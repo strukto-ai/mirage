@@ -28,7 +28,6 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { handleCommand } from './command.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 
 function treeFallbackRegistry(): MountRegistry {
@@ -65,7 +64,6 @@ describe('handleCommand — mount tree fallback', () => {
         { '/longer': new RAMVFS(), '/b': new RAMVFS() },
         {
           mode: MountMode.WRITE,
-          shellParser: await getTestParser(),
         },
       )
       const calls: string[] = []
@@ -432,10 +430,7 @@ describe('the words a handler sees', () => {
     ['diff -u', "diff: missing operand after '-u'\n"],
     ['cd /data && join a.txt -t ,', "join: missing operand after ','\n"],
   ])('%s', async (line, err) => {
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('echo a > /data/a.txt')
     const r = await ws.shell(line)
     expect(new TextDecoder().decode(r.stderr).startsWith(err)).toBe(true)
@@ -458,7 +453,7 @@ describe('dispatched options route nothing', () => {
   ])('%s', async (line, out) => {
     const ws = new Workspace(
       { '/data/': new RAMVFS(), '/work/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     await ws.shell(
       'echo \'{"a":1}\' > /work/t.json; echo \'{"b":2}\' > /data/d.json; echo raw > /data/r.txt',
@@ -483,10 +478,7 @@ describe('the cross-mount entry point', () => {
     const right = new CachedRAM()
     left.loadState({ type: 'ram', files: { '/f': enc.encode('a1\n') } })
     right.loadState({ type: 'ram', files: { '/g': enc.encode('a2\n') } })
-    const ws = new Workspace(
-      { '/a': left, '/b': right },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/a': left, '/b': right }, { mode: MountMode.WRITE })
     try {
       const result = await ws.shell('sed -i s/a/b/ /a/f /b/g')
       expect(result.exitCode).toBe(0)
@@ -505,10 +497,7 @@ describe('the cross-mount entry point', () => {
 // session that may run egrep runs it, though egrep runs grep.
 describe('a wrapper', () => {
   it('runs where the allow list names it but not the program it runs', async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.shell("printf 'a|b\\nx\\n' > /data/e.txt")
       ws.createSession('narrow', { profile: { commands: { allow: ['egrep'] } } })
@@ -528,10 +517,7 @@ describe('a wrapper', () => {
   // registers its own egrep runs it; the wrapper is only the fallback for a
   // name no mount registers.
   it('yields to a mount that registers the name itself', async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       const own = (): [Uint8Array, IOResult] => [
         new TextEncoder().encode('own egrep\n'),
@@ -559,7 +545,6 @@ describe('a wrapper', () => {
       { '/scratch': new RAMVFS(), '/scratch/child': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         profiles: {
           default: parseSessionProfile({
             mounts: {
@@ -593,7 +578,6 @@ describe('a wrapper', () => {
       { '/private': new RAMVFS(), '/public': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         profiles: {
           default: parseSessionProfile({
             commands: {

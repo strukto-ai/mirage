@@ -15,10 +15,12 @@ class ParseScope:
         self._programs: list[ParsedProgram] = []
         self._released = False
 
-    def parse(self, command: str) -> TSNodeLike:
+    def parse(
+        self, command: str, aliases: frozenset[str] = frozenset()
+    ) -> TSNodeLike:
         if self._released:
             raise RuntimeError("parse scope is released")
-        program = parse_program(command)
+        program = parse_program(command, aliases)
         self._programs.append(program)
         return program.root
 

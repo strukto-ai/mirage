@@ -82,7 +82,6 @@ import { MountMode, PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { BoxVFS } from '../../vfs/box/box.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { BoxApiError, BoxTokenManager } from './client.ts'
 import * as api from './api.ts'
@@ -117,13 +116,10 @@ function handed(path: PathSpec, dst?: PathSpec): Promise<Handed> {
   return handedAt(readdir, makeAccessor(), path, dst)
 }
 
-async function workspace(): Promise<Workspace> {
+function workspace(): Workspace {
   const vfs = new BoxVFS({ accessToken: 'test-token' })
   Object.assign(vfs, { accessor: makeAccessor() })
-  return new Workspace(
-    { '/d/': vfs },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  return new Workspace({ '/d/': vfs }, { mode: MountMode.WRITE })
 }
 
 function spec(virtual: string): PathSpec {
@@ -233,7 +229,7 @@ describe('box write ops', () => {
     ['/data/a.txt', 'EEXIST'],
   ])('mkdir -p %s names the file it stops at', async (virtual, code) => {
     vi.mocked(api.createFolder).mockClear()
-    const ws = await workspace()
+    const ws = workspace()
     try {
       await expect(
         ws.dispatch('mkdir', `/d${virtual}`, [], { parents: true }),
@@ -250,7 +246,7 @@ describe('box write ops', () => {
       created.push([parentId, name])
       return Promise.resolve({ type: 'folder', id: `new-${name}`, name })
     })
-    const ws = await workspace()
+    const ws = workspace()
     try {
       await ws.dispatch('mkdir', '/d/data/p/q', [], { parents: true })
       expect(created).toEqual([

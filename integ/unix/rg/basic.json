@@ -23,6 +23,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -57,6 +58,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -91,6 +93,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -123,6 +126,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -155,6 +159,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -187,6 +192,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -219,6 +225,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -251,6 +258,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/r4/sub && printf 'error: disk full\\nwarning: low memory\\ninfo: all good\\nerror: timeout\\nnote: done\\n' > /data/r4/app.log && printf 'alpha\\nbeta\\ngamma\\nALPHA\\n' > /data/r4/notes.txt && printf 'def main():\\n    return 42\\n' > /data/r4/code.py && printf 'function main() { return 42; }\\n' > /data/r4/code.js && printf 'secret alpha\\n' > /data/r4/.hidden.txt && printf 'alpha inner\\n' > /data/r4/sub/inner.txt",
@@ -281,6 +289,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg alpha /data/r4 | sort; rg --sort path alpha /data/r4; rg --sortr path -l alpha /data/r4; rg -d 1 alpha /data/r4; rg --max-depth=1 -l a /data/r4 | sort; rg --max-filesize 25 -l a /data/r4 | sort; rg -q alpha /data/r4; echo rc=$?; rg -q zzz /data/r4; echo rc=$?; rg --trim return /data/r4/code.py; rg -M 5 alpha /data/r4/notes.txt; rg -M 3 --max-columns-preview beta /data/r4/notes.txt; rg --one-file-system -l alpha /data/r4 | sort",
@@ -314,6 +323,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -348,6 +358,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -382,6 +393,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"

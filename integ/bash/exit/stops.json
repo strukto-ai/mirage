@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "echo a; exit 3; echo b",
@@ -51,6 +52,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "bash -c 'i=0; while eval '\"'\"'i=$((i+1)); [ \"$i\" -lt 3 ] || exit 7'\"'\"'; do echo \"$i\"; done; echo BAD'",

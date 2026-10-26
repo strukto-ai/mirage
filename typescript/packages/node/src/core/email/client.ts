@@ -302,11 +302,23 @@ function parseImapDate(s: string): Date | null {
   return value
 }
 
+/**
+ * Refuses a uid holding a CR, LF or NUL. imapflow sends a uid set as a
+ * bare sequence token, unchecked, so one would end the UID FETCH line
+ * early and start a command of the caller's choosing.
+ */
+function checkUid(uid: string): void {
+  if (/[\r\n\0]/.test(uid)) {
+    throw new Error('an IMAP command cannot hold a line break or NUL')
+  }
+}
+
 export async function fetchRawMessage(
   accessor: EmailAccessor,
   folder: string,
   uid: string,
 ): Promise<Uint8Array> {
+  checkUid(uid)
   const imap = await accessor.getImap()
   const lock = await lockMailbox(imap, folder)
   try {
@@ -325,6 +337,7 @@ export async function fetchMessage(
   folder: string,
   uid: string,
 ): Promise<FetchedMessage> {
+  checkUid(uid)
   const imap = await accessor.getImap()
   const lock = await lockMailbox(imap, folder)
   try {
@@ -361,6 +374,7 @@ export async function fetchHeaders(
   headerOnly = false,
 ): Promise<FetchedMessage[]> {
   if (uids.length === 0) return []
+  for (const uid of uids) checkUid(uid)
   const imap = await accessor.getImap()
   const lock = await lockMailbox(imap, folder)
   try {
@@ -400,6 +414,7 @@ export async function fetchAttachment(
   uid: string,
   filename: string,
 ): Promise<Uint8Array | null> {
+  checkUid(uid)
   const imap = await accessor.getImap()
   const lock = await lockMailbox(imap, folder)
   try {

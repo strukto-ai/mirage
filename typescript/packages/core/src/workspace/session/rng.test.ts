@@ -33,7 +33,7 @@ import { initialSeed } from './rng.ts'
 import { SeededIdSource } from '../../utils/ids.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { getTestParser, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 function stored(s: SessionState): string | undefined {
   const v = s.vars[RANDOM]?.value
@@ -53,10 +53,7 @@ describe('RANDOM generator', () => {
   it('replays RANDOM in every shell of a seeded workspace', async () => {
     const outputs: string[] = []
     for (let i = 0; i < 2; i++) {
-      const ws = new Workspace(
-        { '/': new RAMVFS() },
-        { ids: new SeededIdSource(11), shellParser: await getTestParser() },
-      )
+      const ws = new Workspace({ '/': new RAMVFS() }, { ids: new SeededIdSource(11) })
       try {
         const io = await ws.shell('echo $RANDOM $(echo $RANDOM)')
         outputs.push(stdoutStr(io))
@@ -178,7 +175,7 @@ describe('child RANDOM isolation', () => {
       'x=$(: $RANDOM; exit 7)',
       'echo x | { : $RANDOM; exit 7; }',
     ])(`preserves parent state after %s (draw first: ${String(drawFirst)})`, async (child) => {
-      const { ws } = await makeIntegrationWS()
+      const { ws } = makeIntegrationWS()
       try {
         const prefix = 'RANDOM=42; ' + (drawFirst ? ': $RANDOM; ' : '')
         const io = await ws.shell(prefix + child + '; echo $RANDOM')
@@ -207,7 +204,7 @@ it.each([
   ['RANDOM=42; RANDOM=RANDOM+RANDOM; echo $RANDOM', '2815\n', ''],
   ['declare -i n; RANDOM=42; n=RANDOM; echo $n $RANDOM', '17772 26794\n', ''],
 ])('reports seed assignment diagnostics: %s', async (command, stdout, prefix) => {
-  const { ws } = await makeIntegrationWS()
+  const { ws } = makeIntegrationWS()
   try {
     const io = await ws.shell(command)
     expect(io.exitCode).toBe(0)
@@ -238,7 +235,7 @@ it.each([
   ['RANDOM=42; [[ RANDOM -eq 17772 ]]; echo $? $RANDOM', '0 26794\n'],
   ['unset RANDOM; RANDOM=42; echo $((RANDOM)) $((RANDOM))', '42 42\n'],
 ])('draws RANDOM lazily in arithmetic: %s', async (command, stdout) => {
-  const { ws } = await makeIntegrationWS()
+  const { ws } = makeIntegrationWS()
   try {
     const io = await ws.shell(command)
     expect(io.exitCode).toBe(0)
@@ -297,7 +294,7 @@ it.each([
   ['x="a[2]=7"; echo $((x)) ${a[2]}', '7 7\n'],
   ['x="y=1, y+=1"; echo $((x + y)) $y', '4 2\n'],
 ])('seeds RANDOM within the expression that assigns it: %s', async (command, stdout) => {
-  const { ws } = await makeIntegrationWS()
+  const { ws } = makeIntegrationWS()
   try {
     const io = await ws.shell(command)
     expect(io.exitCode).toBe(0)
@@ -351,7 +348,7 @@ it.each([
   // subscript; a compound one reads the target first.
   ['x=0; echo $((a[x++]=x++)); echo "${!a[@]} ${a[@]} $x"', '0\n1 0 2\n'],
 ])('lands the assignments a subscript or offset makes: %s', async (command, stdout) => {
-  const { ws } = await makeIntegrationWS()
+  const { ws } = makeIntegrationWS()
   try {
     const io = await ws.shell(command)
     expect(io.exitCode).toBe(0)
@@ -396,7 +393,7 @@ it.each([
   ['a=(1); [[ -v a[1/0] ]]; echo after', 'bash: 1/0: division by 0 (error token is "0")\n'],
   ['a=(1); a[x=3,1/0]=v; echo after', 'bash: x=3,1/0: division by 0 (error token is "0")\n'],
 ])('a subscript or operand that fails ends the line: %s', async (command, stderr) => {
-  const { ws } = await makeIntegrationWS()
+  const { ws } = makeIntegrationWS()
   try {
     const io = await ws.shell(command)
     expect(io.exitCode).toBe(1)
@@ -416,7 +413,7 @@ it('lays the pending writes over the visible env as a view', async () => {
   // as a scalar; the operand's env lays its pending writes over that env
   // as a view, so the reference neither breaks the operand nor hides the
   // write.
-  const { ws } = await makeIntegrationWS()
+  const { ws } = makeIntegrationWS()
   try {
     const io = await ws.shell(
       'declare -a nrb=(1); declare -n nrc=nrb; v=abcdef; echo "${v:(x=1):2}" $x',
@@ -441,7 +438,7 @@ it.each([
 ])(
   "a conditional operator's word expands only when selected: %s",
   async (command, stdout, stderr) => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const io = await ws.shell(command)
       expect(io.exitCode).toBe(0)
@@ -508,7 +505,7 @@ describe('RANDOM as an array', () => {
     ],
     ['unset RANDOM; f(){ local RANDOM=(7); echo $RANDOM; }; f; echo "[$RANDOM]"', '7\n[]\n'],
   ])('ends the special meaning: %s', async (command, stdout) => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const io = await ws.shell(command)
       expect(io.stderrText).toBe('')

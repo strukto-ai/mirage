@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // GNU grep -r/-R with no path operand searches the working directory,
@@ -24,33 +24,32 @@ import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
 
-async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeWs(): Workspace {
   const r = new RAMVFS()
   r.store.dirs.add('/')
   r.store.dirs.add('/sub')
   r.store.files.set('/a.txt', ENC.encode('hello\n'))
   r.store.files.set('/sub/b.txt', ENC.encode('hello\n'))
-  return new Workspace({ '/': r }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/': r }, { mode: MountMode.WRITE })
 }
 
 describe('grep -r with no path operand', () => {
   it('searches the cwd and prints bare relative names', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('grep -r hello')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('a.txt:hello\nsub/b.txt:hello\n')
   })
 
   it('ignores stdin when the cwd operand is synthesized', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('grep -r hello', { stdin: ENC.encode('hello from stdin\n') })
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('a.txt:hello\nsub/b.txt:hello\n')
   })
 
   it('exits 1 silently when nothing matches', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('grep -r zzz')
     expect(io.exitCode).toBe(1)
     expect(stdoutStr(io)).toBe('')

@@ -15,11 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // The lines cover every surface the path axis gates: enumeration (ls,
@@ -54,7 +50,6 @@ afterEach(async () => {
 })
 
 async function seeded(): Promise<Workspace> {
-  const parser = await getTestParser()
   const a = new RAMVFS()
   const b = new RAMVFS()
   const ws = new Workspace(
@@ -62,7 +57,7 @@ async function seeded(): Promise<Workspace> {
       '/a': [a, MountMode.WRITE] as const,
       '/b': [b, MountMode.WRITE] as const,
     },
-    { mode: MountMode.WRITE, shellParser: parser },
+    { mode: MountMode.WRITE },
   )
   open.push(ws)
   const io = await ws.shell(

@@ -29,7 +29,6 @@ import { readVersioned } from '../../cache/context.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { MountEntry } from './mount.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -490,10 +489,7 @@ describe('Mount.revisions', () => {
 it('a builtin command is still held at its write', async () => {
   const vfs = new RAMVFS()
   vfs.store.files.set('/a', new TextEncoder().encode('original'))
-  const ws = new Workspace(
-    { '/ram/': [vfs, MountMode.READ] },
-    { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
-  )
+  const ws = new Workspace({ '/ram/': [vfs, MountMode.READ] }, { mode: MountMode.WRITE })
   try {
     // The write is refused where it happens and gzip says so in its own
     // words (the fatal write_error form), leaving the store untouched.
@@ -509,10 +505,7 @@ it('a builtin command is still held at its write', async () => {
 })
 
 it('runs a command registered for one filetype only on that filetype', async () => {
-  const ws = new Workspace(
-    { '/ram/': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
-  )
+  const ws = new Workspace({ '/ram/': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     await ws.shell('echo hit > /ram/x.csv; echo hit > /ram/x.txt')
     ws.mount('/ram/').registerCommands(
@@ -540,10 +533,7 @@ it('runs a command registered for one filetype only on that filetype', async () 
 it.each(['grep', 'diff', 'python3', 'curl', 'tar', 'mycmd'])(
   'refuses a borrowed %s like a custom command',
   async (name) => {
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
-    )
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       const spec = new CommandSpec({
         arguments: [
@@ -591,7 +581,7 @@ it.each(['find --mode=a x', 'rg x', 'grep -f a x', 'sort -o /b/out x', 'grep --h
   async (line) => {
     const ws = new Workspace(
       { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+      { mode: MountMode.WRITE },
     )
     try {
       const [name = '', ...words] = line.split(' ')
@@ -640,10 +630,7 @@ it.each([
   ['cd /a && rg -f /b/input /a/patterns', 1, '', SPAN],
   ['cd /a && find //b/input -print0', 0, '//b/input\0', ''],
 ])('keeps `%s` on its own command', async (line, code, stdout, stderr) => {
-  const ws = new Workspace(
-    { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
-  )
+  const ws = new Workspace({ '/a/': new RAMVFS(), '/b/': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     for (const [name, type] of [
       ['grep', 'str'],
@@ -794,10 +781,9 @@ describe('handed commands under restrictions', () => {
   // Mirage cannot see what a handler reads through its own accessor, so it
   // does not try: a hide covers what the handler reads through ctx.vfs.
   it('run where the session restricts their mount', async () => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/data/': new HandedRAM(), '/other/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.shell('echo hi > /data/n.txt; echo s > /data/secret')
@@ -851,10 +837,7 @@ describe('a user write past the dispatcher', () => {
         ;(vfs as unknown as { cachesReads: boolean }).cachesReads = true
         vfs.store.files.set(key, ENC.encode('v1\n'))
       }
-      const ws = new Workspace(
-        { '/one/': one, '/two/': two },
-        { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
-      )
+      const ws = new Workspace({ '/one/': one, '/two/': two }, { mode: MountMode.WRITE })
       try {
         ws.mount('/one/').registerCommands([
           new Command({

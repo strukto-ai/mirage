@@ -21,7 +21,7 @@ interface FetchCall {
   init?: RequestInit
 }
 
-function installFetch(handler: (req: FetchCall) => Response | Promise<Response>): {
+function installTimeout(handler: (req: FetchCall) => Response | Promise<Response>): {
   calls: FetchCall[]
   restore: () => void
 } {
@@ -120,7 +120,7 @@ describe('BROWSER_S3_MODULE command classes', () => {
 })
 
 describe('createBrowserS3Client — command dispatch', () => {
-  let fetchHandle: ReturnType<typeof installFetch>
+  let fetchHandle: ReturnType<typeof installTimeout>
 
   afterEach(() => {
     fetchHandle.restore()
@@ -128,7 +128,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('GET returns Body as AsyncIterable and surfaces Content-Length/ETag/LastModified', async () => {
     const { provider, calls } = makeProvider(() => 'https://signed/get')
-    fetchHandle = installFetch(
+    fetchHandle = installTimeout(
       () =>
         new Response(new Uint8Array([104, 105]), {
           status: 200,
@@ -158,7 +158,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('GET 404 throws with $metadata.httpStatusCode so isNotFoundError matches', async () => {
     const { provider } = makeProvider(() => 'https://signed/404')
-    fetchHandle = installFetch(() => new Response('', { status: 404 }))
+    fetchHandle = installTimeout(() => new Response('', { status: 404 }))
     const client = createBrowserS3Client(cfg(provider))
     const { GetObjectCommand } = BROWSER_S3_MODULE
     await expect(
@@ -173,7 +173,7 @@ describe('createBrowserS3Client — command dispatch', () => {
   // answering: the old code reached both and resolved.
   it('GET refuses a version-pinned read instead of returning the current object', async () => {
     const { provider, calls } = makeProvider(() => 'https://signed/get')
-    fetchHandle = installFetch(() => new Response(new Uint8Array([104, 105]), { status: 200 }))
+    fetchHandle = installTimeout(() => new Response(new Uint8Array([104, 105]), { status: 200 }))
     const client = createBrowserS3Client(cfg(provider))
     const { GetObjectCommand } = BROWSER_S3_MODULE
     await expect(
@@ -185,7 +185,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('HEAD refuses a version-pinned stat for the same reason', async () => {
     const { provider, calls } = makeProvider(() => 'https://signed/head')
-    fetchHandle = installFetch(() => new Response('', { status: 200 }))
+    fetchHandle = installTimeout(() => new Response('', { status: 200 }))
     const client = createBrowserS3Client(cfg(provider))
     const { HeadObjectCommand } = BROWSER_S3_MODULE
     await expect(
@@ -200,7 +200,7 @@ describe('createBrowserS3Client — command dispatch', () => {
   // data but the same answer. Only fields that change the answer may refuse.
   it('LIST still ignores a MaxKeys hint rather than refusing it', async () => {
     const { provider } = makeProvider(() => 'https://signed/list')
-    fetchHandle = installFetch(
+    fetchHandle = installTimeout(
       () =>
         new Response(
           '<?xml version="1.0"?><ListBucketResult><Contents><Key>a.txt</Key>' +
@@ -218,7 +218,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('HEAD returns only metadata (no Body)', async () => {
     const { provider, calls } = makeProvider(() => 'https://signed/head')
-    fetchHandle = installFetch(
+    fetchHandle = installTimeout(
       () =>
         new Response(null, {
           status: 200,
@@ -261,7 +261,7 @@ describe('createBrowserS3Client — command dispatch', () => {
           <ETag>"b2"</ETag>
         </Contents>
       </ListBucketResult>`
-    fetchHandle = installFetch(() => new Response(xml, { status: 200 }))
+    fetchHandle = installTimeout(() => new Response(xml, { status: 200 }))
 
     const client = createBrowserS3Client(cfg(provider))
     const { ListObjectsV2Command } = BROWSER_S3_MODULE
@@ -298,7 +298,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('LIST without prefix/delimiter still signs with empty listPrefix', async () => {
     const { provider, calls } = makeProvider(() => 'https://signed/list')
-    fetchHandle = installFetch(
+    fetchHandle = installTimeout(
       () => new Response('<ListBucketResult></ListBucketResult>', { status: 200 }),
     )
 
@@ -311,7 +311,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('PUT sends body + Content-Type, returns {} on success', async () => {
     const { provider, calls } = makeProvider(() => 'https://signed/put')
-    fetchHandle = installFetch(() => new Response('', { status: 200 }))
+    fetchHandle = installTimeout(() => new Response('', { status: 200 }))
 
     const client = createBrowserS3Client(cfg(provider))
     const { PutObjectCommand } = BROWSER_S3_MODULE
@@ -331,7 +331,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('PUT falls back to config.defaultContentType, then to octet-stream', async () => {
     const { provider } = makeProvider(() => 'https://signed/put')
-    fetchHandle = installFetch(() => new Response('', { status: 200 }))
+    fetchHandle = installTimeout(() => new Response('', { status: 200 }))
 
     const client = createBrowserS3Client({
       bucket: 'b',
@@ -344,7 +344,7 @@ describe('createBrowserS3Client — command dispatch', () => {
     expect(headers['Content-Type']).toBe('application/json')
 
     const { provider: p2 } = makeProvider(() => 'https://signed/put')
-    const handle2 = installFetch(() => new Response('', { status: 200 }))
+    const handle2 = installTimeout(() => new Response('', { status: 200 }))
     const client2 = createBrowserS3Client(cfg(p2))
     await client2.send(new PutObjectCommand({ Bucket: 'b', Key: 'k', Body: new Uint8Array() }))
     const h2 = handle2.calls[0]?.init?.headers as Record<string, string>
@@ -354,7 +354,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('PUT propagates non-ok status as an Error with the status code', async () => {
     const { provider } = makeProvider(() => 'https://signed/put')
-    fetchHandle = installFetch(
+    fetchHandle = installTimeout(
       () => new Response('bucket is read-only', { status: 403, statusText: 'Forbidden' }),
     )
 
@@ -367,7 +367,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('DELETE single object', async () => {
     const { provider, calls } = makeProvider(() => 'https://signed/del')
-    fetchHandle = installFetch(() => new Response(null, { status: 204 }))
+    fetchHandle = installTimeout(() => new Response(null, { status: 204 }))
 
     const client = createBrowserS3Client(cfg(provider))
     const { DeleteObjectCommand } = BROWSER_S3_MODULE
@@ -379,7 +379,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('DELETE tolerates 404 silently (object already gone)', async () => {
     const { provider } = makeProvider(() => 'https://signed/del')
-    fetchHandle = installFetch(() => new Response('', { status: 404 }))
+    fetchHandle = installTimeout(() => new Response('', { status: 404 }))
 
     const client = createBrowserS3Client(cfg(provider))
     const { DeleteObjectCommand } = BROWSER_S3_MODULE
@@ -390,7 +390,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('DeleteObjects fans out to one DELETE per key', async () => {
     const { provider, calls } = makeProvider((path) => `https://signed${path}`)
-    fetchHandle = installFetch(() => new Response(null, { status: 204 }))
+    fetchHandle = installTimeout(() => new Response(null, { status: 204 }))
 
     const client = createBrowserS3Client(cfg(provider))
     const { DeleteObjectsCommand } = BROWSER_S3_MODULE
@@ -409,7 +409,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('COPY signs with copySource and sends x-amz-copy-source header', async () => {
     const { provider, calls } = makeProvider(() => 'https://signed/copy')
-    fetchHandle = installFetch(() => new Response('', { status: 200 }))
+    fetchHandle = installTimeout(() => new Response('', { status: 200 }))
 
     const client = createBrowserS3Client(cfg(provider))
     const { CopyObjectCommand } = BROWSER_S3_MODULE
@@ -429,7 +429,7 @@ describe('createBrowserS3Client — command dispatch', () => {
 
   it('rejects a non-browser command with a helpful error', async () => {
     const { provider } = makeProvider(() => 'https://signed/x')
-    fetchHandle = installFetch(() => new Response(''))
+    fetchHandle = installTimeout(() => new Response(''))
 
     const client = createBrowserS3Client(cfg(provider))
     await expect(client.send({ input: { Bucket: 'b', Key: 'k' } } as unknown)).rejects.toThrow(
@@ -445,10 +445,10 @@ describe('createBrowserS3Client — config validation', () => {
 })
 
 describe('LIST XML parser edge cases', () => {
-  let fetchHandle: ReturnType<typeof installFetch>
+  let fetchHandle: ReturnType<typeof installTimeout>
   beforeEach(() => {
     const { provider } = makeProvider(() => 'https://signed/list')
-    fetchHandle = installFetch(() => new Response('', { status: 200 }))
+    fetchHandle = installTimeout(() => new Response('', { status: 200 }))
     // parser is exercised via the LIST dispatch path; keep provider + fetch handy
     void provider
   })
@@ -459,7 +459,7 @@ describe('LIST XML parser edge cases', () => {
   async function parseList(xml: string): Promise<Record<string, unknown>> {
     const { provider } = makeProvider(() => 'https://signed/list')
     fetchHandle.restore()
-    fetchHandle = installFetch(() => new Response(xml, { status: 200 }))
+    fetchHandle = installTimeout(() => new Response(xml, { status: 200 }))
     const client = createBrowserS3Client(cfg(provider))
     const { ListObjectsV2Command } = BROWSER_S3_MODULE
     return client.send(new ListObjectsV2Command({ Bucket: 'b' }))

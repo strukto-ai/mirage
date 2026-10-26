@@ -22,6 +22,7 @@
         "sharepoint",
         "sharepoint-prefix",
         "ssh",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"

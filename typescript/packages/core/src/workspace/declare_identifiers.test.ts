@@ -63,7 +63,7 @@ const CASES: [string, string, string][] = [
 
 describe('declaration builtins refuse invalid identifiers', () => {
   it.each(CASES)('%s', async (cmd, out, err) => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell(cmd)
     expect(stdoutStr(io)).toBe(out)
     expect(stderrStr(io)).toBe(err)
@@ -73,7 +73,7 @@ describe('declaration builtins refuse invalid identifiers', () => {
   it('lands the good names on the same line', async () => {
     // GNU reports each bad operand and keeps going, so the valid ones
     // are stored: refusing the whole line would be a second divergence.
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('export GOOD=1 1BAD=x GOOD2=2; echo rc=$?; declare -p GOOD GOOD2')
     expect(stdoutStr(io)).toBe('rc=1\ndeclare -x GOOD="1"\ndeclare -x GOOD2="2"\n')
     expect(stderrStr(io)).toBe("bash: export: `1BAD=x': not a valid identifier\n")
@@ -85,7 +85,7 @@ describe('declaration builtins refuse invalid identifiers', () => {
     // splitting, so `export $UNSET` is a bare `export` and prints the
     // listing. A quoted one is a real, empty operand and is refused.
     const empty = "bash: export: `': not a valid identifier\n"
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const quoted = await ws.shell('export ""; echo rc=$?')
     expect(stdoutStr(quoted)).toBe('rc=1\n')
     expect(stderrStr(quoted)).toBe(empty)

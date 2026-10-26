@@ -35,6 +35,7 @@ import {
   overwriteGate,
   parseFlags,
   targetDirError,
+  transferFile,
   updateMode,
   type CpFlags,
   type TransferLinks,
@@ -49,11 +50,7 @@ import { MountMode } from '../../../types.ts'
 import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const DEC = new TextDecoder()
@@ -287,6 +284,28 @@ async function runPrimitive(
   const { stat, strategy } = makePrimitive(files, dirs, fails)
   return cpGeneric(paths.map(spec), stat, strategy, flags)
 }
+
+describe('transferFile', () => {
+  it('moves the bytes when the store has no copy of its own', async () => {
+    // Mirrors test_a_store_with_no_copy_moves_the_bytes.
+    const files = new Map([['/src/a.txt', new Uint8Array([65, 65, 65])]])
+    const { strategy } = makePrimitive(files, new Set(['/src', '/d']), {})
+    const errors: string[] = []
+    const copied = await transferFile(
+      {
+        ...strategy,
+        copy: (_src, dst) => Promise.reject(enotsup('tidb_filesystem', 'copy', dst)),
+      },
+      spec('/src/a.txt'),
+      spec('/d/a.txt'),
+      'cp',
+      errors,
+    )
+    expect(copied).toBe(true)
+    expect(errors).toEqual([])
+    expect(files.get('/d/a.txt')).toEqual(new Uint8Array([65, 65, 65]))
+  })
+})
 
 describe('cpGeneric primitive transfer errors', () => {
   it('a refused destination probe skips only its own tree', async () => {
@@ -835,10 +854,7 @@ describe('a link reached through a linked directory', () => {
   // `dir/al`; coreutils 9.7 copies the link itself. Mirrors python's
   // test_a_link_reached_through_a_linked_directory_copies_as_a_link.
   it('cp -P copies it as a link', async () => {
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell(
       "cd /data && mkdir dir w && printf 'x\\n' > a.txt && ln -s ../a.txt dir/al && ln -s dir dl",
     )
@@ -856,10 +872,7 @@ describe('a backup onto a linked destination', () => {
     ['s/.', 'xsub\n'],
     ['s/sub', 'xf\nb\n'],
   ])('cp -rb %s moves the link aside', async (source, after) => {
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell(
       'cd /data && mkdir -p s/sub && printf b > s/sub/b && printf x > f && ln -s f dst',
     )
@@ -972,7 +985,7 @@ for (const native of [false, true]) {
 it('cp -rL omits hidden links', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS(), '/other': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
   try {
     await ws.shell(
@@ -1020,16 +1033,10 @@ class CopyOnly extends BaseVFS<RAMAccessor> {
 
 it('copies through a mount without write while a hide sits in the target directory', async () => {
   const ram = new RAMVFS()
-  const seed = new Workspace(
-    { '/t/': ram },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const seed = new Workspace({ '/t/': ram }, { mode: MountMode.WRITE })
   await seed.shell('mkdir -p /t/dir && echo s > /t/dir/secret && echo x > /t/x')
   await seed.close()
-  const ws = new Workspace(
-    { '/t/': new CopyOnly(ram) },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/t/': new CopyOnly(ram) }, { mode: MountMode.WRITE })
   try {
     ws.createSession('hidden', { profile: { paths: { hide: ['/t/dir/secret'] } } })
     // The dispatcher judges the copy itself, so cp need not refuse it ahead.

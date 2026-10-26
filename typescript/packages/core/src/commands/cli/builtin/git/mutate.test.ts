@@ -14,7 +14,6 @@
 
 import { DEFAULT_VISIBILITY, FileStat, FileType, PathSpec, MountMode } from '../../../../types.ts'
 import { execFileSync } from 'node:child_process'
-import { createRequire } from 'node:module'
 import {
   appendFileSync,
   existsSync,
@@ -33,7 +32,6 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../../../io/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { parseSessionProfile } from '../../../../policy/profile.ts'
 import { GIT } from './index.ts'
@@ -57,16 +55,10 @@ const BUILDER = fileURLToPath(
 )
 const DEC = new TextDecoder()
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
 let tmp: string
 const roots: string[] = []
 
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
+beforeAll(() => {
   tmp = mkdtempSync(join(tmpdir(), 'mirage-git-mutate-'))
 })
 
@@ -134,7 +126,6 @@ async function harness(prepare?: (repo: string) => void, nested?: string): Promi
   }
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
-    shellParser: parser,
   })
   const dispatch = ws.vfs
   // A mount's ancestors read as existing directories the moment the child is

@@ -2510,6 +2510,32 @@
       }
     },
     {
+      "id": "gh_repo_clone_hands_words_after_the_repository_to_git",
+      "seq": 569949,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "cd /scratch && gh repo clone o/r dir -- extra 2>&1 >/dev/null | head -1; gh repo clone o/r dir -- extra 2>/dev/null; echo $?; test -e dir; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "gh repo clone: fatal: Too many arguments.\n1\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_clone_drops_an_empty_directory",
+      "seq": 569950,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "cd /scratch && gh repo clone o/r '' -- extra 2>&1 >/dev/null | tail -1; gh repo clone o/r '' -- extra 2>/dev/null; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "gh repo clone: repository 'extra' does not exist\n1\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "gh_auth_token_help_describes_refusal",
       "seq": 569948,
       "targets": [

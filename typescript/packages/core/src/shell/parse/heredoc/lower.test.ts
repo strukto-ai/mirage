@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { lowerHeredocs } from './lower.ts'
 import { discoverHeredocs } from './reader.ts'
+import { parse } from '../parse.ts'
 
 it('keeps source locations for unicode bodies', () => {
   const source = 'echo é; cat <<終\n世界\n終'
@@ -29,8 +29,7 @@ it('keeps source locations for unicode bodies', () => {
   expect(doc.body).toBe('世界\n')
 })
 
-it('keeps heredoc identity through other parser repairs', async () => {
-  const parser = await getTestParser()
-  const root = parser.parse('cat > /api/$c/$id.json <<EOF\nbody\nEOF')
+it('keeps heredoc identity through other parser repairs', () => {
+  const root = parse('cat > /api/$c/$id.json <<EOF\nbody\nEOF')
   expect(root.namedChildren[0]?.namedChildren.at(-1)?.heredoc?.body).toBe('body\n')
 })

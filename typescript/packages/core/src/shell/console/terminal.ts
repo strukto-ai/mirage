@@ -173,9 +173,41 @@ export class JobSide extends JobConsole {
 export class JobOutput extends JobConsole {
   recorder: JobConsole | null = null
   private readonly taken: JobConsole[] = []
+  private tail: Promise<void> | null = null
+  private turns = 0
 
   constructor(public target: JobConsole) {
     super()
+  }
+
+  /**
+   * Keep what jobs write from now behind `after`, in the order they write:
+   * a statement that stops recording them still lands what it recorded
+   * first. Mirrors Python's hold_until.
+   */
+  holdUntil(after: Promise<void>): void {
+    void this.turn(() => after)
+  }
+
+  /** Run `write` once every write queued before it has run. */
+  private turn(write: () => Promise<void>): Promise<void> {
+    const before = this.tail ?? Promise.resolve()
+    this.turns += 1
+    const done = before.then(write)
+    this.tail = done.then(
+      () => {
+        this.turned()
+      },
+      () => {
+        this.turned()
+      },
+    )
+    return done
+  }
+
+  private turned(): void {
+    this.turns -= 1
+    if (this.turns === 0) this.tail = null
   }
 
   /**
@@ -195,14 +227,16 @@ export class JobOutput extends JobConsole {
     }
   }
 
-  /** Write what a job wrote where it belongs now. */
+  /** Write what a job wrote where it belongs now, behind what is held. */
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    await (this.recorder ?? this.target).emit(channel, data)
+    if (this.tail === null) await (this.recorder ?? this.target).emit(channel, data)
+    else await this.turn(() => (this.recorder ?? this.target).emit(channel, data))
   }
 
   /** Write what a job wrote to a stream a level owns, keeping the stream. */
   override async emitTo(stream: OwnedStream, data: Uint8Array): Promise<void> {
-    await (this.recorder ?? this.target).emitTo(stream, data)
+    if (this.tail === null) await (this.recorder ?? this.target).emitTo(stream, data)
+    else await this.turn(() => (this.recorder ?? this.target).emitTo(stream, data))
   }
 
   /**

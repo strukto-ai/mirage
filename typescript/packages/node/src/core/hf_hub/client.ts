@@ -103,7 +103,7 @@ export const hubFetch: typeof fetch = async (input, init) => {
  * is `stall_timeout`, which aiohttp spells as sock_connect and sock_read. A
  * bound of zero or less is none, as aiohttp reads a zero.
  */
-export function stallFetch(ms: number): typeof fetch {
+export function stallTimeout(ms: number): typeof fetch {
   if (ms <= 0) return hubFetch
   return async (input, init) => {
     const controller = new AbortController()
@@ -249,7 +249,7 @@ export async function hubGet(
     headers: hubHeaders(account.token),
     params,
     retry: RETRY,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: stallTimeout(account.timeoutMs),
   })
 }
 
@@ -265,7 +265,7 @@ export async function hubGetResponse(
     params,
     retry: RETRY,
     read: 'response',
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: stallTimeout(account.timeoutMs),
   })) as ApiResponse
 }
 
@@ -286,7 +286,7 @@ export async function hubPost(
     params,
     json: body,
     retry,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: stallTimeout(account.timeoutMs),
   })
 }
 
@@ -303,7 +303,7 @@ export async function hubRequest(
     headers: hubHeaders(account.token),
     params,
     retry: WRITE_RETRY,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: stallTimeout(account.timeoutMs),
   }
   if (body !== null && body !== undefined) options.json = body
   return apiRequest(method.toUpperCase(), url, options)
@@ -322,7 +322,7 @@ export async function hubPostNdjson(
     params,
     body: payload,
     retry: WRITE_RETRY,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: stallTimeout(account.timeoutMs),
   })
 }
 
@@ -343,7 +343,7 @@ export async function hubBytes(
     retry: RETRY,
     read: 'bytes',
     window,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: stallTimeout(account.timeoutMs),
   })) as Uint8Array
 }
 
@@ -365,7 +365,7 @@ export async function hubBytesTagged(
     retry: RETRY,
     read: 'bytes_response',
     window,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: stallTimeout(account.timeoutMs),
   })) as ApiResponse
   return [response.data as Uint8Array, response.headers.etag ?? '']
 }
@@ -393,7 +393,7 @@ export async function* hubStream(
   yield* apiStream(url, {
     errorOf,
     headers: hubHeaders(account.token),
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: stallTimeout(account.timeoutMs),
     retry: RETRY,
     ...(onResponse === undefined ? {} : { onResponse }),
   })

@@ -16,7 +16,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Files } from '../files.ts'
 import { Limit, MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Session, Workspace } from '../workspace/workspace.ts'
 import { MirageToolOperations, TOOL_NAMES } from './tool_operations.ts'
 import { Outcome } from '../../policy/types.ts'
@@ -32,10 +31,8 @@ const DEC = new TextDecoder()
 let ws: Workspace
 let ops: MirageToolOperations
 
-const shellParser = await getTestParser()
-
 beforeEach(() => {
-  ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, shellParser })
+  ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
   ops = ws.tools
 })
 
@@ -99,7 +96,7 @@ describe('glob', () => {
   it('says why past the walk_limit', async () => {
     const limited = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }] },
-      { mode: MountMode.WRITE, shellParser },
+      { mode: MountMode.WRITE },
     ).tools
     for (const name of ['a', 'b', 'c']) await limited.write(`/${name}.py`, 'x')
     const result = await limited.glob('*.py', '/')
@@ -256,7 +253,6 @@ async function guardedWs(): Promise<Workspace> {
     { '/': new RAMVFS(), '/vault': new RAMVFS(), '/ro': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      shellParser,
       profiles: {
         guarded: parseSessionProfile({
           paths: { hide: ['/vault'] },
@@ -370,10 +366,7 @@ describe('a session', () => {
     const store = new RAMWorkspaceStateStore()
     const ram = new RAMVFS()
     const open = (): Workspace =>
-      new Workspace(
-        { '/': ram },
-        { mode: MountMode.WRITE, workspaceId: 'shared', store, shellParser },
-      )
+      new Workspace({ '/': ram }, { mode: MountMode.WRITE, workspaceId: 'shared', store })
     const writer = open()
     writer.createSession('agent')
     await writer.ensureSessionsLoaded()
@@ -406,7 +399,7 @@ describe('the tool list', () => {
     [{ mounts: { '/': 'read' } }, MountMode.WRITE, ['shell', 'read', 'ls', 'grep', 'glob']],
     [{ mounts: { '/': 'read' }, paths: { show: { '/out': 'rw' } } }, MountMode.WRITE, TOOL_NAMES],
   ] as const)('follows the profile: %j on %s', (profile, mode, names) => {
-    const own = new Workspace({ '/': new RAMVFS() }, { mode, shellParser })
+    const own = new Workspace({ '/': new RAMVFS() }, { mode })
     if (profile !== null) own.createSession('agent', { profile: parseSessionProfile(profile) })
     const session = new Session(own, profile === null ? null : 'agent')
     expect(session.tools.names()).toEqual(names)
@@ -417,7 +410,7 @@ describe('the tool list', () => {
   it('a deny written under one mount keeps the tool', () => {
     const own = new Workspace(
       { '/': new RAMVFS(), '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser },
+      { mode: MountMode.WRITE },
     )
     const noLs = { commands: { deny: [{ reason: 'no', commands: ['ls'] }] } }
     own.createSession('scoped', { profile: parseSessionProfile({ mounts: { '/data': noLs } }) })
@@ -427,7 +420,7 @@ describe('the tool list', () => {
   })
 
   it('a tool the profile does not offer is no tool', async () => {
-    const own = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, shellParser })
+    const own = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     own.createSession('ro', { profile: parseSessionProfile({ mounts: { '/': 'read' } }) })
     await expect(
       new Session(own, 'ro').tools.call('write', { path: '/x', content: 'y' }),
@@ -437,7 +430,7 @@ describe('the tool list', () => {
 
 describe('a path ask outside a line', () => {
   it('waits on the host, runs one call on a nod and asks again', async () => {
-    const own = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE, shellParser })
+    const own = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     own.createSession('agent', {
       profile: {
         commands: { ask: [{ reason: 'outbox needs a nod', paths: ['/data/out/*'] }] },

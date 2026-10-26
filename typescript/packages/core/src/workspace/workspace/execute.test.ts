@@ -26,7 +26,6 @@ import type { Action, CommandContext, Policy } from '../../policy/index.ts'
 import {
   cachingRamWorkspace,
   captureMarks,
-  getTestParser,
   type Mark,
   stderrStr,
   stdoutStr,
@@ -45,7 +44,6 @@ it('logs an unexpected execution failure and keeps the shell result', async () =
   const ws = new Workspace(
     { '/ram': new RAMVFS() },
     {
-      shellParser: await getTestParser(),
       routePolicy: () => {
         throw error
       },
@@ -61,7 +59,7 @@ it('logs an unexpected execution failure and keeps the shell result', async () =
 })
 
 it('links a pipeline CLI and operation history to the admitted execution', async () => {
-  const ws = await makeWs()
+  const ws = makeWs()
   const seen: (string | null)[] = []
   ws.registerCli(
     'probe',
@@ -90,25 +88,23 @@ it('links a pipeline CLI and operation history to the admitted execution', async
   expect(ops.every((event) => typeof event.execution_id === 'string')).toBe(true)
 })
 
-async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeWs(): Workspace {
   const r = new RAMVFS()
   r.store.dirs.add('/')
   r.store.dirs.add('/subdir')
   r.store.dirs.add('/other')
-  const ws = new Workspace({ '/ram/': r }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/ram/': r }, { mode: MountMode.WRITE })
   open.push(ws)
   return ws
 }
 
-async function makeTwoMounts(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeTwoMounts(): Workspace {
   const a = new RAMVFS()
   a.store.dirs.add('/')
   const b = new RAMVFS()
   b.store.dirs.add('/')
   b.store.files.set('/y.txt', ENC.encode('secret\n'))
-  const ws = new Workspace({ '/a': a, '/b': b }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/a': a, '/b': b }, { mode: MountMode.WRITE })
   open.push(ws)
   return ws
 }
@@ -124,13 +120,13 @@ afterEach(async () => {
 // answer.
 describe('nested evals run in the live ambient session', () => {
   it('cmdsub reads the per-call fork cwd', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('echo $(pwd)', { cwd: '/ram/subdir' })
     expect(stdoutStr(io).trim()).toBe('/ram/subdir')
   })
 
   it('eval moves the fork, not the default session', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const before = ws.getSession(ws.defaultSessionId).cwd
     const io = await ws.shell("eval 'cd /ram/other'; pwd", { cwd: '/ram/subdir' })
     expect(stdoutStr(io).trim()).toBe('/ram/other')
@@ -138,14 +134,14 @@ describe('nested evals run in the live ambient session', () => {
   })
 
   it('cmdsub cd stays in the fork', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const before = ws.getSession(ws.defaultSessionId).cwd
     await ws.shell('echo $(cd /ram/other)', { env: { FOO: 'bar' } })
     expect(ws.getSession(ws.defaultSessionId).cwd).toBe(before)
   })
 
   it('cmdsub reads the named session cwd', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     ws.createSession('agent')
     await ws.shell('cd /ram/subdir', { sessionId: 'agent' })
     const io = await ws.shell('echo $(pwd)', { sessionId: 'agent' })
@@ -155,14 +151,14 @@ describe('nested evals run in the live ambient session', () => {
   it("cmdsub keeps the named session's hides", async () => {
     // A nested eval runs under the same session, so what the profile hides
     // is as absent inside `$()` as outside it.
-    const ws = await makeTwoMounts()
+    const ws = makeTwoMounts()
     ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
     const io = await ws.shell('echo $(cat /b/y.txt)', { sessionId: 'agent' })
     expect(stdoutStr(io)).not.toContain('secret')
   })
 
   it('cmdsub cd is isolated from the live session', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const before = ws.getSession(ws.defaultSessionId).cwd
     const io = await ws.shell('echo $(cd /ram/subdir; pwd)')
     expect(stdoutStr(io)).toBe('/ram/subdir\n')
@@ -176,13 +172,13 @@ describe('nested evals run in the live ambient session', () => {
 // its parent's id) and escapes the job's isolation.
 describe('nested evals inside background jobs run in the job fork', () => {
   it('bg job cmdsub reads the job fork', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('cd /ram/other && echo $(pwd) & wait %1')
     expect(stdoutStr(io).trim()).toBe('/ram/other')
   })
 
   it('bg job cmdsub cd stays in the job fork', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const before = ws.getSession(ws.defaultSessionId).cwd
     await ws.shell('echo $(cd /ram/other) & wait %1')
     expect(ws.getSession(ws.defaultSessionId).cwd).toBe(before)
@@ -193,25 +189,25 @@ describe('nested evals inside background jobs run in the job fork', () => {
 // statement list, not of the first simple command it contains.
 describe('command substitution runs its whole body', () => {
   it('runs every statement', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('echo $(echo a; echo b)')
     expect(stdoutStr(io).trim()).toBe('a b')
   })
 
   it('runs control flow', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('echo $(if true; then echo yes; fi)')
     expect(stdoutStr(io).trim()).toBe('yes')
   })
 
   it('runs assignments', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('echo $(X=5; echo $X)')
     expect(stdoutStr(io).trim()).toBe('5')
   })
 
   it('runs declarations', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('echo $(export Y=7; echo $Y)')
     expect(stdoutStr(io).trim()).toBe('7')
   })
@@ -223,8 +219,8 @@ describe('command substitution runs its whole body', () => {
 // and an unrestricted session must never stand in for a restricted one.
 describe('the ambient session is scoped to its workspace', () => {
   it('another workspace resolves its own session', async () => {
-    const wsA = await makeWs()
-    const wsB = await makeTwoMounts()
+    const wsA = makeWs()
+    const wsB = makeTwoMounts()
     const seen: string[] = []
     const rc = new Command({
       name: 'crossprobe',
@@ -246,7 +242,6 @@ describe('the ambient session is scoped to its workspace', () => {
     // it reads the resolved session's cwd, not the registered
     // session's: a re-entrant line runs in the live ambient fork.
     const seen: string[] = []
-    const parser = await getTestParser()
     const r = new RAMVFS()
     r.store.dirs.add('/')
     r.store.dirs.add('/subdir')
@@ -254,7 +249,6 @@ describe('the ambient session is scoped to its workspace', () => {
       { '/ram/': r },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         routePolicy: (ctx) => {
           seen.push(ctx.session?.cwd() ?? '')
           return null
@@ -286,14 +280,10 @@ class DenySecret implements Policy {
   }
 }
 
-async function policedWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function policedWs(): Workspace {
   const r = new RAMVFS()
   r.store.dirs.add('/')
-  const ws = new Workspace(
-    { '/ram/': r },
-    { mode: MountMode.WRITE, shellParser: parser, policies: [new DenySecret()] },
-  )
+  const ws = new Workspace({ '/ram/': r }, { mode: MountMode.WRITE, policies: [new DenySecret()] })
   open.push(ws)
   return ws
 }
@@ -304,7 +294,7 @@ async function policedWs(): Promise<Workspace> {
 // `Permission denied` beside a null record.
 describe('a nested line carries its refusal out', () => {
   it('command NAME keeps the record the inner line earned', async () => {
-    const ws = await policedWs()
+    const ws = policedWs()
     const io = await ws.shell('V=secret; command echo "$V"')
     expect(io.exitCode).toBe(126)
     expect(stderrStr(io)).toBe('echo: Permission denied\n')
@@ -312,7 +302,7 @@ describe('a nested line carries its refusal out', () => {
   })
 
   it('eval keeps it too', async () => {
-    const ws = await policedWs()
+    const ws = policedWs()
     const io = await ws.shell('V=secret; eval "echo $V"')
     expect(io.exitCode).toBe(126)
     expect(io.refusal?.reason).toBe('secrets stay put')
@@ -321,14 +311,14 @@ describe('a nested line carries its refusal out', () => {
   // A substitution keeps only the inner stdout, so its record has to
   // reach the line through the entry point every nested line re-enters by.
   it('a substitution keeps the record the inner line earned', async () => {
-    const ws = await policedWs()
+    const ws = policedWs()
     const io = await ws.shell('V=secret; X=$(echo "$V")')
     expect(io.exitCode).toBe(126)
     expect(io.refusal?.reason).toBe('secrets stay put')
   })
 
   it('an unrefused outer command still reports the inner record', async () => {
-    const ws = await policedWs()
+    const ws = policedWs()
     const io = await ws.shell('V=secret; echo "[$(echo "$V")]"')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('[]\n')
@@ -341,7 +331,7 @@ describe('a nested line carries its refusal out', () => {
 // refused still has to ride the result.
 describe('a negated command keeps its refusal', () => {
   it('for one command', async () => {
-    const ws = await policedWs()
+    const ws = policedWs()
     const io = await ws.shell('V=secret; ! echo "$V"')
     expect(io.exitCode).toBe(0)
     expect(stderrStr(io)).toBe('echo: Permission denied\n')
@@ -349,7 +339,7 @@ describe('a negated command keeps its refusal', () => {
   })
 
   it('for a pipeline', async () => {
-    const ws = await policedWs()
+    const ws = policedWs()
     const io = await ws.shell('V=secret; ! true | echo "$V"')
     expect(io.exitCode).toBe(0)
     expect(io.refusal?.reason).toBe('secrets stay put')
@@ -364,14 +354,14 @@ describe('same-session lines run one at a time', () => {
   const loopB = 'for f in B1 B2 B3; do sleep 0.01; echo "B:$f"; done'
 
   it('two loops on the default session keep their own values', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [a, b] = await Promise.all([ws.shell(loopA), ws.shell(loopB)])
     expect(stdoutStr(a)).toBe('A:A1\nA:A2\nA:A3\n')
     expect(stdoutStr(b)).toBe('B:B1\nB:B2\nB:B3\n')
   })
 
   it('two sessions each keep their own loop values', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     ws.createSession('one')
     ws.createSession('two')
     const [a, b] = await Promise.all([
@@ -383,7 +373,7 @@ describe('same-session lines run one at a time', () => {
   })
 
   it('a line waits only for its own session to persist', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     ws.createSession('slow')
     ws.createSession('fast')
     const store = ws.stateStore.sessions(ws.workspaceId)
@@ -414,14 +404,14 @@ describe('same-session lines run one at a time', () => {
   })
 
   it('nested lines keep running while the outer line holds the session', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('echo "echo deep" > /ram/f.sh')
     const io = await ws.shell('eval "source /ram/f.sh"; echo $(echo sub)')
     expect(stdoutStr(io)).toBe('deep\nsub\n')
   })
 
   it('a host callback re-entering its own session runs inline', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     ws.registerCli(
       'again',
       new CLI({
@@ -441,7 +431,7 @@ describe('same-session lines run one at a time', () => {
   })
 
   it('a line queued behind a running one is refused once close starts', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     let release!: () => void
     const gate = new Promise<void>((resolve) => {
       release = resolve
@@ -478,7 +468,7 @@ describe('a nested line', () => {
     // Neither the outer line's earlier write nor any read reaches the nested
     // apply: a concurrent sibling records into the same list, so a read token
     // there could label bytes it never described.
-    const ws = await cachingRamWorkspace()
+    const ws = cachingRamWorkspace()
     open.push(ws)
     // Seeded with no copy kept, so the first cat reads the backend.
     await ws.vfs.write('/r/f', new TextEncoder().encode('a\n'))

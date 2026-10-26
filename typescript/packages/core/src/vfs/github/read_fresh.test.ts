@@ -19,7 +19,6 @@ import { ManualClock } from '../../utils/clock.ts'
 import { DEFAULT_READ_TTL, MountMode, ReadPolicy } from '../../types.ts'
 import type { BaseVFS } from '../base.ts'
 import { RAMVFS } from '../ram/ram.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { ContentDriftError } from '../../workspace/snapshot/drift.ts'
 import { toStateDict } from '../../workspace/snapshot/state.ts'
@@ -56,18 +55,18 @@ async function vfsOf(): Promise<GitHubVFS> {
   return vfs
 }
 
-async function ws(
+function ws(
   vfs: BaseVFS,
   policy: ReadPolicy = ReadPolicy.FRESH,
   prefix = '/gh',
   clock?: ManualClock,
-): Promise<Workspace> {
+): Workspace {
   return new Workspace(
     {
       [prefix]: new Mount(vfs, { mode: MountMode.READ, read: { policy, ttl: DEFAULT_READ_TTL } }),
       '/r': [new RAMVFS(), MountMode.WRITE],
     },
-    { shellParser: await getTestParser(), ...(clock === undefined ? {} : { clock }) },
+    { ...(clock === undefined ? {} : { clock }) },
   )
 }
 
@@ -85,7 +84,7 @@ async function fails(w: Workspace, line: string): Promise<string> {
 
 describe('github under read: fresh', () => {
   it('does not let a warm probe bypass a session hidden path', async () => {
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       const session = w.createSession('hidden')
@@ -106,7 +105,7 @@ describe('github under read: fresh', () => {
     it(`leaves the read's sha on the cache entry (${prefix})`, async () => {
       gh.files.clear()
       gh.set('src/a.txt', OLD)
-      const w = await ws(await vfsOf(), ReadPolicy.FRESH, prefix)
+      const w = ws(await vfsOf(), ReadPolicy.FRESH, prefix)
       const path = `${prefix === '/' ? '' : prefix}/src/a.txt`
       try {
         expect(await out(w, `cat ${path}`)).toBe(OLD)
@@ -129,7 +128,7 @@ describe('github under read: fresh', () => {
   ]
   for (const [line, cost] of WARM) {
     it(`costs one listing per probe: ${line}`, async () => {
-      const w = await ws(await vfsOf())
+      const w = ws(await vfsOf())
       try {
         await out(w, `cat ${PATH}`)
         gh.log.length = 0
@@ -146,7 +145,7 @@ describe('github under read: fresh', () => {
   it('prints the same warm stat as a bounded mount', async () => {
     const outs: string[] = []
     for (const policy of [ReadPolicy.FRESH, ReadPolicy.BOUNDED]) {
-      const w = await ws(await vfsOf(), policy)
+      const w = ws(await vfsOf(), policy)
       try {
         await out(w, `cat ${PATH}`)
         outs.push(await out(w, `stat ${PATH}`))
@@ -164,7 +163,7 @@ describe('github under read: fresh', () => {
   it('prints the same cold stat of an overlaid path as a bounded mount', async () => {
     const outs: string[] = []
     for (const policy of [ReadPolicy.FRESH, ReadPolicy.BOUNDED]) {
-      const w = await ws(await vfsOf(), policy)
+      const w = ws(await vfsOf(), policy)
       try {
         await w.namespace.setAttrs(PATH, { mode: 0o600 })
         outs.push(await out(w, `stat -c '%a %s %n' ${PATH}`))
@@ -177,7 +176,7 @@ describe('github under read: fresh', () => {
   })
 
   it('refetches a changed file once, then serves it warm', async () => {
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       gh.set('docs/a.txt', NEW)
@@ -196,7 +195,7 @@ describe('github under read: fresh', () => {
   })
 
   it('serves the cache on a bounded mount', async () => {
-    const w = await ws(await vfsOf(), ReadPolicy.BOUNDED)
+    const w = ws(await vfsOf(), ReadPolicy.BOUNDED)
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       gh.set('docs/a.txt', NEW)
@@ -209,7 +208,7 @@ describe('github under read: fresh', () => {
   })
 
   it('asks a new mount one directory per stat until it lists', async () => {
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       await out(w, `stat ${PATH}`)
       await out(w, `stat ${PATH}`)
@@ -230,7 +229,7 @@ describe('github under read: fresh', () => {
   // A bounded mount lists its way to the first stat with one tree, which
   // names every folder, so every stat and listing after it is free.
   it('lists a bounded mount once for its stats', async () => {
-    const w = await ws(await vfsOf(), ReadPolicy.BOUNDED)
+    const w = ws(await vfsOf(), ReadPolicy.BOUNDED)
     try {
       await out(w, `stat ${PATH}`)
       expect(gh.counts()).toEqual([0, 1, 0])
@@ -247,7 +246,7 @@ describe('github under read: fresh', () => {
     // Content-addressed shas make every stamp source agree once the index is
     // refilled, so this guards that both the stream read (cat) and the bytes
     // read (cp) stamp, rather than telling stamp sources apart.
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       for (const [step, data] of [OLD, NEW, OLD].entries()) {
         gh.set('docs/a.txt', data)
@@ -267,7 +266,7 @@ describe('github under read: fresh', () => {
     // The limit this used to pin (a cold read served the listed sha until the
     // next probe) is gone: fresh re-checks the listing a new command reads,
     // so even the first read resolves the current blob.
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       await out(w, 'ls /gh/docs')
       gh.set('docs/a.txt', NEW)
@@ -280,7 +279,7 @@ describe('github under read: fresh', () => {
   })
 
   it('leaves find its whole listing after a probe', async () => {
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       await out(w, `cat ${PATH}`)
       await out(w, `cat ${PATH}`)
@@ -311,7 +310,7 @@ describe('github cannot-see versus gone', () => {
   }
 
   it('keeps the overlay for a repository it cannot see', async () => {
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       await out(w, `cat ${PATH}`)
       await overlaid(w)
@@ -331,7 +330,7 @@ describe('github cannot-see versus gone', () => {
   })
 
   it('keeps the overlay for a refused token', async () => {
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       await out(w, `cat ${PATH}`)
       await overlaid(w)
@@ -347,7 +346,7 @@ describe('github cannot-see versus gone', () => {
   })
 
   it('treats a parent directory gone upstream as gone', async () => {
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       await out(w, `cat ${PATH}`)
       await overlaid(w)
@@ -362,7 +361,7 @@ describe('github cannot-see versus gone', () => {
   })
 
   it('treats a file gone from a live directory as gone', async () => {
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       await out(w, `cat ${PATH}`)
       await overlaid(w)
@@ -391,7 +390,7 @@ describe('github cannot-see versus gone', () => {
   it('never reads cannot-see as gone through the dispatcher', async () => {
     // No cached copy, so cp's own stat is the op that reaches the backend: an
     // ENOENT there goes through onEnoent, which drops the overlay.
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       await clearedWithOverlay(w)
       expect(await fails(w, `cp ${PATH} /r/x`)).toBe('Bad credentials\n')
@@ -402,7 +401,7 @@ describe('github cannot-see versus gone', () => {
   })
 
   it('never reads cannot-see as gone through the xattr call', async () => {
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       await clearedWithOverlay(w)
       expect(await fails(w, `getfattr -d ${PATH}`)).toBe(`getfattr: ${PATH}: Bad credentials\n`)
@@ -413,7 +412,7 @@ describe('github cannot-see versus gone', () => {
   })
 
   it('does not read a truncated parent listing as absence', async () => {
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       await out(w, `cat ${PATH}`)
       await overlaid(w)
@@ -438,7 +437,7 @@ describe('github cannot-see versus gone', () => {
     const vfs = await vfsOf()
     // create builds it truncated.
     expect(vfs.accessor.truncated).toBe(true)
-    const w = await ws(vfs)
+    const w = ws(vfs)
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       gh.log.length = 0
@@ -460,7 +459,7 @@ describe('github directories cut short', () => {
     // walk refuses the cut listing rather than caching it whole, so a probe
     // cannot read the file as gone, and the overlay stays.
     gh.truncatedRecursive = true
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       await w.namespace.setAttrs(PATH, { mode: 0o600 })
@@ -477,7 +476,7 @@ describe('github directories cut short', () => {
 
 describe('github snapshot pins', () => {
   async function pinnedState(vfs?: BaseVFS) {
-    const w = await ws(vfs ?? (await vfsOf()))
+    const w = ws(vfs ?? (await vfsOf()))
     try {
       await out(w, `cat ${PATH}`)
       return await toStateDict(w)
@@ -492,7 +491,7 @@ describe('github snapshot pins', () => {
   ): Promise<string> {
     const loaded = await Workspace.fromState(
       state,
-      { shellParser: await getTestParser() },
+      {},
       {
         '/gh': vfs,
       },
@@ -521,7 +520,7 @@ describe('github snapshot pins', () => {
 
   it('asks one directory when the drift check runs on a live mount', async () => {
     const vfs = await vfsOf()
-    const w = await ws(vfs)
+    const w = ws(vfs)
     try {
       await out(w, `cat ${PATH}`)
       const state = await toStateDict(w)
@@ -536,7 +535,7 @@ describe('github snapshot pins', () => {
 
   it('does not call a refused drift check drift', async () => {
     const vfs = await vfsOf()
-    const w = await ws(vfs)
+    const w = ws(vfs)
     try {
       await out(w, `cat ${PATH}`)
       const state = await toStateDict(w)
@@ -567,7 +566,7 @@ it.each(['find /gh', 'du -a /gh', 'ls -R /gh'])(
     gh.files.clear()
     gh.files.set('a/b/c/d/e.txt', new TextEncoder().encode('x'))
     gh.truncatedRecursive = true
-    const workspace = await ws(await vfsOf())
+    const workspace = ws(await vfsOf())
     try {
       await out(workspace, line)
       gh.files.set('a/b/c/d/new.txt', new TextEncoder().encode('new'))
@@ -592,7 +591,7 @@ describe('github dispatcher under read: fresh', () => {
   it('fetches the tree once for a burst', async () => {
     gh.files.clear()
     for (let n = 0; n < 20; n++) gh.set(`docs/f${String(n).padStart(2, '0')}.txt`, 'x')
-    const w = await ws(await vfsOf())
+    const w = ws(await vfsOf())
     try {
       const names = await w.readdir('/gh/docs')
       expect(names).toHaveLength(20)
@@ -605,7 +604,7 @@ describe('github dispatcher under read: fresh', () => {
 
   it('sees an outside change after the window', async () => {
     const clock = new ManualClock(100)
-    const w = await ws(await vfsOf(), ReadPolicy.FRESH, '/gh', clock)
+    const w = ws(await vfsOf(), ReadPolicy.FRESH, '/gh', clock)
     try {
       expect(await w.readdir('/gh/docs')).not.toContain('/gh/docs/c.txt')
       gh.set('docs/c.txt', 'new')

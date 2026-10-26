@@ -2,10 +2,10 @@
 // src/scanner.c.
 // https://github.com/tree-sitter/tree-sitter-bash
 // Licensed under MIT. See licenses/third_party/tree-sitter-bash-parser.txt.
-use super::lex::{blank_end, digits_end, is_name, is_name_start, is_space, name_end, number_end};
+use super::lex::{blank_end, digits_end, is_name, is_name_start, is_space, name_end};
 use super::parser::{Parser, R};
 use super::tree::Syn;
-use super::word::{Ctx, SPECIAL};
+use super::word::{Ctx, SPECIAL, push_run};
 
 impl Parser<'_> {
     /// `${...}`.
@@ -138,8 +138,11 @@ impl Parser<'_> {
             }
         }
         if self.peek() == b':' {
+            // bash reads a substring's offset and length as arithmetic only
+            // when the word runs: they are words here, which the executor
+            // splits at their separator and evaluates then.
             children.push(self.op(":"));
-            return self.expansion_slice(children);
+            return self.substring_operands(children);
         }
         if self.peek() == b'@' {
             children.push(self.op("@"));
@@ -161,6 +164,43 @@ impl Parser<'_> {
             return Ok(());
         }
         self.fail(self.i)
+    }
+
+    /// A substring's offset and length up to the `}`: their text as words,
+    /// the quotes and expansions in it as their own nodes.
+    fn substring_operands(&mut self, children: &mut Vec<Syn>) -> R<()> {
+        let mut pieces = Vec::new();
+        let mut run = self.i;
+        loop {
+            if self.eof() {
+                return self.fail(self.i);
+            }
+            let at = self.i;
+            let piece = match self.peek() {
+                b'}' => break,
+                b'\\' => {
+                    self.i += 2;
+                    continue;
+                }
+                b'"' => self.string()?,
+                b'\'' => self.raw_string()?,
+                b'`' => self.backtick()?,
+                b'$' => self.dollar()?,
+                _ => {
+                    self.i += 1;
+                    continue;
+                }
+            };
+            if piece.is("$") {
+                continue;
+            }
+            push_run(&mut pieces, "word", run, at);
+            pieces.push(piece);
+            run = self.i;
+        }
+        push_run(&mut pieces, "word", run, self.i);
+        children.extend(Syn::concat(pieces));
+        Ok(())
     }
 
     /// The word after `:-`, `=` and their kin: pieces up to `}`, where a
@@ -375,94 +415,5 @@ impl Parser<'_> {
         }
         children.extend(Syn::concat(pieces));
         Ok(())
-    }
-
-    /// `:offset` and `:offset:length`.
-    fn expansion_slice(&mut self, children: &mut Vec<Syn>) -> R<()> {
-        if self.peek() != b':' {
-            self.i = blank_end(self.s, self.i);
-            if self.peek() != b'}' && self.peek() != b':' {
-                children.push(self.slice_expression()?);
-            }
-        }
-        self.i = blank_end(self.s, self.i);
-        if self.peek() == b':' {
-            children.push(self.op(":"));
-            self.i = blank_end(self.s, self.i);
-            if self.peek() != b'}' {
-                children.push(self.slice_expression()?);
-            }
-        }
-        self.i = blank_end(self.s, self.i);
-        Ok(())
-    }
-
-    /// An offset or length: a name, number, expansion or parenthesized
-    /// expression, and `+ - * / %` between them.
-    fn slice_expression(&mut self) -> R<Syn> {
-        let left = self.slice_operand()?;
-        self.slice_binary(left, 0)
-    }
-
-    fn slice_binary(&mut self, mut left: Syn, min: u8) -> R<Syn> {
-        loop {
-            self.i = blank_end(self.s, self.i);
-            let (text, prec) = match self.peek() {
-                b'+' => ("+", 1),
-                b'-' => ("-", 1),
-                b'*' => ("*", 2),
-                b'/' => ("/", 2),
-                b'%' => ("%", 2),
-                _ => return Ok(left),
-            };
-            if prec < min {
-                return Ok(left);
-            }
-            let op = self.op(text);
-            self.i = blank_end(self.s, self.i);
-            let mut right = self.slice_operand()?;
-            loop {
-                self.i = blank_end(self.s, self.i);
-                let next = match self.peek() {
-                    b'*' | b'/' | b'%' => 2,
-                    b'+' | b'-' => 1,
-                    _ => 0,
-                };
-                if next > prec {
-                    right = self.slice_binary(right, next)?;
-                } else {
-                    break;
-                }
-            }
-            left = Syn::node("binary_expression", vec![left, op, right]);
-        }
-    }
-
-    fn slice_operand(&mut self) -> R<Syn> {
-        let at = self.i;
-        match self.peek() {
-            b'$' if is_name(self.at(1)) || SPECIAL.contains(&self.at(1)) => {
-                match self.simple_expansion() {
-                    Some(node) => Ok(node),
-                    None => self.fail(at),
-                }
-            }
-            b'$' if self.starts(b"$((") => self.arithmetic_expansion(),
-            b'$' if self.starts(b"$(") => self.command_substitution(),
-            b'$' if self.starts(b"${") => self.expansion(),
-            b'(' => self.parenthesized(),
-            byte if is_name_start(byte) => {
-                let end = name_end(self.s, at);
-                self.i = end;
-                Ok(Syn::leaf("variable_name", at, end))
-            }
-            _ => match number_end(self.s, at) {
-                Some(end) => {
-                    self.i = end;
-                    Ok(Syn::leaf("number", at, end))
-                }
-                None => self.fail(at),
-            },
-        }
     }
 }

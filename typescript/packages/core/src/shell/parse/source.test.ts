@@ -1,41 +1,22 @@
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
-import { Language, Parser } from 'web-tree-sitter'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { describe, expect, it } from 'vitest'
 import type { TSNodeLike } from '../types.ts'
-import { joinContinuations, type ShellParser } from './index.ts'
-
-const require = createRequire(import.meta.url)
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-let rawParser: Parser
-
-beforeAll(async () => {
-  parser = await getTestParser()
-  rawParser = new Parser()
-  rawParser.setLanguage(await Language.load(grammarWasm))
-})
+import { joinContinuations, sourceOffsets } from './index.ts'
+import { parse } from './parse.ts'
 
 describe('sourceOffsets', () => {
   it.each([
     ['continuation', 'echo A; \\\n fi'],
-    ['rebrace', 'echo /api/$c/$id.json; fi'],
+    ['expansion', 'echo /api/$c/$id.json; fi'],
     ['bang', '! echo A \\\n; fi'],
     ['time', 'time echo A \\\n; fi'],
     ['heredoc', 'cat <<E; fi\nbody\nE'],
   ])('points a %s node back into the line as typed', (_label, command) => {
-    const root = parser.parse(command)
-    const names: TSNodeLike[] = []
-    const stack: TSNodeLike[] = [root]
-    for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
-      stack.push(...node.children)
-      if (node.type === 'command_name' && node.text === 'fi') names.push(node)
-    }
-    expect(names).toHaveLength(1)
-    const offsets = parser.sourceOffsets(command, root)
-    expect(offsets[names[0]?.startIndex ?? -1]).toBe(command.lastIndexOf('fi'))
+    // The stray `fi` is where the parser refuses each line.
+    const root = parse(command)
+    const errors = root.children.filter((node) => node.type === 'ERROR')
+    expect(errors).toHaveLength(1)
+    const offsets = sourceOffsets(command, root)
+    expect(offsets[errors[0]?.startIndex ?? -1]).toBe(command.lastIndexOf('fi'))
   })
 })
 
@@ -64,24 +45,22 @@ describe('joinContinuations', () => {
     ['echo "$(echo \'u\\\nv\')"', 'echo "$(echo \'u\\\nv\')"'],
     ['echo "it\'s a\\\nb"', 'echo "it\'s ab"'],
   ])('%j -> %j', (command, expected) => {
-    expect(joinContinuations(rawParser, command)).toBe(expected)
+    expect(joinContinuations(command)).toBe(expected)
   })
 
   it('keeps a quoted heredoc body whole', () => {
-    const root = parser.parse("cat <<'E' | \\\ntr a b\na\\\nb\nE")
+    const root = parse("cat <<'E' | \\\ntr a b\na\\\nb\nE")
     expect(root.text).toBe('cat <"a\\\\\nb\n" | tr a b\n')
     expect(root.sourceText).toBe("cat <<'E' | \\\ntr a b\na\\\nb\nE")
   })
 
   it('joins an unquoted heredoc body', () => {
-    expect(parser.parse('cat <<E | \\\ntr a b\na\\\nb $x\nE').text).toBe(
-      'cat <"ab $x\n" | tr a b\n',
-    )
+    expect(parse('cat <<E | \\\ntr a b\na\\\nb $x\nE').text).toBe('cat <"ab $x\n" | tr a b\n')
   })
 })
 
 it('keeps source rows across a newline shielded inside an extended pattern', () => {
-  const root = parser.parse('echo @(😀\nb|c)\necho after')
+  const root = parse('echo @(😀\nb|c)\necho after')
   const [first, second] = root.namedChildren
   expect(first?.text).toBe('echo @(😀\nb|c)')
   expect(first?.endPosition).toEqual({ row: 1, column: 4 })
@@ -90,7 +69,7 @@ it('keeps source rows across a newline shielded inside an extended pattern', () 
 })
 
 it('preserves pattern source rows across a long script', () => {
-  const root = parser.parse('echo @(😀\nb|c)\n'.repeat(1000) + 'echo end')
+  const root = parse('echo @(😀\nb|c)\n'.repeat(1000) + 'echo end')
   const statements = root.namedChildren
   expect(statements).toHaveLength(1001)
   for (const index of [0, 500, 999]) {
@@ -101,7 +80,7 @@ it('preserves pattern source rows across a long script', () => {
 })
 
 it('does not consume later commands for heredoc tokens inside patterns', () => {
-  const root = parser.parse('echo @(a<<b|c)\ncat <<EOF\nbody\nEOF\necho after\n')
+  const root = parse('echo @(a<<b|c)\ncat <<EOF\nbody\nEOF\necho after\n')
   expect(root.namedChildren).toHaveLength(3)
   expect(root.namedChildren[0]?.text).toBe('echo @(a<<b|c)')
   expect(root.namedChildren.at(-1)?.text).toBe('echo after')
@@ -110,7 +89,7 @@ it('does not consume later commands for heredoc tokens inside patterns', () => {
 it.each(['[[ @ == [a"@"] ]]', '[[ $x == [a"$x"] ]]', 'case "$x" in [a"$x"]) echo match;; esac'])(
   'keeps a quoted bracket pattern one operand: %s',
   (command) => {
-    const root = parser.parse(command)
+    const root = parse(command)
     expect(root.hasError).toBe(false)
     expect(root.text).toBe(command)
     const stack: TSNodeLike[] = [root]
@@ -125,7 +104,7 @@ it.each(['[[ @ == [a"@"] ]]', '[[ $x == [a"$x"] ]]', 'case "$x" in [a"$x"]) echo
 )
 
 it('keeps process substitution in one extended-pattern word', () => {
-  const command = parser.parse('echo @(<(printf a)|b)').namedChildren[0]
+  const command = parse('echo @(<(printf a)|b)').namedChildren[0]
   expect(command?.namedChildren).toHaveLength(2)
   const word = command?.namedChildren[1]
   expect(word?.type).toBe('concatenation')

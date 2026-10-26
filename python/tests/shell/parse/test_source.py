@@ -55,19 +55,14 @@ def test_unquoted_heredoc_body_joins_its_lines():
         "time echo A \\\n; fi",
         "cat <<E; fi\nbody\nE",
     ],
-    ids=["continuation", "rebrace", "bang", "time", "heredoc"],
+    ids=["continuation", "expansion", "bang", "time", "heredoc"],
 )
 def test_source_offsets_point_back_into_the_line_as_typed(command):
+    # The stray `fi` is where the parser refuses each line.
     root = parse(command)
-    stack, names = [root], []
-    while stack:
-        node = stack.pop()
-        stack.extend(node.children)
-        if node.type == "command_name" and node.text == b"fi":
-            names.append(node)
-    (fi,) = names
+    (error,) = (node for node in root.children if node.type == "ERROR")
     offsets = source_offsets(command, root)
-    assert offsets[fi.start_byte] == command.encode().rindex(b"fi")
+    assert offsets[error.start_byte] == command.encode().rindex(b"fi")
 
 
 def test_extended_pattern_shield_preserves_original_rows():

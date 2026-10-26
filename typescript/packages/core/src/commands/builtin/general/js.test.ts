@@ -23,7 +23,7 @@ import {
 // script behaves identically across languages.
 describe('node/js: quickjs runtime', () => {
   it('uses the invoked alias in script errors', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     try {
       for (const name of ['python', 'node']) {
         const io = await ws.shell(`${name} /missing-script`)
@@ -36,7 +36,7 @@ describe('node/js: quickjs runtime', () => {
   })
 
   it('identifies QuickJS for both aliases and both version flags', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     try {
       for (const line of ['js --version', 'node -v']) {
         const io = await ws.shell(line)
@@ -50,7 +50,7 @@ describe('node/js: quickjs runtime', () => {
   })
 
   it('passes --version to a script', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     try {
       await ws.shell("echo 'console.log(scriptArgs[0])' > /ram/version.js")
       const io = await ws.shell('js /ram/version.js --version')
@@ -62,7 +62,7 @@ describe('node/js: quickjs runtime', () => {
   })
 
   it('stdin pipe: std.in.readAsString()', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell(
       'echo hello | js -e "console.log(std.in.readAsString().trim().toUpperCase())"',
     )
@@ -72,7 +72,7 @@ describe('node/js: quickjs runtime', () => {
   }, 60_000)
 
   it('-m: module mode with top-level await', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('js -m -e "const x = await Promise.resolve(41); console.log(x + 1)"')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('42\n')
@@ -80,7 +80,7 @@ describe('node/js: quickjs runtime', () => {
   }, 60_000)
 
   it('mounted .mjs file runs in module mode', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     await ws.shell(
       "printf 'const k = await Promise.resolve(5);\\nconsole.log(k * 2)\\n' > /ram/mod.mjs",
     )
@@ -93,7 +93,7 @@ describe('node/js: quickjs runtime', () => {
   // A program's writes reach its reader as it runs, so one that never ends
   // stops once its reader has what it wanted, as SIGPIPE stops it.
   it('an endless writer stops once its reader has enough', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     try {
       const io = await ws.shell(
         'js -e "for (;;) console.log(\'y\')" | head -n 2; echo "${PIPESTATUS[@]}"',
@@ -105,7 +105,7 @@ describe('node/js: quickjs runtime', () => {
   }, 60_000)
 
   it('syntax error → exit 1 on stderr', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('js -e "this is not js"')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('SyntaxError')
@@ -113,7 +113,7 @@ describe('node/js: quickjs runtime', () => {
   }, 60_000)
 
   it('sandboxed: no node builtins', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('js -e "console.log(typeof process, typeof require, typeof fetch)"')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('undefined undefined undefined\n')
@@ -121,7 +121,7 @@ describe('node/js: quickjs runtime', () => {
   }, 60_000)
 
   it('console.error does not exist, matching quickjs-ng --std', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('js -e "console.error(\'x\')"')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('TypeError')
@@ -129,7 +129,7 @@ describe('node/js: quickjs runtime', () => {
   }, 60_000)
 
   it('printf covers the C conversions, pinned against the real engine', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell(
       'js -e "std.out.printf(\'e[%e]g[%g]plus[%+d]hash[%#x]prec[%.3d]sp[% d]E[%E]G[%G]\', 1234.5678, 1234.5678, 42, 255, 7, 9, 1234.5678, 0.00012)"',
     )
@@ -141,7 +141,7 @@ describe('node/js: quickjs runtime', () => {
   }, 60_000)
 
   it('printf star width and precision consume their arguments', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell(
       "js -e \"std.out.printf('star[%*d]prec[%.*f]o[%#o]neg[%05d]s[%.3s]c[%c]', 6, 42, 2, 3.14159, 8, -42, 'abcdef', 'zz')\"",
     )
@@ -151,7 +151,7 @@ describe('node/js: quickjs runtime', () => {
   }, 60_000)
 
   it('no input → exit 1', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('js')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('js: no input')

@@ -215,6 +215,20 @@ SERVED = {
         "unlink",
         "write",
     },
+    "tidb_filesystem": {
+        "append",
+        "create",
+        "mkdir",
+        "pwrite",
+        "read",
+        "readdir",
+        "rename",
+        "rmdir",
+        "stat",
+        "truncate",
+        "unlink",
+        "write",
+    },
     "trello": {"read", "readdir", "stat"},
 }
 

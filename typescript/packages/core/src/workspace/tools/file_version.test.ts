@@ -16,7 +16,6 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Files } from '../files.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { FileVersionTracker, StaleMirageFileError, fingerprint } from './file_version.ts'
 
@@ -24,11 +23,8 @@ const DEC = new TextDecoder()
 
 let ws: Workspace
 
-beforeEach(async () => {
-  ws = new Workspace(
-    { '/': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+beforeEach(() => {
+  ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 })
 
 // A read seam that answers with something other than the stored bytes.

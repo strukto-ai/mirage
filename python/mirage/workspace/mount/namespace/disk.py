@@ -15,8 +15,9 @@
 from collections.abc import Iterable
 from typing import Any
 
-from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
+from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.record.disk import DiskRecordClient
+from mirage.workspace.record.types import RecordFields, generation_of
 
 NAMESPACE_RECORD = "namespace"
 
@@ -24,7 +25,7 @@ NAMESPACE_RECORD = "namespace"
 class DiskNamespaceStore(NamespaceStore):
     """NamespaceStore backed by one ``namespace.json`` per workspace.
 
-    The whole plane is one human-readable record
+    The whole node table is one human-readable record
     ``{"nodes": {path: fields}}``: the namespace is bound
     to the workspace, so it serializes as one JSON file, not per-node
     files. Read-modify-writes take the record's lockfile so concurrent
@@ -39,35 +40,50 @@ class DiskNamespaceStore(NamespaceStore):
         fields, _ = await self._records.get(NAMESPACE_RECORD)
         return fields if fields is not None else {"nodes": {}}
 
-    async def load(self) -> dict[str, NodeFields]:
+    async def load(self) -> dict[str, RecordFields]:
         return dict((await self._state()).get("nodes", {}))
 
-    async def set(self, path: str, fields: NodeFields) -> None:
+    async def set(self, key: str, fields: RecordFields) -> None:
         fd = await self._records.lock(NAMESPACE_RECORD)
         try:
             state = await self._state()
-            state.setdefault("nodes", {})[path] = dict(fields)
+            state.setdefault("nodes", {})[key] = dict(fields)
             await self._records.put(NAMESPACE_RECORD, state)
         finally:
             await self._records.unlock(NAMESPACE_RECORD, fd)
 
-    async def delete(self, paths: Iterable[str]) -> None:
+    async def cas_set(
+        self, key: str, fields: RecordFields, expected_generation: int
+    ) -> bool:
         fd = await self._records.lock(NAMESPACE_RECORD)
         try:
             state = await self._state()
             nodes = state.setdefault("nodes", {})
-            for path in paths:
-                nodes.pop(path, None)
+            if generation_of(nodes.get(key)) != expected_generation:
+                return False
+            nodes[key] = dict(fields)
+            await self._records.put(NAMESPACE_RECORD, state)
+            return True
+        finally:
+            await self._records.unlock(NAMESPACE_RECORD, fd)
+
+    async def delete(self, keys: Iterable[str]) -> None:
+        fd = await self._records.lock(NAMESPACE_RECORD)
+        try:
+            state = await self._state()
+            nodes = state.setdefault("nodes", {})
+            for key in keys:
+                nodes.pop(key, None)
             await self._records.put(NAMESPACE_RECORD, state)
         finally:
             await self._records.unlock(NAMESPACE_RECORD, fd)
 
-    async def replace_all(self, entries: dict[str, NodeFields]) -> None:
+    async def replace_all(self, entries: dict[str, RecordFields]) -> None:
         fd = await self._records.lock(NAMESPACE_RECORD)
         try:
             state = await self._state()
             state["nodes"] = {
-                path: dict(fields) for path, fields in entries.items()
+                key: dict(fields) for key, fields in entries.items()
             }
             await self._records.put(NAMESPACE_RECORD, state)
         finally:

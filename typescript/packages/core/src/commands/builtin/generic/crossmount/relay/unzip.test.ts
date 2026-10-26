@@ -2,7 +2,6 @@ import { expect, it } from 'vitest'
 import { MountMode } from '../../../../../types.ts'
 import { RAMVFS } from '../../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -16,10 +15,7 @@ async function run(
     type: 'ram',
     files: { '/keep.txt': ENC.encode('keep\n'), '/drop.txt': ENC.encode('drop\n') },
   })
-  const ws = new Workspace(
-    { '/a': source, '/b': dest },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/a': source, '/b': dest }, { mode: MountMode.WRITE })
   try {
     await ws.shell('cd /a && zip -q a.zip keep.txt drop.txt && cd /')
     const result = await ws.shell(line)

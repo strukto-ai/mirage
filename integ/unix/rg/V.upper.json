@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -V | cut -d' ' -f1,2; rg -V foo /nonexistent | cut -d' ' -f1,2",

@@ -15,11 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 // Direct port of tests/workspace/test_cross_mount_errors.py.
@@ -28,14 +24,13 @@ import { Workspace } from '../workspace/workspace.ts'
 
 const ENC = new TextEncoder()
 
-async function makeTwoRamWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeTwoRamWs(): Workspace {
   const ram1 = new RAMVFS()
   const ram2 = new RAMVFS()
   ram1.store.files.set('/file.txt', ENC.encode('line1\nline2\nline3\nline4\nline5\n'))
   ram2.store.files.set('/file.txt', ENC.encode('aaa\nbbb\nccc\n'))
 
-  return new Workspace({ '/a': ram1, '/b': ram2 }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/a': ram1, '/b': ram2 }, { mode: MountMode.WRITE })
 }
 
 async function runCmd(
@@ -48,7 +43,7 @@ async function runCmd(
 
 describe('cross-mount errors (port of tests/workspace/test_cross_mount_errors.py)', () => {
   it('head -n abc across two mounts → exit 1, "invalid number" with "abc"', async () => {
-    const ws = await makeTwoRamWs()
+    const ws = makeTwoRamWs()
     const r = await runCmd(ws, 'head -n abc /a/file.txt /b/file.txt')
     expect(r.code).toBe(1)
     expect(r.err).toContain('invalid number')
@@ -57,7 +52,7 @@ describe('cross-mount errors (port of tests/workspace/test_cross_mount_errors.py
   })
 
   it('tail -n abc across two mounts → exit 1, "invalid number" with "abc"', async () => {
-    const ws = await makeTwoRamWs()
+    const ws = makeTwoRamWs()
     const r = await runCmd(ws, 'tail -n abc /a/file.txt /b/file.txt')
     expect(r.code).toBe(1)
     expect(r.err).toContain('invalid number')
@@ -66,7 +61,7 @@ describe('cross-mount errors (port of tests/workspace/test_cross_mount_errors.py
   })
 
   it('head -n 2 across two mounts → exit 0, first 2 lines of each', async () => {
-    const ws = await makeTwoRamWs()
+    const ws = makeTwoRamWs()
     const r = await runCmd(ws, 'head -n 2 /a/file.txt /b/file.txt')
     expect(r.code).toBe(0)
     expect(r.out).toContain('line1')
@@ -77,7 +72,7 @@ describe('cross-mount errors (port of tests/workspace/test_cross_mount_errors.py
   })
 
   it('tail -n 1 across two mounts → exit 0, last line of each', async () => {
-    const ws = await makeTwoRamWs()
+    const ws = makeTwoRamWs()
     const r = await runCmd(ws, 'tail -n 1 /a/file.txt /b/file.txt')
     expect(r.code).toBe(0)
     expect(r.out).toContain('line5')
@@ -86,7 +81,7 @@ describe('cross-mount errors (port of tests/workspace/test_cross_mount_errors.py
   })
 
   it('head default -n across two mounts → exit 0, includes first lines', async () => {
-    const ws = await makeTwoRamWs()
+    const ws = makeTwoRamWs()
     const r = await runCmd(ws, 'head /a/file.txt /b/file.txt')
     expect(r.code).toBe(0)
     expect(r.out).toContain('line1')
@@ -95,23 +90,19 @@ describe('cross-mount errors (port of tests/workspace/test_cross_mount_errors.py
   })
 })
 
-async function makeReadonlySrcWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeReadonlySrcWs(): Workspace {
   const ro = new RAMVFS()
   const rw = new RAMVFS()
   ro.store.files.set('/report.csv', ENC.encode('name,age\nalice,30\n'))
 
-  return new Workspace(
-    { '/mail': [ro, MountMode.READ], '/scratch': [rw, MountMode.EXEC] },
-    { shellParser: parser },
-  )
+  return new Workspace({ '/mail': [ro, MountMode.READ], '/scratch': [rw, MountMode.EXEC] })
 }
 
 describe('cross-mount mv with an unremovable source', () => {
   it('prints GNU cannot remove and keeps both copies', async () => {
     // GNU mv on a cross-device move that cannot remove the source: the
     // copy stays in place and the failure is a per-entry GNU line.
-    const ws = await makeReadonlySrcWs()
+    const ws = makeReadonlySrcWs()
     const r = await runCmd(ws, 'mv /mail/report.csv /scratch/x.csv')
     expect(r.code).toBe(1)
     expect(r.err).toBe("mv: cannot remove '/mail/report.csv': Read-only file system\n")
@@ -127,7 +118,7 @@ describe('cross-mount relay glob expansion', () => {
   it('mv expands source globs before relaying', async () => {
     // RELAY bypasses the mount command wrappers that expand globs for
     // single-mount runs, so the executor expands relay operands itself.
-    const ws = await makeTwoRamWs()
+    const ws = makeTwoRamWs()
     await runCmd(ws, 'echo g1 | tee /a/g1.txt > /dev/null && echo g2 | tee /a/g2.txt > /dev/null')
     const r = await runCmd(ws, 'mv /a/g*.txt /b/')
     expect([r.err, r.code]).toEqual(['', 0])
@@ -139,7 +130,7 @@ describe('cross-mount relay glob expansion', () => {
   })
 
   it('an unmatched glob stays the literal word, like bash', async () => {
-    const ws = await makeTwoRamWs()
+    const ws = makeTwoRamWs()
     const r = await runCmd(ws, 'mv /a/nomatch*.zzz /b/')
     expect(r.code).toBe(1)
     expect(r.err).toBe("mv: cannot stat '/a/nomatch*.zzz': No such file or directory\n")

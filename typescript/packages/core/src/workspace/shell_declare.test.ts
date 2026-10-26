@@ -17,7 +17,7 @@ import { makeIntegrationWS, run } from '../../tests/workspace/fixtures/integrati
 
 describe('declare/typeset scoping', () => {
   it('assigns at top level', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'declare zd1=5; echo $zd1')).toBe('5\n')
     } finally {
@@ -26,7 +26,7 @@ describe('declare/typeset scoping', () => {
   })
 
   it('is local inside a function', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'zf1() { declare dz=in; echo $dz; }; zf1; echo ${dz:-unset}')).toBe(
         'in\nunset\n',
@@ -37,7 +37,7 @@ describe('declare/typeset scoping', () => {
   })
 
   it('typeset is local inside a function', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'zf2() { typeset tz=in; echo $tz; }; zf2; echo ${tz:-unset}')).toBe(
         'in\nunset\n',
@@ -48,7 +48,7 @@ describe('declare/typeset scoping', () => {
   })
 
   it('shadows a global inside a function', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'gv=g; zf3() { declare gv=l; echo $gv; }; zf3; echo $gv')).toBe('l\ng\n')
     } finally {

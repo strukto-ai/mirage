@@ -21,6 +21,19 @@ def test_a_matcher_counts_characters_and_keeps_lone_surrogates(
     assert GlobMatcher(pattern).matches(name) is expected
 
 
+@pytest.mark.parametrize(
+    "pattern,name,expected",
+    [
+        ("a.com", "a.co", False),
+        ("[a", "[a", True),
+        ("\U0000fdd0", "*", True),
+        ("\U0000fdd0", "a", False),
+    ],
+)
+def test_a_plain_pattern_matches_its_own_text_alone(pattern, name, expected):
+    assert GlobMatcher(pattern).matches(name) is expected
+
+
 def test_threads_sharing_one_matcher_keep_their_names_apart():
     matcher = glob_matcher("a*z")
     names = [

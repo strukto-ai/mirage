@@ -13,9 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
-import tree_sitter
-import tree_sitter_bash
 
+from mirage.rs.shell import parse_shell
 from mirage.shell.helpers import (
     brace_expands,
     byte_offset,
@@ -53,12 +52,9 @@ from mirage.shell.parse.parse import parse_program
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import RedirectKind
 
-_LANG = tree_sitter.Language(tree_sitter_bash.language())
-_PARSER = tree_sitter.Parser(_LANG)
-
 
 def _parse(cmd: str):
-    return _PARSER.parse(cmd.encode()).root_node
+    return parse_shell(cmd).root_node
 
 
 def _first(cmd: str):
@@ -66,8 +62,7 @@ def _first(cmd: str):
 
 
 def _shielded(cmd: str):
-    # The executor's parse, whose redirect shield reads `0<f` and
-    # `<<<` the way bash does.
+    # The executor's parse, which lowers a heredoc body into its redirect.
     return parse(cmd).children[0]
 
 
@@ -1197,8 +1192,7 @@ def test_quoted_parts_keeps_the_text_between_children(cmd, parts):
                 ("/", "/"),
                 ("regex", "x"),
                 ("/", "/"),
-                "\\ ",
-                ("simple_expansion", "$f"),
+                ("concatenation", "\\ $f"),
                 ("}", "}"),
             ],
         ),

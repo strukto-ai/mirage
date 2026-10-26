@@ -2,7 +2,6 @@ import { expect, it, vi } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { NodeSlackTransport } from '../../core/slack/client.ts'
 import { FileStat, FileType } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { SlackVFSBase } from './slack.ts'
 import { seedChannel } from '../../../tests/vfs/slack/_test_util.ts'
@@ -41,7 +40,7 @@ it.each([false, true])(
       name: 'slack',
       accessor: new SlackAccessor(new NodeSlackTransport('token')),
     })
-    const ws = new Workspace({ '/chat': vfs }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/chat': vfs })
     const path = '/chat/channels/general__C1/2026-04-24/files/report__F1.txt'
     const index = ws.mount('/chat').index
     await seedChannel(index, '/chat', 'general__C1', 'C1', { dates: ['2026-04-24'] })

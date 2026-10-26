@@ -502,17 +502,23 @@ fn utf16_offsets(source: &[u8]) -> Vec<u32> {
     offsets
 }
 
-/// Parse the args buffer's first `len` bytes as a shell program. Its node
-/// table, `NODE_WORDS` words a node level by level, offsets and columns in
+/// Parse the args buffer's first `len` bytes as a shell program, the
+/// `aliases_len` after them naming the shell's aliases, each ended by a NUL.
+/// Its node table, `NODE_WORDS` words a node level by level, offsets and columns in
 /// UTF-16 units, is at `mirage_rs_shell_table` until the next parse:
 /// kind | field << 16 | flags << 24 (1 named, 2 has_error),
 /// start, end, start row, start column, end row, end column, parent,
 /// first child, child count. Returns the node count.
 #[unsafe(no_mangle)]
-pub extern "C" fn mirage_rs_shell_parse(len: usize) -> usize {
+pub extern "C" fn mirage_rs_shell_parse(len: usize, aliases_len: usize) -> usize {
     let args = STATE.with_borrow_mut(|state| std::mem::take(&mut state.args));
     let source = &args[..len.min(args.len())];
-    let tree = mirage_rs::shell::parse(source);
+    let aliases: Vec<Vec<u8>> = args[source.len()..(len + aliases_len).min(args.len())]
+        .split(|byte| *byte == 0)
+        .filter(|name| !name.is_empty())
+        .map(<[u8]>::to_vec)
+        .collect();
+    let tree = mirage_rs::shell::parse_with_aliases(source, &aliases);
     let utf16 = utf16_offsets(source);
     let column =
         |offset: u32, bytes: u32| utf16[offset as usize] - utf16[(offset - bytes) as usize];

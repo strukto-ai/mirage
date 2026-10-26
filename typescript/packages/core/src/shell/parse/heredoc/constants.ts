@@ -53,17 +53,9 @@ export const LINE_BLANKS: ReadonlySet<string> = new Set([' ', '\t', '\r'])
 // Characters a body may open with that never reach the scanner as body text.
 export const SKIPPED_BLANKS: ReadonlySet<string> = new Set([' ', '\t', '\r', '\n'])
 
-// What a backslash escapes in an unquoted body (`\$`, `` \` ``, `\\`).
-export const ESCAPE_PARTNERS: ReadonlySet<string> = new Set(['$', '`', '\\'])
-
 // What a backslash escapes inside a double-quoted word; before any other
 // character it stays literal, so `"E\xF"` names E\xF.
 export const DQUOTE_ESCAPABLE: ReadonlySet<string> = new Set(['$', '`', '"', '\\'])
-
-// The letter written over a masked character, and the one used instead
-// when the delimiter itself starts with it.
-export const FILLER = 'x'
-export const ALTERNATE_FILLER = 'y'
 
 export const HEREDOC_START = 'heredoc_start'
 export const HEREDOC_BODY = 'heredoc_body'

@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/fcB_ni/sub && printf 'hit\\n' > /data/fcB_ni/a.txt && printf 'hit\\n' > /data/fcB_ni/sub/b.txt && rg -l --sort path --no-ignore --ignore --no-ignore-dot --ignore-dot --no-ignore-exclude --ignore-exclude --no-ignore-files --ignore-files --no-ignore-global --ignore-global --no-ignore-messages --ignore-messages --no-ignore-parent --ignore-parent --no-ignore-vcs --ignore-vcs --no-require-git --require-git --ignore-file-case-insensitive --no-ignore-file-case-insensitive hit /data/fcB_ni; rm -rf /data/fcB_ni",

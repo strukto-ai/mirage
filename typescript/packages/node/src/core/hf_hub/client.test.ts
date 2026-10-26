@@ -34,7 +34,7 @@ import {
   hubStream,
   resolveUrl,
   revSegment,
-  stallFetch,
+  stallTimeout,
 } from './client.ts'
 import { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import { MAX_RETRIES } from './constants.ts'
@@ -289,7 +289,7 @@ async function stallHandle(req: IncomingMessage, res: ServerResponse): Promise<v
   res.write('ab')
 }
 
-describe('stallFetch', () => {
+describe('stallTimeout', () => {
   let server: Server
   let base = ''
 
@@ -309,24 +309,24 @@ describe('stallFetch', () => {
   })
 
   it('lets a download that keeps flowing outlive the bound', async () => {
-    const response = await stallFetch(STALL_MS)(`${base}/drip`)
+    const response = await stallTimeout(STALL_MS)(`${base}/drip`)
     expect(await response.text()).toBe('abcdefgh')
   })
 
   it('fails a download that stops flowing at the bound', async () => {
-    const response = await stallFetch(STALL_MS)(`${base}/stall`)
+    const response = await stallTimeout(STALL_MS)(`${base}/stall`)
     await expect(response.text()).rejects.toMatchObject({ name: 'TimeoutError' })
   })
 
   it('fails a request whose answer never comes', async () => {
-    await expect(stallFetch(STALL_MS)(`${base}/silent`)).rejects.toMatchObject({
+    await expect(stallTimeout(STALL_MS)(`${base}/silent`)).rejects.toMatchObject({
       name: 'TimeoutError',
     })
   })
 
   it('reads a bound of zero or less as none', async () => {
-    expect(stallFetch(0)).toBe(hubFetch)
-    expect(stallFetch(-1)).toBe(hubFetch)
+    expect(stallTimeout(0)).toBe(hubFetch)
+    expect(stallTimeout(-1)).toBe(hubFetch)
     expect(await drain(hubStream(anonymous(0), `${base}/drip`))).toBe('abcdefgh')
   })
 
@@ -444,6 +444,6 @@ describe('a transport failure', () => {
   it('leaves any other rejection as it was', async () => {
     const aborted = new DOMException('no progress', 'TimeoutError')
     vi.stubGlobal('fetch', () => Promise.reject(aborted))
-    await expect(stallFetch(0)('http://127.0.0.1:1/x')).rejects.toBe(aborted)
+    await expect(stallTimeout(0)('http://127.0.0.1:1/x')).rejects.toBe(aborted)
   })
 })

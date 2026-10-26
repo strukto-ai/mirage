@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -m1 error /data/r4/app.log; rg --max-count=1 error /data/r4/app.log; rg -m=1 error /data/r4/app.log; printf 'a1\\na2\\nb\\na3\\n' > /data/rson.txt; rg --stop-on-nonmatch a /data/rson.txt",
@@ -52,6 +53,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\nab\\nb\\n' > /data/rm0.txt; rg -m 0 a /data/rm0.txt",
@@ -85,6 +87,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\nab\\nb\\n' > /data/rm0.txt; rg -m 0 -c a /data/rm0.txt",
@@ -119,6 +122,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\nab\\nb\\n' > /data/rm0.txt; rg -m 0 -l a /data/rm0.txt",
@@ -153,6 +157,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rmw && printf 'a1\\na2\\n' > /data/rmw/x.txt && printf 'a3\\na4\\n' > /data/rmw/y.txt && rg --sort path -m1 a /data/rmw",
@@ -186,6 +191,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rmw && printf 'a1\\na2\\n' > /data/rmw/x.txt && printf 'a3\\na4\\n' > /data/rmw/y.txt && rg --sort path -m2 a /data/rmw",
@@ -219,6 +225,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\nab\\nb\\n' > /data/rm0.txt; rg -m 0 -A1 a /data/rm0.txt",
@@ -255,6 +262,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -287,6 +295,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/cfrgm/sub/deep; printf 'nested\\ncontent\\n' > /data/cfrgm/sub/nested.txt; printf 'deep\\n' > /data/cfrgm/sub/deep/deeper.txt; rg -m 0 nested /data/cfrgm/sub; echo rc=$?; rm -rf /data/cfrgm",

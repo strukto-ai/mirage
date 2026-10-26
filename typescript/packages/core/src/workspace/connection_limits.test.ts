@@ -12,24 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode, OnExceed } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 const DEC = new TextDecoder()
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
 
 async function buildWs(): Promise<Workspace> {
   const a = new RAMVFS()
@@ -41,7 +29,6 @@ async function buildWs(): Promise<Workspace> {
     },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
     },
   )
   await ws.shell("printf '1\\n2\\n3\\n4\\n5\\n' > /a/f.txt")

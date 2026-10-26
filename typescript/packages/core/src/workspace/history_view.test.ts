@@ -12,29 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Channel } from '../shell/console/index.ts'
 import { JobStatus } from '../shell/job_table/index.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
 import { applyStateDict, toStateDict } from './snapshot/state.ts'
 import { type ExecuteResult, Workspace } from './workspace/workspace.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
 let tempDir: string
 
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
+beforeAll(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'mirage-history-view-'))
 })
 
@@ -44,7 +35,7 @@ afterAll(() => {
 
 function makeWs(): Workspace {
   const ram = new RAMVFS()
-  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
 }
 
 function out(r: ExecuteResult): string {
@@ -424,7 +415,6 @@ describe('history snapshot rewind', () => {
     await ws.snapshot(path)
     const dst = await Workspace.load(path, {
       mode: MountMode.WRITE,
-      shellParser: parser,
     })
     const mine = out(await dst.shell('history'))
     expect(mine).not.toContain('ls /data')

@@ -24,10 +24,33 @@ import { RedisNamespaceStore } from './redis.ts'
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
 
-function makeStore(prefix: string): RedisNamespaceStore {
+function makeStore(prefix: string, table = 'nodes'): RedisNamespaceStore {
   return REDIS_URL !== undefined
-    ? new RedisNamespaceStore({ url: REDIS_URL, keyPrefix: prefix })
-    : new RedisNamespaceStore({ keyPrefix: prefix })
+    ? new RedisNamespaceStore({ url: REDIS_URL, keyPrefix: prefix, table })
+    : new RedisNamespaceStore({ keyPrefix: prefix, table })
+}
+
+function testPrefix(): string {
+  return `mirage:test:namespace:${randomUUID().slice(0, 8)}:`
+}
+
+// Read-modify-CAS one counter, retrying until each round lands.
+async function casIncrement(
+  store: RedisNamespaceStore,
+  worker: string,
+  rounds: number,
+): Promise<void> {
+  for (let round = 0; round < rounds; round++) {
+    let landed = false
+    for (let attempt = 0; attempt < 200 && !landed; attempt++) {
+      const record = (await store.load()).get('hot') ?? { session_id: 'hot', env: {} }
+      const env = { ...((record.env ?? {}) as Record<string, string>) }
+      env[worker] = String(Number(env[worker] ?? '0') + 1)
+      const expected = Number(record.generation ?? 0)
+      landed = await store.casSet('hot', { ...record, env, generation: expected + 1 }, expected)
+    }
+    if (!landed) throw new Error('cas retry budget exhausted')
+  }
 }
 
 class OverlayRAMVFS extends RAMVFS {
@@ -90,5 +113,82 @@ describe.skipIf(skip)('RedisNamespaceStore', () => {
     await cleaner.clear()
     await cleaner.close()
     await reborn.close()
+  })
+})
+
+describe.skipIf(skip)('RedisNamespaceStore casSet', () => {
+  it('serializes two writers on the generation counter', async () => {
+    const prefix = testPrefix()
+    const writerA = makeStore(prefix)
+    const writerB = makeStore(prefix)
+    try {
+      expect(await writerA.casSet('s', { session_id: 's', cwd: '/a', generation: 1 }, 0)).toBe(true)
+      expect(await writerB.casSet('s', { session_id: 's', cwd: '/b', generation: 1 }, 0)).toBe(
+        false,
+      )
+      expect(await writerB.casSet('s', { session_id: 's', cwd: '/b', generation: 2 }, 1)).toBe(true)
+      expect((await writerA.load()).get('s')?.cwd).toBe('/b')
+    } finally {
+      await writerA.clear()
+      await writerA.close()
+      await writerB.close()
+    }
+  })
+
+  it('concurrent writers lose no updates', async () => {
+    const store = makeStore(testPrefix())
+    try {
+      await Promise.all(
+        Array.from({ length: 5 }, (_, i) => casIncrement(store, `w${String(i)}`, 10)),
+      )
+      const final = (await store.load()).get('hot')
+      expect(final?.generation).toBe(50)
+      expect(final?.env).toEqual(
+        Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`w${String(i)}`, '10'])),
+      )
+    } finally {
+      await store.clear()
+      await store.close()
+    }
+  })
+
+  it('treats a legacy record without the field as generation 0', async () => {
+    const store = makeStore(testPrefix())
+    try {
+      await store.set('s1', { session_id: 's1', cwd: '/old' })
+      expect(await store.casSet('s1', { session_id: 's1', cwd: '/new', generation: 1 }, 0)).toBe(
+        true,
+      )
+      expect((await store.load()).get('s1')?.cwd).toBe('/new')
+    } finally {
+      await store.clear()
+      await store.close()
+    }
+  })
+
+  it('shares sessions across workspaces on the same table', async () => {
+    const prefix = testPrefix()
+    const storeA = makeStore(prefix, 'sessions')
+    const storeB = makeStore(prefix, 'sessions')
+    const wsA = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, sessionStore: storeA },
+    )
+    const wsB = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, sessionStore: storeB },
+    )
+    try {
+      wsA.createSession('narrow', { mounts: { '/data': 'read' } })
+      await wsA.flushSessions()
+      await wsB.ensureSessionsLoaded()
+      const session = wsB.getSession('narrow')
+      expect(session.mountModes).not.toBeNull()
+      expect(session.mountModes?.get('/data')).toBe(MountMode.READ)
+    } finally {
+      await storeA.clear()
+      await wsA.close()
+      await wsB.close()
+    }
   })
 })

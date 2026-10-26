@@ -121,6 +121,10 @@ from mirage.vfs.slack import SlackConfig, SlackVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 from mirage.vfs.supabase import SupabaseConfig, SupabaseVFS
 from mirage.vfs.tencent import TencentConfig, TencentVFS
+from mirage.vfs.tidb_filesystem import (
+    TiDBFilesystemConfig,
+    TiDBFilesystemVFS,
+)
 from mirage.vfs.trello import TrelloConfig, TrelloVFS
 from mirage.vfs.wasabi import WasabiConfig, WasabiVFS
 from mirage.workspace.mount.spec import Mount
@@ -568,6 +572,56 @@ class NextcloudService:
 
     async def teardown(self) -> None:
         await _admin_exec(self.admin_ws, f"rm -rf /admin/{self.base}")
+        await self.admin_ws.close()
+
+
+class TiDBFilesystemService:
+    """Points tidb_filesystem mounts at a drive9 server under a folder of
+    this run's own, one root per mount.
+
+    The server is TiDB Cloud's file system or a local open-source drive9;
+    TIDB_FILESYSTEM_HOST and TIDB_FILESYSTEM_TOKEN name it. The run's
+    folder is made and removed through a mount of the file system's root.
+
+    Args:
+        host (str): the server's origin.
+        token (str): the file system token.
+        base (str): this run's folder.
+        admin_ws (Workspace): a workspace over the file system's root.
+    """
+
+    def __init__(
+        self, host: str, token: str, base: str, admin_ws: Workspace
+    ) -> None:
+        self.host = host
+        self.token = token
+        self.base = base
+        self.admin_ws = admin_ws
+
+    @classmethod
+    async def create(
+        cls, run_id: str, target: dict
+    ) -> "TiDBFilesystemService":
+        host = os.environ["TIDB_FILESYSTEM_HOST"]
+        token = os.environ["TIDB_FILESYSTEM_TOKEN"]
+        base = f"/mirage-integ-{run_id}"
+        admin = TiDBFilesystemVFS(TiDBFilesystemConfig(host=host, token=token))
+        admin_ws = Workspace({"/admin": admin}, mode=MountMode.WRITE)
+        paths = " ".join(f"/admin{base}/{m['root']}" for m in target["mounts"])
+        await _admin_exec(admin_ws, f"mkdir -p {paths}")
+        return cls(host, token, base, admin_ws)
+
+    def vfs(self, mount: dict) -> TiDBFilesystemVFS:
+        return TiDBFilesystemVFS(
+            TiDBFilesystemConfig(
+                host=self.host,
+                token=self.token,
+                root_path=f"{self.base}/{mount['root']}",
+            )
+        )
+
+    async def teardown(self) -> None:
+        await _admin_exec(self.admin_ws, f"rm -rf /admin{self.base}")
         await self.admin_ws.close()
 
 
@@ -2477,6 +2531,7 @@ Service = (
     | LanceDBService
     | NotionService
     | NextcloudService
+    | TiDBFilesystemService
     | GwsService
     | HfService
     | HfHubService
@@ -2596,6 +2651,13 @@ async def build_databricks_volume(
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, DatabricksVolumeService)
     return await service.vfs(mount), _noop
+
+
+def build_tidb_filesystem(
+    mount: dict, run_id: str, service: Service | None
+) -> tuple[TiDBFilesystemVFS, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, TiDBFilesystemService)
+    return service.vfs(mount), _noop
 
 
 def build_onedrive(
@@ -2909,6 +2971,7 @@ BUILDERS = {
     "wasabi": build_s3,
     "gridfs": build_gridfs,
     "databricks_volume": build_databricks_volume,
+    "tidb_filesystem": build_tidb_filesystem,
     "onedrive": build_onedrive,
     "sharepoint": build_sharepoint,
     "mem0": build_mem0,
@@ -2979,6 +3042,8 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await SSHService.create(run_id, target)
     if target.get("service") == "nextcloud":
         return await NextcloudService.create(run_id, target)
+    if target.get("service") == "tidb_filesystem":
+        return await TiDBFilesystemService.create(run_id, target)
     if target.get("service") == "gws":
         return await GwsService.create(run_id, target)
     if target.get("service") == "email":

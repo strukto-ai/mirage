@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg --glob \"*.log\" error /data/r4; rg -g '*.log' error /data/r4; rg -g'*.py' return /data/r4; rg -g=*.js return /data/r4; rg -g '*.py' -g '*.js' return /data/r4 | sort; rg -g '!*.py' return /data/r4; rg --iglob '*.LOG' disk /data/r4; rg --glob-case-insensitive -g '*.LOG' disk /data/r4; rg -g '!sub/' -l inner /data/r4; echo rc=$?; rg -g 'sub/**' alpha /data/r4",
@@ -54,6 +55,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -88,6 +90,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -120,6 +123,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/fcB_g && printf 'x\\n' > /data/fcB_g/A.TXT && printf 'x\\n' > /data/fcB_g/b.txt && rg -l --sort path --glob-case-insensitive --no-glob-case-insensitive -g '*.txt' x /data/fcB_g; rg -l --sort path --no-glob-case-insensitive --glob-case-insensitive -g '*.txt' x /data/fcB_g; rg -l --sort path --no-glob-case-insensitive --iglob '*.txt' x /data/fcB_g; rm -rf /data/fcB_g",

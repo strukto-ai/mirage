@@ -16,7 +16,6 @@ import { describe, expect, it } from 'vitest'
 import { LangfuseAccessor, type LangfuseAccessorConfig } from '../../accessor/langfuse.ts'
 import { LangfuseVFS } from '../../vfs/langfuse/langfuse.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { DirListing } from '../../types.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
@@ -152,7 +151,7 @@ describe('langfuse bounded trace listing', () => {
   it('fetches a full page once through the workspace index view', async () => {
     const transport = new RecordingTransport(TRACES)
     const vfs = mountedVfs(accessor(transport, { defaultTraceLimit: 2 }))
-    const ws = new Workspace({ '/nested/lf/': vfs }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/nested/lf/': vfs })
     try {
       const result = await ws.shell('ls -l /nested/lf/traces')
       expect(result.exitCode).toBe(0)

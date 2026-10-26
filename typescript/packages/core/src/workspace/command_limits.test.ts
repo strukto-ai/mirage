@@ -14,35 +14,23 @@
 import { CommandSpec } from '../commands/spec/types.ts'
 import { CLIHandler } from '../commands/cli/types.ts'
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode, OnExceed } from '../types.ts'
 import { Mount } from './mount/spec.ts'
 import { SessionState } from './session/session.ts'
 import { Workspace } from './workspace/workspace.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
 
 function buildWs(nLines: number): Workspace {
   const ram = new RAMVFS()
   const body = Array.from({ length: nLines }, (_, i) => `line${String(i)}\n`).join('')
   ram.store.files.set('/big.txt', ENC.encode(body))
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 }
 
 function overrideLimit(ws: Workspace, name: string, sg: Limit): void {
@@ -104,7 +92,6 @@ describe('Workspace command limit', () => {
       { '/': ram },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         commandLimits: { cat: new Limit({ maxLines: 3 }) },
       },
     )
@@ -131,7 +118,6 @@ describe('Workspace command limit', () => {
       { '/': spell(ram, { cat: new Limit({ maxLines: 3 }) }) as never },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         commandLimits: { cat: new Limit({ maxLines: 9 }), ls: new Limit({ maxLines: 7 }) },
       },
     )
@@ -178,7 +164,6 @@ it.each([
     { '/data': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      shellParser: parser,
       commandLimits: {
         cat: new Limit({ maxLines: 2 }),
         head: new Limit({ maxLines: 3 }),
@@ -207,7 +192,6 @@ it.each([
     { '/data': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      shellParser: parser,
       commandLimits: { cat: new Limit({ maxLines: 2, onExceed: OnExceed.ERROR }) },
     },
   )
@@ -226,7 +210,6 @@ it('keeps profile limits on the session across storage and forks', async () => {
   const ws = new Workspace(
     { '/data': [new RAMVFS(), MountMode.EXEC, { head: new Limit({ maxLines: 1 }) }] },
     {
-      shellParser: parser,
       commandLimits: { head: new Limit({ maxLines: 3 }) },
       profiles: {
         small: { commandLimits: { head: new Limit({ maxLines: 2 }) } },
@@ -265,7 +248,6 @@ it('keeps workspace limits on a copy', async () => {
     { '/data': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       commandLimits: { cat: new Limit({ maxLines: 2 }) },
     },
   )
@@ -284,7 +266,6 @@ it('lets a profile raise the workspace timeout', async () => {
     { '/data': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      shellParser: parser,
       commandLimits: { sleep: new Limit({ timeoutSeconds: 0.005 }) },
       profiles: { relaxed: { commandLimits: { sleep: new Limit({ timeoutSeconds: 1 }) } } },
     },
@@ -302,7 +283,6 @@ it('applies workspace and profile deadlines to registered CLIs', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS() },
     {
-      shellParser: parser,
       commandLimits: { prog: new Limit({ timeoutSeconds: 1 }) },
       profiles: { short: { commandLimits: { prog: new Limit({ timeoutSeconds: 0.01 }) } } },
     },

@@ -72,6 +72,7 @@ enum Operation {
     },
     Shape,
     Parts,
+    Literal,
 }
 
 #[derive(Deserialize)]
@@ -316,6 +317,13 @@ impl Glob {
                     out.extend_from_slice(b"]]");
                     self.active = false;
                 }
+            }
+            Operation::Literal => {
+                let program = self.program.as_ref().expect("compiled pattern");
+                let flat = self.flat.get_or_insert_with(|| Flat::new(program));
+                serde_json::to_writer(out, &flat.as_ref().and_then(Flat::literal))
+                    .expect("glob literal serializes");
+                self.active = false;
             }
             Operation::Matches => {
                 if let Some(end) = self.query_step(0, true, false) {

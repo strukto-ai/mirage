@@ -19,7 +19,7 @@ import { asyncChain, discardStreams } from '../../io/stream.ts'
 import type { ExecutionFrame } from '../frame.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
-import type { ByteSource, IOResult } from '../../io/types.ts'
+import { type ByteSource, IOResult } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
@@ -377,20 +377,64 @@ export function asWritten(stdout: Uint8Array | null, stderr: Uint8Array | null):
 
 /**
  * Run a statement into `recorder`: what it writes to an enclosing level's
- * stream, and what a job this shell started writes while it runs, land among
- * what it writes. Mirrors Python's recording.
+ * stream lands among what it writes. Mirrors Python's recording.
  */
-export async function recording<T>(
+export async function recording<T>(recorder: Recorder, run: () => Promise<T>): Promise<T> {
+  return runWithCaller({ ...currentCaller(), enclosing: recorder }, run)
+}
+
+/**
+ * Send what the jobs this shell started write into `recorder`, among what its
+ * statement writes, until the returned call ends it. The recording lasts past
+ * the statement, until `landLate` has landed what was recorded, so a job
+ * writing in between cannot reach the shell's own output ahead of the
+ * statement. Ended with `after`, what jobs write next waits for it. Mirrors
+ * Python's record_jobs.
+ */
+export function recordJobs(
   session: SessionState,
   recorder: Recorder,
-  run: () => Promise<T>,
-): Promise<T> {
-  const leave = (session.jobOutput ?? session.tty.jobs).record(recorder)
-  try {
-    return await runWithCaller({ ...currentCaller(), enclosing: recorder }, run)
-  } finally {
+): (after?: Promise<void>) => void {
+  const jobs = session.jobOutput ?? session.tty.jobs
+  const leave = jobs.record(recorder)
+  return (after) => {
     leave()
+    if (after !== undefined) jobs.holdUntil(after)
   }
+}
+
+/**
+ * Land what jobs wrote into `recorder` once the statement's output was taken,
+ * and end the recording (`recordJobs`). What jobs write from the end on waits
+ * until what was recorded has landed, so nothing written later overtakes it,
+ * and nothing is left in `recorder` unread. Mirrors Python's land_late.
+ */
+export async function landLate(
+  recorder: Recorder,
+  leave: (after?: Promise<void>) => void,
+  own: StreamOwner | null,
+  sink: JobConsole | null,
+  allStdout: (ByteSource | null)[],
+  mergedIo: IOResult,
+): Promise<IOResult> {
+  let landed = (): void => undefined
+  leave(
+    new Promise<void>((resolve) => {
+      landed = resolve
+    }),
+  )
+  try {
+    while (recorder.busy)
+      mergedIo = await land(
+        await statementOutput(recorder, null, new IOResult(), own, sink),
+        sink,
+        allStdout,
+        mergedIo,
+      )
+  } finally {
+    landed()
+  }
+  return mergedIo
 }
 
 /**

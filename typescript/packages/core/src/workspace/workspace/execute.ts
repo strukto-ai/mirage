@@ -45,7 +45,7 @@ import {
 } from '../../context/session_context.ts'
 import { STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
-import { checkSyntax, syntaxErrorResult, type ShellParser } from '../../shell/parse/index.ts'
+import { checkSyntax, syntaxErrorResult } from '../../shell/parse/index.ts'
 import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
@@ -118,7 +118,6 @@ import { encodeText } from '../../shell/bytes.ts'
  * parts through the workspace instance).
  */
 export interface ExecuteEnv {
-  parser(): Promise<ShellParser>
   meta: WorkspaceMeta
   drift: DriftQueue
   statFn(path: string): Promise<unknown>
@@ -447,23 +446,20 @@ async function runPreparedLine(
       [targetSession, effectiveSession],
       frame.writer,
       async () => {
-        const parser = new ParseScope(await abortable(env.parser(), options.signal))
+        const parser = new ParseScope()
         const previousAliasExpansion = effectiveSession.aliasExpansion
         effectiveSession.aliasExpansion = null
         try {
-          const root = argv === undefined ? parser.parse(command) : literalTree(argv)
+          const aliases = expandingAliases(effectiveSession)
+          const root = argv === undefined ? parser.parse(command, aliases) : literalTree(argv)
           // Syntax gates before policy, mirroring bash: an unparsable line exits 2
           // and the policy is never consulted about it. bash's reading of the
           // line decides; the grammar's own errors only stop a line it cannot
           // build.
           const found =
             argv === undefined
-              ? (checkSyntax(
-                  command,
-                  expandingAliases(effectiveSession),
-                  null,
-                  effectiveSession.shopts.extglob ?? false,
-                ) ?? findSyntaxIssue(root))
+              ? (checkSyntax(command, aliases, null, effectiveSession.shopts.extglob ?? false) ??
+                findSyntaxIssue(root))
               : null
           if (found !== null) {
             const io = syntaxErrorResult(found)
@@ -776,8 +772,7 @@ async function runPreparedLine(
               env.registerCloser(fn)
             },
             // Alias expansion rewrites the head word and reads the result as a
-            // fresh line, so it needs the same parser the line reader used. The
-            // parser is already resolved by the time the tree runs.
+            // fresh line, whose parse the line's scope holds.
             parser,
             ...(options.signal !== undefined ? { signal: options.signal } : {}),
           }
@@ -1135,7 +1130,7 @@ async function runParsedLine(
       // The walked set carries stored function bodies and alias
       // expansions too, so a body invoked by bare name still fills what
       // it reads.
-      const nodes = lineNodes(rootNode, effectiveSession, reparse)
+      const nodes = lineNodes(rootNode, effectiveSession)
       const filled = await fillManaged(
         nodes,
         guestBound(nodes, decision),

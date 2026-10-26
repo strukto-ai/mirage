@@ -16,7 +16,6 @@ import type { ObserverStore } from '../../observe/store.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import type { SessionStore } from '../session/store.ts'
 import type { WorkspaceOptions } from './types.ts'
 
 /**
@@ -28,7 +27,7 @@ export interface ControlStores {
   owned: boolean
   observe: ObserverStore
   namespace: NamespaceStore
-  sessions: SessionStore
+  sessions: NamespaceStore
 }
 
 /**

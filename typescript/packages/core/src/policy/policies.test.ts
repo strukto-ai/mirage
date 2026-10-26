@@ -14,14 +14,11 @@
 
 import type { ByteSource } from '../io/types.ts'
 import type { Handed } from '../vfs/types.ts'
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { record, startOp } from '../observe/context.ts'
 import { norm } from '../utils/path.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode, OnExceed, PathSpec } from '../types.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
@@ -63,16 +60,6 @@ function callOf(name: string): VfsCall {
   if (call === undefined) throw new Error(`no call ${name}`)
   return call
 }
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
 
 class DenyWeird implements Policy {
   preCommand(ctx: CommandContext): Action | null {
@@ -194,7 +181,6 @@ function executableWorkspace(
     { '/data/': ram },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       ...(deny ? { profiles: { default: { commands: { allow: null, ask: [], deny } } } } : {}),
       ...(policies ? { policies } : {}),
     },
@@ -489,9 +475,9 @@ describe('workspace policies', () => {
     // write classification must cover that op too, so the mount's mode
     // refuses it.
     const ram = new RAMVFS()
-    const seed = new Workspace({ '/data/': ram }, { mode: MountMode.WRITE, shellParser: parser })
+    const seed = new Workspace({ '/data/': ram }, { mode: MountMode.WRITE })
     await seed.shell('mkdir -p /data/prod && echo keep > /data/prod/x.txt')
-    const ws = new Workspace({ '/data/': ram }, { mode: MountMode.READ, shellParser: parser })
+    const ws = new Workspace({ '/data/': ram }, { mode: MountMode.READ })
     try {
       const refused = await ws.shell('touch /data/prod/x.txt')
       expect(refused.exitCode).not.toBe(0)
@@ -926,7 +912,6 @@ describe('every method answers Deny and Ask', () => {
     const ws = new Workspace(
       { '/data/': new RAMVFS() },
       {
-        shellParser: parser,
         policies: [new AskSecrets()],
         onAsk: (record: Decision) => {
           asked.push(record)
@@ -1189,10 +1174,7 @@ describe('postCommand and postSession', () => {
     // head pulls cat's output after cat returned and stops after a line:
     // the read is cat's, and so is the record its backend makes as the
     // stream closes, so head is charged with nothing.
-    const ws = new Workspace(
-      { '/data/': new AccountsAtClose() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/data/': new AccountsAtClose() }, { mode: MountMode.WRITE })
     try {
       const big = Array.from({ length: 20000 }, (_, i) => `line ${String(i)}\n`).join('')
       await ws.vfs.write('/data/big', big)
@@ -1247,10 +1229,7 @@ describe('postCommand and postSession', () => {
   }
 
   it('a once nod covers one streamed read however far it is pulled', async () => {
-    const ws = new Workspace(
-      { '/data/': new AccountsAtClose() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/data/': new AccountsAtClose() }, { mode: MountMode.WRITE })
     try {
       await ws.vfs.write('/data/big', 'x'.repeat(10000))
       ws.policies.add(new AskBigReads())
@@ -1531,7 +1510,6 @@ describe('what a method sees', () => {
       { '/data/': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         routePolicy: (ctx: RouteContext) => {
           seen.push(scriptContext(ctx))
           return null

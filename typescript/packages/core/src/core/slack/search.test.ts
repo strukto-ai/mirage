@@ -24,7 +24,6 @@ import { SlackAccessor } from '../../accessor/slack.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { Limit, MountMode } from '../../types.ts'
 import { SlackVFSBase } from '../../vfs/slack/slack.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import {
@@ -344,7 +343,7 @@ async function onSlack(line: string, fake = new FakeSlack(), walkLimit = 1000): 
         commandLimits: limits,
       }),
     },
-    { shellParser: await getTestParser() },
+    {},
   )
   try {
     const result = await ws.shell(line)

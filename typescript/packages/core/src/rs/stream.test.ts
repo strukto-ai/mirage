@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { encodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
@@ -137,7 +136,7 @@ it.each([false, true])(
 )
 
 it('foreground parameter cancellation closes the matcher before returning', async () => {
-  const ws = new Workspace({}, { shellParser: await getTestParser() })
+  const ws = new Workspace({})
   const controller = new AbortController()
   const spansSpy = vi.spyOn(Glob.prototype, 'spans')
   const closeSpy = vi.spyOn(Glob.prototype, 'close')

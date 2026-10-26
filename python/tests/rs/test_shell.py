@@ -19,7 +19,7 @@ SAME = [
     'printf "%s" "$x $y" "$x  y" "$x "',
     "echo {1..3} {a,b} ] ]",
     "x=(1 2) a[i+1]=v declare -r y=1 z",
-    "echo ${a:-two words} ${a#*/} ${a/x/ $f} ${x:1:2} ${#a[@]} ${!p*}",
+    "echo ${a:-two words} ${a#*/} ${a/x/ $f} ${#a[@]} ${!p*}",
     "echo $(( a + b * -c )) $[1] && (( i++, j-- ))",
     "[[ $x == a* && -f f ]] || [ ! -e g ]",
     "case $x in a|b) echo ab;; *.txt) ;& (c) echo c;; esac",

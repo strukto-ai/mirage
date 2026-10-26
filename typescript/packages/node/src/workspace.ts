@@ -12,10 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { createShellParser } from '@struktoai/mirage-core/shell/parse'
-import type { ShellParser } from '@struktoai/mirage-core/shell/parse'
 import { KERNEL_BACKENDS, MountBackend } from '@struktoai/mirage-core/types'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -35,21 +31,6 @@ import './commands/builtin/utils/http.ts'
 import './io/spool.ts'
 import './mount/sftp.ts'
 import './secrets/constants.ts'
-
-const requireCjs = createRequire(import.meta.url)
-
-let cachedParser: Promise<ShellParser> | null = null
-
-function loadShellParser(): Promise<ShellParser> {
-  if (cachedParser !== null) return cachedParser
-  const enginePath = requireCjs.resolve('web-tree-sitter/web-tree-sitter.wasm')
-  const grammarPath = requireCjs.resolve('tree-sitter-bash/tree-sitter-bash.wasm')
-  cachedParser = createShellParser({
-    engineWasm: readFileSync(enginePath),
-    grammarWasm: readFileSync(grammarPath),
-  })
-  return cachedParser
-}
 
 export type NodeWorkspaceOptions = WorkspaceOptions
 
@@ -77,10 +58,7 @@ export class Workspace extends CoreWorkspace {
         mountTargets.push([prefix, backend, value.options.mountpoint])
       }
     }
-    super(mounts, {
-      ...options,
-      shellParserFactory: options.shellParserFactory ?? loadShellParser,
-    })
+    super(mounts, options)
     if (mountTargets.length > 0) {
       // Kick off mounts eagerly; await inside fuseReady() / execute() / close()
       // so callers don't need to await the constructor (Python mirrors this).

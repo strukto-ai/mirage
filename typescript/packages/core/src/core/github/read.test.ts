@@ -22,7 +22,6 @@ import { read, readMany, readStream } from './read.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 import { FakeGitHub, blobSha, servedAccessor } from '../../../tests/core/github/_test_util.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { GitHubVFS } from '../../vfs/github/github.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 
@@ -168,7 +167,7 @@ describe('a read against the wire', () => {
       ref: 'main',
       baseUrl: gh.url,
     })
-    const ws = new Workspace({ '/gh': vfs }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/gh': vfs })
     try {
       const result = await ws.shell('cat /gh/a.txt /gh/b.txt /gh/c.txt /gh/d.txt')
       expect(result.stdoutText).toBe('a\nb\nc\nd\n')

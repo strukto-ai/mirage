@@ -1,6 +1,21 @@
 {
-  "baseline": 2983,
+  "baseline": 2968,
  "modules": {
+  "vfs/tidb_filesystem/config": {
+   "typescript_only": {
+    "TiDBFilesystemConfigRedacted": "The type of the redacted plain-object config that getState returns; Python's state is a dict built by config_state.",
+    "TiDBFilesystemConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
+    "normalizeRootPath": "Python normalizes root_path in a field validator on the pydantic model; the zod schema takes the same normalization as a transform function.",
+    "normalizeTiDBFilesystemConfig": "The TypeScript entry point that parses a plain-object config with the schema; Python constructs TiDBFilesystemConfig directly.",
+    "redactTiDBFilesystemConfig": "TypeScript redacts a plain-object config for getState through its schema; Python's config_state redacts the model's SecretStr fields."
+   }
+  },
+  "vfs/tidb_filesystem/tidb_filesystem": {
+   "typescript_only": {
+    "TiDBFilesystemVFSBase": "TypeScript core holds the VFS functions over the accessor and the node package builds the concrete VFS with its config and state; Python has one class.",
+    "TiDBFilesystemVFSState": "The typed shape getState returns in TypeScript; Python returns a dict."
+   }
+  },
   "vfs/ram/store": {
    "python_only": {
     "_FileStore": "Python RAM and device stores share a structural mapping contract because device listings return lists rather than dict views; TypeScript uses its native Map surface."
@@ -584,26 +599,6 @@
     "BoxFileInfo": "The shape of GET /files/{id} with the fields the fresh check asks for (path_collection, item_status) beside BoxItem's; Python reads the same answer as a plain dict, as it does every Box item."
    }
   },
-  "shell/parse/engine": {
-   "typescript_only": {
-    "NativeParser": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
-    "ParseTrees": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
-    "treeOf": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
-    "WrappedNode": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker."
-   }
-  },
-  "shell/parse/program": {
-   "typescript_only": {
-    "Resource": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases.",
-    "collected": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases.",
-    "releaseResource": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases."
-   }
-  },
-  "shell/parse/parse": {
-   "python_only": {
-    "parse_program": "Python exposes the native singleton entry point as a module function; TypeScript exposes parseProgram on the asynchronously created ShellParser instance."
-   }
-  },
   "workspace/node/explain": {
    "typescript_only": {
     "Scope": "explainedLine groups judgments by the scope they were evaluated from; Python keys a dict by (parent occurrence, text), which needs no named shape.",
@@ -765,7 +760,8 @@
     "CheckFn": "Python names the PrimitiveMove.check_unlink callable type beside MoveFn, as a forward reference to PathSpec; TypeScript types the field inline."
    },
    "typescript_only": {
-    "DirListingInit": "A TypeScript DirListing takes its fields as one object; the Python dataclass takes them as keywords."
+    "DirListingInit": "A TypeScript DirListing takes its fields as one object; the Python dataclass takes them as keywords.",
+    "LIMIT_FIELDS": "Limit.layered walks every field in order; Python reads them off the pydantic model's model_fields, a TypeScript class has no field list to walk."
    }
   },
   "cache/file/redis": {
@@ -1006,6 +1002,11 @@
     "ReasonReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
     "RuleReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
     "RulesReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings."
+   }
+  },
+  "policy/builtin/output_cap": {
+   "typescript_only": {
+    "WIRE_FIELDS": "A command_limits entry spells each Limit field in snake_case; pydantic validates and dumps those names itself, a TypeScript Limit takes camelCase, so the config reader and writer map them here."
    }
   }
  }

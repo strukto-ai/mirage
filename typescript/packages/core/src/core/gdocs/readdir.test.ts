@@ -24,7 +24,6 @@ vi.mock('../google/drive.ts', async () => {
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
 import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { TokenManager } from '../google/client.ts'
 import * as drive from '../google/drive.ts'
@@ -37,12 +36,12 @@ function makeAccessor(): GDocsAccessor {
 
 // The account behind a mount at /gdocs, which keeps each listing as a command's
 // walk does.
-async function mounted(accessor: GDocsAccessor): Promise<Workspace> {
+function mounted(accessor: GDocsAccessor): Workspace {
   const vfs = Object.assign(
     new GDocsVFS({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' }),
     { accessor },
   )
-  return new Workspace({ '/gdocs/': vfs }, { shellParser: await getTestParser() })
+  return new Workspace({ '/gdocs/': vfs })
 }
 
 // A directory's children through the mount; a glob word, the children it
@@ -67,7 +66,7 @@ describe('gdocs readdir', () => {
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
-    const ws = await mounted(accessor)
+    const ws = mounted(accessor)
     await readdir(
       accessor,
       new PathSpec({
@@ -92,7 +91,7 @@ describe('gdocs readdir', () => {
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
-    const ws = await mounted(accessor)
+    const ws = mounted(accessor)
     await readdir(
       accessor,
       new PathSpec({
@@ -116,7 +115,7 @@ describe('gdocs readdir', () => {
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
-    const ws = await mounted(accessor)
+    const ws = mounted(accessor)
     await readdir(
       accessor,
       new PathSpec({
@@ -156,7 +155,7 @@ describe('gdocs readdir', () => {
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
-    const ws = await mounted(accessor)
+    const ws = mounted(accessor)
     await readdir(
       accessor,
       new PathSpec({
@@ -202,7 +201,7 @@ describe('gdocs readdir', () => {
     })
 
     const accessor = makeAccessor()
-    const ws = await mounted(accessor)
+    const ws = mounted(accessor)
     const listed = await readdir(
       accessor,
       new PathSpec({
@@ -247,7 +246,7 @@ describe('gdocs readdir', () => {
     })
 
     const accessor = makeAccessor()
-    const ws = await mounted(accessor)
+    const ws = mounted(accessor)
     const listed = await readdir(
       accessor,
       new PathSpec({
@@ -298,7 +297,7 @@ describe('gdocs incomplete search', () => {
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
-    const ws = await mounted(accessor)
+    const ws = mounted(accessor)
     const owned = new PathSpec({
       virtual: '/gdocs/owned',
       directory: '/gdocs/owned',

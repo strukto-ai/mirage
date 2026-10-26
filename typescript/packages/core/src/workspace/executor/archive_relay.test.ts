@@ -17,11 +17,7 @@ import { writeTar } from '../../commands/builtin/tar_helper.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { gzip } from '../../utils/compress.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 // Direct port of tests/workspace/executor/test_archive_relay.py: member
@@ -52,14 +48,10 @@ async function tgzBytes(): Promise<Uint8Array> {
 }
 
 async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
   const root = new RAMVFS()
   const work = new RAMVFS()
   work.store.files.set('/files.tar.gz', await tgzBytes())
-  return new Workspace(
-    { '/': root, '/work/': work },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  return new Workspace({ '/': root, '/work/': work }, { mode: MountMode.WRITE })
 }
 
 describe('tar member selectors and relay extraction', () => {
@@ -161,13 +153,12 @@ describe('zip across mounts', () => {
 })
 
 async function makeNested(): Promise<Workspace> {
-  const parser = await getTestParser()
   const data = new RAMVFS()
   const inner = new RAMVFS()
   const out = new RAMVFS()
   const ws = new Workspace(
     { '/data/': data, '/data/d/inner/': inner, '/out/': out },
-    { mode: MountMode.WRITE, shellParser: parser },
+    { mode: MountMode.WRITE },
   )
   await ws.shell(
     'mkdir -p /data/d/real && echo r > /data/d/real/r.txt' +

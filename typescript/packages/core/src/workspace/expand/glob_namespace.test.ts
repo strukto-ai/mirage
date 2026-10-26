@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type FileStat, MountMode } from '../../types.ts'
-import { getTestParser, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 // A glob lists what its directory holds, nested mount roots and symlinks
@@ -26,13 +26,9 @@ import { Workspace } from '../workspace/workspace.ts'
 //   du -b base/*  -> 3 base/f1 / 7 base/inner / <target len> base/link / 7 base/sub
 
 async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
   const root = new RAMVFS()
   const inner = new RAMVFS()
-  const ws = new Workspace(
-    { '/': root, '/base/inner': inner },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  const ws = new Workspace({ '/': root, '/base/inner': inner }, { mode: MountMode.WRITE })
   ws.createSession('s')
   await ws.shell('mkdir -p /base/sub', { sessionId: 's' })
   await ws.shell('printf 111 > /base/f1', { sessionId: 's' })
@@ -199,13 +195,9 @@ describe('glob expansion follows a symlinked directory', () => {
 // regular file do not), and every match keeps exactly one trailing slash
 // (#1065).
 async function makeDirsWs(): Promise<Workspace> {
-  const parser = await getTestParser()
   const root = new RAMVFS()
   const inner = new RAMVFS()
-  const ws = new Workspace(
-    { '/': root, '/data/records/inner': inner },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  const ws = new Workspace({ '/': root, '/data/records/inner': inner }, { mode: MountMode.WRITE })
   ws.createSession('s')
   await ws.shell('mkdir -p /data/records/2026-09-10 /data/records/2026-09-11', { sessionId: 's' })
   await ws.shell('echo sample > /data/records/2026-09-10/sample.txt', { sessionId: 's' })
@@ -219,9 +211,8 @@ async function makeDirsWs(): Promise<Workspace> {
 // command's pattern travels to the command tier instead of being resolved
 // by the shell tier on the way (which is what a nested mount forces).
 async function makeFlatWs(): Promise<Workspace> {
-  const parser = await getTestParser()
   const data = new RAMVFS()
-  const ws = new Workspace({ '/data': data }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/data': data }, { mode: MountMode.WRITE })
   ws.createSession('s')
   await ws.shell('mkdir -p /data/records/2026-09-10 /data/records/2026-09-11', { sessionId: 's' })
   await ws.shell('echo sample > /data/records/2026-09-10/sample.txt', { sessionId: 's' })
@@ -322,16 +313,13 @@ class NoStatRAM extends RAMVFS {
   }
 }
 
-async function flatWs(vfs: RAMVFS): Promise<Workspace> {
+function flatWs(vfs: RAMVFS): Workspace {
   vfs.loadState({
     type: 'ram',
     dirs: ['/', '/a', '/b'],
     files: { '/f': new TextEncoder().encode('x') },
   })
-  const ws = new Workspace(
-    { '/m': vfs },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
   ws.createSession('s')
   return ws
 }
@@ -348,7 +336,7 @@ describe('trailing-slash globs on a mount that cannot stat', () => {
     ['one', '/m/a/ /m/b/\n'],
   ])('keeps only what stat calls a directory (stat=%s)', async (stat, expected) => {
     const vfs = stat === 'missing' ? new NoStatRAM() : new RAMVFS()
-    const ws = await flatWs(vfs)
+    const ws = flatWs(vfs)
     if (stat !== 'missing') {
       const ramStat = vfs.stat.bind(vfs)
       vfs.stat = (path) =>

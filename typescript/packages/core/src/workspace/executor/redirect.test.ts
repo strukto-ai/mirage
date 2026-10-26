@@ -32,7 +32,6 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { JobRoute, PipeRecorder, handleRedirect } from './redirect.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
@@ -357,7 +356,7 @@ const BINDS: [string, string, string, number][] = [
 
 describe('a trailing redirect binds to the command it follows', () => {
   it.each(BINDS)('%s', async (line, stdout, stderr, code) => {
-    const { ws } = await makeIntegrationWS({ 'b.txt': '1\n2\n3\n' })
+    const { ws } = makeIntegrationWS({ 'b.txt': '1\n2\n3\n' })
     try {
       const [exit, out, err] = await runResult(ws, line)
       expect([out, err, exit]).toEqual([stdout, stderr, code])
@@ -369,7 +368,7 @@ describe('a trailing redirect binds to the command it follows', () => {
 
 describe('fd-table routing end-to-end', () => {
   it('bare > file creates an empty file', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await runExit(ws, '> /data/bare')).toBe(0)
       expect(await runExit(ws, 'test -f /data/bare')).toBe(0)
@@ -380,7 +379,7 @@ describe('fd-table routing end-to-end', () => {
   })
 
   it('multiple stdout redirects truncate all, write last', async () => {
-    const { ws, data } = await makeIntegrationWS()
+    const { ws, data } = makeIntegrationWS()
     try {
       const read = vi.spyOn(data, 'read').mockRejectedValue(new Error('read refused'))
       const pwrite = vi.spyOn(data, 'pwrite').mockRejectedValue(new Error('pwrite needs read'))
@@ -427,7 +426,7 @@ describe('fd-table routing end-to-end', () => {
   })
 
   it('2> file creates the file even when stderr is empty', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await ws.shell('echo fine 2> /data/errs')
       expect(await runExit(ws, 'test -f /data/errs')).toBe(0)
@@ -437,7 +436,7 @@ describe('fd-table routing end-to-end', () => {
   })
 
   it('>&2 before 2>> keeps stdout on the original stderr', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, out, err] = await runResult(ws, 'echo a >&2 2>> /data/elog')
       expect(exit).toBe(0)
@@ -450,7 +449,7 @@ describe('fd-table routing end-to-end', () => {
   })
 
   it('applies the file redirect nested inside a heredoc', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, out] = await runResult(ws, 'cat <<END > /data/hd\nwritten\nEND')
       expect(exit).toBe(0)
@@ -462,7 +461,7 @@ describe('fd-table routing end-to-end', () => {
   })
 
   it('&>> appends both streams', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await ws.shell('echo one &> /data/acc')
       await ws.shell('echo three &>> /data/acc')
@@ -478,7 +477,7 @@ describe('fd-table routing end-to-end', () => {
 // never name the command. mirage drops the "bash: line N:" prefix, matching
 describe('handleRedirect numeric targets', () => {
   it('routes a close or dup by the descriptor claimed, not the operator', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await runResult(ws, 'cat /data/missing 2<&-; echo code=$?')).toEqual([
         0,
@@ -501,7 +500,7 @@ describe('handleRedirect numeric targets', () => {
   })
 
   it('reads a bare 0 touching the operator as the descriptor', async () => {
-    const { ws } = await makeIntegrationWS({ 'a.txt': 'a' })
+    const { ws } = makeIntegrationWS({ 'a.txt': 'a' })
     try {
       expect(await runResult(ws, 'echo x 0>&-; echo code=$?')).toEqual([0, 'x\ncode=0\n', ''])
       expect(await runResult(ws, 'cat 0</data/a.txt; echo code=$?')).toEqual([0, 'acode=0\n', ''])
@@ -526,7 +525,7 @@ describe('handleRedirect numeric targets', () => {
 // ("nosuchcmd: command not found").
 describe('handleRedirect missing < source', () => {
   it('is shell-attributed, not command-attributed', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, out, err] = await runResult(ws, 'cat < /data/missing')
       expect(exit).toBe(1)
@@ -538,7 +537,7 @@ describe('handleRedirect missing < source', () => {
   })
 
   it('does not run the command', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, out, err] = await runResult(ws, 'echo hi < /data/missing')
       expect(exit).toBe(1)
@@ -550,7 +549,7 @@ describe('handleRedirect missing < source', () => {
   })
 
   it('keeps the rest of the line running', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, out, err] = await runResult(ws, 'cat < /data/missing; echo next')
       expect(exit).toBe(0)
@@ -562,7 +561,7 @@ describe('handleRedirect missing < source', () => {
   })
 
   it('short-circuits && and runs ||', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [andExit, andOut] = await runResult(ws, 'cat < /data/missing && echo YES')
       expect(andExit).toBe(1)
@@ -576,7 +575,7 @@ describe('handleRedirect missing < source', () => {
   })
 
   it('leaves the rest of the pipeline running', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, out, err] = await runResult(ws, 'cat < /data/missing | wc -l')
       expect(exit).toBe(0)
@@ -588,7 +587,7 @@ describe('handleRedirect missing < source', () => {
   })
 
   it('reports the target as typed, not resolved', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, , err] = await runResult(ws, 'cd /data && cat < missing')
       expect(exit).toBe(1)
@@ -599,7 +598,7 @@ describe('handleRedirect missing < source', () => {
   })
 
   it('stops at the first failing redirect', async () => {
-    const { ws } = await makeIntegrationWS({ good: 'PRE' })
+    const { ws } = makeIntegrationWS({ good: 'PRE' })
     try {
       const [exit, , err] = await runResult(ws, 'cat < /data/missing < /data/good')
       expect(exit).toBe(1)
@@ -610,7 +609,7 @@ describe('handleRedirect missing < source', () => {
   })
 
   it('skips a later output redirect', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit] = await runResult(ws, 'echo hi < /data/missing > /data/late')
       expect(exit).toBe(1)
@@ -645,7 +644,7 @@ describe('handleRedirect missing < source', () => {
 
 describe('handleRedirect unwritable > target', () => {
   it('is shell-attributed, not command-attributed or backend prose', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, out, err] = await runResult(ws, 'echo x > /nodir/f')
       expect(exit).toBe(1)
@@ -657,7 +656,7 @@ describe('handleRedirect unwritable > target', () => {
   })
 
   it('keeps the rest of the line running', async () => {
-    const { ws, data } = await makeIntegrationWS()
+    const { ws, data } = makeIntegrationWS()
     try {
       const [exit, out, err] = await runResult(ws, 'echo x > /nodir/f; echo next')
       expect(exit).toBe(0)
@@ -729,7 +728,7 @@ describe('handleRedirect unwritable > target', () => {
   })
 
   it('short-circuits && and runs ||', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [andExit, andOut] = await runResult(ws, 'echo x > /nodir/f && echo YES')
       expect(andExit).toBe(1)
@@ -745,7 +744,7 @@ describe('handleRedirect unwritable > target', () => {
   it.each(['echo x >> /nodir/f', 'echo x 2> /nodir/f', '> /nodir/f'])(
     'spells %s the same way',
     async (line) => {
-      const { ws } = await makeIntegrationWS()
+      const { ws } = makeIntegrationWS()
       try {
         const [exit, , err] = await runResult(ws, line)
         expect(exit).toBe(1)
@@ -759,7 +758,7 @@ describe('handleRedirect unwritable > target', () => {
   it('stops at the first failure and skips the later target', async () => {
     // GNU: `echo x > /nodir/f > /data/out` reports /nodir/f once and
     // never creates /data/out.
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, , err] = await runResult(ws, 'echo x > /nodir/f > /data/out')
       expect(exit).toBe(1)
@@ -773,7 +772,7 @@ describe('handleRedirect unwritable > target', () => {
   it.each(['>', '2>', '3>'])('keeps a target opened before the failing %s', async (redirect) => {
     // GNU: `echo y > /data/out2 > /nodir/g` already truncated
     // /data/out2, so it survives as an empty file.
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, , err] = await runResult(ws, `echo y > /data/out2 ${redirect} /nodir/g`)
       expect(exit).toBe(1)
@@ -910,7 +909,7 @@ describe('descriptor zero duplication', () => {
     ],
     ['exec 2>&-; touch /data/marker 1>&2; test -e /data/marker; echo e=$?', 'e=1\n', '', 0],
   ])('tracks direction and order: %s', async (line, out, err, code) => {
-    const { ws } = await makeIntegrationWS({ 'a.txt': 'a' })
+    const { ws } = makeIntegrationWS({ 'a.txt': 'a' })
     try {
       expect(await runResult(ws, line)).toEqual([code, out, err])
     } finally {
@@ -923,7 +922,7 @@ it('opens a standard descriptor in the other direction', async () => {
   // bash accepts `exec 0>f` (fd 0 write-only: a read is EBADF) and `exec
   // 1<f` / `exec 2<f` (the stream read-only: a write fails), pinned on
   // 5.2; the file itself stays what the redirect made it.
-  const { ws } = await makeIntegrationWS({ input: 'original\n', source: 'readable\n' })
+  const { ws } = makeIntegrationWS({ input: 'original\n', source: 'readable\n' })
   try {
     const zero = await ws.shell(
       '( exec 0>/data/input; echo rc=$?; cat; echo rc=$?; read v; echo rc=$? )',
@@ -942,7 +941,7 @@ it('opens a standard descriptor in the other direction', async () => {
 })
 
 it('persists an explicit stdin file redirect', async () => {
-  const { ws } = await makeIntegrationWS({ input: 'readable\n' })
+  const { ws } = makeIntegrationWS({ input: 'readable\n' })
   try {
     await ws.shell('exec 0</data/input')
     expect((await ws.shell('read value; echo $value')).stdoutText).toBe('readable\n')
@@ -1050,7 +1049,7 @@ describe('descriptor identities survive dups', () => {
     ['exec 0<&1; echo x >&0', 'x\n', '', 0],
     ['echo x >&0; echo rc=$?', 'rc=1\n', 'echo: write error: Bad file descriptor\n', 0],
   ])('%s', async (line, out, err, code) => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await runResult(ws, line)).toEqual([code, out, err])
     } finally {
@@ -1065,7 +1064,7 @@ describe('handleRedirect trailing slash', () => {
     // before looking anything up, so the line prints `missing/: Is a
     // directory`, exits 1, and the command never runs; a plain file behind
     // the slash gets the same answer and keeps its bytes.
-    const { ws } = await makeIntegrationWS({ reg: 'y' })
+    const { ws } = makeIntegrationWS({ reg: 'y' })
     for (const line of [
       'echo hi > /data/missing/',
       'echo hi >> /data/missing/',
@@ -1085,7 +1084,7 @@ describe('handleRedirect trailing slash', () => {
   it('keeps the opens before a slashed refusal', async () => {
     // bash opens left to right, so `> a > missing/` has created `a`
     // (empty) by the time the second open refuses.
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     const [code, , err] = await runResult(ws, 'echo hi > /data/a > /data/missing/')
     expect([code, err]).toEqual([1, '/data/missing/: Is a directory\n'])
     expect(await runExit(ws, 'test -f /data/a')).toBe(0)
@@ -1096,7 +1095,7 @@ describe('handleRedirect trailing slash', () => {
     // bash stops at the first open it cannot perform, so a redirect under
     // an absent parent is reported ahead of a slashed or noclobbered
     // target written after it, and nothing is created.
-    const { ws } = await makeIntegrationWS({ reg: 'y' })
+    const { ws } = makeIntegrationWS({ reg: 'y' })
     for (const line of [
       'echo hi > /data/nodir/f > /data/missing/',
       'set -C; echo hi > /data/nodir/f > /data/reg',
@@ -1114,7 +1113,7 @@ describe('stdin from a character device end-to-end', () => {
   it('leaves rg the cwd, while an empty file is still stdin', async () => {
     // ripgrep 14.1.1 searches stdin only when a file, FIFO or socket is
     // attached: /dev/null is neither, so rg searches the cwd.
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await ws.shell("printf 'hit\\n' > /data/x.txt && printf '' > /data/e")
       expect(await run(ws, 'cd /data && rg hit < /dev/null')).toBe('x.txt:hit\n')
@@ -1138,10 +1137,7 @@ class FailingVFS extends RAMVFS {
 }
 
 it('fails only the redirect when a file read fails midway', async () => {
-  const ws = new Workspace(
-    { '/data': new FailingVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new FailingVFS() }, { mode: MountMode.WRITE })
   try {
     const io = await ws.shell('cat < /data/bad; echo after:$?')
     expect([io.exitCode, io.stdoutText]).toEqual([0, 'firstafter:1\n'])
@@ -1193,13 +1189,10 @@ class RejectingVFS extends RAMVFS {
   }
 }
 
-async function rejecting(vfs: RejectingVFS): Promise<Workspace> {
+function rejecting(vfs: RejectingVFS): Workspace {
   const src = new RAMVFS()
   src.store.files.set('/s', encode('src\n'))
-  return new Workspace(
-    { '/data': vfs, '/src': src },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  return new Workspace({ '/data': vfs, '/src': src }, { mode: MountMode.WRITE })
 }
 
 describe('a redirect the store refuses', () => {
@@ -1215,7 +1208,7 @@ describe('a redirect the store refuses', () => {
     ['echo once >> /data/r.txt || echo ran', 'ran\n', refused],
     ['exec 3> /data/r.txt; echo "s=$?"', 's=1\n', refused],
   ])('fails only its command: %s', async (line, stdout, stderr) => {
-    const ws = await rejecting(new RejectingVFS(new Error('upload refused: 503')))
+    const ws = rejecting(new RejectingVFS(new Error('upload refused: 503')))
     try {
       const io = await ws.shell(line)
       expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([0, stdout, stderr])
@@ -1227,7 +1220,7 @@ describe('a redirect the store refuses', () => {
   it.each(['cat /src/s > /data/r.txt', 'cat /src/s >> /data/r.txt'])(
     'fails only its command past the open: %s',
     async (line) => {
-      const ws = await rejecting(new RejectingVFS(new Error('upload refused: 503'), true))
+      const ws = rejecting(new RejectingVFS(new Error('upload refused: 503'), true))
       try {
         const io = await ws.shell(`${line}; echo "s=$?"`)
         expect([io.stdoutText, io.stderrText]).toEqual(['s=1\n', refused])
@@ -1238,7 +1231,7 @@ describe('a redirect the store refuses', () => {
   )
 
   it.each(['<', '<>'])('fails only its command on a refused read: %s', async (op) => {
-    const ws = await rejecting(new RejectingVFS(new Error('download refused: 503'), false, true))
+    const ws = rejecting(new RejectingVFS(new Error('download refused: 503'), false, true))
     try {
       const io = await ws.shell(`cat ${op} /data/r.txt; echo "s=$?"`)
       expect([io.stdoutText, io.stderrText]).toEqual([
@@ -1253,7 +1246,7 @@ describe('a redirect the store refuses', () => {
   it('fails only its command when the noclobber probe is refused', async () => {
     // bash 5.2: `set -C; echo x > f` refuses an existing f on the command
     // alone, with status 1, and the list goes on.
-    const ws = await rejecting(new RejectingVFS(new Error('stat refused: 503'), false, false, true))
+    const ws = rejecting(new RejectingVFS(new Error('stat refused: 503'), false, false, true))
     try {
       const io = await ws.shell('set -C; echo x > /data/r.txt; echo "s=$?"')
       expect([io.stdoutText, io.stderrText]).toEqual(['s=1\n', '/data/r.txt: stat refused: 503\n'])
@@ -1270,7 +1263,7 @@ describe('a redirect the store refuses', () => {
         '/data': new RejectingVFS(new Error('upload refused: 503'), true),
         '/bad': new RejectingVFS(new Error('upload refused: 503')),
       },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     try {
       const io = await ws.shell('exec 2>/data/e 3>/bad/r.txt; echo after')
@@ -1285,7 +1278,7 @@ describe('a redirect the store refuses', () => {
     'echo once > /data/r.txt 2>/dev/null; echo after',
     'exec 3> /data/r.txt; echo after',
   ])('still ends the line on a timeout: %s', async (line) => {
-    const ws = await rejecting(new RejectingVFS(new CommandTimeoutError('write', 1)))
+    const ws = rejecting(new RejectingVFS(new CommandTimeoutError('write', 1)))
     try {
       const io = await ws.shell(line)
       expect([io.exitCode, io.stdoutText]).toEqual([124, ''])
@@ -1369,14 +1362,10 @@ describe('a first write across workspaces', () => {
         await super.write(path, data, signal, handed, atomic)
       }
     }
-    const parser = await getTestParser()
     const plain = new RAMVFS()
     vi.spyOn(plain, 'pwrite').mockRejectedValue(new Error('windowed'))
-    const first = new Workspace(
-      { '/data': new Held() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
-    const second = new Workspace({ '/data': plain }, { mode: MountMode.WRITE, shellParser: parser })
+    const first = new Workspace({ '/data': new Held() }, { mode: MountMode.WRITE })
+    const second = new Workspace({ '/data': plain }, { mode: MountMode.WRITE })
     const held = first.shell('seq 1 3 > /data/out')
     try {
       await started
@@ -1410,13 +1399,9 @@ describe('a first write across workspaces', () => {
         await super.write(path, data, signal, handed, atomic)
       }
     }
-    const parser = await getTestParser()
     const shared = new Held()
-    const first = new Workspace({ '/data': shared }, { mode: MountMode.WRITE, shellParser: parser })
-    const second = new Workspace(
-      { '/data': shared },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const first = new Workspace({ '/data': shared }, { mode: MountMode.WRITE })
+    const second = new Workspace({ '/data': shared }, { mode: MountMode.WRITE })
     const held = first.shell('seq 1 5 > /data/out')
     try {
       await started

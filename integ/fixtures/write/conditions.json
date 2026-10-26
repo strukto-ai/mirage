@@ -136,6 +136,7 @@
       "copy",
       "delete"
     ],
+    "tidb_filesystem": [],
     "trello": [],
     "wandb": [],
     "wasabi": [

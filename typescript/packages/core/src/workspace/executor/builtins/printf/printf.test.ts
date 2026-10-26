@@ -17,7 +17,6 @@ import { runAsProgram } from '../../../../context/session_context.ts'
 import { materialize } from '../../../../io/types.ts'
 import { Limit, MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { SessionState } from '../../../session/session.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { handlePrintf } from './printf.ts'
@@ -77,11 +76,7 @@ describe('printf under a command runner', () => {
     ["timeout 5 printf 'x\\n' a", 'a'],
     ["find /data -maxdepth 0 -exec printf 'x\\n' {} \\;", '/data'],
   ])('%s is the program', async (line, word) => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const io = await ws.shell(line)
     expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual(['x\n', excess(`'${word}'`), 0])
     await ws.close()
@@ -91,11 +86,7 @@ describe('printf under a command runner', () => {
   it.each(['env g', 'echo a | xargs g', 'timeout 5 g'])(
     'a function %s runs has the builtin',
     async (runner) => {
-      const parser = await getTestParser()
-      const ws = new Workspace(
-        { '/data': new RAMVFS() },
-        { mode: MountMode.WRITE, shellParser: parser },
-      )
+      const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
       const io = await ws.shell(
         `g() { printf -v r ok; printf 'x\\n' extra; echo "[$r]"; }; ${runner}`,
       )
@@ -111,7 +102,6 @@ it.each(['', 'env '])(
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
-        shellParser: await getTestParser(),
         commandLimits: { printf: new Limit({ maxBytes: 4 }) },
       },
     )
@@ -128,10 +118,7 @@ it.each(['', 'env '])(
 
 describe('printf in a pipeline', () => {
   it('keeps its status when its reader stops early', async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const io = await ws.shell(`printf '%d' bad | head -c 1; echo " \${PIPESTATUS[*]}"`)
     expect([io.stdoutText, io.stderrText]).toEqual([
       '0 1 0\n',

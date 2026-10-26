@@ -119,6 +119,8 @@ function subsystem(client: Client, name: string): Promise<ClientChannel> {
 
 const b64 = (text: string): string => Buffer.from(text).toString('base64')
 const unb64 = (text: unknown): string => Buffer.from(String(text), 'base64').toString()
+const readText = (read: Message): string =>
+  (read.chunks as Message[]).map((c) => unb64(c.chunk)).join('')
 
 /** Codex's side of one codex-exec channel, one request at a time. */
 class CodexClient {
@@ -556,6 +558,48 @@ describe('codex-exec', () => {
     expect(unknown).toEqual({ status: 'unknownProcess' })
   })
 
+  it('runs processes side by side', async () => {
+    const client = await codex(await startHarness())
+    await client.start('slow', 'read x; echo got:$x', { pipeStdin: true })
+    const fast = await client.run('fast', 'echo fast')
+    const waiting = await client.result('process/read', { processId: 'slow', afterSeq: 0 })
+    await client.result('process/write', { processId: 'slow', writeId: 'w', chunk: b64('go\n') })
+    const out = await client.noteAny('slow', 'process/output')
+    const exited = await client.noteAny('slow', 'process/exited')
+    expect(fast).toEqual(['fast\n', '', 0])
+    expect(waiting.exited).toBe(false)
+    expect(unb64(out.chunk)).toBe('got:go\n')
+    expect(exited.exitCode).toBe(0)
+  })
+
+  it('keeps what a process sets to itself', async () => {
+    const client = await codex(await startHarness())
+    await client.run('p', 'export LEAK=1')
+    const [out] = await client.run('q', 'echo $USER ${LEAK:-unset}')
+    expect(out).toBe('demo unset\n')
+  })
+
+  it('waits only on the jobs its own process started', async () => {
+    const client = await codex(await startHarness())
+    await client.start('a', 'sleep 30 & echo started; wait')
+    await client.noteAny('a', 'process/output')
+    const done = await client.run('b', 'wait; echo done')
+    expect(done).toEqual(['done\n', '', 0])
+  })
+
+  it('reports the output of a job under the process that started it', async () => {
+    const client = await codex(await startHarness())
+    await client.start('a', '{ sleep 1; echo from-a; } & wait')
+    await client.start('b', 'read x; echo got:$x', { pipeStdin: true })
+    await client.noteAny('a', 'process/exited')
+    await client.result('process/write', { processId: 'b', writeId: 'w', chunk: b64('go\n') })
+    await client.noteAny('b', 'process/exited')
+    const a = await client.result('process/read', { processId: 'a', afterSeq: 0 })
+    const b = await client.result('process/read', { processId: 'b', afterSeq: 0 })
+    expect(readText(a)).toBe('from-a\n')
+    expect(readText(b)).toBe('got:go\n')
+  })
+
   it('stops a process on interrupt and terminate', async () => {
     const client = await codex(await startHarness())
     await client.start('i', 'sleep 30')
@@ -671,7 +715,21 @@ describe('codex-exec', () => {
     expect(unb64(opened.dataBase64)).toBe('token\n')
     expect(refused.code).toBe(RPC_INTERNAL_ERROR)
     expect(code).not.toBe(0)
-    expect(err).not.toBe('')
+    expect(err.endsWith('policy denied: the vault is sealed\n')).toBe(true)
+  })
+
+  it('runs a command the key profile allows', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.WRITE, profiles: { narrow: { commands: { allow: ['echo'] } } } },
+    )
+    const h = await startHarness(MountMode.WRITE, ws)
+    const client = await codex(h, bindKey(h, 'mirage-profile="narrow"'))
+    const allowed = await client.run('p', 'echo hi')
+    const [, err, code] = await client.run('q', 'cat /etc')
+    expect(allowed).toEqual(['hi\n', '', 0])
+    expect(code).not.toBe(0)
+    expect(err.endsWith('policy denied: cat is not allowed\n')).toBe(true)
   })
 
   it('closes its session when the channel ends', async () => {

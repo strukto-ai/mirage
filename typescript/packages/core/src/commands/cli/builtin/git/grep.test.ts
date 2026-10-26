@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { ALL_COMMANDS } from '../../../../policy/builtin/output_cap.ts'
 import { Limit, MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -32,7 +31,7 @@ describe('git grep past the walk limit', () => {
   ])('git %s', async (line, code, out, err) => {
     const ws = new Workspace(
       { '/repo': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }] },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     ws.registerCli('git', GIT)
     try {
@@ -61,7 +60,7 @@ describe('git grep over a work tree on another mount', () => {
         '/meta': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }],
         '/data': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }],
       },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     ws.registerCli('git', GIT)
     const git = 'git --git-dir=/meta/.git --work-tree=/data'

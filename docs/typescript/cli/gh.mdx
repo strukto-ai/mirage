@@ -129,7 +129,11 @@ gh repo delete acme/tools-old --yes
 
 `repo clone` uses Mirage's Git implementation and needs a writable destination
 mount. The token travels in the HTTP authorization header, not in the command
-line, output or `.git/config`. Fork clones do not add an `upstream` remote.
+line, output or `.git/config`, and only to the configured GitHub origin:
+`https://github.com` for GitHub's own API (`base_url` unset or
+`https://api.github.com`), else the scheme, host and port `base_url` names. Git
+clones any other URL on the line without it. Fork clones do not add an `upstream`
+remote.
 
 `repo rename` takes the **new name** as its operand; `-R` selects the repository
 to rename. `repo edit` changes only the named settings, and bare boolean

@@ -25,5 +25,12 @@ pub use tree::{FIELDS, KINDS, Node, Tree, field_id};
 
 /// Parse a program.
 pub fn parse(source: &[u8]) -> Tree {
-    parser::parse(source)
+    parser::parse(source, &[])
+}
+
+/// Parse a program where `aliases` are the names the shell expands as
+/// aliases: one is a command where a command starts, as bash expands it
+/// before it reads a reserved word.
+pub fn parse_with_aliases(source: &[u8], aliases: &[Vec<u8>]) -> Tree {
+    parser::parse(source, aliases)
 }

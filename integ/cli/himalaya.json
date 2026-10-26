@@ -1155,6 +1155,19 @@
       }
     },
     {
+      "id": "hm_read_refuses_an_id_that_would_end_the_command_line",
+      "seq": 562134,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message read -m Archive $'1\\r\\nX1 UID STORE 1:* +FLAGS (\\\\Deleted)\\r\\nX2 EXPUNGE'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya message read: an IMAP command cannot hold a line break or NUL\n"
+      }
+    },
+    {
       "id": "hm_list_zero_page_size_lists_every_page",
       "seq": 9940111,
       "targets": [

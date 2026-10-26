@@ -1152,6 +1152,20 @@
       }
     },
     {
+      "id": "git_clone_refuses_a_third_operand",
+      "seq": 567840,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "cd /repo && git clone . dst extra 2>&1 >/dev/null | head -1; git clone . dst extra 2>/dev/null; echo $?; test -e dst; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "fatal: Too many arguments.\n129\n1\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "git_verbs_refuse_an_unknown_switch",
       "seq": 567836,
       "targets": [

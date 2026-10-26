@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -53,6 +54,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -85,6 +87,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -117,6 +120,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -149,6 +153,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -181,6 +186,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -213,6 +219,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -245,6 +252,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -277,6 +285,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -311,7 +320,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mkdir -p /data/r10lx /data/r10ly /data/r10ld /data/r10le && ln -s t1 /data/r10lx/l && ln -s t2 /data/r10ly/l && cp -P /data/r10lx/l /data/r10ly/l /data/r10ld; echo rc=$?; readlink /data/r10ld/l; cp -P --backup=numbered /data/r10lx/l /data/r10ly/l /data/r10le; echo rc=$?; readlink /data/r10le/l /data/r10le/l.~1~; rm -r /data/r10lx /data/r10ly /data/r10ld /data/r10le",
       "expect": {
@@ -341,6 +351,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -375,7 +386,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mkdir -p /data/fcF_l/dir /data/fcF_l/w && printf 'x\\n' > /data/fcF_l/a.txt && ln -s ../a.txt /data/fcF_l/dir/al && ln -s dir /data/fcF_l/dl && cp -P /data/fcF_l/dl/al /data/fcF_l/w/x && cp -d /data/fcF_l/dl/al /data/fcF_l/w/y && readlink /data/fcF_l/w/x /data/fcF_l/w/y && ls -F /data/fcF_l/w; rm -r /data/fcF_l",
       "expect": {
@@ -409,6 +421,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -441,6 +454,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -473,6 +487,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -505,6 +520,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"

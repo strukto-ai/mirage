@@ -24,16 +24,10 @@ import {
 } from '../../vfs/slack/_test_util.ts'
 import type { FakeSlackTransport } from '../../vfs/slack/_test_util.ts'
 import { Workspace } from '../../../src/workspace/workspace/workspace.ts'
-import { getTestParser } from './workspace_fixture.ts'
-
-const PARSER = await getTestParser()
 
 /** The workspace a test asks the fake through, mounted at /mnt/discord. */
 export function mountDiscord(transport: DiscordTransport): Workspace {
-  return new Workspace(
-    { '/mnt/discord/': makeFakeDiscord(transport) },
-    { mode: MountMode.WRITE, shellParser: PARSER },
-  )
+  return new Workspace({ '/mnt/discord/': makeFakeDiscord(transport) }, { mode: MountMode.WRITE })
 }
 
 /**
@@ -65,7 +59,7 @@ export async function runSlack(
   line: string,
   dates: string[],
 ): Promise<{ stdout: string; exitCode: number }> {
-  const ws = new Workspace({ '/mnt/slack/': makeFakeSlack(transport) }, { shellParser: PARSER })
+  const ws = new Workspace({ '/mnt/slack/': makeFakeSlack(transport) })
   try {
     await seedSlack(ws.mount('/mnt/slack').index, '/mnt/slack', 'general__C1', 'C1', { dates })
     const io = await ws.shell(line)

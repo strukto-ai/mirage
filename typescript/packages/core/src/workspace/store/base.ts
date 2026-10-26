@@ -14,7 +14,7 @@
 
 import type { ObserverStore } from '../../observe/store.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import { CAS_MAX_RETRIES, generationOf, type SessionStore } from '../session/store.ts'
+import { CAS_MAX_RETRIES, generationOf } from '../record/types.ts'
 
 // One workspace's metadata record: the JSON-able discovery payload
 // (workspace_id, default_session_id, created_at, generation). This is
@@ -40,8 +40,8 @@ export interface WorkspaceStateStoreOverrides {
  * that lets a kernel tier bind a session-bound mountpoint created by
  * another daemon.
  *
- * The planes keep their existing narrow interfaces (NamespaceStore,
- * ObserverStore, SessionStore); this provider only unifies their
+ * The node table and the session table are two NamespaceStores and the
+ * observer keeps its ObserverStore; this provider only unifies their
  * construction, connection, and key scoping. Per-group overrides
  * redirect a plane group to a different provider (e.g. large observer
  * logs elsewhere while everything else stays on Redis). Sessions and
@@ -71,7 +71,7 @@ export abstract class WorkspaceStateStore {
   }
 
   /** The session table for one workspace. */
-  sessions(workspaceId: string): SessionStore {
+  sessions(workspaceId: string): NamespaceStore {
     return (this.workspaceOverride ?? this).makeSessions(workspaceId)
   }
 
@@ -83,7 +83,7 @@ export abstract class WorkspaceStateStore {
   /**
    * Write the metadata record iff its stored generation matches.
    *
-   * Same optimistic-concurrency contract as SessionStore.casSet: a
+   * Same optimistic-concurrency contract as NamespaceStore.casSet: a
    * missing record (and a legacy record without the field) counts as
    * generation 0, so create-if-absent is `expectedGeneration = 0`.
    * Resolves true when the write landed, false on conflict.
@@ -148,7 +148,7 @@ export abstract class WorkspaceStateStore {
 
   protected abstract makeNamespace(workspaceId: string): NamespaceStore
   protected abstract makeObserver(workspaceId: string): ObserverStore
-  protected abstract makeSessions(workspaceId: string): SessionStore
+  protected abstract makeSessions(workspaceId: string): NamespaceStore
   protected abstract readMeta(workspaceId: string): Promise<WorkspaceFields | null>
   protected abstract casWriteMeta(
     workspaceId: string,

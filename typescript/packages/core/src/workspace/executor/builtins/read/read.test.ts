@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 
 // What bash printed for each line (debian:stable-slim): the commands a
@@ -106,8 +105,7 @@ const READ_LEAVES_THE_REST: [string, string][] = [
 
 describe('read leaves the rest for the next command', () => {
   it.each(READ_LEAVES_THE_REST)('%s', async (line, expected) => {
-    const parser = await getTestParser()
-    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, shellParser: parser })
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('mkdir -p /data')
     const io = await ws.shell(line)
     expect([io.stdoutText, io.exitCode]).toEqual([expected, 0])
@@ -118,8 +116,7 @@ describe('read leaves the rest for the next command', () => {
 // fd 0 is the shell's, not the line's: a script's next line reads on from
 // where `exec <` left it.
 it('reads on across lines after exec', async () => {
-  const parser = await getTestParser()
-  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.shell('mkdir -p /data')
   await ws.shell("printf 'a\\nb\\n' > /data/f; exec < /data/f; read a")
   const io = await ws.shell('read b; echo "[$a][$b]"')

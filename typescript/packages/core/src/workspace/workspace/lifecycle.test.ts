@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { command } from '../../commands/config.ts'
 import { CommandSpec, Argument } from '../../commands/spec/types.ts'
@@ -25,10 +25,8 @@ import {
   JobConsole,
   RAMConsoleStore,
 } from '../../shell/console/index.ts'
-import type { ShellParser } from '../../shell/parse/index.ts'
 import { MountMode } from '../../types.ts'
 import { ExecutionNode } from '../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { toStateDict } from '../snapshot/state.ts'
@@ -45,13 +43,9 @@ it.each(
   async ({ used, wrapped, unmount }) => {
     const vfs = new RAMVFS()
     vfs.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('seed') } })
-    const owner = new Workspace({ '/data': vfs }, { shellParser: parser })
+    const owner = new Workspace({ '/data': vfs })
     const override = wrapped ? new Mount(vfs, { index: { ttl: 37 } }) : vfs
-    const replica = await Workspace.fromState(
-      await toStateDict(owner),
-      { shellParser: parser },
-      { '/data': override },
-    )
+    const replica = await Workspace.fromState(await toStateDict(owner), {}, { '/data': override })
     try {
       if (used) expect((await replica.shell('cat /data/file')).stdoutText).toBe('seed')
       if (unmount) {
@@ -70,12 +64,6 @@ it.each(
   },
 )
 
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await getTestParser()
-})
-
 it.each([
   '(exec 3</data/file; cat <&3)',
   'x=$(exec 3</data/file)',
@@ -86,7 +74,7 @@ it.each([
 ])('a child shell closes what it opened: %s', async (line) => {
   const vfs = new RAMVFS()
   vfs.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('seed') } })
-  const ws = new Workspace({ '/data': vfs }, { shellParser: parser })
+  const ws = new Workspace({ '/data': vfs })
   try {
     const result = await ws.shell(line)
     expect(result.exitCode).toBe(0)
@@ -109,10 +97,7 @@ it.each([
 })
 
 function buildWs(): Workspace {
-  return new Workspace(
-    { '/m': [new RAMVFS(), MountMode.WRITE] },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  return new Workspace({ '/m': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
 }
 
 /**
@@ -178,7 +163,7 @@ describe('closeWorkspace', () => {
     const store = new LateWriteStore()
     const ws = new Workspace(
       { '/m': [new RAMVFS(), MountMode.WRITE] },
-      { mode: MountMode.WRITE, shellParser: parser, consoleFactory: () => new JobConsole(store) },
+      { mode: MountMode.WRITE, consoleFactory: () => new JobConsole(store) },
     )
     const abort = new AbortController()
     const job = ws.jobTable.submit({
@@ -392,10 +377,8 @@ it.each(
     }
     const mounts: Record<string, RAMVFS> = { '/data': vfs }
     if (alias === 'initial') mounts['/alias'] = vfs
-    const owner = new Workspace(mounts, { shellParser: parser })
-    const ws = borrowed
-      ? await Workspace.fromState(await toStateDict(owner), { shellParser: parser }, mounts)
-      : owner
+    const owner = new Workspace(mounts)
+    const ws = borrowed ? await Workspace.fromState(await toStateDict(owner), {}, mounts) : owner
     if (alias === 'dynamic') ws.addMount('/alias', vfs)
     vi.spyOn(vfs, 'capacity').mockImplementation(async () => {
       entered()
@@ -477,7 +460,7 @@ it.each(
 
 it('workspace close waits for VFS retirements before closing stores', async () => {
   const vfs = new RAMVFS()
-  const ws = new Workspace({ '/data': vfs }, { shellParser: parser })
+  const ws = new Workspace({ '/data': vfs })
   await ws.dispatch('stat', '/data')
   let entered = (): void => undefined
   let resume = (): void => undefined
@@ -573,10 +556,7 @@ describe('closeWorkspace surfaces closer failures', () => {
     ready: Promise<void>
   } {
     const vfs = new RAMVFS()
-    const ws = new Workspace(
-      { '/m': [vfs, MountMode.WRITE] },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/m': [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
     const order: string[] = []
     const closeVfs = vfs.close.bind(vfs)
     vi.spyOn(vfs, 'close').mockImplementation(async () => {
@@ -610,10 +590,7 @@ describe('closeWorkspace surfaces closer failures', () => {
 
   it('leaves the workspace closed when a closer fails, so nothing resumes onto it', async () => {
     const vfs = new RAMVFS()
-    const ws = new Workspace(
-      { '/m': [vfs, MountMode.WRITE] },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/m': [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
     await ws.dispatch('stat', '/m')
     const closers = (ws as unknown as { closers: (() => Promise<void>)[] }).closers
     closers.push(() => Promise.reject(new Error('journal replay failed')))
@@ -631,10 +608,7 @@ describe('closeWorkspace surfaces closer failures', () => {
 
   it('keeps every teardown failure and still releases the later stages', async () => {
     const vfs = new RAMVFS()
-    const ws = new Workspace(
-      { '/m': [vfs, MountMode.WRITE] },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/m': [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
     await ws.dispatch('stat', '/m')
     vi.spyOn(ws.processes, 'stop').mockImplementation(() => {
       throw new Error('process cancellation failed')

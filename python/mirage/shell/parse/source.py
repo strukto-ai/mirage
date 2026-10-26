@@ -13,14 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from bisect import bisect_right
-from typing import Any, cast
-
-import tree_sitter
-
+from mirage.rs.shell import parse_shell
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse.constants import VERBATIM_TYPES
-from mirage.shell.parse.engine import TS_PARSER
 from mirage.shell.parse.heredoc.constants import BACKSLASH
 from mirage.shell.parse.heredoc.lower import (
     drop_bytes,
@@ -30,95 +25,7 @@ from mirage.shell.parse.heredoc.lower import (
 from mirage.shell.parse.heredoc.node import HeredocNode
 from mirage.shell.parse.heredoc.types import HeredocSource
 from mirage.shell.parse.program import ProgramNode
-from mirage.shell.parse.timing import PrefixNode
 from mirage.shell.types import TSNodeLike
-
-
-class SourceNode:
-    """A node of a shielded parse that reads the original bytes.
-
-    Every shield keeps the source's width, so a span names the same bytes
-    in both. Text and row/column positions use the original source:
-    pattern shielding can hide a newline inside a word. Reparsing against the
-    shielded tree did the same until tree-sitter relexed a statement on
-    its own, which it does at a line's end.
-    """
-
-    def __init__(
-        self,
-        node: tree_sitter.Node,
-        data: bytes,
-        lines: tuple[int, ...] | None = None,
-    ) -> None:
-        self._node = node
-        self._data = data
-        self._lines = (
-            lines
-            if lines is not None
-            else (0, *(i + 1 for i, c in enumerate(data) if c == 10))
-        )
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._node, name)
-
-    def _wrap(self, node: tree_sitter.Node | None) -> "SourceNode | None":
-        return (
-            None if node is None else SourceNode(node, self._data, self._lines)
-        )
-
-    @property
-    def type(self) -> str:
-        if self._node.type == "$(" and self.text in (b"<(", b">("):
-            return decode_text(self.text)
-        if self._node.type == "command_substitution" and self.text.startswith(
-            (b"<(", b">(")
-        ):
-            return "process_substitution"
-        return self._node.type
-
-    @property
-    def text(self) -> bytes:
-        return self._data[self._node.start_byte : self._node.end_byte]
-
-    def _point(self, at: int) -> tuple[int, int]:
-        row = bisect_right(self._lines, at) - 1
-        return row, at - self._lines[row]
-
-    @property
-    def start_point(self) -> tuple[int, int]:
-        return self._point(self._node.start_byte)
-
-    @property
-    def end_point(self) -> tuple[int, int]:
-        return self._point(self._node.end_byte)
-
-    @property
-    def children(self) -> list["SourceNode"]:
-        return [
-            cast(SourceNode, self._wrap(node)) for node in self._node.children
-        ]
-
-    @property
-    def named_children(self) -> list["SourceNode"]:
-        return [
-            cast(SourceNode, self._wrap(node))
-            for node in self._node.named_children
-        ]
-
-    @property
-    def parent(self) -> "SourceNode | None":
-        return self._wrap(self._node.parent)
-
-    @property
-    def prev_sibling(self) -> "SourceNode | None":
-        return self._wrap(self._node.prev_sibling)
-
-    @property
-    def next_sibling(self) -> "SourceNode | None":
-        return self._wrap(self._node.next_sibling)
-
-    def child_by_field_name(self, name: str) -> "SourceNode | None":
-        return self._wrap(self._node.child_by_field_name(name))
 
 
 def _verbatim_spans(root: TSNodeLike) -> list[tuple[int, int]]:
@@ -139,13 +46,14 @@ def _verbatim_spans(root: TSNodeLike) -> list[tuple[int, int]]:
     return sorted(spans)
 
 
-def continuation_bytes(data: bytes) -> list[int]:
+def continuation_bytes(
+    data: bytes, aliases: frozenset[str] = frozenset()
+) -> list[int]:
     """Offsets of the bytes bash's reader deletes as line continuations.
 
     The reader removes ``\\<newline>`` before a token is read, so the
     halves it joins are one word (``a\\<newline>b`` is ``ab``,
-    ``$\\<newline>{x}`` an expansion); tree-sitter reads the pair as
-    whitespace instead. Single-quoted and ANSI-C text and a comment keep
+    ``$\\<newline>{x}`` an expansion). Single-quoted and ANSI-C text and a comment keep
     theirs, and an escaped backslash continues nothing: only an
     odd-length run of backslashes before the newline ends in a live one.
     A live backslash ending the input continues onto nothing and goes
@@ -155,10 +63,12 @@ def continuation_bytes(data: bytes) -> list[int]:
 
     Args:
         data (bytes): shell source.
+        aliases (frozenset[str]): the names the shell expands as aliases,
+            so the parse that finds quoted text reads the line it runs.
     """
     if b"\\\n" not in data and not data.endswith(b"\\"):
         return []
-    spans = _verbatim_spans(TS_PARSER.parse(data).root_node)
+    spans = _verbatim_spans(parse_shell(data, aliases).root_node)
     dropped: list[int] = []
     at = 0
     index = data.find(b"\\")
@@ -179,36 +89,42 @@ def continuation_bytes(data: bytes) -> list[int]:
     return dropped
 
 
-def source_offsets(command: str, root: TSNodeLike) -> tuple[int, ...]:
+def source_offsets(
+    command: str, root: TSNodeLike, aliases: frozenset[str] = frozenset()
+) -> tuple[int, ...]:
     """Where each byte of the source ``parse`` read sits in ``command``.
 
-    ``parse`` deletes line continuations and inserts bytes to repair the
-    grammar, so a node's offsets index the source it read rather than the
-    line as typed. Indexed by one of them, this gives the byte of
-    ``command`` it came from; an inserted byte gives the byte after it.
+    ``parse`` deletes line continuations and lowers heredocs, so a node's
+    offsets index the source it read rather than the line as typed.
+    Indexed by one of them, this gives the byte of ``command`` it came
+    from; an inserted byte gives the byte after it.
 
     Args:
         command (str): the line ``root`` was parsed from.
         root (TSNodeLike): what ``parse(command)`` returned.
+        aliases (frozenset[str]): the alias names ``parse`` read it with.
     """
     if isinstance(root, ProgramNode) and root.program.original == command:
         return root.program.offsets
-    if isinstance(root, HeredocNode | PrefixNode):
+    if isinstance(root, HeredocNode):
         return root.offsets
     data = encode_text(command)
     source = drop_source_bytes(
         HeredocSource(data, data, tuple(range(len(data) + 1)), ()),
-        continuation_bytes(data),
+        continuation_bytes(data, aliases),
     )
     repaired = source.source[: root.start_byte] + (root.text or b"")
     return rebase_source(source, repaired).offsets
 
 
-def join_continuations(command: str) -> str:
+def join_continuations(
+    command: str, aliases: frozenset[str] = frozenset()
+) -> str:
     """The line as bash's reader hands it on, continuations removed.
 
     Args:
         command (str): the raw command line.
+        aliases (frozenset[str]): the names the shell expands as aliases.
     """
     data = encode_text(command)
-    return decode_text(drop_bytes(data, continuation_bytes(data)))
+    return decode_text(drop_bytes(data, continuation_bytes(data, aliases)))

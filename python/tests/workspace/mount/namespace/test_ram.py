@@ -79,3 +79,29 @@ async def test_load_returns_copies():
 def test_ram_store_subclasses_namespace_store():
     assert issubclass(RAMNamespaceStore, NamespaceStore)
     assert isinstance(RAMNamespaceStore(), NamespaceStore)
+
+
+@pytest.mark.asyncio
+async def test_cas_set_matching_generation_writes():
+    store = RAMNamespaceStore()
+    fields = {"session_id": "s1", "cwd": "/", "env": {}, "generation": 1}
+    assert await store.cas_set("s1", fields, 0) is True
+    assert (await store.load())["s1"]["generation"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cas_set_stale_generation_conflicts():
+    store = RAMNamespaceStore()
+    await store.set("s1", {"session_id": "s1", "cwd": "/", "generation": 2})
+    lost = {"session_id": "s1", "cwd": "/stale", "generation": 1}
+    assert await store.cas_set("s1", lost, 0) is False
+    assert (await store.load())["s1"]["cwd"] == "/"
+
+
+@pytest.mark.asyncio
+async def test_cas_set_legacy_record_counts_as_generation_zero():
+    store = RAMNamespaceStore()
+    await store.set("s1", {"session_id": "s1", "cwd": "/old"})
+    fields = {"session_id": "s1", "cwd": "/new", "generation": 1}
+    assert await store.cas_set("s1", fields, 0) is True
+    assert (await store.load())["s1"]["cwd"] == "/new"

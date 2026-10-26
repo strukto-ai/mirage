@@ -23,7 +23,6 @@ import {
   ROADMAP,
   TOKEN,
 } from '../../../../../tests/core/airtable/_test_util.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { UsageStyle } from '../../../spec/types.ts'
 import { cliSpecFor } from '../../specs.ts'
@@ -68,7 +67,7 @@ function leaf(...path: string[]): CommandSpec {
 
 async function shell(line: string): Promise<[number, string, string]> {
   vi.stubGlobal('fetch', new FakeAirtable().fetch)
-  const ws = new Workspace({}, { shellParser: await getTestParser() })
+  const ws = new Workspace({})
   ws.registerCli('airtable', AIRTABLE, { token: TOKEN, requests_per_second: 10_000 })
   try {
     const io = await ws.shell(line)
@@ -120,7 +119,7 @@ describe('airtable tree', () => {
 
   it('answers a second install under its own name', async () => {
     vi.stubGlobal('fetch', new FakeAirtable().fetch)
-    const ws = new Workspace({}, { shellParser: await getTestParser() })
+    const ws = new Workspace({})
     ws.registerCli('work', AIRTABLE, {
       token: TOKEN,
       base_ids: [ROADMAP],

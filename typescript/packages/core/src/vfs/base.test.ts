@@ -25,7 +25,7 @@ import { RuntimeFiles } from '../runtime/files.ts'
 import { IOResult } from '../io/types.ts'
 import { ops } from '../test-utils.ts'
 import { CapacityState, ContentType, FileStat, FileType, MountMode, PathSpec } from '../types.ts'
-import { getTestParser, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { buildMountArgs, toStateDict } from '../workspace/snapshot/state.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
@@ -322,8 +322,7 @@ describe('a plug-in VFS', () => {
   })
 
   it('refuses to restore rather than substituting an empty mount', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace({ '/wiki/': makeVfs() }, { mode: MountMode.READ, shellParser: parser })
+    const ws = new Workspace({ '/wiki/': makeVfs() }, { mode: MountMode.READ })
     try {
       const state = await toStateDict(ws)
       expect(() => buildMountArgs(state)).toThrow(/must include overrides for: \/wiki\//)
@@ -363,10 +362,9 @@ describe('a plug-in VFS', () => {
   })
 
   it('serves a mount end to end', async () => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/wiki/': makeVfs({ commands: wikiHello }) },
-      { mode: MountMode.READ, shellParser: parser },
+      { mode: MountMode.READ },
     )
     try {
       expect(stdoutStr(await ws.shell('ls /wiki/guides'))).toContain('quickstart.md')
@@ -408,7 +406,7 @@ describe('custom VFS capability fallbacks', () => {
     store.dirs.add('/empty')
     store.files.set('/file', ENC.encode('keep'))
     const vfs = ramWithout(store, ['rmR', 'rmdir'])
-    const ws = new Workspace({ '/custom': [vfs, mode] }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/custom': [vfs, mode] })
     try {
       const result = await ws.shell(`rm ${flag} /custom/empty /custom/file`)
       const reason = mode === MountMode.READ ? 'Read-only file system' : 'Operation not supported'
@@ -434,10 +432,7 @@ describe('custom VFS capability fallbacks', () => {
       for (const dir of ['/src', '/src/empty', '/src/sub']) store.dirs.add(dir)
       store.files.set('/src/sub/file', ENC.encode('payload'))
       const vfs = ramWithout(store, ['copy', 'find'])
-      const ws = new Workspace(
-        { '/custom': vfs },
-        { mode: MountMode.WRITE, shellParser: await getTestParser() },
-      )
+      const ws = new Workspace({ '/custom': vfs }, { mode: MountMode.WRITE })
       try {
         const result = await ws.shell(`cp ${flags} /custom/src /custom/dst`)
         expect(result.exitCode).toBe(0)
@@ -463,7 +458,7 @@ describe('custom VFS capability fallbacks', () => {
     store.files.set('/src/file', ENC.encode('payload'))
     const before = new Set(store.dirs)
     const vfs = ramWithout(store, ['copy', 'write'])
-    const ws = new Workspace({ '/custom': [vfs, mode] }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/custom': [vfs, mode] })
     try {
       const result = await ws.shell(`cp ${flags} /custom/src /custom/dst`)
       const reason = mode === MountMode.READ ? 'Read-only file system' : 'Operation not supported'
@@ -484,10 +479,7 @@ describe('custom VFS capability fallbacks', () => {
     const before = ENC.encode('before')
     await ops(builtin).write(path, before)
     const vfs = custom ? ramWithout(builtin.store, [], 'probe') : builtin
-    const ws = new Workspace(
-      { '/data': vfs },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.READ })
     try {
       const result = await ws.shell('echo after > /data/a')
       expect(result.exitCode).not.toBe(0)
@@ -518,7 +510,6 @@ it('serves a custom driver through CLI, namespace and runtime entry points', asy
     { '/wiki': makeVfs() },
     {
       mode: MountMode.WRITE,
-      shellParser: await getTestParser(),
     },
   )
   ws.registerCli(

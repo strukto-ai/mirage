@@ -53,6 +53,7 @@
       "seq": 941003,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -69,6 +70,7 @@
       "seq": 941004,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"

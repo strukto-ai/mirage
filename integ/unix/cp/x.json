@@ -23,7 +23,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mkdir -p /data/fcF_cx/t/s && echo f > /data/fcF_cx/t/s/f && cp -rx /data/fcF_cx/t /data/fcF_cx/c && cp -r --one-file-system /data/fcF_cx/t /data/fcF_cx/d && cp -x /data/fcF_cx/t/s/f /data/fcF_cx/g && find /data/fcF_cx/c /data/fcF_cx/d /data/fcF_cx/g | sort; rm -r /data/fcF_cx",
       "expect": {

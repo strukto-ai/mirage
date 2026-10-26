@@ -28,6 +28,7 @@ import { RedisVFS } from './redis/redis.ts'
 import { S3VFSBase } from './s3/s3.ts'
 import { SharePointVFS } from './sharepoint/sharepoint.ts'
 import { SlackVFSBase } from './slack/slack.ts'
+import { TiDBFilesystemVFSBase } from './tidb_filesystem/tidb_filesystem.ts'
 
 // Every backend that takes the window itself instead of leaving it to the
 // read-and-slice fallback. Most push it down to the store (one ranged GET
@@ -52,6 +53,7 @@ const NATIVE: [string, () => BaseVFS][] = [
   ['s3', () => new S3VFSBase()],
   ['sharepoint', () => new SharePointVFS({ accessToken: 'tok' })],
   ['slack', () => new SlackVFSBase()],
+  ['tidb_filesystem', () => new TiDBFilesystemVFSBase()],
 ]
 
 const SLICED: [string, () => BaseVFS][] = [

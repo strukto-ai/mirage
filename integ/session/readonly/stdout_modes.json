@@ -5,6 +5,7 @@
     "redis",
     "opfs",
     "s3",
+    "tidb-filesystem",
     "s3-prefix",
     "gridfs"
   ],

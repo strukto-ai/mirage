@@ -12,18 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../shell/job_table/index.ts'
-import type { ShellParser } from '../../shell/parse/index.ts'
 import { MountMode } from '../../types.ts'
-import {
-  getTestParser,
-  stdoutStr,
-  stderrStr,
-} from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr, stderrStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { ExecutionNode } from '../types.ts'
@@ -319,17 +314,8 @@ describe('handleFg with an invocation signal', () => {
 
 // `&` inside a compound body launches a job, as it does at top level.
 
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await getTestParser()
-})
-
 function buildWs(): Workspace {
-  return new Workspace(
-    { '/m': [new RAMVFS(), MountMode.WRITE] },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  return new Workspace({ '/m': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
 }
 
 // Runners begin in the order they were started: a job begins before the
@@ -699,7 +685,6 @@ it('ps lists the session leader with its owner', async () => {
     { '/m': [new RAMVFS(), MountMode.WRITE] },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       profiles: { admin: parseSessionProfile({}) },
       profile: 'admin',
     },
@@ -720,7 +705,6 @@ it("ps does not name another session's group", async () => {
     { '/m': [new RAMVFS(), MountMode.WRITE] },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       profiles: {
         admin: parseSessionProfile({ processes: 'workspace' }),
         reader: parseSessionProfile({}),

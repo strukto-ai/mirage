@@ -141,6 +141,7 @@ export const NodeType = Object.freeze({
   REDIRECT_DUP_IN: '<&',
   REDIRECT_CLOSE_OUT: '>&-',
   REDIRECT_CLOSE_IN: '<&-',
+  REDIRECT_READWRITE: '<>',
   REDIRECT_BOTH: '&>',
   REDIRECT_BOTH_APPEND: '&>>',
   HEREDOC_START_TOKEN: '<<',
@@ -437,7 +438,6 @@ export type BuiltinGroup = (typeof BuiltinGroup)[keyof typeof BuiltinGroup]
  * Python side reading nodes through shell.types.
  */
 export interface TSNodeLike {
-  readonly timing?: readonly boolean[]
   readonly heredoc?: Heredoc | undefined
   readonly warnings?: string
   readonly sourceText?: string

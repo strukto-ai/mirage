@@ -17,11 +17,10 @@ import { FD_BOTH, FD_CLOSE } from './constants.ts'
 import { badDescriptorLine, unsupportedDescriptor } from './descriptors.ts'
 import { getRedirects } from './helpers.ts'
 import { RedirectKind, type Redirect, type TSNodeLike } from './types.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { parse } from './parse/parse.ts'
 
-async function redirects(line: string): Promise<Redirect[]> {
-  const parser = await getTestParser()
-  const node = parser.parse(line).namedChildren[0] as TSNodeLike
+function redirects(line: string): Redirect[] {
+  const node = parse(line).namedChildren[0] as TSNodeLike
   return getRedirects(node)[1]
 }
 
@@ -46,21 +45,21 @@ describe('redirect parser keeps the descriptor as typed', () => {
     ['echo x >& f', FD_BOTH, 'f', RedirectKind.STDOUT],
   ]
   for (const [line, fd, target, kind] of cases) {
-    it(line, async () => {
-      const [r] = await redirects(line)
+    it(line, () => {
+      const [r] = redirects(line)
       expect([r?.fd, r?.target, r?.kind]).toEqual([fd, target, kind])
     })
   }
 
-  it('append and clobber flags', async () => {
-    expect((await redirects('echo x >> f'))[0]?.append).toBe(true)
-    expect((await redirects('echo x >| f'))[0]?.clobber).toBe(true)
-    expect((await redirects('echo x &>> f'))[0]?.append).toBe(true)
+  it('append and clobber flags', () => {
+    expect(redirects('echo x >> f')[0]?.append).toBe(true)
+    expect(redirects('echo x >| f')[0]?.clobber).toBe(true)
+    expect(redirects('echo x &>> f')[0]?.append).toBe(true)
   })
 })
 
 describe('unsupportedDescriptor', () => {
-  it('accepts every descriptor and the two sentinels', async () => {
+  it('accepts every descriptor and the two sentinels', () => {
     for (const line of [
       'echo x > f',
       'echo x 2>&1',
@@ -79,7 +78,7 @@ describe('unsupportedDescriptor', () => {
       'echo x 3>&-',
       'echo x > f 4>&1',
     ]) {
-      expect(unsupportedDescriptor(await redirects(line))).toBeNull()
+      expect(unsupportedDescriptor(redirects(line))).toBeNull()
     }
     expect(new TextDecoder().decode(badDescriptorLine(3))).toBe('3: Bad file descriptor\n')
   })

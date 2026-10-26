@@ -14,6 +14,7 @@
 
 import re
 from collections.abc import Sequence
+from functools import partial
 
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.escapes import decode_ansi_c
@@ -39,16 +40,21 @@ _CONTINUATION = re.compile(r"\\\n[ \t]*")
 _RESERVED = BASH_KEYWORDS | {"!", "{", "}", "[[", "]]", "time", "coproc"}
 
 
-def stored_function_text(name: str, source: str) -> str:
+def stored_function_text(
+    name: str, source: str, aliases: frozenset[str] = frozenset()
+) -> str:
     """Render a portable function without keeping its parsed tree.
 
     Args:
         name (str): the function's stored name.
         source (str): its definition as shell source.
+        aliases (frozenset[str]): the alias names its body is read with.
     """
     scope = ParseScope()
     try:
-        return function_text(name, parse_function(source, scope.parse))
+        return function_text(
+            name, parse_function(source, partial(scope.parse, aliases=aliases))
+        )
     finally:
         scope.release()
 
@@ -218,13 +224,8 @@ class _Printer:
                 + f" {op} "
                 + self.command(right, indent)
             )
-        if kind == "negated_command":
-            return "! " + self.command(node.named_children[0], indent)
-        if kind == "timed_statement":
-            portable = bool(getattr(node, "timing", (False,))[0])
-            return ("time -p " if portable else "time ") + self.command(
-                node.named_children[0], indent
-            )
+        if kind in ("negated_command", "timed_statement"):
+            return self._prefixed(node, indent)
         if kind == NT.SUBSHELL:
             return "( " + self.statements(node.children, indent, False) + " )"
         if kind == "test_command" and get_text(node).startswith("[["):
@@ -410,9 +411,40 @@ class _Printer:
             + "done"
         )
 
+    def _prefixed(self, node: TSNodeLike, indent: str) -> str:
+        """A pipeline under ``time`` and ``!`` words, as bash prints it:
+        ``time`` once (``-p`` if any has it), then ``!`` when an odd
+        number of them negate it, then the pipeline, which may be empty.
+
+        Args:
+            node (TSNodeLike): a ``timed_statement`` or ``negated_command``.
+            indent (str): the current indentation.
+        """
+        timed = portable = negated = False
+        inner: TSNodeLike | None = node
+        while inner is not None and inner.type in (
+            "negated_command",
+            "timed_statement",
+        ):
+            if inner.type == "timed_statement":
+                timed = True
+                portable = portable or any(
+                    child.type == "-p" for child in inner.children
+                )
+            else:
+                negated = not negated
+            inner = inner.named_children[0] if inner.named_children else None
+        prefix = ("time -p " if portable else "time ") if timed else ""
+        prefix += "! " if negated else ""
+        return prefix + ("" if inner is None else self.command(inner, indent))
+
     def _for(self, node: TSNodeLike, indent: str) -> str:
         variable, values, _ = get_for_parts(node)
-        words = " ".join(self.word(v) for v in values)
+        words = (
+            '"$@"'
+            if values is None
+            else " ".join(self.word(v) for v in values)
+        )
         group = next((c for c in node.children if c.type == NT.DO_GROUP), None)
         return (
             node.children[0].type

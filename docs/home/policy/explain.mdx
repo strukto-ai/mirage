@@ -16,6 +16,7 @@ A refusal reads as a real terminal's. The reason travels beside it.
 | --- | --- |
 | a line or a command | `rm: Permission denied`, exit 126 |
 | one path | the command's own error: `cat: /data/k: Permission denied`, exit 1 |
+| a write to a read-only mount | the command's own error: `rm: cannot remove '/data/a': Read-only file system`, exit 1 |
 | a VFS call | `EACCES` |
 | a variable write | `KEY: permission denied`, exit 1 |
 | an ask | the same as a deny, until a host approves; then the retry runs |

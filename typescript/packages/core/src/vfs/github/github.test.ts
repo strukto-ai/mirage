@@ -31,7 +31,6 @@ import { blobSha, FakeGitHub } from '../../../tests/core/github/_test_util.ts'
 import type { GitHubTreeItem } from '../../core/github/client.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { Limit, MountMode } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../ram/ram.ts'
@@ -82,7 +81,7 @@ describe('GitHubVFS', () => {
         ref: 'main',
         baseUrl: 'http://127.0.0.1:1',
       })
-      const ws = new Workspace({ '/gh': vfs }, { mode, shellParser: await getTestParser() })
+      const ws = new Workspace({ '/gh': vfs }, { mode })
       try {
         const lines: Record<string, string> = {
           'rm /gh/top.txt': `rm: cannot remove '/gh/top.txt': ${refusal}\n`,
@@ -121,10 +120,7 @@ describe('GitHubVFS', () => {
       ref: 'main',
       baseUrl: 'http://127.0.0.1:1',
     })
-    const ws = new Workspace(
-      { '/gh': vfs },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/gh': vfs }, { mode: MountMode.READ })
     try {
       const seen = await ws.shell('find /gh; find /gh -type d -empty')
       expect(DEC.decode(seen.stdout)).toBe('/gh\n/gh/docs\n/gh/docs/guide.md\n/gh/top.txt\n')
@@ -154,7 +150,7 @@ async function run(vfs: GitHubVFS | RAMVFS, line: string, limit?: number): Promi
     limit === undefined ? {} : { [ALL_COMMANDS]: new Limit({ walkLimit: limit }) }
   const ws = new Workspace(
     { '/gh': new Mount(vfs, { mode: MountMode.READ, commandLimits }) },
-    { shellParser: await getTestParser() },
+    {},
   )
   try {
     const result = await ws.shell(line)
@@ -327,7 +323,7 @@ describe('grep and rg over code search', () => {
     const commandLimits = { [ALL_COMMANDS]: new Limit({ walkLimit: count - 1 }) }
     const ws = new Workspace(
       { [prefix]: new Mount(vfs, { mode: MountMode.READ, commandLimits }) },
-      { shellParser: await getTestParser() },
+      {},
     )
     try {
       expect((await ws.shell(`ls ${prefix}/docs`)).exitCode).toBe(0)

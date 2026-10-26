@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, RAMVFS, type SessionStore } from '@struktoai/mirage-core'
+import { MountMode, RAMVFS, type NamespaceStore } from '@struktoai/mirage-core'
 import { seedVar } from '@struktoai/mirage-core/workspace/session/state'
 import { RedisWorkspaceStateStore, S3WorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 
@@ -188,7 +188,7 @@ async function read(prefix: string): Promise<void> {
 }
 
 // Read-modify-CAS this worker's counter, retrying until it lands.
-async function casIncrement(sess: SessionStore, worker: string, rounds: number): Promise<void> {
+async function casIncrement(sess: NamespaceStore, worker: string, rounds: number): Promise<void> {
   for (let round = 0; round < rounds; round++) {
     let landed = false
     for (let attempt = 0; attempt < 500 && !landed; attempt++) {

@@ -17,7 +17,6 @@ import type { Handed } from '../../vfs/types.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { Limit, MountMode, type PathSpec } from '../../types.ts'
 import { GmailVFS } from '../../vfs/gmail/gmail.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 
@@ -237,7 +236,7 @@ async function onGmail(line: string, fake = new FakeGmail(), walkLimit = 1000): 
   const limits = { [ALL_COMMANDS]: new Limit({ walkLimit }) }
   const ws = new Workspace(
     { '/gmail': new Mount(vfs, { mode: MountMode.READ, commandLimits: limits }) },
-    { shellParser: await getTestParser() },
+    {},
   )
   try {
     const result = await ws.shell(line)

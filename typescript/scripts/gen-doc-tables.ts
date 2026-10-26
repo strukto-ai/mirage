@@ -64,6 +64,7 @@ const SAMPLES: Record<string, Record<string, string | string[]>> = {
   mem0: { api_key: 'key', user_id: 'user' },
   r2: { bucket: 'bucket', account_id: 'account' },
   supabase: { bucket: 'bucket', region: 'us-east-1', project_ref: 'ref' },
+  tidb_filesystem: { host: 'https://aws-us-east-1.drive9.ai', token: 'token' },
   wandb: { entities: ['entity'] },
 }
 // GitHubVFS.create reads the repository it mounts, so a GitHub mount has

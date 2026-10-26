@@ -24,7 +24,6 @@ import {
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import { Session, Workspace } from './workspace.ts'
 
@@ -41,10 +40,7 @@ describe('session.explain.vfs', () => {
   let ws: Workspace
 
   beforeEach(async () => {
-    ws = new Workspace(
-      { '/data/': new RAMVFS(), '/ro/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    ws = new Workspace({ '/data/': new RAMVFS(), '/ro/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.vfs.mkdir('/data/sec')
     await ws.vfs.write('/data/sec/k', 'key')
     await ws.vfs.symlink('/data/link', '/data/sec/k')

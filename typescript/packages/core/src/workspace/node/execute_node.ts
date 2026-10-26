@@ -20,7 +20,7 @@ import type { ParseScope } from '../../shell/parse/scope.ts'
 
 import { ExecutionScope } from '../execution.ts'
 import { newExecutionId } from '../../execution/context.ts'
-import { timingReport } from './timing.ts'
+import { timedBy, timingReport } from './timing.ts'
 import { PathSpec } from '../../types.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 
@@ -48,6 +48,8 @@ import {
   getListParts,
   getNegatedCommand,
   getPipelineStages,
+  commandRedirects,
+  withOwnRedirects,
   getRedirects,
   readRow,
   takeContinuation,
@@ -64,6 +66,7 @@ import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.t
 import {
   runWithRedirectPaths,
   redirectPathsFor,
+  redirectRunnerFor,
   redirectSyntaxFor,
   type RedirectRunner,
 } from '../../context/session_context.ts'
@@ -109,7 +112,7 @@ import type { HandOff } from '../../policy/types.ts'
 import { claimantFor, definedAt } from './occurrence.ts'
 import { type Admitted, admitTest } from './admission.ts'
 import type { SessionView } from '../../view/types.ts'
-import { sessionView } from '../session/state.ts'
+import { positionalParams, sessionView } from '../session/state.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { drained } from '../executor/jobs.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
@@ -247,6 +250,11 @@ async function evalCforExpr(
  * point (after the left side ran, so cwd changes apply). Every other node
  * recurses normally.
  */
+/** The empty command a redirect with no command name runs under. */
+function noCommand(): Promise<Result> {
+  return Promise.resolve([null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })])
+}
+
 async function recurseReassociated(
   recurse: Recurse,
   dispatch: DispatchFn,
@@ -271,7 +279,7 @@ async function recurseReassociated(
     registry,
     namespace,
     right,
-    [...redirects],
+    withOwnRedirects(right, redirects),
     signal,
     processes,
     opts?.sink,
@@ -592,7 +600,7 @@ async function runRedirected(
         registry,
         namespace,
         inner,
-        redirects,
+        inner === null ? redirects : withOwnRedirects(inner, redirects),
         signal,
         processes,
         sink,
@@ -601,7 +609,7 @@ async function runRedirected(
         callStack,
       ),
     )
-    return negated(stdout, io, execNode, context, inner)
+    return negated(stdout, io, execNode, context, inner ?? command)
   }
   const pipeNode =
     (redirects.find((r) => r.pipeline != null)?.pipeline as TSNodeLike | null) ?? null
@@ -1102,24 +1110,23 @@ async function executeNodeBody(
   if (kind === NodeKind.TIMED) {
     const started = performance.now()
     const inner = node.namedChildren[0]
-    if (inner === undefined) throw new Error('timed statement has no body')
-    const [body, io, execNode] = await stream(inner, context, stdin, callStack)
-    const stdout = await applyBarrier(body, io, BarrierPolicy.VALUE)
-    const elapsed = (performance.now() - started) / 1000
-    const stderr = await io.materializeStderr()
-    const reports = [...(node.timing ?? [])]
-      .reverse()
-      .map((portable) => timingReport(elapsed, portable, session.env.TIMEFORMAT))
-    const merged = new Uint8Array(
-      stderr.length + reports.reduce((n, report) => n + report.length, 0),
-    )
-    merged.set(stderr)
-    let offset = stderr.length
-    for (const report of reports) {
-      merged.set(report, offset)
-      offset += report.length
+    const [stdout, io, execNode] =
+      inner === undefined
+        ? [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
+        : await stream(inner, context, stdin, callStack).then(
+            async ([body, ran, ranNode]) =>
+              [await applyBarrier(body, ran, BarrierPolicy.VALUE), ran, ranNode] as const,
+          )
+    const portable = timedBy(node)
+    if (portable !== null) {
+      const elapsed = (performance.now() - started) / 1000
+      const stderr = await io.materializeStderr()
+      const report = timingReport(elapsed, portable, session.env.TIMEFORMAT)
+      const merged = new Uint8Array(stderr.length + report.length)
+      merged.set(stderr)
+      merged.set(report, stderr.length)
+      io.stderr = merged
     }
-    io.stderr = merged
     return [stdout, io, execNode]
   }
 
@@ -1182,6 +1189,70 @@ async function executeNodeBody(
       inline,
       executeFn,
     )
+  }
+
+  if (kind === NodeKind.COMMAND && !node.children.some((c) => c.type === NT.COMMAND_NAME)) {
+    // Assignments with redirects among them and no command name
+    // (`a=1 > f b=$a`): bash assigns in order, as an assignment statement
+    // does, then opens the redirects with no command; one that fails fails
+    // the line, the assignments standing, and else the status is the last
+    // substitution's, a redirect's included.
+    const subSeq = context.frame.cmdsubSeq
+    let mergedIo = new IOResult()
+    for (const child of node.namedChildren) {
+      if (child.type !== NT.VARIABLE_ASSIGNMENT) continue
+      const [, io] = await recurse(child, context, stdin, callStack, { ownDiagnostics: false })
+      mergedIo = await mergedIo.merge(io)
+    }
+    const runner = redirectRunnerFor(node)
+    const [, opened] =
+      runner === null
+        ? await runRedirected(
+            recurse,
+            dispatch,
+            executeFn,
+            registry,
+            deps.namespace,
+            null,
+            commandRedirects(node),
+            deps.signal,
+            jobTable.processes,
+            undefined,
+            context,
+            stdin,
+            callStack,
+          )
+        : await runner(noCommand, undefined, '', [])
+    mergedIo = await mergedIo.merge(opened)
+    mergedIo.exitCode =
+      opened.exitCode !== 0 ? opened.exitCode : assignmentStatus(context.frame, subSeq)
+    const ran: Result = [
+      null,
+      mergedIo,
+      new ExecutionNode({ command: getText(node), exitCode: mergedIo.exitCode }),
+    ]
+    return sink === undefined ? ran : drained(sink, ...ran)
+  }
+
+  const own =
+    kind === NodeKind.COMMAND && redirectRunnerFor(node) === null ? commandRedirects(node) : []
+  if (own.length > 0) {
+    const ran = await runRedirected(
+      recurse,
+      dispatch,
+      executeFn,
+      registry,
+      deps.namespace,
+      node,
+      own,
+      deps.signal,
+      jobTable.processes,
+      sink,
+      context,
+      stdin,
+      callStack,
+    )
+    return sink === undefined ? ran : drained(sink, ...ran)
   }
 
   if (kind === NodeKind.COMMAND) {
@@ -1421,26 +1492,29 @@ async function executeNodeBody(
   if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
     const [variable, values, body] = getForParts(node)
     if (!isValidName(variable)) return fail(kind, `bash: \`${variable}': not a valid identifier\n`)
-    const resolved = await runInCommandScope(async () => {
-      const classified = await expandAndClassify(
-        values,
-        context,
-        executeFn,
-        registry,
-        session.cwd,
-        callStack,
-        view,
-      )
-      // The loop word list is consumed by the shell (WordPolicy.SHELL):
-      // globs resolve to matches before iteration starts.
-      return resolveGlobs(
-        classified,
-        registry,
-        session.shellOptions.noglob === true,
-        deps.namespace.sessionLinks(session),
-        globOptions(session),
-      )
-    })
+    const resolved =
+      values === null
+        ? positionalParams(session, callStack)
+        : await runInCommandScope(async () => {
+            const classified = await expandAndClassify(
+              values,
+              context,
+              executeFn,
+              registry,
+              session.cwd,
+              callStack,
+              view,
+            )
+            // The loop word list is consumed by the shell (WordPolicy.SHELL):
+            // globs resolve to matches before iteration starts.
+            return resolveGlobs(
+              classified,
+              registry,
+              session.shellOptions.noglob === true,
+              deps.namespace.sessionLinks(session),
+              globOptions(session),
+            )
+          })
     if (kind === NodeKind.SELECT) {
       const signal = mergeSignals(deps.signal, context.frame.abortSignal)
       return callStack.loop(() =>
@@ -1537,6 +1611,15 @@ async function executeNodeBody(
 
   if (kind === NodeKind.NEGATED) {
     const inner = getNegatedCommand(node)
+    // A bare `!` negates the empty command, which succeeds.
+    if (inner === null)
+      return negated(
+        null,
+        new IOResult(),
+        new ExecutionNode({ command: '', exitCode: 0 }),
+        context,
+        node,
+      )
     const [stdout, io, execNode] = await ignoringErrexit(context.session, () =>
       stream(inner, context, stdin, callStack),
     )

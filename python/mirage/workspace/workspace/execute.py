@@ -722,8 +722,11 @@ async def run_prepared_line(
     previous_alias_expansion = effective_session._alias_expansion
     effective_session._alias_expansion = None
     try:
+        aliases = expanding_aliases(effective_session)
         ast = (
-            parse_scope.parse(command) if argv is None else literal_tree(argv)
+            parse_scope.parse(command, aliases)
+            if argv is None
+            else literal_tree(argv)
         )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
@@ -733,7 +736,7 @@ async def run_prepared_line(
         if argv is None:
             found = check_syntax(
                 command,
-                expanding_aliases(effective_session),
+                aliases,
                 extglob=effective_session.shopts.get("extglob", False),
             ) or find_syntax_issue(ast)
         if found is not None:

@@ -12,36 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import type { LostPaths, OpRecord } from '../../../src/observe/record.ts'
 import { RAMVFS } from '../../../src/vfs/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../../../src/shell/parse/index.ts'
 import { type CacheFacts, MountMode, type Refusal } from '../../../src/types.ts'
 import type { RuntimeEntry } from '../../../src/runtime/base.ts'
 import type { SessionProfile } from '../../../src/policy/profile.ts'
 import { Workspace } from '../../../src/workspace/workspace/workspace.ts'
 import { describeRefusal } from '../../../src/policy/index.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parserPromise: Promise<ShellParser> | null = null
-
-export async function getTestParser(): Promise<ShellParser> {
-  parserPromise ??= createShellParser({ engineWasm, grammarWasm })
-  return parserPromise
-}
-
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 /** A writable workspace with a read-caching RAM mount at `/r`. */
-export async function cachingRamWorkspace(): Promise<Workspace> {
+export function cachingRamWorkspace(): Workspace {
   const ram = new RAMVFS()
   ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
-  return new Workspace({ '/r': ram }, { mode: MountMode.WRITE, shellParser: await getTestParser() })
+  return new Workspace({ '/r': ram }, { mode: MountMode.WRITE })
 }
 
 export type Mark = [op: string, path: string]
@@ -84,14 +70,13 @@ function putDir(res: RAMVFS, path: string): void {
   res.store.dirs.add(path)
 }
 
-export async function makeWorkspace(
+export function makeWorkspace(
   extra: {
     runtimes?: RuntimeEntry[]
     profiles?: Record<string, SessionProfile>
     profile?: string
   } = {},
-): Promise<TestWorkspace> {
-  const parser = await getTestParser()
+): TestWorkspace {
   const s3 = new RAMVFS()
   const disk = new RAMVFS()
   const ram = new RAMVFS()
@@ -117,7 +102,7 @@ export async function makeWorkspace(
 
   const ws = new Workspace(
     { '/s3': s3, '/disk': disk, '/ram': ram },
-    { mode: MountMode.EXEC, shellParser: parser, ...extra },
+    { mode: MountMode.EXEC, ...extra },
   )
   ws.getSession(ws.defaultSessionId).cwd = '/s3'
   return { ws, s3, disk, ram }

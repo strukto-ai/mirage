@@ -13,23 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { getFunctionBody } from './helpers.ts'
 import { ParseScope } from './parse/scope.ts'
 import { functionText, storedFunctionText } from './printer.ts'
+import { parse } from './parse/parse.ts'
 
 // getFunctionBody wraps a body under two redirects in a statement of its
 // own; the printer finds the definition again from it.
-it('reads the definition under its redirects', async () => {
-  const statement = (await getTestParser()).parse('f() { echo a; } >o 2>&1').namedChildren[0]
+it('reads the definition under its redirects', () => {
+  const statement = parse('f() { echo a; } >o 2>&1').namedChildren[0]
   const definition = statement?.namedChildren[0]
   const body = definition === undefined ? null : getFunctionBody(definition)
   expect(body === null ? null : functionText('f', body)).toBe('f () \n{ \n    echo a\n} > o 2>&1')
 })
 
 // bash prints a definition's heredoc bodies after its closing line.
-it("prints the definition's own heredocs", async () => {
-  const scope = new ParseScope(await getTestParser())
+it("prints the definition's own heredocs", () => {
+  const scope = new ParseScope()
   const source = 'f() { cat; } <<A >/dev/null <<B\na\nA\nb\nB'
   expect(storedFunctionText('f', source, scope)).toBe(
     'f () \n{ \n    cat\n} <<A > /dev/null <<B\na\nA\nb\nB\n',

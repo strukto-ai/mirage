@@ -22,7 +22,7 @@ import {
 
 describe('sh/bash script file', () => {
   it.each(['sh', 'bash'])('%s runs the lines of a script file', async (head) => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo one\necho two\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo one\necho two\n' })
     try {
       expect(await run(ws, `${head} /data/run.sh`)).toBe('one\ntwo\n')
     } finally {
@@ -31,7 +31,7 @@ describe('sh/bash script file', () => {
   })
 
   it('resolves the script file against the working directory', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo hi\n' })
     try {
       expect(await run(ws, 'cd /data; sh run.sh')).toBe('hi\n')
     } finally {
@@ -40,7 +40,7 @@ describe('sh/bash script file', () => {
   })
 
   it('takes a script file after --', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo hi\n' })
     try {
       expect(await run(ws, 'bash -- /data/run.sh')).toBe('hi\n')
     } finally {
@@ -49,7 +49,7 @@ describe('sh/bash script file', () => {
   })
 
   it('passes operands to the script as positional parameters', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo $# $1 $2\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo $# $1 $2\n' })
     try {
       expect(await run(ws, 'sh /data/run.sh a b')).toBe('2 a b\n')
     } finally {
@@ -58,7 +58,7 @@ describe('sh/bash script file', () => {
   })
 
   it('stops parsing options at the script file', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo "$@"\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo "$@"\n' })
     try {
       expect(await run(ws, 'sh /data/run.sh -c foo')).toBe('-c foo\n')
     } finally {
@@ -67,7 +67,7 @@ describe('sh/bash script file', () => {
   })
 
   it('sets $0 to the script file', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo $0\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo $0\n' })
     try {
       expect(await run(ws, 'sh /data/run.sh')).toBe('/data/run.sh\n')
     } finally {
@@ -76,7 +76,7 @@ describe('sh/bash script file', () => {
   })
 
   it('restores $0 and the positional parameters afterwards', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo inner $1\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo inner $1\n' })
     try {
       const out = await run(ws, 'set -- outer; sh /data/run.sh inner-arg; echo $0 $1')
       expect(out).toBe('inner inner-arg\nmirage outer\n')
@@ -86,7 +86,7 @@ describe('sh/bash script file', () => {
   })
 
   it('propagates the script exit status', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'exit 7\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'exit 7\n' })
     try {
       expect(await runExit(ws, 'sh /data/run.sh')).toBe(7)
     } finally {
@@ -95,7 +95,7 @@ describe('sh/bash script file', () => {
   })
 
   it.each(['sh', 'bash'])('%s reports a missing script and exits 127', async (head) => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, , err] = await runResult(ws, `${head} /data/nope.sh`)
       expect(err).toBe(`${head}: /data/nope.sh: No such file or directory\n`)
@@ -106,7 +106,7 @@ describe('sh/bash script file', () => {
   })
 
   it('reports a directory operand and exits 126', async () => {
-    const { ws } = await makeIntegrationWS({ 'sub/keep.txt': 'x\n' })
+    const { ws } = makeIntegrationWS({ 'sub/keep.txt': 'x\n' })
     try {
       const [code, , err] = await runResult(ws, 'sh /data/sub')
       expect(err).toBe('/data/sub: /data/sub: Is a directory\n')
@@ -117,7 +117,7 @@ describe('sh/bash script file', () => {
   })
 
   it('traces the script under -x', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo hi\n' })
     try {
       const [code, out, err] = await runResult(ws, 'bash -x /data/run.sh')
       expect(out).toBe('hi\n')
@@ -129,7 +129,7 @@ describe('sh/bash script file', () => {
   })
 
   it('does not leak -x into the caller', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo hi\n' })
     try {
       const [, , err] = await runResult(ws, 'bash -x /data/run.sh; echo after')
       expect(err).toBe('+ echo hi\n')
@@ -139,7 +139,7 @@ describe('sh/bash script file', () => {
   })
 
   it('still runs inline text under -c', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, "sh -c 'echo hello'")).toBe('hello\n')
     } finally {
@@ -148,7 +148,7 @@ describe('sh/bash script file', () => {
   })
 
   it('takes a name and positional parameters after -c', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, "sh -c 'echo $0 $# $1 $2' myname a b")).toBe('myname 2 a b\n')
     } finally {
@@ -157,7 +157,7 @@ describe('sh/bash script file', () => {
   })
 
   it('names the head word when -c has no argument', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, , err] = await runResult(ws, 'sh -c')
       expect(err).toBe('sh: -c: option requires an argument\n')
@@ -168,7 +168,7 @@ describe('sh/bash script file', () => {
   })
 
   it('applies the option named by -o', async () => {
-    const { ws } = await makeIntegrationWS({ 'pf.sh': 'false | true\necho pipefail=$?\n' })
+    const { ws } = makeIntegrationWS({ 'pf.sh': 'false | true\necho pipefail=$?\n' })
     try {
       expect(await run(ws, 'bash -o pipefail /data/pf.sh')).toBe('pipefail=1\n')
     } finally {
@@ -177,7 +177,7 @@ describe('sh/bash script file', () => {
   })
 
   it('applies -o from inside a cluster', async () => {
-    const { ws } = await makeIntegrationWS({ 'pf.sh': 'false | true\necho pipefail=$?\n' })
+    const { ws } = makeIntegrationWS({ 'pf.sh': 'false | true\necho pipefail=$?\n' })
     try {
       const [code, out, err] = await runResult(ws, 'bash -xo pipefail /data/pf.sh')
       expect(out).toBe('pipefail=1\n')
@@ -189,7 +189,7 @@ describe('sh/bash script file', () => {
   })
 
   it('reads a + word as an option, not as the script', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo hi\n' })
     try {
       expect(await runResult(ws, 'bash +x /data/run.sh')).toEqual([0, 'hi\n', ''])
       expect(await runResult(ws, 'bash +o xtrace /data/run.sh')).toEqual([0, 'hi\n', ''])
@@ -199,7 +199,7 @@ describe('sh/bash script file', () => {
   })
 
   it('ends option parsing at a single dash', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo hi\n' })
     try {
       expect(await run(ws, 'bash - /data/run.sh')).toBe('hi\n')
     } finally {
@@ -208,7 +208,7 @@ describe('sh/bash script file', () => {
   })
 
   it('lets a long option consume its value', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo hi\n' })
     try {
       expect(await runResult(ws, 'bash --rcfile /data/run.sh')).toEqual([0, '', ''])
     } finally {
@@ -217,7 +217,7 @@ describe('sh/bash script file', () => {
   })
 
   it('refuses an unknown long option', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo hi\n' })
     try {
       const [code, , err] = await runResult(ws, 'bash --nosuch /data/run.sh')
       expect(err).toBe('bash: --nosuch: unsupported option\n')
@@ -228,7 +228,7 @@ describe('sh/bash script file', () => {
   })
 
   it('reads the program from stdin when no operand names one', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, "echo 'echo hi' | bash")).toBe('hi\n')
     } finally {
@@ -237,7 +237,7 @@ describe('sh/bash script file', () => {
   })
 
   it('keeps every operand positional under -s', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, "echo 'echo zero=$0 one=$1' | bash -s A B")).toBe('zero=bash one=A\n')
     } finally {
@@ -246,7 +246,7 @@ describe('sh/bash script file', () => {
   })
 
   it('does not leak the working directory out of a nested shell', async () => {
-    const { ws } = await makeIntegrationWS({
+    const { ws } = makeIntegrationWS({
       'cd.sh': 'cd /data/sub\n',
       'sub/keep.txt': 'x\n',
     })
@@ -258,7 +258,7 @@ describe('sh/bash script file', () => {
   })
 
   it('does not leak an export out of a nested shell', async () => {
-    const { ws } = await makeIntegrationWS({ 'exp.sh': 'export LEAK=1\n' })
+    const { ws } = makeIntegrationWS({ 'exp.sh': 'export LEAK=1\n' })
     try {
       expect(await run(ws, 'bash /data/exp.sh; echo [$LEAK]')).toBe('[]\n')
     } finally {
@@ -267,7 +267,7 @@ describe('sh/bash script file', () => {
   })
 
   it('does not leak a shell option out of a nested shell', async () => {
-    const { ws } = await makeIntegrationWS({ 'opt.sh': 'set -f\n', 'a.txt': 'x\n' })
+    const { ws } = makeIntegrationWS({ 'opt.sh': 'set -f\n', 'a.txt': 'x\n' })
     try {
       expect(await run(ws, 'bash /data/opt.sh; echo /data/*.txt')).toBe('/data/a.txt\n')
     } finally {
@@ -276,7 +276,7 @@ describe('sh/bash script file', () => {
   })
 
   it('keeps a sourced shell option set in the caller', async () => {
-    const { ws } = await makeIntegrationWS({ 'opt.sh': 'set -f\n', 'a.txt': 'x\n' })
+    const { ws } = makeIntegrationWS({ 'opt.sh': 'set -f\n', 'a.txt': 'x\n' })
     try {
       expect(await run(ws, 'source /data/opt.sh; echo /data/*.txt')).toBe('/data/*.txt\n')
     } finally {
@@ -285,7 +285,7 @@ describe('sh/bash script file', () => {
   })
 
   it('reports a file source cannot read, as typed', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, , err] = await runResult(ws, 'cd /data; source nope.sh')
       expect(err).toBe('bash: nope.sh: No such file or directory\n')
@@ -296,7 +296,7 @@ describe('sh/bash script file', () => {
   })
 
   it('reports a directory operand to source', async () => {
-    const { ws } = await makeIntegrationWS({ 'sub/keep.txt': 'x\n' })
+    const { ws } = makeIntegrationWS({ 'sub/keep.txt': 'x\n' })
     try {
       const [code, , err] = await runResult(ws, 'source /data/sub')
       expect(err).toBe('bash: source: /data/sub: is a directory\n')
@@ -307,7 +307,7 @@ describe('sh/bash script file', () => {
   })
 
   it('refuses source with no operand', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, out, err] = await runResult(ws, 'source; echo after=$?')
       expect(err).toBe(
@@ -321,7 +321,7 @@ describe('sh/bash script file', () => {
   })
 
   it.each(['sh', 'bash', 'source'])('%s follows a symlinked script operand', async (head) => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo hi\n' })
     try {
       expect(await run(ws, `ln -s /data/run.sh /data/link.sh; ${head} /data/link.sh`)).toBe('hi\n')
     } finally {
@@ -330,7 +330,7 @@ describe('sh/bash script file', () => {
   })
 
   it('follows a relative symlinked script operand', async () => {
-    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    const { ws } = makeIntegrationWS({ 'run.sh': 'echo hi\n' })
     try {
       expect(await run(ws, 'ln -s run.sh /data/rel.sh; sh /data/rel.sh')).toBe('hi\n')
     } finally {
@@ -339,7 +339,7 @@ describe('sh/bash script file', () => {
   })
 
   it('reports the link for a broken symlinked script operand', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, , err] = await runResult(
         ws,
@@ -353,7 +353,7 @@ describe('sh/bash script file', () => {
   })
 
   it('keeps return invalid in a child shell run from a sourced file', async () => {
-    const { ws } = await makeIntegrationWS({
+    const { ws } = makeIntegrationWS({
       'child.sh': 'return 5\necho child-after\n',
       'lib.sh': 'bash /data/child.sh\necho after=$?\n',
     })
@@ -368,7 +368,7 @@ describe('sh/bash script file', () => {
   })
 
   it('keeps return valid in the sourced file itself', async () => {
-    const { ws } = await makeIntegrationWS({ 'child.sh': 'return 5\necho child-after\n' })
+    const { ws } = makeIntegrationWS({ 'child.sh': 'return 5\necho child-after\n' })
     try {
       expect(await run(ws, 'source /data/child.sh; echo after=$?')).toBe('after=5\n')
     } finally {

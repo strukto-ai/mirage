@@ -24,10 +24,17 @@ import {
   finishStatement,
   forks,
   ignoringErrexit,
+  land,
+  landLate,
+  recordJobs,
   restoreStatus,
   snapshotStatus,
+  statementOutput,
 } from './statement.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { Channel, JobOutput } from '../../shell/console/index.ts'
+import { Recorder } from '../../shell/descriptors.ts'
+import { materialize } from '../../io/types.ts'
+import { parse } from '../../shell/parse/parse.ts'
 
 const decode = (b: Uint8Array | null): string => new TextDecoder().decode(b ?? new Uint8Array())
 
@@ -123,9 +130,9 @@ describe('forks', () => {
     ['$cmd x', ['head', 'x'], true],
     ['$c head', ['command', 'head'], true],
     ['$f', ['g'], false],
-  ] as const)('%s with %j: %s', async (line, words, forked) => {
+  ] as const)('%s with %j: %s', (line, words, forked) => {
     const session = new SessionState({ sessionId: 's', functions: { g: 'g() { :; }' } })
-    const node = (await getTestParser()).parse(line).children[0]
+    const node = parse(line).children[0]
     expect(node !== undefined && forks(node, session, words)).toBe(forked)
   })
 })
@@ -136,15 +143,15 @@ describe('errexitActs', () => {
     ['false', 0, true, false],
     ['false', 1, false, false],
     ['! true', 1, true, false],
-  ] as const)('%s, status %d, errexit %s: %s', async (line, status, errexit, acts) => {
+  ] as const)('%s, status %d, errexit %s: %s', (line, status, errexit, acts) => {
     const session = new SessionState({ sessionId: 's', shellOptions: { errexit } })
-    const node = (await getTestParser()).parse(line).children[0]
+    const node = parse(line).children[0]
     expect(node !== undefined && errexitActs(node, status, session)).toBe(acts)
   })
 
   it('is scoped off inside an ignored context', async () => {
     const session = new SessionState({ sessionId: 's', shellOptions: { errexit: true } })
-    const node = (await getTestParser()).parse('false').children[0]
+    const node = parse('false').children[0]
     if (node === undefined) throw new Error('no statement')
     await ignoringErrexit(session, async () => {
       expect(errexitActs(node, 1, session)).toBe(false)
@@ -153,4 +160,47 @@ describe('errexitActs', () => {
     })
     expect(errexitActs(node, 1, session)).toBe(true)
   })
+})
+
+it('lands a job write made before its statement landed after the statement', async () => {
+  // A job that writes after the statement's output was taken but before it
+  // landed lands after it; one that writes once the recording ended goes
+  // straight on to the shell.
+  const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
+  const session = new SessionState({ sessionId: 't' })
+  const shell = new Recorder()
+  const jobs = new JobOutput(shell)
+  session.jobOutput = jobs
+  const recorder = new Recorder()
+  const leave = recordJobs(session, recorder)
+  await jobs.emit(Channel.STDOUT, encode('statement\n'))
+  const written = await statementOutput(recorder, null, new IOResult(), null, shell)
+  await jobs.emit(Channel.STDOUT, encode('late\n'))
+  const merged = await land(written, shell, [], new IOResult())
+  await landLate(recorder, leave, null, shell, [], merged)
+  await jobs.emit(Channel.STDOUT, encode('after\n'))
+  const out: string[] = []
+  for (const [, data] of await shell.take()) out.push(decode(await materialize(data)))
+  expect(out.join('')).toBe('statement\nlate\nafter\n')
+})
+
+it('keeps a job write made once the recording ended behind what it recorded', async () => {
+  // What a job writes once the recording ended waits until what was
+  // recorded has landed, so it cannot overtake it.
+  const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
+  const session = new SessionState({ sessionId: 't' })
+  const shell = new Recorder()
+  const jobs = new JobOutput(shell)
+  session.jobOutput = jobs
+  const recorder = new Recorder()
+  const leave = recordJobs(session, recorder)
+  await jobs.emit(Channel.STDOUT, encode('a\n'))
+  await jobs.emit(Channel.STDOUT, encode('b\n'))
+  const landing = landLate(recorder, leave, null, shell, [], new IOResult())
+  const late = jobs.emit(Channel.STDOUT, encode('c\n'))
+  await landing
+  await late
+  const out: string[] = []
+  for (const [, data] of await shell.take()) out.push(decode(await materialize(data)))
+  expect(out.join('')).toBe('a\nb\nc\n')
 })

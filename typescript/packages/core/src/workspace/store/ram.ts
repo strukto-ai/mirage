@@ -15,8 +15,7 @@
 import { RAMObserverStore, type ObserverStore } from '../../observe/store.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import { RAMSessionStore } from '../session/ram.ts'
-import { generationOf, type SessionStore } from '../session/store.ts'
+import { generationOf } from '../record/types.ts'
 import {
   WorkspaceStateStore,
   type WorkspaceFields,
@@ -30,7 +29,7 @@ import {
 export class RAMWorkspaceStateStore extends WorkspaceStateStore {
   private readonly namespaces = new Map<string, RAMNamespaceStore>()
   private readonly observers = new Map<string, RAMObserverStore>()
-  private readonly sessionTables = new Map<string, RAMSessionStore>()
+  private readonly sessionTables = new Map<string, RAMNamespaceStore>()
   private readonly meta = new Map<string, WorkspaceFields>()
 
   constructor(overrides: WorkspaceStateStoreOverrides = {}) {
@@ -55,10 +54,10 @@ export class RAMWorkspaceStateStore extends WorkspaceStateStore {
     return ob
   }
 
-  protected makeSessions(workspaceId: string): SessionStore {
+  protected makeSessions(workspaceId: string): NamespaceStore {
     let table = this.sessionTables.get(workspaceId)
     if (table === undefined) {
-      table = new RAMSessionStore()
+      table = new RAMNamespaceStore()
       this.sessionTables.set(workspaceId, table)
     }
     return table

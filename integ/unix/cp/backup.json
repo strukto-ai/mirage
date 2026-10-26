@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -56,6 +57,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -91,6 +93,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -127,6 +130,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -163,6 +167,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -208,6 +213,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -243,6 +249,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -279,6 +286,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -305,6 +313,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -340,6 +349,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -375,6 +385,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -410,6 +421,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -447,7 +459,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mkdir -p /data/r10nb/x /data/r10nb/y /data/r10nb/d && echo X > /data/r10nb/x/a && echo Y > /data/r10nb/y/a && cp --backup=numbered /data/r10nb/x/a /data/r10nb/y/a /data/r10nb/d; echo rc=$?; cat /data/r10nb/d/a /data/r10nb/d/a.~1~; cp -b /data/r10nb/x/a /data/r10nb/x/a /data/r10nb/d; echo rc=$?; cat /data/r10nb/d/a /data/r10nb/d/a.~2~; rm -r /data/r10nb",
       "expect": {
@@ -479,7 +492,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mkdir -p /data/fcF_b1 && echo S > /data/fcF_b1/s && cp --backup=existing /data/fcF_b1/s /data/fcF_b1/new; echo rc=$?; echo D > /data/fcF_b1/d && cp --backup=existing /data/fcF_b1/s /data/fcF_b1/d; echo E > /data/fcF_b1/e && echo V3 > '/data/fcF_b1/e.~3~' && cp --backup=existing /data/fcF_b1/s /data/fcF_b1/e; ls /data/fcF_b1; cat '/data/fcF_b1/d~' '/data/fcF_b1/e.~4~'; rm -r /data/fcF_b1",
       "expect": {
@@ -514,7 +528,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mkdir -p /data/fcF_b2/t/a/b && cp -r -b /data/fcF_b2/t /data/fcF_b2/c; echo rc=$?; find /data/fcF_b2/c | sort; rm -r /data/fcF_b2",
       "expect": {
@@ -548,6 +563,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -580,6 +596,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -617,6 +634,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"

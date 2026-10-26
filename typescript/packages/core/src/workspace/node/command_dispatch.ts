@@ -52,7 +52,7 @@ import { argumentListTooLong } from '../executor/command/handler.ts'
 import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/command.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
-import { checkSyntax, syntaxErrorResult } from '../../shell/parse/index.ts'
+import { checkSyntax, sourceOffsets, syntaxErrorResult } from '../../shell/parse/index.ts'
 import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
@@ -101,6 +101,7 @@ import { postSessionGate, preSessionGate } from '../../policy/index.ts'
 import { ExecutionNode } from '../types.ts'
 import { concat } from '../../utils/bytes.ts'
 import type { ExpandedWords } from './types.ts'
+import { WORD_BREAKS } from '../../shell/parse/constants.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -116,6 +117,35 @@ async function ownWords<T>(node: TSNodeLike, pending: Promise<T>): Promise<T> {
     if (err instanceof ExitSignal) err.expanding = node.id ?? null
     throw err
   }
+}
+
+/**
+ * The aliases the parser takes for a line an alias rewrote. An alias is no
+ * alias inside the text its own expansion produced, so a name spelling a
+ * reserved word is that word there (`alias fi='if :; then :; fi'` closes its
+ * own `if`). The parser takes one set for the line, so a name that stands in
+ * its own text leaves it. Mirrors Python's parser_aliases.
+ */
+export function parserAliases(
+  line: string,
+  aliases: ReadonlySet<string>,
+  owners: readonly ReadonlySet<string>[],
+): ReadonlySet<string> {
+  return new Set([...aliases].filter((name) => !ownedWord(line, name, owners)))
+}
+
+/** Whether `name` stands as a word of `line` inside text its own expansion produced. */
+function ownedWord(line: string, name: string, owners: readonly ReadonlySet<string>[]): boolean {
+  for (let at = line.indexOf(name); at >= 0; at = line.indexOf(name, at + 1)) {
+    const end = at + name.length
+    if (
+      (at === 0 || WORD_BREAKS.has(line[at - 1] ?? '')) &&
+      (end === line.length || WORD_BREAKS.has(line[end] ?? '')) &&
+      owners[at]?.has(name) === true
+    )
+      return true
+  }
+  return false
 }
 
 export async function executeCommand(
@@ -179,11 +209,12 @@ export async function executeCommand(
       const previous = session.aliasExpansion
       const scope = parser.fork()
       try {
-        const ast = scope.parse(line)
+        const aliases = new Set([...expandingAliases(session), ...names])
+        const ast = scope.parse(line, parserAliases(line, aliases, owners))
         const found =
           checkSyntax(
             line,
-            new Set([...expandingAliases(session), ...names]),
+            aliases,
             (name, at) => owners[at]?.has(name) ?? false,
             session.shopts.extglob ?? false,
           ) ?? findSyntaxIssue(ast)
@@ -199,7 +230,7 @@ export async function executeCommand(
         const mapped = [...owners, new Set<string>()]
         session.aliasExpansion = {
           root: ast.id,
-          owners: scope.sourceOffsets(line, ast).map((i) => {
+          owners: sourceOffsets(line, ast).map((i) => {
             const owner = mapped[i]
             if (owner === undefined) throw new Error('alias source offset is out of bounds')
             return owner
@@ -326,7 +357,17 @@ export async function executeCommand(
       return writeRefused(err, name)
     }
     const cmdLabel = prefixAssignments.map(([k, v]) => `${k}=${v}`).join(' ')
-    return [null, new IOResult(), new ExecutionNode({ command: cmdLabel, exitCode: 0 })]
+    const landed: [null, IOResult, ExecutionNode] = [
+      null,
+      new IOResult(),
+      new ExecutionNode({ command: cmdLabel, exitCode: 0 }),
+    ]
+    // Redirects among the assignments (`x=1 > f y=2`) still open their
+    // files, and one that fails fails the line; the assignments stand
+    // either way.
+    const runner = redirectRunnerFor(node)
+    if (runner === null) return landed
+    return runner(() => Promise.resolve(landed), undefined, '', [])
   }
 
   const savedEnvOverrides = new TempEnv()

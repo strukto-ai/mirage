@@ -14,23 +14,17 @@
 import { CommandSpec } from '../../../commands/spec/types.ts'
 import { CLIHandler } from '../../../commands/cli/types.ts'
 
-import { readFileSync } from 'node:fs'
 import { Accessor } from '../../../accessor/base.ts'
-import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import { CLI } from '../../../commands/cli/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { createShellParser } from '../../../shell/parse/index.ts'
 import { ops } from '../../../test-utils.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 function warmWorkspace(): [Workspace, RAMVFS, RAMVFS] {
   const ram = new RAMVFS()
@@ -43,7 +37,6 @@ function warmWorkspace(): [Workspace, RAMVFS, RAMVFS] {
     { '/r': ram, '/o': other },
     {
       mode: MountMode.WRITE,
-      shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
     },
   )
   return [ws, ram, other]

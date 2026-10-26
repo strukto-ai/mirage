@@ -22,7 +22,7 @@ import {
 
 describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   it('grep pattern', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('grep alice /s3/report.csv')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toContain('alice')
@@ -31,7 +31,7 @@ describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   })
 
   it('grep count', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('grep -c GET /s3/access.log')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toContain('3')
@@ -39,7 +39,7 @@ describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   })
 
   it('grep invert', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('grep -v 500 /s3/access.log')
     const out = stdoutStr(io)
     expect(out).not.toContain('500')
@@ -48,7 +48,7 @@ describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   })
 
   it('grep in pipe', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('cat /s3/access.log | grep POST')
     expect(countOccurrences(stdoutBytes(io), 'POST')).toBe(2)
     expect(stdoutStr(io)).not.toContain('GET')
@@ -56,7 +56,7 @@ describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   })
 
   it('awk print field', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell("awk -F, '{print $1}' /s3/report.csv")
     const out = stdoutStr(io)
     expect(out).toContain('name')
@@ -65,14 +65,14 @@ describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   })
 
   it('awk sum', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell("awk -F, 'NR>1{s+=$2}END{print s}' /s3/report.csv")
     expect(stdoutStr(io)).toContain('55')
     await ws.close()
   })
 
   it('sed substitute', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell("sed 's/alice/ALICE/' /s3/report.csv")
     const out = stdoutStr(io)
     expect(out).toContain('ALICE')
@@ -81,7 +81,7 @@ describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   })
 
   it('sed delete line', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell("sed '/bob/d' /s3/report.csv")
     const out = stdoutStr(io)
     expect(out).not.toContain('bob')
@@ -90,49 +90,49 @@ describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   })
 
   it('sed in pipe', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell("cat /s3/report.csv | sed 's/,/ | /g'")
     expect(stdoutStr(io)).toContain(' | ')
     await ws.close()
   })
 
   it('jq field', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell("jq '.[0].name' /s3/users.json")
     expect(stdoutStr(io)).toContain('alice')
     await ws.close()
   })
 
   it('jq length', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell("jq 'length' /s3/users.json")
     expect(stdoutStr(io)).toContain('2')
     await ws.close()
   })
 
   it('jq in pipe', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell("cat /s3/users.json | jq '.[1].age'")
     expect(stdoutStr(io)).toContain('25')
     await ws.close()
   })
 
   it('wc -l', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('wc -l /ram/notes.txt')
     expect(stdoutStr(io)).toContain('3')
     await ws.close()
   })
 
   it('wc -l in pipe', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('cat /s3/access.log | wc -l')
     expect(stdoutStr(io)).toContain('5')
     await ws.close()
   })
 
   it('head -n', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('head -n 2 /s3/access.log')
     const lines = stdoutStr(io).trim().split('\n')
     expect(lines.length).toBe(2)
@@ -140,7 +140,7 @@ describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   })
 
   it('tail -n', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('tail -n 2 /s3/access.log')
     const lines = stdoutStr(io).trim().split('\n')
     expect(lines.length).toBe(2)
@@ -148,7 +148,7 @@ describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   })
 
   it('cut field', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('cut -d, -f1 /s3/report.csv')
     const out = stdoutStr(io)
     expect(out).toContain('name')
@@ -157,21 +157,21 @@ describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   })
 
   it('uniq dedupes', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('sort /ram/words.txt | uniq')
     expect(countOccurrences(stdoutBytes(io), 'apple')).toBe(1)
     await ws.close()
   })
 
   it('tr upper', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell("cat /s3/data.txt | tr 'a-z' 'A-Z'")
     expect(stdoutStr(io)).toContain('HELLO FROM S3')
     await ws.close()
   })
 
   it('sort numeric', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('sort -n /ram/nums.txt')
     const lines = stdoutStr(io).trim().split('\n')
     expect(lines).toEqual(['1', '2', '3', '4', '5'])
@@ -179,14 +179,14 @@ describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   })
 
   it('rev in pipe', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('echo hello | rev')
     expect(stdoutStr(io)).toContain('olleh')
     await ws.close()
   })
 
   it('nl numbers lines', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('nl /ram/notes.txt')
     const out = stdoutStr(io)
     expect(out).toContain('1')

@@ -17,7 +17,6 @@ import type { Handed } from '../../../vfs/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { MountMode, type PathSpec } from '../../../types.ts'
 import { mountedPath } from '../../../utils/key_prefix.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -121,10 +120,7 @@ async function run(
 ): Promise<[string, string, number]> {
   for (const dir of ['/d', '/d/sub']) vfs.store.dirs.add(dir)
   for (const [key, data] of Object.entries(TREE)) vfs.store.files.set(key, ENC.encode(data))
-  const ws = new Workspace(
-    { '/': vfs },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/': vfs }, { mode: MountMode.WRITE })
   for (const [path, rev] of Object.entries(pins)) ws.mount('/').revisions.set(path, rev)
   const scoped = hide !== undefined || deny !== undefined
   try {
@@ -304,7 +300,7 @@ async function grepAfterEdit(vfs: RAMVFS): Promise<[string, string[]]> {
   for (const [key, data] of Object.entries({ ...TREE, '/d/c.txt': 'ada cached\n' })) {
     vfs.store.files.set(key, ENC.encode(data))
   }
-  const ws = new Workspace({ '/': vfs }, { shellParser: await getTestParser() })
+  const ws = new Workspace({ '/': vfs })
   try {
     await ws.shell('cat /d/c.txt')
     vfs.store.files.set('/d/c.txt', ENC.encode('nothing\n'))

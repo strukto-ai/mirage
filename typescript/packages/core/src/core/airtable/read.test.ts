@@ -17,7 +17,6 @@ import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { AirtableVFS } from '../../vfs/airtable/airtable.ts'
 import type { AirtableConfig } from './config.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { FakeAirtable, makeAccessor } from '../../../tests/core/airtable/_test_util.ts'
 import { read, readStream } from './read.ts'
@@ -34,14 +33,11 @@ const DEC = new TextDecoder()
 const ROW = new FileStat({ name: 'file', type: FileType.FILE })
 const DIR = new FileStat({ name: 'dir', type: FileType.DIRECTORY })
 
-async function mounted(
-  fake: FakeAirtable,
-  overrides: Partial<AirtableConfig> = {},
-): Promise<Workspace> {
+function mounted(fake: FakeAirtable, overrides: Partial<AirtableConfig> = {}): Workspace {
   const vfs = Object.assign(new AirtableVFS({ token: 'pat' }), {
     accessor: makeAccessor(fake, overrides),
   })
-  return new Workspace({ [`${ROOT}/`]: vfs }, { shellParser: await getTestParser() })
+  return new Workspace({ [`${ROOT}/`]: vfs })
 }
 
 function spec(virtual: string): PathSpec {
@@ -120,7 +116,7 @@ describe('airtable read', () => {
   })
 
   it('answers ENOENT for missing tables and views', async () => {
-    const ws = await mounted(new FakeAirtable())
+    const ws = mounted(new FakeAirtable())
     for (const path of [
       `${BASE}/Gone__tblGone0000000001/records.jsonl`,
       `${TABLE}/views/Gone__viwGone0000000001.jsonl`,
@@ -132,7 +128,7 @@ describe('airtable read', () => {
 
   it('answers ENOENT for a base outside baseIds', async () => {
     const fake = new FakeAirtable()
-    const ws = await mounted(fake, { baseIds: ['appOpsFinance0001'] })
+    const ws = mounted(fake, { baseIds: ['appOpsFinance0001'] })
     for (const path of [RECORDS, `${BASE}/base.json`, `${TABLE}/table.json`]) {
       await expect(ws.dispatch('read', path)).rejects.toMatchObject({ code: 'ENOENT' })
     }
@@ -141,7 +137,7 @@ describe('airtable read', () => {
 
   it('answers ENOENT for a name the listing does not hold', async () => {
     const fake = new FakeAirtable()
-    const ws = await mounted(fake)
+    const ws = mounted(fake)
     const ops = `${ROOT}/bases/Ops_Finance__appOpsFinance0001`
     for (const path of [
       `${ROOT}/bases/Wrong__appRoadmapBase001/base.json`,
@@ -222,7 +218,7 @@ describe('airtable read stream', () => {
     const accessor = makeAccessor(new FakeAirtable())
     const body = Buffer.concat(await drain(readStream(accessor, spec(DONE), ROW, DIR)))
     expect(ids(body)).toHaveLength(4)
-    const ws = await mounted(new FakeAirtable())
+    const ws = mounted(new FakeAirtable())
     for (const path of [
       `${BASE}/Gone__tblGone0000000001/records.jsonl`,
       `${TABLE}/views/Gone__viwGone0000000001.jsonl`,

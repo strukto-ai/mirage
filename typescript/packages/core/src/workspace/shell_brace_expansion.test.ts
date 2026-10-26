@@ -76,7 +76,7 @@ const CASES: [string, string][] = [
 
 describe('shell brace expansion', () => {
   it.each(CASES)('%s', async (cmd, expected) => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, cmd)).toBe(expected)
     } finally {
@@ -85,7 +85,7 @@ describe('shell brace expansion', () => {
   })
 
   it('brace expansion happens before glob resolution', async () => {
-    const { ws } = await makeIntegrationWS({
+    const { ws } = makeIntegrationWS({
       'ga1.txt': 'x\n',
       'ga2.txt': 'y\n',
       'gb1.txt': 'z\n',
@@ -102,7 +102,7 @@ describe('shell brace expansion', () => {
   })
 
   it('mkdir with braces creates each directory', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'mkdir -p /data/bd/{x,y,z} && ls /data/bd')).toBe('x\ny\nz\n')
     } finally {
@@ -111,7 +111,7 @@ describe('shell brace expansion', () => {
   })
 
   it('touch with a brace range creates each file', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'touch /data/bf{1..3}.txt && ls /data')
       expect(out).toContain('bf1.txt')

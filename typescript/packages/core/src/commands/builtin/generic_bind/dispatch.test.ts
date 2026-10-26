@@ -28,7 +28,6 @@ import type { Handed } from '../../../vfs/types.ts'
 import { eacces } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 it('reads the output inside the running command', async () => {
   // A fresh mount trusts only the listings the running command made, so a
@@ -68,10 +67,7 @@ it.each([false, true])(
     const right = new CachedRAM()
     left.loadState({ type: 'ram', files: { '/input': enc.encode('z\na\n') } })
     right.loadState({ type: 'ram', files: { '/input': enc.encode('m\n') } })
-    const ws = new Workspace(
-      { '/a': left, '/b': right },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/a': left, '/b': right }, { mode: MountMode.WRITE })
     const command = 'sort /a/input /b/input'
     try {
       const result = await ws.shell(command + (overwrite ? ' -o /a/input' : ''))
@@ -100,7 +96,7 @@ it('charges each mount its own limit in a du walk', async () => {
       '/a': [outer, MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }],
       '/a/b': [inner, MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }],
     },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
   const spec = SPECS.du
   if (spec === undefined) throw new Error('Missing spec: du')
@@ -136,7 +132,7 @@ class RefusedListing extends RAMVFS {
 it('du -x never lists a mount below the operand', async () => {
   const ws = new Workspace(
     { '/a': new RAMVFS(), '/a/b': new RefusedListing(), '/c': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
   try {
     await ws.shell('echo aa > /a/f; echo d > /c/h')
@@ -181,7 +177,7 @@ function lines<T extends Lines>(vfs: T): T {
 
 it('asks the mount for head, tail and wc through the dispatcher', async () => {
   const vfs = lines(new Lines())
-  const ws = new Workspace({ '/m': vfs }, { shellParser: await getTestParser() })
+  const ws = new Workspace({ '/m': vfs })
   const dec = new TextDecoder()
   try {
     const out = [
@@ -198,10 +194,7 @@ it('asks the mount for head, tail and wc through the dispatcher', async () => {
 
 it('refuses the stand-ins through a link to a sealed file', async () => {
   const vfs = lines(new Lines())
-  const ws = new Workspace(
-    { '/m': vfs },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
   try {
     expect((await ws.shell('ln -s /m/f /m/l')).exitCode).toBe(0)
     await ws.setSessionProfile(ws.defaultSessionId, {
@@ -220,7 +213,7 @@ it('refuses the stand-ins through a link to a sealed file', async () => {
 
 it('reads a cached file from the cache instead', async () => {
   const vfs = lines(new CachedLines())
-  const ws = new Workspace({ '/m': vfs }, { shellParser: await getTestParser() })
+  const ws = new Workspace({ '/m': vfs })
   const dec = new TextDecoder()
   try {
     await ws.shell('cat /m/f')
@@ -285,10 +278,7 @@ async function walks(vfs: RAMVFS): Promise<[number, string, string][]> {
     },
   })
   for (const dir of ['/a', '/a/b', '/a/b/c', '/a/empty']) vfs.store.dirs.add(dir)
-  const ws = new Workspace(
-    { '/m': vfs },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
   const dec = new TextDecoder()
   try {
     const out: [number, string, string][] = []
@@ -328,7 +318,7 @@ it.each([
     vfs.loadState({ type: 'ram', files: { '/x.txt': enc.encode('ada\n') } })
     mounts[`/repo/${name}`] = vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE, shellParser: await getTestParser() })
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   try {
     const r = await ws.shell(line)
     const dec = new TextDecoder()
@@ -348,10 +338,7 @@ it('a walk following a link onto a mount without readTree walks it', async () =>
   main.loadState({ type: 'ram', files: { '/x.txt': enc.encode('ada\n') } })
   const dev = new Untreed()
   dev.loadState({ type: 'ram', dirs: ['/', '/sub'], files: {} })
-  const ws = new Workspace(
-    { '/repo/main': main, '/data/dev': dev },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/repo/main': main, '/data/dev': dev }, { mode: MountMode.WRITE })
   try {
     await ws.shell('ln -s /data/dev /repo/a')
     const r = await ws.shell('du -aL /repo')
@@ -369,10 +356,7 @@ it('a walk following a link onto a mount without readTree walks it', async () =>
 // A run across mounts reads as served by no mount, even while a mount's scope
 // is bound (another task's: there is no task isolation), so its walk descends.
 it('walks across mounts as a run across them, even inside a mount scope', async () => {
-  const ws = new Workspace(
-    { '/a': new RAMVFS(), '/a/b': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/a': new RAMVFS(), '/a/b': new RAMVFS() }, { mode: MountMode.WRITE })
   const run = (name: string): Promise<string> =>
     runWithMountGate('/a/', MountMode.WRITE, async () => {
       const builder = BUILDERS.find((b) => b.name === name)

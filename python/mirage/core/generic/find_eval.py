@@ -278,38 +278,14 @@ def evaluate(node: PredNode, entry: FindEntry, effects: Effects) -> bool:
 
     Evaluation short-circuits the way GNU's does (``-a`` stops at the
     first false, ``-o`` at the first true), so an action or a prune is
-    reached exactly when GNU would reach it.
+    reached exactly when GNU would reach it. The tests and connectives
+    every entry meets are told apart first.
 
     Args:
         node (PredNode): the predicate tree.
         entry (FindEntry): the entry under test.
         effects (Effects): filled in as actions are reached.
     """
-    if isinstance(node, TrueNode):
-        return True
-    if isinstance(node, Action):
-        effects.acted = True
-        return True
-    if isinstance(node, Prune):
-        # Only a directory has contents to skip; a file key that is also
-        # a directory prefix (an object store allows both) must not
-        # drop what sits under the directory.
-        if entry.kind == "d" and effects.deferred:
-            node.pending.append(PendingPrune(entry))
-        elif entry.kind == "d":
-            node.pruned.append(entry.key)
-        effects.pruned = effects.pruned or entry.kind == "d"
-        return True
-    if isinstance(node, Mtime):
-        # An entry the walk fetched no time for passes here and meets
-        # the expression's flat window afterwards; the test is recorded
-        # so a -prune reached past it is only pending.
-        if entry.mtime is None:
-            effects.deferred.append(node)
-            return True
-        return in_mtime_window(entry.mtime, node.lo, node.hi)
-    if isinstance(node, Empty):
-        return entry.is_empty is True
     if isinstance(node, Name):
         if node.icase:
             return fnmatch(entry.name.lower(), node.pattern.lower())
@@ -343,6 +319,31 @@ def evaluate(node: PredNode, entry: FindEntry, effects: Effects) -> bool:
                 del effects.deferred[mark:before]
                 return True
         return False
+    if isinstance(node, TrueNode):
+        return True
+    if isinstance(node, Action):
+        effects.acted = True
+        return True
+    if isinstance(node, Prune):
+        # Only a directory has contents to skip; a file key that is also
+        # a directory prefix (an object store allows both) must not
+        # drop what sits under the directory.
+        if entry.kind == "d" and effects.deferred:
+            node.pending.append(PendingPrune(entry))
+        elif entry.kind == "d":
+            node.pruned.append(entry.key)
+        effects.pruned = effects.pruned or entry.kind == "d"
+        return True
+    if isinstance(node, Mtime):
+        # An entry the walk fetched no time for passes here and meets
+        # the expression's flat window afterwards; the test is recorded
+        # so a -prune reached past it is only pending.
+        if entry.mtime is None:
+            effects.deferred.append(node)
+            return True
+        return in_mtime_window(entry.mtime, node.lo, node.hi)
+    if isinstance(node, Empty):
+        return entry.is_empty is True
     raise TypeError(f"unknown predicate node: {node!r}")
 
 
@@ -516,7 +517,12 @@ def tree_has_empty(node: PredNode) -> bool:
     return False
 
 
-def keep(entry: FindEntry, tree: PredNode, min_depth: int | None) -> bool:
+def keep(
+    entry: FindEntry,
+    tree: PredNode,
+    min_depth: int | None,
+    acts: bool | None = None,
+) -> bool:
     """Whether ``find`` reports the entry.
 
     With no action in the tree the rows are the entries the whole
@@ -530,6 +536,8 @@ def keep(entry: FindEntry, tree: PredNode, min_depth: int | None) -> bool:
         entry (FindEntry): the entry under test.
         tree (PredNode): the predicate tree.
         min_depth (int | None): ``-mindepth``.
+        acts (bool | None): whether the tree holds an action, for a walk
+            that works it out once for every entry; None works it out.
     """
     if min_depth is not None and entry.depth < min_depth:
         return False
@@ -542,7 +550,9 @@ def keep(entry: FindEntry, tree: PredNode, min_depth: int | None) -> bool:
         # reach, on the first of them.
         for prune in _prune_nodes(tree)[:1]:
             prune.pending.append(PendingPrune(entry))
-    return effects.acted if tree_has_action(tree) else matched
+    if acts is None:
+        acts = tree_has_action(tree)
+    return effects.acted if acts else matched
 
 
 def emit_start_path(

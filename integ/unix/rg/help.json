@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -h | grep -c '^Usage: rg '; rg -h foo /nonexistent | grep -c '^Usage: rg '",

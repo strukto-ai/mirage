@@ -34,10 +34,10 @@ import type { Context } from '../../commands/config.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { Session, Workspace } from '../workspace/workspace.ts'
 import { explainLine, type Judgment } from './explain.ts'
+import { parse } from '../../shell/parse/parse.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -93,10 +93,9 @@ afterEach(async () => {
 })
 
 async function ws(): Promise<Workspace> {
-  const parser = await getTestParser()
   const w = new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: parser, profiles: { r: PROFILE } },
+    { mode: MountMode.WRITE, profiles: { r: PROFILE } },
   )
   open.push(w)
   await w.shell('mkdir -p /data/prod')
@@ -119,17 +118,16 @@ async function judged(
 ): Promise<Judgment[]> {
   await w.ensureSessionsLoaded()
   const session = w.getSession(sessionId === '' ? w.defaultSessionId : sessionId)
-  const parser = await getTestParser()
   const said = await runWithRefusalSink(
     () => undefined,
     () =>
       runExplaining(DryRun.DECIDING, () =>
         explainLine(
-          parser.parse(line),
+          parse(line),
           session,
           w.registry,
           w.namespace,
-          (text) => parser.parse(text),
+          (text) => parse(text),
           wholeLine,
         ),
       ),
@@ -142,10 +140,9 @@ async function judged(
  * `profile` for session `s`.
  */
 async function inlineWs(onAsk: AskHandler, profile = PROFILE): Promise<Workspace> {
-  const parser = await getTestParser()
   const w = new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: parser, profiles: { r: profile }, onAsk },
+    { mode: MountMode.WRITE, profiles: { r: profile }, onAsk },
   )
   open.push(w)
   await w.shell('mkdir -p /data/prod')
@@ -239,11 +236,10 @@ describe('explain', () => {
     async (line) => {
       // A builtin that runs a word hands it to the gate, which refuses it
       // there, and the dry run says what the run says.
-      const parser = await getTestParser()
       const profile = parseSessionProfile({ commands: { allow: ['timeout', 'eval'] } })
       const w = new Workspace(
         { '/data': new RAMVFS() },
-        { mode: MountMode.WRITE, shellParser: parser, profiles: { r: profile } },
+        { mode: MountMode.WRITE, profiles: { r: profile } },
       )
       open.push(w)
       await w.vfs.write('/data/a.txt', 'a\n')
@@ -262,6 +258,15 @@ describe('explain', () => {
     const [first, second] = await judged(w, 'cat /data/a.txt && rm /data/prod/x.txt', 's')
     expect([first?.command, first?.outcome]).toEqual(['cat', Outcome.ALLOW])
     expect([second?.command, second?.outcome]).toEqual(['rm', Outcome.DENY])
+  })
+
+  it('reads a reserved word alias as a command', async () => {
+    const w = await ws()
+    await w.shell("shopt -s expand_aliases; alias fi='echo works'", { sessionId: 's' })
+    const said = await w.explain('fi', 's')
+    expect(said.node.children.map((child) => ('command' in child ? child.command : null))).toEqual([
+      'fi',
+    ])
   })
 
   it('says exactly what the run would say', async () => {
@@ -363,10 +368,7 @@ describe('explain', () => {
     // Every reader of the line reads a test by the run's own tokens and
     // grammar, a [[ ]] a leaf at a time, so the question the pass asked is
     // the one the gate answers: the line runs once, on one nod.
-    const w = new Workspace(
-      { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(w)
     await w.vfs.write('/data/a.txt', 'a\n')
     await w.vfs.write('/data/secret.txt', 's\n')
@@ -388,10 +390,7 @@ describe('explain', () => {
     // find -exec hands cat words the runtime completes, so the run leaves
     // cat's question to the gate where it runs and holds nothing; explain
     // says the same rather than a hold the run never makes.
-    const w = new Workspace(
-      { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(w)
     await w.shell('echo a > /data/a.txt; echo s > /data/secret.txt')
     w.createSession('s', {
@@ -484,10 +483,9 @@ const SEALED = parseSessionProfile({
 })
 
 async function sealedWs(): Promise<Workspace> {
-  const parser = await getTestParser()
   const w = new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: parser, profiles: { r: SEALED } },
+    { mode: MountMode.WRITE, profiles: { r: SEALED } },
   )
   open.push(w)
   await w.shell('mkdir -p /data/prod')
@@ -539,10 +537,9 @@ describe('prejudge', () => {
     // rules alone; a policy written in code answers preCommand once, as
     // its command runs, so the commands before it have run. A line it
     // refuses whole is preExecute's.
-    const parser = await getTestParser()
     const w = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser, policies: [new NoCat()] },
+      { mode: MountMode.WRITE, policies: [new NoCat()] },
     )
     open.push(w)
     await w.shell('echo a > /data/a.txt')
@@ -650,12 +647,10 @@ describe('prejudge', () => {
       Promise.reject(new Error('connection refused')),
     )
     const asked: string[] = []
-    const parser = await getTestParser()
     const w = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: { r: PROFILE },
         onAsk: answering(asked, Outcome.ALLOW),
         env: { TOKEN: { from: 'fake-dead-handoff', ref: 'r' } },
@@ -774,12 +769,10 @@ describe('prejudge', () => {
     // every retry asked for the cat again; the answers could never
     // accumulate to a line that runs.
     const box = new LineBox()
-    const parser = await getTestParser()
     const w = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         profiles: { r: PROFILE },
         runtimes: [box, 'workspace'],
       },
@@ -807,7 +800,6 @@ describe('prejudge', () => {
     // The executor judges a name once expanded, so explain says nothing
     // about it; a runtime that takes the line whole reads it as typed and
     // refuses it under a rule, and explain then says exactly that.
-    const parser = await getTestParser()
     const line = 'X=echo; "$X" hi'
     for (const [whole, profile, code] of [
       [false, PROFILE, 0],
@@ -818,7 +810,6 @@ describe('prejudge', () => {
         { '/data': new RAMVFS() },
         {
           mode: MountMode.EXEC,
-          shellParser: parser,
           profiles: { r: profile },
           ...(whole ? { runtimes: [new LineBox(), 'workspace'] } : {}),
         },
@@ -842,7 +833,6 @@ describe('prejudge', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         profiles: { r: parseSessionProfile({ commands: { allow: ['bash', 'source', 'rm'] } }) },
         runtimes: [new LineBox(), 'workspace'],
       },
@@ -876,7 +866,6 @@ describe('prejudge', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         profiles: {
           r: parseSessionProfile({
             commands: {
@@ -921,7 +910,6 @@ describe('prejudge', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         profiles: {
           r: parseSessionProfile({
             commands: {
@@ -973,7 +961,6 @@ describe('prejudge', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         policies: [new SealedSecret()],
         runtimes: [box, 'workspace'],
       },
@@ -997,10 +984,7 @@ describe('prejudge', () => {
     // A loop is read for a cd before it is walked; walking it to find out
     // doubled the work at every level, so 22 nested loops walked the innermost
     // command four million times before the line ran.
-    const w = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const w = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(w)
     const line = `${'for a in; do '.repeat(22)}true${'; done'.repeat(22)}`
     const started = performance.now()
@@ -1018,7 +1002,6 @@ describe('prejudge', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         profiles: {
           r: parseSessionProfile({
             commands: {
@@ -1049,7 +1032,6 @@ describe('prejudge', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         profiles: { r: PROFILE },
         runtimes: [new LineBox(), 'workspace'],
         routePolicy: () => 'workspace',
@@ -1078,7 +1060,6 @@ describe('prejudge', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         profiles: { r: PROFILE, g: sealed },
       },
     )
@@ -1117,13 +1098,11 @@ describe('prejudge', () => {
     // the hand-off stays a holder short of release for good and its
     // grant is neither spent nor on offer to any later line.
     const asked: string[] = []
-    const parser = await getTestParser()
     let consoles = 0
     const w = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: { r: PROFILE },
         onAsk: answering(asked, Outcome.ALLOW),
         consoleFactory: (): JobConsole => {
@@ -1633,10 +1612,7 @@ describe('explain answers and the op form', () => {
   // runs printf as a scope of its own, spelled from the expanded words,
   // and `$'\xff'` expands to a byte no UTF-8 encodes.
   it('reads a scope that spells a byte past UTF-8', async () => {
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       const said = await ws.explain("env printf '%d\\n' $'\\x27\\xff'")
       const [env] = said.node.children
@@ -1659,7 +1635,6 @@ describe('explain answers and the op form', () => {
       { '/data/': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         policies: [new AskRm(), new DenyRm()],
       },
     )
@@ -1686,7 +1661,7 @@ describe('explain answers and the op form', () => {
   it('explains a policy that fails as a deny', async () => {
     const ws = new Workspace(
       { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser(), policies: [new Broken()] },
+      { mode: MountMode.WRITE, policies: [new Broken()] },
     )
     try {
       const said = await ws.explain('echo hi')

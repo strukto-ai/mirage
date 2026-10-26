@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg --json foo /data/rgfl/a.txt | sed -E 's/\"elapsed\":\\{[^}]*\\}/\"elapsed\":E/g; s/\"elapsed_total\":\\{[^}]*\\}/\"elapsed_total\":E/g; s/\"bytes_printed\":[0-9]+/\"bytes_printed\":N/g'; rg --json -C1 bar /data/rgfl/a.txt | sed -E 's/\"elapsed\":\\{[^}]*\\}/\"elapsed\":E/g; s/\"elapsed_total\":\\{[^}]*\\}/\"elapsed_total\":E/g; s/\"bytes_printed\":[0-9]+/\"bytes_printed\":N/g'; rg --json zzz /data/rgfl/a.txt | sed -E 's/\"elapsed\":\\{[^}]*\\}/\"elapsed\":E/g; s/\"elapsed_total\":\\{[^}]*\\}/\"elapsed_total\":E/g; s/\"bytes_printed\":[0-9]+/\"bytes_printed\":N/g'; rm -rf /data/rgfl",
@@ -55,6 +56,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg --json -c foo /data/rgfl/a.txt; rg --json -l foo /data/rgfl/a.txt; rg --json --no-json foo /data/rgfl/a.txt; rg --json -U 'foo\\nbar' /data/rgfl/a.txt | sed -E 's/\"elapsed\":\\{[^}]*\\}/\"elapsed\":E/g; s/\"elapsed_total\":\\{[^}]*\\}/\"elapsed_total\":E/g; s/\"bytes_printed\":[0-9]+/\"bytes_printed\":N/g'; printf 'foo\\n' | rg --json foo | sed -E 's/\"elapsed\":\\{[^}]*\\}/\"elapsed\":E/g; s/\"elapsed_total\":\\{[^}]*\\}/\"elapsed_total\":E/g; s/\"bytes_printed\":[0-9]+/\"bytes_printed\":N/g'; rm -rf /data/rgfl",
@@ -92,6 +94,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'foo\\nbar\\n' | rg -U --json 'foo\\nbar\\n' | head -2 | tail -1; rg -U --json 'foo\\n' /data/rgfl/a.txt | head -2 | tail -1; rm -rf /data/rgfl",

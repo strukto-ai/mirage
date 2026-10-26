@@ -28,7 +28,6 @@ import { PyodideExecution } from './execution.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { context } from '../../../../tests/workspace/fixtures/context.ts'
 import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
 
@@ -1015,7 +1014,6 @@ describe('Pyodide run cwd', { timeout: 120_000 }, () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         runtimes: [rt, 'workspace'],
       },
     )

@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "zgrep hello /data/a.txt",
@@ -51,6 +52,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "zgrep -c o /data/a.txt /data/b.txt",
@@ -81,6 +83,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'hello\\n' | zgrep -H hello",
@@ -111,6 +114,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'hello\\n' | gzip | head -c 10 | zgrep h",
@@ -141,6 +145,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep  hello bad.gz good.gz)",
@@ -171,6 +176,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep -c hello bad.gz good.gz)",
@@ -201,6 +207,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep -n hello bad.gz good.gz)",
@@ -231,6 +238,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep -l hello bad.gz good.gz)",
@@ -261,6 +269,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep -L hello bad.gz good.gz)",
@@ -291,6 +300,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep -q hello bad.gz good.gz)",
@@ -321,6 +331,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5Oaxg=' | base64 -d | zgrep -c hello",
@@ -351,6 +362,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAAfiwgAAAAAAAIT' | base64 -d | zgrep -c hello",

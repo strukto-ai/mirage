@@ -49,7 +49,7 @@ from mirage.vfs.s3 import S3VFS
 from mirage.workspace.mount.namespace import RAMNamespaceStore
 from mirage.workspace.mount.namespace.disk import DiskNamespaceStore
 from mirage.workspace.mount.namespace.redis import RedisNamespaceStore
-from mirage.workspace.session.disk import DiskSessionStore
+from mirage.workspace.mount.namespace.store import RecordNamespaceStore
 from mirage.workspace.store import (
     DiskWorkspaceStateStore,
     RAMWorkspaceStateStore,
@@ -225,7 +225,7 @@ async def test_store_disk_group_override(tmp_path):
     assert isinstance(cfg.store.workspace, DiskStoreBlock)
     store = cfg.to_workspace_kwargs()["store"]
     assert isinstance(store, RAMWorkspaceStateStore)
-    assert isinstance(store.sessions("ws1"), DiskSessionStore)
+    assert isinstance(store.sessions("ws1"), RecordNamespaceStore)
 
 
 @pytest.mark.asyncio
@@ -270,7 +270,7 @@ async def test_store_s3_workspace_group_builds_s3_provider():
     store = cfg.to_workspace_kwargs()["store"]
     assert isinstance(store, RAMWorkspaceStateStore)
     assert isinstance(store.namespace("ws1"), RAMNamespaceStore)
-    assert type(store.sessions("ws1")).__name__ == "S3SessionStore"
+    assert isinstance(store.sessions("ws1"), RecordNamespaceStore)
 
 
 @pytest.mark.asyncio

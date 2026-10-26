@@ -213,7 +213,8 @@ async function arithText(
       child.type === NT.UNARY_EXPRESSION ||
       child.type === NT.PARENTHESIZED_EXPRESSION ||
       child.type === NT.TERNARY_EXPRESSION ||
-      child.type === NT.POSTFIX_EXPRESSION
+      child.type === NT.POSTFIX_EXPRESSION ||
+      child.type === NT.CONCATENATION
     ) {
       parts.push(await arithText(child, context, executeFn, callStack, view))
     } else if (child.type === 'subscript') {
@@ -221,7 +222,8 @@ async function arithText(
     } else if (
       ARITH_OPERATORS.has(child.type) ||
       child.type === NT.NUMBER ||
-      child.type === NT.VARIABLE_NAME
+      child.type === NT.VARIABLE_NAME ||
+      child.type === NT.WORD
     ) {
       parts.push(child.text)
     } else {

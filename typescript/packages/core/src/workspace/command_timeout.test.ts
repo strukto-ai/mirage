@@ -15,14 +15,11 @@ import { CommandSpec } from '../commands/spec/types.ts'
 import { CLIHandler } from '../commands/cli/types.ts'
 import type { Context } from '../commands/config.ts'
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_COMMAND_LIMITS } from '../policy/builtin/output_cap.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import type { Program, RunResult } from '../runtime/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { programs } from './lookup/lookup.ts'
@@ -48,16 +45,7 @@ class SignalProbeRuntime extends LanguageRuntime {
   }
 }
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 const DEC = new TextDecoder()
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
 
 afterEach(() => {
   delete DEFAULT_COMMAND_LIMITS.sleep
@@ -65,7 +53,7 @@ afterEach(() => {
 
 function buildWs(): Workspace {
   const ram = new RAMVFS()
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 }
 
 describe('command timeout', () => {
@@ -146,7 +134,6 @@ describe('python3 command timeout', () => {
       { '/data': [ram, MountMode.EXEC, limits?.['/data'] ?? {}] },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: ['monty', 'quickjs', 'workspace'],
       },
     )
@@ -200,7 +187,6 @@ describe('python3 command timeout', () => {
       { '/data': ram },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [probe, 'workspace'],
         commandLimits: { python3: new Limit({ timeoutSeconds: 0.1 }) },
       },
@@ -220,7 +206,6 @@ describe('python3 command timeout', () => {
       { '/data': ram },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: ['pyodide', 'workspace'],
         commandLimits: { python3: new Limit({ timeoutSeconds: 0.5 }) },
       },
@@ -256,7 +241,6 @@ describe('python3 command timeout', () => {
       { '/data': ram },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: ['quickjs', 'workspace'],
         commandLimits: { node: new Limit({ timeoutSeconds: 0.3 }) },
       },
@@ -279,7 +263,7 @@ describe('background job kill', () => {
     const ram = new RAMVFS()
     const ws = new Workspace(
       { '/data': ram },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [probe, 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: [probe, 'workspace'] },
     )
     try {
       await ws.shell('python3 -c "hang" &')
@@ -369,7 +353,7 @@ describe('large in-memory commands', () => {
     const ram = new RAMVFS()
     ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(500_000)))
     ram.store.files.set('/blank', new TextEncoder().encode('\n'.repeat(2_500_000)))
-    const ws = new Workspace({ '/': ram }, { shellParser: parser })
+    const ws = new Workspace({ '/': ram })
     const abort = new AbortController()
     const timer = setTimeout(() => {
       abort.abort()
@@ -400,7 +384,7 @@ describe('large in-memory commands', () => {
   ])('honors a caller abort during the walk of %s', async (command) => {
     const ws = new Workspace(
       { '/': [wideRam(), MountMode.WRITE, UNCAPPED] },
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
     )
     const abort = new AbortController()
     const timer = setTimeout(() => {
@@ -419,7 +403,7 @@ describe('large in-memory commands', () => {
   it('lets a caller abort tr after output starts', async () => {
     const ram = new RAMVFS()
     ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(500_000)))
-    const ws = new Workspace({ '/': ram }, { shellParser: parser })
+    const ws = new Workspace({ '/': ram })
     const abort = new AbortController()
     let now = 0
     const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
@@ -461,7 +445,7 @@ describe('large in-memory commands', () => {
 // ends on its own or within a second of the caller's abort. Each runs in a
 // subshell, so a `cd`, `set` or `exec` leaves the next one's shell as it was.
 it('every program settles soon after an abort', async () => {
-  const ws = new Workspace({ '/': [wideRam(), MountMode.READ, UNCAPPED] }, { shellParser: parser })
+  const ws = new Workspace({ '/': [wideRam(), MountMode.READ, UNCAPPED] }, {})
   const internals = ws as unknown as {
     callSession(): Parameters<typeof programs>[0]
     registry: Parameters<typeof programs>[1]

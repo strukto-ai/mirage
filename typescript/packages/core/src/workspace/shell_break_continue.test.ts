@@ -17,7 +17,7 @@ import { makeIntegrationWS, run } from '../../tests/workspace/fixtures/integrati
 
 describe('break/continue levels', () => {
   it('break exits the inner loop only', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'for i in 1 2; do for j in a b; do echo $i$j; break; done; done')).toBe(
         '1a\n2a\n',
@@ -28,7 +28,7 @@ describe('break/continue levels', () => {
   })
 
   it('break 2 exits both loops', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(
         await run(ws, 'for i in 1 2; do for j in a b; do echo $i$j; break 2; done; done'),
@@ -39,7 +39,7 @@ describe('break/continue levels', () => {
   })
 
   it('break beyond the depth breaks all loops', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(
         await run(ws, 'for i in 1 2; do for j in a b; do echo $i$j; break 9; done; done'),
@@ -50,7 +50,7 @@ describe('break/continue levels', () => {
   })
 
   it('continue 2 continues the outer loop', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(
         await run(
@@ -65,7 +65,7 @@ describe('break/continue levels', () => {
   })
 
   it('plain continue skips one iteration', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(
         await run(ws, 'for i in 1 2 3; do if [ $i = 2 ]; then continue; fi; echo $i; done'),
@@ -76,7 +76,7 @@ describe('break/continue levels', () => {
   })
 
   it('break 2 escapes a while inside a for', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(
         await run(

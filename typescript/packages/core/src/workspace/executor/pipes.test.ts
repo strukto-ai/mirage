@@ -118,7 +118,7 @@ describe('handlePipe', () => {
     // bash 5.2: each segment is a child of the shell as it stood before
     // the pipeline, so `$?` is the pre-pipeline status even after a
     // sibling segment ran a compound command or a function.
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       for (const line of [
         'false; { true; } | echo $?',

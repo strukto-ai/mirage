@@ -14,7 +14,7 @@
 
 import { expect, it } from 'vitest'
 import type { TSNodeLike } from '../../types.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { parse } from '../parse.ts'
 
 function substitution(root: TSNodeLike): TSNodeLike {
   const stack = [root]
@@ -27,22 +27,19 @@ function substitution(root: TSNodeLike): TSNodeLike {
   throw new Error('no substitution')
 }
 
-it('restores heredoc syntax for nested evaluation', async () => {
-  const parser = await getTestParser()
-  const node = substitution(parser.parse('echo "$(cat <<EOF\nhello\nEOF\n)"'))
+it('restores heredoc syntax for nested evaluation', () => {
+  const node = substitution(parse('echo "$(cat <<EOF\nhello\nEOF\n)"'))
   expect(node.sourceText).toContain('<<EOF')
   expect(node.text).not.toContain('<<EOF')
 })
 
-it('keeps reader continuation removal in nested evaluation', async () => {
-  const parser = await getTestParser()
-  const node = substitution(parser.parse("cat <<EOF\n$(printf '%s' 'a\\\nb')\nEOF"))
+it('keeps reader continuation removal in nested evaluation', () => {
+  const node = substitution(parse("cat <<EOF\n$(printf '%s' 'a\\\nb')\nEOF"))
   expect(node.sourceText).toBe("$(printf '%s' 'ab')")
 })
 
-it('keeps earlier nodes alive across subsequent parses', async () => {
-  const parser = await getTestParser()
-  const first = parser.parse('cat <<EOF\none\nEOF')
-  parser.parse('cat <<EOF\ntwo\nEOF')
+it('keeps earlier nodes alive across subsequent parses', () => {
+  const first = parse('cat <<EOF\none\nEOF')
+  parse('cat <<EOF\ntwo\nEOF')
   expect(first.namedChildren[0]?.namedChildren.at(-1)?.heredoc?.body).toBe('one\n')
 })

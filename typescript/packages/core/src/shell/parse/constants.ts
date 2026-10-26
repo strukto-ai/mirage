@@ -42,32 +42,6 @@ export const BASH_KEYWORDS: ReadonlySet<string> = new Set([
   'select',
 ])
 
-// Tokens that make an ERROR node a real syntax error: brackets, quotes,
-// and an expansion or substitution opener left unclosed, for which bash
-// reads to the end of input looking for the match and runs none of the
-// line.
-export const STRUCTURAL_TOKENS: ReadonlySet<string> = new Set([
-  '(',
-  ')',
-  '{',
-  '}',
-  '[',
-  ']',
-  '"',
-  "'",
-  '`',
-  '$(',
-  '$((',
-  '${',
-  '$[',
-  '<(',
-  '>(',
-])
-
-// Statement separators. One that lands inside an ERROR node has nothing
-// to separate (a line starting with `;`, `| s`, `a ; ; b`, `a &; b`).
-export const SEPARATOR_TOKENS: ReadonlySet<string> = new Set([';', '&', '|', '&&', '||'])
-
 // The case-item terminators: a list ends at one only inside a case item.
 export const CASE_TERMINATORS: ReadonlySet<string> = new Set([';;', ';&', ';;&'])
 

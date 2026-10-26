@@ -24,6 +24,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from mirage.accessor.github import GitHubAccount
+from mirage.commands.builtin.utils.http import DEFAULT_PORTS
 from mirage.commands.cli.builtin.gh.constants import (
     CONNECT_HINT,
     GITHUB_HOST,
@@ -75,16 +76,32 @@ def check_host(accessor: GitHubAccount, host: str | None) -> None:
 def web_origin(accessor: GitHubAccount) -> str:
     """The origin the install's GitHub serves its pages and git from:
     github.com for GitHub's own API, else the API host's own origin, as a
-    GitHub Enterprise server and a local stand-in serve them.
+    GitHub Enterprise server and a local stand-in serve them. It is
+    serialised as ``URL.origin`` does on the TypeScript host: lowercase
+    host, no userinfo, no default port; the host is not otherwise
+    canonicalised.
 
     Args:
         accessor (GitHubAccount): the install's account.
+
+    Raises:
+        ValueError: the API base is not an http(s) URL with a host.
     """
     base = accessor.config.base_url
     if base is None or base.rstrip("/") == API_BASE:
         return f"https://{GITHUB_HOST}"
-    parts = urlsplit(base)
-    return f"{parts.scheme}://{parts.netloc}"
+    try:
+        parts = urlsplit(base)
+        host, port = parts.hostname, parts.port
+    except ValueError as exc:
+        raise ValueError("Invalid URL") from exc
+    if parts.scheme not in {"http", "https"} or not host:
+        raise ValueError("Invalid URL")
+    if ":" in host:
+        host = f"[{host}]"
+    if port is None or port == DEFAULT_PORTS[parts.scheme]:
+        return f"{parts.scheme}://{host}"
+    return f"{parts.scheme}://{host}:{port}"
 
 
 def gh_repo(accessor: GitHubAccount, spec: str | None) -> RepoRef:

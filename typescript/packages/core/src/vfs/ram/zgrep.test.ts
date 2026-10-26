@@ -20,7 +20,6 @@ import { describe, expect, it } from 'vitest'
 import { materialize } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
 import { MountMode, PathSpec } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { gzip } from '../../utils/compress.ts'
 const RAM_ZGREP = GENERIC_COMMANDS.filter((c) => c.name === 'zgrep' && c.filetype == null)
@@ -137,10 +136,7 @@ async function shell(
   stdin: Uint8Array | null = null,
   seed: Record<string, Uint8Array> = {},
 ): Promise<[string, string, number]> {
-  const ws = new Workspace(
-    { '/data/': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     for (const [path, body] of Object.entries(seed)) {
       await ws.shell(`tee ${path} > /dev/null`, { stdin: body })

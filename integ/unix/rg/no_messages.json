@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg --no-messages hello /data/nosuch.txt /data/a.txt; echo rc=$?; rg --no-messages --messages hello /data/nosuch.txt; echo rc=$?; rg --no-messages '(' /data/a.txt; echo rc=$?",

@@ -169,6 +169,18 @@ export function expandingAliases(session: SessionState): ReadonlySet<string> {
 }
 
 /**
+ * The alias names a stored function's body is read with: the ones its
+ * definition saw, or the session's own for a definition that kept none (one
+ * restored from a stored session). Mirrors Python's body_aliases.
+ */
+export function bodyAliases(session: SessionState, name: string): ReadonlySet<string> {
+  const site = session.functionSites.get(name)
+  if (site !== undefined && site.source === session.functions[name] && site.aliases != null)
+    return new Set(Object.keys(site.aliases))
+  return new Set(aliasesOn(session) ? Object.keys(session.aliases) : [])
+}
+
+/**
  * The aliases a function defined by `node` keeps for its body. bash expands
  * a function's aliases as it reads the definition, so the body runs them as
  * they were then, whatever is defined or removed later: the aliases a use in

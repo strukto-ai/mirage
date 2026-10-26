@@ -179,6 +179,36 @@
         "stdout": "",
         "stderr": "timed\n"
       }
+    },
+    {
+      "id": "time_reports_a_leading_chain_once",
+      "seq": 511012,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "TIMEFORMAT=timed; time ! time true; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": "timed\n"
+      }
+    },
+    {
+      "id": "time_chain_through_a_pipeline_reports_once",
+      "seq": 511013,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "TIMEFORMAT=timed; time ! time true >/dev/null | cat; echo $?; time { time true; } | cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": "timed\ntimed\ntimed\n"
+      }
     }
   ]
 }

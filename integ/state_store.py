@@ -24,8 +24,8 @@ import uuid  # noqa: E402
 from mirage import MountMode, Workspace  # noqa: E402
 from mirage.vfs.ram import RAMVFS  # noqa: E402
 from mirage.vfs.s3.config import S3Config  # noqa: E402
+from mirage.workspace.mount.namespace.store import NamespaceStore  # noqa: E402
 from mirage.workspace.session.state import seed_var  # noqa: E402
-from mirage.workspace.session.store import SessionStore  # noqa: E402
 from mirage.workspace.store.redis import RedisWorkspaceStateStore  # noqa: E402
 from mirage.workspace.store.s3 import S3WorkspaceStateStore  # noqa: E402
 
@@ -219,7 +219,9 @@ async def read(prefix: str) -> None:
     await store.close()
 
 
-async def cas_increment(sess: SessionStore, worker: str, rounds: int) -> None:
+async def cas_increment(
+    sess: NamespaceStore, worker: str, rounds: int
+) -> None:
     """Read-modify-CAS this worker's counter, retrying until it lands."""
     for _ in range(rounds):
         for _ in range(500):

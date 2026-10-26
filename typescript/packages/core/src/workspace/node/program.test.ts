@@ -15,12 +15,11 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser, stderrStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
-  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.shell('mkdir -p /data/sub')
   await ws.shell('echo hi > /data/sub/x.txt')
   await ws.shell('cd /data')

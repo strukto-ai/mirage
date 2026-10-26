@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "zgrep -q error /data/z4/app.log.gz; echo rc=$?",
@@ -54,6 +55,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "zgrep -q zzz /data/z4/app.log.gz; echo rc=$?",

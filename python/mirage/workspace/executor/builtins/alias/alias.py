@@ -256,6 +256,29 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
     return frozenset(session.aliases) - blocked
 
 
+def body_aliases(session: SessionState, name: str) -> frozenset[str]:
+    """The alias names a stored function's body is read with: the ones
+    its definition saw, or the session's own for a definition that kept
+    none (one restored from a stored session).
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the function's name.
+    """
+    site = session._function_sites.get(name)
+    if (
+        site is not None
+        and site.source == session.functions.get(name)
+        and site.aliases is not None
+    ):
+        return frozenset(site.aliases)
+    if not session.shopts.get(
+        "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
+    ):
+        return frozenset()
+    return frozenset(session.aliases)
+
+
 def alias_view(
     session: SessionState, node: TSNodeLike, mark: AliasMark
 ) -> dict[str, str]:

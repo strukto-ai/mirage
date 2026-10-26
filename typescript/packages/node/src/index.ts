@@ -26,8 +26,6 @@ export {
 } from './workspace/mount/namespace/redis.ts'
 export { DiskRecordClient } from './workspace/record/disk.ts'
 export { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
-export { DiskSessionStore } from './workspace/session/disk.ts'
-export { RedisSessionStore, type RedisSessionStoreOptions } from './workspace/session/redis.ts'
 export {
   DEFAULT_STATE_ROOT,
   DiskWorkspaceStateStore,
@@ -76,6 +74,10 @@ export {
   DatabricksVolumeVFS,
   type DatabricksVolumeVFSState,
 } from './vfs/databricks_volume/databricks_volume.ts'
+export {
+  TiDBFilesystemVFS,
+  type TiDBFilesystemVFSState,
+} from './vfs/tidb_filesystem/tidb_filesystem.ts'
 
 export {
   normalizeS3Config,

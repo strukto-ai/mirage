@@ -23,7 +23,6 @@ import type { FlagValue } from '../../../../spec/types.ts'
 import { enoent } from '../../../../../errors/fs.ts'
 import { RAMVFS } from '../../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { CrossResult } from '../types.ts'
 import { runWc } from './wc.ts'
 
@@ -164,10 +163,7 @@ it('recounts a wc without counts alone', async () => {
   const second = new RAMVFS()
   first.loadState({ type: 'ram', files: { '/x': ENC.encode('a\nb\n') } })
   second.loadState({ type: 'ram', files: { '/y': ENC.encode('c\n') } })
-  const ws = new Workspace(
-    { '/a': first, '/b': second },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/a': first, '/b': second }, { mode: MountMode.WRITE })
   const spec = SPECS.wc
   if (spec === undefined) throw new Error('Missing spec: wc')
   for (const cmd of command({ name: 'wc', vfs: 'ram', spec, fn: rowCount }))

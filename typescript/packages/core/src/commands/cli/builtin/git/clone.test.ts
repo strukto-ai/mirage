@@ -13,7 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
+import { MountMode } from '../../../../types.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
+import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { defaultDirectory, remoteHead } from './clone.ts'
+import { GIT } from './index.ts'
 import type { Advertisement } from './transport.ts'
 
 const C = 'c'.repeat(40)
@@ -62,4 +66,19 @@ it('checks out a detached remote HEAD detached', () => {
     head: null,
   }
   expect(remoteHead(adv, null)).toEqual([null, C])
+})
+
+it('refuses a third operand as too many arguments', async () => {
+  const ws = new Workspace({ '/w': new RAMVFS() }, { mode: MountMode.WRITE })
+  ws.registerCli('git', GIT)
+  try {
+    await ws.shell('mkdir /w/b && echo x > /w/b/f')
+    const result = await ws.shell('cd /w && git clone a b c')
+    expect(result.exitCode).toBe(129)
+    expect(new TextDecoder().decode(result.stderr)).toMatch(
+      /^fatal: Too many arguments\.\n\nusage: git clone /,
+    )
+  } finally {
+    await ws.close()
+  }
 })

@@ -15,15 +15,13 @@
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const ALL = 'Linux mirage mirage #1 Mirage x86_64 GNU/Linux\n'
 
-async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeWs(): Workspace {
   const ram = new RAMVFS()
-  return new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
 }
 
 // GNU's layout, measured on coreutils 9.7 (debian:stable-slim): no option is
@@ -50,7 +48,7 @@ describe('uname', () => {
     ['uname -o -n', 'mirage GNU/Linux\n'],
     ['uname -s -s', 'Linux\n'],
   ])('%s', async (line, out) => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell(line)
     await ws.close()
     expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([out, '', 0])
@@ -61,7 +59,7 @@ describe('uname', () => {
     ['uname -s x', "uname: extra operand 'x'\nTry 'uname --help' for more information.\n"],
     ['uname -z', "uname: invalid option -- 'z'\nTry 'uname --help' for more information.\n"],
   ])('%s refuses', async (line, err) => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell(line)
     await ws.close()
     expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual(['', err, 1])

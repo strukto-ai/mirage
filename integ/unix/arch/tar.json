@@ -23,6 +23,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -57,6 +58,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -91,6 +93,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -125,6 +128,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -560,6 +564,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -594,6 +599,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -628,6 +634,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -662,6 +669,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -696,6 +704,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -730,6 +739,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -764,6 +774,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -798,6 +809,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -838,6 +850,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -928,6 +941,7 @@
         "redis",
         "opfs",
         "s3",
+        "tidb-filesystem",
         "s3-prefix"
       ],
       "command": "(mkdir -p /data/tar1269-0 && cd /data/tar1269-0 && echo 'H4sIAAAAAAACE+3RMQqDQBAF0Kk9RU4gWxhznhSChRCIK+T47qYSewXxveYPf4opZhym6dPmX47jpKLvun8W+6zbzVz7V5+e8UhxgmXO7285Gfc01v83AQAAAAAAAAAAwMWs' | base64 -d > input.tgz && tar -tzf input.tgz)",
@@ -946,6 +960,7 @@
         "redis",
         "opfs",
         "s3",
+        "tidb-filesystem",
         "s3-prefix"
       ],
       "command": "(mkdir -p /data/tar1269-1 && cd /data/tar1269-1 && echo 'H4sIAAAAAAACE+3RMQqDQBAF0Kk9RU4gWxhznhSChRCIK+T47qYSewXxveYPf4opZhym6dPmX47jpKLvun8W+6zbzVz7V5+e8UhxgmXO7285Gfc01v83AQAAAAAAAAAAwMWs' | base64 -d > input.tgz && tar -xzf input.tgz; status=$?; cat hello.txt; exit $status)",
@@ -964,6 +979,7 @@
         "redis",
         "opfs",
         "s3",
+        "tidb-filesystem",
         "s3-prefix"
       ],
       "command": "(mkdir -p /data/tar1269-2 && cd /data/tar1269-2 && echo 'H4sIAAAAAAACE+3RMQqDQBAF0Kk9RU4gWxhznhSChRCIK+T47qYSewXxveYPf4opZhym6dPmX47jpKLvun8W+6zbzVz7V5+e8UhxgmXO7285Gfc01v83AQAAAAAAAAAAwMWs' | base64 -d > input.tgz && tar -xOzf input.tgz)",
@@ -982,6 +998,7 @@
         "redis",
         "opfs",
         "s3",
+        "tidb-filesystem",
         "s3-prefix"
       ],
       "command": "(mkdir -p /data/tar1269-3 && cd /data/tar1269-3 && echo 'H4sIAAAAAAACE+3RMQqDQBAF0Kk9RU4gWxhznhSChRCIK+T47qYSewXxveYPf4opZhym6dPmX47jpKLvun8W+6zbzVz7V5+e8UhxgmXO7285Gfc01v83AQAAAAAAAAAAwMWspGdw9AAoAAAfiw==' | base64 -d > input.tgz && tar -tf input.tgz)",
@@ -1000,6 +1017,7 @@
         "redis",
         "opfs",
         "s3",
+        "tidb-filesystem",
         "s3-prefix"
       ],
       "command": "(mkdir -p /data/tar1269-4 && cd /data/tar1269-4 && echo 'H4sIAAAAAAACE8vLL1FIVChJLOICAAAAAAAAAAAA' | base64 -d > input.tgz && tar -tzf input.tgz)",
@@ -1018,6 +1036,7 @@
         "redis",
         "opfs",
         "s3",
+        "tidb-filesystem",
         "s3-prefix"
       ],
       "command": "(mkdir -p /data/tar1269-5 && cd /data/tar1269-5 && echo 'H4sIAAAAAAACE8vLL1FIVChJLOICAAAAAAAAAAAA' | base64 -d > input.tgz && tar -xOzf input.tgz)",
@@ -1036,6 +1055,7 @@
         "redis",
         "opfs",
         "s3",
+        "tidb-filesystem",
         "s3-prefix"
       ],
       "command": "(mkdir -p /data/tar-invalid-gzip && printf '%s' 'H4sIAAAAAAACE6uoGAUjGQAAAAAAAAAAAAA=' | base64 -d > /data/tar-invalid-gzip/input.tgz && cd /data/tar-invalid-gzip && tar -tzf input.tgz)",
@@ -1054,6 +1074,7 @@
         "redis",
         "opfs",
         "s3",
+        "tidb-filesystem",
         "s3-prefix"
       ],
       "command": "(mkdir -p /data/tar-invalid-gzip && printf '%s' 'H4sIAAAAAAACE6uoGAUjGQAAAAAAAAAAAAA=' | base64 -d > /data/tar-invalid-gzip/input.tgz && cd /data/tar-invalid-gzip && tar -xzf input.tgz)",
@@ -1072,6 +1093,7 @@
         "redis",
         "opfs",
         "s3",
+        "tidb-filesystem",
         "s3-prefix"
       ],
       "command": "(mkdir -p /data/tar-invalid-gzip && printf '%s' 'H4sIAAAAAAACE6uoGAUjGQAAAAAAAAAAAAA=' | base64 -d > /data/tar-invalid-gzip/input.tgz && cd /data/tar-invalid-gzip && tar -xOzf input.tgz)",
@@ -1090,6 +1112,7 @@
         "redis",
         "opfs",
         "s3",
+        "tidb-filesystem",
         "s3-prefix"
       ],
       "command": "printf %s H4sIAAAAAAAC/0vUK6koYaAtMAACMxMTMA0E6DRIFokNEjczNzJi4DJgoAMoLS5JLAJayTAyQUZqTk4+F8MoGAWjYBSMghEGAOTVivYACAAA | base64 -d | tar -tzf -",
@@ -1108,6 +1131,7 @@
         "redis",
         "opfs",
         "s3",
+        "tidb-filesystem",
         "s3-prefix"
       ],
       "command": "printf %s H4sIAAAAAAAC/0vUK6koYaAtMAACMxMTMA0E6DRIFokNEjczNzJi4DJgoAMoLS5JLAJayTAyQUZqTk4+F8MoGAWjYBSMghEGAOTVivYACAAA | base64 -d | tar -xOzf -",

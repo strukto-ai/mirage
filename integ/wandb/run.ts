@@ -6,7 +6,6 @@ import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { Workspace } from '../../typescript/packages/core/src/workspace/workspace/workspace.ts'
-import { getTestParser } from '../../typescript/packages/core/tests/workspace/fixtures/workspace_fixture.ts'
 import { WandbVFS } from '../../typescript/packages/core/src/vfs/wandb/wandb.ts'
 import { normalizeWandbConfig } from '../../typescript/packages/core/src/core/wandb/config.ts'
 import { MountMode, PathSpec } from '../../typescript/packages/core/src/types.ts'
@@ -69,10 +68,7 @@ const vfs = new WandbVFS(
     page_size: 2,
   }),
 )
-const ws = new Workspace(
-  { '/wandb': vfs },
-  { mode: MountMode.READ, shellParser: await getTestParser() },
-)
+const ws = new Workspace({ '/wandb': vfs }, { mode: MountMode.READ })
 const decoder = new TextDecoder()
 try {
   const cases = JSON.parse(readFileSync(new URL('./cases.json', import.meta.url), 'utf8')) as Case[]

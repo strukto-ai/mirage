@@ -10,6 +10,7 @@
         "opfs",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive"
       ],
       "command": "mkdir -p /data/ptch1 && printf 'x' > /data/ptch1/a.txt && ls /data/ptch1 > /dev/null && touch -d '2021-06-15T12:00:00' /data/ptch1/a.txt",

@@ -36,7 +36,7 @@ export type ErrorOf = (response: Response, body: string) => Error
  * which aiohttp spells as sock_connect and sock_read; `seconds` of 0 is no
  * bound.
  */
-export function stallFetch(seconds: number, fetchFn?: typeof fetch): typeof fetch {
+export function stallTimeout(seconds: number, fetchFn?: typeof fetch): typeof fetch {
   const send: typeof fetch = fetchFn ?? ((input, init) => fetch(input, init))
   if (!(seconds > 0)) return send
   return async (input, init) => {
@@ -120,7 +120,7 @@ export async function* apiStream(
 ): AsyncGenerator<Uint8Array, void> {
   const retry = options.retry ?? NO_RETRY
   const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000, options.signal))
-  const doFetch = stallFetch(options.timeout ?? DEFAULT_TIMEOUT, options.fetchFn)
+  const doFetch = stallTimeout(options.timeout ?? DEFAULT_TIMEOUT, options.fetchFn)
   for (let attempt = 0; ; attempt += 1) {
     const last = attempt >= retry.maxRetries
     let response: Response
@@ -329,7 +329,7 @@ export interface ApiRequestOptions {
    * prefixes do not count, and overflow fails rather than truncates. */
   maxBodyBytes?: number | undefined
   /** Seconds a request may wait to connect, or between two reads of its
-   * response, before it fails (`stallFetch`); 0 is no bound, absent is
+   * response, before it fails (`stallTimeout`); 0 is no bound, absent is
    * `DEFAULT_TIMEOUT`. */
   timeout?: number | undefined
   /** The fetch to use, so transports keep their injection seam. */
@@ -447,7 +447,7 @@ export async function apiRequest(
   if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0) {
     throw new RangeError('max_body_bytes must be a non-negative safe integer')
   }
-  const doFetch = stallFetch(options.timeout ?? DEFAULT_TIMEOUT, options.fetchFn)
+  const doFetch = stallTimeout(options.timeout ?? DEFAULT_TIMEOUT, options.fetchFn)
   const target = new URL(url)
   for (const [name, value] of Object.entries(options.params ?? {})) {
     target.searchParams.set(name, String(value))

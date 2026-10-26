@@ -1,4 +1,3 @@
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -28,7 +27,7 @@ const cases = ['bash/test/posix.json', 'unix/awk/redirect.json', 'unix/awk/getli
 
 describe('POSIX classes and awk output across the shell', () => {
   it.each(cases)('$id', async (test) => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       if (test.seed) await runResult(ws, FIXTURES)
       expect(await runResult(ws, test.command)).toEqual([
@@ -45,7 +44,7 @@ describe('POSIX classes and awk output across the shell', () => {
 it('dispatches awk output across mounts and stops on write failure', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS(), '/other': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
   try {
     expect(
@@ -68,10 +67,7 @@ it('dispatches awk output across mounts and stops on write failure', async () =>
 })
 
 it('respects a read-only mount for awk output', async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.READ, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.READ })
   try {
     expect((await runResult(ws, `awk 'BEGIN {print "x" > "/data/out"}'`))[0]).toBe(2)
     expect((await runResult(ws, 'test -e /data/out'))[0]).toBe(1)
@@ -114,10 +110,7 @@ const CROSS_MOUNT: [string, number, string, string][] = [
 ]
 
 it.each(CROSS_MOUNT)('keeps ARGV across mounts in %j', async (command, code, out, err) => {
-  const ws = new Workspace(
-    { '/m1': new RAMVFS(), '/m2': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/m1': new RAMVFS(), '/m2': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     await runResult(
       ws,
