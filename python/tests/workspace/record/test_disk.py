@@ -126,20 +126,28 @@ async def test_cancel_during_acquisition_releases_lock(
     assert await client.cas_put("k", {"generation": 1}, 0)
 
 
-def _race_two_reclaimers(monkeypatch, lock_path: str) -> None:
-    """Hold the first two stats of ``lock_path`` until both have run, and
-    delay its second unlink, so two waiters judge one stale lock together
-    and the later unlink lands after the earlier reclaimer's new lock.
+LATE_STEPS = pytest.mark.parametrize(
+    "late_step", ["unlink", "open"], ids=["together", "after"]
+)
+
+
+def _race_two_reclaimers(monkeypatch, lock_path: str, late_step: str) -> None:
+    """Hold the first two stats of ``lock_path`` until both have run, then
+    delay the later waiter's ``late_step``: its unlink of the lock (both
+    reclaim at once) or its open of the reclaim guard (it reclaims after
+    the earlier waiter has taken a new lock).
 
     Args:
         monkeypatch (pytest.MonkeyPatch): the test's patcher.
         lock_path (str): the lockfile both waiters contend for.
+        late_step (str): ``"unlink"`` or ``"open"``, the os call delayed.
     """
     both_saw_it = threading.Barrier(2)
     stats = count()
-    unlinks = count()
+    late_calls = count()
+    late_path = lock_path if late_step == "unlink" else f"{lock_path}.reclaim"
     real_stat = os.stat
-    real_unlink = os.unlink
+    real_late = getattr(os, late_step)
 
     def stat(path, *args, **kwargs):
         result = real_stat(path, *args, **kwargs)
@@ -147,13 +155,13 @@ def _race_two_reclaimers(monkeypatch, lock_path: str) -> None:
             both_saw_it.wait(5)
         return result
 
-    def unlink(path, *args, **kwargs):
-        if path == lock_path and next(unlinks) == 1:
+    def late(path, *args, **kwargs):
+        if path == late_path and next(late_calls) == 1:
             time.sleep(0.2)
-        return real_unlink(path, *args, **kwargs)
+        return real_late(path, *args, **kwargs)
 
     monkeypatch.setattr(os, "stat", stat)
-    monkeypatch.setattr(os, "unlink", unlink)
+    monkeypatch.setattr(os, late_step, late)
 
 
 def _stale_lock(client: DiskRecordClient, name: str) -> str:
@@ -164,11 +172,12 @@ def _stale_lock(client: DiskRecordClient, name: str) -> str:
 
 
 @pytest.mark.asyncio
+@LATE_STEPS
 async def test_two_reclaimers_of_one_stale_lock_never_both_hold_it(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, late_step
 ):
     client = DiskRecordClient(str(tmp_path), "")
-    _race_two_reclaimers(monkeypatch, _stale_lock(client, "k"))
+    _race_two_reclaimers(monkeypatch, _stale_lock(client, "k"), late_step)
     inside = 0
     most = 0
 
@@ -187,12 +196,13 @@ async def test_two_reclaimers_of_one_stale_lock_never_both_hold_it(
 
 
 @pytest.mark.asyncio
+@LATE_STEPS
 async def test_two_claims_over_one_stale_lock_have_one_winner(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, late_step
 ):
     client = DiskRecordClient(str(tmp_path), "")
     await client.put("ws", {"generation": 0, "owner": None})
-    _race_two_reclaimers(monkeypatch, _stale_lock(client, "ws"))
+    _race_two_reclaimers(monkeypatch, _stale_lock(client, "ws"), late_step)
     read = client.get
 
     async def slow_get(name: str):

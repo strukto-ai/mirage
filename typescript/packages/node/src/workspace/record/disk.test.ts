@@ -40,12 +40,21 @@ afterEach(() => {
   vi.mocked(fs.unlink).mockImplementation(real.unlink)
 })
 
-// Hold the first two stats of `lock` until both have run, and delay its
-// second unlink, so two waiters judge one stale lock together and the
-// later unlink lands after the earlier reclaimer's new lock.
-function raceTwoReclaimers(lock: string): void {
+type LateStep = 'unlink' | 'open'
+const LATE_STEPS: [string, LateStep][] = [
+  ['together', 'unlink'],
+  ['after', 'open'],
+]
+
+const pause = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+// Hold the first two stats of `lock` until both have run, then delay the
+// later waiter's `lateStep`: its unlink of the lock (both reclaim at
+// once) or its open of the reclaim guard (it reclaims after the earlier
+// waiter has taken a new lock).
+function raceTwoReclaimers(lock: string, lateStep: LateStep): void {
   let stats = 0
-  let unlinks = 0
+  let lateCalls = 0
   let bothSawIt: () => void = () => undefined
   const together = new Promise<void>((resolve) => {
     bothSawIt = resolve
@@ -59,10 +68,17 @@ function raceTwoReclaimers(lock: string): void {
     }
     return result
   }) as typeof fs.stat)
-  vi.mocked(fs.unlink).mockImplementation(async (p) => {
-    if (p === lock && unlinks++ === 1) await new Promise((r) => setTimeout(r, 200))
-    await real.unlink(p)
-  })
+  if (lateStep === 'unlink') {
+    vi.mocked(fs.unlink).mockImplementation(async (p) => {
+      if (p === lock && lateCalls++ === 1) await pause(200)
+      await real.unlink(p)
+    })
+  } else {
+    vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+      if (args[0] === `${lock}.reclaim` && lateCalls++ === 1) await pause(200)
+      return real.open(...args)
+    }) as typeof fs.open)
+  }
 }
 
 function staleLock(client: DiskRecordClient, name: string): string {
@@ -81,41 +97,47 @@ describe('DiskRecordClient lock reclaim and release', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('never lets two reclaimers of one stale lock both hold it', async () => {
-    const client = new DiskRecordClient(root, '')
-    raceTwoReclaimers(staleLock(client, 'k'))
-    let inside = 0
-    let most = 0
-    const hold = async (): Promise<void> => {
-      const fh = await client.lock('k')
-      inside += 1
-      most = Math.max(most, inside)
-      await new Promise((r) => setTimeout(r, 300))
-      inside -= 1
-      await client.unlock('k', fh)
-    }
-    await Promise.all([hold(), hold()])
-    expect(most).toBe(1)
-    expect(readdirSync(root)).toEqual([])
-  })
+  it.each(LATE_STEPS)(
+    'never lets two reclaimers of one stale lock both hold it (%s)',
+    async (_, lateStep) => {
+      const client = new DiskRecordClient(root, '')
+      raceTwoReclaimers(staleLock(client, 'k'), lateStep)
+      let inside = 0
+      let most = 0
+      const hold = async (): Promise<void> => {
+        const fh = await client.lock('k')
+        inside += 1
+        most = Math.max(most, inside)
+        await pause(300)
+        inside -= 1
+        await client.unlock('k', fh)
+      }
+      await Promise.all([hold(), hold()])
+      expect(most).toBe(1)
+      expect(readdirSync(root)).toEqual([])
+    },
+  )
 
-  it('gives two claims over one stale lock one winner', async () => {
-    const client = new DiskRecordClient(root, '')
-    await client.put('ws', { generation: 0, owner: null })
-    raceTwoReclaimers(staleLock(client, 'ws'))
-    const read = client.get.bind(client)
-    vi.spyOn(client, 'get').mockImplementation(async (name) => {
-      const found = await read(name)
-      await new Promise((r) => setTimeout(r, 300))
-      return found
-    })
-    const won = await Promise.all([
-      client.casPut('ws', { generation: 1, owner: 'alice' }, 0),
-      client.casPut('ws', { generation: 1, owner: 'bob' }, 0),
-    ])
-    expect(won.sort()).toEqual([false, true])
-    expect(readdirSync(root)).toEqual(['ws.json'])
-  })
+  it.each(LATE_STEPS)(
+    'gives two claims over one stale lock one winner (%s)',
+    async (_, lateStep) => {
+      const client = new DiskRecordClient(root, '')
+      await client.put('ws', { generation: 0, owner: null })
+      raceTwoReclaimers(staleLock(client, 'ws'), lateStep)
+      const read = client.get.bind(client)
+      vi.spyOn(client, 'get').mockImplementation(async (name) => {
+        const found = await read(name)
+        await pause(300)
+        return found
+      })
+      const won = await Promise.all([
+        client.casPut('ws', { generation: 1, owner: 'alice' }, 0),
+        client.casPut('ws', { generation: 1, owner: 'bob' }, 0),
+      ])
+      expect(won.sort()).toEqual([false, true])
+      expect(readdirSync(root)).toEqual(['ws.json'])
+    },
+  )
 
   it('leaves a lock another writer took on release', async () => {
     const client = new DiskRecordClient(root, '')
