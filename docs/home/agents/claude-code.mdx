@@ -89,7 +89,7 @@ mirage session create demo --id agent -p reviewer
 ```
 
 - Each command runs in a copy of the session, from Claude's working directory. `cd` carries over, since Claude Code tracks it; `export` lasts for that one command, as in Claude Code's own shell.
-- The profile applies to every command. Under `reviewer`, `rm /data/a.txt` fails with `Read-only file system`, as on a read-only disk; [what the agent reads](/home/policy/explain#what-the-agent-reads) lists every refusal.
+- The profile applies to every command. Under `reviewer`, `echo x > /data/a.txt` fails with `Read-only file system`, as on a read-only disk; [what the agent reads](/home/policy/explain#what-the-agent-reads) lists every refusal.
 - `mirage session update demo agent -p builder` moves the session to another profile while Claude runs.
 
 Claude Code's Read, Edit, Write, Glob and Grep still run on the host, outside the profile. To route them through Mirage too, add [MCP](#mcp) and deny them, or use [FUSE](#fuse).
