@@ -13,7 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { listMessageUids, lockMailbox, parseSearchCriteria, quoteString } from './client.ts'
+import {
+  fetchAttachment,
+  fetchHeaders,
+  fetchMessage,
+  fetchRawMessage,
+  listMessageUids,
+  lockMailbox,
+  parseSearchCriteria,
+  quoteString,
+} from './client.ts'
 
 // The IMAP criteria string is the cross-language contract: python hands
 // it straight to imaplib, node has to rebuild imapflow's search object
@@ -176,4 +185,31 @@ describe('quoteString', () => {
     expect(() => quoteString('two\nlines')).toThrow('line break')
     expect(() => quoteString('two\rlines')).toThrow('line break')
   })
+})
+
+// Twin of test_a_uid_that_would_end_the_line_is_refused_before_connecting.
+describe('a uid that would end the command line', () => {
+  const fetches = {
+    fetchRawMessage: (a: never, uid: string) => fetchRawMessage(a, 'INBOX', uid),
+    fetchMessage: (a: never, uid: string) => fetchMessage(a, 'INBOX', uid),
+    fetchAttachment: (a: never, uid: string) => fetchAttachment(a, 'INBOX', uid, 'f'),
+    fetchHeaders: (a: never, uid: string) => fetchHeaders(a, 'INBOX', ['2', uid, '3']),
+  }
+  for (const [name, fetch] of Object.entries(fetches)) {
+    for (const bad of ['\r', '\n', '\0']) {
+      it(`${name} refuses ${JSON.stringify(bad)} before connecting`, async () => {
+        let connected = false
+        const accessor = {
+          getImap: () => {
+            connected = true
+            return {}
+          },
+        }
+        await expect(fetch(accessor as never, `1${bad}X1 EXPUNGE`)).rejects.toThrow(
+          'line break or NUL',
+        )
+        expect(connected).toBe(false)
+      })
+    }
+  }
 })
