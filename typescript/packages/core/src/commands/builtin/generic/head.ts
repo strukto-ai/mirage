@@ -282,13 +282,7 @@ export async function headGeneric(
     ]
   }
   const source = resolveSource(ctx.stdin)
-  const body = headStream(
-    source,
-    parsed.lines,
-    parsed.bytesMode,
-    parsed.zeroTerminated,
-    ctx.signal,
-  )
+  const body = headStream(source, parsed.lines, parsed.bytesMode, parsed.zeroTerminated, ctx.signal)
   // -v heads a stdin nobody named with the name it gives `-`.
   return [
     parsed.verbose && !parsed.quiet ? asyncChain([operandHeader(null), body]) : body,

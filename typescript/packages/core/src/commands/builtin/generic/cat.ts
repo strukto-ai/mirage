@@ -185,14 +185,10 @@ export async function catGeneric(
     }
     const merged = outputs.length === 1 ? outputs[0] : asyncChain(outputs)
     if (merged === undefined) throw new Error('cat: missing readable stream')
-    const out: ByteSource = wantsDisplay
-      ? displayLines(merged, display, ctx.signal)
-      : merged
+    const out: ByteSource = wantsDisplay ? displayLines(merged, display, ctx.signal) : merged
     return [out, io]
   }
   const source = resolveSource(ctx.stdin)
-  const out: ByteSource = wantsDisplay
-    ? displayLines(source, display, ctx.signal)
-    : source
+  const out: ByteSource = wantsDisplay ? displayLines(source, display, ctx.signal) : source
   return [out, new IOResult()]
 }

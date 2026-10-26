@@ -2059,6 +2059,20 @@ export class Dispatcher {
   }
 
   /**
+   * The files a walk guard's path holds, once the command's own `walkLimit`
+   * lets the walk run: past it the walk is refused before any backend rule
+   * is asked. Mirrors Python's Dispatcher._full_walk_files.
+   */
+  private async fullWalkFiles(mount: MountEntry, vfs: BaseVFS, call: Call): Promise<number | null> {
+    const limit = this.walkBoundOf(mount)
+    const files = await this.visibleFiles(mount, vfs, call, limit)
+    if (limit >= 0 && files !== null && files > limit) {
+      throw new Error(`more than ${String(limit)} files in scope (walk_limit); narrow the path`)
+    }
+    return files
+  }
+
+  /**
    * How many files the session sees under a walk guard's path, counted off
    * the mount's `readTree` with every hidden file dropped, and every file a
    * nested mount covers, so a guard's refusal never counts what the command
@@ -2340,16 +2354,11 @@ export class Dispatcher {
       } else if (name === 'before_full_walk' && !(await isDirectory(mount, p))) {
         result = null
       } else if (name === 'before_full_walk' && !vfs.supports(name)) {
-        // The command's own walkLimit, which the backend cannot know.
-        const limit = this.walkBoundOf(mount)
-        const files = await this.visibleFiles(mount, vfs, call, limit)
-        if (limit >= 0 && files !== null && files > limit) {
-          throw new Error(`more than ${String(limit)} files in scope (walk_limit); narrow the path`)
-        }
+        await this.fullWalkFiles(mount, vfs, call)
         result = null
       } else {
         if (name === 'before_full_walk')
-          fullKwargs.files = await this.visibleFiles(mount, vfs, call, this.walkBoundOf(mount))
+          fullKwargs.files = await this.fullWalkFiles(mount, vfs, call)
         if (names(call, this.caller)) await this.reconciler.reconcileRead(mount, p.virtual)
         const answered = probed(call, mount)
         result = answered ?? (await run(fullKwargs))

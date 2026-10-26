@@ -281,8 +281,9 @@ Whether a command may copy, compare, change or remove every file under a folder.
 | Raises `ValueError` (TypeScript: rejects) | Refuses the command before it touches anything. It prints `<command>: <message>` and exits 1. |
 
 These commands call `before_full_walk`: `tar -c`, `zip -r`, `cp -r`, `rm -r`,
-`chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount and `diff -r`. The
-default refuses more than `walk_limit` files.
+`chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount and `diff -r`.
+Mirage refuses more than the command's `walk_limit` files before it asks, so
+the default lets the walk run.
 
 ## `walk_limit`
 

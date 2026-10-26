@@ -2322,21 +2322,11 @@ class Dispatcher:
             elif call.name == "before_full_walk" and not mount.vfs.supports(
                 call.name
             ):
-                # The command's own walk_limit, which the backend cannot
-                # know.
-                limit = self._walk_bound(mount, call.caller)
-                files = await self._visible_files(mount, call, limit)
-                if limit >= 0 and files is not None and files > limit:
-                    raise ValueError(
-                        f"more than {limit} files in scope (walk_limit); "
-                        "narrow the path"
-                    )
+                await self._full_walk_files(mount, call)
                 result = None
             else:
                 if call.name == "before_full_walk":
-                    kwargs["files"] = await self._visible_files(
-                        mount, call, self._walk_bound(mount, call.caller)
-                    )
+                    kwargs["files"] = await self._full_walk_files(mount, call)
                 if call.fresh:
                     kwargs["index"] = ListingCheckStore(hints=mount.index)
                 if _names(call):
@@ -2436,6 +2426,29 @@ class Dispatcher:
             self._namespace.registry.command_limits,
             session.command_limits if session is not None else None,
         )
+
+    async def _full_walk_files(
+        self, mount: MountEntry, call: _Call
+    ) -> int | None:
+        """The files a walk guard's path holds, once the command's own
+        ``walk_limit`` lets the walk run: past it the walk is refused
+        before any backend rule is asked.
+
+        Args:
+            mount (MountEntry): the mount serving the path.
+            call (_Call): the guard's call.
+
+        Raises:
+            ValueError: the path holds more files than the limit.
+        """
+        limit = self._walk_bound(mount, call.caller)
+        files = await self._visible_files(mount, call, limit)
+        if limit >= 0 and files is not None and files > limit:
+            raise ValueError(
+                f"more than {limit} files in scope (walk_limit); "
+                "narrow the path"
+            )
+        return files
 
     async def _visible_files(
         self, mount: MountEntry, call: _Call, limit: int

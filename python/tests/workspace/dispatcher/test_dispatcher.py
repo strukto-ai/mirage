@@ -3281,6 +3281,25 @@ async def test_a_full_walk_follows_the_commands_walk_limit():
 
 
 @pytest.mark.asyncio
+async def test_a_backend_walk_rule_is_asked_within_the_commands_limit():
+    vfs = SearchedRAM()
+    vfs._store.dirs.add("/d")
+    for i in range(3):
+        vfs._store.files[f"/d/a{i}.txt"] = b"a\n"
+    limits = {"rm": Limit(walk_limit=2)}
+    with Workspace(
+        {"/ram/": (vfs, MountMode.WRITE, limits)}, mode=MountMode.WRITE
+    ) as ws:
+        refused = await ws.shell("rm -r /ram/d")
+        assert (refused.stderr, vfs.counted) == (
+            b"rm: more than 2 files in scope (walk_limit); narrow the path\n",
+            [],
+        )
+        ran = await ws.shell("rm /ram/d/a0.txt && rm -r /ram/d")
+        assert (ran.exit_code, vfs.counted) == (0, [2])
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "name, line, out",
     [

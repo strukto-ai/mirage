@@ -14,7 +14,11 @@
 
 import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
 import type { Limit } from '../types.ts'
-import { checkCommandLimits, commandLimitsToJSON, parseCommandLimits } from './builtin/output_cap.ts'
+import {
+  checkCommandLimits,
+  commandLimitsToJSON,
+  parseCommandLimits,
+} from './builtin/output_cap.ts'
 import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, METHODS, PROGRAM_RUNTIME } from './constants.ts'
 import type {
   CommandRule,

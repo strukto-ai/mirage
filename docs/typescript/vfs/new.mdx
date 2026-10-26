@@ -375,8 +375,8 @@ A glob matching more is refused.
 walk, before they touch a file there. `files` is the number of files the
 session sees under `path`: from your VFS's `readTree`, or by listing each
 directory until one file past `walkLimit`; `null` otherwise.
-The default refuses more than `walkLimit` files; override `beforeFullWalk`
-only for another rule.
+Mirage refuses more than the command's `walkLimit` files before it asks, so
+override `beforeFullWalk` only for another rule.
 
 Reject from it (or from `filesContaining`) to refuse: the command prints
 `<command>: <message>` and exits 1. From grep or rg, a filesystem error rejected

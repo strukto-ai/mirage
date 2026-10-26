@@ -366,7 +366,8 @@ A glob matching more is refused.
 `rm -r`, `chmod -R`, `chown -R`, `chgrp -R`, `mv` across mounts and `diff -r`
 walk, before they touch a file there. `files` is the number of files the
 session sees under `path`: from your VFS's `read_tree`, or by listing each
-directory until one file past `walk_limit`; `None` otherwise. The default refuses more than `walk_limit` files; define
+directory until one file past `walk_limit`; `None` otherwise. Mirage refuses
+more than the command's `walk_limit` files before it asks, so define
 `before_full_walk` only for another rule.
 
 Raise a `ValueError` from it (or from `files_containing`) to refuse: the command

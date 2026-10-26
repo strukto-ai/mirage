@@ -736,10 +736,9 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * the first file it touches there: tar -c, zip -r, cp -r, mv across
    * mounts, diff -r, rm -r, chmod -R, chown -R and chgrp -R. Resolve to let
    * the walk run; reject to refuse it, and the error's message is what the
-   * command prints. The default lets it run: the dispatcher refuses more
-   * than the command's `walkLimit` files before it asks a backend that
-   * defines none. Searches and listings are never refused: they stop after
-   * `walkLimit` files.
+   * command prints. The dispatcher has already refused more than the
+   * command's `walkLimit` files, so the default lets the walk run. Searches
+   * and listings are never refused: they stop after `walkLimit` files.
    *
    * @param path the directory about to be walked.
    * @param files how many files the session sees under `path`, with every

@@ -59,6 +59,10 @@ describe('guardDispatch', () => {
         fired = true
         controller.abort(new Error('released'))
       }, 0)
+      // Due before the run starts: an immediate yield goes on before the loop
+      // reaches its timers, so a due timer runs at the second yield.
+      const due = performance.now() + 2
+      while (performance.now() < due) continue
       const run = async (): Promise<void> => {
         while (!fired) await guarded('stat', path)
         await guarded('stat', path)
@@ -66,7 +70,7 @@ describe('guardDispatch', () => {
       if (withSignal) await expect(run()).rejects.toMatchObject({ name: 'AbortError' })
       else await run()
       expect(fired).toBe(true)
-      expect(seen.length).toBeLessThanOrEqual(YIELD_CALLS + 1)
+      expect(seen.length).toBeLessThanOrEqual(2 * YIELD_CALLS + 1)
     },
   )
 })

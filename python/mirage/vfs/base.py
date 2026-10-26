@@ -791,11 +791,10 @@ class BaseVFS:
         whole, before the first file it touches there: tar -c, zip -r,
         cp -r, mv across mounts, diff -r, rm -r, chmod -R, chown -R and
         chgrp -R. Return to let the walk run; raise to refuse it, and the
-        error's message is what the command prints. The default lets it
-        run: the dispatcher refuses more than the command's
-        ``walk_limit`` files before it asks a backend that defines none.
-        Searches and listings are never refused: they stop after
-        ``walk_limit`` files.
+        error's message is what the command prints. The dispatcher has
+        already refused more than the command's ``walk_limit`` files, so
+        the default lets the walk run. Searches and listings are never
+        refused: they stop after ``walk_limit`` files.
 
         Args:
             path (PathSpec): the directory about to be walked.

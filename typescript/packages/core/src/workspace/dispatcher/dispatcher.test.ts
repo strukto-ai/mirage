@@ -3242,6 +3242,30 @@ describe('a hide filters a one-call read', () => {
     expect(vfs.store.files.size).toBe(3)
   })
 
+  // Twin of test_a_backend_walk_rule_is_asked_within_the_commands_limit.
+  it("asks a backend's walk rule within the command's walk limit", async () => {
+    const vfs = new SearchedRAM()
+    vfs.store.dirs.add('/d')
+    for (let i = 0; i < 3; i++) {
+      vfs.store.files.set(`/d/a${String(i)}.txt`, new TextEncoder().encode('a\n'))
+    }
+    const ws = new Workspace(
+      { '/ram': [vfs, MountMode.WRITE, { rm: new Limit({ walkLimit: 2 }) }] },
+      { mode: MountMode.WRITE },
+    )
+    try {
+      const refused = await ws.shell('rm -r /ram/d')
+      expect([new TextDecoder().decode(refused.stderr), [...vfs.counted]]).toEqual([
+        'rm: more than 2 files in scope (walk_limit); narrow the path\n',
+        [],
+      ])
+      const ran = await ws.shell('rm /ram/d/a0.txt && rm -r /ram/d')
+      expect([ran.exitCode, vfs.counted]).toEqual([0, [2]])
+    } finally {
+      await ws.close()
+    }
+  })
+
   // Twin of test_a_null_walk_limit_lifts_the_mounts.
   it.each([
     ['tar', 'cd /ram && tar -cf d.tar d; echo $?', '0\n'],
