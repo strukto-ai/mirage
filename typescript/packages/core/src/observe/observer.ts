@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IOResult } from '../io/types.ts'
+import { YieldBudget } from '../io/yield_budget.ts'
 import { utcDateFolder } from '../utils/dates.ts'
 import { SystemClock, type Clock } from '../utils/clock.ts'
 import {
@@ -157,8 +158,12 @@ export class Observer {
   ): Promise<void> {
     // TODO: batch the op lines and the command line into a single
     // store.append so one typed line costs one roundtrip and lands
-    // atomically in the store.
+    // atomically in the store. A store whose append never suspends still
+    // lets the loop run between a long line's records.
+    const budget = new YieldBudget()
     for (const rec of opRecords) {
+      const pending = budget.run()
+      if (pending !== undefined) await pending
       await this.logOp(rec, session, cwd)
     }
     const stdout = await io.materializeStdout()

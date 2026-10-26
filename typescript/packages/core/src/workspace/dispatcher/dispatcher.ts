@@ -2640,13 +2640,13 @@ export class Dispatcher {
   /**
    * Run one write with its names held, one writer at a time per name.
    *
-   * The caller's abort covers its wait for the hold and the store's call,
-   * not `after` (the bookkeeping), which it then waits for. A writer that
-   * gives up while queued lets go of any name it already holds and never
-   * runs. One that gives up after its call started keeps the hold until the
-   * store's own call settles, since an abort cannot stop the call and an
-   * abandoned pwrite still writes back what it read; the mount's activity
-   * ends at the abort as for any op, so an unmount does not wait on it.
+   * The caller's abort covers only its wait for the hold: a writer the
+   * abort finds queued lets go of any name it already holds and never
+   * runs. One that comes after the abort (a stopped run landing what its
+   * guest left open, within the stop's grace) waits its turn. One holding
+   * its names runs to the end and the caller waits for it and for `after`
+   * (the bookkeeping), since an abort cannot stop a store's call under way,
+   * as Python's cancelled line is joined whole.
    * `after` runs only for a caller still waiting: a call that lands after
    * its caller left runs `landed` instead, which drops what the landing
    * made stale where its names still belong to the mount that ran it (a
@@ -2671,9 +2671,10 @@ export class Dispatcher {
     landed: () => Promise<void>,
   ): Promise<unknown> {
     // The caller's abort (the line's deadline among its reasons) stops the
-    // wait for the hold, so a write still queued never runs; one whose
-    // store call started keeps its hold until that call settles.
-    const signal = callerSignal()
+    // wait for the hold, so a write still queued never runs; a write made
+    // after it is the caller's own choice and waits.
+    const caller = callerSignal()
+    const signal = caller?.aborted === true ? undefined : caller
     const turn = { entered: false, abandoned: false, late: false, started: false, settled: false }
     let giveUp = (): void => undefined
     const gaveUp = new Promise<void>((resolve) => {
@@ -2727,18 +2728,20 @@ export class Dispatcher {
         held,
       )([])
     })
-    let value: unknown
     try {
-      value = await abortable(
-        entered.then(() => answer),
-        signal,
-      )
+      await abortable(entered, signal)
     } catch (err) {
-      if (turn.started && !turn.settled) turn.late = true
       if (!turn.entered) {
         turn.abandoned = true
         giveUp()
+        throw err
       }
+    }
+    let value: unknown
+    try {
+      value = await answer
+    } catch (err) {
+      if (turn.started && !turn.settled) turn.late = true
       throw err
     }
     await finished
