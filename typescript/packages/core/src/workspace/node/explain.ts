@@ -542,10 +542,11 @@ async function* judgeWords(
   }
   // env's command runs in the environment env builds for it.
   const child = name === 'env' && inners.length > 0 ? envChild(args, session) : null
-  const innerSession =
-    child !== null && typeof child !== 'string'
-      ? session.fork({ vars: envVars(session, child[1]) })
-      : session
+  let innerSession = session
+  if (child !== null && typeof child !== 'string') {
+    innerSession = session.fork()
+    innerSession.vars = envVars(session, child[1])
+  }
   for (const inner of inners) {
     if (!innerReadable(inner)) continue
     if (inner.line !== null) {

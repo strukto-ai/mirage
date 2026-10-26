@@ -65,13 +65,15 @@ class SeePrefix implements Policy {
   routed: [string, string | null][] = []
   commanded: [string, string | null][] = []
 
+  constructor(private readonly name = 'GPU') {}
+
   preExecute(ctx: RouteContext): Action | null {
-    for (const c of ctx.commands) this.routed.push([c.command, c.session?.get('GPU') ?? null])
+    for (const c of ctx.commands) this.routed.push([c.command, c.session?.get(this.name) ?? null])
     return null
   }
 
   preCommand(ctx: CommandContext): Action | null {
-    this.commanded.push([ctx.command, ctx.session?.get('GPU') ?? null])
+    this.commanded.push([ctx.command, ctx.session?.get(this.name) ?? null])
     return null
   }
 }
@@ -1590,6 +1592,22 @@ describe('what a method sees', () => {
         ['env', null],
         ['echo', '2'],
         ['env', '3'],
+        ['echo', null],
+      ])
+      const key = (pair: [string, string | null]): string => JSON.stringify(pair)
+      expect(spy.commanded.map(key).sort()).toEqual(spy.routed.map(key).sort())
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('env -i brings no startup variable back', async () => {
+    const spy = new SeePrefix('PWD')
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE, policies: [spy] })
+    try {
+      await ws.shell('env -i echo c')
+      expect(spy.routed).toEqual([
+        ['env', '/'],
         ['echo', null],
       ])
       const key = (pair: [string, string | null]): string => JSON.stringify(pair)

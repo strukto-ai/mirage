@@ -609,11 +609,10 @@ async def _judge_words(
     )
     # env's command runs in the environment env builds for it.
     child = env_child(args, session) if name == "env" and inners else None
-    inner_session = (
-        session.fork(vars=env_vars(session, child[1]))
-        if child is not None and not isinstance(child, str)
-        else session
-    )
+    inner_session = session
+    if child is not None and not isinstance(child, str):
+        inner_session = session.fork()
+        inner_session.vars = env_vars(session, child[1])
     for inner in inners:
         if not inner.readable:
             continue

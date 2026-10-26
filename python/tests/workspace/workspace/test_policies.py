@@ -2106,20 +2106,21 @@ async def test_a_route_policy_reads_the_session_as_data():
 
 
 class SeePrefix(Policy):
-    def __init__(self) -> None:
+    def __init__(self, name: str = "GPU") -> None:
+        self.name = name
         self.routed: list[tuple[str, str | None]] = []
         self.commanded: list[tuple[str, str | None]] = []
 
     async def pre_execute(self, ctx: RouteContext) -> Action | None:
         self.routed.extend(
-            (c.command, c.session.get("GPU") if c.session else None)
+            (c.command, c.session.get(self.name) if c.session else None)
             for c in ctx.commands
         )
         return None
 
     async def pre_command(self, ctx: CommandContext) -> Action | None:
         assert ctx.session is not None
-        self.commanded.append((ctx.command, ctx.session.get("GPU")))
+        self.commanded.append((ctx.command, ctx.session.get(self.name)))
         return None
 
 
@@ -2168,6 +2169,18 @@ async def test_env_s_command_is_read_in_the_environment_env_gives_it():
             ("env", "3"),
             ("echo", None),
         ]
+        assert sorted(spy.commanded, key=str) == sorted(spy.routed, key=str)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_env_i_brings_no_startup_variable_back():
+    spy = SeePrefix("PWD")
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[spy])
+    try:
+        await ws.shell("env -i echo c")
+        assert spy.routed == [("env", "/"), ("echo", None)]
         assert sorted(spy.commanded, key=str) == sorted(spy.routed, key=str)
     finally:
         await ws.close()
