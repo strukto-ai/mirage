@@ -68,12 +68,14 @@ describe('interpreters at the line deadline', () => {
   }
 
   it('aborts the run signal so a runtime can reclaim what it spawned', async () => {
+    // The budget starts before the line's passes, so the run has to be given
+    // one they cannot spend on a loaded runner to start at all.
     const probe = new SignalProbeRuntime()
-    const ws = lineWs([probe, 'workspace'], 0.1)
+    const ws = lineWs([probe, 'workspace'], 1)
     try {
       const r = await ws.shell('cd /data && python3 -c "hang"')
       expect(r.exitCode).toBe(124)
-      expect(DEC.decode(r.stderr)).toContain('line: timed out after 0.1s')
+      expect(DEC.decode(r.stderr)).toContain('line: timed out after 1s')
       expect(probe.aborted).toBe(true)
     } finally {
       await ws.close()

@@ -252,7 +252,9 @@ async def test_truncation_keeps_lazy_exit_zero_on_match():
 
 @pytest.mark.asyncio
 async def test_timeout_preserves_partial_records_and_logs(caplog):
-    ws = _ws(line=0.1)
+    # The budget starts before the line's passes: one they cannot spend on a
+    # loaded runner, so the cat runs before the deadline.
+    ws = _ws(line=1.0)
     await ws.shell("echo hello > /data/f.txt")
     before = len(ws._files.records)
     with caplog.at_level(logging.DEBUG, logger="mirage.workspace.workspace"):

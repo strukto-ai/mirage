@@ -90,7 +90,7 @@ class DelayedProcessProbe extends ProcessProbe {
   override async runProcess(_e: unknown, _p: PathSpec[], argv: string[], ctx: Context) {
     this.requests.push({ ...ctx, argv })
     try {
-      await sleep(150, ctx.signal)
+      await sleep(5000, ctx.signal)
       return { stdout: ENC.encode('completed\n'), stderr: null, exitCode: 0 }
     } catch (err) {
       this.aborted = ctx.signal?.aborted ?? false
@@ -258,13 +258,15 @@ describe('external program capture', () => {
   })
 })
 
-function lineWs(probe: Runtime): Workspace {
+// The line's budget starts before its passes, so a run that must start gets
+// one they cannot spend on a loaded runner.
+function lineWs(probe: Runtime, seconds = 0.05): Workspace {
   return new Workspace(
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
       runtimes: [probe],
-      commandLimits: { line: new Limit({ timeoutSeconds: 0.05 }) },
+      commandLimits: { line: new Limit({ timeoutSeconds: seconds }) },
     },
   )
 }
@@ -272,11 +274,11 @@ function lineWs(probe: Runtime): Workspace {
 describe('external program at the line deadline', () => {
   it('aborts the process', async () => {
     const probe = new DelayedProcessProbe()
-    const ws = lineWs(probe)
+    const ws = lineWs(probe, 1)
     try {
       const result = await ws.shell('native-tool')
       expect(result.exitCode).toBe(124)
-      expect(DEC.decode(result.stderr)).toContain('line: timed out after 0.05s')
+      expect(DEC.decode(result.stderr)).toContain('line: timed out after 1s')
       expect(probe.requests).toHaveLength(1)
       expect(probe.aborted).toBe(true)
     } finally {
