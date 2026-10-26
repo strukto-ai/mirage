@@ -189,6 +189,18 @@ async def test_a_hand_over_puts_what_is_left_ahead_on_the_next_terminal():
 
 
 @pytest.mark.asyncio
+async def test_an_attached_reader_takes_what_was_handed_back_first():
+    tty, to = Terminal(), Terminal()
+    reader = JobConsole()
+    await to.attach(reader)
+    await tty.jobs.emit(Channel.STDOUT, b"saved\n")
+    tty.hand_over(to)
+    await to.emit(Channel.STDOUT, b"newer\n")
+    assert await reader.snapshot(Channel.STDOUT) == b"saved\nnewer\n"
+    assert to.reader is reader
+
+
+@pytest.mark.asyncio
 async def test_bounded_output_goes_back_ahead_of_later_output():
     tty = Terminal()
     await tty.emit(Channel.STDOUT, b"long line\n")

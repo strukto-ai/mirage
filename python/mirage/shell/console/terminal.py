@@ -63,7 +63,9 @@ class Terminal(JobConsole):
 
     async def put(self, channel: Channel, data: bytes, job: bool) -> None:
         """Pass a chunk to the reader, or keep it for the line; while a
-        reader takes what waited (``attach``), keep it and wait.
+        reader takes what waited (``attach``), keep it and wait. What was
+        handed back to an attached reader (``hand_over``) goes to it
+        first.
 
         Args:
             channel (Channel): stdout or stderr.
@@ -72,12 +74,16 @@ class Terminal(JobConsole):
         """
         if not data:
             return
-        if self.reader is not None:
+        reader = self.reader
+        if reader is not None and not self.chunks:
             self._remember(channel, data)
-            await self.reader.emit(channel, data)
+            await reader.emit(channel, data)
             return
         self.chunks.append((channel, data, job))
-        if self.attaching is not None:
+        if reader is not None:
+            self.reader = None
+            await self._pass(reader)
+        elif self.attaching is not None:
             await self.attaching.wait()
 
     async def attach(self, reader: JobConsole | None) -> None:
@@ -97,6 +103,15 @@ class Terminal(JobConsole):
         if reader is None:
             self.reader = None
             return
+        await self._pass(reader)
+
+    async def _pass(self, reader: JobConsole) -> None:
+        """Hand ``reader`` what waits, one chunk at a time, and make it
+        the line's reader once none is left.
+
+        Args:
+            reader (JobConsole): where the caller streams the line.
+        """
         ended = self.ended
         attaching = self.attaching = asyncio.Event()
         try:
@@ -115,7 +130,8 @@ class Terminal(JobConsole):
     def hand_over(self, to: "Terminal") -> None:
         """Once its last line has ended, give ``to`` what is left here,
         ahead of what reached it meanwhile, and send there what jobs
-        write from now on.
+        write from now on. A reader attached to ``to`` takes it before
+        anything written after.
 
         Args:
             to (Terminal): the terminal that takes the rest.

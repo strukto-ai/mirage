@@ -57,17 +57,22 @@ export class Terminal extends JobConsole {
 
   /**
    * Pass a chunk to the reader, or keep it for the line; while a reader
-   * takes what waited (`attach`), keep it and wait. `job` says a job wrote it.
+   * takes what waited (`attach`), keep it and wait. What was handed back to
+   * an attached reader (`handOver`) goes to it first. `job` says a job wrote it.
    */
   async put(channel: Channel, data: Uint8Array, job: boolean): Promise<void> {
     if (data.byteLength === 0) return
-    if (this.reader !== null) {
+    const reader = this.reader
+    if (reader !== null && this.chunks.length === 0) {
       this.remember(channel, data)
-      await this.reader.emit(channel, data)
+      await reader.emit(channel, data)
       return
     }
     this.chunks.push([channel, data, job])
-    if (this.attaching !== null) await this.attaching
+    if (reader !== null) {
+      this.reader = null
+      await this.pass(reader)
+    } else if (this.attaching !== null) await this.attaching
   }
 
   /**
@@ -86,6 +91,11 @@ export class Terminal extends JobConsole {
       this.reader = null
       return
     }
+    await this.pass(reader)
+  }
+
+  /** Hand `reader` what waits, one chunk at a time, and make it the line's once none is left. */
+  private async pass(reader: JobConsole): Promise<void> {
     const ended = this.ended
     let attached: () => void = () => undefined
     const attaching = new Promise<void>((resolve) => {
@@ -110,7 +120,8 @@ export class Terminal extends JobConsole {
 
   /**
    * Once its last line has ended, give `to` what is left here, ahead of what
-   * reached it meanwhile, and send there what jobs write from now on.
+   * reached it meanwhile, and send there what jobs write from now on. A
+   * reader attached to `to` takes it before anything written after.
    */
   handOver(to: Terminal): void {
     to.chunks = [...this.chunks, ...to.chunks]
