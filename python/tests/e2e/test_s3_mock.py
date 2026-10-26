@@ -35,3 +35,38 @@ async def test_the_tripwire_refuses_an_unconditioned_mutation(call):
     c.tripwire = True
     with pytest.raises(AssertionError, match="unconditioned"):
         await call(c)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op", ["put", "copy"])
+async def test_if_none_match_refuses_a_key_that_exists(op):
+    c = MultiBucketS3Client({"b": {"k": b"k\n", "src": b"s\n"}})
+
+    async def create(key):
+        if op == "put":
+            await c.put_object(
+                Bucket="b", Key=key, Body=b"n\n", IfNoneMatch="*"
+            )
+        else:
+            await c.copy_object(
+                Bucket="b",
+                CopySource={"Bucket": "b", "Key": "src"},
+                Key=key,
+                IfNoneMatch="*",
+            )
+
+    with pytest.raises(Exception, match="PreconditionFailed"):
+        await create("k")
+    assert c.buckets["b"]["k"] == b"k\n"
+    await create("new")
+    assert "new" in c.buckets["b"]
+
+
+@pytest.mark.asyncio
+async def test_commits_count_per_key_so_equal_bytes_are_two_versions():
+    c = MultiBucketS3Client({"b": {}})
+    await c.put_object(Bucket="b", Key="k", Body=b"x\n")
+    await c.put_object(Bucket="b", Key="k", Body=b"x\n")
+    await c.delete_object(Bucket="b", Key="gone")
+    await c.delete_objects(Bucket="b", Delete={"Objects": [{"Key": "k"}]})
+    assert c.commits == {("b", "k"): 3}
