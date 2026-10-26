@@ -29,6 +29,13 @@ import { type ObserverStore, RAMObserverStore } from './store.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import { currentExecutionId } from '../context/session_context.ts'
 
+/**
+ * Opt in by assigning a debug sink, as Python's module logger is off until
+ * configured: history is read after every command, and a torn line stays in
+ * the file, so a sink that always wrote would repeat it on every read.
+ */
+export const logger: { debug?: (message: string) => void } = {}
+
 const KNOWN_EVENTS = new Set<string>([EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, EVENT_OP])
 
 export type EventDict = Record<string, unknown>
@@ -46,7 +53,7 @@ function parseFiles(files: Map<string, Uint8Array>): EventDict[] {
       } catch (err) {
         // A crash mid-append tears a line and the entry appended onto it.
         if (!(err instanceof SyntaxError)) throw err
-        console.debug(`skipping unparseable history line in ${key}: ${String(err)}`)
+        logger.debug?.(`skipping unparseable history line in ${key}: ${String(err)}`)
       }
     }
   }
