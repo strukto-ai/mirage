@@ -247,7 +247,7 @@ export function hostRun(pid: number, argv: readonly string[]): Record<string, Js
  */
 function startedAt(pid: number): Promise<number | null> {
   const lstart = /^\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const months = 'JanFebMarAprMayJunJulAugSepOctNovDec'
   return new Promise((resolve, reject) => {
     execFile(
       'ps',
@@ -266,7 +266,7 @@ function startedAt(pid: number): Promise<number | null> {
         const [, month, day, hours, minutes, seconds, year] = found
         const start = new Date(
           Number(year),
-          months.indexOf(month ?? ''),
+          months.indexOf(month ?? '') / 3,
           Number(day),
           Number(hours),
           Number(minutes),

@@ -466,14 +466,20 @@ async def processes_peer(prefix: str) -> None:
 
     check("py peer: ps lists the owner's process", await until(listed))
     name = names[0] if names else "none:0"
-    result = await ws.shell(f"ps -p {name} -o pid=,comm=", session_id=JOBS_SESSION)
+    result = await ws.shell(
+        f"ps -p {name} -o pid=,comm=", session_id=JOBS_SESSION
+    )
     check(
         "py peer: ps -p selects it with its ids tagged",
         result.stdout.decode().split() == [name, "sleep"],
         f"got {result.stdout!r}",
     )
     result = await ws.shell(f"kill {name}", session_id=JOBS_SESSION)
-    check(f"py peer: kill {name}", result.exit_code == 0, f"got {result.stderr!r}")
+    check(
+        f"py peer: kill {name}",
+        result.exit_code == 0,
+        f"got {result.stderr!r}",
+    )
     result = await ws.shell("wait %1; echo $?", session_id=JOBS_SESSION)
     check(
         "py peer: wait answers TERM's status",
