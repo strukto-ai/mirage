@@ -537,46 +537,60 @@ impl Parser<'_> {
     }
 
     /// `$((`: arithmetic when the parentheses close with `))`, else a
-    /// command substitution whose first command is a subshell, which bash
-    /// parses when it runs it.
+    /// command substitution up to the `)` matching its first `(`, whose
+    /// first command is a subshell. bash parses that text when it runs it,
+    /// so a body that does not parse to there is one raw word.
     pub(super) fn arithmetic_or_substitution(&mut self) -> R<Syn> {
         if self.double_paren_end(self.i + 1).is_some() {
             return self.arithmetic_expansion();
         }
         let at = self.i;
         let mark = self.mark();
-        match self.command_substitution() {
-            Ok(node) => Ok(node),
-            Err(fail) => {
-                let Some(end) = super::lex::pair_end(self.s, at + 1, b'(', b')') else {
-                    return Err(fail);
-                };
-                self.reset(mark);
-                self.check_raw(at + 2, end - 1, false)?;
-                self.i = end;
-                Ok(Syn::node(
-                    "command_substitution",
-                    vec![
-                        Syn::token("$(", at, at + 2),
-                        Syn::leaf("word", at + 2, end - 1),
-                        Syn::token(")", end - 1, end),
-                    ],
-                ))
-            }
+        let parsed = self.command_substitution();
+        let Some(end) = self.paren_end(at + 1) else {
+            parsed?;
+            return Err(Fail::eof(self.s.len(), ')'));
+        };
+        if parsed.is_ok() && self.i == end {
+            return parsed;
         }
+        self.reset(mark);
+        self.check_raw(at + 2, end - 1, false)?;
+        self.i = end;
+        Ok(Syn::node(
+            "command_substitution",
+            vec![
+                Syn::token("$(", at, at + 2),
+                Syn::leaf("word", at + 2, end - 1),
+                Syn::token(")", end - 1, end),
+            ],
+        ))
     }
 
     /// Past the `))` closing the `((` at `at`, if the pair closes with
-    /// one; each `$(...)` inside is read by the parser, so a `)` of a case
-    /// pattern there does not close the outer pair.
+    /// one.
     pub(super) fn double_paren_end(&self, at: usize) -> Option<usize> {
+        let end = self.paren_end(at + 1)?;
+        (self.s.get(end) == Some(&b')')).then_some(end + 1)
+    }
+
+    /// Past the `)` closing the `(` at `at`; each `$(...)` and double-quoted
+    /// string inside is read by the parser, so a `)` of a case pattern
+    /// there does not close it.
+    fn paren_end(&self, at: usize) -> Option<usize> {
         let mut depth = 0usize;
-        let mut end = at + 2;
+        let mut end = at;
         while end < self.s.len() {
             match self.s[end] {
                 b'\\' => end += 1,
-                b'\'' | b'"' | b'`' => {
+                b'\'' | b'`' => {
                     end = super::lex::quote_end(self.s, end, self.s[end])?;
+                    continue;
+                }
+                b'"' => {
+                    let mut probe = self.probe(end);
+                    probe.string().ok()?;
+                    end = probe.i;
                     continue;
                 }
                 b'$' if self.s.get(end + 1) == Some(&b'\'') => {
@@ -592,9 +606,11 @@ impl Parser<'_> {
                     continue;
                 }
                 b'(' => depth += 1,
-                b')' if depth > 0 => depth -= 1,
                 b')' => {
-                    return (self.s.get(end + 1) == Some(&b')')).then_some(end + 2);
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(end + 1);
+                    }
                 }
                 _ => {}
             }

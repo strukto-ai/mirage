@@ -253,6 +253,46 @@ fn an_empty_regex_comes_before_and_and() {
 }
 
 #[test]
+fn a_conditional_reads_words_and_only_its_own_operators() {
+    assert_eq!(
+        read("[[ -lt -nt b ]]"),
+        "(program (test_command (binary_expression left: (word=-lt) operator: (test_operator=-nt) \
+         right: (word=b))))"
+    );
+    assert_eq!(
+        read("[[ ! -- && -n ! ]]"),
+        "(program (test_command (binary_expression left: (unary_expression (word=--)) \
+         right: (unary_expression operator: (test_operator=-n) (word=!)))))"
+    );
+    assert_eq!(
+        read("[[ ~/x == -1 ]]"),
+        "(program (test_command (binary_expression left: (word=~/x) right: (number=-1))))"
+    );
+    read("[[ -zz = -zz ]]");
+    read("[[ a == ! ]]");
+    refused("[[ -f = -f ]]");
+}
+
+#[test]
+fn a_regex_keeps_its_quotes_and_expansions_apart() {
+    assert_eq!(
+        read("[[ a =~ ^'a'\"$b\"(c d)$ ]]"),
+        "(program (test_command (binary_expression left: (word=a) right: (concatenation (regex=^) \
+         (raw_string='a') (string (simple_expansion (variable_name=b))) (regex=(c d)$)))))"
+    );
+    read("[[ a =~ a`echo .`c ]]");
+    refused("[[ a =~ ^(a|b$ ]]");
+}
+
+#[test]
+fn a_dollar_double_paren_substitution_ends_at_the_paren_closing_its_first() {
+    refused("echo $((case x in x) echo y;; esac))");
+    refused("echo $((echo a #)\n))");
+    refused("echo $((echo a # (\n) )");
+    read("echo $((echo \"$(echo \")\")\") ) $((echo a)|cat)");
+}
+
+#[test]
 fn an_extglob_group_takes_blanks_quotes_and_expansions() {
     assert_eq!(
         read("[[ $a == @(x\ny) ]]"),

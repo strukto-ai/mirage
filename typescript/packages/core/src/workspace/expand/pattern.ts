@@ -25,14 +25,14 @@ import { homeDir } from '../session/shell_dirs.ts'
 import { expandNode } from './node.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 
-/** An unquoted word as a pattern: globs live, backslash escapes. */
-function unquotedPattern(text: string): string {
+/** An unquoted word as a pattern: its specials live, backslash escapes. */
+function unquotedPattern(text: string, escape: (text: string) => string): string {
   const out: string[] = []
   let i = 0
   while (i < text.length) {
     const c = text[i] ?? ''
     if (c === '\\' && i + 1 < text.length) {
-      out.push(escapeGlob(text[i + 1] ?? ''))
+      out.push(escape(text[i + 1] ?? ''))
       i += 2
       continue
     }
@@ -43,14 +43,15 @@ function unquotedPattern(text: string): string {
 }
 
 /**
- * Expand one pattern word into the matcher's glob dialect.
+ * Expand one pattern word into a matcher's dialect, the glob one unless
+ * `escape` writes another's literals (`=~`'s regex).
  *
- * bash 5.2 semantics, shared by case patterns, the `[[ == ]]` right side
- * and quoted parameter-expansion operands: text under any quote matches
- * literally, unquoted text keeps its glob characters live with backslash
- * escaping the next character, and an expansion's value is a live pattern
- * when unquoted but literal inside double quotes. Patterns are never
- * word-split, so `$p` holding `a b` matches the word `a b`.
+ * bash 5.2 semantics, shared by case patterns, the right side of a `[[`
+ * match and quoted parameter-expansion operands: text under any quote
+ * matches literally, unquoted text keeps its special characters live with
+ * backslash escaping the next character, and an expansion's value is a
+ * live pattern when unquoted but literal inside double quotes. Patterns
+ * are never word-split, so `$p` holding `a b` matches the word `a b`.
  */
 export async function expandPattern(
   tsNode: TSNodeLike,
@@ -58,22 +59,23 @@ export async function expandPattern(
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
   view?: SessionView,
+  escape: (text: string) => string = escapeGlob,
 ): Promise<string> {
   const session = context.session
   const ntype = tsNode.type
-  if (ntype === NT.WORD || ntype === NT.EXTGLOB_PATTERN) {
+  if (ntype === NT.WORD || ntype === NT.EXTGLOB_PATTERN || ntype === NT.REGEX) {
     let raw = tsNode.text
     if (raw.startsWith('~')) raw = expandTilde(raw, homeDir(session))
-    return unquotedPattern(raw)
+    return unquotedPattern(raw, escape)
   }
-  if (ntype === NT.RAW_STRING) return escapeGlob(tsNode.text.slice(1, -1))
-  if (ntype === NT.ANSI_C_STRING) return escapeGlob(decodeAnsiC(tsNode.text.slice(2, -1)))
+  if (ntype === NT.RAW_STRING) return escape(tsNode.text.slice(1, -1))
+  if (ntype === NT.ANSI_C_STRING) return escape(decodeAnsiC(tsNode.text.slice(2, -1)))
   if (ntype === NT.STRING)
-    return escapeGlob(await expandNode(tsNode, context, executeFn, callStack, view))
+    return escape(await expandNode(tsNode, context, executeFn, callStack, view))
   if (ntype === NT.TRANSLATED_STRING) {
     for (const child of tsNode.namedChildren) {
       if (child.type === NT.STRING) {
-        return escapeGlob(await expandNode(child, context, executeFn, callStack, view))
+        return escape(await expandNode(child, context, executeFn, callStack, view))
       }
     }
     return ''
@@ -88,7 +90,7 @@ export async function expandPattern(
       // followed by the string node; the `$` is the translation marker,
       // not text (same rule as expandNode).
       if (child.type === '$' && children[position + 1]?.type === NT.STRING) continue
-      parts.push(await expandPattern(child, context, executeFn, callStack, view))
+      parts.push(await expandPattern(child, context, executeFn, callStack, view, escape))
     }
     return parts.join('')
   }

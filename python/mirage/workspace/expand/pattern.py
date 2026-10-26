@@ -28,17 +28,19 @@ from mirage.workspace.expand.node import expand_node
 from mirage.workspace.session.shell_dirs import home_dir
 
 
-def _unquoted_pattern(text: str) -> str:
-    """An unquoted word as a pattern: globs live, backslash escapes.
+def _unquoted_pattern(text: str, escape: Callable[[str], str]) -> str:
+    """An unquoted word as a pattern: its specials live, backslash
+    escapes.
 
     Args:
         text (str): the word's raw source text.
+        escape (Callable[[str], str]): writes a literal in the dialect.
     """
     out: list[str] = []
     i = 0
     while i < len(text):
         if text[i] == "\\" and i + 1 < len(text):
-            out.append(escape_glob(text[i + 1]))
+            out.append(escape(text[i + 1]))
             i += 2
             continue
         out.append(text[i])
@@ -52,36 +54,39 @@ async def expand_pattern(
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
+    escape: Callable[[str], str] = escape_glob,
 ) -> str:
-    """Expand one pattern word into the matcher's glob dialect.
+    """Expand one pattern word into a matcher's dialect, the glob one
+    unless ``escape`` writes another's literals (``=~``'s regex).
 
-    bash 5.2 semantics, shared by case patterns, the ``[[ == ]]`` right
-    side and quoted parameter-expansion operands: text under any quote
-    matches literally, unquoted text keeps its glob characters live
-    with backslash escaping the next character, and an expansion's
-    value is a live pattern when unquoted but literal inside double
-    quotes. Patterns are never word-split, so ``$p`` holding ``a b``
-    matches the word ``a b``.
+    bash 5.2 semantics, shared by case patterns, the right side of a
+    ``[[`` match and quoted parameter-expansion operands: text under
+    any quote matches literally, unquoted text keeps its special
+    characters live with backslash escaping the next character, and an
+    expansion's value is a live pattern when unquoted but literal
+    inside double quotes. Patterns are never word-split, so ``$p``
+    holding ``a b`` matches the word ``a b``.
 
     Args:
         ts_node (TSNodeLike): one pattern node.
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): function-call scope, if any.
+        escape (Callable[[str], str]): writes a literal in the dialect.
     """
     session = context.session
     ntype = ts_node.type
-    if ntype in (NT.WORD, NT.EXTGLOB_PATTERN):
+    if ntype in (NT.WORD, NT.EXTGLOB_PATTERN, NT.REGEX):
         raw = get_text(ts_node)
         if raw.startswith("~"):
             raw = expand_tilde(raw, home_dir(session))
-        return _unquoted_pattern(raw)
+        return _unquoted_pattern(raw, escape)
     if ntype == NT.RAW_STRING:
-        return escape_glob(get_text(ts_node)[1:-1])
+        return escape(get_text(ts_node)[1:-1])
     if ntype == NT.ANSI_C_STRING:
-        return escape_glob(decode_ansi_c(get_text(ts_node)[2:-1]))
+        return escape(decode_ansi_c(get_text(ts_node)[2:-1]))
     if ntype == NT.STRING:
-        return escape_glob(
+        return escape(
             await expand_node(
                 ts_node, context, execute_fn, call_stack, view=view
             )
@@ -89,7 +94,7 @@ async def expand_pattern(
     if ntype == NT.TRANSLATED_STRING:
         for child in ts_node.named_children:
             if child.type == NT.STRING:
-                return escape_glob(
+                return escape(
                     await expand_node(
                         child, context, execute_fn, call_stack, view=view
                     )
@@ -110,7 +115,7 @@ async def expand_pattern(
                 continue
             parts.append(
                 await expand_pattern(
-                    child, context, execute_fn, call_stack, view=view
+                    child, context, execute_fn, call_stack, view, escape
                 )
             )
         return "".join(parts)

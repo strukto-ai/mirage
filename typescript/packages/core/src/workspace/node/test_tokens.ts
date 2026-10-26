@@ -56,27 +56,28 @@ function negativeNumberChild(node: TSNodeLike): TSNodeLike | null {
 
 /**
  * One token of a test expression: an operator's text, or an operand node
- * (`negative` for a `-N` tree-sitter split into `-` and N).
+ * (`negative` for a `-N` a `[` test splits into `-` and N).
  */
 export type ExprToken =
   | { readonly op: string; readonly operand: null; readonly negative: false }
   | { readonly op: null; readonly operand: TSNodeLike; readonly negative: boolean }
 
-/** A parsed `[[ ]]` expression. */
+/** A parsed `[[ ]]` expression, its leaves holding their operand nodes. */
 export type CondTree =
   | { kind: 'and' | 'or'; left: CondTree; right: CondTree }
   | { kind: 'not' | 'group'; inner: CondTree }
-  | { kind: 'unary'; op: string; operand: ExprToken }
-  | { kind: 'binary'; op: string; left: ExprToken; right: ExprToken }
-  | { kind: 'word'; operand: ExprToken }
+  | { kind: 'unary'; op: string; operand: TSNodeLike }
+  | { kind: 'binary'; op: string; left: TSNodeLike; right: TSNodeLike }
+  | { kind: 'word'; operand: TSNodeLike }
 
 /** The tokens are no expression the `[[ ]]` grammar reads. */
 export class CondSyntax extends Error {}
 
 /**
  * The tokens of a `[[ ]]` node in source order, which its grammar
- * (`CondParser`) reads: every reader of the test reads these. Throws
- * `CondSyntax` where tree-sitter could not read it.
+ * (`CondParser`) reads: every reader of the test reads these. The parser
+ * splits the test into bash's words and operators, a `-x` an operator only
+ * where bash reads one.
  */
 export function condTokens(node: TSNodeLike): ExprToken[] {
   const out: ExprToken[] = []
@@ -89,15 +90,12 @@ function condInto(node: TSNodeLike, out: ExprToken[]): void {
   for (const child of node.children) {
     const ctype = child.type
     if (ctype === '[[' || ctype === ']]') continue
-    if (ctype === NT.ERROR) throw new CondSyntax()
     if (child.isNamed !== true) {
       out.push({ op: ctype, operand: null, negative: false })
     } else if (ctype === NT.TEST_OPERATOR) {
       out.push({ op: child.text, operand: null, negative: false })
     } else if (CONTAINER_TYPES.has(ctype)) {
-      const negative = negativeNumberChild(child)
-      if (negative !== null) out.push({ op: null, operand: negative, negative: true })
-      else condInto(child, out)
+      condInto(child, out)
     } else {
       out.push({ op: null, operand: child, negative: false })
     }
@@ -174,11 +172,11 @@ export class CondParser {
     return this.tokens[this.at + ahead]?.op === null
   }
 
-  private take(): ExprToken {
-    const token = this.tokens[this.at]
-    if (token === undefined) throw new CondSyntax()
+  private take(): TSNodeLike {
+    const operand = this.tokens[this.at]?.operand
+    if (operand === undefined || operand === null) throw new CondSyntax()
     this.at++
-    return token
+    return operand
   }
 
   parse(): CondTree {

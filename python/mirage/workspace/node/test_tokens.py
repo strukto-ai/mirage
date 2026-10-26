@@ -59,8 +59,8 @@ def _negative_number_child(node: TSNodeLike) -> TSNodeLike | None:
     return None
 
 
-# One token of a ``[[ ]]`` expression: an operator's text, or an operand
-# node (``negative`` for a ``-N`` tree-sitter split into ``-`` and N).
+# One token of a test expression: an operator's text, or an operand node
+# (``negative`` for a ``-N`` a ``[`` test splits into ``-`` and N).
 @dataclass(frozen=True, slots=True)
 class ExprToken:
     op: str | None = None
@@ -78,13 +78,12 @@ class CondSyntax(Exception):
 
 def cond_tokens(node: TSNodeLike) -> list[ExprToken]:
     """The tokens of a ``[[ ]]`` node in source order, which its grammar
-    (``CondParser``) reads: every reader of the test reads these.
+    (``CondParser``) reads: every reader of the test reads these. The
+    parser splits the test into bash's words and operators, a ``-x`` an
+    operator only where bash reads one.
 
     Args:
         node (TSNodeLike): the test_command node opened with ``[[``.
-
-    Raises:
-        CondSyntax: tree-sitter could not read it.
     """
     out: list[ExprToken] = []
     _cond_into(node, out)
@@ -102,18 +101,12 @@ def _cond_into(node: TSNodeLike, out: list[ExprToken]) -> None:
         ctype = child.type
         if ctype in ("[[", "]]"):
             continue
-        if ctype == NT.ERROR:
-            raise CondSyntax
         if not child.is_named:
             out.append(ExprToken(op=ctype))
         elif ctype == NT.TEST_OPERATOR:
             out.append(ExprToken(op=get_text(child)))
         elif ctype in _CONTAINER_TYPES:
-            negative = _negative_number_child(child)
-            if negative is not None:
-                out.append(ExprToken(operand=negative, negative=True))
-            else:
-                _cond_into(child, out)
+            _cond_into(child, out)
         else:
             out.append(ExprToken(operand=child))
 
@@ -177,7 +170,8 @@ class CondParser:
     ``||``, ``&&``, then a term. A term is any run of ``!`` (each one
     toggles a single inversion, so ``! !`` inverts nothing) before a
     parenthesized expression, a unary test, a binary test or a word.
-    The tree is tuples, expanded later by ``_cond_node``.
+    The tree is tuples whose leaves hold their operand nodes, expanded
+    later by ``_cond_node``.
     """
 
     def __init__(self, tokens: list[ExprToken]) -> None:
@@ -231,10 +225,10 @@ class CondParser:
         op = self._op()
         if op is not None and op.startswith("-") and self._operand(1):
             self.at += 2
-            return ("unary", op, self.tokens[self.at - 1])
+            return ("unary", op, self.tokens[self.at - 1].operand)
         if not self._operand():
             raise CondSyntax
-        left = self.tokens[self.at]
+        left = self.tokens[self.at].operand
         op = self._op(1)
         if (
             op is not None
@@ -242,7 +236,7 @@ class CondParser:
             and self._operand(2)
         ):
             self.at += 3
-            return ("binary", op, left, self.tokens[self.at - 1])
+            return ("binary", op, left, self.tokens[self.at - 1].operand)
         self.at += 1
         return ("word", left)
 

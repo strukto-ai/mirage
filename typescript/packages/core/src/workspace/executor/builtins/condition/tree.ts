@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { RegexError } from '../../../../rs/errors.ts'
-import { posixEscape, posixRegex } from '../../../../rs/regex.ts'
+import { posixRegex } from '../../../../rs/regex.ts'
 import { randomReader, seedVar, sessionArith, visibleEnv } from '../../../session/state.ts'
 import { byteView, textView, utf8Locale } from '../../../../shell/bytes.ts'
 import type { ArithResult, ArithWrite } from '../../../../shell/types.ts'
@@ -80,7 +80,6 @@ async function evalLeaf(
 
 /** Match [[ left =~ right ]], filling BASH_REMATCH on a match. */
 function regexStatus(ctx: CondContext, node: Extract<CondNode, { kind: 'binary' }>): number {
-  const pattern = node.rightLiteral ? posixEscape(node.right) : node.right
   // The shell's own locale, which an unexported LC_ALL sets as well.
   const utf8 = utf8Locale(visibleEnv(ctx.session))
   const left = byteView(node.left, utf8)
@@ -88,7 +87,7 @@ function regexStatus(ctx: CondContext, node: Extract<CondNode, { kind: 'binary' 
   // POSIX_EXTENDED syntax, where `\d` is a `d` and `(?` is refused.
   let found
   try {
-    found = posixRegex(byteView(pattern, utf8), true, 'posix', false, utf8).search(left)
+    found = posixRegex(byteView(node.right, utf8), true, 'posix', false, utf8).search(left)
   } catch (err) {
     if (!(err instanceof RegexError)) throw err
     return 2

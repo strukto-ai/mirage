@@ -70,7 +70,7 @@ def test_escaped_text_matches_itself_and_nothing_else():
     ],
 )
 def test_unquoted_pattern_backslash_escapes(text, expected):
-    assert _unquoted_pattern(text) == expected
+    assert _unquoted_pattern(text, escape_glob) == expected
 
 
 def test_single_quoted_pattern_is_literal():

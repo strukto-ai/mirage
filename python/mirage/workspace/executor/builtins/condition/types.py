@@ -55,9 +55,6 @@ class CondBinary:
     left: str
     op: str
     right: str
-    # True when the right side was quoted: `[[ x == "a*" ]]` compares
-    # literally while the unquoted form pattern-matches.
-    right_literal: bool = False
 
 
 @dataclass(frozen=True, slots=True)

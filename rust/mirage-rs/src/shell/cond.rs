@@ -2,7 +2,7 @@ use super::lex::{blank_end, is_space};
 use super::parser::{Fail, Parser, R};
 
 /// Unary operators of a conditional command, without their dash.
-const UNARY: &[&[u8]] = &[
+pub(super) const UNARY: &[&[u8]] = &[
     b"a", b"b", b"c", b"d", b"e", b"f", b"g", b"h", b"k", b"p", b"r", b"s", b"t", b"u", b"w", b"x",
     b"G", b"L", b"N", b"O", b"S", b"z", b"n", b"o", b"v", b"R",
 ];
@@ -171,7 +171,7 @@ impl Cond<'_, '_> {
                 let word = self.text(start, end);
                 if word.len() > 1 && word[0] == b'-' && UNARY.contains(&&word[1..]) {
                     let operand = self.next()?;
-                    if let Token::Word(..) = operand {
+                    if matches!(operand, Token::Word(..) | Token::Not) {
                         return self.next_skipping();
                     }
                     if !operand.ends_term() {
@@ -202,7 +202,7 @@ impl Cond<'_, '_> {
             return self.regex();
         }
         match self.next()? {
-            Token::Word(..) => self.after_term(),
+            Token::Word(..) | Token::Not => self.after_term(),
             _ => self.fail(self.at),
         }
     }
@@ -231,7 +231,7 @@ impl Cond<'_, '_> {
         while self.at < self.end {
             match s[self.at] {
                 b'\\' => self.at += 1,
-                b'\'' | b'"' => {
+                b'\'' | b'"' | b'`' => {
                     self.at = super::lex::quote_end(s, self.at, s[self.at]).unwrap_or(self.end) - 1;
                 }
                 b'$' if s.get(self.at + 1) == Some(&b'\'') => {
