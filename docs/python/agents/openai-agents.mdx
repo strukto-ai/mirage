@@ -76,7 +76,7 @@ result = await Runner.run(
 
 How the session behaves:
 
-- Every command starts at the manifest root, `/` unless you configure a `Manifest`, and a `cd` or `export` ends with its command, as in the SDK's other sandboxes. Commands see the manifest's environment. Each sandbox session has its own Mirage session, and its commands, file reads, writes and patches run in it one at a time.
+- Every command starts at the manifest root, `/` unless you configure a `Manifest`, and a `cd` or `export` ends with its command, as in the SDK's other sandboxes. Commands see the manifest's environment. Each sandbox session has its own Mirage session. Its commands run in it side by side, so one left running in the background does not hold up the next.
 - A command still running after `exec_command`'s yield time keeps running. The model polls it with `write_stdin` and stops it with Ctrl-C (`\u0003`). A direct `exec(..., timeout=...)` raises `ExecTimeoutError`.
 - Relative paths resolve against the manifest root, and writes create missing parent directories.
 - A run paused for tool approval resumes on the same workspace and keeps the files the agent wrote.

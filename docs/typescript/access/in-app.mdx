@@ -240,10 +240,10 @@ Runs a shell line as the session. With `stream: false` (the default), it collect
   The line's stdin. An async iterable streams it.
 </ResponseField>
 <ResponseField name="cwd" type="string">
-  A working directory for this line only. A `cd` in the line does not leak.
+  A working directory for this line only. The line runs as a process of its own, as `bash -c` does: a `cd` in it does not leak, its jobs are its own, and it runs beside the session's other lines rather than after them.
 </ResponseField>
 <ResponseField name="env" type="Record<string, string>">
-  Variables for this line only.
+  Variables for this line only. Like `cwd`, they run the line as a process of its own.
 </ResponseField>
 <ResponseField name="signal" type="AbortSignal">
   Aborting it stops the line, which throws an `AbortError`.

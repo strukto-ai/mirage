@@ -253,17 +253,19 @@ export interface ExecuteOptions {
    */
   record?: boolean
   /**
-   * Per-call working directory. Providing this runs the command in an
-   * isolated session, like a bash subshell `(cd <cwd> && cmd)`. Mutations
-   * (cd, export) inside the call do NOT persist back to the workspace's
-   * session. To change the persistent cwd, assign `ws.cwd` directly or run
-   * `ws.shell('cd <path>')` without this option.
+   * Per-call working directory. Providing this runs the command as a
+   * process of its own, as `bash -c` started from the session does: in an
+   * isolated session, with jobs of its own, and beside the session's other
+   * lines rather than after them. Mutations (cd, export) inside the call do
+   * NOT persist back to the workspace's session. To change the persistent
+   * cwd, assign `ws.cwd` directly or run `ws.shell('cd <path>')` without
+   * this option.
    */
   cwd?: string
   /**
    * Per-call environment variable overrides, layered on top of the
-   * session's env. Providing this runs the command in an isolated session,
-   * like `env FOO=bar cmd`. Mutations (export) inside the call do NOT
+   * session's env. Like `cwd`, providing this runs the command as a process
+   * of its own, like `env FOO=bar cmd`. Mutations (export) inside the call do NOT
    * persist back to the workspace's session. To change the persistent env,
    * assign `ws.env` directly or run `ws.shell('export FOO=bar')` without
    * this option.

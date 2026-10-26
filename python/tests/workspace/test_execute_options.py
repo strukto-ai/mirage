@@ -22,6 +22,15 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace.executor.builtins.sleep.sleep import handle_sleep
 
 
+def _held(reading: asyncio.Event, release: asyncio.Event):
+    async def chunks():
+        reading.set()
+        await release.wait()
+        yield b"go\n"
+
+    return chunks()
+
+
 def _make_ws():
     vfs = RAMVFS()
     store = vfs._store
@@ -92,6 +101,13 @@ async def test_function_definitions_do_not_leak():
     assert "greet" not in session.functions
 
 
+@pytest.mark.asyncio
+async def test_cwd_leaves_its_status_in_the_session():
+    ws = _make_ws()
+    await ws.shell("false", cwd="/ram/subdir")
+    assert ws.get_session(ws.default_session_id).last_exit_code == 1
+
+
 # ── env tests ────────────────────────────────────────────────────────────
 
 
@@ -142,6 +158,71 @@ async def test_env_parallel_isolation():
     )
     assert (await r1.stdout_str()).strip() == "one"
     assert (await r2.stdout_str()).strip() == "two"
+
+
+# ── a process of its own ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("own", [{"cwd": "/ram"}, {}])
+async def test_a_per_call_line_runs_beside_the_sessions_line(own):
+    ws = _make_ws()
+    reading, release = asyncio.Event(), asyncio.Event()
+    slow = asyncio.create_task(
+        ws.shell("read x; echo got:$x", stdin=_held(reading, release), **own)
+    )
+    await asyncio.wait_for(reading.wait(), 5)
+    fast = await asyncio.wait_for(ws.shell("echo fast", cwd="/ram"), 5)
+    assert not slow.done()
+    release.set()
+    assert (await (await slow).stdout_str()) == "got:go\n"
+    assert (await fast.stdout_str()) == "fast\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_per_call_lines_wait_sees_only_its_own_jobs():
+    ws = _make_ws()
+    reading, release = asyncio.Event(), asyncio.Event()
+    holder = asyncio.create_task(
+        ws.shell(
+            "sleep 30 & read x", cwd="/ram", stdin=_held(reading, release)
+        )
+    )
+    await asyncio.wait_for(reading.wait(), 5)
+    done = await asyncio.wait_for(ws.shell("wait; echo done", cwd="/ram"), 5)
+    release.set()
+    await holder
+    assert (await done.stdout_str()) == "done\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_job_writes_to_the_per_call_line_that_started_it():
+    ws = _make_ws()
+    reading, release = asyncio.Event(), asyncio.Event()
+    a = asyncio.create_task(
+        ws.shell(
+            "{ while [ ! -f /ram/go ]; do sleep 0.05; done; echo from-a; }"
+            " & touch /ram/waiting; wait",
+            cwd="/ram",
+        )
+    )
+    while not await ws.vfs.exists("/ram/waiting"):
+        await asyncio.sleep(0.01)
+    b = asyncio.create_task(
+        ws.shell(
+            "read x; echo got:$x", cwd="/ram", stdin=_held(reading, release)
+        )
+    )
+    await asyncio.wait_for(reading.wait(), 5)
+    await ws.shell("touch /ram/go", cwd="/ram")
+    out_a = await asyncio.wait_for(a, 5)
+    release.set()
+    out_b = await b
+    assert (await out_a.stdout_str()) == "from-a\n"
+    assert (await out_b.stdout_str()) == "got:go\n"
+    await ws.close()
 
 
 # ── mid-flight cancel ─────────────────────────────────────────────

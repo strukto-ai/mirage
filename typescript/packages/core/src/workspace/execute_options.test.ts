@@ -34,6 +34,27 @@ const DEC = new TextDecoder()
 
 const ENC = new TextEncoder()
 
+function heldInput(): {
+  stdin: AsyncIterable<Uint8Array>
+  reading: Promise<void>
+  release: () => void
+} {
+  let read = (): void => undefined
+  let release = (): void => undefined
+  const reading = new Promise<void>((resolve) => {
+    read = resolve
+  })
+  const released = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  async function* chunks(): AsyncGenerator<Uint8Array> {
+    read()
+    await released
+    yield ENC.encode('go\n')
+  }
+  return { stdin: chunks(), reading, release }
+}
+
 function makeWs(): Workspace {
   const r = new RAMVFS()
   r.store.dirs.add('/')
@@ -155,6 +176,55 @@ describe('execute({ env }): bash subshell semantics', () => {
     ])
     expect(stdoutStr(a).trim()).toBe('one')
     expect(stdoutStr(b).trim()).toBe('two')
+    await ws.close()
+  })
+})
+
+describe('execute({ cwd }): a process of its own', () => {
+  for (const [label, own] of [
+    ['a per-call line', { cwd: '/ram' }],
+    ['a typed line', {}],
+  ] as const) {
+    it(`runs beside ${label} of the session`, async () => {
+      const ws = makeWs()
+      const input = heldInput()
+      const slow = ws.shell('read x; echo got:$x', { ...own, stdin: input.stdin })
+      await input.reading
+      const fast = await ws.shell('echo fast', { cwd: '/ram' })
+      input.release()
+      expect(stdoutStr(await slow)).toBe('got:go\n')
+      expect(stdoutStr(fast)).toBe('fast\n')
+      await ws.close()
+    })
+  }
+
+  it('waits only on the jobs it started', async () => {
+    const ws = makeWs()
+    const input = heldInput()
+    const holder = ws.shell('sleep 30 & read x', { cwd: '/ram', stdin: input.stdin })
+    await input.reading
+    const done = await ws.shell('wait; echo done', { cwd: '/ram' })
+    input.release()
+    await holder
+    expect(stdoutStr(done)).toBe('done\n')
+    await ws.close()
+  })
+
+  it('reports the output of a job under the line that started it', async () => {
+    const ws = makeWs()
+    const input = heldInput()
+    const a = ws.shell(
+      '{ while [ ! -f /ram/go ]; do sleep 0.05; done; echo from-a; } & touch /ram/waiting; wait',
+      { cwd: '/ram' },
+    )
+    while (!(await ws.vfs.exists('/ram/waiting'))) await new Promise((r) => setTimeout(r, 10))
+    const b = ws.shell('read x; echo got:$x', { cwd: '/ram', stdin: input.stdin })
+    await input.reading
+    await ws.shell('touch /ram/go', { cwd: '/ram' })
+    const outA = await a
+    input.release()
+    expect(stdoutStr(outA)).toBe('from-a\n')
+    expect(stdoutStr(await b)).toBe('got:go\n')
     await ws.close()
   })
 })

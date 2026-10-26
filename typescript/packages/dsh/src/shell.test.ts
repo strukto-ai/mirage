@@ -731,6 +731,16 @@ describe('start', () => {
     expect(proc.readOutput().delta).toBe('')
   })
 
+  it('runs a command beside a background one', async () => {
+    const { shell } = await makeShell()
+    const proc = await shell.execute(shell.resolve({ command: 'sleep 30' }))
+    const out = await runOn(shell, shell.resolve({ command: 'echo fast' }))
+    expect(out.stdout.text).toBe('fast\n')
+    expect(proc.status).toBe('running')
+    proc.kill()
+    await proc.done
+  })
+
   it('kill aborts a running command and is idempotent about completion', async () => {
     const { shell } = await makeShell()
     const proc = await shell.execute(shell.resolve({ command: 'sleep 30' }))

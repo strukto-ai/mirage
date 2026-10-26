@@ -49,6 +49,7 @@ import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
 import { PlacementPolicy } from '../../policy/builtin/placement.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { Decisions } from '../../policy/decisions.ts'
+import { JobOutput } from '../../shell/console/terminal.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
 import { buildFileCache } from './cache.ts'
 import { DriftQueue, installDriftState } from '../snapshot/drift.ts'
@@ -148,6 +149,8 @@ import { normDir, rstripSlash } from '../../utils/slash.ts'
 import type { EventRuntime } from '../../events/base.ts'
 import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
+import { forkForCall } from './utils.ts'
+import { recordStatus } from '../executor/statement.ts'
 import { fillEnv } from './fill.ts'
 import { closeWorkspace } from './lifecycle.ts'
 import { WorkspaceMeta } from './meta.ts'
@@ -1910,12 +1913,58 @@ export class Workspace {
     // A line admitted before close may still recurse through eval/source/$(),
     // but no continuation can start after teardown has finished.
     if (this.closed) throw new Error('Workspace is closed')
+    if (
+      options.handed === undefined &&
+      options.session === undefined &&
+      (options.cwd !== undefined || options.env !== undefined)
+    ) {
+      return this.runBeside(command, options)
+    }
     return this.serializeLine(
       options.sessionId,
       options.signal,
       () => executeLine(this.executeEnv(), command, options),
       options.session,
     )
+  }
+
+  /**
+   * Run a line given a cwd or env of its own as a process of its own, as
+   * `bash -c` started from the session is.
+   *
+   * It runs on a fork of the session, as a background job does, so what it
+   * changes stays on the fork; it has jobs of its own, which its `wait`
+   * waits on and whose output it reports; and it waits on none of the
+   * session's other lines: an agent's `nvidia-smi` answers while its
+   * `python3 train.py` still runs. Its status is the session's `$?` once it
+   * ends, as `bash -c`'s is its caller's. A line nested in one of the
+   * session's (a host callback fired mid-line) continues in that line
+   * instead, as `serializeLine` runs it.
+   *
+   * @param command the line.
+   * @param options the caller's options, with the `cwd` or `env`.
+   */
+  private async runBeside(command: string, options: ExecuteOptions): Promise<ExecuteResult> {
+    const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(this.sessionManager) : null
+    if (
+      ambient !== null &&
+      (options.sessionId === undefined || options.sessionId === ambient.sessionId)
+    ) {
+      return executeLine(this.executeEnv(), command, options)
+    }
+    await abortable(this.ensureSessionsLoaded(), options.signal)
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    const source = this.sessionManager.get(options.sessionId ?? this.sessionManager.defaultId)
+    const session = forkForCall(source, options.cwd, options.env)
+    session.processId = null
+    session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
+    const result = await executeLine(this.executeEnv(), command, {
+      ...options,
+      session,
+      jobTable: this.jobTable.child(),
+    })
+    recordStatus(source, result.exitCode)
+    return result
   }
 
   /**
