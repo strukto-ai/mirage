@@ -162,6 +162,18 @@ describe('Namespace symlink table', () => {
     expect(ws.namespace.isLink('/data/sub/m/b')).toBe(true)
     await ws.close()
   })
+
+  // Twin of test_rename_under_keeps_a_mount_below.
+  it('renameUnder keeps a mount below', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS(), '/data/sub/m': new RAMVFS() })
+    await ws.namespace.symlink('/data/sub/a', '/t1', 1)
+    await ws.namespace.symlink('/data/sub/m/b', '/t2', 1)
+    expect(await ws.namespace.renameUnder('/data/sub', '/data/new')).toBe(1)
+    expect(ws.namespace.isLink('/data/new/a')).toBe(true)
+    expect(ws.namespace.isLink('/data/sub/m/b')).toBe(true)
+    expect(ws.namespace.isLink('/data/new/m/b')).toBe(false)
+    await ws.close()
+  })
 })
 
 describe('Namespace node metadata overlay', () => {

@@ -644,7 +644,10 @@ class Namespace:
         entries by absolute path, so a link or an attr overlay below the
         source names a path that no longer exists once the backend has
         moved the bytes. No backend can report those entries, which is
-        why nothing below the dispatcher can do this.
+        why nothing below the dispatcher can do this. Entries in a mount
+        below stay, as ``purge_under`` keeps them: the mount stays where it
+        is, so its links and overlays are still its own, whenever it was
+        mounted.
 
         Args:
             src (str): absolute virtual path being renamed.
@@ -654,10 +657,14 @@ class Namespace:
             int: number of entries re-anchored.
         """
         base = src.rstrip("/") + "/"
+        roots = [
+            m.prefix.rstrip("/") for m in self.registry.descendant_mounts(src)
+        ]
         moved = [
             (path, meta)
             for path, meta in self._nodes.items()
             if path.startswith(base)
+            and not any(path == r or path.startswith(r + "/") for r in roots)
         ]
         if not moved:
             return 0
