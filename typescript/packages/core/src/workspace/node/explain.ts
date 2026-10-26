@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { YieldBudget } from '../../io/yield_budget.ts'
 import { PermissionsPolicy, refusalOf, renderDeny } from '../../policy/index.ts'
 import { isPending } from '../../policy/decisions.ts'
 import { sourceOf } from '../../policy/match/decide.ts'
@@ -915,8 +916,12 @@ export async function lineJudgments(
 ): Promise<[Walked, Judged[]][]> {
   const judged: [Walked, Judged[]][] = []
   const frame = rootFrame(root, handed.origin)
+  // Each command's gates answer in microtasks: a long script would hold
+  // the loop, and its abort, until every command was judged.
+  const budget = new YieldBudget()
   for (const item of walkedLine(root, session, reparse, frame)) {
     if (item.words[0]?.text === null) continue
+    await budget.run()
     const explained: Judged[] = []
     for await (const one of judgeWords(
       item.words,
@@ -1177,7 +1182,7 @@ function definesFunction(node: TSNodeLike): boolean {
   const stack = [node]
   for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
     if (current.type === 'function_definition') return true
-    stack.push(...current.namedChildren)
+    for (const child of current.namedChildren) stack.push(child)
   }
   return false
 }

@@ -101,7 +101,7 @@ function bracketIsACommand(text: string, node: ShellNode): boolean {
   const stack = children.slice(1, -1)
   for (let part = stack.pop(); part !== undefined; part = stack.pop()) {
     if (!part.isNamed && constants.LIST_TOKENS.has(part.type)) return true
-    if (constants.TEST_PARTS.has(part.type)) stack.push(...part.children)
+    if (constants.TEST_PARTS.has(part.type)) for (const child of part.children) stack.push(child)
   }
   return false
 }
@@ -158,7 +158,7 @@ function skippedEscapes(text: string, root: ShellNode): number[] {
   const stack: ShellNode[] = [root]
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
     if (node.childCount > 0 && !constants.UNLEXED.has(node.type) && node.type !== 'string')
-      stack.push(...node.children)
+      for (const child of node.children) stack.push(child)
     else spans.push([node.startIndex, node.endIndex])
   }
   spans.sort((a, b) => a[0] - b[0] || a[1] - b[1])
@@ -184,7 +184,7 @@ function respelled(text: string, root: ShellNode): string {
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
     if (node.type === 'test_command' && bracketIsACommand(text, node)) out[node.startIndex] = '_'
     if (constants.UNLEXED.has(node.type)) continue
-    stack.push(...node.children)
+    for (const child of node.children) stack.push(child)
     for (const child of node.children) {
       if (child.isNamed) continue
       constants.LITERAL_DOLLAR.lastIndex = child.startIndex

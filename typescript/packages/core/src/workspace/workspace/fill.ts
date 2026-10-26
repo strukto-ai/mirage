@@ -81,7 +81,7 @@ function definedBodies(node: TSNodeLike): Map<string, TSNodeLike[]> {
         else bodies.push(body)
       }
     }
-    stack.push(...current.namedChildren)
+    for (const child of current.namedChildren) stack.push(child)
   }
   return out
 }
@@ -251,7 +251,7 @@ function replacementBlocked(part: TSNodeLike): boolean {
     const current = stack.pop()
     if (current === undefined) break
     if (SUBSTITUTIONS.has(current.type)) return true
-    stack.push(...current.namedChildren)
+    for (const child of current.namedChildren) stack.push(child)
   }
   return false
 }

@@ -1027,7 +1027,7 @@ export function getFunctionSource(node: TSNodeLike): string {
     if (current === undefined) break
     const doc = current.heredoc
     if (doc !== undefined && doc.bodyStart >= end) documents.set(doc.bodyStart, doc.end)
-    pending.push(...current.namedChildren)
+    for (const child of current.namedChildren) pending.push(child)
   }
   if (documents.size > 0)
     text +=
