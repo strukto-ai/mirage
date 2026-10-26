@@ -59,9 +59,10 @@ export function walkOf(
   command: string,
 ): WalkFn {
   const [readdir, stat] = treeWalk(
-    files.answers('read_tree') ? files.readTree : undefined,
+    files.readTree,
     files.readdir,
     files.stat,
+    files.answers('read_tree'),
   )
   return walkWith((spec) => readdir(spec), stat, dispatch, command)
 }

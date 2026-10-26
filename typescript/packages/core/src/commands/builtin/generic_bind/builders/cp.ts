@@ -55,9 +55,10 @@ export const BUILDER: GenericCommand = {
     // (mirrors Python's _make_find), so stat classifies entries from the
     // listing instead of re-fetching, matching find.
     const [readdir, stat] = treeWalk<string[], FileStat>(
-      files.answers('read_tree') ? files.readTree : undefined,
+      files.readTree,
       (p) => files.readdir(p),
       files.stat,
+      files.answers('read_tree'),
     )
     const findFn: NativeCopy['find'] = async (src, options) => {
       const refused: string[] = []

@@ -35,9 +35,10 @@ async def grep(
     resolved = await files.resolve_glob(paths) if paths else []
     read = await search_reads(files, "grep", resolved, texts, ctx)
     readdir, stat = tree_walk(
-        (files.read_tree if files.answers("read_tree") else None),
+        files.read_tree,
         files.readdir,
         files.stat,
+        files.answers("read_tree"),
     )
     return await grep_generic(
         resolved,

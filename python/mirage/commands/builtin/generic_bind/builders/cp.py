@@ -80,9 +80,10 @@ def _make_find(files: CommandFiles) -> Callable[..., Awaitable[list[str]]]:
         files (CommandFiles): the command's files.
     """
     readdir, stat = tree_walk(
-        files.read_tree if files.answers("read_tree") else None,
+        files.read_tree,
         files.readdir,
         files.stat,
+        files.answers("read_tree"),
     )
     return partial(_walk_find, readdir, stat)
 

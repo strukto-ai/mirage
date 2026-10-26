@@ -35,7 +35,7 @@ from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
 from mirage.policy.decisions import is_pending
-from mirage.process.supervisor import ProcessSupervisor
+from mirage.process.table import ProcessTable
 from mirage.process.types import ProcessInfo
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import whole_line_runtime
@@ -130,7 +130,7 @@ class ExecuteEnv:
         job_table (JobTable): the workspace's jobs.
         runtimes (Runtimes): the runtimes a whole line may run in.
         router (Router): places a line.
-        processes (ProcessSupervisor): starts a session's process.
+        processes (ProcessTable): starts a session's process.
         dispatch (DispatchFn): ``Workspace.dispatch``.
         has_managed_env (Callable[[], bool]): any session may hold a
             managed variable.
@@ -151,7 +151,7 @@ class ExecuteEnv:
     job_table: JobTable
     runtimes: Runtimes
     router: Router
-    processes: ProcessSupervisor
+    processes: ProcessTable
     dispatch: DispatchFn
     has_managed_env: Callable[[], bool]
     secret_sources: Callable[[], Awaitable[Mapping[str, ResolvedSource]]]

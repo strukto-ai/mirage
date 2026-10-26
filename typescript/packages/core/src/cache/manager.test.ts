@@ -433,7 +433,7 @@ describe('CacheManager', () => {
   })
 })
 
-describe('CacheManager cachedSize', () => {
+describe('CacheManager cachedSizes', () => {
   const spec = (path = '/data/x.txt') =>
     new PathSpec({
       vfsPath: mountKey(path, '/data/'),
@@ -448,23 +448,31 @@ describe('CacheManager cachedSize', () => {
     return [cache, index] as const
   }
 
-  it('cachedSize reports the length', async () => {
+  it('cachedSizes reports the length', async () => {
     const [cache, index] = await withEntry()
     const manager = new CacheManager(cache, index, '/data/', true)
-    expect(await manager.cachedSize(spec())).toBe(6)
+    expect(await manager.cachedSizes([spec()])).toEqual([6])
   })
 
-  it('cachedSize of an empty render is 0, not null', async () => {
+  it('cachedSizes of an empty render is 0, not null', async () => {
     const [cache, index] = await withEntry(new Uint8Array(0))
     const manager = new CacheManager(cache, index, '/data/', true)
-    expect(await manager.cachedSize(spec())).toBe(0)
+    expect(await manager.cachedSizes([spec()])).toEqual([0])
   })
 
-  it('cachedSize of an absent path is null', async () => {
+  it('cachedSizes of an absent path is null', async () => {
     const cache = new RAMFileCacheStore()
     const index = new RAMIndexCacheStore({ ttl: 600 })
     const manager = new CacheManager(cache, index, '/data/', true)
-    expect(await manager.cachedSize(spec())).toBeNull()
+    expect(await manager.cachedSizes([spec()])).toEqual([null])
+  })
+
+  it('cachedSizes answers each path in order', async () => {
+    const [cache, index] = await withEntry()
+    await cache.set('/data/e.txt', new Uint8Array(0))
+    const manager = new CacheManager(cache, index, '/data/', true)
+    const paths = ['/data/x.txt', '/data/miss.txt', '/data/e.txt', '/other/x.txt']
+    expect(await manager.cachedSizes(paths.map((p) => spec(p)))).toEqual([6, null, 0, null])
   })
 })
 

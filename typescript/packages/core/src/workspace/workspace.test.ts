@@ -555,6 +555,9 @@ describe('Workspace custom cache option', () => {
     keepFingerprints(): Promise<void> {
       return Promise.resolve()
     }
+    sizes(keys: readonly string[]): Promise<(number | null)[]> {
+      return Promise.resolve(keys.map((k) => this.store.get(k)?.length ?? null))
+    }
     fingerprints(keys: readonly string[]): Promise<(string | null)[]> {
       return Promise.resolve(keys.map(() => null))
     }

@@ -358,6 +358,37 @@ describe('a mount that keeps its VFS listings', () => {
     }
   })
 
+  it("answers one level as the listing with each child's stat", async () => {
+    const store = new Folders()
+    const d = store.add('d')
+    store.add('sub', d)
+    store.add('f.txt', d, ENC.encode('f'))
+    const ws = workspace(store)
+    try {
+      const level = (await ws.dispatch('read_tree', '/f/d', [], { level: true })) as Map<
+        string,
+        FileStat
+      >
+      expect(Object.fromEntries([...level].map(([name, row]) => [name, row.type]))).toEqual({
+        sub: FileType.DIRECTORY,
+        'f.txt': FileType.FILE,
+      })
+      expect(level.get('f.txt')?.size).toBe(1)
+      expect(store.calls).toEqual([
+        ['list', 'root'],
+        ['list', d],
+      ])
+      store.calls.length = 0
+      expect(((await ws.dispatch('readdir', '/f/d')) as string[]).sort()).toEqual([
+        '/f/d/f.txt',
+        '/f/d/sub',
+      ])
+      expect(store.calls).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('asks the backend for a stat once its listing expires', async () => {
     const store = new Folders()
     const a = store.add('a.txt', 'root', ENC.encode('a'))

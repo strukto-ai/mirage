@@ -357,6 +357,15 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect((await cache.fingerprints(['/a']))[0]).toBeNull()
   })
 
+  it('answers sizes for each key in order without fetching a body', async () => {
+    await cache.set('/a', new TextEncoder().encode('abc'))
+    await cache.set('/empty', new Uint8Array(0))
+    await cache.keepFingerprints({ '/v': 'v1' })
+    const get = vi.spyOn(cache, 'get')
+    expect(await cache.sizes(['/a', '/empty', '/v', '/none'])).toEqual([3, 0, null, null])
+    expect(get).not.toHaveBeenCalled()
+  })
+
   it('answers fingerprints for each key in order', async () => {
     await cache.set('/a', new TextEncoder().encode('x'), { fingerprint: 'v1' })
     await cache.keepFingerprints({ '/c': 'v3' })

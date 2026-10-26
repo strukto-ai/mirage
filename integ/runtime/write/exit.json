@@ -45,7 +45,7 @@
     },
     {
       "id": "a_run_its_deadline_stops_keeps_what_it_wrote",
-      "note": "A write(2) a killed process made stays in its file, so a run timeout stops keeps what the program wrote, though it never closed the file. The JavaScript loop never yields, so the deadline must stop a guest that holds the host's event loop. A first run starts the interpreter, and the Python deadline leaves room for a Pyodide run, which takes about a second to reach its program and more on a slow runner, so the deadline meets the program and not its start.",
+      "note": "A write(2) a killed process made stays in its file, so a run timeout stops keeps what the program wrote, though it never closed the file. The JavaScript loop never yields. A first run compiles the WASI module before timing the guest. Pyodide creates a fresh interpreter for every run, so warming an earlier run cannot remove its startup from the deadline. The Python deadline includes room for that startup while the CLI and SDK batteries share a busy runner; both exit 124 and the retained file are required.",
       "runtimes": [
         "wasi",
         "pyodide",
@@ -80,7 +80,7 @@
         },
         {
           "command": {
-            "python": "timeout 5 python3 -c 'import os\nfd = os.open(\"/data/out.txt\", os.O_WRONLY | os.O_CREAT)\nos.write(fd, b\"kept\")\nwhile True:\n    pass'",
+            "python": "timeout 15 python3 -c 'import os\nfd = os.open(\"/data/out.txt\", os.O_WRONLY | os.O_CREAT)\nos.write(fd, b\"kept\")\nwhile True:\n    pass'",
             "js": "timeout 2 node -e \"const f = std.open('/data/out.txt', 'w'); f.puts('kept'); f.flush(); for (;;) {}\""
           },
           "expect": {

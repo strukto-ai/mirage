@@ -27,7 +27,7 @@ import { SSHVFS } from '../../../vfs/ssh/ssh.ts'
 import { Workspace } from '../../../workspace.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { SSHRuntime } from './runtime.ts'
-import { ProcessSupervisor } from '@struktoai/mirage-core/process/supervisor'
+import { ProcessTable } from '@struktoai/mirage-core/process/table'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
 import type { Ssh2Sdk } from './sdk.ts'
 
@@ -260,7 +260,7 @@ describe('SSHRuntime cancellation', () => {
     const runtime = new HungRuntime()
     const controller = new AbortController()
     const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
-    const runner = new ProcessSupervisor(runWithExecution).start({
+    const runner = new ProcessTable(runWithExecution).start({
       sessionId: 's',
       command: 'sleep',
       cwd: PathSpec.fromStrPath('/'),

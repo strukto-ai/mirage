@@ -90,7 +90,7 @@ class Scanner {
       true,
     )
     ;[this.treeReaddir, this.treeLstat] = treeWalk<string[], FileStat>(
-      (path) => this.subtree(path),
+      (path, _limit, level) => this.subtree(path, level === true),
       (path) => vfs.readdir(path),
       (path) => vfs.stat(path, undefined, { nofollow: true }),
     )
@@ -130,9 +130,11 @@ class Scanner {
 
   /**
    * A directory's whole subtree in one read, given up once it holds more
-   * entries than files the walk may still count on its mount.
+   * entries than files the walk may still count on its mount; with `level`,
+   * its one level.
    */
-  private subtree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+  private subtree(path: PathSpec, level = false): Promise<Map<string, FileStat> | null> {
+    if (level) return this.readTree(path, undefined, true)
     if (this.mounts?.walkLimit === undefined) return this.readTree(path)
     const limit = this.mounts.walkLimit(path.virtual)
     if (limit < 0) return this.readTree(path)

@@ -54,6 +54,10 @@ async def _data_ttl(cache: RedisFileCacheStore, path: str) -> int:
     return await cache._cache_client.ttl(cache._data_key(path))
 
 
+async def _no_get(*args, **kwargs):
+    raise AssertionError("sizes fetched a body")
+
+
 @pytest.mark.asyncio
 async def test_set_and_get(cache):
     await cache.set("/file.txt", b"hello")
@@ -511,6 +515,18 @@ def test_the_two_version_lua_copies_are_byte_identical():
         root / "typescript/packages/node/src/cache/file/version.lua"
     ).read_bytes()
     assert py == ts
+
+
+@pytest.mark.asyncio
+async def test_sizes_answer_each_key_in_order_without_its_bytes(
+    cache, monkeypatch
+):
+    await cache.set("/a", b"abc")
+    await cache.set("/empty", b"")
+    await cache.keep_fingerprints({"/v": "v1"})
+    monkeypatch.setattr(cache._cache_client, "get", _no_get)
+    keys = ["/a", "/empty", "/v", "/none"]
+    assert await cache.sizes(keys) == [3, 0, None, None]
 
 
 @pytest.mark.asyncio

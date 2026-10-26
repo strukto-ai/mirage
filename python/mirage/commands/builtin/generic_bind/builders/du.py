@@ -277,9 +277,7 @@ def _tree_of(files: CommandFiles, listing: ReaddirFn) -> Walk:
         listing (ReaddirFn): the walk's own listing.
     """
     readdir, stat = tree_walk(
-        files.read_tree if files.answers("read_tree") else None,
-        listing,
-        files.stat,
+        files.read_tree, listing, files.stat, files.answers("read_tree")
     )
     return Walk(readdir=readdir, stat=stat)
 

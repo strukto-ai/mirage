@@ -24,12 +24,13 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const ls: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  // Only -R walks; a plain listing reads one directory.
+  // Only -R reads whole subtrees; a plain listing reads one level.
   const recursive = new FlagView(ctx.flags, specOf('ls')).asBool('recursive')
   const [readdir, stat] = treeWalk<string[], FileStat>(
-    recursive && files.answers('read_tree') ? files.readTree : undefined,
+    files.readTree,
     files.readdir,
     files.stat,
+    recursive && files.answers('read_tree'),
   )
   return lsGeneric(resolved, ctx, readdir, stat)
 }

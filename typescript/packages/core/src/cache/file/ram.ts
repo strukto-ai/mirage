@@ -171,6 +171,15 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
     )
     for (const below of keys) await this.remove(below)
   }
+  sizes(keys: readonly string[]): Promise<(number | null)[]> {
+    const now = this.seconds()
+    return Promise.resolve(
+      keys.map((key) => {
+        const entry = this.entries.get(key)
+        return entry !== undefined && entry.hasBytes && !entry.isExpired(now) ? entry.size : null
+      }),
+    )
+  }
   fingerprints(keys: readonly string[]): Promise<(string | null)[]> {
     return Promise.resolve(keys.map((key) => this.entries.get(key)?.fingerprint ?? null))
   }

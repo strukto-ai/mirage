@@ -44,7 +44,7 @@ from mirage.io.async_line_iterator import share
 from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
-from mirage.process.supervisor import ProcessSupervisor
+from mirage.process.table import ProcessTable
 from mirage.process.types import ProcessInfo
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
@@ -264,7 +264,7 @@ async def _recurse_reassociated(
     registry: MountRegistry,
     namespace: Namespace,
     redirects: list[Redirect],
-    processes: ProcessSupervisor | None,
+    processes: ProcessTable | None,
     right: TSNodeLike,
     node: TSNodeLike,
     context: EvaluationContext,
@@ -287,7 +287,7 @@ async def _recurse_reassociated(
         registry (MountRegistry): mount registry.
         namespace (Namespace): namespace links for redirect pathname expansion.
         redirects (list): parsed redirects hoisted off the list.
-        processes (ProcessSupervisor | None): where the stages run as
+        processes (ProcessTable | None): where the stages run as
             managed processes.
         right (Any): the list's right operand.
         node (Any): node being executed by handle_connection.
@@ -340,7 +340,7 @@ async def _recurse_lifted(
     registry: MountRegistry,
     namespace: Namespace,
     stages: PipelineStages,
-    processes: ProcessSupervisor | None,
+    processes: ProcessTable | None,
     right: TSNodeLike,
     node: TSNodeLike,
     context: EvaluationContext,
@@ -359,7 +359,7 @@ async def _recurse_lifted(
         registry (MountRegistry): mount registry.
         namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline, its lead already taken.
-        processes (ProcessSupervisor | None): where the stages run as
+        processes (ProcessTable | None): where the stages run as
             managed processes.
         right (Any): the list's right operand.
         node (Any): node being executed by handle_connection.
@@ -392,7 +392,7 @@ async def _recurse_stage(
     namespace: Namespace,
     stages: PipelineStages,
     targets: list[Any],
-    processes: ProcessSupervisor | None,
+    processes: ProcessTable | None,
     node: TSNodeLike,
     context: EvaluationContext,
     stdin: ByteSource | None = None,
@@ -415,7 +415,7 @@ async def _recurse_stage(
         namespace (Namespace): namespace links for redirect pathname expansion.
         stages (PipelineStages): the pipeline being run.
         targets (list[Any]): the stages a ``|&`` follows.
-        processes (ProcessSupervisor | None): where the stages run as
+        processes (ProcessTable | None): where the stages run as
             managed processes.
         node (Any): the stage handle_pipe asks for.
         context (EvaluationContext): the stage's session.
@@ -474,7 +474,7 @@ async def _run_pipeline(
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    processes: ProcessSupervisor | None = None,
+    processes: ProcessTable | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a pipeline as bash reads it (``get_pipeline_stages``).
@@ -494,7 +494,7 @@ async def _run_pipeline(
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
-        processes (ProcessSupervisor | None): where the stages run as
+        processes (ProcessTable | None): where the stages run as
             managed processes.
         sink (JobConsole | None): where the output goes as it arrives.
     """
@@ -650,7 +650,7 @@ async def _run_redirected(
     view: SessionView | None,
     command: TSNodeLike | None,
     redirects: list[Redirect],
-    processes: ProcessSupervisor | None,
+    processes: ProcessTable | None,
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
@@ -675,7 +675,7 @@ async def _run_redirected(
         command (Any): the redirected command node, None for a bare
             redirect.
         redirects (list[Redirect]): the statement's parsed redirects.
-        processes (ProcessSupervisor | None): where the stages run as
+        processes (ProcessTable | None): where the stages run as
             managed processes.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.

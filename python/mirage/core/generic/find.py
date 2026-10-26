@@ -43,7 +43,7 @@ async def _stat_entry(
             and row.size is None
             and manager is not None
         ):
-            size = await manager.cached_size(spec)
+            [size] = await manager.cached_sizes([spec])
             if size is not None:
                 row = row.model_copy(update={"size": size})
         return row

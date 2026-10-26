@@ -117,7 +117,7 @@ async function statEntry(deps: WalkFindDeps, path: string): Promise<FileStat | n
     const row = await deps.stat(spec)
     const size =
       row.type === FileType.FILE && row.size === null
-        ? await activeCacheManager()?.cachedSize(spec)
+        ? (await activeCacheManager()?.cachedSizes([spec]))?.[0]
         : null
     return size == null ? row : row.with({ size })
   } catch (err) {

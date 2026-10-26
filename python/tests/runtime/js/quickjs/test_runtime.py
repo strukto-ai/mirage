@@ -338,11 +338,13 @@ class _SlowRAM(RAMVFS):
 @pytest.mark.asyncio
 async def test_a_deadline_joins_the_landing_of_what_a_stopped_guest_wrote():
     # The run's end closes the file it left open, which takes longer than
-    # a moment: timeout answers once that write has landed.
+    # a moment: timeout answers once that write has landed. A first run has
+    # the engine up, so the deadline lands in the loop, not in a cold start.
     ws = Workspace(
         {"/data": _SlowRAM()}, mode=MountMode.EXEC, runtimes=["quickjs"]
     )
     try:
+        await ws.shell("node -e 0")
         io = await ws.shell(
             "timeout 1 node -e \"const f = std.open('/data/o', 'w'); "
             "f.puts('kept'); f.flush(); for (;;) {}\"; cat /data/o"
