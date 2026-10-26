@@ -248,3 +248,13 @@ async def test_wait_returns_immediately_once_closed(console):
     await console.close()
 
     await asyncio.wait_for(console.wait_finished(), timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_outcome_reads_the_ending_once_it_is_stored():
+    console = JobConsole()
+    assert await console.outcome() is None
+    await console.emit(Channel.STDOUT, b"out")
+    assert await console.outcome() is None
+    await console.finish("killed:143")
+    assert await console.outcome() == "killed:143"

@@ -40,12 +40,12 @@ from mirage.policy.profile import (
 )
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
-    KILLED_OUTCOME,
     Channel,
     ConsoleChunk,
     JobConsole,
     RAMConsoleStore,
     exit_outcome,
+    killed_outcome,
 )
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import Job, JobStatus, JobTable
@@ -703,7 +703,7 @@ async def apply_state_dict(
         ws._session_mgr.restore_seed(seed_vars)
     _restore_cache(ws, state)
     await _restore_history(ws, state)
-    _restore_jobs(ws, state)
+    await _restore_jobs(ws, state)
     await _restore_nodes(ws, state)
 
 
@@ -884,9 +884,9 @@ async def _restore_history(ws: WorkspaceLike, state: dict[str, Any]) -> None:
     await ws.observer.load_events(state.get(StateKey.HISTORY) or [])
 
 
-def _restore_jobs(ws: WorkspaceLike, state: dict[str, Any]) -> None:
+async def _restore_jobs(ws: WorkspaceLike, state: dict[str, Any]) -> None:
     for job_d in state.get(StateKey.JOBS, []):
-        ws.job_table.load(_job_from_dict(job_d))
+        await ws.job_table.load(_job_from_dict(job_d))
 
 
 async def _job_to_dict(job: Job) -> dict[str, Any]:
@@ -939,7 +939,7 @@ def _restored_console(
                 )
             )
     outcome = (
-        KILLED_OUTCOME
+        killed_outcome(exit_code)
         if status == JobStatus.KILLED
         else exit_outcome(exit_code)
     )

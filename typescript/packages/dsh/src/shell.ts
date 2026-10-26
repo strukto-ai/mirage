@@ -28,9 +28,10 @@ import type { SubprocessOutputRead } from '@deepseek-ai/dsh-subprocess'
 import {
   Channel,
   JobConsole,
-  KILLED_OUTCOME,
   exitOutcome,
+  killedOutcome,
 } from '@struktoai/mirage-core/shell/console/index'
+import { KILLED_EXIT_CODE } from '@struktoai/mirage-core/shell/job_table/constants'
 import type {
   ConsoleChunk,
   ConsoleStore,
@@ -219,7 +220,9 @@ interface ExecutionParts {
 class ExecutionStore implements ConsoleStore {
   private nextSeq = 0
   private isClosed = false
+  private ended = false
   private waiters: (() => void)[] = []
+  private enders: (() => void)[] = []
 
   constructor(private readonly deliver: (chunk: ConsoleChunk) => Promise<void>) {}
 
@@ -231,6 +234,10 @@ class ExecutionStore implements ConsoleStore {
     const chunk: ConsoleChunk = { seq: this.nextSeq, ts: Date.now() / 1000, channel, data }
     this.nextSeq += 1
     await this.deliver(chunk)
+    if (channel === Channel.CONTROL) {
+      this.ended = true
+      for (const resolve of this.enders.splice(0)) resolve()
+    }
     return chunk
   }
 
@@ -245,9 +252,23 @@ class ExecutionStore implements ConsoleStore {
     })
   }
 
+  waitEnded(signal?: AbortSignal): Promise<void> {
+    if (this.isClosed || this.ended || signal?.aborted === true) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      this.enders.push(resolve)
+      signal?.addEventListener(
+        'abort',
+        () => {
+          resolve()
+        },
+        { once: true },
+      )
+    })
+  }
+
   close(): Promise<void> {
     this.isClosed = true
-    for (const resolve of this.waiters.splice(0)) resolve()
+    for (const resolve of [...this.waiters.splice(0), ...this.enders.splice(0)]) resolve()
     return Promise.resolve()
   }
 }
@@ -372,7 +393,7 @@ class MirageShellExecution implements ShellExecution {
     } else {
       this.status = 'killed'
       this.signal = 'SIGTERM'
-      outcome = KILLED_OUTCOME
+      outcome = killedOutcome(143)
       // Mirage answers an abort by throwing, so only a throw no abort
       // explains is an infrastructure failure: `result()` rejects with it,
       // and the read path carries it on stderr for a background reader.
@@ -406,7 +427,7 @@ class MirageShellExecution implements ShellExecution {
   private async settleExpired(): Promise<void> {
     this.settled = true
     this.status = 'killed'
-    await this.console.finish(KILLED_OUTCOME)
+    await this.console.finish(killedOutcome(KILLED_EXIT_CODE))
     const sandbox = this.parts.verdict(null, '')
     if (sandbox !== undefined) this.sandbox = sandbox
     this.parts.disarm()

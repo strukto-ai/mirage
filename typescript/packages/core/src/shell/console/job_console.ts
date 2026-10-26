@@ -14,9 +14,10 @@
 
 import { concat } from '../../utils/bytes.ts'
 import { Channel, type ConsoleChunk, type OwnedStream, type ReadResult } from './types.ts'
+import { END_OF_CONSOLE } from './constants.ts'
 import { RAMConsoleStore } from './ram.ts'
 import type { ConsoleStore } from './store.ts'
-import { encodeText } from '../bytes.ts'
+import { decodeText, encodeText } from '../bytes.ts'
 
 function join(chunks: ConsoleChunk[]): Uint8Array {
   return concat(chunks.map((c) => c.data))
@@ -142,6 +143,23 @@ export class JobConsole {
       await this.backing.wait(cursor)
       if (this.backing.closed) return
     }
+  }
+
+  /**
+   * How the job ended, or null while no ending is stored.
+   *
+   * Reads only the last chunk, wherever the store keeps it: a read past
+   * the end answers the console's length, and the ending is always the
+   * last chunk. This is how a workspace learns how another one's job
+   * ended.
+   */
+  async outcome(): Promise<string | null> {
+    const [, end] = await this.backing.readFrom(END_OF_CONSOLE)
+    if (end === 0) return null
+    const [chunks] = await this.backing.readFrom(end - 1, 1)
+    const last = chunks[chunks.length - 1]
+    if (last?.channel !== Channel.CONTROL) return null
+    return decodeText(last.data)
   }
 
   /**

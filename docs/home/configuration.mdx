@@ -45,8 +45,8 @@ constructors default to `read`.
 | `command_limits` | Set [output and execution limits](/home/core/output-limits). |
 | `env` | Seed literal or managed environment variables, described below. |
 | `secrets` | Declare named [credential sources](/home/authentication). |
-| `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#cache-index-store-and-console). |
-| `store`, `console` | Configure workspace state and background-job output storage, described [below](#cache-index-store-and-console). |
+| `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#cache-index-and-store). |
+| `store` | Configure workspace state, background jobs included, described [below](#cache-index-and-store). |
 | `io` | Set byte-queue capacity with `buffer_bytes`. |
 | `default_session_id`, `workspace_id` | Set explicit identifiers instead of generated ones. |
 
@@ -122,7 +122,7 @@ clis:
 A `script` entry's `config` cannot hold a credential pointer. Read the
 credential from a managed `env` entry instead.
 
-## Cache, index, store and console
+## Cache, index and store
 
 Each block takes a `type`, and the other keys depend on it. A `redis` type
 defaults `url` to `redis://localhost:6379/0`.
@@ -152,17 +152,16 @@ or `redis`. A mount's own `index` replaces this block.
 | `namespace` | unset | A separate store block for symlinks and file attributes. |
 | `observer` | unset | A separate store block for command history. |
 | `workspace` | unset | A separate store block for sessions and workspace metadata. |
+| `jobs` | unset | A separate store block for background jobs: each session's job list and each job's output. |
 
 A group block takes the same keys with `type` `ram`, `disk` or `redis`. Only
 `workspace` also accepts `s3`, which takes the [S3 config fields](/home/setup/s3)
-with `key_prefix` defaulting to `mirage/`.
+with `key_prefix` defaulting to `mirage/`. `jobs` takes `ram` or `redis` only,
+and a `disk` store keeps its jobs in memory. Redis keeps a job's output for a
+day after its last write.
 
-`console` holds background-job output. `type` is `ram` (default) or `redis`.
-
-| Key | Default | Purpose |
-| --- | --- | --- |
-| `url`, `key_prefix` | `mirage:console:` | Redis only. |
-| `ttl_seconds` | `86400` | Redis only. Seconds a job's output is kept after its last write. `null` keeps it until deleted. |
+Workspaces that share a store share each session's background jobs, as
+described in [Shell](/home/core/shell#jobs-across-workspaces).
 
 ```yaml
 store:
@@ -171,9 +170,6 @@ store:
   workspace:
     type: s3
     bucket: my-mirage-state
-console:
-  type: redis
-  ttl_seconds: 3600
 ```
 
 ## Environment and credential pointers

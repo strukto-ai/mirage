@@ -46,7 +46,8 @@ from mirage.secrets import registry as secrets_registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.shell import parse
-from mirage.shell.console import JobConsole
+from mirage.shell.console import ConsoleStore
+from mirage.shell.job_table import RAMJobStore
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.node.explain import Judgment, explain_line
@@ -1354,8 +1355,11 @@ async def test_a_path_the_pass_cannot_read_is_left_to_the_gate():
         await ws.close()
 
 
-def _no_console(job_id: int) -> JobConsole:
-    raise RuntimeError("no console")
+class _NoConsoles(RAMJobStore):
+    """A job store that cannot open a console."""
+
+    def console(self, name: str) -> ConsoleStore:
+        raise RuntimeError("no console")
 
 
 @pytest.mark.asyncio
@@ -1368,12 +1372,13 @@ async def test_a_job_that_cannot_be_submitted_hands_its_borrow_back():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ws.job_table._console_factory = _no_console
+        store = ws.job_table.store
+        ws.job_table.store = _NoConsoles()
         ran = await ws.shell("cat /data/secret.txt & ls /data", session_id="s")
         assert ran.exit_code != 0
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
-        ws.job_table._console_factory = None
+        ws.job_table.store = store
         again = await ws.shell("cat /data/secret.txt", session_id="s")
         assert again.exit_code == 0
         assert again.stdout == b"s\n"

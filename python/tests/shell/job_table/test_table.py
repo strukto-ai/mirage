@@ -18,8 +18,14 @@ from functools import partial
 import pytest
 
 from mirage.io import IOResult
-from mirage.shell.console import Channel, JobConsole, RAMConsoleStore
+from mirage.shell.console import (
+    Channel,
+    ConsoleStore,
+    JobConsole,
+    RAMConsoleStore,
+)
 from mirage.shell.console.types import ConsoleChunk, ReadResult
+from mirage.shell.job_table.ram import RAMJobStore
 from mirage.shell.job_table.table import JobTable
 from mirage.shell.job_table.types import Job, JobStatus
 from mirage.utils.clock import ManualClock
@@ -54,6 +60,9 @@ class _GatedStore:
     async def wait(self, seq: int) -> None:
         await self._inner.wait(seq)
 
+    async def wait_ended(self) -> None:
+        await self._inner.wait_ended()
+
     async def close(self) -> None:
         await self._inner.close()
 
@@ -68,22 +77,15 @@ async def _run_forever(job: Job) -> tuple[IOResult, ExecutionNode]:
     return IOResult(), ExecutionNode()
 
 
-def _tracked_ram_console(
-    stores: list[RAMConsoleStore], job_id: int
-) -> JobConsole:
-    """A console factory that remembers the stores it built.
+class _BrokenConsoles(RAMJobStore):
+    """A job store that cannot open a console."""
 
-    Args:
-        stores (list[RAMConsoleStore]): where built stores are recorded.
-        job_id (int): the job the console is being built for.
-    """
-    store = RAMConsoleStore()
-    stores.append(store)
-    return JobConsole(store=store)
+    def console(self, name: str) -> ConsoleStore:
+        raise ValueError("console unavailable")
 
 
-def _submit_gated(table: JobTable, gate: asyncio.Event) -> Job:
-    job = table.submit(command="deaf", run=_run_forever, cwd="/")
+async def _submit_gated(table: JobTable, gate: asyncio.Event) -> Job:
+    job = await table.submit(command="deaf", run=_run_forever, cwd="/")
     job.console = JobConsole(store=_GatedStore(gate))
     return job
 
@@ -99,7 +101,7 @@ async def test_wait_joins_a_kill_still_appending_its_marker():
     """
     gate = asyncio.Event()
     table = JobTable()
-    job = _submit_gated(table, gate)
+    job = await _submit_gated(table, gate)
     kill_task = asyncio.create_task(table.kill(job.id))
     await asyncio.sleep(0)
     assert job.status is JobStatus.KILLED
@@ -124,7 +126,7 @@ async def test_wait_all_joins_a_killed_job_still_appending():
     """
     gate = asyncio.Event()
     table = JobTable()
-    job = _submit_gated(table, gate)
+    job = await _submit_gated(table, gate)
     kill_task = asyncio.create_task(table.kill(job.id))
     await asyncio.sleep(0)
     assert job.status is JobStatus.KILLED
@@ -138,38 +140,25 @@ async def test_wait_all_joins_a_killed_job_still_appending():
 
 
 @pytest.mark.asyncio
-async def test_close_consoles_releases_factory_stores():
-    """Teardown closes what the factory built, and only that."""
-    stores: list[RAMConsoleStore] = []
-    table = JobTable(console_factory=partial(_tracked_ram_console, stores))
-    job = table.submit(command="deaf", run=_run_forever, cwd="/")
-    await table.kill(job.id)
-    await table.close_consoles()
-    assert len(stores) == 1
-    assert all(s.closed for s in stores)
-
-
-@pytest.mark.asyncio
-async def test_a_child_table_builds_consoles_its_owner_releases():
-    stores: list[RAMConsoleStore] = []
-    table = JobTable(console_factory=partial(_tracked_ram_console, stores))
+async def test_a_child_table_keeps_its_jobs_off_the_shared_store():
+    store = RAMJobStore()
+    table = JobTable(store)
     child = table.child().child(table)
-    job = child.submit(command="deaf", run=_run_forever, cwd="/")
+    job = await child.submit(command="deaf", run=_run_forever, cwd="/")
     assert child.processes is table.processes
     assert child.parent is table
+    assert child.store is not store
     assert table.list_jobs() == []
+    assert await store.load("") is None
     await child.kill(job.id)
-    await table.close_consoles()
-    assert len(stores) == 1
-    assert all(s.closed for s in stores)
 
 
 @pytest.mark.asyncio
-async def test_close_consoles_leaves_default_consoles_alone():
+async def test_close_leaves_consoles_open():
     table = JobTable()
-    job = table.submit(command="deaf", run=_run_forever, cwd="/")
+    job = await table.submit(command="deaf", run=_run_forever, cwd="/")
     await table.kill(job.id)
-    await table.close_consoles()
+    await table.close()
     assert job.console.store.closed is False
 
 
@@ -186,7 +175,7 @@ async def test_settle_kill_marker_survives_second_cancel():
     """
     gate = asyncio.Event()
     table = JobTable()
-    job = _submit_gated(table, gate)
+    job = await _submit_gated(table, gate)
     await asyncio.sleep(0)
     assert job.process is not None
     job.process.task.cancel()
@@ -201,8 +190,8 @@ async def test_settle_kill_marker_survives_second_cancel():
     assert await job.console.snapshot(Channel.STDERR) == b"Killed"
 
 
-def _submit(table: JobTable, session_id: str, command: str = "x") -> Job:
-    return table.submit(
+async def _submit(table: JobTable, session_id: str, command: str = "x") -> Job:
+    return await table.submit(
         command=command, run=_run_forever, cwd="/", session_id=session_id
     )
 
@@ -210,9 +199,9 @@ def _submit(table: JobTable, session_id: str, command: str = "x") -> Job:
 @pytest.mark.asyncio
 async def test_each_session_numbers_its_jobs_from_one():
     table = JobTable()
-    a1 = _submit(table, "a")
-    b1 = _submit(table, "b")
-    a2 = _submit(table, "a")
+    a1 = await _submit(table, "a")
+    b1 = await _submit(table, "b")
+    a2 = await _submit(table, "a")
     assert (a1.id, b1.id, a2.id) == (1, 1, 2)
     await table.kill_all()
 
@@ -220,8 +209,8 @@ async def test_each_session_numbers_its_jobs_from_one():
 @pytest.mark.asyncio
 async def test_views_are_scoped_to_one_session():
     table = JobTable()
-    a1 = _submit(table, "a")
-    b1 = _submit(table, "b")
+    a1 = await _submit(table, "a")
+    b1 = await _submit(table, "b")
     assert table.list_jobs("a") == [a1]
     assert table.running_jobs("b") == [b1]
     assert table.get(1, "b") is b1
@@ -234,8 +223,8 @@ async def test_views_are_scoped_to_one_session():
 @pytest.mark.asyncio
 async def test_kill_all_reaches_every_session():
     table = JobTable()
-    a1 = _submit(table, "a")
-    b1 = _submit(table, "b")
+    a1 = await _submit(table, "a")
+    b1 = await _submit(table, "b")
     killed = await table.kill_all()
     assert {j.session_id for j in killed} == {"a", "b"}
     assert a1.status is JobStatus.KILLED
@@ -248,7 +237,7 @@ async def test_kill_all_reaches_every_session():
 @pytest.mark.parametrize("signal,code", [(9, 137), (15, 143), (2, 130)])
 async def test_a_job_killed_with_a_signal_exits_128_plus_it(signal, code):
     table = JobTable()
-    job = _submit(table, "a")
+    job = await _submit(table, "a")
     await asyncio.sleep(0)
     assert await table.kill(job.id, "a", signal)
     assert (job.status, job.exit_code) == (JobStatus.KILLED, code)
@@ -256,7 +245,7 @@ async def test_a_job_killed_with_a_signal_exits_128_plus_it(signal, code):
     assert (await job.process.join()).exit_code == code
 
 
-def _submit_handling(
+async def _submit_handling(
     table: JobTable, simple: bool, stopped: list[str]
 ) -> tuple[Job, asyncio.Event]:
     started = asyncio.Event()
@@ -272,7 +261,7 @@ def _submit_handling(
             stopped.append("handled")
         return IOResult(), ExecutionNode()
 
-    return table.submit("prog", run, "/", simple=simple), started
+    return await table.submit("prog", run, "/", simple=simple), started
 
 
 # bash's `wait` returns once a killed child has gone, with the status it
@@ -286,7 +275,7 @@ async def test_wait_joins_a_killed_job_and_takes_its_program_status(
 ):
     table = JobTable()
     stopped: list[str] = []
-    job, started = _submit_handling(table, simple, stopped)
+    job, started = await _submit_handling(table, simple, stopped)
     await started.wait()
     assert await table.kill(job.id, "", 15)
     assert (job.exit_code, stopped) == (143, [])
@@ -311,7 +300,7 @@ async def test_wait_answers_the_kill_once_a_runner_outlasts_the_bound(
             await asyncio.shield(release.wait())
         return IOResult(), ExecutionNode()
 
-    job = table.submit("deaf", run, "/", simple=True)
+    job = await table.submit("deaf", run, "/", simple=True)
     await asyncio.sleep(0)
     assert await table.kill(job.id, "", 15)
     async with asyncio.timeout(2):
@@ -324,22 +313,22 @@ async def test_wait_answers_the_kill_once_a_runner_outlasts_the_bound(
 @pytest.mark.asyncio
 async def test_numbering_resets_per_session_when_its_list_empties():
     table = JobTable()
-    a1 = _submit(table, "a")
-    _submit(table, "b")
+    a1 = await _submit(table, "a")
+    await _submit(table, "b")
     assert await table.kill(a1.id, "a")
-    table.reap(a1.id, "a")
-    assert _submit(table, "a").id == 1
-    assert _submit(table, "b").id == 2
+    await table.reap(a1.id, "a")
+    assert (await _submit(table, "a")).id == 1
+    assert (await _submit(table, "b")).id == 2
     await table.kill_all()
 
 
 @pytest.mark.asyncio
 async def test_close_session_stops_and_forgets_its_jobs():
     table = JobTable()
-    a1 = _submit(table, "a")
-    a2 = _submit(table, "a")
-    b1 = _submit(table, "b")
-    assert table.disown(a2.id, "a")
+    a1 = await _submit(table, "a")
+    a2 = await _submit(table, "a")
+    b1 = await _submit(table, "b")
+    assert await table.disown(a2.id, "a")
     assert await table.close_session("a") == [a1]
     assert a1.status is JobStatus.KILLED
     # Disowned: off the list, still running, bash's own rule.
@@ -348,7 +337,7 @@ async def test_close_session_stops_and_forgets_its_jobs():
     assert table.get(1, "a") is None
     assert table.list_jobs("b") == [b1]
     # A session reusing the id starts from one and inherits nothing.
-    assert _submit(table, "a").id == 1
+    assert (await _submit(table, "a")).id == 1
     await table.kill_all()
     assert a2.status is JobStatus.KILLED
 
@@ -364,11 +353,11 @@ async def test_load_restores_a_job_into_its_session():
         status=JobStatus.COMPLETED,
         session_id="a",
     )
-    table.load(restored)
+    await table.load(restored)
     assert table.get(3, "a") is restored
     assert table.get(3) is None
-    assert _submit(table, "a").id == 4
-    assert _submit(table, "b").id == 1
+    assert (await _submit(table, "a")).id == 4
+    assert (await _submit(table, "b")).id == 1
     await table.kill_all()
 
 
@@ -385,12 +374,12 @@ async def test_disowned_job_keeps_process_identity_until_runner_really_exits():
             await release.wait()
         return IOResult(exit_code=0), ExecutionNode()
 
-    job = table.submit(command="long", run=run, cwd="/", session_id="a")
+    job = await table.submit(command="long", run=run, cwd="/", session_id="a")
     await entered.wait()
     process = job.process
     assert process is not None
     view = table.processes.view("a")
-    assert table.disown(job.id, "a")
+    assert await table.disown(job.id, "a")
     assert table.list_jobs("a") == []
     assert [i.pid for i in view.list()] == [process.info.pid]
     await table.kill_all()
@@ -406,13 +395,13 @@ async def test_disowned_job_keeps_process_identity_until_runner_really_exits():
 @pytest.mark.asyncio
 async def test_process_ids_do_not_restart_with_shell_job_numbers():
     table = JobTable()
-    a = _submit(table, "a")
-    b = _submit(table, "b")
+    a = await _submit(table, "a")
+    b = await _submit(table, "b")
     assert a.id == b.id == 1
     assert a.process.info.pid != b.process.info.pid
     await table.kill(a.id, "a")
-    table.reap(a.id, "a")
-    replacement = _submit(table, "a")
+    await table.reap(a.id, "a")
+    replacement = await _submit(table, "a")
     assert replacement.id == 1
     assert replacement.process.info.pid > b.process.info.pid
     await table.kill_all()
@@ -422,56 +411,59 @@ async def test_process_ids_do_not_restart_with_shell_job_numbers():
 
 
 @pytest.mark.asyncio
-async def test_refused_job_never_allocates_a_factory_console():
-    stores: list[RAMConsoleStore] = []
-    table = JobTable(console_factory=partial(_tracked_ram_console, stores))
+async def test_a_refused_job_gives_its_number_back():
+    store = RAMJobStore()
+    table = JobTable(store)
     release = asyncio.Event()
 
     async def run(job):
         await release.wait()
         return IOResult(), ExecutionNode()
 
-    job = table.submit(command="held", run=run, cwd="/", limit=1)
+    job = await table.submit(command="held", run=run, cwd="/", limit=1)
     try:
         for _ in range(3):
             with pytest.raises(BlockingIOError):
-                table.submit(command="refused", run=run, cwd="/", limit=1)
-        assert len(stores) == 1
+                await table.submit(
+                    command="refused", run=run, cwd="/", limit=1
+                )
         assert table.list_jobs() == [job]
+        stored = await store.load("")
+        assert stored is not None
+        assert list(stored["jobs"]) == ["1"]
+        assert stored["next"] == 2
     finally:
         release.set()
         await table.processes.drain()
-        await table.close_consoles()
-    assert stores[0].closed
 
 
 @pytest.mark.asyncio
-async def test_factory_failure_never_enters_job_runner():
+async def test_a_console_failure_never_enters_job_runner():
     entered = []
-
-    def factory(job_id):
-        entered.append(job_id)
-        raise ValueError("console unavailable")
 
     async def run(job):
         entered.append("runner")
         return IOResult(), ExecutionNode()
 
-    table = JobTable(console_factory=factory)
+    store = _BrokenConsoles()
+    table = JobTable(store)
     with pytest.raises(ValueError, match="console unavailable"):
-        table.submit(command="refused", run=run, cwd="/", limit=1)
+        await table.submit(command="refused", run=run, cwd="/", limit=1)
     await table.processes.drain()
     assert table.list_jobs() == []
     assert table.processes.live() == ()
-    assert entered == [1]
+    assert entered == []
+    stored = await store.load("")
+    assert stored is not None
+    assert stored["jobs"] == {}
 
 
 @pytest.mark.asyncio
 async def test_a_substitution_lists_its_callers_jobs_before_its_own():
     caller = JobTable()
-    outer = caller.submit("outer", _run_forever, cwd="/")
+    outer = await caller.submit("outer", _run_forever, cwd="/")
     inner_table = JobTable(processes=caller.processes, parent=caller)
-    inner = inner_table.submit("inner", _run_forever, cwd="/")
+    inner = await inner_table.submit("inner", _run_forever, cwd="/")
     assert inner_table.listing() == [outer, inner]
     assert inner_table.list_jobs() == [inner]
 
@@ -480,12 +472,114 @@ async def test_a_substitution_lists_its_callers_jobs_before_its_own():
 async def test_jobs_are_stamped_on_the_table_clock():
     clock = ManualClock(start=1_000.0)
     table = JobTable(clock=clock)
-    first = table.submit(command="deaf", run=_run_forever, cwd="/")
+    first = await table.submit(command="deaf", run=_run_forever, cwd="/")
     clock.advance(5)
     child = table.child()
-    second = child.submit(command="deaf", run=_run_forever, cwd="/")
+    second = await child.submit(command="deaf", run=_run_forever, cwd="/")
     try:
         assert (first.created_at, second.created_at) == (1_000.0, 1_005.0)
     finally:
         await table.kill_all()
         await child.kill_all()
+
+
+async def _exit_with(code: int, job: Job) -> tuple[IOResult, ExecutionNode]:
+    """A runner that exits at once with ``code``.
+
+    Args:
+        code (int): the exit status.
+        job (Job): the job being run.
+    """
+    return IOResult(exit_code=code), ExecutionNode(exit_code=code)
+
+
+@pytest.mark.asyncio
+async def test_another_table_lists_waits_on_and_kills_a_job():
+    store = RAMJobStore()
+    a, b = JobTable(store), JobTable(store)
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+    await asyncio.sleep(0)
+    await b.sync("s")
+    [seen] = b.list_jobs("s")
+    assert (seen.id, seen.command, seen.status) == (
+        1,
+        "sleep 30",
+        JobStatus.RUNNING,
+    )
+    assert seen.process is None
+    assert await b.kill(1, "s", 15)
+    assert (await b.wait(1, "s")).exit_code == 143
+    assert job.process is not None
+    async with asyncio.timeout(2):
+        await job.process.join()
+    assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
+    assert await job.console.snapshot(Channel.STDERR) == b"Killed"
+
+
+@pytest.mark.asyncio
+async def test_another_table_waits_for_a_job_to_end():
+    store = RAMJobStore()
+    a, b = JobTable(store), JobTable(store)
+    gate = asyncio.Event()
+
+    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+        await gate.wait()
+        return IOResult(exit_code=1), ExecutionNode(exit_code=1)
+
+    await a.submit("false", run, "/", session_id="s")
+    await b.sync("s")
+    waiter = asyncio.ensure_future(b.wait(1, "s"))
+    await asyncio.sleep(0.01)
+    assert not waiter.done()
+    gate.set()
+    async with asyncio.timeout(2):
+        assert (await waiter).exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_two_tables_never_hand_out_one_number():
+    store = RAMJobStore()
+    a, b = JobTable(store), JobTable(store)
+    first, second = await asyncio.gather(
+        a.submit("one", _run_forever, "/", session_id="s"),
+        b.submit("two", _run_forever, "/", session_id="s"),
+    )
+    assert {first.id, second.id} == {1, 2}
+    await b.sync("s")
+    assert [j.id for j in b.list_jobs("s")] == [1, 2]
+    await a.kill_all()
+    await b.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_a_job_whose_owner_lapsed_ends_as_hung_up():
+    store = RAMJobStore(lease_seconds=0.05)
+    a, b = JobTable(store), JobTable(store)
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+    await asyncio.sleep(0)
+    assert a._lease is not None
+    a._lease.cancel()
+    await b.sync("s")
+    assert b.running_jobs("s") != []
+    await asyncio.sleep(0.1)
+    async with asyncio.timeout(2):
+        assert (await b.wait(1, "s")).exit_code == 129
+    assert b.get(1, "s").status is JobStatus.KILLED
+    assert job.process is not None
+    async with asyncio.timeout(2):
+        await job.process.join()
+    assert (job.status, job.exit_code) == (JobStatus.KILLED, 129)
+
+
+@pytest.mark.asyncio
+async def test_a_reap_elsewhere_drops_the_job_from_its_owner():
+    store = RAMJobStore()
+    a, b = JobTable(store), JobTable(store)
+    await a.submit("true", partial(_exit_with, 0), "/", session_id="s")
+    await b.sync("s")
+    assert (await b.wait(1, "s")).exit_code == 0
+    await b.reap(1, "s")
+    await a.sync("s")
+    assert a.list_jobs("s") == []
+    assert (await a.submit("next", _run_forever, "/", session_id="s")).id == 1
+    await a.kill_all()

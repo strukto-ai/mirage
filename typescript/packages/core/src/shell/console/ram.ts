@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { END_OF_CONSOLE } from './constants.ts'
 import { Channel, type ConsoleChunk, type ReadResult } from './types.ts'
 import type { ConsoleStore } from './store.ts'
 
@@ -28,12 +29,18 @@ interface Waiter {
  * resolver. Python has to park futures per loop and wake them through
  * call_soon_threadsafe, because its callers arrive on pool threads with
  * their own loops.
+ *
+ * The ending chunk is terminal here as it is in Redis: an append after a
+ * CONTROL chunk is dropped, so a runner that outlived an ending written
+ * through another handle on this store (a kill from another workspace
+ * sharing it) cannot append past it.
  */
 export class RAMConsoleStore implements ConsoleStore {
   private chunks: ConsoleChunk[]
   private baseSeq: number
   private nextSeq: number
   private bytes: number
+  private ended: boolean
   private readonly maxBytes: number | null
   private waiters: Waiter[] = []
   private isClosed = false
@@ -56,10 +63,14 @@ export class RAMConsoleStore implements ConsoleStore {
     this.baseSeq = first === undefined ? 0 : first.seq
     this.nextSeq = last === undefined ? 0 : last.seq + 1
     this.bytes = this.chunks.reduce((sum, c) => sum + c.data.byteLength, 0)
+    this.ended = this.chunks.some((c) => c.channel === Channel.CONTROL)
     this.maxBytes = maxBytes
   }
 
   append(channel: Channel, data: Uint8Array): Promise<ConsoleChunk> {
+    const last = this.chunks[this.chunks.length - 1]
+    if (this.ended && last !== undefined) return Promise.resolve(last)
+    this.ended = channel === Channel.CONTROL
     const chunk: ConsoleChunk = {
       seq: this.nextSeq,
       ts: Date.now() / 1000,
@@ -91,6 +102,22 @@ export class RAMConsoleStore implements ConsoleStore {
     })
   }
 
+  waitEnded(signal?: AbortSignal): Promise<void> {
+    if (this.isClosed || this.ended || signal?.aborted === true) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      const waiter = { seq: END_OF_CONSOLE, resolve }
+      this.waiters.push(waiter)
+      signal?.addEventListener(
+        'abort',
+        () => {
+          this.waiters = this.waiters.filter((w) => w !== waiter)
+          resolve()
+        },
+        { once: true },
+      )
+    })
+  }
+
   close(): Promise<void> {
     this.isClosed = true
     const waiters = this.waiters
@@ -114,9 +141,9 @@ export class RAMConsoleStore implements ConsoleStore {
   }
 
   private wake(): void {
-    const matured = this.waiters.filter((w) => w.seq < this.nextSeq)
+    const matured = this.waiters.filter((w) => w.seq < this.nextSeq || this.ended)
     if (matured.length === 0) return
-    this.waiters = this.waiters.filter((w) => w.seq >= this.nextSeq)
+    this.waiters = this.waiters.filter((w) => !matured.includes(w))
     for (const w of matured) w.resolve()
   }
 }

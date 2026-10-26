@@ -752,34 +752,40 @@
       }
     },
     {
-      "name": "console block: unknown key",
+      "name": "store s3 group: hosts only sessions+meta, not the jobs plane",
       "config": {
         "mounts": {
           "/d": {
             "vfs": "ram"
           }
         },
-        "console": {
-          "type": "redis",
-          "prefix": "c:"
+        "store": {
+          "type": "ram",
+          "jobs": {
+            "type": "s3",
+            "bucket": "b"
+          }
         }
       }
     },
     {
-      "name": "console block: unknown type",
+      "name": "store jobs group: a console is a stream, so never disk",
       "config": {
         "mounts": {
           "/d": {
             "vfs": "ram"
           }
         },
-        "console": {
-          "type": "disk"
+        "store": {
+          "type": "ram",
+          "jobs": {
+            "type": "disk"
+          }
         }
       }
     },
     {
-      "name": "console block: url not a string",
+      "name": "console block: gone, job consoles live in the store's jobs plane",
       "config": {
         "mounts": {
           "/d": {
@@ -787,22 +793,7 @@
           }
         },
         "console": {
-          "type": "redis",
-          "url": 123
-        }
-      }
-    },
-    {
-      "name": "console block: zero ttl",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "console": {
-          "type": "redis",
-          "ttl_seconds": 0
+          "type": "redis"
         }
       }
     },

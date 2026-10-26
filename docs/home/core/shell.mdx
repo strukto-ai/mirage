@@ -59,6 +59,21 @@ These are common options, not an exhaustive flag reference.
 
 `ws.shell(...)` keeps the session's working directory, variables, and functions between calls. Supplying `cwd` or `env` uses an isolated copy for that call. Calls on one session run in order; use separate sessions for concurrent command streams. Python accepts a cancellation event through `cancel`; TypeScript accepts an abort `signal`.
 
+### Jobs across workspaces
+
+Workspaces that share a [store](/home/configuration#cache-index-and-store)
+share each session's background jobs: in one process through a RAM store, and
+across processes through a store that keeps jobs on Redis. On any of them,
+`jobs` lists the session's jobs under the same numbers, `wait` returns a job's
+exit status, `kill %N` stops it and `fg %N` waits for it. Two workspaces never
+hand out the same job number.
+
+A job runs in the workspace that started it. If that workspace goes away
+without stopping it, the others report the job ended with status 129, as Bash
+reports a hangup, about 30 seconds later. `ps` and `kill PID` see only the
+workspace's own processes, `jobs -l` shows another workspace's job under its
+job number in place of a PID, and `$!` is set only where the job started.
+
 ### Per-session mount modes
 
 Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, `rwx`). Unlisted mounts keep their configured modes. Interpreters such as `python3` and `js` require `exec`; shell scripts run with the permissions of each command they contain. Use a [agent profile](/home/profiles) to hide paths or restrict commands.

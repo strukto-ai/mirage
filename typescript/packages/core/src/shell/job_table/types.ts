@@ -30,28 +30,28 @@ export type JobResult = [IOResult, ExecutionNode]
 /** Produces a job's output and its result. */
 export type JobRunner = (job: Job) => Promise<JobResult>
 
-/** Builds each new job's console from its job id. */
-export type ConsoleFactory = (jobId: number) => JobConsole
-
 /**
  * One background command, and everything it has printed.
  *
  * Output lives in `console` rather than in byte fields, so a reader can
  * watch a job while it runs instead of waiting for it to end. A `simple`
  * job is one simple command, which the job is, so a program it ran that
- * handled a `kill` leaves the job its own status.
+ * handled a `kill` leaves the job its own status. Its `owner` is the job
+ * table that runs it; a job another workspace runs has no `process` here.
  */
 export class Job {
   readonly id: number
   readonly command: string
-  // null for jobs restored from a snapshot (already finished, no runner).
+  // null for jobs restored from a snapshot (already finished, no runner)
+  // and for jobs another workspace runs.
   process: ProcessHandle | null = null
   readonly abort: AbortController | null
   readonly cwd: string
   readonly sessionId: string
   readonly createdAt: number
-  readonly console: JobConsole
+  console: JobConsole
   readonly simple: boolean
+  owner: string
 
   status: JobStatus = JobStatus.RUNNING
   exitCode = 0
@@ -67,6 +67,7 @@ export class Job {
     exitCode?: number
     console?: JobConsole
     simple?: boolean
+    owner?: string
   }) {
     this.id = init.id
     this.command = init.command
@@ -76,13 +77,15 @@ export class Job {
     this.createdAt = init.createdAt
     this.console = init.console ?? new JobConsole()
     this.simple = init.simple ?? false
+    this.owner = init.owner ?? ''
     if (init.status !== undefined) this.status = init.status
     if (init.exitCode !== undefined) this.exitCode = init.exitCode
   }
 
   /**
    * The managed PID `$!`, `jobs -p` and `wait -p` report. A job restored
-   * from a snapshot has no runner, so its job number stands in.
+   * from a snapshot or run by another workspace has no runner here, so its
+   * job number stands in.
    */
   get pid(): number {
     return this.process?.info.pid ?? this.id

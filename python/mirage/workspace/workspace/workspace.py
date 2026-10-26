@@ -116,7 +116,7 @@ from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import BIN_PREFIX
-from mirage.shell.job_table import ConsoleFactory, JobTable
+from mirage.shell.job_table import JobTable
 from mirage.shell.literal import literal_tree
 from mirage.shell.variable import VarAttr
 from mirage.types import (
@@ -266,7 +266,6 @@ class Workspace:
         observe: ObserverStore | None = None,
         namespace_store: NamespaceStore | None = None,
         session_store: NamespaceStore | None = None,
-        console_factory: ConsoleFactory | None = None,
         runtimes: list[Runtime[Any] | str] | None = None,
         route_policy: RoutePolicy | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
@@ -340,7 +339,7 @@ class Workspace:
         self._drift = DriftQueue()
         self.processes = ProcessTable(self._ids, bind=run_with_execution)
         self.job_table = JobTable(
-            console_factory, self.processes, clock=self._clock
+            stores.jobs, self.processes, clock=self._clock
         )
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: dict[ShellExecution, None] = {}
@@ -2455,6 +2454,8 @@ class Workspace:
         Returns:
             int: how many jobs and runners were stopped.
         """
+        if session_id is not None:
+            await self.job_table.sync(session_id)
         jobs = (
             self.job_table.all_running_jobs()
             if session_id is None

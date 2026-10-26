@@ -166,7 +166,7 @@ def test_finished_jobs_survive(tmp_path):
         created_at=time.time(),
         session_id="default",
     )
-    src.job_table.load(finished)
+    asyncio.run(src.job_table.load(finished))
 
     snap = tmp_path / "ws.tar"
     asyncio.run(src.snapshot(snap))
@@ -178,7 +178,9 @@ def test_finished_jobs_survive(tmp_path):
     assert asyncio.run(restored.console.snapshot(Channel.STDOUT)) == b"done\n"
     assert restored.console.finished
     # Next job id continues from max(finished)+1 (= 2)
-    assert dst.job_table._next_ids["default"] == 2
+    stored = asyncio.run(dst.job_table.store.load("default"))
+    assert stored is not None
+    assert stored["next"] == 2
 
 
 # ── copy() shares Redis backend (documented divergence) ──────────

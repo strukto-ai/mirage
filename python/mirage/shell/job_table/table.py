@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+import uuid
 
 from mirage.process.table import ProcessTable
 from mirage.shell.bytes import encode_text
@@ -22,19 +23,20 @@ from mirage.shell.console import (
     Channel,
     JobConsole,
     exit_outcome,
+    killed_outcome,
 )
 from mirage.shell.job_table.constants import (
+    HANGUP_EXIT_CODE,
     KILLED_EXIT_CODE,
+    LIST_MAX_RETRIES,
     STOP_WAIT_SECONDS,
 )
-from mirage.shell.job_table.types import (
-    ConsoleFactory,
-    Job,
-    JobRunner,
-    JobStatus,
-)
+from mirage.shell.job_table.ram import RAMJobStore
+from mirage.shell.job_table.store import JobStore
+from mirage.shell.job_table.types import Job, JobRunner, JobStatus
 from mirage.types import PathSpec
 from mirage.utils.clock import Clock, SystemClock
+from mirage.workspace.record.types import RecordFields, generation_of
 
 logger = logging.getLogger(__name__)
 
@@ -60,14 +62,29 @@ def cancel_job(job: Job, signal: int = 9) -> None:
         logger.debug("job %d loop is gone: %s", job.id, exc)
 
 
-async def _mark_killed(console: JobConsole) -> None:
+def _ended(outcome: str) -> tuple[JobStatus, int]:
+    """The status and exit code a console's ending records.
+
+    Args:
+        outcome (str): the ending's text, ``exit:<code>`` or
+            ``killed:<code>``.
+    """
+    form, _, code = outcome.partition(":")
+    status = (
+        JobStatus.KILLED if form == KILLED_OUTCOME else JobStatus.COMPLETED
+    )
+    return status, int(code)
+
+
+async def _mark_killed(console: JobConsole, exit_code: int) -> None:
     """Write the kill marker and the ending chunk.
 
     Args:
         console (JobConsole): the killed job's console.
+        exit_code (int): the status the job answers.
     """
     await console.emit(Channel.STDERR, b"Killed")
-    await console.finish(KILLED_OUTCOME)
+    await console.finish(killed_outcome(exit_code))
 
 
 async def _stop(job: Job, signal: int = 9) -> None:
@@ -81,7 +98,7 @@ async def _stop(job: Job, signal: int = 9) -> None:
     cancel_job(job, signal)
     job.status = JobStatus.KILLED
     job.exit_code = 128 + signal
-    await _mark_killed(job.console)
+    await _mark_killed(job.console, job.exit_code)
 
 
 def _stopped_status(job: Job) -> int:
@@ -133,7 +150,9 @@ async def _settle(run: JobRunner, job: Job) -> int:
         # and lose the marker readers are parked on. The shielded task
         # keeps running to completion even if this one is cancelled
         # again; RAM completes without ever suspending either way.
-        marker = asyncio.ensure_future(_mark_killed(job.console))
+        marker = asyncio.ensure_future(
+            _mark_killed(job.console, job.exit_code)
+        )
         while not marker.done():
             try:
                 await asyncio.shield(marker)
@@ -163,6 +182,35 @@ async def _settle(run: JobRunner, job: Job) -> int:
     return io_result.exit_code
 
 
+async def _adopt_ending(job: Job) -> None:
+    """Stop a job this table runs if another workspace ended its console.
+
+    A ``kill`` elsewhere ends the job's console, the one record of how
+    the job ended, and this cancels the runner the way a local kill
+    does, with the signal the ending implies.
+
+    Args:
+        job (Job): a job this table runs.
+    """
+    if job.status != JobStatus.RUNNING:
+        return
+    outcome = await job.console.outcome()
+    if outcome is None or job.status != JobStatus.RUNNING:
+        return
+    job.status, job.exit_code = _ended(outcome)
+    cancel_job(job, job.exit_code - 128 if job.exit_code > 128 else 9)
+
+
+async def _watch(job: Job) -> None:
+    """Stop a job this table runs once another workspace ends it.
+
+    Args:
+        job (Job): a job this table runs.
+    """
+    await job.console.store.wait_ended()
+    await _adopt_ending(job)
+
+
 class JobTable:
     """The shell's job table: bash's per-shell job list, one list per session.
 
@@ -176,9 +224,18 @@ class JobTable:
     KILLED outcome ends its console, while ``job.process`` stays STOPPING
     until the runner actually finishes.
 
+    The lists live in the workspace's job store, so every workspace on a
+    shared store sees a session's jobs with the same numbers. A job runs
+    on the table that started it, its owner; another table lists it,
+    reads and waits on its console, and kills it by ending that console,
+    which its owner watches for. ``sync`` brings a session's list up to
+    date before a builtin reads it. A job whose owner's lease lapsed with
+    no ending was lost with its owner and is ended as hung up, as a
+    bash's job is when its terminal goes.
+
     The table is still owned by the workspace rather than by a session,
     because the workspace owns the tasks: teardown must stop every job
-    in every session (``kill_all``), snapshot capture reads every
+    it runs in every session (``kill_all``), snapshot capture reads every
     finished one (``all_jobs``), and a disowned job keeps running after
     its shell forgot it. Those are the only cross-session views; every
     other method takes the session whose list it reads, and the empty
@@ -188,27 +245,17 @@ class JobTable:
 
     def __init__(
         self,
-        console_factory: ConsoleFactory | None = None,
+        store: JobStore | None = None,
         processes: ProcessTable | None = None,
         parent: "JobTable | None" = None,
         clock: Clock | None = None,
     ) -> None:
-        """Create a table, optionally choosing where consoles live.
+        """Create a table, optionally choosing where its lists live.
 
         Args:
-            console_factory (ConsoleFactory | None): builds each new
-                job's console from its job id. None means an in-memory
-                console per job. A factory must hand every job a fresh
-                backing: ids restart at 1 when a session's list empties
-                (GNU numbering) and two sessions can both hold a job 1,
-                so a store keyed on the id alone gets reused, and a
-                reused stream replays the previous job's chunks, ending
-                chunk included. The table tracks what the factory
-                builds and ``close_consoles`` releases it at workspace
-                teardown, because a config-provisioned store (a Redis
-                client per job) is invisible to the embedder; a console
-                still outlives its table entry, so ``reap`` never closes
-                one.
+            store (JobStore | None): the job plane holding each
+                session's list and each job's console; None keeps them
+                in memory, private to this table.
             processes (ProcessTable | None): where the jobs run.
             parent (JobTable | None): the table of the shell a ``$( )``
                 is part of, whose jobs ``jobs`` still lists there, as
@@ -219,35 +266,28 @@ class JobTable:
         self.parent = parent
         self.clock: Clock = clock if clock is not None else SystemClock()
         self.processes = processes or ProcessTable()
+        self.store: JobStore = store if store is not None else RAMJobStore()
+        self.owner = uuid.uuid4().hex
         self._jobs: dict[str, dict[int, Job]] = {}
-        self._next_ids: dict[str, int] = {}
-        self._console_factory = console_factory
-        self._factory_consoles: list[JobConsole] = []
-        # The table whose ``close_consoles`` releases what the factory
-        # builds for this one: itself, or the table a child came from.
-        self._console_owner: JobTable = self
         # Jobs `disown` removed from the table while they still run. The
         # shell no longer lists, waits for or reports them, but the
         # workspace still owns their tasks, so teardown can stop them.
         self._disowned: list[Job] = []
+        self._lease: asyncio.Task[None] | None = None
 
     def child(self, parent: "JobTable | None" = None) -> "JobTable":
         """A table for a child shell (``bash -c``, a script, ``( )``,
-        ``$( )``): a job list of its own on the same processes, whose
-        jobs get their consoles from this table's factory, released at
-        teardown with this table's.
+        ``$( )``): a job list of its own on the same processes, kept in
+        memory, since a child shell's jobs end with it on this workspace
+        and no other one lists them.
 
         Args:
             parent (JobTable | None): the table a ``$( )`` still lists
                 in ``jobs``.
         """
-        table = JobTable(
-            self._console_factory, self.processes, parent, self.clock
-        )
-        table._console_owner = self._console_owner
-        return table
+        return JobTable(None, self.processes, parent, self.clock)
 
-    def submit(
+    async def submit(
         self,
         command: str,
         run: JobRunner,
@@ -259,10 +299,13 @@ class JobTable:
     ) -> Job:
         """Register a job in its session's list and start it.
 
-        Reserve a process slot before allocating a console. The runner
-        is deferred until the job and console are ready; failed setup
-        cancels the reservation without entering the supplied runner.
-        Only fully initialized jobs join the table.
+        The job's number is taken from the store first, so two
+        workspaces starting a job on one session never share one; a
+        process slot is reserved next, and a refused one gives the
+        number back. The runner is deferred until the job and console
+        are ready; failed setup cancels the reservation without
+        entering the supplied runner. Only fully initialized jobs join
+        the table.
 
         Args:
             command (str): the command line being run.
@@ -277,36 +320,47 @@ class JobTable:
         Raises:
             BlockingIOError: the session is at its process cap.
         """
-        jobs = self._jobs.setdefault(session_id, {})
-        if not jobs:
-            # GNU bash restarts job numbering at 1 once the job list
-            # empties. Without this, reaping after a targeted `wait`
-            # would leave a later `wait %1` pointing at nothing.
-            self._next_ids[session_id] = 1
-        job_id = self._next_ids.setdefault(session_id, 1)
+        name = uuid.uuid4().hex
+        created_at = self.clock.now()
+        await self.store.renew(self.owner)
+        job_id = await self._allocate(
+            session_id,
+            {
+                "command": command,
+                "cwd": cwd,
+                "created_at": created_at,
+                "owner": self.owner,
+                "console": name,
+            },
+        )
         job: Job | None = None
 
         async def execute() -> int:
             if job is None:
                 return KILLED_EXIT_CODE
-            if job.status == JobStatus.RUNNING:
+            if job.status != JobStatus.RUNNING:
+                return job.exit_code
+            watcher = asyncio.ensure_future(_watch(job))
+            try:
                 return await _settle(run, job)
-            return job.exit_code
+            finally:
+                watcher.cancel()
+                self._drop_lease()
 
-        process = self.processes.start(
-            session_id=session_id,
-            command=command,
-            cwd=PathSpec.from_str_path(cwd),
-            run=execute,
-            parent_pid=parent_pid,
-            limit=limit,
-        )
         try:
-            if self._console_factory is None:
-                console = JobConsole()
-            else:
-                console = self._console_factory(job_id)
-                self._console_owner._factory_consoles.append(console)
+            process = self.processes.start(
+                session_id=session_id,
+                command=command,
+                cwd=PathSpec.from_str_path(cwd),
+                run=execute,
+                parent_pid=parent_pid,
+                limit=limit,
+            )
+        except BaseException:
+            await self._remove(session_id, {job_id}, give_back=True)
+            raise
+        try:
+            console = JobConsole(self.store.console(name))
             console.bind_execution(process.info.execution_id)
             job = Job(
                 id=job_id,
@@ -315,25 +369,83 @@ class JobTable:
                 session_id=session_id,
                 console=console,
                 simple=simple,
-                created_at=self.clock.now(),
+                created_at=created_at,
+                owner=self.owner,
             )
         except Exception:
             process.terminate()
+            await self._remove(session_id, {job_id}, give_back=True)
             raise
         job.process = process
-        jobs[job_id] = job
-        self._next_ids[session_id] = job_id + 1
+        self._jobs.setdefault(session_id, {})[job_id] = job
+        self._keep_lease()
         return job
 
-    def load(self, job: Job) -> None:
+    async def load(self, job: Job) -> None:
         """Insert a finished job restored from a snapshot into its session.
+
+        Its output moves onto a console in the store, so every workspace
+        on it reads the job the way it reads one that ran there.
 
         Args:
             job (Job): the restored job.
         """
+        name = uuid.uuid4().hex
+        console = self.store.console(name)
+        chunks, _, _ = await job.console.read_from(0)
+        for chunk in chunks:
+            await console.append(chunk.channel, chunk.data)
+        restored = JobConsole(console, finished=True)
+        if job.execution_id is not None:
+            restored.bind_execution(job.execution_id)
+        job.console = restored
+        job.owner = self.owner
+        await self._insert(
+            job.session_id,
+            job.id,
+            {
+                "command": job.command,
+                "cwd": job.cwd,
+                "created_at": job.created_at,
+                "owner": job.owner,
+                "console": name,
+            },
+        )
         self._jobs.setdefault(job.session_id, {})[job.id] = job
-        if job.id >= self._next_ids.get(job.session_id, 1):
-            self._next_ids[job.session_id] = job.id + 1
+
+    async def sync(self, session_id: str = "") -> None:
+        """Bring a session's list up to date with the store.
+
+        Adds the jobs other workspaces started, drops the ones they
+        reaped or disowned (a job this table runs keeps running, on the
+        side list ``disown`` uses), and settles a job whose console
+        another workspace ended, or another workspace's job whose owner's
+        lease lapsed with no ending.
+
+        Args:
+            session_id (str): the session whose list to refresh.
+        """
+        fields = await self.store.load(session_id)
+        entries: RecordFields = fields.get("jobs", {}) if fields else {}
+        local = self._jobs.get(session_id, {})
+        jobs: dict[int, Job] = {}
+        for key in sorted(entries, key=int):
+            job_id = int(key)
+            job = local.pop(job_id, None)
+            jobs[job_id] = (
+                job
+                if job is not None
+                else self._remote(job_id, session_id, entries[key])
+            )
+        for job in local.values():
+            if job.process is not None and job.status == JobStatus.RUNNING:
+                self._disowned.append(job)
+        self._jobs[session_id] = jobs
+        for job in jobs.values():
+            if job.process is not None:
+                await _adopt_ending(job)
+            elif job.status == JobStatus.RUNNING:
+                await self._refresh(job)
 
     def get(self, job_id: int, session_id: str = "") -> Job | None:
         return self._jobs.get(session_id, {}).get(job_id)
@@ -393,6 +505,11 @@ class JobTable:
         append past its own death, and ``_settle`` returns early once the
         job is no longer RUNNING so it cannot relabel it.
 
+        Another workspace's job is killed by ending its console; its
+        owner sees the ending and stops the runner. Should the job have
+        ended first, the ending it wrote stands and the job was not
+        killed.
+
         Args:
             job_id (int): the job to stop.
             session_id (str): the session whose list names it.
@@ -400,16 +517,16 @@ class JobTable:
                 is 128 plus it, KILL's 137 by default.
         """
         job = self.get(job_id, session_id)
-        if (
-            job is None
-            or job.status != JobStatus.RUNNING
-            or job.process is None
-        ):
+        if job is None or job.status != JobStatus.RUNNING:
             return False
-        await _stop(job, signal)
-        return True
+        if job.process is not None:
+            await _stop(job, signal)
+            return True
+        await _mark_killed(job.console, 128 + signal)
+        await self._refresh(job)
+        return job.status == JobStatus.KILLED
 
-    def disown(self, job_id: int, session_id: str = "") -> bool:
+    async def disown(self, job_id: int, session_id: str = "") -> bool:
         """Drop a job from its session's list without stopping it.
 
         What `disown` does in bash: the job keeps running, `jobs` no
@@ -423,8 +540,9 @@ class JobTable:
         job = self._jobs.get(session_id, {}).pop(job_id, None)
         if job is None:
             return False
-        if job.status == JobStatus.RUNNING:
+        if job.process is not None and job.status == JobStatus.RUNNING:
             self._disowned.append(job)
+        await self._remove(session_id, {job_id})
         return True
 
     async def close_session(self, session_id: str) -> list[Job]:
@@ -436,46 +554,46 @@ class JobTable:
         an empty list numbered from 1 rather than inheriting jobs it
         never launched, under a profile it may not share. Session closure
         revokes its process entry points and stops disowned runners too.
+        Closing a session closes it everywhere, so the jobs other
+        workspaces run in it are stopped too.
 
         Args:
             session_id (str): the session being closed.
         """
+        await self.sync(session_id)
         running = self.running_jobs(session_id)
         for job in running:
             await self.kill(job.id, session_id)
-        self.processes.revoke_session(session_id)
         self._jobs.pop(session_id, None)
-        self._next_ids.pop(session_id, None)
+        await self.store.delete(session_id)
+        self.processes.revoke_session(session_id)
         return running
 
     async def kill_all(self) -> list[Job]:
-        """Stop every running job in every session, returning the ones
-        that were running.
+        """Stop every running job this table runs in every session,
+        returning the ones that were running.
 
         Disowned jobs are stopped too: the shell forgot them, the
         workspace did not, and a teardown that left them running would
-        leak their tasks.
+        leak their tasks. Another workspace's jobs are its own to stop.
         """
-        running = self.all_running_jobs()
+        running = [j for j in self.all_running_jobs() if j.process is not None]
         for job in [*running, *self._disowned]:
             if job.status == JobStatus.RUNNING and job.process is not None:
                 await _stop(job)
         self._disowned = []
         return running
 
-    async def close_consoles(self) -> None:
-        """Close every console the factory built, releasing its store.
+    async def close(self) -> None:
+        """Stop renewing this table's lease, at workspace teardown.
 
-        Called by workspace teardown after ``kill_all``. Only tracked,
-        factory-built consoles are closed: the default in-memory ones
-        hold nothing, while a factory-provisioned store keeps a client
-        open per job (in Node an open client holds the process alive).
-        Closing also releases any reader still parked on one.
+        Called after ``kill_all``, so every job this table ran has
+        ended and other workspaces need no lease to settle them. The
+        store itself belongs to the workspace's state store.
         """
-        consoles = self._factory_consoles
-        self._factory_consoles = []
-        for console in consoles:
-            await console.close()
+        if self._lease is not None:
+            self._lease.cancel()
+            self._lease = None
 
     async def wait(self, job_id: int, session_id: str = "") -> Job:
         """Block until a job ends, then return it.
@@ -494,12 +612,18 @@ class JobTable:
         status it leaves is the one answered, as bash's ``wait`` answers
         once the child has gone.
 
+        Another workspace's job answers the status its ending records.
+        While none is stored its owner's lease is checked every third of
+        it, and a lapsed one ends the job as hung up.
+
         Args:
             job_id (int): the job to wait for.
             session_id (str): the session whose list names it.
         """
         job = self._jobs[session_id][job_id]
         if job.process is None:
+            if job.status == JobStatus.RUNNING:
+                await self._join_remote(job)
             return job
         await job.console.wait_finished()
         try:
@@ -526,7 +650,7 @@ class JobTable:
             await self.wait(job.id, session_id)
         return running
 
-    def reap(self, job_id: int, session_id: str = "") -> None:
+    async def reap(self, job_id: int, session_id: str = "") -> None:
         """Remove one job from its session's list.
 
         What a targeted ``wait``/``fg`` does once the job has ended,
@@ -539,8 +663,9 @@ class JobTable:
             session_id (str): the session whose list names it.
         """
         self._jobs.get(session_id, {}).pop(job_id, None)
+        await self._remove(session_id, {job_id})
 
-    def pop_completed(self, session_id: str = "") -> list[Job]:
+    async def pop_completed(self, session_id: str = "") -> list[Job]:
         """Return a session's completed/killed jobs and remove them from
         its list.
 
@@ -554,4 +679,196 @@ class JobTable:
         completed = [j for j in jobs.values() if j.status != JobStatus.RUNNING]
         for j in completed:
             del jobs[j.id]
+        if completed:
+            await self._remove(session_id, {j.id for j in completed})
         return completed
+
+    def _remote(
+        self, job_id: int, session_id: str, entry: RecordFields
+    ) -> Job:
+        """Another workspace's job, as its list entry describes it.
+
+        Args:
+            job_id (int): the job's number.
+            session_id (str): the session whose list names it.
+            entry (RecordFields): the job's list entry.
+        """
+        return Job(
+            id=job_id,
+            command=entry["command"],
+            cwd=entry["cwd"],
+            created_at=entry["created_at"],
+            console=JobConsole(self.store.console(entry["console"])),
+            session_id=session_id,
+            owner=entry["owner"],
+        )
+
+    async def _refresh(self, job: Job) -> None:
+        """Settle another workspace's job from its console's ending, or
+        end it as hung up when its owner's lease lapsed with none.
+
+        Args:
+            job (Job): another workspace's running job.
+        """
+        outcome = await job.console.outcome()
+        if outcome is None:
+            if await self.store.alive(job.owner):
+                return
+            await _mark_killed(job.console, HANGUP_EXIT_CODE)
+            outcome = await job.console.outcome()
+            if outcome is None:
+                return
+        job.status, job.exit_code = _ended(outcome)
+
+    async def _join_remote(self, job: Job) -> None:
+        """Block until another workspace's job ends.
+
+        Args:
+            job (Job): another workspace's running job.
+        """
+        lease = self.store.lease_seconds
+        while job.status == JobStatus.RUNNING:
+            if lease is None:
+                await job.console.wait_finished()
+            else:
+                try:
+                    async with asyncio.timeout(lease / 3):
+                        await job.console.wait_finished()
+                except TimeoutError:
+                    logger.debug("job %d still running elsewhere", job.id)
+            if job.console.store.closed:
+                return
+            await self._refresh(job)
+
+    async def _allocate(self, session_id: str, entry: RecordFields) -> int:
+        """Add a job to a session's list under the next number.
+
+        Numbering restarts at 1 once the list is empty, as GNU bash
+        restarts it; without that, reaping after a targeted `wait` would
+        leave a later `wait %1` pointing at nothing.
+
+        Args:
+            session_id (str): the session.
+            entry (RecordFields): the job's list entry.
+        """
+        for _ in range(LIST_MAX_RETRIES):
+            fields = await self.store.load(session_id)
+            jobs = dict(fields.get("jobs", {})) if fields else {}
+            job_id = int(fields.get("next", 1)) if fields and jobs else 1
+            jobs[str(job_id)] = entry
+            if await self._write(session_id, fields, jobs, job_id + 1):
+                return job_id
+        raise RuntimeError(
+            f"job list of session {session_id!r} kept conflicting "
+            "with another writer"
+        )
+
+    async def _insert(
+        self, session_id: str, job_id: int, entry: RecordFields
+    ) -> None:
+        """Add a job to a session's list under its own number.
+
+        Args:
+            session_id (str): the session.
+            job_id (int): the job's number.
+            entry (RecordFields): the job's list entry.
+        """
+        for _ in range(LIST_MAX_RETRIES):
+            fields = await self.store.load(session_id)
+            jobs = dict(fields.get("jobs", {})) if fields else {}
+            jobs[str(job_id)] = entry
+            following = int(fields.get("next", 1)) if fields else 1
+            if await self._write(
+                session_id, fields, jobs, max(following, job_id + 1)
+            ):
+                return
+        raise RuntimeError(
+            f"job list of session {session_id!r} kept conflicting "
+            "with another writer"
+        )
+
+    async def _remove(
+        self, session_id: str, job_ids: set[int], give_back: bool = False
+    ) -> None:
+        """Drop jobs from a session's list.
+
+        Args:
+            session_id (str): the session.
+            job_ids (set[int]): the jobs to drop.
+            give_back (bool): the jobs never started, so the last number
+                handed out is free again, as no job took it.
+        """
+        for _ in range(LIST_MAX_RETRIES):
+            fields = await self.store.load(session_id)
+            if fields is None:
+                return
+            stored = fields.get("jobs", {})
+            jobs = {k: v for k, v in stored.items() if int(k) not in job_ids}
+            if len(jobs) == len(stored):
+                return
+            following = int(fields.get("next", 1))
+            if give_back and following - 1 in job_ids:
+                following -= 1
+            if await self._write(session_id, fields, jobs, following):
+                return
+        raise RuntimeError(
+            f"job list of session {session_id!r} kept conflicting "
+            "with another writer"
+        )
+
+    async def _write(
+        self,
+        session_id: str,
+        fields: RecordFields | None,
+        jobs: RecordFields,
+        following: int,
+    ) -> bool:
+        """Write a session's list over the one read, iff still current.
+
+        Args:
+            session_id (str): the session.
+            fields (RecordFields | None): the list as read.
+            jobs (RecordFields): the jobs it holds now.
+            following (int): the number the next job takes.
+        """
+        expected = generation_of(fields)
+        return await self.store.cas_set(
+            session_id,
+            {"next": following, "jobs": jobs, "generation": expected + 1},
+            expected,
+        )
+
+    def _keep_lease(self) -> None:
+        """Renew this table's lease while it runs jobs on a store that
+        leases owners."""
+        lease = self.store.lease_seconds
+        if lease is None or self._lease is not None:
+            return
+        self._lease = asyncio.ensure_future(self._renew(lease / 3))
+
+    def _drop_lease(self) -> None:
+        """Stop renewing once this table runs no job."""
+        if self._lease is None or any(
+            j.process is not None and j.status == JobStatus.RUNNING
+            for j in [*self.all_jobs(), *self._disowned]
+        ):
+            return
+        self._lease.cancel()
+        self._lease = None
+
+    async def _renew(self, interval: float) -> None:
+        """Renew this table's lease every ``interval`` seconds.
+
+        A failed renewal is logged and retried: should the lease lapse
+        meanwhile, other workspaces end this table's jobs as hung up and
+        the watchers here stop them, so the two never disagree.
+
+        Args:
+            interval (float): seconds between renewals.
+        """
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self.store.renew(self.owner)
+            except Exception as exc:
+                logger.debug("job lease renewal failed: %s", exc)

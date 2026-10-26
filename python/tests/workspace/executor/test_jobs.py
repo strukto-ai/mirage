@@ -34,6 +34,7 @@ from mirage.workspace.executor.jobs import (
     handle_ps,
     handle_wait,
 )
+from mirage.workspace.store import RAMWorkspaceStateStore
 from mirage.workspace.types import ExecutionNode
 
 
@@ -463,14 +464,14 @@ async def _emit_after(
     return await _emit_and_settle(job, stdout=b"late")
 
 
-def _submit_settled(
+async def _submit_settled(
     table: JobTable,
     command: str = "foo",
     stdout: bytes = b"",
     stderr: bytes = b"",
     exit_code: int = 0,
 ) -> Job:
-    return table.submit(
+    return await table.submit(
         command=command,
         run=partial(
             _emit_and_settle, stdout=stdout, stderr=stderr, exit_code=exit_code
@@ -479,14 +480,14 @@ def _submit_settled(
     )
 
 
-def _submit_pending(table: JobTable, command: str = "sleep") -> Job:
-    return table.submit(command=command, run=_run_forever, cwd="/")
+async def _submit_pending(table: JobTable, command: str = "sleep") -> Job:
+    return await table.submit(command=command, run=_run_forever, cwd="/")
 
 
 @pytest.mark.asyncio
 async def test_wait_without_an_id_waits_for_every_job():
     table = JobTable()
-    job = _submit_settled(table)
+    job = await _submit_settled(table)
     _, io, node = await handle_wait(table, ["wait"])
     assert io.exit_code == 0
     assert node.command == "wait"
@@ -513,7 +514,9 @@ async def test_wait_rejects_an_unknown_job_id():
 @pytest.mark.asyncio
 async def test_wait_answers_the_awaited_jobs_status_and_prints_nothing():
     table = JobTable()
-    job = _submit_settled(table, stdout=b"out", stderr=b"done", exit_code=3)
+    job = await _submit_settled(
+        table, stdout=b"out", stderr=b"done", exit_code=3
+    )
     stdout, io, _ = await handle_wait(table, ["wait", str(job.id)])
     assert stdout is None
     assert io.exit_code == 3
@@ -523,7 +526,7 @@ async def test_wait_answers_the_awaited_jobs_status_and_prints_nothing():
 @pytest.mark.asyncio
 async def test_wait_accepts_the_percent_job_id_spelling():
     table = JobTable()
-    job = _submit_settled(table)
+    job = await _submit_settled(table)
     _, io, _ = await handle_wait(table, ["wait", f"%{job.id}"])
     assert io.exit_code == 0
 
@@ -587,7 +590,7 @@ async def test_kill_refuses_in_bash_words(args, code, stderr):
 @pytest.mark.asyncio
 async def test_kill_marks_a_known_job_killed():
     table = JobTable()
-    job = _submit_pending(table)
+    job = await _submit_pending(table)
     _, io, _ = await handle_kill(table, ["kill", str(job.id)])
     assert io.exit_code == 0
     assert table.get(job.id).status == JobStatus.KILLED
@@ -603,8 +606,8 @@ async def test_jobs_prints_nothing_when_the_table_is_empty():
 @pytest.mark.asyncio
 async def test_jobs_lists_id_status_and_command():
     table = JobTable()
-    done = _submit_settled(table, command="foo")
-    pending = _submit_pending(table, command="bar")
+    done = await _submit_settled(table, command="foo")
+    pending = await _submit_pending(table, command="bar")
     await table.wait(done.id)
     out, _, _ = await handle_jobs(table, ["jobs"])
     assert b"[1] completed foo" in out
@@ -615,7 +618,7 @@ async def test_jobs_lists_id_status_and_command():
 @pytest.mark.asyncio
 async def test_jobs_reaps_the_completed_entries_it_reported():
     table = JobTable()
-    job = _submit_settled(table)
+    job = await _submit_settled(table)
     await table.wait(job.id)
     await handle_jobs(table, ["jobs"])
     assert table.list_jobs() == []
@@ -624,8 +627,8 @@ async def test_jobs_reaps_the_completed_entries_it_reported():
 @pytest.mark.asyncio
 async def test_ps_lists_only_the_running_jobs():
     table = JobTable()
-    job = _submit_pending(table)
-    done = _submit_settled(table, command="foo")
+    job = await _submit_pending(table)
+    done = await _submit_settled(table, command="foo")
     await table.wait(done.id)
     out, _, _ = await handle_ps(table, ["ps"])
     assert out == b"1\tsleep\n"
@@ -670,7 +673,9 @@ async def test_fg_without_an_operand_takes_a_job_that_already_finished():
     # A background job can end before `fg` runs; it is still the current
     # job, as `fg %N` would find it.
     table = JobTable()
-    job = _submit_settled(table, command="quick", stdout=b"body", exit_code=3)
+    job = await _submit_settled(
+        table, command="quick", stdout=b"body", exit_code=3
+    )
     await table.wait(job.id)
     stdout, io, _ = await handle_fg(table, ["fg"])
     assert stdout == b"quick\n"
@@ -681,11 +686,11 @@ async def test_fg_without_an_operand_takes_a_job_that_already_finished():
 async def test_fg_without_an_operand_prefers_a_running_job_to_a_finished_one():
     # bash's current job is the newest one still running; a finished job
     # answers only when nothing runs. The older job holds until fg has
-    # picked, which it does before its first await.
+    # picked, which it has done by the next turn.
     table = JobTable()
     gate = asyncio.Event()
-    table.submit("older", partial(_emit_after, gate=gate), cwd="/")
-    done = _submit_settled(table, command="newer", stdout=b"early")
+    await table.submit("older", partial(_emit_after, gate=gate), cwd="/")
+    done = await _submit_settled(table, command="newer", stdout=b"early")
     await table.wait(done.id)
     fg = asyncio.create_task(handle_fg(table, ["fg"]))
     await asyncio.sleep(0)
@@ -704,7 +709,9 @@ async def test_fg_rejects_an_unknown_job_id_with_the_operand_as_typed():
 @pytest.mark.asyncio
 async def test_fg_echoes_the_command_line_then_answers_the_jobs_status():
     table = JobTable()
-    job = _submit_settled(table, command="slow", stdout=b"body", exit_code=7)
+    job = await _submit_settled(
+        table, command="slow", stdout=b"body", exit_code=7
+    )
     stdout, io, _ = await handle_fg(table, ["fg", str(job.id)])
     assert stdout == b"slow\n"
     assert io.exit_code == 7
@@ -714,7 +721,7 @@ async def test_fg_echoes_the_command_line_then_answers_the_jobs_status():
 async def test_fg_writes_the_command_line_before_it_blocks():
     table = JobTable()
     gate = asyncio.Event()
-    table.submit("held", partial(_emit_after, gate=gate), cwd="/")
+    await table.submit("held", partial(_emit_after, gate=gate), cwd="/")
     sink = JobConsole()
     fg = asyncio.create_task(handle_fg(table, ["fg"], sink=sink))
     await asyncio.sleep(0)
@@ -732,7 +739,7 @@ async def test_disown_drops_a_job_from_the_table():
         await asyncio.sleep(0.05)
         return IOResult(), ExecutionNode(command="j", exit_code=0)
 
-    table.submit("sleep", _run, cwd="/")
+    await table.submit("sleep", _run, cwd="/")
     _, io, _ = await handle_disown(table, ["disown"])
     assert io.exit_code == 0
     assert table.list_jobs() == []
@@ -755,7 +762,7 @@ async def test_wait_n_returns_first_finisher():
     async def _quick(job):
         return IOResult(exit_code=3), ExecutionNode(command="q", exit_code=3)
 
-    table.submit("q", _quick, cwd="/")
+    await table.submit("q", _quick, cwd="/")
     _, io, _ = await handle_wait(table, ["wait", "-n"])
     assert io.exit_code == 3
 
@@ -1313,3 +1320,60 @@ async def test_a_job_is_one_program_only_when_it_runs_one(line, simple):
         assert job.simple is simple
     finally:
         await ws.close()
+
+
+def _sharing(store: RAMWorkspaceStateStore) -> Workspace:
+    """A workspace on a state store another workspace shares.
+
+    Args:
+        store (RAMWorkspaceStateStore): the shared store.
+    """
+    return Workspace(
+        {"/m": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        workspace_id="shared",
+        session_id="s",
+        store=store,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_lists_kills_and_waits_on_anothers_job():
+    store = RAMWorkspaceStateStore()
+    a, b = _sharing(store), _sharing(store)
+    try:
+        assert (await a.shell("sleep 30 &", session_id="s")).exit_code == 0
+        listed = await b.shell("jobs", session_id="s")
+        assert listed.stdout == b"[1] running sleep 30\n"
+        assert (await b.shell("kill %1", session_id="s")).exit_code == 0
+        await a.job_table.sync("s")
+        job = a.job_table.get(1, "s")
+        assert job is not None and job.process is not None
+        assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
+        waited = await b.shell("wait %1; echo $?", session_id="s")
+        assert waited.stdout == b"143\n"
+        assert (await b.shell("jobs", session_id="s")).stdout == b""
+        assert (await a.shell("jobs", session_id="s")).stdout == b""
+        async with asyncio.timeout(2):
+            await job.process.join()
+    finally:
+        await a.close()
+        await b.close()
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_waits_for_anothers_job_status():
+    store = RAMWorkspaceStateStore()
+    a, b = _sharing(store), _sharing(store)
+    try:
+        await a.shell("false &", session_id="s")
+        waited = await b.shell("wait %1; echo $?", session_id="s")
+        assert waited.stdout == b"1\n"
+        await a.shell("sleep 0.05 & sleep 0.05 &", session_id="s")
+        assert (await b.shell("wait; echo $?", session_id="s")).stdout == (
+            b"0\n"
+        )
+        assert (await a.shell("jobs", session_id="s")).stdout == b""
+    finally:
+        await a.close()
+        await b.close()

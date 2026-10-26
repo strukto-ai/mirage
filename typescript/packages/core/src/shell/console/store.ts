@@ -58,6 +58,19 @@ export interface ConsoleStore {
   wait(seq: number): Promise<void>
 
   /**
+   * Resolve once the console holds its ending chunk.
+   *
+   * Woken by the ending alone, not by every chunk, which is what lets a
+   * job's owner watch for an ending another workspace wrote at no cost
+   * per write. Resolves immediately on a closed store, and once `signal`
+   * aborts: a promise cannot be cancelled, so the watcher stops this way
+   * where Python cancels its task.
+   *
+   * @param signal ends the wait early
+   */
+  waitEnded(signal?: AbortSignal): Promise<void>
+
+  /**
    * Release the store's resources.
    *
    * This is not "the job ended": that is the CONTROL chunk. Closing

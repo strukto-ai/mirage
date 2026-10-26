@@ -317,8 +317,8 @@ export class Workspace {
     this.registry.diff = this.diffPool
     this.registry.processView = (session) => this.processView(session)
     this.registry.fillEnv = (session, names) => this.fillTreeEnv(session, names)
-    this.jobTable = new JobTable(options.consoleFactory ?? null, this.processes, null, this.clock)
     const stores = resolveControlStores(this.wsId, options)
+    this.jobTable = new JobTable(stores.jobs, this.processes, null, this.clock)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
     // The env block, translated once: a literal entry becomes an
@@ -1901,6 +1901,7 @@ export class Workspace {
    * and runners were stopped.
    */
   async kill(sessionId?: string): Promise<number> {
+    if (sessionId !== undefined) await this.jobTable.sync(sessionId)
     const jobs =
       sessionId === undefined
         ? this.jobTable.allRunningJobs()

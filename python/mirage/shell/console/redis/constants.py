@@ -24,3 +24,7 @@ APPEND_LUA = (files("mirage.shell.console.redis") / "append.lua").read_text(
 )
 
 BLOCK_MS = 250
+
+# How often ``wait_ended`` checks for the ending: it is how a job's owner
+# notices a kill another process wrote, which needs no chunk's latency.
+ENDED_POLL_MS = 1000

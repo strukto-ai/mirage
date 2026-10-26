@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountMode, RAMVFS, type NamespaceStore } from '@struktoai/mirage-core'
+import { JobStatus } from '@struktoai/mirage-core/shell/job_table/types'
 import { seedVar } from '@struktoai/mirage-core/workspace/session/state'
 import { RedisWorkspaceStateStore, S3WorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 
@@ -22,6 +23,8 @@ const S3_ENDPOINT = process.env.STORE_S3_ENDPOINT ?? 'http://localhost:9000'
 const S3_BUCKET = process.env.STORE_S3_BUCKET ?? 'mirage-state'
 const WORKSPACE_ID = 'xstore'
 const MARKER = 'xstore-history-marker'
+const JOBS_WORKSPACE_ID = 'xjobs'
+const JOBS_SESSION = 's'
 
 // The store under test: redis for every plane, or (STORE_BACKEND=s3) the
 // sessions+meta group riding S3 as the workspace group override.
@@ -235,6 +238,89 @@ async function casVerify(prefix: string, rounds: number): Promise<void> {
   await store.close()
 }
 
+function makeJobsWorkspace(prefix: string): { ws: Workspace; store: RedisWorkspaceStateStore } {
+  const store = makeStateStore(prefix)
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.EXEC, workspaceId: JOBS_WORKSPACE_ID, sessionId: JOBS_SESSION, store },
+  )
+  return { ws, store }
+}
+
+// Poll `probe` for up to 20 s; whether it ever answered true.
+async function until(probe: () => Promise<boolean>): Promise<boolean> {
+  for (let i = 0; i < 400; i++) {
+    if (await probe()) return true
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return false
+}
+
+// Run the jobs the other language's peer lists, kills and waits on. Stays
+// up until the peer has reaped each job, since a job dies with its owner.
+async function jobsOwn(prefix: string): Promise<void> {
+  const { ws, store } = makeJobsWorkspace(prefix)
+  const plane = store.jobs(JOBS_WORKSPACE_ID)
+  const reaped = async (): Promise<boolean> => {
+    const listed = await plane.load(JOBS_SESSION)
+    return listed !== null && Object.keys(listed.jobs ?? {}).length === 0
+  }
+  const sleep = await ws.shell('sleep 30 &', { sessionId: JOBS_SESSION })
+  check('ts own: sleep started', sleep.exitCode === 0)
+  const job = ws.jobTable.get(1, JOBS_SESSION)
+  check('ts own: the job is listed here', job !== null)
+  await Promise.race([
+    job?.process?.join(),
+    new Promise((resolve) => setTimeout(resolve, 20_000).unref()),
+  ])
+  check(
+    "ts own: the peer's kill stopped the runner by TERM",
+    job?.status === JobStatus.KILLED && job.exitCode === 143,
+    `got ${String(job?.status)} ${String(job?.exitCode)}`,
+  )
+  check("ts own: the peer's wait reaped it", await until(reaped))
+  const failing = await ws.shell('false &', { sessionId: JOBS_SESSION })
+  check('ts own: false started', failing.exitCode === 0)
+  check("ts own: the peer's wait reaped false", await until(reaped))
+  await plane.clear()
+  await ws.close()
+  await store.close()
+}
+
+// List, kill and wait on jobs the other language's owner runs.
+async function jobsPeer(prefix: string): Promise<void> {
+  const { ws, store } = makeJobsWorkspace(prefix)
+  const plane = store.jobs(JOBS_WORKSPACE_ID)
+  const listed = async (): Promise<boolean> => {
+    const found = await plane.load(JOBS_SESSION)
+    return found !== null && '1' in ((found.jobs ?? {}) as Record<string, unknown>)
+  }
+  check("ts peer: the owner's job is listed", await until(listed))
+  const jobs = await ws.shell('jobs', { sessionId: JOBS_SESSION })
+  check(
+    'ts peer: jobs shows it running',
+    jobs.stdoutText === '[1] running sleep 30\n',
+    JSON.stringify(jobs.stdoutText),
+  )
+  const kill = await ws.shell('kill %1', { sessionId: JOBS_SESSION })
+  check('ts peer: kill %1', kill.exitCode === 0, kill.stderrText)
+  const term = await ws.shell('wait %1; echo $?', { sessionId: JOBS_SESSION })
+  check(
+    "ts peer: wait answers TERM's status",
+    term.stdoutText === '143\n',
+    JSON.stringify(term.stdoutText),
+  )
+  check("ts peer: the owner's false is listed", await until(listed))
+  const status = await ws.shell('wait %1; echo $?', { sessionId: JOBS_SESSION })
+  check(
+    "ts peer: wait answers false's status",
+    status.stdoutText === '1\n',
+    JSON.stringify(status.stdoutText),
+  )
+  await ws.close()
+  await store.close()
+}
+
 async function main(): Promise<void> {
   const role = process.argv[2]
   const prefix = process.argv[3]
@@ -242,6 +328,8 @@ async function main(): Promise<void> {
   else if (role === 'read') await read(prefix)
   else if (role === 'hammer') await hammer(prefix, Number(process.argv[4]))
   else if (role === 'cas-verify') await casVerify(prefix, Number(process.argv[4]))
+  else if (role === 'jobs-own') await jobsOwn(prefix)
+  else if (role === 'jobs-peer') await jobsPeer(prefix)
   else throw new Error(`unknown role: ${role}`)
   if (fail !== 0) process.exit(1)
 }

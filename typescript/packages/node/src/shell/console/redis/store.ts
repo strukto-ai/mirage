@@ -20,7 +20,7 @@ import type {
   ReadResult,
 } from '@struktoai/mirage-core/shell/console/index'
 import { RedisConnection } from '../../../optional_peer.ts'
-import { APPEND_LUA, POLL_MS } from './constants.ts'
+import { APPEND_LUA, ENDED_POLL_MS, POLL_MS } from './constants.ts'
 
 interface StreamEntry {
   id: { toString: () => string }
@@ -32,10 +32,24 @@ export interface RedisConsoleStoreOptions {
   keyPrefix?: string
   /** Expire the keys this long after the last append; absent keeps them. */
   ttlSeconds?: number
+  /**
+   * A connection the caller owns and shares between consoles (a job
+   * store's); absent connects to `url` and closes that connection on
+   * close().
+   */
+  connection?: RedisConnection
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', done)
+      resolve()
+    }
+    const timer = setTimeout(done, ms)
+    signal?.addEventListener('abort', done, { once: true })
+  })
 }
 
 /**
@@ -64,6 +78,8 @@ function sleep(ms: number): Promise<void> {
  * Python's XREAD BLOCK does: node-redis serializes commands on one
  * connection, so a blocking read would wedge the job's own appends
  * behind it, and a second connection costs more than a short poll.
+ * `waitEnded` polls the ending flag instead, so a watcher costs nothing
+ * per chunk.
  * There is no retention trim, so readFrom never reports a truncated
  * cursor; retention is bounded by `ttlSeconds` instead, refreshed on
  * every append, so a console expires that long after its job's last
@@ -77,6 +93,7 @@ export class RedisConsoleStore implements ConsoleStore {
   private readonly endedKey: string
   private readonly ttlSeconds: number
   private readonly redis: RedisConnection
+  private readonly ownsConnection: boolean
   private isClosed = false
 
   constructor(options: RedisConsoleStoreOptions = {}) {
@@ -86,7 +103,8 @@ export class RedisConsoleStore implements ConsoleStore {
     this.counterKey = `${this.keyPrefix}seq`
     this.endedKey = `${this.keyPrefix}ended`
     this.ttlSeconds = options.ttlSeconds ?? 0
-    this.redis = new RedisConnection(this.url, 'RedisConsoleStore')
+    this.ownsConnection = options.connection === undefined
+    this.redis = options.connection ?? new RedisConnection(this.url, 'RedisConsoleStore')
   }
 
   get closed(): boolean {
@@ -183,11 +201,19 @@ export class RedisConsoleStore implements ConsoleStore {
     }
   }
 
+  async waitEnded(signal?: AbortSignal): Promise<void> {
+    while (!this.isClosed && signal?.aborted !== true) {
+      const c = await this.client()
+      if ((await c.exists(this.endedKey)) > 0) return
+      await sleep(ENDED_POLL_MS, signal)
+    }
+  }
+
   async close(): Promise<void> {
     // Idempotent, and the flag flips before the quit so a parked wait
     // that wakes mid-teardown returns instead of re-polling.
     this.isClosed = true
-    await this.redis.close()
+    if (this.ownsConnection) await this.redis.close()
   }
 
   /** Delete the console's keys (test and integ teardown only). */

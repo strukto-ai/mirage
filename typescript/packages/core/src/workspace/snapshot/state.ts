@@ -59,9 +59,9 @@ import {
   Channel,
   type ConsoleChunk,
   JobConsole,
-  KILLED_OUTCOME,
   RAMConsoleStore,
   exitOutcome,
+  killedOutcome,
 } from '../../shell/console/index.ts'
 import {
   type ReadSpec,
@@ -666,7 +666,7 @@ export async function applyStateDict(
   if (seed !== null) ws.sessionManager.restoreSeed(seed)
   restoreCache(ws, state)
   await restoreHistory(ws, state)
-  restoreJobs(ws, state)
+  await restoreJobs(ws, state)
   await restoreNodes(ws, state)
 }
 
@@ -814,7 +814,9 @@ function restoredConsole(j: JobSnapshot): JobConsole {
     }
   }
   const outcome =
-    (j.status as JobStatus) === JobStatus.KILLED ? KILLED_OUTCOME : exitOutcome(j.exit_code)
+    (j.status as JobStatus) === JobStatus.KILLED
+      ? killedOutcome(j.exit_code)
+      : exitOutcome(j.exit_code)
   chunks.push({
     seq: chunks.length,
     ts: j.created_at,
@@ -826,9 +828,9 @@ function restoredConsole(j: JobSnapshot): JobConsole {
   return console
 }
 
-function restoreJobs(ws: WorkspaceLike, state: WorkspaceStateDict): void {
+async function restoreJobs(ws: WorkspaceLike, state: WorkspaceStateDict): Promise<void> {
   for (const j of state.jobs) {
-    ws.jobTable.load(
+    await ws.jobTable.load(
       new Job({
         id: j.id,
         command: j.command,

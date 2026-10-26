@@ -77,6 +77,15 @@ class ConsoleStore(Protocol):
         """
         ...
 
+    async def wait_ended(self) -> None:
+        """Return once the console holds its ending chunk.
+
+        Woken by the ending alone, not by every chunk, which is what lets
+        a job's owner watch for an ending another workspace wrote at no
+        cost per write. Returns immediately on a closed store.
+        """
+        ...
+
     async def close(self) -> None:
         """Release the store's resources.
 

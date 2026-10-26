@@ -27,7 +27,7 @@ import type { IndexConfig, RedisIndexConfig } from '../../cache/index/config.ts'
 import type { Mount } from '../mount/spec.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
-import type { ConsoleFactory, JobTable } from '../../shell/job_table/index.ts'
+import type { JobTable } from '../../shell/job_table/index.ts'
 import type { Clock } from '../../utils/clock.ts'
 import type { IdSource } from '../../utils/ids.ts'
 import type { Limit, DriftPolicy, MountMode, ReadSpec, Refusal, WritePolicy } from '../../types.ts'
@@ -103,15 +103,6 @@ export interface WorkspaceOptions {
    * replays them. A copy keeps its origin's.
    */
   ids?: IdSource
-  /**
-   * Builds each background job's console from its job id, so job
-   * output can live somewhere a reader in another process reaches
-   * (a Redis stream). Unset means an in-memory console per job. The
-   * workspace tracks what the factory builds and closes it at
-   * close(); a console still outlives its job-table entry, so a reap
-   * never closes one.
-   */
-  consoleFactory?: ConsoleFactory
   observe?: ObserverStore
   namespaceStore?: NamespaceStore
   sessionStore?: NamespaceStore

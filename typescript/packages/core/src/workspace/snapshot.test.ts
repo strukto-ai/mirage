@@ -501,7 +501,7 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     // leaves PWD stale, which the old wholesale env replacement hid.
     setCwd(worker, '/data')
     seedVar(worker, 'ROLE', 'bg')
-    ws.jobTable.submit({
+    await ws.jobTable.submit({
       command: 'sleep 0',
       run: () => Promise.resolve([new IOResult(), new ExecutionNode()] as JobResult),
       abort: new AbortController(),

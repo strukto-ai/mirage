@@ -18,3 +18,20 @@ KILLED_EXIT_CODE = 137
 # sandbox reaps for up to 5 s after a 1 s grace) before it answers with
 # the status the kill recorded.
 STOP_WAIT_SECONDS = 10.0
+
+# How long an owner's lease lasts on a store other processes share. The
+# owner renews it at a third of that while it runs jobs, so a workspace
+# that dies is seen as gone at most this long after its last renewal.
+LEASE_SECONDS = 30.0
+
+# The status a job lost with its owner answers: SIGHUP's, as bash's job
+# answers when its terminal goes.
+HANGUP_EXIT_CODE = 129
+
+# How long a shared console's output is kept after its last write, so
+# the streams of jobs nobody reaps do not accumulate.
+CONSOLE_TTL_SECONDS = 86400
+
+# How many times a job-list write retries against other writers before
+# it gives up: every workspace of a session writes the one record.
+LIST_MAX_RETRIES = 32

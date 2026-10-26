@@ -24,6 +24,7 @@ import {
   type ReadResult,
 } from '../console/index.ts'
 import { STOP_WAIT_SECONDS } from './constants.ts'
+import { RAMJobStore } from './ram.ts'
 import { JobTable } from './table.ts'
 import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 import { ManualClock } from '../../utils/clock.ts'
@@ -83,16 +84,38 @@ class GatedStore implements ConsoleStore {
     return this.inner.wait(seq)
   }
 
+  async waitEnded(): Promise<void> {
+    return this.inner.waitEnded()
+  }
+
   async close(): Promise<void> {
     return this.inner.close()
   }
 }
 
+/** A job store whose consoles park their appends behind the gate. */
+class GatedJobs extends RAMJobStore {
+  constructor(private readonly gate: Promise<void>) {
+    super()
+  }
+
+  override console(): ConsoleStore {
+    return new GatedStore(this.gate)
+  }
+}
+
+/** A job store that cannot open a console. */
+class BrokenConsoles extends RAMJobStore {
+  override console(): ConsoleStore {
+    throw new Error('console unavailable')
+  }
+}
+
 /** A live job whose console appends are parked behind the gate. */
-function gatedJob(gate: Promise<void>): [JobTable, Job] {
-  const jt = new JobTable(() => new JobConsole(new GatedStore(gate)))
+async function gatedJob(gate: Promise<void>): Promise<[JobTable, Job]> {
+  const jt = new JobTable(new GatedJobs(gate))
   const abort = new AbortController()
-  return [jt, jt.submit({ command: 'deaf', run: pending(abort), abort, cwd: '/' })]
+  return [jt, await jt.submit({ command: 'deaf', run: pending(abort), abort, cwd: '/' })]
 }
 
 /** A runner that never finishes on its own; only an abort ends it. */
@@ -113,35 +136,40 @@ function pending(abort: AbortController, prelude?: string): JobRunner {
 }
 
 describe('JobTable.submit', () => {
-  it('assigns incrementing ids starting at 1', () => {
+  it('assigns incrementing ids starting at 1', async () => {
     const jt = new JobTable()
-    const j1 = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
-    const j2 = jt.submit({ command: 'b', run: quiet, abort: new AbortController(), cwd: '/' })
+    const j1 = await jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    const j2 = await jt.submit({ command: 'b', run: quiet, abort: new AbortController(), cwd: '/' })
     expect(j1.id).toBe(1)
     expect(j2.id).toBe(2)
   })
 
-  it('stamps jobs on the table clock, a child table included', () => {
+  it('stamps jobs on the table clock, a child table included', async () => {
     const clock = new ManualClock(1_000)
     const jt = new JobTable(null, undefined, null, clock)
-    const first = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    const first = await jt.submit({
+      command: 'a',
+      run: quiet,
+      abort: new AbortController(),
+      cwd: '/',
+    })
     clock.advance(5)
-    const second = jt
+    const second = await jt
       .child()
       .submit({ command: 'b', run: quiet, abort: new AbortController(), cwd: '/' })
     expect([first.createdAt, second.createdAt]).toEqual([1_000, 1_005])
   })
 
-  it('defaults sessionId', () => {
+  it('defaults sessionId', async () => {
     const jt = new JobTable()
-    const j = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    const j = await jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
     expect(j.sessionId).toBe('')
     expect(j.status).toBe(JobStatus.RUNNING)
   })
 
   it('hands the runner a job that already has a console', async () => {
     const jt = new JobTable()
-    const j = jt.submit({
+    const j = await jt.submit({
       command: 'echo hi',
       run: talking('hi'),
       abort: new AbortController(),
@@ -153,10 +181,10 @@ describe('JobTable.submit', () => {
 })
 
 describe('JobTable.get / list / running', () => {
-  it('retrieves and lists jobs', () => {
+  it('retrieves and lists jobs', async () => {
     const jt = new JobTable()
     const abort = new AbortController()
-    const j = jt.submit({ command: 'a', run: pending(abort), abort, cwd: '/' })
+    const j = await jt.submit({ command: 'a', run: pending(abort), abort, cwd: '/' })
     expect(jt.get(j.id)).toBe(j)
     expect(jt.get(999)).toBeNull()
     expect(jt.listJobs()).toHaveLength(1)
@@ -173,7 +201,7 @@ describe('JobTable.kill', () => {
   ])('a job killed with signal %i exits %i', async (signal, code) => {
     const jt = new JobTable()
     const abort = new AbortController()
-    const j = jt.submit({ command: 'sleep', run: pending(abort, 'up'), abort, cwd: '/' })
+    const j = await jt.submit({ command: 'sleep', run: pending(abort, 'up'), abort, cwd: '/' })
     while (dec(await j.console.snapshot(Channel.STDOUT)) === '') await Promise.resolve()
     expect(await jt.kill(j.id, '', signal)).toBe(true)
     expect([j.status, j.exitCode]).toEqual([JobStatus.KILLED, code])
@@ -206,7 +234,7 @@ describe('JobTable.kill', () => {
           }, 50)
         })
       })
-    const j = jt.submit({ command: 'prog', run, abort, cwd: '/', simple })
+    const j = await jt.submit({ command: 'prog', run, abort, cwd: '/', simple })
     await up
     expect(await jt.kill(j.id, '', 15)).toBe(true)
     expect([j.exitCode, stopped]).toEqual([143, []])
@@ -228,7 +256,7 @@ describe('JobTable.kill', () => {
         new Promise(() => {
           started()
         })
-      const j = jt.submit({ command: 'deaf', run, abort, cwd: '/', simple: true })
+      const j = await jt.submit({ command: 'deaf', run, abort, cwd: '/', simple: true })
       await up
       expect(await jt.kill(j.id, '', 15)).toBe(true)
       const waiting = jt.wait(j.id)
@@ -242,7 +270,7 @@ describe('JobTable.kill', () => {
   it('aborts, marks killed, and keeps output produced before the kill', async () => {
     const jt = new JobTable()
     const abort = new AbortController()
-    const j = jt.submit({ command: 'sleep', run: pending(abort, 'partial'), abort, cwd: '/' })
+    const j = await jt.submit({ command: 'sleep', run: pending(abort, 'partial'), abort, cwd: '/' })
     while (dec(await j.console.snapshot(Channel.STDOUT)) === '') await Promise.resolve()
 
     expect(await jt.kill(j.id)).toBe(true)
@@ -257,7 +285,7 @@ describe('JobTable.kill', () => {
   it('returns a settled job, so callers never see a half-dead one', async () => {
     const jt = new JobTable()
     const abort = new AbortController()
-    const j = jt.submit({ command: 'sleep', run: pending(abort), abort, cwd: '/' })
+    const j = await jt.submit({ command: 'sleep', run: pending(abort), abort, cwd: '/' })
     expect(await jt.kill(j.id)).toBe(true)
     expect(j.console.finished).toBe(true)
   })
@@ -266,7 +294,7 @@ describe('JobTable.kill', () => {
     const jt = new JobTable()
     const abort = new AbortController()
     const release: { fire?: () => void } = {}
-    const j = jt.submit({ command: 'long', run: deaf(release), abort, cwd: '/' })
+    const j = await jt.submit({ command: 'long', run: deaf(release), abort, cwd: '/' })
 
     // The signal is only seen where someone checks it. Joining the runner
     // here would hang the shell on exactly the runaway job being stopped.
@@ -285,7 +313,7 @@ describe('JobTable.kill', () => {
 
   it('returns false for unknown and already-finished jobs', async () => {
     const jt = new JobTable()
-    const j = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    const j = await jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
     await jt.wait(j.id)
     expect(await jt.kill(j.id)).toBe(false)
     expect(await jt.kill(999)).toBe(false)
@@ -295,8 +323,8 @@ describe('JobTable.kill', () => {
     const jt = new JobTable()
     const a1 = new AbortController()
     const a2 = new AbortController()
-    jt.submit({ command: 'a', run: pending(a1), abort: a1, cwd: '/' })
-    jt.submit({ command: 'b', run: pending(a2), abort: a2, cwd: '/' })
+    await jt.submit({ command: 'a', run: pending(a1), abort: a1, cwd: '/' })
+    await jt.submit({ command: 'b', run: pending(a2), abort: a2, cwd: '/' })
     const killed = await jt.killAll()
     expect(killed).toHaveLength(2)
     expect(jt.runningJobs()).toHaveLength(0)
@@ -312,7 +340,7 @@ describe('JobTable.wait', () => {
       await job.console.emit(Channel.STDERR, new TextEncoder().encode('oops'))
       return [new IOResult({ exitCode: 2 }), execNode]
     }
-    const j = jt.submit({ command: 'foo', run, abort: new AbortController(), cwd: '/' })
+    const j = await jt.submit({ command: 'foo', run, abort: new AbortController(), cwd: '/' })
     const result = await jt.wait(j.id)
     expect(result.status).toBe(JobStatus.COMPLETED)
     expect(result.exitCode).toBe(2)
@@ -324,7 +352,7 @@ describe('JobTable.wait', () => {
     const jt = new JobTable()
     const j = new Job({ id: 99, command: 'a', cwd: '/', createdAt: 0 })
     j.status = JobStatus.COMPLETED
-    jt.load(j)
+    await jt.load(j)
     const result = await jt.wait(99)
     expect(result).toBe(j)
   })
@@ -332,7 +360,7 @@ describe('JobTable.wait', () => {
   it('sets COMPLETED and exitCode 1 on a runner error', async () => {
     const jt = new JobTable()
     const run: JobRunner = () => Promise.reject(new Error('boom'))
-    const j = jt.submit({ command: 'a', run, abort: new AbortController(), cwd: '/' })
+    const j = await jt.submit({ command: 'a', run, abort: new AbortController(), cwd: '/' })
     const result = await jt.wait(j.id)
     expect(result.status).toBe(JobStatus.COMPLETED)
     expect(result.exitCode).toBe(1)
@@ -352,7 +380,7 @@ describe('JobTable.wait ordering', () => {
     const gate = new Promise<void>((resolve) => {
       open = resolve
     })
-    const [jt, job] = gatedJob(gate)
+    const [jt, job] = await gatedJob(gate)
     const killP = jt.kill(job.id)
     // kill's synchronous prefix has already flipped the status; the
     // marker appends are parked behind the gate.
@@ -377,7 +405,7 @@ describe('JobTable.wait ordering', () => {
     const gate = new Promise<void>((resolve) => {
       open = resolve
     })
-    const [jt, job] = gatedJob(gate)
+    const [jt, job] = await gatedJob(gate)
     const killP = jt.kill(job.id)
     expect(job.status).toBe(JobStatus.KILLED)
     let settled = false
@@ -398,15 +426,20 @@ describe('JobTable.waitAll', () => {
   it('survives a failing task — mixed success/failure both land in the table', async () => {
     const jt = new JobTable()
     const failing: JobRunner = () => Promise.reject(new Error('VFS API error'))
-    const bad = jt.submit({ command: 'bad', run: failing, abort: new AbortController(), cwd: '/' })
-    const good = jt.submit({
+    const bad = await jt.submit({
+      command: 'bad',
+      run: failing,
+      abort: new AbortController(),
+      cwd: '/',
+    })
+    const good = await jt.submit({
       command: 'good',
       run: talking('hello'),
       abort: new AbortController(),
       cwd: '/',
     })
-    const jobs = await jt.waitAll()
-    expect(jobs).toHaveLength(2)
+    await jt.waitAll()
+    expect(jt.listJobs()).toHaveLength(2)
     const badJob = jt.get(bad.id)
     const goodJob = jt.get(good.id)
     expect(badJob?.exitCode).toBe(1)
@@ -419,18 +452,18 @@ describe('JobTable.waitAll', () => {
 describe('JobTable.popCompleted', () => {
   it('removes completed/killed jobs from the table', async () => {
     const jt = new JobTable()
-    const j1 = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    const j1 = await jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
     const abort = new AbortController()
-    jt.submit({ command: 'b', run: pending(abort), abort, cwd: '/' })
+    await jt.submit({ command: 'b', run: pending(abort), abort, cwd: '/' })
     await jt.wait(j1.id)
-    const popped = jt.popCompleted()
+    const popped = await jt.popCompleted()
     expect(popped).toHaveLength(1)
     expect(jt.listJobs()).toHaveLength(1)
   })
 
   it('a reader keeps its console after the job leaves the table', async () => {
     const jt = new JobTable()
-    const j = jt.submit({
+    const j = await jt.submit({
       command: 'a',
       run: talking('kept'),
       abort: new AbortController(),
@@ -438,56 +471,40 @@ describe('JobTable.popCompleted', () => {
     })
     await jt.wait(j.id)
     const console_ = j.console
-    jt.popCompleted()
+    await jt.popCompleted()
     expect(jt.get(j.id)).toBeNull()
     expect(dec(await console_.snapshot(Channel.STDOUT))).toBe('kept')
   })
 
-  it('closeConsoles releases factory-built stores', async () => {
-    const stores: RAMConsoleStore[] = []
-    const factory = (): JobConsole => {
-      const store = new RAMConsoleStore()
-      stores.push(store)
-      return new JobConsole(store)
-    }
-    const jt = new JobTable(factory)
-    const j = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
-    await jt.wait(j.id)
-    await jt.closeConsoles()
-    expect(stores).toHaveLength(1)
-    expect(stores.every((s) => s.closed)).toBe(true)
-  })
-
-  it('a child table builds consoles its owner releases', async () => {
-    const stores: RAMConsoleStore[] = []
-    const factory = (): JobConsole => {
-      const store = new RAMConsoleStore()
-      stores.push(store)
-      return new JobConsole(store)
-    }
-    const jt = new JobTable(factory)
+  it('a child table keeps its jobs off the shared store', async () => {
+    const store = new RAMJobStore()
+    const jt = new JobTable(store)
     const child = jt.child().child(jt)
-    const j = child.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    const j = await child.submit({
+      command: 'a',
+      run: quiet,
+      abort: new AbortController(),
+      cwd: '/',
+    })
     expect(child.processes).toBe(jt.processes)
     expect(child.parent).toBe(jt)
+    expect(child.store).not.toBe(store)
     expect(jt.listJobs()).toEqual([])
+    expect(await store.load('')).toBeNull()
     await child.wait(j.id)
-    await jt.closeConsoles()
-    expect(stores).toHaveLength(1)
-    expect(stores.every((s) => s.closed)).toBe(true)
   })
 
-  it('closeConsoles leaves default consoles alone', async () => {
+  it('close leaves consoles open', async () => {
     const jt = new JobTable()
-    const j = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    const j = await jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
     await jt.wait(j.id)
-    await jt.closeConsoles()
+    await jt.close()
     expect(j.console.store.closed).toBe(false)
   })
 })
 
 /** A live job in one session, ended only by its own abort. */
-function live(jt: JobTable, sessionId: string): Job {
+async function live(jt: JobTable, sessionId: string): Promise<Job> {
   const abort = new AbortController()
   return jt.submit({ command: 'x', run: pending(abort), abort, cwd: '/', sessionId })
 }
@@ -495,17 +512,17 @@ function live(jt: JobTable, sessionId: string): Job {
 describe('JobTable per-session scoping', () => {
   it('numbers each session from one', async () => {
     const jt = new JobTable()
-    const a1 = live(jt, 'a')
-    const b1 = live(jt, 'b')
-    const a2 = live(jt, 'a')
+    const a1 = await live(jt, 'a')
+    const b1 = await live(jt, 'b')
+    const a2 = await live(jt, 'a')
     expect([a1.id, b1.id, a2.id]).toEqual([1, 1, 2])
     await jt.killAll()
   })
 
   it('scopes every view to one session', async () => {
     const jt = new JobTable()
-    const a1 = live(jt, 'a')
-    const b1 = live(jt, 'b')
+    const a1 = await live(jt, 'a')
+    const b1 = await live(jt, 'b')
     expect(jt.listJobs('a')).toEqual([a1])
     expect(jt.runningJobs('b')).toEqual([b1])
     expect(jt.get(1, 'b')).toBe(b1)
@@ -522,8 +539,8 @@ describe('JobTable per-session scoping', () => {
 
   it('killAll reaches every session', async () => {
     const jt = new JobTable()
-    const a1 = live(jt, 'a')
-    const b1 = live(jt, 'b')
+    const a1 = await live(jt, 'a')
+    const b1 = await live(jt, 'b')
     const killed = await jt.killAll()
     expect(new Set(killed.map((j) => j.sessionId))).toEqual(new Set(['a', 'b']))
     expect(a1.status).toBe(JobStatus.KILLED)
@@ -533,21 +550,21 @@ describe('JobTable per-session scoping', () => {
 
   it('resets numbering per session when its list empties', async () => {
     const jt = new JobTable()
-    const a1 = live(jt, 'a')
-    live(jt, 'b')
+    const a1 = await live(jt, 'a')
+    await live(jt, 'b')
     expect(await jt.kill(a1.id, 'a')).toBe(true)
-    jt.reap(a1.id, 'a')
-    expect(live(jt, 'a').id).toBe(1)
-    expect(live(jt, 'b').id).toBe(2)
+    await jt.reap(a1.id, 'a')
+    expect((await live(jt, 'a')).id).toBe(1)
+    expect((await live(jt, 'b')).id).toBe(2)
     await jt.killAll()
   })
 
   it("closeSession stops and forgets the session's jobs", async () => {
     const jt = new JobTable()
-    const a1 = live(jt, 'a')
-    const a2 = live(jt, 'a')
-    const b1 = live(jt, 'b')
-    expect(jt.disown(a2.id, 'a')).toBe(true)
+    const a1 = await live(jt, 'a')
+    const a2 = await live(jt, 'a')
+    const b1 = await live(jt, 'b')
+    expect(await jt.disown(a2.id, 'a')).toBe(true)
     expect(await jt.closeSession('a')).toEqual([a1])
     expect(a1.status).toBe(JobStatus.KILLED)
     // Disowned: off the list, still running, bash's own rule.
@@ -556,7 +573,7 @@ describe('JobTable per-session scoping', () => {
     expect(jt.get(1, 'a')).toBeNull()
     expect(jt.listJobs('b')).toEqual([b1])
     // A session reusing the id starts from one and inherits nothing.
-    expect(live(jt, 'a').id).toBe(1)
+    expect((await live(jt, 'a')).id).toBe(1)
     await jt.killAll()
     expect(a2.status).toBe(JobStatus.KILLED)
   })
@@ -572,11 +589,11 @@ describe('JobTable per-session scoping', () => {
       sessionId: 'a',
       console: new JobConsole(),
     })
-    jt.load(restored)
+    await jt.load(restored)
     expect(jt.get(3, 'a')).toBe(restored)
     expect(jt.get(3)).toBeNull()
-    expect(live(jt, 'a').id).toBe(4)
-    expect(live(jt, 'b').id).toBe(1)
+    expect((await live(jt, 'a')).id).toBe(4)
+    expect((await live(jt, 'b')).id).toBe(1)
     await jt.killAll()
   })
 })
@@ -584,7 +601,7 @@ describe('JobTable per-session scoping', () => {
 it('keeps a disowned process visible until its cancelled runner really exits', async () => {
   const table = new JobTable(),
     release: { fire?: () => void } = {}
-  const job = table.submit({
+  const job = await table.submit({
     command: 'long',
     run: deaf(release),
     cwd: '/',
@@ -595,7 +612,7 @@ it('keeps a disowned process visible until its cancelled runner really exits', a
   const process = job.process
   if (process === null) throw new Error('missing process')
   const view = table.processes.view('a')
-  expect(table.disown(job.id, 'a')).toBe(true)
+  expect(await table.disown(job.id, 'a')).toBe(true)
   expect(table.listJobs('a')).toEqual([])
   expect(view.list().map((info) => info.pid)).toEqual([process.info.pid])
   await table.killAll()
@@ -613,8 +630,8 @@ it('does not restart process IDs with shell job numbers', async () => {
     const abort = new AbortController()
     return table.submit({ command: 'wait', run: pending(abort), abort, cwd: '/', sessionId })
   }
-  const a = submit('a'),
-    b = submit('b')
+  const a = await submit('a'),
+    b = await submit('b')
   expect(a.id).toBe(1)
   expect(b.id).toBe(1)
   const pa = a.process,
@@ -622,8 +639,8 @@ it('does not restart process IDs with shell job numbers', async () => {
   if (pa === null || pb === null) throw new Error('missing process')
   expect(pa.info.pid).not.toBe(pb.info.pid)
   await table.kill(a.id, 'a')
-  table.reap(a.id, 'a')
-  const replacement = submit('a')
+  await table.reap(a.id, 'a')
+  const replacement = await submit('a')
   expect(replacement.id).toBe(1)
   const pr = replacement.process
   if (pr === null) throw new Error('missing process')
@@ -637,7 +654,7 @@ it('settles an already aborted job without entering its runner', async () => {
     abort = new AbortController()
   abort.abort()
   let entered = false
-  const job = table.submit({
+  const job = await table.submit({
     command: 'cancelled',
     abort,
     cwd: '/',
@@ -652,18 +669,20 @@ it('settles an already aborted job without entering its runner', async () => {
   expect(await job.process?.join()).toMatchObject({ exitCode: 137, cancellationRequested: true })
 })
 
-it('refused jobs never allocate factory consoles', async () => {
-  const stores: RAMConsoleStore[] = []
-  const table = new JobTable(() => {
-    const store = new RAMConsoleStore()
-    stores.push(store)
-    return new JobConsole(store)
-  })
+it('a refused job gives its number back', async () => {
+  const store = new RAMJobStore()
+  const table = new JobTable(store)
   const abort = new AbortController()
-  const job = table.submit({ command: 'held', run: pending(abort), abort, cwd: '/', limit: 1 })
+  const job = await table.submit({
+    command: 'held',
+    run: pending(abort),
+    abort,
+    cwd: '/',
+    limit: 1,
+  })
   try {
     for (let n = 0; n < 3; n++)
-      expect(() =>
+      await expect(
         table.submit({
           command: 'refused',
           run: quiet,
@@ -671,24 +690,22 @@ it('refused jobs never allocate factory consoles', async () => {
           cwd: '/',
           limit: 1,
         }),
-      ).toThrow(expect.objectContaining({ code: 'EAGAIN' }))
-    expect(stores).toHaveLength(1)
+      ).rejects.toThrow(expect.objectContaining({ code: 'EAGAIN' }))
     expect(table.listJobs()).toEqual([job])
+    const stored = await store.load('')
+    expect(Object.keys(stored?.jobs ?? {})).toEqual(['1'])
+    expect(stored?.next).toBe(2)
   } finally {
     await table.killAll()
     await table.processes.drain()
-    await table.closeConsoles()
   }
-  expect(stores[0]?.closed).toBe(true)
 })
 
-it('factory failure never enters the job runner', async () => {
-  const entered: (number | string)[] = []
-  const table = new JobTable((id) => {
-    entered.push(id)
-    throw new Error('console unavailable')
-  })
-  expect(() =>
+it('a console failure never enters the job runner', async () => {
+  const entered: string[] = []
+  const store = new BrokenConsoles()
+  const table = new JobTable(store)
+  await expect(
     table.submit({
       command: 'refused',
       cwd: '/',
@@ -699,23 +716,24 @@ it('factory failure never enters the job runner', async () => {
         return quiet(job)
       },
     }),
-  ).toThrow('console unavailable')
+  ).rejects.toThrow('console unavailable')
   await table.processes.drain()
   expect(table.listJobs()).toEqual([])
   expect(table.processes.live()).toEqual([])
-  expect(entered).toEqual([1])
+  expect(entered).toEqual([])
+  expect((await store.load(''))?.jobs).toEqual({})
 })
 
-it("a substitution lists its caller's jobs before its own", () => {
+it("a substitution lists its caller's jobs before its own", async () => {
   const caller = new JobTable()
-  const outer = caller.submit({
+  const outer = await caller.submit({
     command: 'outer',
     run: quiet,
     abort: new AbortController(),
     cwd: '/',
   })
   const innerTable = new JobTable(null, caller.processes, caller)
-  const inner = innerTable.submit({
+  const inner = await innerTable.submit({
     command: 'inner',
     run: quiet,
     abort: new AbortController(),
@@ -723,4 +741,114 @@ it("a substitution lists its caller's jobs before its own", () => {
   })
   expect(innerTable.listing()).toEqual([outer, inner])
   expect(innerTable.listJobs()).toEqual([inner])
+})
+
+/** A runner that exits at once with `code`. */
+function exitWith(code: number): JobRunner {
+  return () =>
+    Promise.resolve([new IOResult({ exitCode: code }), new ExecutionNode({ exitCode: code })])
+}
+
+/** A job in session `s` that ends only through its abort. */
+async function sleeping(jt: JobTable): Promise<Job> {
+  const abort = new AbortController()
+  return jt.submit({ command: 'sleep 30', run: pending(abort), abort, cwd: '/', sessionId: 's' })
+}
+
+describe('JobTable on a shared store', () => {
+  it('another table lists, waits on and kills a job', async () => {
+    const store = new RAMJobStore()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    const job = await sleeping(a)
+    await b.sync('s')
+    const [seen] = b.listJobs('s')
+    expect([seen?.id, seen?.command, seen?.status]).toEqual([1, 'sleep 30', JobStatus.RUNNING])
+    expect(seen?.process).toBeNull()
+    expect(await b.kill(1, 's', 15)).toBe(true)
+    expect((await b.wait(1, 's')).exitCode).toBe(143)
+    await job.process?.join()
+    expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
+    expect(dec(await job.console.snapshot(Channel.STDERR))).toBe('Killed')
+  })
+
+  it('another table waits for a job to end', async () => {
+    const store = new RAMJobStore()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const run: JobRunner = async () => {
+      await gate
+      return [new IOResult({ exitCode: 1 }), new ExecutionNode({ exitCode: 1 })]
+    }
+    await a.submit({
+      command: 'false',
+      run,
+      abort: new AbortController(),
+      cwd: '/',
+      sessionId: 's',
+    })
+    await b.sync('s')
+    let done = false
+    const waiter = b.wait(1, 's').then((job) => {
+      done = true
+      return job
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(done).toBe(false)
+    release()
+    expect((await waiter).exitCode).toBe(1)
+  })
+
+  it('two tables never hand out one number', async () => {
+    const store = new RAMJobStore()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    const [first, second] = await Promise.all([sleeping(a), sleeping(b)])
+    expect(new Set([first.id, second.id])).toEqual(new Set([1, 2]))
+    await b.sync('s')
+    expect(b.listJobs('s').map((j) => j.id)).toEqual([1, 2])
+    await a.killAll()
+    await b.killAll()
+  })
+
+  it('a job whose owner lapsed ends as hung up', async () => {
+    const store = new RAMJobStore(0.05)
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    const job = await sleeping(a)
+    const owner = a as unknown as { lease: ReturnType<typeof setTimeout> | null }
+    expect(owner.lease).not.toBeNull()
+    if (owner.lease !== null) clearTimeout(owner.lease)
+    await b.sync('s')
+    expect(b.runningJobs('s')).not.toEqual([])
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect((await b.wait(1, 's')).exitCode).toBe(129)
+    expect(b.get(1, 's')?.status).toBe(JobStatus.KILLED)
+    await job.process?.join()
+    expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 129])
+  })
+
+  it('a reap elsewhere drops the job from its owner', async () => {
+    const store = new RAMJobStore()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    await a.submit({
+      command: 'true',
+      run: exitWith(0),
+      abort: new AbortController(),
+      cwd: '/',
+      sessionId: 's',
+    })
+    await b.sync('s')
+    expect((await b.wait(1, 's')).exitCode).toBe(0)
+    await b.reap(1, 's')
+    await a.sync('s')
+    expect(a.listJobs('s')).toEqual([])
+    expect((await sleeping(a)).id).toBe(1)
+    await a.killAll()
+  })
 })

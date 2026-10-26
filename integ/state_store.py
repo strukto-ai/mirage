@@ -22,6 +22,7 @@ import os  # noqa: E402
 import uuid  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
+from mirage.shell.job_table import JobStatus  # noqa: E402
 from mirage.vfs.ram import RAMVFS  # noqa: E402
 from mirage.vfs.s3.config import S3Config  # noqa: E402
 from mirage.workspace.mount.namespace.store import NamespaceStore  # noqa: E402
@@ -35,6 +36,8 @@ S3_ENDPOINT = os.environ.get("STORE_S3_ENDPOINT", "http://localhost:9000")
 S3_BUCKET = os.environ.get("STORE_S3_BUCKET", "mirage-state")
 WORKSPACE_ID = "xstore"
 MARKER = "xstore-history-marker"
+JOBS_WORKSPACE_ID = "xjobs"
+JOBS_SESSION = "s"
 
 
 def make_state_store(prefix: str) -> RedisWorkspaceStateStore:
@@ -279,6 +282,98 @@ async def cas_verify(prefix: str, rounds: int) -> None:
     await store.close()
 
 
+def make_jobs_workspace(
+    prefix: str,
+) -> tuple[Workspace, RedisWorkspaceStateStore]:
+    store = make_state_store(prefix)
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        workspace_id=JOBS_WORKSPACE_ID,
+        session_id=JOBS_SESSION,
+        store=store,
+    )
+    return ws, store
+
+
+async def until(probe) -> bool:
+    """Poll ``probe`` for up to 20 s; whether it ever answered true."""
+    for _ in range(400):
+        if await probe():
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+async def jobs_own(prefix: str) -> None:
+    """Run the jobs the other language's peer lists, kills and waits on.
+
+    Stays up until the peer has reaped each job, since a job dies with
+    its owner."""
+    ws, store = make_jobs_workspace(prefix)
+    plane = store.jobs(JOBS_WORKSPACE_ID)
+
+    async def reaped() -> bool:
+        listed = await plane.load(JOBS_SESSION)
+        return listed is not None and not listed["jobs"]
+
+    result = await ws.shell("sleep 30 &", session_id=JOBS_SESSION)
+    check("py own: sleep started", result.exit_code == 0)
+    job = ws.job_table.get(1, JOBS_SESSION)
+    check("py own: the job is listed here", job is not None)
+    if job is not None and job.process is not None:
+        joined = asyncio.ensure_future(job.process.join())
+        await asyncio.wait({joined}, timeout=20)
+    check(
+        "py own: the peer's kill stopped the runner by TERM",
+        job is not None
+        and (job.status, job.exit_code) == (JobStatus.KILLED, 143),
+        f"got {(job.status, job.exit_code) if job is not None else None!r}",
+    )
+    check("py own: the peer's wait reaped it", await until(reaped))
+    result = await ws.shell("false &", session_id=JOBS_SESSION)
+    check("py own: false started", result.exit_code == 0)
+    check("py own: the peer's wait reaped false", await until(reaped))
+    await plane.clear()
+    await ws.close()
+    await store.close()
+
+
+async def jobs_peer(prefix: str) -> None:
+    """List, kill and wait on jobs the other language's owner runs."""
+    ws, store = make_jobs_workspace(prefix)
+    plane = store.jobs(JOBS_WORKSPACE_ID)
+
+    async def listed() -> bool:
+        found = await plane.load(JOBS_SESSION)
+        return found is not None and "1" in found["jobs"]
+
+    check("py peer: the owner's job is listed", await until(listed))
+    result = await ws.shell("jobs", session_id=JOBS_SESSION)
+    check(
+        "py peer: jobs shows it running",
+        result.stdout == b"[1] running sleep 30\n",
+        f"got {result.stdout!r}",
+    )
+    result = await ws.shell("kill %1", session_id=JOBS_SESSION)
+    check("py peer: kill %1", result.exit_code == 0, f"got {result.stderr!r}")
+    result = await ws.shell("wait %1; echo $?", session_id=JOBS_SESSION)
+    check(
+        "py peer: wait answers TERM's status",
+        result.stdout == b"143\n",
+        f"got {result.stdout!r}",
+    )
+    check("py peer: the owner's false is listed", await until(listed))
+    result = await ws.shell("wait %1; echo $?", session_id=JOBS_SESSION)
+    check(
+        "py peer: wait answers false's status",
+        result.stdout == b"1\n",
+        f"got {result.stdout!r}",
+    )
+    await ws.close()
+    await store.close()
+
+
 async def main() -> None:
     role = sys.argv[1]
     prefix = sys.argv[2]
@@ -290,6 +385,10 @@ async def main() -> None:
         await hammer(prefix, int(sys.argv[3]))
     elif role == "cas-verify":
         await cas_verify(prefix, int(sys.argv[3]))
+    elif role == "jobs-own":
+        await jobs_own(prefix)
+    elif role == "jobs-peer":
+        await jobs_peer(prefix)
     else:
         raise SystemExit(f"unknown role: {role!r}")
     if fail:

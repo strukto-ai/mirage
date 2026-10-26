@@ -16,6 +16,7 @@ import type { ObserverStore } from '../../observe/store.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
+import type { JobStore } from '../../shell/job_table/store.ts'
 import type { WorkspaceOptions } from './types.ts'
 
 /**
@@ -28,10 +29,11 @@ export interface ControlStores {
   observe: ObserverStore
   namespace: NamespaceStore
   sessions: NamespaceStore
+  jobs: JobStore
 }
 
 /**
- * Resolve the state-store provider and its three planes.
+ * Resolve the state-store provider and its planes.
  *
  * One provider scopes every control-plane store by workspace id; the
  * per-plane options (observe / namespaceStore / sessionStore) remain as
@@ -48,5 +50,6 @@ export function resolveControlStores(wsId: string, options: WorkspaceOptions): C
     observe: options.observe ?? stateStore.observer(wsId),
     namespace: options.namespaceStore ?? stateStore.namespace(wsId),
     sessions: options.sessionStore ?? stateStore.sessions(wsId),
+    jobs: stateStore.jobs(wsId),
   }
 }
