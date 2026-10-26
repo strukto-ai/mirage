@@ -40,9 +40,9 @@ export function memoryLimit(value: string | number | null | undefined): number |
 /** Constructor options every runtime accepts (a yaml entry's keys). */
 export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown>> {
   /**
-   * Commands this runtime claims; EXTERNAL_COMMANDS captures unresolved
-   * program names. ["*"]
-   * claims every line for a line-executing runtime.
+   * Commands this runtime claims; EXTERNAL_COMMANDS (`@external`)
+   * captures unresolved program names. WHOLE_LINE (`@line`) claims every
+   * line for a line-executing runtime.
    */
   captures?: readonly string[]
   /**
