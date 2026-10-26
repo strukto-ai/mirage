@@ -1370,7 +1370,7 @@ const LEDGER_CHECKS = new Set(['ops_contain', 'ops_absent', 'ops_count'])
 const RUNTIME_REQUIRES: Record<string, string[]> = {
   monty: [],
   pyodide: [],
-  quickjs: [],
+  quickjs: ['env:MIRAGE_QUICKJS_HOME'],
   local: [],
   sandlock: ['env:MIRAGE_INTEG_SANDLOCK'],
   host: [],

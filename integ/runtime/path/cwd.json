@@ -282,7 +282,7 @@
             "wasi": {
               "stdout": "/data/sub\nchild\nhello\n/data/sub/..\n"
             },
-            "quickjs@python": {
+            "quickjs": {
               "stdout": "0\n/data/sub\nchild\nhello\n/data/sub/..\n"
             },
             "monty@typescript": {

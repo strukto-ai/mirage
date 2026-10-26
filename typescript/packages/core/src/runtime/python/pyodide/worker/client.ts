@@ -24,9 +24,13 @@ import type { RuntimeFiles } from '../../../files.ts'
 import { READ } from '../../../handles/mode.ts'
 import { applyMutation } from '../fs/journal.ts'
 import type { FlushFailure } from '../fs/types.ts'
-import { failureText } from './failure.ts'
 import { compiledModule } from '../../../../rs/stream.ts'
-import { answerOverBridge, bridged, respond } from './transport.ts'
+import {
+  answerOverBridge,
+  failureText,
+  respond,
+  serviceWorkerBridge,
+} from '../../../wasm/transport.ts'
 import { GuestProcessTable } from './process.ts'
 import { mergeSignals } from '../../../../utils/abort.ts'
 import type {
@@ -37,20 +41,6 @@ import type {
   WorkerPort,
   WorkerResult,
 } from './types.ts'
-
-/**
- * The page URL its service worker bridges file calls at, or null when no
- * service worker controlling the page answers the bridge.
- */
-async function serviceWorkerBridge(): Promise<string | null> {
-  const host = globalThis as {
-    navigator?: { serviceWorker?: { controller: unknown } }
-    location?: { origin: string; pathname: string }
-  }
-  if (host.navigator?.serviceWorker?.controller == null || host.location === undefined) return null
-  const bridge = host.location.origin + host.location.pathname
-  return (await bridged(bridge)) ? bridge : null
-}
 
 async function createPort(): Promise<WorkerPort | null> {
   const node = (globalThis as { process?: { versions?: { node?: string } } }).process?.versions

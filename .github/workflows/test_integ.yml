@@ -564,12 +564,32 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx root.ts
 
+      - name: Cache the lifecycle policy engine
+        id: lifecycle-quickjs-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/quickjs
+          key: quickjs-wasi-v0.16.2
+
+      - name: Download the lifecycle policy engine
+        if: steps.lifecycle-quickjs-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/quickjs
+          gh release download v0.16.2 -R quickjs-ng/quickjs \
+            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
+
       - name: Run workspace lifecycle JSON scenarios (Node and browser wrappers)
         working-directory: integ
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: pnpm exec tsx lifecycle/run.ts
 
       - name: Run the policy corpus (Node and browser wrappers)
         working-directory: integ
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: pnpm exec tsx lifecycle/run.ts policy/cases.json
 
       # The browser wrapper again, in a real Chrome page: there is no
@@ -577,6 +597,8 @@ jobs:
       # fallback slot that Node never exercises.
       - name: Run shell cases and session concurrency in Chrome
         working-directory: integ
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: pnpm exec tsx browser/run.ts
 
       - name: Generate integ Prisma clients

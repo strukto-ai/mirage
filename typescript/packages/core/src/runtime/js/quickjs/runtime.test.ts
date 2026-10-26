@@ -104,8 +104,9 @@ class SlowRAMVFS extends RAMVFS {
 it('a deadline joins the landing of what a stopped guest wrote', async () => {
   // The run's end closes the file it left open, which takes longer than a
   // plain abort's grace: the stop names a signal, so the line waits for it,
-  // as a kill's does. The stderr the guest wrote before the stop reaches the
-  // line only as its run ends, and is kept.
+  // as a kill's does. What qjs's own stdio still held is lost with the
+  // guest, as a killed process's is, so the file is there and empty; the
+  // stderr the guest wrote before the stop is kept.
   const ws = new Workspace(
     { '/data': new SlowRAMVFS() },
     {
@@ -117,7 +118,7 @@ it('a deadline joins the landing of what a stopped guest wrote', async () => {
     const io = await ws.shell(
       `timeout 1 node -e "std.err.puts('warn\\n'); const f = std.open('/data/o', 'w'); f.puts('kept'); for (;;) {}"; cat /data/o`,
     )
-    expect([io.stdoutText, io.stderrText]).toEqual(['kept', 'warn\n'])
+    expect([io.stdoutText, io.stderrText]).toEqual(['', 'warn\n'])
   } finally {
     await ws.close()
   }
@@ -127,7 +128,10 @@ function full(): Promise<void> {
   return Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' }))
 }
 
-it('marks a FILE whose flush failed as in error', async () => {
+// A FILE's writes land at its close, as the core keeps an open file's
+// writes; the close is what reports a landing that failed (as on the
+// Python host's qjs).
+it('reports a failed landing at the close of the FILE that wrote it', async () => {
   class FullVFS extends RAMVFS {
     override append = full
     override pwrite = full
@@ -141,9 +145,9 @@ it('marks a FILE whose flush failed as in error', async () => {
   try {
     const result = await execute(
       rt,
-      "const f = std.open('/data/x', 'w'); f.puts('x'); print(String(f.flush()), f.error())",
+      "const f = std.open('/data/x', 'w'); f.puts('x'); print(String(f.flush()), f.error()); print(f.close())",
     )
-    expect(new TextDecoder().decode(result.stdout)).toBe('undefined true\n')
+    expect(new TextDecoder().decode(result.stdout)).toBe('undefined false\n-29\n')
   } finally {
     await ws.close()
   }
@@ -197,9 +201,9 @@ describe('QuickJS compatibility', () => {
       '',
       200,
     ],
-    ["throw 'plain'", '', 'plain\n', 1],
-    ['throw 42', '', '42\n', 1],
-    ['throw new Error()', '', 'Error\n', 1],
+    ["throw 'plain'", '', 'plain\n    at <eval> (<cmdline>:1:6)\n\n', 1],
+    ['throw 42', '', '42\n    at <eval> (<cmdline>:1:6)\n\n', 1],
+    ['throw new Error()', '', 'Error\n    at <eval> (<cmdline>:1:11)\n\n', 1],
     ["print(std.getenv('toString'))", 'undefined\n', '', 0],
     ["print(std.out.printf('é%s', 'é')); print(std.out.printf('%d', 2**40))", 'éé4\n01\n', '', 0],
     [

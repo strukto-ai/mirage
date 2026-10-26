@@ -76,7 +76,6 @@
     "chromadb": "^3.4.3",
     "esbuild": "^0.28.2",
     "pyodide": "^314.0.5",
-    "quickjs-emscripten": "^0.32.0",
     "tree-sitter-bash": "^0.25.1",
     "typescript": "^6.0.0",
     "@types/node": "^22.0.0",
@@ -104,7 +103,6 @@
     "@qdrant/js-client-rest": "^1.18.0",
     "chromadb": "^3.4.3",
     "pyodide": "^0.29.0 || ^314.0.0",
-    "quickjs-emscripten": "^0.31.0 || ^0.32.0",
     "redis": "^5.0.0",
     "e2b": "^2.45.0"
   },
@@ -122,9 +120,6 @@
       "optional": true
     },
     "@pydantic/monty": {
-      "optional": true
-    },
-    "quickjs-emscripten": {
       "optional": true
     },
     "e2b": {

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { serviceWorker } from '../../../../../tests/runtime/python/pyodide/fixtures/service_worker.ts'
-import { FORMAT, PARAM } from './transport.ts'
+import { FORMAT, PARAM } from '../../../wasm/transport.ts'
 
 const PAGE = 'https://app.test/index.html'
 

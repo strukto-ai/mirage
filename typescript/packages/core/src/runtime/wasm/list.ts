@@ -12,22 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { QuickJSAsyncWASMModule } from 'quickjs-emscripten'
-import { QuickJsUnavailableError } from './errors.ts'
-
-export type NewAsyncModule = () => Promise<QuickJSAsyncWASMModule>
-
-/** Import the optional engine package, failing loud when it is absent. */
-export async function loadQuickJsModule(): Promise<NewAsyncModule> {
-  try {
-    const mod = (await import('quickjs-emscripten')) as unknown as {
-      newQuickJSAsyncWASMModule: NewAsyncModule
-    }
-    return mod.newQuickJSAsyncWASMModule
-  } catch (err) {
-    throw new QuickJsUnavailableError(
-      "the quickjs runtime requires the 'quickjs-emscripten' package — install it to run `node`/`js`",
-      { cause: err },
-    )
-  }
+/**
+ * Encode one fd_readdir entry; d_next and d_ino are the entry's index + 1.
+ *
+ * @param index - zero-based position of the entry in the listing.
+ * @param name - the entry's name, already encoded.
+ * @param filetype - preview1 filetype, FT_UNKNOWN when not known.
+ */
+export function packDirent(index: number, name: Uint8Array, filetype: number): Uint8Array {
+  const record = new Uint8Array(24 + name.byteLength)
+  const view = new DataView(record.buffer)
+  view.setBigUint64(0, BigInt(index + 1), true)
+  view.setBigUint64(8, BigInt(index + 1), true)
+  view.setUint32(16, name.byteLength, true)
+  view.setUint8(20, filetype)
+  record.set(name, 24)
+  return record
 }

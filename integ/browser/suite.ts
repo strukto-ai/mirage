@@ -19,7 +19,7 @@ import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { DiffRequest } from '@struktoai/mirage-core/rs/diff_worker'
-import { JobConsole, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
+import { buildRuntime, JobConsole, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 import {
   bindMount,
   compare,
@@ -646,8 +646,40 @@ const CHECKS: [string, Check][] = [
   ...battery(),
 ]
 
-/** Run every check on a workspace of its own, recording each outcome. */
-export async function runSuite(): Promise<Outcome[]> {
+/**
+ * QuickJS as a page runs it: quickjs-ng's WASI build on a worker whose file
+ * calls cross the page's service worker bridge. A file it writes lands,
+ * its input arrives as a pipe hands it over, and a deadline stops a guest
+ * that never yields.
+ */
+async function quickjsCheck(home: string): Promise<void> {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      runtimes: [buildRuntime('quickjs', { config: { home } }), 'workspace'],
+    },
+  )
+  try {
+    equal(await shell(ws, "node -e 'console.log(6 * 7)'"), [0, '42\n', ''])
+    equal(await shell(ws, `node -e "std.writeFile('/data/k', 'kept')"; cat /data/k`), [
+      0,
+      'kept',
+      '',
+    ])
+    equal(await shell(ws, "seq 100000 | node -e 'print(std.in.getline())'"), [0, '1\n', ''])
+    equal(await shell(ws, "timeout 1 node -e 'for (;;) {}'; echo $?"), [0, '124\n', ''])
+    equal(await shell(ws, "node -e 'console.log(1)'"), [0, '1\n', ''])
+  } finally {
+    await ws.close()
+  }
+}
+
+/**
+ * Run every check on a workspace of its own, recording each outcome, and
+ * QuickJS's when the page serves its module under `quickjsHome`.
+ */
+export async function runSuite(quickjsHome: string | null = null): Promise<Outcome[]> {
   const outcomes: Outcome[] = []
   for (const [name, check] of CHECKS) {
     const ws = workspace()
@@ -658,6 +690,15 @@ export async function runSuite(): Promise<Outcome[]> {
       outcomes.push({ name, error: error instanceof Error ? error.message : String(error) })
     } finally {
       await ws.close()
+    }
+  }
+  if (quickjsHome !== null) {
+    const name = 'QuickJS runs on a worker over the page bridge'
+    try {
+      await quickjsCheck(quickjsHome)
+      outcomes.push({ name })
+    } catch (error) {
+      outcomes.push({ name, error: error instanceof Error ? error.message : String(error) })
     }
   }
   return outcomes

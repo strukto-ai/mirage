@@ -153,7 +153,7 @@
             "stdout": "opened\nrow survived true 40755\n"
           },
           "expect_on": {
-            "quickjs@python": {
+            "quickjs": {
               "stdout": "opened\nrow survived true 40000\n"
             }
           }
@@ -266,7 +266,7 @@
             }
           },
           "expect_on": {
-            "quickjs@python": {
+            "quickjs": {
               "stdout": "true true\n1 2 0\n0 0\n"
             }
           }

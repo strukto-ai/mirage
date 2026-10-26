@@ -132,24 +132,6 @@ export default tseslint.config(
     },
   },
   {
-    ...tseslint.configs.disableTypeChecked,
-    files: ['packages/core/src/runtime/js/quickjs/js/*.js'],
-    languageOptions: {
-      globals: {
-        std: 'readonly',
-        os: 'readonly',
-        toIndex: 'readonly',
-        // execution.js defines these and filesystem.js, the next part of
-        // the same bootstrap, uses them.
-        __mirage_now: 'readonly',
-        __text: 'readonly',
-        __pieces: 'readonly',
-        __sprintf: 'readonly',
-      },
-      parserOptions: { projectService: false },
-    },
-  },
-  {
     // `typescript/scripts/*.ts` is production code: pre-commit runs
     // `gen-specs.ts` and then `git diff --exit-code spec/`, and
     // `check_spec_parity.py` reads what it emits. It was excluded from

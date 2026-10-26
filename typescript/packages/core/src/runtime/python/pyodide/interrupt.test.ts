@@ -14,7 +14,7 @@
 
 import { expect, it, vi } from 'vitest'
 import { createPyodideInterrupter } from './interrupt.ts'
-import { requestSync } from './worker/transport.ts'
+import { requestSync } from '../../wasm/transport.ts'
 
 it('reasserts consumed deadline and abort signals until the run disarms', async () => {
   const interrupter = await createPyodideInterrupter()
