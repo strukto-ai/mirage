@@ -314,6 +314,41 @@
         "stdout": "f () \n{ \n    time ;\n    ! ;\n    time ! true;\n    true\n}\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "function_prints_conditional_tests",
+      "seq": 18500008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "f() { [[ -- ]]; [[ 1 -eq 1 ]]; [[ a -nt b ]]; [[ -lt -nt b ]]; [[ ! -- ]]; [[ -n ! ]]; [[ a == ! ]]; [[ abc =~ a'.'c && ( x < y || ! -f z ) ]]; }; declare -f f; unset -f f",
+      "expect": {
+        "exit": 0,
+        "stdout": "f () \n{ \n    [[ -n -- ]];\n    [[ 1 -eq 1 ]];\n    [[ a -nt b ]];\n    [[ -lt -nt b ]];\n    [[ ! -n -- ]];\n    [[ -n ! ]];\n    [[ a == ! ]];\n    [[ abc =~ a'.'c && ( x < y || ! -f z ) ]]\n}\n",
+        "stderr": ""
+      }
     }
   ]
 }

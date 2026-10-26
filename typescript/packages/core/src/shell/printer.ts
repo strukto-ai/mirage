@@ -219,12 +219,18 @@ class Printer {
   condition(node: TSNodeLike): string {
     const kind = node.type
     const named = node.namedChildren
-    const [first, second] = named
-    if (kind === 'binary_expression' && first !== undefined && second !== undefined) {
-      const op = getText(node.children.find((c) => c.isNamed !== true) ?? node)
+    const [left, operator, right] = node.children
+    if (
+      kind === 'binary_expression' &&
+      node.children.length === 3 &&
+      left !== undefined &&
+      operator !== undefined &&
+      right !== undefined
+    ) {
+      const op = getText(operator)
       if (op === '&&' || op === '||')
-        return `${this.condition(first)} ${op} ${this.condition(second)}`
-      return `${this.word(first)} ${op} ${this.word(second)}`
+        return `${this.condition(left)} ${op} ${this.condition(right)}`
+      return `${this.word(left)} ${op} ${this.word(right)}`
     }
     const operand = named[named.length - 1]
     const opNode = node.children[0]
@@ -233,6 +239,7 @@ class Printer {
       if (op === '!' && end(opNode) < start(operand)) return `! ${this.condition(operand)}`
       if (op !== '!') return `${op} ${this.word(operand)}`
     }
+    const first = named[0]
     if (kind === 'parenthesized_expression' && first !== undefined)
       return `( ${this.condition(first)} )`
     return `-n ${this.word(node)}`

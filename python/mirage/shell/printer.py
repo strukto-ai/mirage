@@ -276,15 +276,12 @@ class _Printer:
         """
         kind = node.type
         named = node.named_children
-        if kind == "binary_expression" and len(named) == 2:
-            op = next(get_text(c) for c in node.children if not c.is_named)
+        if kind == "binary_expression" and len(node.children) == 3:
+            left, operator, right = node.children
+            op = get_text(operator)
             if op in ("&&", "||"):
-                return (
-                    self.condition(named[0])
-                    + f" {op} "
-                    + self.condition(named[1])
-                )
-            return self.word(named[0]) + f" {op} " + self.word(named[1])
+                return self.condition(left) + f" {op} " + self.condition(right)
+            return self.word(left) + f" {op} " + self.word(right)
         if kind == "unary_expression" and named:
             op = get_text(node.children[0])
             if op == "!" and node.children[0].end_byte < named[-1].start_byte:
