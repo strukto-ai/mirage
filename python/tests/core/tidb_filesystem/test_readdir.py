@@ -59,6 +59,16 @@ async def test_empty_directory_is_empty(accessor, drive9):
 
 
 @pytest.mark.asyncio
+async def test_empty_directory_beside_a_file_of_its_name_is_empty(
+    accessor, drive9
+):
+    drive9.files["/root/x"] = b"file"
+    drive9.dirs.add("/root/x")
+
+    assert await readdir(accessor, _path("/fs/x")) == []
+
+
+@pytest.mark.asyncio
 async def test_missing_directory_is_enoent(accessor, drive9):
     with pytest.raises(FileNotFoundError):
         await readdir(accessor, _path("/fs/nope"))

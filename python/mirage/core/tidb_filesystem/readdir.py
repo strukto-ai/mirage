@@ -14,7 +14,11 @@
 
 from mirage.accessor.tidb_filesystem import TiDBFilesystemAccessor
 from mirage.core.tidb_filesystem.client import list_entries
-from mirage.core.tidb_filesystem.dest import kinds_of, lookup_error
+from mirage.core.tidb_filesystem.dest import (
+    folder_of,
+    kinds_of,
+    lookup_error,
+)
 from mirage.core.tidb_filesystem.path import backend_path
 from mirage.core.tidb_filesystem.stat import file_stat
 from mirage.errors.fs import enotdir
@@ -46,7 +50,7 @@ async def readdir(
     )
     if not entries:
         kinds = await kinds_of(accessor, [*ancestors(key), key])
-        found = kinds.get(key)
+        found = folder_of(kinds, key)
         if found is None:
             raise lookup_error(kinds, list_path, key)
         if not found.is_dir:

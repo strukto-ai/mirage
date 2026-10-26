@@ -18,7 +18,7 @@ import type { FileStat, PathSpec } from '../../types.ts'
 import { ancestors, norm } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { listEntries } from './client.ts'
-import { kindsOf, lookupError } from './dest.ts'
+import { folderOf, kindsOf, lookupError } from './dest.ts'
 import { backendPath } from './path.ts'
 import { fileStat } from './stat.ts'
 
@@ -37,7 +37,7 @@ export async function readdir(
   const entries = await listEntries(accessor, backendPath(accessor.config, listPath))
   if (entries.length === 0) {
     const kinds = await kindsOf(accessor, [...ancestors(key), key])
-    const found = kinds.get(key) ?? null
+    const found = folderOf(kinds, key)
     if (found === null) throw lookupError(kinds, listPath, key)
     if (!found.isDir) throw enotdir(listPath)
     return []

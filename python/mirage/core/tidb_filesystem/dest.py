@@ -28,7 +28,10 @@ async def kinds_of(accessor: TiDBFilesystemAccessor, keys: list[str]) -> Kinds:
     drive9 creates missing parents on a write, a mkdir and a file rename,
     and keeps a file and a directory of one name side by side, so the
     errno ``open(2)`` or ``rename(2)`` would answer has to be worked out
-    here from what the paths are before the call.
+    here from what the paths are before the call. Each path is asked
+    bare, which answers the file of a name that is both, and with a
+    trailing slash, kept under ``key + "/"``, which answers only a
+    directory.
 
     Args:
         accessor (TiDBFilesystemAccessor): the file system's accessor.
@@ -36,12 +39,25 @@ async def kinds_of(accessor: TiDBFilesystemAccessor, keys: list[str]) -> Kinds:
             always a directory and is not asked.
     """
     asked = [key for key in dict.fromkeys(keys) if key != "/"]
+    remote = [backend_path(accessor.config, key) for key in asked]
     found = await stat_entries(
-        accessor, [backend_path(accessor.config, key) for key in asked]
+        accessor, [*remote, *(path + "/" for path in remote)]
     )
     kinds: Kinds = dict(zip(asked, found))
+    kinds.update(zip((key + "/" for key in asked), found[len(asked) :]))
     kinds["/"] = Entry("/", True, 0, None)
     return kinds
+
+
+def folder_of(kinds: Kinds, key: str) -> Entry | None:
+    """What ``key`` is as a folder on a longer path: the directory of a
+    name that is also a file, as a listing shows it, else what is there.
+
+    Args:
+        kinds (Kinds): what the paths are, from :func:`kinds_of`.
+        key (str): the normalized mount-local path.
+    """
+    return kinds.get(key.rstrip("/") + "/") or kinds.get(key)
 
 
 def broken_parent(kinds: Kinds, spec: PathSpec, key: str) -> OSError | None:
@@ -54,7 +70,7 @@ def broken_parent(kinds: Kinds, spec: PathSpec, key: str) -> OSError | None:
         key (str): the normalized mount-local path.
     """
     for ancestor in ancestors(key):
-        entry = kinds.get(ancestor)
+        entry = folder_of(kinds, ancestor)
         if entry is None:
             return enoent(spec)
         if not entry.is_dir:
@@ -101,7 +117,7 @@ def check_mkdir_target(
             raise broken
         return False
     for component in ancestors(key):
-        above = kinds.get(component)
+        above = folder_of(kinds, component)
         if above is not None and not above.is_dir:
             raise enotdir(mounted_path(spec, component))
     if entry is not None and not entry.is_dir:

@@ -42,6 +42,12 @@ def test_broken_parent_stops_at_the_first_gap():
     assert isinstance(error, FileNotFoundError)
 
 
+def test_a_folder_beside_a_file_of_its_name_is_a_folder_above():
+    kinds = {"/": ROOT, "/a": FILE, "/a/": DIR}
+
+    assert broken_parent(kinds, spec("/fs/a/b"), "/a/b") is None
+
+
 def test_lookup_error_names_a_file_above():
     kinds = {"/": ROOT, "/a": FILE}
 

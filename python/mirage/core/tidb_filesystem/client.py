@@ -370,7 +370,7 @@ async def _upload_multipart(
             json_body={"parts": parts},
             read="none",
         )
-    except Exception:
+    except BaseException:
         await _abort(
             accessor, "POST", f"{host}/v2/uploads/{upload.upload_id}/abort"
         )
@@ -483,7 +483,7 @@ async def append_to(
             f"{host}/v1/uploads/{plan.upload_id}/complete",
             read="none",
         )
-    except Exception:
+    except BaseException:
         await _abort(accessor, "DELETE", f"{host}/v1/uploads/{plan.upload_id}")
         raise
     return True

@@ -56,6 +56,14 @@ describe('write', () => {
     expect(drive9.count('PUT', '/s3/upload')).toBe(3)
   })
 
+  it('writes beneath a folder that is also a file', async () => {
+    drive9.files.set('/root/x', ENC.encode('file'))
+    drive9.dirs.add('/root/x')
+    await write(accessor, spec('/fs/x/new.txt'), ENC.encode('hello'))
+    expect(drive9.files.get('/root/x/new.txt')).toEqual(ENC.encode('hello'))
+    expect(drive9.files.get('/root/x')).toEqual(ENC.encode('file'))
+  })
+
   it('is one check and one PUT', async () => {
     await write(accessor, spec('/fs/a.txt'), ENC.encode('hello'))
     expect(drive9.files.get('/root/a.txt')).toEqual(ENC.encode('hello'))
@@ -95,6 +103,13 @@ describe('mkdir', () => {
     await expect(mkdir(accessor, spec('/fs/a/b'))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(mkdir(accessor, spec('/fs/f'))).rejects.toMatchObject({ code: 'EEXIST' })
     expect(drive9.dirs.has('/root/a')).toBe(false)
+  })
+
+  it('makes a chain with -p through a folder that is also a file', async () => {
+    drive9.files.set('/root/x', ENC.encode('file'))
+    drive9.dirs.add('/root/x')
+    await mkdir(accessor, spec('/fs/x/y'), true)
+    expect(drive9.dirs.has('/root/x/y')).toBe(true)
   })
 
   it('makes a chain with -p, and stops at a file it crosses', async () => {

@@ -100,6 +100,12 @@ describe('readdir', () => {
     expect(rows.map((r) => [r.name, r.type])).toEqual([['both', FileType.DIRECTORY]])
   })
 
+  it('lists an empty directory beside a file of its name as empty', async () => {
+    drive9.files.set('/root/x', ENC.encode('file'))
+    drive9.dirs.add('/root/x')
+    expect(await readdir(accessor, spec('/fs/x'))).toEqual([])
+  })
+
   it('tells an empty directory from a missing one and a file', async () => {
     drive9.dirs.add('/root/empty')
     drive9.files.set('/root/a.txt', ENC.encode('x'))

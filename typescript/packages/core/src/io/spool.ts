@@ -30,6 +30,7 @@ export class ByteSpool {
   private pendingSize = 0
   private cache: Uint8Array = new Uint8Array()
   private cacheOffset = 0
+  private turn: Promise<unknown> = Promise.resolve()
 
   constructor(readonly memoryLimit = MEMORY_LIMIT) {
     if (!Number.isSafeInteger(memoryLimit) || memoryLimit < 0) {
@@ -37,7 +38,21 @@ export class ByteSpool {
     }
   }
 
-  async append(data: Uint8Array): Promise<void> {
+  /** Run `fn` once every call before it has settled, as Python's lock holds them. */
+  private locked<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.turn.then(fn)
+    this.turn = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return run
+  }
+
+  append(data: Uint8Array): Promise<void> {
+    return this.locked(() => this.appendNow(data))
+  }
+
+  private async appendNow(data: Uint8Array): Promise<void> {
     if (this.closed) throw new Error('spool is closed')
     this.cache = new Uint8Array()
     if (this.store === null && this.size + data.length > this.memoryLimit && factory !== null) {
@@ -83,6 +98,10 @@ export class ByteSpool {
   async read(offset: number, size: number): Promise<Uint8Array> {
     if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(size) || offset < 0 || size < 0)
       throw new RangeError('spool window must be nonnegative')
+    return this.locked(() => this.readNow(offset, size))
+  }
+
+  private async readNow(offset: number, size: number): Promise<Uint8Array> {
     if (this.closed) throw new Error('spool is closed')
     if (this.store !== null) {
       await this.flush()
@@ -129,15 +148,21 @@ export class ByteSpool {
     return new OutputStream(this.stream(), () => this.close())
   }
 
-  async body(kind: 'fetch' | 'sdk'): Promise<Uint8Array | Blob | AsyncIterable<Uint8Array>> {
-    if (this.closed) throw new Error('spool is closed')
-    await this.flush()
-    if (this.store?.body !== undefined) return this.store.body(kind)
-    if (this.store !== null) throw new Error('scratch storage cannot provide an upload body')
-    return this.read(0, this.size)
+  body(kind: 'fetch' | 'sdk'): Promise<Uint8Array | Blob | AsyncIterable<Uint8Array>> {
+    return this.locked(async () => {
+      if (this.closed) throw new Error('spool is closed')
+      await this.flush()
+      if (this.store?.body !== undefined) return this.store.body(kind)
+      if (this.store !== null) throw new Error('scratch storage cannot provide an upload body')
+      return this.readNow(0, this.size)
+    })
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    return this.locked(() => this.closeNow())
+  }
+
+  private async closeNow(): Promise<void> {
     this.closed = true
     this.memory = []
     this.cache = new Uint8Array()

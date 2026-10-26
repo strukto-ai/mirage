@@ -138,9 +138,10 @@ export class FakeDrive9 {
       this.requests.push(['POST', '/v1/fs:batch-stat'])
       const { paths } = JSON.parse(Buffer.from(await bodyOf(req)).toString()) as { paths: string[] }
       json(res, 200, {
-        results: paths.map((path) => {
-          const entry = this.entry(path)
-          return entry === null
+        results: paths.map((asked) => {
+          const path = rstripSlash(asked) || '/'
+          const entry = this.entry(path, asked.endsWith('/'))
+          return entry === null || (asked.endsWith('/') && !entry.isDir)
             ? { path, status: 404, error: 'not found' }
             : { path, status: 200, mtime: MTIME, ...entry }
         }),
@@ -471,7 +472,12 @@ export class FakeDrive9 {
       } finally {
         this.inFlight -= 1
       }
-      this.uploads.get(id)?.parts.set(Number(number), body)
+      const upload = this.uploads.get(id)
+      if (upload === undefined) {
+        res.writeHead(404).end('upload aborted')
+        return
+      }
+      upload.parts.set(Number(number), body)
       res.writeHead(200, { ETag: `"etag-${number}"` }).end()
       return
     }

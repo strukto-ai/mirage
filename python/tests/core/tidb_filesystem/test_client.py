@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.core.tidb_filesystem import client
@@ -144,6 +146,44 @@ async def test_failed_append_part_aborts_the_upload(accessor, drive9):
 
     with pytest.raises(TiDBFilesystemApiError):
         await append_to(accessor, "/root/big.bin", b"y" * 100)
+
+    assert drive9.count("DELETE", "/v1/uploads/") == 1
+    assert drive9.files["/root/big.bin"] == b"x" * 60_000
+    assert drive9.uploads == {}
+
+
+async def _cancel_once_a_part_is_in_flight(drive9, task) -> None:
+    while drive9.in_flight == 0:
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_upload_is_aborted(accessor, drive9):
+    drive9.part_size = 20_000
+    drive9.part_delay = 0.5
+    task = asyncio.create_task(
+        upload(accessor, "/root/big.bin", b"x" * 60_000)
+    )
+
+    await _cancel_once_a_part_is_in_flight(drive9, task)
+
+    assert drive9.count("POST", "/v2/uploads/abort") == 1
+    assert drive9.uploads == {}
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_append_is_aborted(accessor, drive9):
+    drive9.part_size = 25_000
+    drive9.files["/root/big.bin"] = b"x" * 60_000
+    drive9.part_delay = 0.5
+    task = asyncio.create_task(
+        append_to(accessor, "/root/big.bin", b"y" * 100)
+    )
+
+    await _cancel_once_a_part_is_in_flight(drive9, task)
 
     assert drive9.count("DELETE", "/v1/uploads/") == 1
     assert drive9.files["/root/big.bin"] == b"x" * 60_000

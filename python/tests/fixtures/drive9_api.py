@@ -314,9 +314,10 @@ class FakeDrive9:
             return _missing(401, "unauthorized")
         body = await request.json()
         results = []
-        for path in body["paths"]:
-            entry = self._entry(path)
-            if entry is None:
+        for asked in body["paths"]:
+            path = asked.rstrip("/") or "/"
+            entry = self._entry(path, prefer_dir=asked.endswith("/"))
+            if entry is None or (asked.endswith("/") and not entry["isDir"]):
                 results.append(
                     {"path": path, "status": 404, "error": "not found"}
                 )
@@ -418,7 +419,9 @@ class FakeDrive9:
             body = await request.read()
         finally:
             self.in_flight -= 1
-        upload = self.uploads[request.match_info["id"]]
+        upload = self.uploads.get(request.match_info["id"])
+        if upload is None:
+            return web.Response(status=404, text="upload aborted")
         number = int(request.match_info["number"])
         upload.parts[number] = body
         return web.Response(headers={"ETag": f'"etag-{number}"'})

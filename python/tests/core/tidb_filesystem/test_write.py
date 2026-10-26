@@ -53,6 +53,17 @@ async def test_a_streamed_write_goes_up_in_parts(accessor, drive9):
 
 
 @pytest.mark.asyncio
+async def test_write_beneath_a_folder_that_is_also_a_file(accessor, drive9):
+    drive9.files["/root/x"] = b"file"
+    drive9.dirs.add("/root/x")
+
+    await write(accessor, _path("/fs/x/new.txt"), b"hello")
+
+    assert drive9.files["/root/x/new.txt"] == b"hello"
+    assert drive9.files["/root/x"] == b"file"
+
+
+@pytest.mark.asyncio
 async def test_write_under_a_missing_folder_is_enoent(accessor, drive9):
     with pytest.raises(FileNotFoundError):
         await write(accessor, _path("/fs/nope/a.txt"), b"x")

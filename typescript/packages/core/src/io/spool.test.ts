@@ -43,6 +43,43 @@ it.each([0, 13, 2000000])('spills, replays and reads windows with budget %s', as
   expect(closed).toBe(limit < expected.length ? 1 : 0)
 })
 
+it('answers concurrent reads of a spilled spool each from its own window', async () => {
+  let stored: Uint8Array = new Uint8Array()
+  const later = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 1))
+  setSpoolFactory(() =>
+    Promise.resolve({
+      append: async (part) => {
+        await later()
+        stored = concat([stored, part])
+      },
+      read: async (offset, size) => {
+        await later()
+        return stored.slice(offset, offset + size)
+      },
+      close: () => Promise.resolve(),
+    }),
+  )
+  const expected = Uint8Array.from({ length: 600_001 }, (_, i) => (i * 7) % 256)
+  const spool = new ByteSpool(0)
+  try {
+    await spool.append(expected)
+    await spool.append(expected.slice(0, 1))
+    const windows: [number, number][] = [
+      [600_000, 2],
+      [1, 1],
+      [300_000, 4095],
+      [550_000, 100],
+      [10, 20],
+    ]
+    const whole = concat([expected, expected.slice(0, 1)])
+    const reads = await Promise.all(windows.map(([offset, size]) => spool.read(offset, size)))
+    expect(reads).toEqual(windows.map(([offset, size]) => whole.slice(offset, offset + size)))
+    expect(stored.byteLength).toBe(whole.byteLength)
+  } finally {
+    await spool.close()
+  }
+})
+
 it('closes its source when spilling fails', async () => {
   let closed = false
   setSpoolFactory(() => Promise.reject(new Error('scratch full')))

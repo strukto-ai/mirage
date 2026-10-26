@@ -21,27 +21,36 @@ import { ancestors } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { statEntries } from './client.ts'
 import { backendPath } from './path.ts'
-import type { Kinds } from './types.ts'
+import type { Entry, Kinds } from './types.ts'
 
 /**
  * What each mount-local path is, in one fs:batch-stat. drive9 creates missing
  * parents on a write, a mkdir and a file rename, and keeps a file and a
  * directory of one name side by side, so the errno open(2) or rename(2) would
  * answer has to be worked out here from what the paths are before the call.
- * The mount root is always a directory and is not asked.
+ * Each path is asked bare, which answers the file of a name that is both, and
+ * with a trailing slash, kept under `key + '/'`, which answers only a
+ * directory. The mount root is always a directory and is not asked.
  */
 export async function kindsOf(
   accessor: TiDBFilesystemAccessor,
   keys: readonly string[],
 ): Promise<Kinds> {
   const asked = [...new Set(keys)].filter((key) => key !== '/')
-  const found = await statEntries(
-    accessor,
-    asked.map((key) => backendPath(accessor.config, key)),
-  )
+  const remote = asked.map((key) => backendPath(accessor.config, key))
+  const found = await statEntries(accessor, [...remote, ...remote.map((path) => `${path}/`)])
   const kinds: Kinds = new Map(asked.map((key, index) => [key, found[index] ?? null]))
+  asked.forEach((key, index) => kinds.set(`${key}/`, found[asked.length + index] ?? null))
   kinds.set('/', { name: '/', isDir: true, size: 0, mtime: null })
   return kinds
+}
+
+/**
+ * What `key` is as a folder on a longer path: the directory of a name that is
+ * also a file, as a listing shows it, else what is there.
+ */
+export function folderOf(kinds: Kinds, key: string): Entry | null {
+  return kinds.get(`${rstripSlash(key)}/`) ?? kinds.get(key) ?? null
 }
 
 /**
@@ -50,7 +59,7 @@ export async function kindsOf(
  */
 export function brokenParent(kinds: Kinds, spec: PathSpec, key: string): FsError | null {
   for (const ancestor of ancestors(key)) {
-    const entry = kinds.get(ancestor) ?? null
+    const entry = folderOf(kinds, ancestor)
     if (entry === null) return enoent(spec)
     if (!entry.isDir) return enotdir(spec)
   }
@@ -88,7 +97,7 @@ export function checkMkdirTarget(
     return false
   }
   for (const component of ancestors(key)) {
-    if (kinds.get(component)?.isDir === false) throw enotdir(mountedPath(spec, component))
+    if (folderOf(kinds, component)?.isDir === false) throw enotdir(mountedPath(spec, component))
   }
   if (entry !== null && !entry.isDir) throw eexist(spec)
   return entry !== null

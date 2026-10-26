@@ -38,6 +38,10 @@ describe('dest', () => {
     ).toBe('ENOENT')
   })
 
+  it('takes a folder beside a file of its name as the folder above', () => {
+    expect(brokenParent(kinds({ '/a': FILE, '/a/': DIR }), spec('/fs/a/b'), '/a/b')).toBeNull()
+  })
+
   it('names a file above a lookup', () => {
     expect(lookupError(kinds({ '/a': FILE }), spec('/fs/a/x'), '/a/x').code).toBe('ENOTDIR')
   })

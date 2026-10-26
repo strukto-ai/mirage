@@ -65,6 +65,16 @@ async def test_mkdir_p_on_an_existing_directory_sends_nothing(
 
 
 @pytest.mark.asyncio
+async def test_mkdir_p_through_a_folder_that_is_also_a_file(accessor, drive9):
+    drive9.files["/root/x"] = b"file"
+    drive9.dirs.add("/root/x")
+
+    await mkdir(accessor, _path("/fs/x/y"), parents=True)
+
+    assert "/root/x/y" in drive9.dirs
+
+
+@pytest.mark.asyncio
 async def test_mkdir_p_through_a_file_is_enotdir(accessor, drive9):
     drive9.files["/root/f"] = b"x"
 
