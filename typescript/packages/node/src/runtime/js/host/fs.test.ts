@@ -23,6 +23,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { promisify } from 'node:util'
@@ -290,6 +291,48 @@ describe('patchNodeFs — routed calls', () => {
     expect(() => fs.realpathSync.native('/data/f.txt')).toThrow(
       expect.objectContaining({ code: 'ENOTSUP' }),
     )
+    await ws.close()
+  })
+
+  it('changes a link itself, never its target, through the l calls', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/a.txt', 'hello')
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const before = (await fs.promises.stat('/data/a.txt')).mtimeMs
+    await fs.promises.symlink('a.txt', '/data/link')
+    await fs.promises.lchown('/data/link', 4242, 4343)
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    await fs.promises.lchmod('/data/link', 0o600)
+    await promisify(fs.lutimes)('/data/link', 100, 200)
+    const link = await fs.promises.lstat('/data/link')
+    // No POSIX system consults the bits on a symlink, so its mode stays.
+    expect([link.uid, link.gid, link.mode & 0o777, link.isSymbolicLink()]).toEqual([
+      4242,
+      4343,
+      0o777,
+      true,
+    ])
+    expect(link.mtimeMs).toBe(200_000)
+    expect((await fs.promises.stat('/data/a.txt')).mtimeMs).toBe(before)
+    await ws.close()
+  })
+
+  it('changes the mode and owner of the file a descriptor names', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/a.txt', 'hello')
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const handle = await fs.promises.open('/data/a.txt', 'r+')
+    await handle.chmod(0o600)
+    await handle.chown(4242, 4343)
+    await handle.close()
+    const fd = await promisify(fs.open)('/data/a.txt', 'r+')
+    await promisify(fs.fchmod)(fd, 0o640)
+    await promisify(fs.fchown)(fd, 4244, 4345)
+    await promisify(fs.close)(fd)
+    const st = await fs.promises.stat('/data/a.txt')
+    expect([st.mode & 0o777, st.uid, st.gid]).toEqual([0o640, 4244, 4345])
     await ws.close()
   })
 
@@ -659,6 +702,378 @@ describe('patchNodeFs — refusals', () => {
   })
 })
 
+/** What an async iterable yields, as sorted strings. */
+async function names(items: AsyncIterable<unknown>): Promise<string[]> {
+  const out: string[] = []
+  for await (const item of items) out.push(String(item))
+  return out.sort()
+}
+
+describe('patchNodeFs — calls node makes on its own', () => {
+  // d/a.txt, d/sub/b.txt, a link at /data/link to d/a.txt and one at
+  // d/sub/up to its parent.
+  const world = async (): Promise<[Workspace, Fs]> => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.mkdir('/data/d')
+    await ws.vfs.mkdir('/data/d/sub')
+    await ws.vfs.write('/data/d/a.txt', 'a')
+    await ws.vfs.write('/data/d/sub/b.txt', 'b')
+    await ws.vfs.symlink('/data/link', 'd/a.txt')
+    await ws.vfs.symlink('/data/d/sub/up', '..')
+    restore = patchNodeFs(ws)
+    return [ws, requireCjs('fs') as Fs]
+  }
+
+  it('realpath follows each link in turn, as realpath(3) does', async () => {
+    const [ws, fs] = await world()
+    expect(await fs.promises.realpath('/data/link')).toBe('/data/d/a.txt')
+    expect(await fs.promises.realpath('/data/d/sub/up/a.txt')).toBe('/data/d/a.txt')
+    expect(await fs.promises.realpath('/data/d/sub/up/../d/./a.txt')).toBe('/data/d/a.txt')
+    expect(Buffer.isBuffer(await fs.promises.realpath('/data/link', { encoding: 'buffer' }))).toBe(
+      true,
+    )
+    expect(await promisify(fs.realpath)('/data/link')).toBe('/data/d/a.txt')
+    await expect(fs.promises.realpath('/data/nope/x')).rejects.toMatchObject({
+      code: 'ENOENT',
+      syscall: 'realpath',
+      path: '/data/nope/x',
+    })
+    await expect(fs.promises.realpath('/data/d/a.txt/x')).rejects.toMatchObject({
+      code: 'ENOTDIR',
+      syscall: 'realpath',
+    })
+    await ws.close()
+  })
+
+  it('mkdtemp makes a new directory under its prefix', async () => {
+    const [ws, fs] = await world()
+    const made = await fs.promises.mkdtemp('/data/tmp-')
+    expect(made).toMatch(/^\/data\/tmp-[A-Za-z0-9]{6}$/)
+    expect((await fs.promises.stat(made)).isDirectory()).toBe(true)
+    // Private, as node's own; a mkdir narrows to the mode it asks for.
+    expect((await fs.promises.stat(made)).mode & 0o777).toBe(0o700)
+    await fs.promises.mkdir('/data/m', { mode: 0o750 })
+    expect((await fs.promises.stat('/data/m')).mode & 0o777).toBe(0o750)
+    // A plain mkdir looks nothing up, and a refused lookup leaves a
+    // narrowed one as made: neither fails a create that happened.
+    ws.policies.add({
+      preVfs: (ctx) => (ctx.call.name === 'stat' ? { kind: 'deny', reason: 'no stat' } : null),
+    })
+    await fs.promises.mkdir('/data/plain')
+    await fs.promises.mkdir('/data/narrow', 0o700)
+    expect(await fs.promises.mkdtemp('/data/tmp-')).not.toBe(made)
+    await expect(fs.promises.mkdtemp('/data/nope/x-')).rejects.toMatchObject({
+      code: 'ENOENT',
+      syscall: 'mkdtemp',
+    })
+    await ws.close()
+  })
+
+  it.skipIf(!('mkdtempDisposable' in (requireCjs('fs') as Fs).promises))(
+    'mkdtempDisposable removes what it made',
+    async () => {
+      const [ws, fs] = await world()
+      const promises = fs.promises as unknown as {
+        mkdtempDisposable(
+          prefix: string,
+          options?: { encoding: string },
+        ): Promise<{ path: string; remove(): Promise<void> }>
+      }
+      const made = await promises.mkdtempDisposable('/data/dt-')
+      expect((await fs.promises.stat(made.path)).isDirectory()).toBe(true)
+      await made.remove()
+      expect(await ws.vfs.exists(made.path)).toBe(false)
+      const hex = await promises.mkdtempDisposable('/data/dt-', { encoding: 'hex' })
+      const named = Buffer.from(hex.path, 'hex').toString()
+      expect(named).toMatch(/^\/data\/dt-.{6}$/)
+      await hex.remove()
+      expect(await ws.vfs.exists(named)).toBe(false)
+      await ws.close()
+    },
+  )
+
+  it('opendir hands out the entries as a node Dir does', async () => {
+    const [ws, fs] = await world()
+    const dir = await fs.promises.opendir('/data/d')
+    const seen: string[] = []
+    for await (const entry of dir)
+      seen.push(`${entry.name}:${String(entry.isDirectory())}:${entry.parentPath}`)
+    expect(seen.sort()).toEqual(['a.txt:false:/data/d', 'sub:true:/data/d'])
+    expect(dir.path).toBe('/data/d')
+    await expect(dir.read()).rejects.toMatchObject({ code: 'ERR_DIR_CLOSED' })
+    const again = await promisify(fs.opendir)('/data/d')
+    expect(again.readSync()?.name).toMatch(/^(a\.txt|sub)$/)
+    await again.close()
+    await expect(again.close()).rejects.toMatchObject({ code: 'ERR_DIR_CLOSED' })
+    await expect(fs.promises.opendir('/data/nope')).rejects.toMatchObject({
+      code: 'ENOENT',
+      syscall: 'opendir',
+    })
+    await ws.close()
+  })
+
+  it('glob matches with the matcher node uses', async () => {
+    const [ws, fs] = await world()
+    expect(await names(fs.promises.glob('/data/d/**/*.txt'))).toEqual([
+      '/data/d/a.txt',
+      '/data/d/sub/b.txt',
+    ])
+    expect(await names(fs.promises.glob('**/*.txt', { cwd: '/data/d' }))).toEqual([
+      'a.txt',
+      'sub/b.txt',
+    ])
+    const pruned = fs.promises.glob('**', {
+      cwd: '/data/d',
+      exclude: (path: unknown) => String(path).endsWith('sub'),
+    })
+    expect(await names(pruned)).toEqual(['.', 'a.txt'])
+    expect(
+      await names(fs.promises.glob('**/*.txt', { cwd: '/data/d', exclude: ['sub/**'] })),
+    ).toEqual(['a.txt'])
+    expect(await names(fs.promises.glob('/data/zz/*'))).toEqual([])
+    const typed: string[] = []
+    for await (const entry of fs.promises.glob('*', { cwd: '/data/d', withFileTypes: true }))
+      typed.push(`${entry.name}:${String(entry.isDirectory())}`)
+    expect(typed.sort()).toEqual(['a.txt:false', 'sub:true'])
+    const called = await new Promise<string[]>((resolve, reject) => {
+      fs.glob('*.txt', { cwd: '/data/d' }, (err, matches) => {
+        if (err === null) resolve(matches)
+        else reject(err)
+      })
+    })
+    expect(called).toEqual(['a.txt'])
+    await ws.close()
+  })
+
+  it('cp copies a file and a tree as node itself does', async () => {
+    const [ws, fs] = await world()
+    await fs.promises.cp('/data/d/a.txt', '/data/c.txt')
+    expect(await fs.promises.readFile('/data/c.txt', 'utf-8')).toBe('a')
+    await fs.promises.cp('/data/d', '/data/e', { recursive: true })
+    expect((await fs.promises.readdir('/data/e', { recursive: true })).sort()).toEqual([
+      'a.txt',
+      'sub',
+      'sub/b.txt',
+      'sub/up',
+    ])
+    // A relative link's target is resolved against where it was.
+    expect(await fs.promises.readlink('/data/e/sub/up')).toBe('/data/d')
+    await fs.promises.cp('/data/d', '/data/f', {
+      recursive: true,
+      filter: (src: string) => !src.endsWith('b.txt'),
+    })
+    expect((await fs.promises.readdir('/data/f', { recursive: true })).sort()).toEqual([
+      'a.txt',
+      'sub',
+      'sub/up',
+    ])
+    await fs.promises.cp('/data/d/a.txt', '/data/c.txt', { force: false })
+    await expect(
+      fs.promises.cp('/data/d/a.txt', '/data/c.txt', { force: false, errorOnExist: true }),
+    ).rejects.toMatchObject({ code: 'ERR_FS_CP_EEXIST', syscall: 'cp', path: '/data/c.txt' })
+    await expect(fs.promises.cp('/data/d', '/data/g')).rejects.toMatchObject({
+      code: 'ERR_FS_EISDIR',
+      message:
+        'Path is a directory: cp returned EISDIR (/data/d is a directory (not copied)) /data/d',
+    })
+    await expect(
+      fs.promises.cp('/data/d', '/data/d/sub/x', { recursive: true }),
+    ).rejects.toMatchObject({ code: 'ERR_FS_CP_EINVAL', path: '/data/d/sub/x' })
+    await expect(fs.promises.cp('/data/c.txt', '/data/c.txt')).rejects.toMatchObject({
+      code: 'ERR_FS_CP_EINVAL',
+    })
+    await expect(fs.promises.cp('/data/nope', '/data/x')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await ws.close()
+  })
+
+  it('cp copies across the mount edge, either way', async () => {
+    const [ws, fs] = await world()
+    const tree = join(scratch, 'tree')
+    await fs.promises.mkdir(join(tree, 'in'), { recursive: true })
+    writeFileSync(join(tree, 'in', 'x.txt'), 'x')
+    await fs.promises.cp(tree, '/data/h', { recursive: true })
+    expect(await fs.promises.readFile('/data/h/in/x.txt', 'utf-8')).toBe('x')
+    await fs.promises.cp('/data/d', join(scratch, 'out'), { recursive: true })
+    expect(readFileSync(join(scratch, 'out', 'sub', 'b.txt'), 'utf-8')).toBe('b')
+    await ws.close()
+  })
+
+  // Pinned against node 24 on the host: a copy onto the file itself
+  // through a link is refused with the source kept, missing parents are
+  // made, and each new file and directory takes its source's mode.
+  it('cp tells files apart through links, makes parents and keeps modes', async () => {
+    const [ws, fs] = await world()
+    await ws.vfs.symlink('/data/dl', 'd')
+    await expect(fs.promises.cp('/data/d/a.txt', '/data/dl/a.txt')).rejects.toMatchObject({
+      code: 'ERR_FS_CP_EINVAL',
+    })
+    expect(await fs.promises.readFile('/data/d/a.txt', 'utf-8')).toBe('a')
+    await expect(
+      fs.promises.cp('/data/d', '/data/dl/sub/x', { recursive: true }),
+    ).rejects.toMatchObject({ code: 'ERR_FS_CP_EINVAL' })
+    await fs.promises.cp('/data/d/a.txt', '/data/new/deep/a.txt')
+    expect(await fs.promises.readFile('/data/new/deep/a.txt', 'utf-8')).toBe('a')
+    await fs.promises.cp('/data/d/sub', '/data/n2/deep/sub', { recursive: true })
+    expect((await fs.promises.readdir('/data/n2/deep/sub')).sort()).toEqual(['b.txt', 'up'])
+    await fs.promises.chmod('/data/d/a.txt', 0o751)
+    await fs.promises.chmod('/data/d/sub', 0o701)
+    await fs.promises.cp('/data/d/a.txt', '/data/m.txt')
+    await fs.promises.cp('/data/d/sub', '/data/msub', { recursive: true })
+    expect([
+      (await fs.promises.stat('/data/m.txt')).mode & 0o777,
+      (await fs.promises.stat('/data/msub')).mode & 0o777,
+    ]).toEqual([0o751, 0o701])
+    await ws.close()
+  })
+
+  // Pinned against node 24 on the host: a socket (as a FIFO) is refused
+  // before anything is touched, a link onto a file fails at its own
+  // symlink with the file kept, and a link replaces a link whatever
+  // `force` says.
+  it('cp refuses a socket and copies a link as node does', async () => {
+    const [ws, fs] = await world()
+    const sock = join(scratch, 'sock')
+    const server = createServer()
+    await new Promise<void>((resolve) => server.listen(sock, resolve))
+    try {
+      await expect(fs.promises.cp(sock, '/data/p')).rejects.toMatchObject({
+        code: 'ERR_FS_CP_SOCKET',
+        message:
+          'Cannot copy a socket file: cp returned EINVAL (cannot copy a socket file: /data/p) /data/p',
+      })
+    } finally {
+      server.close()
+    }
+    expect(await ws.vfs.exists('/data/p')).toBe(false)
+    await ws.vfs.symlink('/data/lk', 'd/a.txt')
+    await ws.vfs.write('/data/keep.txt', 'keep')
+    await expect(fs.promises.cp('/data/lk', '/data/keep.txt')).rejects.toMatchObject({
+      code: 'EEXIST',
+    })
+    expect(await fs.promises.readFile('/data/keep.txt', 'utf-8')).toBe('keep')
+    await ws.vfs.symlink('/data/lk2', 'd/sub/b.txt')
+    await fs.promises.cp('/data/lk', '/data/lk2', { force: false })
+    expect(await fs.promises.readlink('/data/lk2')).toBe('/data/d/a.txt')
+    // A directory onto a link to one: refused as a non-directory, unless
+    // `dereference` follows the link and copies into its target.
+    await ws.vfs.mkdir('/data/src')
+    await ws.vfs.write('/data/src/f.txt', 'f')
+    await ws.vfs.mkdir('/data/t')
+    await ws.vfs.symlink('/data/lt', 't')
+    await expect(
+      fs.promises.cp('/data/src', '/data/lt', { recursive: true }),
+    ).rejects.toMatchObject({ code: 'ERR_FS_CP_DIR_TO_NON_DIR' })
+    await fs.promises.cp('/data/src', '/data/lt', { recursive: true, dereference: true })
+    expect(await fs.promises.readdir('/data/t')).toEqual(['f.txt'])
+    // Every pair is checked: a child that a link makes the source's own
+    // is refused there, the source kept.
+    await ws.vfs.mkdir('/data/src/sub')
+    await ws.vfs.write('/data/src/sub/g.txt', 'g')
+    await ws.vfs.mkdir('/data/out')
+    await ws.vfs.symlink('/data/out/sub', '/data/src/sub')
+    await expect(
+      fs.promises.cp('/data/src', '/data/out', { recursive: true, dereference: true }),
+    ).rejects.toMatchObject({
+      code: 'ERR_FS_CP_EINVAL',
+      message:
+        'Invalid src or dest: cp returned EINVAL (src and dest cannot be the same) /data/out/sub',
+    })
+    expect(await fs.promises.readFile('/data/src/sub/g.txt', 'utf-8')).toBe('g')
+    // A link onto a link refuses when one leads into the other's directory.
+    await ws.vfs.mkdir('/data/tree')
+    await ws.vfs.mkdir('/data/tree/in')
+    await ws.vfs.symlink('/data/la', '/data/tree/in')
+    await ws.vfs.symlink('/data/lb', '/data/tree')
+    await expect(fs.promises.cp('/data/la', '/data/lb')).rejects.toMatchObject({
+      code: 'ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY',
+      message:
+        'Cannot overwrite symlink in subdirectory of self: cp returned EINVAL (cannot overwrite /data/tree with /data/tree/in) /data/lb',
+    })
+    await expect(fs.promises.cp('/data/lb', '/data/la')).rejects.toMatchObject({
+      code: 'ERR_FS_CP_EINVAL',
+      message:
+        'Invalid src or dest: cp returned EINVAL (cannot copy /data/tree to a subdirectory of self /data/tree/in) /data/la',
+    })
+    expect([
+      await fs.promises.readlink('/data/la'),
+      await fs.promises.readlink('/data/lb'),
+    ]).toEqual(['/data/tree/in', '/data/tree'])
+    await ws.close()
+  })
+
+  it('glob walks any depth for a whole-name ** inside braces, as node matches it', async () => {
+    const [ws, fs] = await world()
+    await ws.vfs.mkdir('/data/d/sub/deep')
+    await ws.vfs.write('/data/d/sub/deep/c.txt', 'c')
+    expect(await names(fs.promises.glob('/data/{d/**,x}/*.txt'))).toEqual([
+      '/data/d/a.txt',
+      '/data/d/sub/b.txt',
+      '/data/d/sub/deep/c.txt',
+    ])
+    // Within a name `**` is a `*`, so the walk stays one level down.
+    expect(await names(fs.promises.glob('/data/d**/*.txt'))).toEqual(['/data/d/a.txt'])
+    // A trailing slash keeps the directories, named without it; an
+    // excluded base leaves out all under it.
+    expect(await names(fs.promises.glob('/data/d/*/'))).toEqual(['/data/d/sub'])
+    expect(await names(fs.promises.glob('/data/d/a.txt/'))).toEqual([])
+    expect(await names(fs.promises.glob('/data/d/a.txt', { exclude: () => true }))).toEqual([])
+    expect(await names(fs.promises.glob('/data/d/*', { exclude: ['/data/d'] }))).toEqual([])
+    // An exclusion matches from cwd whatever the pattern's spelling.
+    expect(
+      await names(fs.promises.glob('/data/d/**/*.txt', { cwd: '/data/d', exclude: ['sub/**'] })),
+    ).toEqual(['/data/d/a.txt'])
+    // followSymlinks walks a link to a directory, short of one its branch
+    // already went through, as node 24 walks this tree (sub/up is '..');
+    // two directories linked to each other end.
+    await ws.vfs.symlink('/data/alias', '/data/d/sub')
+    expect(await names(fs.promises.glob('/data/*/*.txt'))).toEqual(['/data/d/a.txt'])
+    expect(
+      await names(fs.promises.glob('/data/**/*.txt', { followSymlinks: true } as object)),
+    ).toEqual([
+      '/data/alias/b.txt',
+      '/data/alias/deep/c.txt',
+      '/data/alias/up/a.txt',
+      '/data/d/a.txt',
+      '/data/d/sub/b.txt',
+      '/data/d/sub/deep/c.txt',
+    ])
+    await ws.vfs.mkdir('/data/ma')
+    await ws.vfs.mkdir('/data/mb')
+    await ws.vfs.write('/data/ma/x.txt', 'x')
+    await ws.vfs.write('/data/mb/y.txt', 'y')
+    await ws.vfs.symlink('/data/ma/toB', '/data/mb')
+    await ws.vfs.symlink('/data/mb/toA', '/data/ma')
+    expect(
+      await names(fs.promises.glob('/data/m*/**/*.txt', { followSymlinks: true } as object)),
+    ).toEqual(['/data/ma/toB/y.txt', '/data/ma/x.txt', '/data/mb/toA/x.txt', '/data/mb/y.txt'])
+    // The walk names a mounted directory by the namespace's links, so it
+    // looks up nothing above the pattern's base.
+    ws.policies.add({
+      preVfs: (ctx) =>
+        ctx.call.name === 'stat' && ctx.path.virtual.replace(/\/$/, '') === '/data'
+          ? { kind: 'deny', reason: 'no stat of /data' }
+          : null,
+    })
+    expect(
+      await names(fs.promises.glob('/data/d/**/*.txt', { followSymlinks: true } as object)),
+    ).toEqual(['/data/d/a.txt', '/data/d/sub/b.txt', '/data/d/sub/deep/c.txt'])
+    await ws.close()
+  })
+
+  it('a listing names its entries in the encoding asked for', async () => {
+    const [ws, fs] = await world()
+    const dir = await fs.promises.opendir('/data/d', { encoding: 'buffer' as BufferEncoding })
+    const entry = (await dir.read()) as unknown as { name: unknown }
+    await dir.close()
+    expect(Buffer.isBuffer(entry.name)).toBe(true)
+    const listed = await fs.promises.readdir('/data/d', { encoding: 'buffer' })
+    expect(listed.every((name) => Buffer.isBuffer(name))).toBe(true)
+    await ws.close()
+  })
+})
+
 describe('patchNodeFs — access', () => {
   // W_OK answers what the write itself meets, for the session the files run
   // as (here the default one, bound by no one): a cap to read is refused, a
@@ -708,20 +1123,6 @@ describe('patchNodeFs — what a mount cannot serve', () => {
       'an exclusive copy onto a dangling link',
       'EEXIST',
       (fs: Fs) => fs.promises.copyFile('/data/f.txt', '/data/dangling', fs.constants.COPYFILE_EXCL),
-    ],
-    [
-      'a glob whose pattern list names a mount',
-      'ENOTSUP',
-      async (fs: Fs) => {
-        for await (const _ of fs.promises.glob(['/tmp/*', '/data/*'])) return
-      },
-    ],
-    [
-      'a glob under a mounted cwd',
-      'ENOTSUP',
-      async (fs: Fs) => {
-        for await (const _ of fs.promises.glob('*', { cwd: '/data' })) return
-      },
     ],
     [
       'a watch, on its first event',

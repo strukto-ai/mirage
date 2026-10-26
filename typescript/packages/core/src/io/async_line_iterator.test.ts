@@ -96,6 +96,24 @@ describe('AsyncLineIterator', () => {
     for await (const line of lines) rest.push(decode(line))
     expect(rest).toEqual(['b', 'c'])
   })
+
+  it('read1 answers what one pull brings, up to its size, and keeps the rest', async () => {
+    let pulled = 0
+    async function* source(): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      pulled += 1
+      yield encode('abcdef')
+      pulled += 1
+      yield encode('gh')
+    }
+    const input = new AsyncLineIterator(source())
+    expect(decode(await input.read1(4))).toBe('abcd')
+    expect(decode(await input.read1(4))).toBe('ef')
+    expect(pulled).toBe(1)
+    expect(decode(await input.read1(4))).toBe('gh')
+    expect(decode(await input.read1(0))).toBe('')
+    expect((await input.read1(4)).byteLength).toBe(0)
+  })
 })
 
 describe('readChars counts characters, not bytes', () => {

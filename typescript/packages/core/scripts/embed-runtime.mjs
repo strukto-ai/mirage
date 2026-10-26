@@ -2,7 +2,6 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
 const modules = {
   pyodide: ['python/pyodide/py/execution.py'],
-  quickjs: ['js/quickjs/js/execution.js', 'js/quickjs/js/filesystem.js'],
 }
 const output = new URL('../src/generated/', import.meta.url)
 mkdirSync(output, { recursive: true })

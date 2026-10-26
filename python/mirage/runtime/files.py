@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import dataclasses
 import logging
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from dataclasses import dataclass
@@ -110,10 +111,13 @@ class Descriptor:
         files (RuntimeFiles): the adapter whose core the handle is on.
         fh (int): the core's handle.
         mode (OpenMode): what the open asked for.
-        opened (str): the path it was opened at, which its inode number
-            comes from however the file is renamed since.
+        opened (str): the path it was opened at, the name a file object
+            reports.
         directory (bool): it names a directory, which it may not read.
         pos (int): the read/write position.
+        inode (str): where the links on ``opened`` led as it opened, which
+            names its inode however the file is renamed or the link
+            changed since; "" names it by ``opened``.
     """
 
     files: "RuntimeFiles"
@@ -122,6 +126,7 @@ class Descriptor:
     opened: str
     directory: bool = False
     pos: int = 0
+    inode: str = ""
 
     @property
     def path(self) -> str:
@@ -689,11 +694,17 @@ class RuntimeFiles:
                 and gates that read exactly as it gates ``readlink``.
         """
         if self._core is None:
-            return stat_row(self.call("stat", path, nofollow=nofollow))
-        # Through the core, so what the files open there wrote and have
-        # not landed counts, as write(2) is seen at once.
-        return stat_row(
-            self._on_core(lambda core: core.stat(path, not nofollow))
+            row = stat_row(self.call("stat", path, nofollow=nofollow))
+        else:
+            # Through the core, so what the files open there wrote and
+            # have not landed counts, as write(2) is seen at once.
+            row = stat_row(
+                self._on_core(lambda core: core.stat(path, not nofollow))
+            )
+        # One file is one inode whichever spelling reached it, so a copy
+        # through a link onto the file itself is told apart (samefile).
+        return dataclasses.replace(
+            row, name=self.walked(path, follow=not nofollow)
         )
 
     def stat_or_none(

@@ -354,6 +354,22 @@ class TestWrites:
         patched.rmdir("/data/dir/fresh")
         assert patched.path.isdir("/data/dir/fresh") is False
 
+    def test_mkdir_narrows_to_its_mode_as_tempfile_asks(self):
+        _, patched = seeded()
+        patched.mkdir("/data/dir/private", 0o700)
+        mode = patched.stat("/data/dir/private").st_mode
+        assert mode & 0o777 == 0o700
+
+    def test_mkdir_does_not_fail_a_create_on_a_refused_lookup(self):
+        # A plain mkdir looks nothing up, and a refused lookup leaves a
+        # narrowed one as made: neither fails a create that happened.
+        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+        ws.policies.add(_NoStats())
+        patched = make_os_module(ws.vfs)
+        patched.mkdir("/data/plain")
+        patched.mkdir("/data/narrow", 0o700)
+        assert sorted(patched.listdir("/data")) == ["narrow", "plain"]
+
     def test_makedirs_creates_every_missing_ancestor(self):
         _, patched = seeded()
         patched.makedirs("/data/deep/x/y")
@@ -503,6 +519,29 @@ class TestLinks:
         assert (st.st_uid, st.st_gid) == (4242, 4343)
         assert stat_mod.S_ISLNK(st.st_mode)
         assert st.st_size == len("a.txt")
+
+    def test_utime_on_a_link_leaves_its_target(self):
+        _, patched = seeded()
+        before = patched.stat("/data/dir/a.txt").st_mtime
+        patched.symlink("a.txt", "/data/dir/link")
+        patched.utime("/data/dir/link", (100, 200), follow_symlinks=False)
+        assert patched.lstat("/data/dir/link").st_mtime == 200
+        assert patched.stat("/data/dir/a.txt").st_mtime == before
+
+    def test_a_descriptor_changes_the_mode_and_owner_of_its_file(self):
+        _, patched = seeded()
+        fd = patched.open("/data/dir/a.txt", os.O_RDWR)
+        try:
+            patched.fchmod(fd, 0o600)
+            patched.fchown(fd, 4242, 4343)
+        finally:
+            patched.close(fd)
+        st = patched.stat("/data/dir/a.txt")
+        assert (stat_mod.S_IMODE(st.st_mode), st.st_uid, st.st_gid) == (
+            0o600,
+            4242,
+            4343,
+        )
 
     def test_a_link_stays_lrwxrwxrwx_after_chmod_h(self):
         _, patched = seeded()

@@ -3,8 +3,7 @@
  "baseline_reason": "Every divergence below the excused ones predates the gate and each needs its own decision, so --strict fails on a rise rather than demanding zero. Lower this number whenever a divergence is closed; the gate fails on a drop too, so an improvement cannot be silently spent. Items 31-37 of the cleanup plan are scoped from this report. The unit is one module, never one directory: a one-sided directory counts once per module inside it, so it cannot absorb new modules without moving the number. An excused directory is the deliberate exception -- it excuses its whole subtree, because the excuse is that there is no counterpart to mirror, which makes growth inside it expected rather than drift.",
  "directories": {
   "python_only": {
-   "runtime/wasm": "The wasmtime WASI host. npm ships quickjs-emscripten and pyodide with their own hosts and python has no equivalent, so there is nothing to mirror. CLAUDE.md says do not port it.",
-   "runtime/python/host": "The `with ws:` entry point: the host interpreter's own builtins.open, io.open and os functions patched onto a workspace (fs, open, file, list, stat, constants), plus the re-entrancy bypass (host_io) the mount path sets so a backend serving an op reaches the host. Both ride the runtimes' file API (runtime/files RuntimeFiles) over ws.vfs. Its node twin is runtime/js/host (fs and constants, excused there): an npm consumer holds promises, not file objects, so file, open and the stat and listing shapes have nothing to mirror, and node needs no host_io because the patch swaps only the CommonJS fs and fs.promises functions, which every node backend's ESM node:fs/promises import never reaches (pinned by fs.test.ts, 'a disk root at its own prefix does not re-enter').",
+   "runtime/python/host": "The `with ws:` entry point: the host interpreter's own builtins.open, io.open and os functions patched onto a workspace (fs, open, file, list, stat, constants), plus the re-entrancy bypass (host_io) the mount path sets so a backend serving an op reaches the host. Both ride the runtimes' file API (runtime/files RuntimeFiles) over ws.vfs. Its node twin is runtime/js/host (fs, constants, descriptors, list and stat, excused there): an npm consumer holds promises, not file objects, so file and open have nothing to mirror, and node needs no host_io because the patch swaps only the CommonJS fs and fs.promises functions, which every node backend's ESM node:fs/promises import never reaches (pinned by fs.test.ts, 'a disk root at its own prefix does not re-enter').",
    "bridge": "sync.py exists to run an event loop on a worker thread for the FUSE callbacks, which python needs because its FUSE loop is threaded and node's is not.",
    "agents/agno": "Ecosystem split: agno is a python-only framework.",
    "agents/pydantic_ai": "Ecosystem split: pydantic-ai is a python-only framework.",
@@ -35,11 +34,7 @@
   },
   "runtime/js/quickjs": {
    "typescript_only": {
-    "errors": "QuickJsUnavailableError, raised when the optional quickjs-emscripten package is missing. Python QuickJS runs a qjs build on disk and raises FileNotFoundError when it is missing, so it has no error module.",
-    "fs": "The QuickJS Emscripten host callbacks over RuntimeFiles. Python QuickJS is a WASI guest whose file callbacks are the shared runtime/wasm/fs.py host, which is already excused.",
-    "list": "Encodes directory entries as QuickJS Emscripten handles. Python QuickJS gets preview1 dirents from the shared runtime/wasm/list.py.",
-    "loader": "Imports the optional quickjs-emscripten npm package. Python QuickJS locates qjs-wasi.wasm on disk and runs it on the shared runtime/wasm host, whose runtime/wasm/loader.py imports wasmtime.",
-    "stat": "Encodes stat results as QuickJS Emscripten handles. Python QuickJS gets preview1 filestats from the shared runtime/wasm/stat.py."
+    "errors": "QuickJsUnavailableError, raised when no qjs-wasi.wasm is found or no worker can start, which the interpreter command answers 127 for. Python raises FileNotFoundError at construction, so it has no error module."
    }
   },
   "utils": {
@@ -181,7 +176,19 @@
    "typescript_only": {
     "constants": "The node entry point's call tables (routed, refused, passthrough), the twin of runtime/python/host/constants.py, which classifies os the same way. Paired by role for the reason the fs entry gives.",
     "descriptors": "The descriptors the node entry point's open hands a mounted path, the twin of runtime/python/host/descriptors.py: open(2) flags onto the mode vocabulary and a table of numbers held on the null device. Paired by role for the reason the fs entry gives.",
-    "fs": "patchNodeFs, the node twin of python's `with ws:` entry point: it swaps node's own fs and fs.promises functions onto a workspace, the way runtime/python/host patches the host interpreter's builtins.open, io.open and os functions (excused there as a directory), and both ride RuntimeFiles over ws.vfs. The two pair by role, not by path: python's entry point sits under runtime/python/host, node's under runtime/js/host, each beside the engines of its own language."
+    "fs": "patchNodeFs, the node twin of python's `with ws:` entry point: it swaps node's own fs and fs.promises functions onto a workspace, the way runtime/python/host patches the host interpreter's builtins.open, io.open and os functions (excused there as a directory), and both ride RuntimeFiles over ws.vfs. The two pair by role, not by path: python's entry point sits under runtime/python/host, node's under runtime/js/host, each beside the engines of its own language.",
+    "list": "The Dirent and Dir shapes the node entry point lists a mounted directory with, the twin of runtime/python/host/list.py (MountDirEntry and MountScandir). Paired by role for the reason the fs entry gives.",
+    "stat": "node's Stats and BigIntStats from the stat every runtime shares, the twin of runtime/python/host/stat.py (stat_result). Paired by role for the reason the fs entry gives."
+   }
+  },
+  "runtime/wasm": {
+   "python_only": {
+    "build": "BuildDir, the interpreter's own files routed beside the mounts, for CPython on WASI. The TypeScript host runs only qjs on WASI, which carries no files (it runs CPython through Pyodide).",
+    "slab": "Puts wasmtime-py's process-wide callback slab behind a lock; a JS host has no wasmtime."
+   },
+   "typescript_only": {
+    "transport": "The blocking bridge a worker guest calls the host through (shared memory, or the page's service worker), which Pyodide uses too. Python's guest runs on a thread whose calls wait on the event loop directly.",
+    "worker": "The worker entry a guest runs on, its WasiFs answered across the bridge. Python runs the guest on a thread (WasmExecution._run_sync)."
    }
   }
  }

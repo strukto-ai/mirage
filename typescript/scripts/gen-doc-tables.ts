@@ -109,11 +109,6 @@ const PEER_FEATURES: readonly { feature: string; packages: readonly string[]; ne
     needs: 'The Pyodide and Monty runtimes behind `python3`.',
   },
   {
-    feature: 'JavaScript runtime',
-    packages: ['quickjs-emscripten'],
-    needs: 'The QuickJS runtime behind `js` and `node`.',
-  },
-  {
     feature: 'Sandboxes',
     packages: ['e2b', '@daytonaio/sdk'],
     needs: 'The E2B and Daytona sandbox runtimes.',

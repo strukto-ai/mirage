@@ -38,6 +38,25 @@ async def test_clean_boundaries():
 
 
 @pytest.mark.asyncio
+async def test_read1_answers_one_pull_up_to_its_size_and_keeps_the_rest():
+    pulled = []
+
+    async def source():
+        pulled.append(1)
+        yield b"abcdef"
+        pulled.append(2)
+        yield b"gh"
+
+    reader = AsyncLineIterator(source())
+    assert await reader.read1(4) == b"abcd"
+    assert await reader.read1(4) == b"ef"
+    assert pulled == [1]
+    assert await reader.read1(4) == b"gh"
+    assert await reader.read1(0) == b""
+    assert await reader.read1(4) == b""
+
+
+@pytest.mark.asyncio
 async def test_split_across_chunks():
     source = _chunks([b"hel", b"lo\nwor", b"ld\n"])
     lines = [line async for line in AsyncLineIterator(source)]

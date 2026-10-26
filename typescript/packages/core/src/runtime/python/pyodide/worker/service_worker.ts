@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FORMAT, PARAM } from './transport.ts'
+import { FORMAT, PARAM } from '../../../wasm/transport.ts'
 
 /**
  * The service worker a page without shared memory registers so pyodide's

@@ -66,7 +66,7 @@ RUNTIMES='{
       "e2b": ["env:MIRAGE_INTEG_E2B_SANDBOX"], "smolvm": ["env:MIRAGE_INTEG_SMOLVM_MACHINE"],
       "microsandbox": ["env:MIRAGE_INTEG_MICROSANDBOX_SANDBOX"],
       "apple_container": ["env:MIRAGE_INTEG_APPLE_CONTAINER"]},
-    "typescript": {"monty": [], "pyodide": [], "quickjs": [],
+    "typescript": {"monty": [], "pyodide": [], "quickjs": ["env:MIRAGE_QUICKJS_HOME"],
       "local": [], "sandlock": ["env:MIRAGE_INTEG_SANDLOCK"],
       "docker": ["env:MIRAGE_INTEG_DOCKER_CONTAINER"], "ssh": ["env:MIRAGE_INTEG_SSH_HOST"],
       "smolvm": ["env:MIRAGE_INTEG_SMOLVM_MACHINE"],

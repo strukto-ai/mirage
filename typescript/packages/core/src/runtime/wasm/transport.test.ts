@@ -13,10 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { serviceWorker } from '../../../../../tests/runtime/python/pyodide/fixtures/service_worker.ts'
-import { enoent } from '../../../../errors/fs.ts'
-import { answerOverBridge, bridged, FORMAT, PARAM, requestOverBridge } from './transport.ts'
-import type { VfsRequest } from './types.ts'
+import { serviceWorker } from '../../../tests/runtime/python/pyodide/fixtures/service_worker.ts'
+import { enoent } from '../../errors/fs.ts'
+import type { VfsRequest } from '../python/pyodide/worker/types.ts'
+import {
+  answerOverBridge,
+  bridged,
+  failureText,
+  FORMAT,
+  PARAM,
+  requestOverBridge,
+} from './transport.ts'
 
 const PAGE = 'https://app.test/index.html'
 const ID = '00000000-0000-4000-8000-000000000001'
@@ -67,7 +74,7 @@ async function bridgedCall(operation: () => Promise<unknown>): Promise<unknown> 
   const posted: VfsRequest[] = []
   const value = requestOverBridge(
     (message) => posted.push(message),
-    { op: 'stat', path: '/a' },
+    { op: 'stat' as const, path: '/a' },
     PAGE,
   )
   expect(posted).toEqual([{ op: 'stat', path: '/a', kind: 'vfs', id: ID }])
@@ -103,7 +110,7 @@ describe('the service worker bridge', () => {
     )
     vi.spyOn(crypto, 'randomUUID').mockReturnValue(ID)
     expect(() => requestOverBridge(() => undefined, { op: 'stat', path: '/a' }, PAGE)).toThrow(
-      'pyodide filesystem bridge answered 404',
+      "the guest worker's file bridge answered 404",
     )
   })
 
@@ -113,5 +120,29 @@ describe('the service worker bridge', () => {
     expect(await bridged(PAGE)).toBe(true)
     vi.stubGlobal('fetch', () => Promise.resolve(new Response('<!doctype html>')))
     expect(await bridged(PAGE)).toBe(false)
+  })
+})
+
+describe('failureText', () => {
+  it("prints an Error's message", () => {
+    expect(failureText(new RangeError('boom'))).toBe('boom')
+  })
+
+  it('names a plain object instead of printing [object Object]', () => {
+    const exit = { name: 'ExitStatus', message: 'Program terminated with exit(1)', status: 1 }
+    expect(failureText(exit)).toBe('ExitStatus: Program terminated with exit(1)')
+    expect(failureText({ message: 'no name' })).toBe('no name')
+  })
+
+  it('lists the keys of an object with neither a name nor a message', () => {
+    expect(failureText({ status: 7, signal: 'SIGKILL' })).toBe(
+      'an object with keys: status, signal',
+    )
+    expect(failureText({})).toBe('an object with keys: (none)')
+  })
+
+  it('prints a primitive as it is', () => {
+    expect(failureText('unwind')).toBe('unwind')
+    expect(failureText(null)).toBe('null')
   })
 })

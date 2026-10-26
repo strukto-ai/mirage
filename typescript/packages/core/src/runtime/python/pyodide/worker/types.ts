@@ -27,17 +27,19 @@ export interface VfsRequest {
   buffer?: SharedArrayBuffer
   /** The request the service worker holds for a worker that shares none. */
   id?: string
-  op: ReadOperation | HandleOperation | 'dispatch' | 'flush' | 'process'
+  /** `stdin` reads the run's input and `output` writes its stdout or stderr. */
+  op: ReadOperation | HandleOperation | 'dispatch' | 'flush' | 'process' | 'stdin' | 'output'
   path: string
   args?: Parameters<BridgeDispatchFn>
   mutations?: MirageMutation[]
   payload?: string
   classify?: boolean
   mode?: OpenMode
+  /** The core handle a call is on, or the stream (1 or 2) an output names. */
   fh?: number
   /** Where a pread or pwrite starts. */
   offset?: number
-  /** How many bytes a pread asks for, or the length a ftruncate leaves. */
+  /** How many bytes a pread or a stdin read asks for, or the length a ftruncate leaves. */
   size?: number
   bytes?: Uint8Array
 }
@@ -61,6 +63,16 @@ export interface ExecuteRequest {
   bridge?: string
   /** The mirage-rs module the page compiled, which a browser worker's bundle leaves out. */
   wasm?: WebAssembly.Module
+}
+/**
+ * The run's standard streams on the main thread, which the guest's stdio
+ * calls reach. A stop ends a call still waiting.
+ */
+export interface HostStdio {
+  /** One read(2) of the run's input: what has arrived, up to `size` bytes; empty at its end. */
+  read(size: number, stop: AbortSignal): Promise<Uint8Array>
+  /** Hand one write to stdout (1) or stderr (2): false once its reader has gone. */
+  write(fd: 1 | 2, bytes: Uint8Array, stop: AbortSignal): Promise<boolean>
 }
 export type WorkerResult =
   | { kind: 'notice'; message: string }

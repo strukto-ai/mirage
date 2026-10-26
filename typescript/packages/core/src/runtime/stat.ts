@@ -44,7 +44,8 @@ export interface PosixStat {
  * The POSIX stat a runtime reports for one mount row. `uid` and `gid`
  * are what a row without an owner reports (a host process's own, 0 in a
  * sandbox), and `unknownMs` what an unknown modification time reads as.
- * Mirrors Python's `posix_stat`.
+ * `path` names the inode when the row names none of its own. Mirrors
+ * Python's `posix_stat`.
  */
 export function posixStat(
   row: VFSStat,
@@ -55,7 +56,7 @@ export function posixStat(
   const mtime = row.mtimeMs ?? fallback.unknownMs ?? 0
   return {
     mode: row.mode,
-    ino: ident(path),
+    ino: ident(row.name ?? path),
     dev: ident(prefix),
     nlink: row.isDir ? 2 : 1,
     uid: row.uid ?? fallback.uid ?? 0,

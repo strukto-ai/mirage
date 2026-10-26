@@ -354,4 +354,8 @@ export interface VFSStat {
   gid?: number
   /** Original row, preserving unknown size and backend metadata for retained stats. */
   source?: FileStat
+  /** The path the row's file has once the links are followed, which names
+   * its inode however the path that reached it was spelled; absent when
+   * the row is not a mount's. */
+  name?: string
 }

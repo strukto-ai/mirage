@@ -16,13 +16,22 @@ import source from '../../../generated/pyodide.ts'
 import type { FlagValue } from '../../../commands/spec/types.ts'
 import type { PyodideInterface } from './loader.ts'
 import type { XattrOp } from './fs/types.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 interface PyProxy {
   destroy(): void
   toJs(options: { create_proxies: boolean }): unknown
 }
 
-type PyFunction = ((...args: unknown[]) => PyProxy) & PyProxy
+type PyFunction = ((...args: unknown[]) => unknown) & PyProxy
+
+function isProxy(value: unknown): value is PyProxy {
+  return (
+    value !== null &&
+    (typeof value === 'object' || typeof value === 'function') &&
+    'destroy' in value
+  )
+}
 interface PyNamespace extends PyProxy {
   get(name: string): PyFunction
 }
@@ -45,10 +54,47 @@ export type XattrCall = (
 
 const NO_XATTRS: XattrCall = () => JSON.stringify({ code: 'ENOTSUP' })
 
+/**
+ * The run's standard streams as the guest's own stdio reaches them,
+ * registered as `_mirage_stdio`.
+ */
+export interface GuestStdio {
+  /** One read(2) of the run's input: what has arrived, up to `size` bytes; empty at its end. */
+  read(size: number): Uint8Array
+  /** Hand one write to stdout (1) or stderr (2): false once its reader has gone. */
+  write(fd: 1 | 2, bytes: Uint8Array): boolean
+}
+
+/** Streams over a run's whole input that keep what it writes. */
+function collected(
+  stdin: Uint8Array | null,
+): GuestStdio & { out: Uint8Array[]; err: Uint8Array[] } {
+  const input = stdin ?? new Uint8Array()
+  const out: Uint8Array[] = []
+  const err: Uint8Array[] = []
+  let at = 0
+  return {
+    out,
+    err,
+    read: (size) => {
+      const bytes = input.subarray(at, Math.min(input.length, at + size))
+      at += bytes.length
+      return bytes
+    },
+    write: (fd, bytes) => {
+      ;(fd === 1 ? out : err).push(bytes)
+      return true
+    },
+  }
+}
+
 interface ExecutionRequest {
   code: string
   env: Record<string, string>
+  // The run's whole input, where its streams are not given.
   stdin: Uint8Array | null
+  // Whether the run has input at all; by default, whether `stdin` holds it.
+  piped?: boolean
   argv: string[]
   cwd: string
   // The run's interpreter switches (`ctx.flags`).
@@ -62,6 +108,7 @@ interface ExecutionRequest {
 
 export class PyodideExecution {
   private readonly namespace: PyNamespace
+  private stdio: GuestStdio = collected(null)
 
   constructor(
     private readonly pyodide: PyodideInterface,
@@ -74,6 +121,13 @@ export class PyodideExecution {
     pyodide.registerJsModule('_mirage_xattr', { call: xattr })
     pyodide.registerJsModule('_mirage_process', { run: subprocess })
     pyodide.registerJsModule('_mirage_exit', { seal })
+    // Numbers cross, not buffers: Pyodide's buffer conversion slices with
+    // signed wasm32 addresses, so above 2 GiB it reads the wrong bytes.
+    pyodide.registerJsModule('_mirage_stdio', {
+      read: (size: number) => Array.from(this.stdio.read(size)),
+      write: (fd: number, data: number[]) =>
+        this.stdio.write(fd === 2 ? 2 : 1, Uint8Array.from(data)) ? 0 : -1,
+    })
     this.namespace = pyodide.toPy({ __name__: '_mirage_pyodide' }) as PyNamespace
     try {
       pyodide.runPython(source, { globals: this.namespace, filename: 'mirage/execution.py' })
@@ -83,18 +137,40 @@ export class PyodideExecution {
     }
   }
 
+  /**
+   * Run one program. Its output comes back in the result, or, where the
+   * run's streams are given, goes to them as it is written and the
+   * result leaves it out.
+   *
+   * @param request the program and what of the run's context it reads.
+   * @param arm starts the run's interrupt countdown.
+   * @param disarm stops it.
+   * @param stdio the run's streams; absent reads `request.stdin`.
+   */
   run(
     request: ExecutionRequest,
     arm: () => void,
     disarm: () => void,
+    stdio?: GuestStdio,
   ): [Uint8Array, Uint8Array, number] {
-    const [stdout, stderr, exitCode] = this.call(
-      'run',
-      { ...request, stdin: request.stdin ?? undefined, filename: request.filename ?? undefined },
-      arm,
-      disarm,
-    ) as [number[], number[], number]
-    return [new Uint8Array(stdout), new Uint8Array(stderr), exitCode]
+    const kept = collected(request.stdin)
+    this.stdio = stdio ?? kept
+    try {
+      const { stdin, ...rest } = request
+      const exitCode = this.call(
+        'run',
+        {
+          ...rest,
+          piped: request.piped ?? stdin !== null,
+          filename: request.filename ?? undefined,
+        },
+        arm,
+        disarm,
+      ) as number
+      return [concat(kept.out), concat(kept.err), exitCode]
+    } finally {
+      this.stdio = collected(null)
+    }
   }
 
   seedSysPath(paths: readonly string[]): string[] {
@@ -108,22 +184,16 @@ export class PyodideExecution {
   private call(name: string, ...args: unknown[]): unknown {
     const fn = this.namespace.get(name)
     const converted: unknown[] = []
-    let result: PyProxy | undefined
+    // A number or a string comes back as itself, anything else a proxy.
+    let result: unknown
     try {
       for (const arg of args) converted.push(this.pyodide.toPy(arg))
       // PyProxy calls are synchronous so interpreter interrupts reach guest code.
       result = fn(...converted)
-      return result.toJs({ create_proxies: false })
+      return isProxy(result) ? result.toJs({ create_proxies: false }) : result
     } finally {
-      result?.destroy()
-      for (const arg of converted) {
-        if (
-          arg !== null &&
-          (typeof arg === 'object' || typeof arg === 'function') &&
-          'destroy' in arg
-        )
-          (arg as PyProxy).destroy()
-      }
+      if (isProxy(result)) result.destroy()
+      for (const arg of converted) if (isProxy(arg)) arg.destroy()
       fn.destroy()
     }
   }

@@ -4,7 +4,9 @@
       "id": "host_retained_read_obeys_current_policy",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -242,7 +244,9 @@
       "id": "mount_retained_read_obeys_current_policy",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -480,7 +484,9 @@
       "id": "fuse_retained_read_obeys_current_policy",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -718,7 +724,9 @@
       "id": "facade_warm_read_obeys_current_policy",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -914,7 +922,9 @@
       "id": "command_warm_read_obeys_current_policy",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -1101,7 +1111,9 @@
       "id": "file_cli_warm_read_obeys_current_policy",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -1297,7 +1309,9 @@
       ],
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -1348,7 +1362,9 @@
       "id": "copy_checks_warm_source_result_policy",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -1428,7 +1444,9 @@
       ],
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -1474,7 +1492,9 @@
       ],
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -1547,7 +1567,9 @@
       ],
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -1614,7 +1636,9 @@
       "id": "host_retained_metadata_attached",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -1787,7 +1811,9 @@
       "id": "host_retained_metadata_detached",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -1980,7 +2006,9 @@
       "id": "mount_retained_metadata_attached",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -2153,7 +2181,9 @@
       "id": "mount_retained_metadata_detached",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -2346,7 +2376,9 @@
       "id": "fuse_retained_metadata_attached",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -2519,7 +2551,9 @@
       "id": "fuse_retained_metadata_detached",
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -2717,7 +2751,9 @@
       ],
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",
@@ -2764,7 +2800,9 @@
       ],
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "read_control": "/data/secret.txt",

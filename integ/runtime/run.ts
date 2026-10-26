@@ -1370,7 +1370,7 @@ const LEDGER_CHECKS = new Set(['ops_contain', 'ops_absent', 'ops_count'])
 const RUNTIME_REQUIRES: Record<string, string[]> = {
   monty: [],
   pyodide: [],
-  quickjs: [],
+  quickjs: ['env:MIRAGE_QUICKJS_HOME'],
   local: [],
   sandlock: ['env:MIRAGE_INTEG_SANDLOCK'],
   host: [],
@@ -1554,11 +1554,17 @@ function variants(testCase: Case): Case[] {
 function backendVariants(testCase: Case): Case[] {
   if (testCase.backends === undefined) return [testCase]
   return testCase.backends.map((backend) => {
+    // `<backend>+cache` serves repeat reads from the file cache.
+    const [base = backend, cached = ''] = backend.split('+', 2)
+    if (cached !== '' && cached !== 'cache') {
+      throw new Error(`${testCase.id}: unknown backend ${backend}`)
+    }
     const world = structuredClone(testCase.world ?? {})
     for (const spec of Object.values(world.mounts ?? {})) {
       if (spec.vfs === 'ram') {
-        spec.vfs = backend
+        spec.vfs = base
         spec.scoped = true
+        if (cached !== '') spec.cache_reads = true
       }
     }
     return {
@@ -1568,10 +1574,21 @@ function backendVariants(testCase: Case): Case[] {
       world,
       requires: [
         ...(testCase.requires ?? []),
-        ...(BACKEND_REQUIRES[backend] ?? [`unknown backend ${backend}`]),
+        ...(BACKEND_REQUIRES[base] ?? [`unknown backend ${backend}`]),
       ],
     }
   })
+}
+
+/**
+ * The `expect_on` keys a backend variant answers to, weakest first: a cached
+ * one answers as its backend does, then as itself. Mirrors Python's
+ * `_backend_keys`.
+ */
+function backendKeys(backend: string | undefined, runtime: string | undefined): string[] {
+  if (backend === undefined) return []
+  const names = [...new Set([backend.split('+', 1)[0] ?? backend, backend])]
+  return runtime === undefined ? names : [...names, ...names.map((name) => `${runtime}@${name}`)]
 }
 
 // Remove the directory each disk and ssh backend mount was given; an ssh root
@@ -1647,11 +1664,7 @@ async function runCase(suite: string, testCase: Case): Promise<string[]> {
           )
       }
     }
-    const backend = testCase.backend
-    const keys = backend === undefined ? [] : [backend]
-    if (backend !== undefined && testCase.runtime !== undefined) {
-      keys.push(`${testCase.runtime}@${backend}`)
-    }
+    const keys = backendKeys(testCase.backend, testCase.runtime)
     for (const [index, listed] of (testCase.steps ?? []).entries()) {
       const step = overlay(listed, keys)
       problems.push(

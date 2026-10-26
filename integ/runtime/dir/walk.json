@@ -1,0 +1,102 @@
+{
+  "cases": [
+    {
+      "id": "a_tree_is_made_walked_copied_and_removed",
+      "note": "Monty has no os.makedirs, os.walk, os.scandir or shutil.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "s"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nimport shutil\nos.makedirs('/data/x/y/z')\nos.makedirs('/data/x/y', exist_ok=True)\nopen('/data/x/y/z/f.txt', 'w').write('f')\nopen('/data/x/g.txt', 'w').write('g')\nprint([(d, sorted(ds), sorted(fs)) for d, ds, fs in os.walk('/data/x')])\nprint(sorted((e.name, e.is_dir(), e.is_file()) for e in os.scandir('/data/x')))\nshutil.copy('/data/x/g.txt', '/data/x/h.txt')\nshutil.move('/data/x/h.txt', '/data/x/y/h.txt')\nshutil.copytree('/data/x/y', '/data/x/w')\nshutil.rmtree('/data/x/y')\nprint(sorted(os.listdir('/data/x')), sorted(os.listdir('/data/x/w')), open('/data/x/w/h.txt').read())",
+            "node": "const fsp = require('node:fs').promises\nawait fsp.mkdir('/data/x/y/z', { recursive: true })\nawait fsp.mkdir('/data/x/y', { recursive: true })\nawait fsp.writeFile('/data/x/y/z/f.txt', 'f')\nawait fsp.writeFile('/data/x/g.txt', 'g')\nconsole.log(JSON.stringify((await fsp.readdir('/data/x', { withFileTypes: true })).map((e) => [e.name, e.isDirectory(), e.isFile()]).sort()))\nawait fsp.copyFile('/data/x/g.txt', '/data/x/h.txt')\nawait fsp.rename('/data/x/h.txt', '/data/x/y/h.txt')\nawait fsp.mkdir('/data/x/w/z', { recursive: true })\nawait fsp.copyFile('/data/x/y/h.txt', '/data/x/w/h.txt')\nawait fsp.copyFile('/data/x/y/z/f.txt', '/data/x/w/z/f.txt')\nawait fsp.rm('/data/x/y', { recursive: true })\nconsole.log(JSON.stringify((await fsp.readdir('/data/x')).sort()), JSON.stringify((await fsp.readdir('/data/x/w')).sort()), await fsp.readFile('/data/x/w/h.txt', 'utf8'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "[('/data/x', ['y'], ['g.txt']), ('/data/x/y', ['z'], []), ('/data/x/y/z', [], ['f.txt'])]\n[('g.txt', False, True), ('y', True, False)]\n['g.txt', 'w'] ['h.txt', 'z'] g\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "[[\"g.txt\",false,true],[\"y\",true,false]]\n[\"g.txt\",\"w\"] [\"h.txt\",\"z\"] g\n"
+            }
+          }
+        },
+        {
+          "command": "find /data/x | sort",
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/x\n/data/x/g.txt\n/data/x/w\n/data/x/w/h.txt\n/data/x/w/z\n/data/x/w/z/f.txt\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_tree_is_made_and_listed_by_quickjs",
+      "runtimes": [
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "s"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "js": "console.log(os.mkdir('/data/x'), os.mkdir('/data/x/y'), os.mkdir('/data/x/y'))\nconst f = std.open('/data/x/y/f.txt', 'w')\nf.puts('f')\nf.close()\nconst [names, err] = os.readdir('/data/x/y')\nconsole.log(err, names.filter((n) => n[0] !== '.').join(','))\nconsole.log(os.remove('/data/x/y/f.txt'), os.remove('/data/x/y'), os.readdir('/data/x')[0].filter((n) => n[0] !== '.').length)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "0 0 -20\n0 f.txt\n0 0 0\n"
+          }
+        },
+        {
+          "command": "find /data/x | sort",
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/x\n"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from mirage.concurrency.limiter import settle
-from mirage.io.types import ByteSource, materialize
+from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.types import ByteSource
 from mirage.runtime.types import OutputFn
 from mirage.runtime.wasm.fs import WasiFs, install_wasi_fs
 from mirage.runtime.wasm.loader import wasmtime
@@ -198,15 +199,15 @@ class WasmExecution:
 
         Args:
             argv (list[str]): full argv, including the program name.
-            stdin (ByteSource | None): the run's stdin, collected whole
-                before the guest starts.
+            stdin (ByteSource | None): the run's stdin, which the guest
+                takes as it reads it, as from a pipe.
             env (list[tuple[str, str]]): environment as (name, value) pairs.
             fs (WasmView): path router serving the run's filesystem.
             output (OutputFn | None): receives stdout as the guest writes
                 it; None returns it.
             errors (OutputFn | None): the same for stderr.
         """
-        data = None if stdin is None else await materialize(stdin)
+        reader = None if stdin is None else AsyncLineIterator(stdin)
         compilation = asyncio.create_task(asyncio.to_thread(self._checkout))
         try:
             engine, module = await asyncio.shield(compilation)
@@ -219,6 +220,7 @@ class WasmExecution:
         canceled = threading.Event()
         loop = asyncio.get_running_loop()
         writing: list[concurrent.futures.Future[None]] = []
+        reading: list[concurrent.futures.Future[bytes]] = []
         writes: set[asyncio.Task[Any]] = set()
 
         def emitter(sink: OutputFn | None) -> Callable[[bytes], None] | None:
@@ -241,13 +243,26 @@ class WasmExecution:
 
             return emit
 
+        def intake(size: int) -> bytes:
+            assert reader is not None
+            future: concurrent.futures.Future[bytes] = (
+                asyncio.run_coroutine_threadsafe(reader.read1(size), loop)
+            )
+            reading.append(future)
+            if canceled.is_set():
+                future.cancel()
+            try:
+                return future.result()
+            finally:
+                reading.remove(future)
+
         worker = asyncio.create_task(
             asyncio.to_thread(
                 self._run_sync,
                 engine,
                 module,
                 argv,
-                data,
+                None if reader is None else intake,
                 env,
                 fs,
                 canceled,
@@ -262,6 +277,8 @@ class WasmExecution:
             engine.increment_epoch()
             for future in list(writing):
                 future.cancel()
+            for taking in list(reading):
+                taking.cancel()
 
             async def stop() -> None:
                 try:
@@ -290,7 +307,7 @@ class WasmExecution:
         engine: "wasmtime.Engine",
         module: "wasmtime.Module",
         argv: list[str],
-        stdin: bytes | None,
+        stdin: Callable[[int], bytes] | None,
         env: list[tuple[str, str]],
         fs: WasmView,
         canceled: threading.Event,
@@ -307,7 +324,7 @@ class WasmExecution:
                 store.set_limits(memory_size=self._max_memory)
             if canceled.is_set():
                 return b"", None, 130
-            wasi_fs = WasiFs(fs, stdin or b"", canceled, output, errors)
+            wasi_fs = WasiFs(fs, stdin, canceled, output, errors)
             install_wasi_fs(linker, store, wasi_fs)
             wasi = wasmtime.WasiConfig()
             wasi.argv = argv

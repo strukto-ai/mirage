@@ -120,6 +120,7 @@ export class Descriptors {
       mode,
       path,
       row?.isDir === true,
+      this.files.walked(path),
     )
     const fd = (this.native.openSync as (p: string, f: string) => number)(devNull, 'r')
     this.table.set(fd, desc)

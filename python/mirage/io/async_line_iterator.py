@@ -318,6 +318,23 @@ class AsyncLineIterator:
             await self._failed(exc)
             raise
 
+    async def read1(self, size: int) -> bytes:
+        """At most ``size`` bytes with at most one pull of the source, as
+        a read(2) of a pipe answers (``io.BufferedReader.read1``): what has
+        arrived, the rest kept for the next read; b"" at the end of input.
+
+        Args:
+            size (int): byte budget.
+        """
+        if size <= 0:
+            return b""
+        chunk = await self.read_chunk()
+        if chunk is None:
+            return b""
+        if len(chunk) > size:
+            self.unread(chunk[size:])
+        return chunk[:size]
+
     async def discard(self) -> None:
         """Close the source and drop what it buffered, for input a failed
         line abandoned."""
