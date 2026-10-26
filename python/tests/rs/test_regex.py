@@ -203,4 +203,5 @@ async def test_a_cancelled_search_stops_and_leaves_the_expression_usable():
     regex = PosixRegex(LONG_PATTERN)
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(regex.matches("a" * 40 + "b"), 0.05)
+    assert not any(stream.busy() for stream in regex._streams._idle)
     assert await regex.matches("aac")

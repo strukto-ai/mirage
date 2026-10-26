@@ -24,7 +24,7 @@ export async function shortlog(
   const repo = await opened(ctx, fl)
   const mailmap = await loadMailmap(repo.vfs, repo.location)
   const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
-  const flags = { ...parseFlags(fl), pathspecs }
+  const flags = { ...parseFlags(fl, null, ctx.signal), pathspecs }
   const [starts, hidden] = await walkEnds(
     repo,
     revisions.length ? revisions : flags.allRefs ? [] : ['HEAD'],

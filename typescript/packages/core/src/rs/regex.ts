@@ -132,7 +132,9 @@ function open(config: Readonly<Record<string, util.JSONType>>): MovableStream {
  * The regex streams one compiled expression searches with. A search out of
  * steps stays in its stream, busy, until the caller's drains finish it, so
  * each search takes a stream of its own: an idle one, or a new one while every
- * stream is in another task's search. Mirrors Python's `_StreamPool`.
+ * stream is in another task's search. A stream an aborted search left busy
+ * still holds its subject, so it closes rather than going back. Mirrors
+ * Python's `_StreamPool`.
  */
 class StreamPool {
   readonly metadata: unknown
@@ -155,23 +157,25 @@ class StreamPool {
     signal?: AbortSignal,
   ): Promise<Uint8Array> {
     const movable = this.idle.pop() ?? open(this.config)
+    let stream = movable.live
     try {
       const budget = new YieldBudget(signal)
       for (;;) {
-        const stream = movable.live
+        stream = movable.live
         stream.begin(request)
         const parts = [stream.feed(data), stream.finish()]
         for (;;) {
           if (!stream.busy()) return concat(parts)
           await budget.run()
-          // A stream closes with its instance when that retires mid-search;
-          // the search starts over on the next one.
+          // A stream closes with its instance when another stream on it
+          // traps; the search starts over on the next one.
           if (!stream.live) break
           parts.push(stream.drain())
         }
       }
     } finally {
-      this.idle.push(movable)
+      if (stream.live && stream.busy()) movable.close()
+      else this.idle.push(movable)
     }
   }
 }

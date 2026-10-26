@@ -1,3 +1,6 @@
+import asyncio
+import threading
+
 import pytest
 
 from mirage.server.workspace_config import (
@@ -5,6 +8,7 @@ from mirage.server.workspace_config import (
     build_workspace_from_config,
     resolve_workspace_config,
 )
+from mirage.workspace.workspace import Workspace
 
 MINIMAL = "mounts:\n  /:\n    vfs: ram\n    mode: WRITE\n"
 
@@ -101,3 +105,34 @@ async def test_build_workspace_from_config(tree):
         assert ws.workspace_id
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_canceled_build_closes_the_mounts_it_made(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "fuse.yaml"
+    config.write_text(
+        "mounts:\n  /:\n    vfs: ram\n    mode: WRITE\n    backend: fuse\n"
+    )
+    mounting = threading.Event()
+    release = threading.Event()
+    closed = []
+
+    def add_fuse_mount(self, prefix, mountpoint=None, backend=None):
+        mounting.set()
+        release.wait(5)
+        return "/mnt"
+
+    async def close(self):
+        closed.append(self)
+
+    monkeypatch.setattr(Workspace, "add_fuse_mount", add_fuse_mount)
+    monkeypatch.setattr(Workspace, "close", close)
+    build = asyncio.create_task(build_workspace_from_config(config))
+    await asyncio.to_thread(mounting.wait, 5)
+    build.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await build
+    assert len(closed) == 1

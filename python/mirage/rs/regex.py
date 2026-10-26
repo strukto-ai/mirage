@@ -107,7 +107,9 @@ class _StreamPool:
     A search out of steps stays in its stream, busy, until the caller's
     drains finish it, so each search takes a stream of its own: an idle
     one, or a new one while every stream is in a search (another task's,
-    or a git worker thread's). The lock guards only the idle list.
+    or a git worker thread's). A stream a canceled search left busy still
+    holds its subject, so it is dropped rather than given back. The lock
+    guards only the idle list.
 
     Args:
         config (Mapping[str, JsonValue]): the regex stream's config.
@@ -129,6 +131,8 @@ class _StreamPool:
         return _open(self._config)
 
     def _give(self, stream: OpenStream) -> None:
+        if stream.busy():
+            return
         with self._lock:
             self._idle.append(stream)
 

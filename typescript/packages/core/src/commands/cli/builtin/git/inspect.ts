@@ -373,7 +373,7 @@ export async function revList(
     throw new UsageError('', verbUsage(ctx))
   }
   const repo = await opened(ctx, fl)
-  const parsed = parseFlags(fl)
+  const parsed = parseFlags(fl, null, ctx.signal)
   const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
   // A line naming only paths has no revision either (git 2.47.3).
   if (!revisions.length && !parsed.allRefs) throw new UsageError('', verbUsage(ctx))

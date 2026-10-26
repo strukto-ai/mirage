@@ -111,7 +111,9 @@ async def build_workspace_from_config(config_path: str | Path) -> "Workspace":
             await run_blocking(
                 workspace.add_fuse_mount, prefix, mountpoint, backend=backend
             )
-    except Exception:
+    except BaseException:
+        # run_blocking finishes the mount in flight before a cancel
+        # lands, so close takes that one down too.
         await workspace.close()
         raise
     return workspace

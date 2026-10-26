@@ -69,6 +69,21 @@ describe('openStream', () => {
     expect(await large.search('ax')).toEqual([[1, 2]])
   })
 
+  it('keeps an instance a paused search is on', async () => {
+    const instance = (stream: unknown): unknown => (stream as { exports: unknown }).exports
+    const size = 34 * 1024 * 1024
+    // `a*` keeps the automaton from skipping to the `x`, so the search pauses.
+    const regex = new PosixRegex('a*x$')
+    const search = regex.search('a'.repeat(size) + 'x')
+    const before = await openStream('base64', DECODE)
+    const grown = instance(before)
+    before.close()
+    const after = await openStream('base64', DECODE)
+    expect(instance(after)).toBe(grown)
+    after.close()
+    expect(await search).toEqual([[0, size + 1]])
+  })
+
   it('reads one input after another', async () => {
     const stream = await openStream('grep', { patterns: ['*a'], syntax: 'extended', count: true })
     const text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
