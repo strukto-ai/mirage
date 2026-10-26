@@ -18,7 +18,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
-import { getTestParser, voicedStderr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { voicedStderr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
 import { Admitted, admit, policyScopes } from './admission.ts'
@@ -30,6 +30,7 @@ import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { command, type CommandFn } from '../../commands/config.ts'
 import { SPECS } from '../../commands/spec/index.ts'
 import { Argument, CommandSpec } from '../../commands/spec/types.ts'
+import { parse } from '../../shell/parse/parse.ts'
 
 const DEC = new TextDecoder()
 
@@ -76,13 +77,11 @@ afterEach(async () => {
   for (const ws of open.splice(0)) await ws.close()
 })
 
-async function ws(profile: SessionProfile | null = DOC): Promise<Workspace> {
-  const parser = await getTestParser()
+function ws(profile: SessionProfile | null = DOC): Workspace {
   const w = new Workspace(
     { '/data': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       ...(profile !== null ? { profiles: { default: profile } } : {}),
     },
   )
@@ -107,7 +106,6 @@ describe('admission', () => {
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         profiles: {
           default: parseSessionProfile({
             commands: { deny: [{ reason: 'elsewhere', paths: ['/secret'] }] },
@@ -123,7 +121,7 @@ describe('admission', () => {
   }, 30000)
 
   it('policy scopes follow links only for a following command', async () => {
-    const w = await ws()
+    const w = ws()
     await w.shell('echo top > /data/secret && ln -s /data/secret /data/link')
     // cat opens the target: the typed path first, then what it resolves
     // to; rm and `ls -l` act on the link itself.
@@ -143,7 +141,7 @@ describe('admission', () => {
     // `ls`, `find`, `du`, `tree` and `grep -r` typed bare read the cwd,
     // an operand the executor injects after the gate; a rule on that
     // directory has to see it here, as the operand typed `.`.
-    const w = await ws()
+    const w = ws()
     await w.shell('mkdir -p /data/private && echo x > /data/private/f')
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const run = async (name: string, args: string[], stdin: Uint8Array | null = null) => {
@@ -184,7 +182,7 @@ describe('admission', () => {
     // A session that cannot see a path must not learn of it from a
     // rule: the gate drops the operand before any method, the rule does
     // not fire, and the line goes on to the dispatcher, which answers ENOENT.
-    const w = await ws()
+    const w = ws()
     await w.shell('mkdir -p /data/private && echo s > /data/secret')
     const veiled = w.createSession('veiled', {
       profile: { paths: { hide: ['/data/secret', '/data/private'] } },
@@ -223,12 +221,11 @@ describe('admission', () => {
   })
 
   it('admitLine reads literal words and refuses the unreadable', async () => {
-    const w = await ws()
-    const parser = await getTestParser()
+    const w = ws()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
-    const reparse = (text: string) => parser.parse(text)
+    const reparse = (text: string) => parse(text)
     const line = async (text: string) => {
-      const refusal = await admitLine(parser.parse(text), session, w.registry, w.namespace, reparse)
+      const refusal = await admitLine(parse(text), session, w.registry, w.namespace, reparse)
       return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
     }
     const unread = (raw: string) =>
@@ -283,23 +280,19 @@ describe('admission', () => {
   it('admitLine without rules admits the words as typed', async () => {
     // No command rule in force: nothing is refused for being unreadable,
     // which is what a coded policy always saw.
-    const w = await ws(null)
-    const parser = await getTestParser()
+    const w = ws(null)
     const session = w.sessionManager.get(w.sessionManager.defaultId)
-    const reparse = (text: string) => parser.parse(text)
+    const reparse = (text: string) => parse(text)
     for (const text of ['$cmd /data/x', 'eval "$p"', 'source /data/env.sh', 'ls | xargs cat']) {
-      expect(
-        await admitLine(parser.parse(text), session, w.registry, w.namespace, reparse),
-      ).toBeNull()
+      expect(await admitLine(parse(text), session, w.registry, w.namespace, reparse)).toBeNull()
     }
   })
 
   it('admitLine refuses the first offending command', async () => {
-    const w = await ws()
-    const parser = await getTestParser()
+    const w = ws()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = (text: string) =>
-      admitLine(parser.parse(text), session, w.registry, w.namespace, (t) => parser.parse(t))
+      admitLine(parse(text), session, w.registry, w.namespace, (t) => parse(t))
     expect(await line('cat /data/a | head -n 1')).toBeNull()
     // An unlisted word anywhere in the line is the allow list's Deny.
     const unlisted = await line('cat /data/a | sort')
@@ -324,12 +317,11 @@ describe('admission', () => {
     // `cat secret` from /data names /data/secret only through cat's
     // spec: the bare word has no path shape for the heuristics, and the
     // runtime resolves it against the cwd exactly as the spec hints do.
-    const w = await ws()
+    const w = ws()
     await w.shell('cd /data')
-    const parser = await getTestParser()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = (text: string) =>
-      admitLine(parser.parse(text), session, w.registry, w.namespace, (t) => parser.parse(t))
+      admitLine(parse(text), session, w.registry, w.namespace, (t) => parse(t))
     const sealed = await line('cat secret')
     expect([sealed?.exitCode, DEC.decode(sealed?.stderr)]).toEqual([
       1,
@@ -344,16 +336,15 @@ describe('admission', () => {
     // slot from the interpreter's spec as it does a mount command's: a
     // bare name under the cwd is the file it names, and once -c or -e
     // names the program no operand is a path.
-    const w = await ws(
+    const w = ws(
       parseSessionProfile({
         commands: { deny: [{ reason: 'sealed', paths: ['/data/secret*'] }] },
       }),
     )
     await w.shell('cd /data')
-    const parser = await getTestParser()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = (text: string) =>
-      admitLine(parser.parse(text), session, w.registry, w.namespace, (t) => parser.parse(t))
+      admitLine(parse(text), session, w.registry, w.namespace, (t) => parse(t))
     const sealed = await line('python3 secret.py')
     expect([sealed?.exitCode, DEC.decode(sealed?.stderr)]).toEqual([
       1,
@@ -374,12 +365,11 @@ describe('admission', () => {
     // disk), so a command a path rule reads must not reach it with a
     // walk or a pattern in hand: the walk would read entries the gate
     // never judged, and only the runtime would see the matches.
-    const w = await ws()
-    const parser = await getTestParser()
+    const w = ws()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = async (text: string) => {
-      const refusal = await admitLine(parser.parse(text), session, w.registry, w.namespace, (t) =>
-        parser.parse(t),
+      const refusal = await admitLine(parse(text), session, w.registry, w.namespace, (t) =>
+        parse(t),
       )
       return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
     }
@@ -407,12 +397,11 @@ describe('admission', () => {
     // admitted command's gate window, so the gate judges it with the
     // line: `cat < /data/secret` reads the file it protects, and a
     // target only the runtime can expand is unread like any word.
-    const w = await ws()
-    const parser = await getTestParser()
+    const w = ws()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = async (text: string) => {
-      const refusal = await admitLine(parser.parse(text), session, w.registry, w.namespace, (t) =>
-        parser.parse(t),
+      const refusal = await admitLine(parse(text), session, w.registry, w.namespace, (t) =>
+        parse(t),
       )
       return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
     }
@@ -448,12 +437,9 @@ describe('admission', () => {
   ]
 
   it.each(HOISTED)('admitLine binds a hoisted redirect to its command: %s', async (text) => {
-    const w = await ws()
-    const parser = await getTestParser()
+    const w = ws()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
-    const refusal = await admitLine(parser.parse(text), session, w.registry, w.namespace, (t) =>
-      parser.parse(t),
-    )
+    const refusal = await admitLine(parse(text), session, w.registry, w.namespace, (t) => parse(t))
     expect(refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]).toEqual([
       1,
       'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
@@ -464,7 +450,7 @@ describe('admission', () => {
     // The run hands a redirect's targets to the gate of the node it runs
     // under them, so a redirect left on a `!` (or a pipeline) never
     // reached `cat`'s gate and `! cat < /data/secret` printed the file.
-    const w = await ws()
+    const w = ws()
     await w.shell('echo TOPSECRET > /data/secret')
     const io = await w.shell(text)
     expect(DEC.decode(io.stdout)).not.toContain('TOPSECRET')
@@ -543,7 +529,7 @@ describe('admission', () => {
   })
 
   it('admit reports the grant the line runs under', async () => {
-    const w = await ws()
+    const w = ws()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const words = classifyParts(['rm', '/data/x'], w.registry, session.cwd)
     const verdict = await admit('rm', ['/data/x'], words.slice(1), session, w.registry, w.namespace)
@@ -633,7 +619,6 @@ describe('what the handler a command resolves to declares', () => {
       { '/data/': new RAMVFS(), '/other/': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         policies: [
           {
             preCommand: (ctx: CommandContext): Action | null => {
@@ -713,7 +698,6 @@ describe('what the handler a command resolves to declares', () => {
         { '/reader': new RAMVFS(), '/write': new RAMVFS() },
         {
           mode: MountMode.WRITE,
-          shellParser: await getTestParser(),
           policies: [
             {
               preCommand: (ctx): Action | null =>
@@ -763,7 +747,6 @@ describe('what the handler a command resolves to declares', () => {
       { '/reader': new RAMVFS(), '/write': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         policies: [
           {
             preCommand: (ctx): Action | null =>
@@ -802,7 +785,6 @@ describe('what the handler a command resolves to declares', () => {
         { '/reader': new RAMVFS(), '/write': new RAMVFS() },
         {
           mode: MountMode.WRITE,
-          shellParser: await getTestParser(),
           profiles: { default: parseSessionProfile({ commands: { [decision]: ['remote send'] } }) },
         },
       )
@@ -848,7 +830,6 @@ describe('what the handler a command resolves to declares', () => {
       { '/reader': new RAMVFS(), '/write': [new RAMVFS(), MountMode.READ] },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         policies: [
           {
             preCommand: (ctx): Action | null =>
@@ -885,7 +866,7 @@ function spell(name: string, expr: string): string {
 // The answer to one test spelled under a name, on fresh files, in a session
 // under `profile`: exit, stdout, stderr.
 async function tested(profile: SessionProfile, name: string, prefix: string, expr: string) {
-  const w = await ws(null)
+  const w = ws(null)
   await w.shell('echo a > /data/a.txt; echo s > /data/secret.txt')
   w.createSession('s', { profile })
   const r = await w.shell(`${prefix}${spell(name, expr)}; echo $?`, { sessionId: 's' })

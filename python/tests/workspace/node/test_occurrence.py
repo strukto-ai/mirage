@@ -26,11 +26,27 @@ from mirage.workspace.node.occurrence import (
     line_frame,
     occurrence_in,
     occurrence_of,
-    part_of,
     root_frame,
     segment_frames,
     whole_occurrence,
 )
+
+
+def _all(node, kind: str) -> list:
+    """Every node of a type under a tree, in source order.
+
+    Args:
+        node: the tree to scan.
+        kind (str): the node type.
+    """
+    found = []
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current.type == kind:
+            found.append(current)
+        stack.extend(reversed(current.children))
+    return found
 
 
 def _first(node, kind: str):
@@ -128,26 +144,23 @@ def test_a_substitution_body_is_read_as_the_nested_line_parses_it():
     assert walked == ran
 
 
-def test_a_backtick_region_is_one_line_per_pair():
-    # tree-sitter lexes touching pairs as one node whose subtree merges
-    # the two commands into one; the evaluator splits the region and
-    # runs each pair as a line of its own, standing at the pair's own
-    # span on the line, and the pass reads it the same way.
+def test_each_backtick_pair_is_a_line_of_its_own():
+    # Each pair is a substitution of its own, run as a line standing at
+    # its own span, and the pass reads it the same way.
     line = "echo `cat /data/secret.txt` `echo ok`"
     ast = parse(line)
     frame = root_frame(ast, None)
-    sub = _first(ast, NodeType.COMMAND_SUBSTITUTION)
-    assert body_frame(sub, frame) is None
-    first, second = segment_frames(sub, frame)
-    assert (first.text, second.text) == ("cat /data/secret.txt", "echo ok")
-    for inner in (first, second):
+    subs = _all(ast, NodeType.COMMAND_SUBSTITUTION)
+    frames = [inner for sub in subs for inner in segment_frames(sub, frame)]
+    assert [inner.text for inner in frames] == [
+        "cat /data/secret.txt",
+        "echo ok",
+    ]
+    for inner in frames:
         assert inner.base == 0
         assert inner.parent is not None
         assert line[inner.parent.start : inner.parent.end] == inner.text
-    # What the nested line computes when expansion hands the executor
-    # the pair's span within the node.
-    assert occurrence_of(sub, HandOff(), (1, 21)) == first.parent
-    assert part_of(occurrence_in(sub, frame), 1, 21) == first.parent
+    assert occurrence_of(subs[0], HandOff(), (1, 21)) == frames[0].parent
 
 
 def test_a_folded_prefix_is_set_aside_before_a_region_is_split():
@@ -202,11 +215,17 @@ def test_a_pair_after_a_multibyte_character_stands_at_its_bytes():
     line = "echo `echo é` `cat /data/secret.txt`"
     ast = parse(line)
     frame = root_frame(ast, None)
-    sub = _first(ast, NodeType.COMMAND_SUBSTITUTION)
-    first, second = segment_frames(sub, frame)
-    assert (first.text, second.text) == ("echo é", "cat /data/secret.txt")
+    frames = [
+        inner
+        for sub in _all(ast, NodeType.COMMAND_SUBSTITUTION)
+        for inner in segment_frames(sub, frame)
+    ]
+    assert [inner.text for inner in frames] == [
+        "echo é",
+        "cat /data/secret.txt",
+    ]
     raw = line.encode()
-    for inner in (first, second):
+    for inner in frames:
         assert inner.parent is not None
         assert (
             raw[inner.parent.start : inner.parent.end].decode() == inner.text

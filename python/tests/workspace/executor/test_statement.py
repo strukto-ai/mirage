@@ -12,9 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.io import IOResult
+from mirage.shell.console import Channel, JobOutput
+from mirage.shell.descriptors import Recorder
 from mirage.shell.parse import parse
 from mirage.workspace.executor.statement import (
     assignment_status,
@@ -22,8 +26,12 @@ from mirage.workspace.executor.statement import (
     finish_statement,
     forks,
     ignoring_errexit,
+    land,
+    land_late,
+    record_jobs,
     restore_status,
     snapshot_status,
+    statement_output,
 )
 from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.session import SessionState
@@ -148,3 +156,46 @@ def test_ignoring_errexit_scopes_the_context():
             pass
         assert session.errexit_ignored
     assert errexit_acts(node, 1, session)
+
+
+@pytest.mark.asyncio
+async def test_a_job_writing_before_its_statement_lands_follows_it():
+    # A job that writes after the statement's output was taken but before
+    # it landed lands after it; one that writes once the recording ended
+    # goes straight on to the shell.
+    session = SessionState(session_id="t")
+    shell = Recorder()
+    jobs = JobOutput(shell)
+    session.job_output = jobs
+    recorder = Recorder()
+    leave = record_jobs(session, recorder)
+    await jobs.emit(Channel.STDOUT, b"statement\n")
+    written = await statement_output(recorder, None, IOResult(), None, shell)
+    await jobs.emit(Channel.STDOUT, b"late\n")
+    merged = await land(written, shell, [], IOResult())
+    await land_late(recorder, leave, None, shell, [], merged)
+    await jobs.emit(Channel.STDOUT, b"after\n")
+    assert b"".join([data for _, data in await shell.take()]) == (
+        b"statement\nlate\nafter\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_job_writing_once_its_statement_stopped_recording_waits():
+    # What a job writes once the recording ended waits until what was
+    # recorded has landed, so it cannot overtake it.
+    session = SessionState(session_id="t")
+    shell = Recorder()
+    jobs = JobOutput(shell)
+    session.job_output = jobs
+    recorder = Recorder()
+    leave = record_jobs(session, recorder)
+    await jobs.emit(Channel.STDOUT, b"a\n")
+    await jobs.emit(Channel.STDOUT, b"b\n")
+    landing = asyncio.ensure_future(
+        land_late(recorder, leave, None, shell, [], IOResult())
+    )
+    await asyncio.sleep(0)
+    await jobs.emit(Channel.STDOUT, b"c\n")
+    await landing
+    assert b"".join([data for _, data in await shell.take()]) == b"a\nb\nc\n"

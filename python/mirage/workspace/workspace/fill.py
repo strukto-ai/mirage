@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping, Sequence
+from functools import partial
 
 from mirage.commands.cli.walk import invoked_env_names, supplied_env_names
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
@@ -142,7 +143,12 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
                 else live
             )
             found = (
-                [(body, saved) for body in parse_function(stored, parse)]
+                [
+                    (body, saved)
+                    for body in parse_function(
+                        stored, partial(parse, aliases=frozenset(saved))
+                    )
+                ]
                 if stored is not None
                 else []
             )
@@ -154,7 +160,15 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
                 # That keeps its argument list honest -- a CLI named in
                 # an alias reads as "verbs unknowable" (whole spec
                 # tree) rather than "no verb selected".
-                found.append((parse(aliases[word] + _ALIAS_REST), aliases))
+                found.append(
+                    (
+                        parse(
+                            aliases[word] + _ALIAS_REST,
+                            frozenset(aliases) - {word},
+                        ),
+                        aliases,
+                    )
+                )
             nodes.extend(body for body, _ in found)
             frontier.extend(found)
     return nodes

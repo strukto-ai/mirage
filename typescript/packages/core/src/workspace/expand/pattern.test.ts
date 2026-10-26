@@ -17,19 +17,18 @@ import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
 import { getCaseItems } from '../../shell/helpers.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import type { ExecuteFn } from './types.ts'
 import { escapeGlob } from '../../utils/glob_walk.ts'
 import { expandPattern } from './pattern.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { parse } from '../../shell/parse/parse.ts'
 
 const failExec: ExecuteFn = () =>
   Promise.reject(new Error('pattern expansion must not run commands here'))
 
 async function expand(snippet: string, env: Record<string, string> = {}): Promise<string> {
-  const parser = await getTestParser()
-  const root = parser.parse(`case x in ${snippet}) :;; esac`) as unknown as TSNodeLike
+  const root = parse(`case x in ${snippet}) :;; esac`) as unknown as TSNodeLike
   const caseNode = root.children[0]
   if (caseNode === undefined) throw new Error('no case statement parsed')
   const [item] = getCaseItems(caseNode)

@@ -15,17 +15,15 @@
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // A read-family command with one good and one missing operand keeps the
 // good operand's output, reports each missing operand on stderr, and exits
 // 1, per GNU coreutils. Single-mount and cross-mount must be byte-identical.
 async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
   const a = new RAMVFS()
   const b = new RAMVFS()
-  const ws = new Workspace({ '/a': a, '/b': b }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/a': a, '/b': b }, { mode: MountMode.WRITE })
   await ws.shell('echo aaa > /a/f.txt')
   return ws
 }
@@ -196,9 +194,8 @@ describe('cross-mount partial output matches single-mount bytes', () => {
 })
 
 async function makeNumberedWs(): Promise<Workspace> {
-  const parser = await getTestParser()
   const a = new RAMVFS()
-  const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE })
   await ws.shell("printf '1\\n2\\n' > /a/f.txt && printf '3\\n4\\n' > /a/g.txt")
   await ws.shell("printf 'hello\\n' > /a/h.txt")
   return ws

@@ -25,7 +25,6 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
@@ -40,7 +39,6 @@ import { secretStr } from '../vfs/secrets.ts'
 import { RAMVFS, type RAMVFSState } from '../vfs/ram/ram.ts'
 import type { VFSStateBase } from '../vfs/base.ts'
 import { type JobResult } from '../shell/job_table/index.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { DEFAULT_READ_TTL, Limit, MountMode, ReadPolicy } from '../types.ts'
 import { VERSION } from '../version.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
@@ -58,15 +56,9 @@ import { Workspace } from './workspace/workspace.ts'
 import { ManualClock } from '../utils/clock.ts'
 import type { NOOPAccessor } from '../accessor/base.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
 let tempDir: string
 
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
+beforeAll(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'mirage-snapshot-'))
 })
 
@@ -82,10 +74,10 @@ it('preserves effective mount index settings and aliases through snapshots', asy
       '/alias': new Mount(driver, { index: { ttl: 99 } }),
       '/default': new RAMVFS(),
     },
-    { index: { ttl: 73 }, shellParser: parser },
+    { index: { ttl: 73 } },
   )
   try {
-    const restored = await Workspace.fromState(await toStateDict(ws), { shellParser: parser })
+    const restored = await Workspace.fromState(await toStateDict(ws), {})
     try {
       for (const entry of restored.mounts()) {
         if (['/first/', '/alias/', '/default/'].includes(entry.prefix)) {
@@ -111,10 +103,7 @@ it.each(['redis://localhost:6379/2', 'redis://user:secret@localhost:6379/2'])(
       keyPrefix: 'test:index:',
       ttl: 91,
     }
-    const ws = new Workspace(
-      { '/data': new Mount(new RAMVFS(), { index: config }) },
-      { shellParser: parser },
-    )
+    const ws = new Workspace({ '/data': new Mount(new RAMVFS(), { index: config }) }, {})
     try {
       const state = await toStateDict(ws)
       let overrides = {}
@@ -140,7 +129,7 @@ it.each(['redis://localhost:6379/2', 'redis://user:secret@localhost:6379/2'])(
 
 function buildWorkspace(): Workspace {
   const ram = new RAMVFS()
-  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
 }
 
 describe('toStateDict / applyStateDict', () => {
@@ -165,7 +154,6 @@ describe('toStateDict / applyStateDict', () => {
     await ws.snapshot(path)
     const loaded = await Workspace.load(path, {
       mode: MountMode.WRITE,
-      shellParser: parser,
     })
     const entries = await loaded.history()
     expect(entries.length).toBe(2)
@@ -178,7 +166,7 @@ describe('toStateDict / applyStateDict', () => {
   it('restores cache entries even when every mount has redacted config', async () => {
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
-    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
+    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
     await ws.shell('echo "cached" | tee /data/x.txt > /dev/null')
     await ws.shell('cat /data/x.txt > /dev/null')
     const state = await toStateDict(ws)
@@ -189,11 +177,7 @@ describe('toStateDict / applyStateDict', () => {
 
     const overrides: Record<string, RAMVFS> = {}
     for (const m of state.mounts) overrides[m.prefix] = new RAMVFS()
-    const restored = await Workspace.fromState(
-      state,
-      { mode: MountMode.WRITE, shellParser: parser },
-      overrides,
-    )
+    const restored = await Workspace.fromState(state, { mode: MountMode.WRITE }, overrides)
     const cacheKeys = (
       restored as unknown as { cache: { snapshotEntries(): { key: string }[] } }
     ).cache
@@ -217,11 +201,7 @@ describe('toStateDict / applyStateDict', () => {
       Object.assign(m.vfs_state, { config: { url: REDACTED_SECRET } })
       overrides[m.prefix] = new RAMVFS()
     }
-    const restored = await Workspace.fromState(
-      state,
-      { mode: MountMode.WRITE, shellParser: parser },
-      overrides,
-    )
+    const restored = await Workspace.fromState(state, { mode: MountMode.WRITE }, overrides)
     try {
       const r = await restored.shell('cat /data/x.txt')
       expect(new TextDecoder().decode(r.stdout)).toBe('kept\n')
@@ -249,7 +229,7 @@ describe('toStateDict / applyStateDict', () => {
     const notes = new NotesRAM()
     const ws = new Workspace(
       { '/a': new RAMVFS(), '/d': notes, '/s': new BoxVFS({ accessToken: 'fake' }) },
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
     )
     const read = async (path: string): Promise<string> =>
       new TextDecoder().decode(await ws.vfs.read(path))
@@ -290,7 +270,6 @@ describe('Workspace.snapshot / Workspace.load', () => {
 
     const loaded = await Workspace.load(path, {
       mode: MountMode.WRITE,
-      shellParser: parser,
     })
     const r = await loaded.shell('cat /data/x.txt')
     expect(new TextDecoder().decode(r.stdout)).toBe('persistent\n')
@@ -305,7 +284,6 @@ describe('Workspace.snapshot / Workspace.load', () => {
     await expect(
       Workspace.fromState(state, {
         mode: MountMode.WRITE,
-        shellParser: parser,
       }),
     ).rejects.toThrow(/snapshot format/)
     await ws.close()
@@ -315,12 +293,9 @@ describe('Workspace.snapshot / Workspace.load', () => {
 // Twin of test_a_rebuilt_local_mount_keeps_its_walk_limit.
 describe('a rebuilt RAM mount', () => {
   it.each([2, -1])('keeps its walk limit (%d)', async (limit) => {
-    const ws = new Workspace(
-      { '/d': new RAMVFS({ walkLimit: limit }) },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/d': new RAMVFS({ walkLimit: limit }) }, { mode: MountMode.WRITE })
     const copied = await ws.copy()
-    const restored = await Workspace.fromState(await toStateDict(ws), { shellParser: parser })
+    const restored = await Workspace.fromState(await toStateDict(ws), {})
     try {
       expect([copied.mount('/d/').vfs.walkLimit, restored.mount('/d/').vfs.walkLimit]).toEqual([
         limit,
@@ -358,7 +333,7 @@ describe('Workspace.copy', () => {
       }
     }
     const shared = new SharedRAM()
-    const ws = new Workspace({ '/r': shared }, { mode: MountMode.WRITE, shellParser: parser })
+    const ws = new Workspace({ '/r': shared }, { mode: MountMode.WRITE })
     try {
       expect((await ws.shell('echo x > /r/gone.txt')).exitCode).toBe(0)
       const cp = await ws.copy()
@@ -378,7 +353,6 @@ describe('Workspace.copy', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: { ro: { commands: { deny: [{ reason: 'read-only', commands: ['rm'] }] } } },
         profile: 'ro',
       },
@@ -404,7 +378,6 @@ describe('Workspace.copy', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: {
           default: { commands: { deny: [{ reason: 'denied by policy', commands: ['rm'] }] } },
           ro: { paths: { hide: ['/data/secrets'] } },
@@ -420,7 +393,7 @@ describe('Workspace.copy', () => {
     } finally {
       await ws.close()
     }
-    const loaded = await Workspace.load(tar, { shellParser: parser })
+    const loaded = await Workspace.load(tar, {})
     try {
       const listed = await loaded.shell('ls /data', { sessionId: 'agent' })
       expect([listed.exitCode, new TextDecoder().decode(listed.stdout)]).toEqual([0, ''])
@@ -452,7 +425,6 @@ describe('Workspace.snapshot / load — filenames with spaces and unicode', () =
     await src.snapshot(path)
     const loaded = await Workspace.load(path, {
       mode: MountMode.WRITE,
-      shellParser: parser,
     })
     const dstMount = loaded.mount('/data/')
     const dstRam = dstMount.vfs as RAMVFS
@@ -529,7 +501,6 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
 
     const ws2 = await Workspace.fromState(state, {
       mode: MountMode.WRITE,
-      shellParser: parser,
     })
     const def = ws2.sessionManager.get(ws2.sessionManager.defaultId)
     expect(def.cwd).toBe('/data')
@@ -557,10 +528,7 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
 
   it('preserves a non-default default session id', async () => {
     const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/data': ram },
-      { mode: MountMode.WRITE, shellParser: parser, sessionId: 'main' },
-    )
+    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, sessionId: 'main' })
     await ws.shell('cd /data')
     await ws.shell('export FOO=bar')
 
@@ -569,7 +537,6 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
 
     const ws2 = await Workspace.fromState(state, {
       mode: MountMode.WRITE,
-      shellParser: parser,
     })
     expect(ws2.sessionManager.defaultId).toBe('main')
     const def = ws2.sessionManager.get('main')
@@ -592,10 +559,7 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
   it('aggregates every redacted mount missing an override into one error', async () => {
     const ramA = new RAMVFS()
     const ramB = new RAMVFS()
-    const ws = new Workspace(
-      { '/a': ramA, '/b': ramB },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/a': ramA, '/b': ramB }, { mode: MountMode.WRITE })
     const state = await toStateDict(ws)
     for (const m of state.mounts) {
       Object.assign(m.vfs_state, { config: { token: '<REDACTED>' } })
@@ -604,7 +568,6 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     try {
       await Workspace.fromState(state, {
         mode: MountMode.WRITE,
-        shellParser: parser,
       })
     } catch (e) {
       err = e as Error
@@ -646,13 +609,11 @@ describe('cli registry snapshot', () => {
         },
       ])
 
-      await expect(Workspace.fromState(state, { shellParser: parser })).rejects.toThrow(
-        /clis= must include/,
-      )
+      await expect(Workspace.fromState(state, {})).rejects.toThrow(/clis= must include/)
 
       const ws2 = await Workspace.fromState(
         state,
-        { shellParser: parser },
+        {},
         {},
         { snapcli: { token: 'sek2', channel: 'eng' } },
       )
@@ -717,7 +678,7 @@ describe('cli registry snapshot', () => {
     // captured verbatim rather than guessed at.
     expect(entry?.config).toEqual({ width: 80 })
 
-    const restored = await Workspace.fromState(state, { shellParser: parser })
+    const restored = await Workspace.fromState(state, {})
     const install = restored.clis().get('pager')
     expect(install?.cli.script?.source).toBe("print('hi')")
     expect(install?.cli.runtime).toBeNull()
@@ -739,7 +700,7 @@ describe('cli registry snapshot', () => {
     const state = await toStateDict(ws)
     expect(state.clis?.[0]?.runtime).toBe('quickjs')
     expect(state.clis?.[0]?.script?.module).toBe(true)
-    const restored = await Workspace.fromState(state, { shellParser: parser })
+    const restored = await Workspace.fromState(state, {})
     const install = restored.clis().get('pager')
     expect(install?.cli.runtime).toBe('quickjs')
     expect(install?.cli.script?.module).toBe(true)
@@ -909,7 +870,6 @@ function gatedWorkspace(prefix = '/data', sessionId?: string): Workspace {
     { [prefix]: ram },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       policies: [new DenyGate()],
       ...(sessionId !== undefined ? { sessionId } : {}),
     },
@@ -944,7 +904,6 @@ describe('applyStateDict and the deployment', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         ...(state.default_session_id !== undefined ? { sessionId: state.default_session_id } : {}),
         policies: [new CwdGate()],
       },
@@ -965,7 +924,6 @@ describe('applyStateDict and the deployment', () => {
     const state = await toStateDict(source)
     await source.close()
     const loaded = await Workspace.fromState(state, {
-      shellParser: parser,
       profiles: { default: { commands: { deny: [{ reason: 'no rm', commands: ['rm'] }] } } },
     })
     try {
@@ -995,10 +953,7 @@ describe('applyStateDict and the deployment', () => {
   // close would then persist. Every table is vetted before anything lands.
   it('a refused session table leaves the workspace untouched', async () => {
     const ram = new RAMVFS()
-    const source = new Workspace(
-      { '/data': ram },
-      { mode: MountMode.WRITE, shellParser: parser, sessionId: 'src' },
-    )
+    const source = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, sessionId: 'src' })
     expect((await source.shell('echo restored > /data/f.txt')).exitCode).toBe(0)
     expect((await source.shell('export PUBLIC_A=1')).exitCode).toBe(0)
     source.createSession('s2')
@@ -1019,10 +974,7 @@ describe('applyStateDict and the deployment', () => {
   // lands no session either.
   it('a refused env template lands no session', async () => {
     const ram = new RAMVFS()
-    const source = new Workspace(
-      { '/data': ram },
-      { mode: MountMode.WRITE, shellParser: parser, env: { GATE_X: '1' } },
-    )
+    const source = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, env: { GATE_X: '1' } })
     expect((await source.shell('unset GATE_X; export PUBLIC_A=1')).exitCode).toBe(0)
     const state = await toStateDict(source)
     await source.close()
@@ -1051,7 +1003,6 @@ describe('applyStateDict and the deployment', () => {
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: {
           default: { commands: { deny: [{ reason: 'no removals', commands: ['rm'] }] } },
         },
@@ -1083,7 +1034,6 @@ describe('applyStateDict and the deployment', () => {
         { '/a': new RAMVFS(), '/b': new RAMVFS() },
         {
           mode: MountMode.WRITE,
-          shellParser: parser,
           sessionId: 's',
           profiles: { default: { mounts: new Map([[prefix, { mode: MountMode.READ }]]) } },
         },
@@ -1114,7 +1064,6 @@ describe('applyStateDict and the deployment', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: { default: { commands: { ask: [{ reason: 'ask', commands: ['rm'] }] } } },
       },
     )
@@ -1122,7 +1071,7 @@ describe('applyStateDict and the deployment', () => {
     const recorded = source.decisions.list()
     const state = await toStateDict(source)
     await source.close()
-    const loaded = await Workspace.fromState(state, { shellParser: parser })
+    const loaded = await Workspace.fromState(state, {})
     try {
       expect(recorded).toHaveLength(1)
       expect(loaded.decisions.list().map((d) => d.id)).toEqual(recorded.map((d) => d.id))
@@ -1141,10 +1090,7 @@ describe('applyStateDict and the deployment', () => {
       const state = await toStateDict(source)
       await source.close()
       const other = new RAMVFS()
-      const target = new Workspace(
-        { '/elsewhere': other },
-        { mode: MountMode.WRITE, shellParser: parser },
-      )
+      const target = new Workspace({ '/elsewhere': other }, { mode: MountMode.WRITE })
       await applyStateDict(target, state)
       await target.close()
       const messages = warn.mock.calls.map((c) => String(c[0]))
@@ -1165,19 +1111,13 @@ describe('applyStateDict and the deployment', () => {
     try {
       const data = new RAMVFS()
       const keep = new RAMVFS()
-      const source = new Workspace(
-        { '/data': data, '/keep': keep },
-        { mode: MountMode.WRITE, shellParser: parser },
-      )
+      const source = new Workspace({ '/data': data, '/keep': keep }, { mode: MountMode.WRITE })
       const state = await toStateDict(source)
       await source.close()
       for (const m of state.mounts) m.vfs_state = { ...m.vfs_state, needs_override: true }
       const live = new RAMVFS()
       const loadState = vi.spyOn(live, 'loadState')
-      const target = new Workspace(
-        { '/keep': live },
-        { mode: MountMode.WRITE, shellParser: parser },
-      )
+      const target = new Workspace({ '/keep': live }, { mode: MountMode.WRITE })
       await applyStateDict(target, state)
       await target.close()
       const messages = warn.mock.calls.map((c) => String(c[0]))
@@ -1395,7 +1335,7 @@ describe('the workspace clock across a snapshot', () => {
   it('ages a restored cache entry on the clock the restoring workspace was given', async () => {
     const src = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser, clock: new ManualClock(1000) },
+      { mode: MountMode.WRITE, clock: new ManualClock(1000) },
     )
     const clock = new ManualClock(1000)
     try {
@@ -1403,7 +1343,6 @@ describe('the workspace clock across a snapshot', () => {
       const state = await toStateDict(src)
       const restored = await Workspace.fromState(state, {
         mode: MountMode.WRITE,
-        shellParser: parser,
         clock,
       })
       try {
@@ -1421,10 +1360,7 @@ describe('the workspace clock across a snapshot', () => {
 
   it('a copy keeps the workspace clock', async () => {
     const clock = new ManualClock(1000)
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser, clock },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, clock })
     const copied = await ws.copy()
     try {
       await copied.cache.set('/data/c.txt', new TextEncoder().encode('cached'), { ttl: 10 })

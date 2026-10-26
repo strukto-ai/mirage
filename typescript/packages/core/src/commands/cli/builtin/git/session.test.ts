@@ -13,14 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { execFileSync } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
-import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
@@ -30,16 +28,10 @@ const BUILDER = fileURLToPath(
   new URL('../../../../../../../../integ/fixtures/git/build.sh', import.meta.url),
 )
 const DEC = new TextDecoder()
-const require = createRequire(import.meta.url)
 
-let parser: ShellParser
 let fixture: string
 
-beforeAll(async () => {
-  parser = await createShellParser({
-    engineWasm: readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm')),
-    grammarWasm: readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm')),
-  })
+beforeAll(() => {
   fixture = join(mkdtempSync(join(tmpdir(), 'mirage-git-session-')), 'repo')
   execFileSync('bash', [BUILDER, fixture], { stdio: 'ignore' })
 })
@@ -61,16 +53,10 @@ async function load(ws: Workspace, root: string, relative = ''): Promise<void> {
 it('keeps the error of a read-only work tree', async () => {
   const repo = new RAMVFS()
   const tree = new RAMVFS()
-  const writer = new Workspace(
-    { '/repo': repo, '/tree': tree },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  const writer = new Workspace({ '/repo': repo, '/tree': tree }, { mode: MountMode.WRITE })
   await load(writer, fixture)
   await writer.shell("printf 'edited\\n' > /tree/letters.txt")
-  const ws = new Workspace(
-    { '/repo': [repo, MountMode.WRITE], '/tree': [tree, MountMode.READ] },
-    { shellParser: parser },
-  )
+  const ws = new Workspace({ '/repo': [repo, MountMode.WRITE], '/tree': [tree, MountMode.READ] })
   ws.registerCli('git', GIT)
   const result = await ws.shell(
     'git --git-dir=/repo/.git --work-tree=/tree restore --source=HEAD~1 letters.txt',

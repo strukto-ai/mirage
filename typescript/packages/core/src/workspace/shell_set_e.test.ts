@@ -17,7 +17,7 @@ import { makeIntegrationWS, run } from '../../tests/workspace/fixtures/integrati
 
 describe('set -e (errexit)', () => {
   it('exits on failure', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'set -e; false; echo unreached')
       expect(out).not.toContain('unreached')
@@ -27,7 +27,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('continues when command passes', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -e; true; echo ok')).toBe('ok\n')
     } finally {
@@ -36,7 +36,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('allows || chain', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -e; false || echo recovered; echo done')).toBe('recovered\ndone\n')
     } finally {
@@ -45,7 +45,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('allows && chain to skip', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -e; false && echo skipped; echo done')).toBe('done\n')
     } finally {
@@ -54,7 +54,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('allows if condition', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -e; if false; then echo a; else echo b; fi')).toBe('b\n')
     } finally {
@@ -63,7 +63,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('allows while condition', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(
         await run(ws, 'set -e; X=0; while [ $X -lt 2 ]; do echo $X; X=$((X+1)); done; echo done'),
@@ -74,7 +74,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('set +e disables', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -e; set +e; false; echo ok')).toBe('ok\n')
     } finally {
@@ -83,7 +83,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('set -o errexit alias', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'set -o errexit; false; echo unreached')
       expect(out).not.toContain('unreached')
@@ -93,7 +93,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('does not trip on pipeline failure (default)', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -e; false | true; echo after')).toBe('after\n')
     } finally {
@@ -101,7 +101,7 @@ describe('set -e (errexit)', () => {
     }
   })
   it('exits on && list-tail failure', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'set -e; true && false; echo unreached')
       expect(out).not.toContain('unreached')
@@ -111,7 +111,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('exits on || list-tail failure', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'set -e; false || false; echo unreached')
       expect(out).not.toContain('unreached')
@@ -121,7 +121,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('negated command is immune', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -e; ! true; echo ok')).toBe('ok\n')
     } finally {
@@ -130,7 +130,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('negated pipeline is immune', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -e; ! true | true; echo ok')).toBe('ok\n')
     } finally {
@@ -139,7 +139,7 @@ describe('set -e (errexit)', () => {
   })
 
   it('negated tail of an && list is immune', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -e; true && ! true; echo ok')).toBe('ok\n')
     } finally {

@@ -31,6 +31,7 @@ from mirage.shell.parse.scope import ParseScope
 from mirage.shell.variable import ShellVar
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.builtins.alias.alias import body_aliases
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.control import execute_body, returning
 from mirage.workspace.executor.traps import (
@@ -85,7 +86,10 @@ async def run_shell_function(
     session = context.session
     scope = ParseScope()
     try:
-        func_body = parse_function(session.functions[cmd_name], scope.parse)
+        func_body = parse_function(
+            session.functions[cmd_name],
+            partial(scope.parse, aliases=body_aliases(session, cmd_name)),
+        )
     except BaseException:
         scope.release()
         raise

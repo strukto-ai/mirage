@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -j1 --heading o /data/a.txt /data/mixed.txt; rg -j1 --heading --no-heading o /data/a.txt /data/mixed.txt; rg -j1 --no-heading --heading -n -A1 world /data/a.txt /data/mixed.txt; rg -j1 --heading -c o /data/a.txt /data/mixed.txt; rg --heading o /data/a.txt; rg -j1 --heading -l o /data/a.txt /data/mixed.txt",

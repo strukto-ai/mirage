@@ -66,6 +66,7 @@ from mirage.server.ssh.stream import (
     deliver,
     encode,
 )
+from mirage.shell.console.terminal import JobOutput
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.abort import MirageAbortError
 
@@ -517,8 +518,15 @@ async def run_process(
     """Run one process's line as the session, streaming its output as
     the line produces it.
 
-    Runs on the workspace's loop. The status is read once the output
-    has ended, because a streaming command settles it only then.
+    The line runs on a fork of the session, as a background job of it
+    does: it reads the session's variables and records into its
+    history, keeps what it changes to itself, and waits on no other
+    line, so Codex's commands run side by side, as on its own
+    exec-server: ``nvidia-smi`` answers while ``python3 train.py``
+    still runs. Like ``bash -c``, it has jobs of its own, which its
+    ``wait`` waits on and whose output it reports. Runs on the
+    workspace's loop. The status is read once the output has ended,
+    because a streaming command settles it only then.
 
     Args:
         ws (Workspace): the workspace.
@@ -533,6 +541,8 @@ async def run_process(
     Returns:
         int: the line's exit status.
     """
+    session = ws.get_session(session_id).fork()
+    session.job_output = JobOutput(session.job_output or session.tty.jobs)
     async with await ws.shell(
         line,
         session_id=session_id,
@@ -540,6 +550,8 @@ async def run_process(
         cwd=cwd,
         env=env or None,
         stream=True,
+        session=session,
+        job_table=ws.job_table.child(),
     ) as execution:
         io = await deliver(execution, send)
     return io.exit_code
@@ -571,7 +583,8 @@ class CodexChannel:
     """One codex-exec channel: Codex's exec-server over one session.
 
     Codex runs its agent where it is and sends each tool call here: a
-    process runs as a line in the channel's session, and a file call
+    process runs as a line on a fork of the channel's session, beside
+    the channel's other processes (``run_process``), and a file call
     lands on the MountCore SFTP uses, so both see the tree, modes and
     policies a shell in that session sees. Requests are answered one
     at a time, in order, as the exec-server answers them by default,

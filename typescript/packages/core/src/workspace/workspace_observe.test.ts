@@ -12,28 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
 import { STDOUT_TRUNCATE } from '../observe/log_entry.ts'
 import { RAMObserverStore } from '../observe/store.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
 const DEC = new TextDecoder()
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
 
 function buildWorkspace(observe?: RAMObserverStore): Workspace {
   const ram = new RAMVFS()
@@ -41,7 +28,6 @@ function buildWorkspace(observe?: RAMObserverStore): Workspace {
     { '/data': ram },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       ...(observe !== undefined ? { observe } : {}),
     },
   )
@@ -192,10 +178,7 @@ describe('Workspace observer wiring', () => {
   it('records the op path per mount, not mount-relative', async () => {
     const s3 = new RAMVFS()
     const db = new RAMVFS()
-    const ws = new Workspace(
-      { '/s3': s3, '/db': db },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/s3': s3, '/db': db }, { mode: MountMode.WRITE })
     for (const line of [
       'echo one > /s3/report.json',
       'echo two > /db/report.json',

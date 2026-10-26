@@ -14,17 +14,15 @@
 
 from typing import cast
 
-import tree_sitter
-
-from mirage.shell.parse.engine import TS_PARSER
+from mirage.rs.shell import parse_shell
 from mirage.shell.parse.heredoc import body_prefix, tree_root
-from mirage.shell.parse.recovery import parse_protected
+from mirage.shell.types import TSNodeLike
 
 HEREDOC_REDIRECT = "heredoc_redirect"
 
 
-def _redirects(root: tree_sitter.Node) -> list[tree_sitter.Node]:
-    found: list[tree_sitter.Node] = []
+def _redirects(root: TSNodeLike) -> list[TSNodeLike]:
+    found: list[TSNodeLike] = []
     stack = [root]
     while stack:
         node = stack.pop()
@@ -37,11 +35,11 @@ def _redirects(root: tree_sitter.Node) -> list[tree_sitter.Node]:
 
 
 def _prefix(command: str) -> str:
-    return body_prefix(_redirects(parse_protected(command.encode()))[0])
+    return body_prefix(_redirects(parse_shell(command).root_node)[0])
 
 
 class _Node:
-    """The slice of a tree_sitter.Node that body_prefix reads."""
+    """The slice of a node that body_prefix reads."""
 
     def __init__(
         self,
@@ -120,16 +118,16 @@ def test_body_prefix_after_a_file_redirect():
 
 
 def test_body_prefix_under_dash():
-    assert _prefix("cat <<-EOF\n\n\tfoo\nEOF\n") == "\n"
+    assert _prefix("cat <<-EOF\n\n\tfoo\nEOF\n") == "\n\t"
 
 
-def test_body_prefix_leaves_a_blank_first_line_to_the_body():
-    assert _prefix("cat <<EOF\n  \nfoo\nEOF\n") == ""
+def test_body_prefix_holds_a_blank_first_line():
+    assert _prefix("cat <<EOF\n  \nfoo\nEOF\n") == "  \n"
 
 
 def test_body_prefix_is_the_indentation_an_unshielded_tree_skipped():
     cmd = "cat <<EOF\n  foo\nEOF\n"
-    root = TS_PARSER.parse(cmd.encode()).root_node
+    root = parse_shell(cmd).root_node
     assert body_prefix(_redirects(root)[0]) == "  "
 
 
@@ -146,7 +144,7 @@ def test_body_prefix_of_an_unterminated_body():
 
 def test_body_prefix_of_a_heredoc_inside_a_command_substitution():
     outer, inner = _redirects(
-        parse_protected(b"cat <<A $(cat <<B\n\nb\nB\n)\na\nA\n")
+        parse_shell("cat <<A $(cat <<B\n\nb\nB\n)\na\nA\n").root_node
     )
     assert body_prefix(outer) == ""
     assert body_prefix(inner) == "\n"
@@ -175,6 +173,6 @@ def test_body_prefix_of_an_earlier_heredoc_on_the_line():
             )
         ],
     )
-    assert tree_root(cast(tree_sitter.Node, second)) is root
-    assert body_prefix(cast(tree_sitter.Node, second)) == ""
-    assert body_prefix(cast(tree_sitter.Node, first)) == "\n"
+    assert tree_root(cast(TSNodeLike, second)) is root
+    assert body_prefix(cast(TSNodeLike, second)) == ""
+    assert body_prefix(cast(TSNodeLike, first)) == "\n"

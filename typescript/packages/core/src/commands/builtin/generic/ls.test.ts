@@ -39,7 +39,6 @@ import { readers } from '../../../test-utils.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const DEC = new TextDecoder()
 
@@ -583,7 +582,6 @@ describe('a directory a rule refuses to list', () => {
       { '/s': new RAMVFS(), '/v': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         profiles: { sealed: SEALED_DOC },
       },
     )

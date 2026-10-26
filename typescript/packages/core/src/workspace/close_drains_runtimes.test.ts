@@ -14,31 +14,18 @@
 import { CommandSpec } from '../commands/spec/types.ts'
 import { CLIHandler } from '../commands/cli/types.ts'
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import type { FileEvent, PathSpec } from '../types.ts'
 import { MountMode } from '../types.ts'
 import type { EventRuntime } from '../events/base.ts'
 import { Workspace } from './workspace/workspace.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
-
 function build(): Workspace {
   const ram = new RAMVFS()
-  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {

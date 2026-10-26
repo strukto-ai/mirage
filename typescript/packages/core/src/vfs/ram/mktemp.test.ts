@@ -20,7 +20,6 @@ import { RAMVFS } from './ram.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import type { Context } from '../../commands/config.ts'
 import { mktempGeneric } from '../../commands/builtin/generic/mktemp.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 const RAM_MKTEMP = GENERIC_COMMANDS.filter((c) => c.name === 'mktemp' && c.filetype == null)
 
@@ -89,10 +88,7 @@ async function readOnlyShell(
   line: string,
 ): Promise<[number, string, string, string[]]> {
   const vfs = new RAMVFS()
-  const ws = new Workspace(
-    { '/ro/': [vfs, MountMode.WRITE] },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/ro/': [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
   try {
     const seeded = await ws.shell(seed)
     if (seeded.exitCode !== 0) throw new Error(DEC.decode(seeded.stderr))
@@ -127,7 +123,7 @@ async function shellOf(
   mounts: Record<string, [RAMVFS, MountMode]>,
   line: string,
 ): Promise<[number, string, string]> {
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE, shellParser: await getTestParser() })
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   try {
     const r = await ws.shell(line)
     return [r.exitCode, DEC.decode(r.stdout), DEC.decode(r.stderr)]

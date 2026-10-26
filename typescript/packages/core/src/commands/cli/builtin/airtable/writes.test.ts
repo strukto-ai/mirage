@@ -23,7 +23,6 @@ import {
 import { MountMode } from '../../../../types.ts'
 import { AirtableVFS } from '../../../../vfs/airtable/airtable.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { AIRTABLE } from './index.ts'
 
@@ -39,13 +38,13 @@ const FIRST = 'rec00000000000001'
 
 const opened: Workspace[] = []
 
-async function open(fake: FakeAirtable, overrides: Row = {}): Promise<Shell> {
+function open(fake: FakeAirtable, overrides: Row = {}): Shell {
   vi.stubGlobal('fetch', fake.fetch)
   const config = { token: TOKEN, requestsPerSecond: 10_000, ...overrides }
   const mount = new AirtableVFS(config, { fetchFn: fake.fetch })
   const ws = new Workspace(
     { '/at/': [mount, MountMode.READ], '/s/': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
   ws.registerCli('airtable', AIRTABLE, config)
   opened.push(ws)
@@ -80,7 +79,7 @@ describe('airtable write verbs', () => {
 
   it('creates ten records to a request', async () => {
     const fake = new FakeAirtable()
-    const run = await open(fake)
+    const run = open(fake)
     await lines(run, '/s/new.jsonl', named(23))
     const [code, out, err] = await run(`airtable record create ${AT} < /s/new.jsonl`)
     expect([code, err]).toEqual([0, ''])
@@ -96,7 +95,7 @@ describe('airtable write verbs', () => {
 
   it('creates one record, typecast as a body key', async () => {
     const fake = new FakeAirtable()
-    const run = await open(fake)
+    const run = open(fake)
     const [code, out] = await run(
       `airtable record create ${AT} --typecast --fields '{"Name": "x", "Priority": "4"}'`,
     )
@@ -110,7 +109,7 @@ describe('airtable write verbs', () => {
 
   it('round-trips a mount line through update', async () => {
     const fake = new FakeAirtable()
-    const run = await open(fake)
+    const run = open(fake)
     const [code, out] = await run(
       `jq -c 'select(.fields.Status == "Done") | .fields.Priority = 9' ${TABLE_DIR}/records.jsonl | ` +
         `airtable record update ${AT} | jq -c '[.record_id, .fields.Priority]'`,
@@ -136,7 +135,7 @@ describe('airtable write verbs', () => {
       name: 'Ticket',
       type: 'formula',
     })
-    const run = await open(fake)
+    const run = open(fake)
     await lines(run, '/s/one.jsonl', [
       {
         record_id: FIRST,
@@ -152,7 +151,7 @@ describe('airtable write verbs', () => {
 
   it('patches one record', async () => {
     const fake = new FakeAirtable()
-    const run = await open(fake)
+    const run = open(fake)
     const [code, out] = await run(
       `airtable record update ${AT} ${FIRST} --fields '{"Priority": 0}'`,
     )
@@ -163,7 +162,7 @@ describe('airtable write verbs', () => {
 
   it('deletes by operands or by stdin lines', async () => {
     const fake = new FakeAirtable()
-    const run = await open(fake)
+    const run = open(fake)
     expect(await run(`airtable record delete ${AT} ${FIRST}`)).toEqual([
       0,
       '{"record_id":"rec00000000000001","deleted":true}\n',
@@ -177,7 +176,7 @@ describe('airtable write verbs', () => {
 
   it('deletes ten records to a request', async () => {
     const fake = new FakeAirtable()
-    const run = await open(fake)
+    const run = open(fake)
     await lines(run, '/s/new.jsonl', named(5))
     await run(`airtable record create ${AT} < /s/new.jsonl`)
     const ids = (fake.records[FEATURES] ?? []).map((r) => String(r.id)).join(' ')
@@ -189,7 +188,7 @@ describe('airtable write verbs', () => {
 
   it('still prints what landed when a later batch fails', async () => {
     const fake = new FakeAirtable()
-    const run = await open(fake)
+    const run = open(fake)
     await lines(run, '/s/new.jsonl', [...named(10), { fields: { Nope: 1 } }, ...named(2)])
     const [code, out, err] = await run(`airtable record create ${AT} < /s/new.jsonl`)
     expect(code).toBe(1)
@@ -203,7 +202,7 @@ describe('airtable write verbs', () => {
 
   it('never retries a write on a 502', async () => {
     const fake = new FakeAirtable({ faults: { 1: [502, 'BAD_GATEWAY'] } })
-    const run = await open(fake)
+    const run = open(fake)
     const [code, out, err] = await run(`airtable record create ${AT} --fields '{}'`)
     expect([code, out]).toEqual([1, ''])
     expect(err).toContain('HTTP 502')
@@ -212,7 +211,7 @@ describe('airtable write verbs', () => {
 
   it('takes comment text from --text or stdin', async () => {
     const fake = new FakeAirtable()
-    const run = await open(fake)
+    const run = open(fake)
     const [code, out] = await run(`airtable comment add ${AT} ${FIRST} --text 'from a flag'`)
     expect([code, (JSON.parse(out) as Row).text]).toEqual([0, 'from a flag'])
     await run(`printf 'piped\\n\\n' | airtable comment add ${AT} ${FIRST}`)
@@ -237,7 +236,7 @@ describe('airtable write verbs', () => {
     [`airtable comment add ${AT} --text hi`, 'the following arguments are required: RECORD'],
   ])('refuses missing or malformed input: %s', async (line, message) => {
     const fake = new FakeAirtable()
-    const run = await open(fake)
+    const run = open(fake)
     expect(await run(line)).toEqual(usage(message))
     expect(fake.calls).toEqual([])
   })
@@ -255,7 +254,7 @@ describe('airtable write verbs', () => {
     ['delete', '{"record_id": "rec1", "fields": 3}\n', 'stdin line 1: "fields" must be an object'],
   ])('checks every stdin line before sending: %s %s', async (verb, text, message) => {
     const fake = new FakeAirtable()
-    const run = await open(fake)
+    const run = open(fake)
     await run(`printf '%s' '${text}' > /s/in.jsonl`)
     expect(await run(`airtable record ${verb} ${AT} < /s/in.jsonl`)).toEqual(usage(message))
     expect(fake.calls).toEqual([])
@@ -268,7 +267,7 @@ describe('airtable write verbs', () => {
     `airtable comment add --base ${OPS} --table t ${FIRST} --text hi`,
   ])('refuses a write outside the scope unsent: %s', async (line) => {
     const fake = new FakeAirtable()
-    const run = await open(fake, { baseIds: [ROADMAP] })
+    const run = open(fake, { baseIds: [ROADMAP] })
     const verb = line.split(' ').slice(0, 3).join(' ')
     expect(await run(line)).toEqual([1, '', `${verb}: ${OPS}: Permission denied\n`])
     expect(fake.calls).toEqual([])

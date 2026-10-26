@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawnSync, execFileSync } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
@@ -21,7 +20,6 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { createShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
@@ -33,10 +31,6 @@ const BUILDER = fileURLToPath(
 const DEC = new TextDecoder()
 // The clock both sides render relative and human dates by.
 const CLOCK = 'GIT_TEST_DATE_NOW=1700000000 TZ=UTC'
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 let tmp: string
 let repoPath: string
@@ -67,8 +61,7 @@ beforeAll(async () => {
   repoPath = join(tmp, 'repo')
   execFileSync('bash', [BUILDER, repoPath], { stdio: 'ignore', env: NATIVE_ENV })
   const ram = new RAMVFS()
-  const parser = await createShellParser({ engineWasm, grammarWasm })
-  ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE })
   const dispatch = ws.vfs
   for (const rel of walk(repoPath)) {
     const target = `/repo/${rel}`

@@ -17,7 +17,6 @@ import { FakeDrive, installDrive } from '../../../tests/core/gdrive/_test_util.t
 import { MountMode, ReadPolicy } from '../../types.ts'
 import { md5Hex } from '../../utils/hash.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import {
   ContentDriftError,
   captureFingerprints,
@@ -49,7 +48,7 @@ describe('GoogleDriveVFS re-list cleanup', () => {
     const b = fake.add('b.txt', dir, undefined, ENC.encode('bravo\n'))
     const ws = new Workspace(
       { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
+      { mode: MountMode.READ },
     )
     try {
       expect(DEC.decode((await ws.shell('ls /gd/dir')).stdout)).toBe('a.txt\nb.txt\n')
@@ -79,7 +78,6 @@ describe('GoogleDriveVFS re-list cleanup', () => {
       {
         mode: MountMode.READ,
         read: { policy: ReadPolicy.FRESH, ttl: 600 },
-        shellParser: await getTestParser(),
       },
     )
     try {
@@ -98,10 +96,10 @@ describe('GoogleDriveVFS re-list cleanup', () => {
   })
 })
 
-function freshWs(parser: Awaited<ReturnType<typeof getTestParser>>): Workspace {
+function freshWs(): Workspace {
   return new Workspace(
     { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
-    { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 }, shellParser: parser },
+    { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 } },
   )
 }
 
@@ -130,7 +128,7 @@ describe('GoogleDriveVFS warm read under fresh', () => {
     [3, 4],
   ] as const) {
     it(`costs one walk per probe at depth ${String(depth)}`, async () => {
-      const ws = freshWs(await getTestParser())
+      const ws = freshWs()
       try {
         const path = await warmFile(ws, depth)
         fake.listLimits.length = 0
@@ -146,7 +144,6 @@ describe('GoogleDriveVFS warm read under fresh', () => {
   // The command's stat now comes from the freshness probe rather than from
   // the command's own lookup; what it prints must not change with it.
   it('prints the same stat as a bounded mount', async () => {
-    const parser = await getTestParser()
     const outs: string[] = []
     for (const read of [
       { policy: ReadPolicy.FRESH, ttl: 600 },
@@ -156,7 +153,7 @@ describe('GoogleDriveVFS warm read under fresh', () => {
       installDrive(fake)
       const ws = new Workspace(
         { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
-        { mode: MountMode.READ, read, shellParser: parser },
+        { mode: MountMode.READ, read },
       )
       try {
         const path = await warmFile(ws, 1)
@@ -181,7 +178,6 @@ describe('GoogleDriveVFS snapshot capture on a written path', () => {
       {
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.FRESH, ttl: 600 },
-        shellParser: await getTestParser(),
       },
     )
     try {

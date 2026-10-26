@@ -23,6 +23,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -31,6 +32,74 @@
       "expect": {
         "exit": 0,
         "stdout": "-3 -1 1024 16 8\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arith_expands_its_body_before_reading_it",
+      "seq": 864,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=1; for (( i=${x}0; i<11; i++ )); do echo $i; done; echo $(( ${x}0 + 1 )) $(( $(echo 4)0 )) $[ ${x}2 ]; (( ${x}0 == 10 )) && echo ten",
+      "expect": {
+        "exit": 0,
+        "stdout": "10\n11 40 12\nten\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arith_raw_c_style_header_splits_at_outer_semicolons",
+      "seq": 865,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=1; for (( i=${x}0; i<$(echo 11; :); i++ )); do echo \"i=$i\"; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "i=10\n",
         "stderr": ""
       }
     }

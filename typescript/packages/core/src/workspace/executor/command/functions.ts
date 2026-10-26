@@ -37,6 +37,7 @@ import { executeBody, returning } from '../control.ts'
 import { liftFunctionTraps, restoreFunctionTraps } from '../traps.ts'
 import type { ExecuteStringFn } from '../builtins/types.ts'
 import { runAsShell } from '../../../context/session_context.ts'
+import { bodyAliases } from '../builtins/alias/alias.ts'
 import type { Result } from './types.ts'
 
 export async function runShellFunction(
@@ -62,7 +63,8 @@ export async function runShellFunction(
   const scope = parser.fork()
   let body
   try {
-    body = parseFunction(source, (line) => scope.parse(line))
+    const aliases = bodyAliases(session, cmdName)
+    body = parseFunction(source, (line) => scope.parse(line, aliases))
   } catch (error) {
     scope.release()
     throw error

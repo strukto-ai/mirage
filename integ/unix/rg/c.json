@@ -23,6 +23,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -58,6 +59,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -96,6 +98,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -133,6 +136,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -168,6 +172,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -c zzz /data/a.txt; echo rc=$?; rg -c hello /data/a.txt /data/b.txt; echo rc=$?; rg -H hello /data/a.txt; rg -I hello /data/a.txt /data/b.txt",
@@ -198,6 +203,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'bar\\nbaz\\n' | rg -c foo; echo rc=$?; printf 'bar\\n' | rg -c --include-zero foo; echo rc=$?",
@@ -232,6 +238,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -c --include-zero --no-include-zero zzz /data/a.txt; echo rc=$?; rg -j1 -c --no-include-zero --include-zero zzz /data/a.txt /data/b.txt; echo rc=$?",
@@ -268,6 +275,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -j1 -l -c hello /data/a.txt /data/b.txt; echo rc=$?; rg -j1 -c -l hello /data/a.txt /data/b.txt; rg -l --count-matches o /data/a.txt; rg --count-matches -l o /data/a.txt",

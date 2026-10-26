@@ -936,7 +936,7 @@ const CASES: [string, string, string, string, number][] = [
 describe('associative arrays', () => {
   for (const [id, cmd, wantOut, wantErr, wantCode] of CASES) {
     it(id, async () => {
-      ;({ ws } = await makeIntegrationWS())
+      ;({ ws } = makeIntegrationWS())
       const [code, out, err] = await runResult(ws, cmd)
       expect([out, err, code]).toEqual([wantOut, wantErr, wantCode])
     })

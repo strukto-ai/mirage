@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg --no-line-buffered --block-buffered --no-block-buffered --mmap --no-stats --no-crlf --no-multiline --no-multiline-dotall --no-json --no-search-zip --no-encoding --no-pre --unicode --no-auto-hybrid-regex --no-config -j2 --line-buffered --no-mmap -n world /data/a.txt; echo rc=$?",
@@ -72,6 +73,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg --dfa-size-limit 10M --regex-size-limit 1G -c foo /data/rgfl/a.txt; rg --regex-size-limit 1 -c foo /data/rgfl/a.txt; rg --hyperlink-format default -c foo /data/rgfl/a.txt; rg --hyperlink-format none --hostname-bin /bin/false -c foo /data/rgfl/a.txt; rg --colors 'match:fg:red' --colors 'path:style:bold' -c foo /data/rgfl/a.txt; rg --debug -c foo /data/rgfl/a.txt 2>/dev/null; rg --trace -c foo /data/rgfl/a.txt 2>/dev/null; rm -rf /data/rgfl",
@@ -112,6 +114,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg --dfa-size-limit 10X foo /data/rgfl/a.txt; echo rc=$?; rg --regex-size-limit abc foo /data/rgfl/a.txt; echo rc=$?; rg --hyperlink-format 'bogus{x}' foo /data/rgfl/a.txt; echo rc=$?; rg --colors bogus foo /data/rgfl/a.txt; echo rc=$?; rg --colors 'match:fg:nope' foo /data/rgfl/a.txt; echo rc=$?; rm -rf /data/rgfl",
@@ -148,6 +151,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg --dfa-size-limit bogus --dfa-size-limit 1M foo /data/rgfl/a.txt; echo rc=$?; rg --hyperlink-format 'x{bad}' --hyperlink-format default foo /data/rgfl/a.txt; echo rc=$?; rg --max-filesize bogus --max-filesize 1M foo /data/rgfl/a.txt; echo rc=$?; rm -rf /data/rgfl",

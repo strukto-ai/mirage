@@ -18,7 +18,6 @@ import { Command } from '../../commands/config.ts'
 import { describe, expect, it } from 'vitest'
 import { FakeAirtable, TOKEN } from '../../../tests/core/airtable/_test_util.ts'
 import { VFSName } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { AirtableVFS, VFS_MD } from './airtable.ts'
 
@@ -62,10 +61,7 @@ describe('AirtableVFS', () => {
   })
 
   it('browses bases, tables and records through a workspace', async () => {
-    const ws = new Workspace(
-      { '/at/': vfs(new FakeAirtable(), { maxReadRecords: 5 }) },
-      { shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/at/': vfs(new FakeAirtable(), { maxReadRecords: 5 }) }, {})
     try {
       const tree = await ws.shell('tree /at/bases/Product_Roadmap__appRoadmapBase001')
       expect(DEC.decode(tree.stdout)).toContain('records.jsonl')
@@ -87,10 +83,7 @@ describe('AirtableVFS', () => {
 
   it('pushes the head line count into maxRecords', async () => {
     const fake = new FakeAirtable()
-    const ws = new Workspace(
-      { '/at/': vfs(fake, { maxReadRecords: 5 }) },
-      { shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/at/': vfs(fake, { maxReadRecords: 5 }) })
     try {
       const result = await ws.shell(`head -n 2 ${TABLE}/records.jsonl`)
       expect(result.exitCode).toBe(0)

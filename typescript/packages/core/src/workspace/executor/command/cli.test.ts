@@ -27,7 +27,6 @@ import { Limit, MountMode, PathSpec } from '../../../types.ts'
 import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { CLIRegistry } from '../../cli/registry.ts'
 import { MountEntry } from '../../mount/mount.ts'
@@ -706,7 +705,7 @@ describe('handleCli script arm', () => {
     const second = new TierPyRuntime('second')
     const ws = new Workspace(
       { '/ram/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [first, second] },
+      { mode: MountMode.EXEC, runtimes: [first, second] },
     )
     try {
       ws.registerCli('pager', scriptInstall().cli)
@@ -1355,10 +1354,7 @@ describe('a command tree a mount serves', () => {
       }),
       handlers: { show: new CLIHandler({ fn: () => null }) },
     })
-    const ws = new Workspace(
-      { '/n/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/n/': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       ws.mount('/n/').registerCommands([tree])
       const helped = await ws.shell('cd /n && ls --help')
@@ -1374,7 +1370,7 @@ describe('a command tree a mount serves', () => {
     // it, and the child mount below /n/b must not expand it a second time.
     const ws = new Workspace(
       { '/n/': new RAMVFS(), '/n/b/sub/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     try {
       ws.mount('/n/').registerCommands([NOTES])
@@ -1394,10 +1390,7 @@ describe('a command tree a mount serves', () => {
     const vfs = new RAMVFS()
     ;(vfs as unknown as { cachesReads: boolean }).cachesReads = true
     vfs.store.files.set('/a.md', ENC.encode('first\n'))
-    const ws = new Workspace(
-      { '/n/': vfs, '/o/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/n/': vfs, '/o/': new RAMVFS() }, { mode: MountMode.WRITE })
     const stderr: Record<number, string> = {
       0: '',
       1: 'notes add: read-only mount at /n/\n',

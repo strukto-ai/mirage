@@ -18,7 +18,6 @@ import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { rgGeneric } from './rg.ts'
 
@@ -324,14 +323,11 @@ describe('rgGeneric - an operand the walk refused', () => {
 // world, beside a read-only /ro holding f, as ripgrep 14.1.1 was pinned.
 async function walked(line: string): Promise<[string, string, number]> {
   const ro = new RAMVFS()
-  const seed = new Workspace(
-    { '/ro/': ro },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const seed = new Workspace({ '/ro/': ro }, { mode: MountMode.WRITE })
   await seed.shell("printf 'ro\\n' > /ro/f")
   const ws = new Workspace(
     { '/data/': new RAMVFS(), '/ro/': [ro, MountMode.READ] },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
   try {
     await ws.shell(

@@ -18,11 +18,7 @@ import { type FileStat, MountMode, type PathSpec } from '../types.ts'
 import { parseSessionProfile, type SessionProfile } from '../policy/profile.ts'
 import type { Action, VfsContext, VfsResultContext, Policy } from '../policy/index.ts'
 import { runWithSession } from '../context/session_context.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Session, Workspace } from './workspace/workspace.ts'
 
 const DEC = new TextDecoder()
@@ -71,13 +67,11 @@ afterEach(async () => {
   for (const ws of open.splice(0)) await ws.close()
 })
 
-async function hiding(): Promise<Workspace> {
-  const parser = await getTestParser()
+function hiding(): Workspace {
   const ws = new Workspace(
     { '/data': [new RAMVFS(), MountMode.WRITE] as const },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       profiles: { agent: parseSessionProfile({ paths: { hide: ['/data/vault'] } }) },
       profile: 'agent',
     },
@@ -87,12 +81,8 @@ async function hiding(): Promise<Workspace> {
 }
 
 async function seeded(mode: MountMode = MountMode.WRITE): Promise<Workspace> {
-  const parser = await getTestParser()
   const repo = new RAMVFS()
-  const ws = new Workspace(
-    { '/repo': [repo, mode] as const },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  const ws = new Workspace({ '/repo': [repo, mode] as const }, { mode: MountMode.WRITE })
   open.push(ws)
   const io = await ws.shell(
     'mkdir -p /repo/secrets /repo/public/docs && ' +
@@ -181,10 +171,9 @@ describe('the path axis end to end', () => {
     // cd takes for a backend that cannot stat its own root; it lands
     // only on a root the session sees, and touch calls only such a root
     // a directory, so the root answers what a hidden folder answers.
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/a/vault': [new RAMVFS(), MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
     )
     open.push(ws)
     expect((await ws.shell('mkdir -p /a/sec && echo v > /a/vault/v')).exitCode).toBe(0)
@@ -212,12 +201,10 @@ describe('the path axis end to end', () => {
     // A handle runs the same entry point as another session over the
     // same ledger; a session with an explicit empty profile is the
     // host's entry point to what the default profile hides.
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/data': [new RAMVFS(), MountMode.WRITE] as const },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: { agent: parseSessionProfile({ paths: { hide: ['/data/vault'] } }) },
         profile: 'agent',
       },
@@ -248,14 +235,13 @@ describe('the path axis end to end', () => {
     // session it arrived under. A binding that names no owner is a
     // deliberate placement (a kernel mount binds one that way) and is
     // kept as before.
-    const parser = await getTestParser()
     const other = new Workspace(
       { '/data': [new RAMVFS(), MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
     )
     open.push(other)
     const wide = other.createSession('wide', { profile: parseSessionProfile({}) })
-    const ws = await hiding()
+    const ws = hiding()
     const host = ws.createSession('host', { profile: parseSessionProfile({}) })
     const files = new Session(ws, host.sessionId).vfs
     await files.mkdir('/data/vault')
@@ -282,7 +268,7 @@ describe('the path axis end to end', () => {
     // visible target, so the dispatcher's check of the typed path never saw
     // the hide. The follow now runs as the session and only from a
     // path it can see, so the link reads as absent.
-    const ws = await hiding()
+    const ws = hiding()
     const host = ws.createSession('host', { profile: parseSessionProfile({}) })
     const files = new Session(ws, host.sessionId).vfs
     await files.write('/data/pub.txt', 'pub\n')
@@ -328,11 +314,10 @@ describe('the path axis end to end', () => {
   it('a show mode never grants past the configured mode', async () => {
     // The mount's own mode stays the strongest answer possible: a show
     // stating rw on a READ-configured mount changes nothing.
-    const parser = await getTestParser()
     const repo = new RAMVFS()
     const ws = new Workspace(
       { '/repo': [repo, MountMode.READ] as const },
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
     )
     open.push(ws)
     ws.createSession('rev', {
@@ -485,13 +470,12 @@ describe('the path axis end to end', () => {
 })
 
 async function boxed(profile: SessionProfile, ...more: string[]): Promise<Workspace> {
-  const parser = await getTestParser()
   const repo = new RAMVFS()
   const mounts: Record<string, readonly [RAMVFS, MountMode]> = {
     '/repo': [repo, MountMode.WRITE] as const,
   }
   for (const m of more) mounts[m] = [new RAMVFS(), MountMode.WRITE] as const
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   open.push(ws)
   const io = await ws.shell(
     'mkdir -p /repo/box/sec /repo/only && ' +
@@ -665,12 +649,11 @@ describe('subtree mutations against hides', () => {
     // The stamped children join the guard's emptiness judgment, so the
     // not-empty refusal stays instead of the cascade destroying the
     // hidden remnant and reporting success while the mount remains.
-    const parser = await getTestParser()
     const repo = new RAMVFS()
     const m = new RAMVFS()
     const ws = new Workspace(
       { '/repo': [repo, MountMode.WRITE] as const, '/repo/only/m': [m, MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
     )
     open.push(ws)
     const io = await ws.shell("mkdir -p /repo/only && printf 'h\\n' > /repo/only/h")
@@ -691,11 +674,10 @@ describe('ws.vfs against hides', () => {
     // The dispatcher's cascade routes every deletion through the same
     // mode fence normal dispatch applies, so FUSE and ws.vfs callers
     // cannot destroy a mode-protected remnant either.
-    const parser = await getTestParser()
     const repo = new RAMVFS()
     const ws = new Workspace(
       { '/repo': [repo, MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
     )
     open.push(ws)
     const io = await ws.shell("mkdir -p /repo/only && printf 'h\\n' > /repo/only/h")
@@ -720,12 +702,11 @@ describe('ws.vfs against hides', () => {
     // the visible mounted child keeps the not-empty refusal instead of
     // the arm destroying the hidden backend remnants and reporting a
     // successful rmdir while the mount remains.
-    const parser = await getTestParser()
     const a = new RAMVFS()
     const m = new RAMVFS()
     const ws = new Workspace(
       { '/a': [a, MountMode.WRITE] as const, '/a/d/m': [m, MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
     )
     open.push(ws)
     const io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
@@ -748,13 +729,11 @@ describe('ws.vfs against hides', () => {
     // policy that protects the hidden file refuses its unlink, the
     // cascade folds the denial into the original not-empty refusal,
     // and the protected content survives.
-    const parser = await getTestParser()
     const a = new RAMVFS()
     const ws = new Workspace(
       { '/a': [a, MountMode.WRITE] as const },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         policies: [new DenyRemnantUnlink()],
       },
     )
@@ -779,12 +758,8 @@ describe('ws.vfs against hides', () => {
       // A listing or deletion that fails with no errno still answers with
       // the backend's not-empty refusal: the raw failure would reveal
       // exactly what the refusal exists to hide.
-      const parser = await getTestParser()
       const a = new FailingRAM()
-      const ws = new Workspace(
-        { '/a': [a, MountMode.WRITE] as const },
-        { mode: MountMode.WRITE, shellParser: parser },
-      )
+      const ws = new Workspace({ '/a': [a, MountMode.WRITE] as const }, { mode: MountMode.WRITE })
       open.push(ws)
       const io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
       expect(io.exitCode).toBe(0)
@@ -804,13 +779,11 @@ describe('ws.vfs against hides', () => {
     // A deletion is done by the time postVfs could speak, so the cascade
     // never asks it: the rmdir takes the hidden remnant and the directory,
     // rather than refusing with a child already gone.
-    const parser = await getTestParser()
     const a = new RAMVFS()
     const ws = new Workspace(
       { '/a': [a, MountMode.WRITE] as const },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         policies: [new DenyUnlinkAfter()],
       },
     )
@@ -829,12 +802,8 @@ describe('ws.vfs against hides', () => {
     // A hidden link is invisible to every backend, so the cascade walk
     // cannot take it; left in the node table it synthesizes /a/d right
     // back once the hide lifts, resurfacing the removed tree.
-    const parser = await getTestParser()
     const a = new RAMVFS()
-    const ws = new Workspace(
-      { '/a': [a, MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/a': [a, MountMode.WRITE] as const }, { mode: MountMode.WRITE })
     open.push(ws)
     const io = await ws.shell(
       "mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k && ln -s /a/t /a/d/lnk",
@@ -857,12 +826,8 @@ describe('ws.vfs against hides', () => {
     // A visible link joins the merged emptiness judgment, so the
     // refusal stands and nothing (backend remnant or node table) is
     // destroyed.
-    const parser = await getTestParser()
     const a = new RAMVFS()
-    const ws = new Workspace(
-      { '/a': [a, MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/a': [a, MountMode.WRITE] as const }, { mode: MountMode.WRITE })
     open.push(ws)
     const io = await ws.shell(
       "mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k && ln -s /a/t /a/d/lnk",
@@ -884,12 +849,11 @@ describe('ws.vfs against hides', () => {
 })
 
 async function twoMounts(profile: object): Promise<Workspace> {
-  const parser = await getTestParser()
   const a = new RAMVFS()
   const b = new RAMVFS()
   const ws = new Workspace(
     { '/a': [a, MountMode.WRITE] as const, '/b': [b, MountMode.WRITE] as const },
-    { mode: MountMode.WRITE, shellParser: parser },
+    { mode: MountMode.WRITE },
   )
   open.push(ws)
   const io = await ws.shell(

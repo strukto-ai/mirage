@@ -18,7 +18,6 @@ import type { Policy } from '../../../../policy/base.ts'
 import type { Action, VfsContext } from '../../../../policy/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { followPaths, prepareMv } from './links.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -72,14 +71,12 @@ function dispatchOf(ws: Workspace): DispatchFn {
   ]
 }
 
-async function makeWs(policies: Policy[] = []): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeWs(policies: Policy[] = []): Workspace {
   return new Workspace(
     { '/data': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       policies,
-      shellParserFactory: () => Promise.resolve(parser),
     },
   )
 }
@@ -92,7 +89,7 @@ describe('followPaths and a link loop', () => {
   it('refuses the looping operand and resolves its neighbours', async () => {
     // A loop no longer fails the whole line: the operand stays as typed
     // with the walk's verdict on it.
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell(
       'mkdir -p /data/real; ln -s /data/real /data/dlink; ln -s /data/l2 /data/l1; ln -s /data/l1 /data/l2',
     )
@@ -113,7 +110,7 @@ describe('followPaths and a link loop', () => {
   it('lets mv replace a looping destination like any link', async () => {
     // stat(2) of the destination fails ELOOP, which GNU mv reads as "not a
     // directory": the rename lands on the link's own name.
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('echo b > /data/b.txt; ln -s /data/l2 /data/l1; ln -s /data/l1 /data/l2')
     const r = await ws.shell('mv /data/b.txt /data/l1')
     expect(r.exitCode).toBe(0)
@@ -123,7 +120,7 @@ describe('followPaths and a link loop', () => {
 })
 
 it.each(['missing', 'a.txt', 'l1'])('mv replaces a loop with a symlink to %s', async (source) => {
-  const ws = await makeWs()
+  const ws = makeWs()
   try {
     await ws.shell(
       `echo a > /data/a.txt; ln -s l2 /data/l1; ln -s l1 /data/l2; ln -s ${source} /data/src`,
@@ -143,7 +140,7 @@ describe('followPaths and a relative target', () => {
     // `../a` climbs from the link's own directory; left uncollapsed the
     // followed path no longer matched the word that spelled it, and every
     // command named the operand `/data/sub/../a`.
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell(
       "mkdir -p /data/sub && printf 'x\\n' > /data/a && ln -s ../a /data/sub/al && ln -s ../nowhere /data/sub/d",
     )
@@ -163,7 +160,7 @@ describe('ln -f on the same file', () => {
     // and the file survives, spelled as typed on both sides; a backup
     // waives the check; a destination that is not there is not the same
     // file and becomes a self-loop, as in GNU.
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell('printf hi > /data/a.txt')
       const cases: [string, string][] = [
@@ -201,7 +198,7 @@ describe('ln -b on a directory', () => {
     // where mirage used to rename the whole tree to `d~`; a symlink
     // standing at the name is what -T names and is backed up; without
     // -T the directory is where the link goes.
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell('mkdir -p /data/d; printf hi > /data/a.txt')
       for (const line of [
@@ -236,11 +233,7 @@ describe('ln with a source it cannot read', () => {
     // GNU names the source it cannot reach and links the rest, exit 1.
     // mirage's hard link is a byte copy, so a read the stat did not
     // foresee (the backend's refusal here) is that refusal, not an abort.
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': new SealedReads() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/data': new SealedReads() }, { mode: MountMode.WRITE })
     try {
       await ws.shell('mkdir /data/d; printf a > /data/a.sealed; printf b > /data/b.txt')
       const r = await ws.shell('ln /data/a.sealed /data/b.txt /data/d')
@@ -260,7 +253,7 @@ describe('rm and unlink reach a link through the dispatcher', () => {
     // policy protecting a link fires for an unlink of it as for any other
     // file call (the FUSE unlink hole). The mount is writable, so only the
     // policy can be what refuses.
-    const ws = await makeWs([new PinLinks()])
+    const ws = makeWs([new PinLinks()])
     try {
       await ws.shell('echo b > /data/f.txt')
       await ws.shell('ln -s f.txt /data/lk.pinned')
@@ -275,7 +268,7 @@ describe('rm and unlink reach a link through the dispatcher', () => {
     // Byte for byte what `rm` of a backend file on the same grant
     // answers, because one grant must not describe itself two ways
     // depending on whether the name it stopped was a link.
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell('echo b > /data/f.txt; ln -s f.txt /data/lk')
       ws.createSession('agent', { mounts: { '/data/': 'read' } })
@@ -292,7 +285,7 @@ describe('rm and unlink reach a link through the dispatcher', () => {
     // Same rule for the other two verbs that write the node table: `ln`
     // answers as `touch` does on a read-only mount, and `mv` as `mv` of
     // a backend file does, in GNU's per-operand voice.
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell('echo b > /data/f.txt; ln -s f.txt /data/lk')
       ws.createSession('agent', { mounts: { '/data/': 'read' } })
@@ -314,7 +307,7 @@ describe('rm and unlink reach a link through the dispatcher', () => {
     // GNU rm reports the operand it could not remove and removes the
     // others; the backend half of the line still runs and the exit code
     // says something failed.
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell('echo b > /data/f.txt')
       await ws.shell('ln -s f.txt /data/lk.pinned; ln -s f.txt /data/lk')
@@ -333,7 +326,7 @@ describe('rm and unlink reach a link through the dispatcher', () => {
 
   it('rm -f still reports a mode refusal', async () => {
     // GNU -f silences only the absent; EROFS is not ENOENT.
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell('echo b > /data/f.txt; ln -s f.txt /data/lk')
       ws.createSession('agent', { mounts: { '/data/': 'read' } })
@@ -348,7 +341,7 @@ describe('rm and unlink reach a link through the dispatcher', () => {
   it('rm -f silences a hidden link', async () => {
     // A hidden link answers ENOENT (the no-name-leak rule), which is
     // exactly what -f silences; without -f the miss is reported.
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell('echo b > /data/f.txt; ln -s f.txt /data/lk.sec')
       ws.createSession('agent', { profile: { paths: { hide: ['/data/lk.sec'] } } })
@@ -367,7 +360,7 @@ describe('rm and unlink reach a link through the dispatcher', () => {
   it('test and cd see no hidden link', async () => {
     // test and cd resolve through the session's links, so a hidden link
     // is no link and leads nowhere, as every other command meets it.
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell(
         'echo b > /data/f.txt; mkdir /data/d; ln -s f.txt /data/lk.sec; ln -s d /data/dl.sec',
@@ -390,7 +383,7 @@ describe('rm and unlink reach a link through the dispatcher', () => {
     // GNU reports each operand it could not remove, so a read grant is
     // one line per operand -- a link the node table refuses and a
     // backend file the dispatcher refuses say the same thing.
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell('echo b > /data/f.txt')
       await ws.shell('ln -s f.txt /data/l1; ln -s f.txt /data/l2')
@@ -426,7 +419,7 @@ describe('mv re-anchors what the node table holds', () => {
         '/data/l /data/a /data/dst',
         '-t /data/dst /data/l /data/a',
       ]) {
-        const ws = await makeWs()
+        const ws = makeWs()
         try {
           await ws.shell(
             'mkdir /data/dst; echo old > /data/dst/l; ln -s missing /data/l; echo a > /data/a',
@@ -447,7 +440,7 @@ describe('mv re-anchors what the node table holds', () => {
     // GNU stats the destination of `mv a b dlink` through the link, so the
     // generic mv is handed the directory it names (coreutils 9.7), and each
     // source lands inside it.
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell('mkdir -p /data/dst; printf a > /data/a; printf b > /data/b')
       await ws.shell('ln -s /data/dst /data/dlink')
@@ -483,7 +476,7 @@ describe('mv re-anchors what the node table holds', () => {
     // A link has no backend entry for the generic mv to move, so a
     // several-source mv lost it (`mv: cannot stat 'l'`); the namespace
     // renames it into the directory and the rest go to the backend.
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell('mkdir -p /data/dst; printf a > /data/a')
       await ws.shell('ln -s /data/a /data/l')
@@ -507,7 +500,7 @@ describe('mv re-anchors what the node table holds', () => {
   it.each([false, true])(
     'reanchors only completed sources in a partial move (skip=%s)',
     async (skip) => {
-      const ws = await makeWs()
+      const ws = makeWs()
       try {
         await ws.shell(
           'mkdir -p /data/src /data/out/src; echo x > /data/src/f; ln -s f /data/src/l',
@@ -526,7 +519,7 @@ describe('mv re-anchors what the node table holds', () => {
   )
 
   it('moves a link below a renamed directory with it', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell('mkdir -p /data/d; printf t > /data/t')
       await ws.shell('ln -s /data/t /data/d/link')
@@ -543,7 +536,7 @@ describe('mv re-anchors what the node table holds', () => {
 it.each(['missing', 'a.txt', 'loop'])(
   'keeps the %s link when the move destination loops',
   async (source) => {
-    const ws = await makeWs()
+    const ws = makeWs()
     try {
       await ws.shell(`cd /data; echo hello > a.txt; ln -s loop loop; ln -s ${source} src`)
       const result = await ws.shell('cd /data; mv src loop/child')
@@ -559,10 +552,9 @@ it.each(['missing', 'a.txt', 'loop'])(
 it.each([null, 'read', 'unlink', 'symlink'] as const)(
   'cross-mount mv preserves tree links with %s failure',
   async (failure) => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/data': failure === 'read' ? new SealedReads() : new RAMVFS(), '/other': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       const setup = await ws.shell(
@@ -621,10 +613,9 @@ it.each([null, 'read', 'unlink', 'symlink'] as const)(
 it.each(['/data', '/other'])(
   'mv to %s keeps directory links only in the backup',
   async (destination) => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/data': new RAMVFS(), '/other': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       const setup = await ws.shell(
@@ -659,10 +650,9 @@ for (const destination of ['/data', '/other']) {
     it.each(['safe', 'missing', 'dst~', 'dir'])(
       `cp backup at ${destination} preserves %s referent (source link: ${String(sourceLink)})`,
       async (backupTarget) => {
-        const parser = await getTestParser()
         const ws = new Workspace(
           { '/data': new RAMVFS(), '/other': new RAMVFS() },
-          { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+          { mode: MountMode.WRITE },
         )
         try {
           const setup = await ws.shell(
@@ -694,10 +684,9 @@ for (const destination of ['/data', '/other']) {
 it.each([false, true])(
   'cp backup unlink refusal preserves destination (source link: %s)',
   async (sourceLink) => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/data': new RAMVFS(), '/other': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       const setup = await ws.shell(
@@ -722,10 +711,9 @@ for (const command of ['cp -P', 'mv']) {
   it.each(['/data', '/other'])(
     `${command} counts namespace links in numbered backups at %s`,
     async (destination) => {
-      const parser = await getTestParser()
       const ws = new Workspace(
         { '/data': new RAMVFS(), '/other': new RAMVFS() },
-        { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+        { mode: MountMode.WRITE },
       )
       try {
         const setup = await ws.shell(
@@ -751,7 +739,7 @@ const LOOPS =
 
 describe('realpath and readlink -f over link loops', () => {
   it('refuse a loop', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell(LOOPS)
     const r = await ws.shell(
       'cd /data; realpath /data/l1; echo rc=$?; realpath -e l1; echo rc=$?;' +
@@ -767,7 +755,7 @@ describe('realpath and readlink -f over link loops', () => {
   it('keep the 21st link of a loop in missing mode', async () => {
     // GNU 9.7 keeps l((20 mod k) + 1) of a loop of k links: l1 of four
     // (from l1), l3 of four (from l3), m3 of three.
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell(LOOPS)
     const r = await ws.shell('cd /data; realpath -m /data/l1/x /data/m1/x; readlink -m l3')
     expect(DEC.decode(r.stdout)).toBe('/data/l1/x\n/data/m3/x\n/data/l3\n')
@@ -776,7 +764,7 @@ describe('realpath and readlink -f over link loops', () => {
   it('keep the first link of a loop behind a chain in missing mode', async () => {
     // GNU 9.7: behind 25 links (rt1 -> ... -> rt25 -> rq1) the loop's own
     // first link stays; behind 19 (from rt7) the 21st step lands on rq2.
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell(
       'cd /data && ln -s rq2 rq1 && ln -s rq3 rq2 && ln -s rq1 rq3' +
         ' && ln -s rq1 rt25 && for i in $(seq 24 -1 1); do ln -s rt$((i+1)) rt$i; done',
@@ -791,7 +779,7 @@ describe('realpath and readlink -f over link loops', () => {
   it('follow a long chain up to the link limit', async () => {
     // GNU 9.7 follows a chain of any length; here 1,024 links resolve and
     // the 1,025th is refused as a loop, as is a link that grows its path.
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell(
       'cd /data && echo z > c0 && for i in $(seq 1025); do ln -s c$((i-1)) c$i; done && ln -s g/x g',
     )

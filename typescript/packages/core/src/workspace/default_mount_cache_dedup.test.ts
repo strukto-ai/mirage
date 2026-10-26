@@ -12,19 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import type { RAMFileCacheStore } from '../cache/file/ram.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { createShellParser } from '../shell/parse/index.ts'
 import { ops } from '../test-utils.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 describe('default mount cache dedup', () => {
   it('cache hit does not double-store', async () => {
@@ -34,7 +27,6 @@ describe('default mount cache dedup', () => {
       { '/r': ram },
       {
         mode: MountMode.WRITE,
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     const cache = ws.cache as RAMFileCacheStore

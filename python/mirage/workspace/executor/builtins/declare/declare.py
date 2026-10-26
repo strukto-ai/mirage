@@ -33,6 +33,7 @@ from mirage.shell.variable import (
 from mirage.shell.xtrace import trace_assignment
 from mirage.utils.hidden import var_hidden
 from mirage.view.types import SessionView
+from mirage.workspace.executor.builtins.alias.alias import body_aliases
 from mirage.workspace.executor.builtins.declare.constants import (
     ANSI_C_ESCAPES,
     BARE_KEY_RE,
@@ -828,7 +829,11 @@ def function_lines(
     for name in names:
         flags = function_flags(session, name)
         if bodies:
-            lines.append(stored_function_text(name, session.functions[name]))
+            lines.append(
+                stored_function_text(
+                    name, session.functions[name], body_aliases(session, name)
+                )
+            )
             if marks and flags != "f":
                 lines.append(f"declare -{flags} {name}")
         else:

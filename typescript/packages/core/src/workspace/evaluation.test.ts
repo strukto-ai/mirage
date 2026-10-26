@@ -7,7 +7,7 @@ import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { Channel } from '../shell/console/index.ts'
 import { type ParsedProgram } from '../shell/parse/program.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import * as parseModule from '../shell/parse/parse.ts'
 import { SessionState } from './session/session.ts'
 import { seedVar } from './session/state.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -18,15 +18,14 @@ afterEach(() => vi.restoreAllMocks())
 const it = test.extend<{ owned: { ws: Workspace; programs: ParsedProgram[] } }>({
   // eslint-disable-next-line no-empty-pattern -- Vitest requires destructuring for fixture dependencies.
   owned: async ({}, use) => {
-    const parser = await getTestParser()
     const programs: ParsedProgram[] = []
-    const original = parser.parseProgram.bind(parser)
-    vi.spyOn(parser, 'parseProgram').mockImplementation((source) => {
-      const program = original(source)
+    const original = parseModule.parseProgram
+    vi.spyOn(parseModule, 'parseProgram').mockImplementation((source, aliases) => {
+      const program = original(source, aliases)
       programs.push(program)
       return program
     })
-    const ws = new Workspace({}, { shellParser: parser })
+    const ws = new Workspace({})
     try {
       await use({ ws, programs })
     } finally {
@@ -127,20 +126,6 @@ it.for([
     expect(programs.every((program) => program.references === 0)).toBe(true)
   },
 )
-
-it('closing one workspace leaves its injected parser usable by another', async () => {
-  const parser = await getTestParser()
-  const first = new Workspace({}, { shellParser: parser })
-  const second = new Workspace({}, { shellParser: parser })
-  await first.shell('f() { echo first; }')
-  await first.close()
-  try {
-    const io = await second.shell('echo second')
-    expect(new TextDecoder().decode(io.stdout)).toBe('second\n')
-  } finally {
-    await second.close()
-  }
-})
 
 it('keeps a cancelled tree alive until a blocked leaf actually settles', async ({
   owned: { ws, programs },

@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -o \"err[a-z]*\" /data/r4/app.log; rg -o -r X 'err[a-z]*' /data/r4/app.log; rg -r '[$0]' 'err[a-z]*' /data/r4/app.log; rg -r '<$1>' 'e(r+)' /data/r4/app.log",
@@ -54,6 +55,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a1b2c\\n' | rg -o '[0-9]'",
@@ -87,6 +89,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'ab\\n' | rg -o '[0-9]*'",
@@ -120,6 +123,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'ab\\n' | rg -o ''",
@@ -153,6 +157,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'ab\\n' | rg -o '^'",
@@ -186,6 +191,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'ab\\n' | rg -o '$'",
@@ -219,6 +225,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a1b\\n' | rg -o '[0-9]*'",
@@ -252,6 +259,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '1a22b\\n' | rg -o '[0-9]*'",
@@ -285,6 +293,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'abc\\n' | rg -o 'b*'",
@@ -318,6 +327,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'ab\\n' | rg -oc '[0-9]*'",
@@ -352,6 +362,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\nb\\n' | rg -o '[0-9]*'",
@@ -385,6 +396,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgo1 && printf 'a1b2c\\n' > /data/rgo1/x.txt && rg -o '[0-9]' /data/rgo1",
@@ -418,6 +430,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgo6 && printf 'a1b2c\\n' > /data/rgo6/x.txt && rg -on '[0-9]' /data/rgo6",
@@ -452,6 +465,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgo7 && printf 'a1b2c\\n' > /data/rgo7/x.txt && rg -oI '[0-9]' /data/rgo7",
@@ -486,6 +500,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgo3 && printf 'ab\\n' > /data/rgo3/p.txt && printf 'cd\\n' > /data/rgo3/q.txt && rg -o '[0-9]*' /data/rgo3/p.txt /data/rgo3/q.txt",
@@ -519,6 +534,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgo4 && printf 'ab\\n' > /data/rgo4/z.txt && rg -oH '[0-9]*' /data/rgo4/z.txt",
@@ -553,6 +569,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/rgb.txt; rg -ob abc /data/rgb.txt",
@@ -587,6 +604,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a1b\\n' | rg -ob '[0-9]*'",
@@ -621,6 +639,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgo5 && printf 'ab\\n' > /data/rgo5/z.txt && rg -o '[0-9]*' /data/rgo5",
@@ -654,6 +673,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'abc\\ndef\\n' > /data/rov.txt; rg -ov abc /data/rov.txt",
@@ -688,6 +708,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'abc\\ndef\\n' > /data/rov.txt; rg -ovc abc /data/rov.txt",
@@ -723,6 +744,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'x\\ny\\nzz\\n' | rg -v -o -n y",
@@ -758,6 +780,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\nb\\nc\\n' | rg -o -n -C1 b",
@@ -793,6 +816,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'xay\\nb\\n' | rg -o -b -v -C1 'a|y'",
@@ -829,6 +853,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\nb\\nc\\nd\\ne\\nf\\n' | rg -o -A1 -e b -e f",
@@ -864,6 +889,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'b1\\nb22\\n' | rg -o -c '[0-9]'",
@@ -898,6 +924,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'abc\\n' > /data/rovc1.txt; printf 'def\\n' > /data/rovc2.txt; rg -ovc abc /data/rovc1.txt /data/rovc2.txt",
@@ -933,6 +960,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rovd && printf 'abc\\ndef\\n' > /data/rovd/x.txt && rg -ov abc /data/rovd",
@@ -967,6 +995,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rovd && printf 'abc\\ndef\\n' > /data/rovd/x.txt && rg -ovc abc /data/rovd",
@@ -1002,6 +1031,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rocd && printf 'a\\nb\\nc\\n' > /data/rocd/x.txt && rg -o -C1 b /data/rocd",
@@ -1036,6 +1066,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a1b2\\nc\\n' > /data/roc4.txt; rg -o -n -A1 '[0-9]' /data/roc4.txt /data/roc4.txt",
@@ -1071,6 +1102,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/fcB_oc && printf 'b1\\nb22\\n' > /data/fcB_oc/x.txt && rg -o -c '[0-9]' /data/fcB_oc/x.txt; rg -j1 -o -c '[0-9]' /data/fcB_oc/x.txt /data/fcB_oc/x.txt; rg -o -c '[0-9]' /data/fcB_oc; rm -rf /data/fcB_oc",
@@ -1106,6 +1138,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'abc\\ndef\\n' | rg -ovc abc; echo rc=$?; printf 'abc\\n' | rg -ovc abc; echo rc=$?",

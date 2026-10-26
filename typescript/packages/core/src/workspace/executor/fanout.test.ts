@@ -16,14 +16,13 @@ import { expect, it } from 'vitest'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import { Limit, MountMode, PathSpec } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { shouldFanOut } from './fanout.ts'
 
-async function nested(): Promise<Workspace> {
+function nested(): Workspace {
   return new Workspace(
     { '/base': new RAMVFS(), '/base/inner': new RAMVFS(), '/other': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
 }
 
@@ -39,7 +38,7 @@ it.each([
 ] as [string, Record<string, FlagValue>, boolean][])(
   'a walk fans out over a nested mount: %s %j',
   async (cmd, flags, expected) => {
-    const ws = await nested()
+    const ws = nested()
     const path = PathSpec.fromStrPath('/base')
     expect(shouldFanOut(cmd, [path], flags, ws.registry)).toBe(expected)
     await ws.close()
@@ -47,7 +46,7 @@ it.each([
 )
 
 it('no nested mount and a refused operand stay single', async () => {
-  const ws = await nested()
+  const ws = nested()
   expect(shouldFanOut('find', [PathSpec.fromStrPath('/other')], {}, ws.registry)).toBe(false)
   const refused = new PathSpec({
     virtual: '/base',
@@ -64,7 +63,7 @@ it.each(['find /base', 'du /base', 'ls -R /base'])(
   async (line) => {
     const ws = new Workspace(
       { '/base': new RAMVFS(), '/base/inner': new RAMVFS(), '/base/seen': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     const name = line.split(' ')[0] ?? ''
     ws.registry.mountFor('/base/inner/').commandLimits.set(name, new Limit({ maxLines: 1 }))
@@ -87,7 +86,7 @@ it.each([
 ])('walks a nested mount through the ops: %s', async (line, expected) => {
   const ws = new Workspace(
     { '/base': new RAMVFS(), '/base/inner': new RAMVFS(), '/other': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
   try {
     await ws.shell('printf ab > /base/top; printf abc > /base/inner/g; printf a > /other/h')

@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { encodeValue } from './getfattr.ts'
 
@@ -28,8 +27,7 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function seeded(): Promise<Workspace> {
-  const parser = await getTestParser()
-  const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.shell('mkdir /r/d && echo hi > /r/d/f && ln -s f /r/d/l')
   await ws.vfs.setxattr('/r/d/f', 'user.b', ENC.encode('two'))
   await ws.vfs.setxattr('/r/d/f', 'user.a', ENC.encode('one'))

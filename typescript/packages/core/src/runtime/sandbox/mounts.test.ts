@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeAll, describe, expect, it } from 'vitest'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import {
   currentCaller,
   getAdmission,
@@ -148,12 +147,12 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
   }
 }
 
-async function workspace(
+function workspace(
   sandbox: FakeSandbox,
   hide: string[] = [],
   mounts?: ReadonlyMap<string, ProfileMount>,
   commandLimits?: Record<string, Limit>,
-): Promise<Workspace> {
+): Workspace {
   return new Workspace(
     {
       '/': new RAMVFS(),
@@ -163,7 +162,6 @@ async function workspace(
     },
     {
       mode: MountMode.WRITE,
-      shellParser: await getTestParser(),
       profiles: { agent: { paths: { hide }, ...(mounts === undefined ? {} : { mounts }) } },
       runtimes: [sandbox, 'workspace'],
       ...(commandLimits === undefined ? {} : { commandLimits }),
@@ -225,7 +223,7 @@ describe('topPrefixes', () => {
 describe('SandboxMounts', () => {
   it('serves every prefix the session sees over ssh', async () => {
     const sandbox = new FakeSandbox('ssh')
-    const ws = await workspace(sandbox)
+    const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('python3 job.py')
     expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
@@ -241,7 +239,7 @@ describe('SandboxMounts', () => {
 
   it('refuses a second session rather than show it the first view', async () => {
     const sandbox = new FakeSandbox('ssh')
-    const ws = await workspace(sandbox)
+    const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     const other = await ws.session('other')
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
@@ -256,7 +254,7 @@ describe('SandboxMounts', () => {
 
   it('refuses a session made again under its id', async () => {
     const sandbox = new FakeSandbox('ssh')
-    const ws = await workspace(sandbox)
+    const ws = workspace(sandbox)
     let agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     await ws.closeSession('agent')
@@ -273,7 +271,7 @@ describe('SandboxMounts', () => {
 
   it('refuses hidden unserved mounts without claiming the sandbox', async () => {
     const sandbox = new FakeSandbox('ssh')
-    const ws = await workspace(sandbox, ['/data', '/my notes'])
+    const ws = workspace(sandbox, ['/data', '/my notes'])
     const agent = await ws.session('agent', { profile: 'agent' })
     const other = await ws.session('other')
     const result = await agent.shell('python3 job.py')
@@ -287,7 +285,7 @@ describe('SandboxMounts', () => {
 
   it('leaves the sandbox free after a line it refused', async () => {
     const sandbox = new FakeSandbox('both', ['/data', '/my notes'])
-    const ws = await workspace(sandbox, ['/data'])
+    const ws = workspace(sandbox, ['/data'])
     const agent = await ws.session('agent', { profile: 'agent' })
     const other = await ws.session('other')
     expect((await agent.shell('python3 job.py')).exitCode).toBe(126)
@@ -297,7 +295,7 @@ describe('SandboxMounts', () => {
 
   it('serves over both what the sandbox does not mount itself', async () => {
     const sandbox = new FakeSandbox('both', ['/data'])
-    const ws = await workspace(sandbox, ['/my notes/secret'])
+    const ws = workspace(sandbox, ['/my notes/secret'])
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     expect(sandbox.served()).toEqual(['/my notes'])
@@ -308,7 +306,7 @@ describe('SandboxMounts', () => {
     'refuses a line under %s while a rule covers a prefix the sandbox serves',
     async (mountType) => {
       const sandbox = new FakeSandbox(mountType, ['/data'])
-      const ws = await workspace(sandbox, ['/data/secret.csv'])
+      const ws = workspace(sandbox, ['/data/secret.csv'])
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('python3 job.py')
       expect(result.exitCode).toBe(126)
@@ -320,7 +318,7 @@ describe('SandboxMounts', () => {
 
   it('refuses a line once the sandbox mounts a ruled prefix itself', async () => {
     const sandbox = new FakeSandbox('fuse')
-    const ws = await workspace(sandbox, ['/data/secret.csv'])
+    const ws = workspace(sandbox, ['/data/secret.csv'])
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(126)
     sandbox.table.set('/data', 'fuse')
@@ -332,7 +330,7 @@ describe('SandboxMounts', () => {
 
   it('serves nothing from the host over fuse and takes any session', async () => {
     const sandbox = new FakeSandbox('fuse', ['/data'])
-    const ws = await workspace(sandbox, ['/my notes/secret'])
+    const ws = workspace(sandbox, ['/my notes/secret'])
     const agent = await ws.session('agent', { profile: 'agent' })
     const other = await ws.session('other')
     expect((await agent.shell('python3 job.py')).exitCode).toBe(126)
@@ -343,7 +341,7 @@ describe('SandboxMounts', () => {
 
   it('fails loud in a sandbox without sshfs', async () => {
     const sandbox = new FakeSandbox('ssh', [], false)
-    const ws = await workspace(sandbox)
+    const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('python3 job.py')
     expect(result.exitCode).toBe(1)
@@ -358,7 +356,7 @@ describe('SandboxMounts', () => {
   it('drops a stale sshfs mount before serving', async () => {
     const sandbox = new FakeSandbox('ssh')
     sandbox.table.set('/data', 'fuse.sshfs')
-    const ws = await workspace(sandbox)
+    const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     const drop = "fusermount3 -uz '/data' || fusermount -uz '/data'"
@@ -375,7 +373,7 @@ describe('SandboxMounts', () => {
     'refuses a line under %s while a hidden mount is the sandbox own',
     async (mountType) => {
       const sandbox = new FakeSandbox(mountType, ['/data'])
-      const ws = await workspace(sandbox, ['/data'])
+      const ws = workspace(sandbox, ['/data'])
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('python3 job.py')
       expect(result.exitCode).toBe(126)
@@ -386,7 +384,7 @@ describe('SandboxMounts', () => {
 
   it('refuses a line while a mode cap covers a prefix the sandbox serves', async () => {
     const sandbox = new FakeSandbox('both', ['/data'])
-    const ws = await workspace(sandbox, [], new Map([['/data/sub', { mode: MountMode.READ }]]))
+    const ws = workspace(sandbox, [], new Map([['/data/sub', { mode: MountMode.READ }]]))
     const agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('python3 job.py')
     expect(result.exitCode).toBe(126)
@@ -398,7 +396,7 @@ describe('SandboxMounts', () => {
     'refuses a shown read-only path on a sandbox-owned mount under %s',
     async (mountType) => {
       const sandbox = new FakeSandbox(mountType, ['/data'])
-      const ws = await workspace(sandbox)
+      const ws = workspace(sandbox)
       try {
         const agent = await ws.session('agent', {
           profile: { paths: { hide: [], show: [{ path: '/data/locked', mode: MountMode.READ }] } },
@@ -416,7 +414,7 @@ describe('SandboxMounts', () => {
   it('serves the live session to a line with its own cwd', async () => {
     sessions.length = 0
     const sandbox = new FakeSandbox('ssh')
-    const ws = await workspace(sandbox)
+    const ws = workspace(sandbox)
     await ws.session('agent', { profile: 'agent' })
     const result = await ws.shell('python3 job.py', { sessionId: 'agent', cwd: '/data' })
     expect(result.exitCode).toBe(0)
@@ -437,7 +435,7 @@ describe('SandboxMounts', () => {
     }))
     try {
       const sandbox = new FakeSandbox('ssh')
-      const ws = await workspace(sandbox)
+      const ws = workspace(sandbox)
       const agent = await ws.session('agent', { profile: 'agent' })
       expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
       expect(bound).toEqual([
@@ -472,7 +470,7 @@ describe('SandboxMounts', () => {
       }
     })
     try {
-      const ws = await workspace(new FakeSandbox('ssh'))
+      const ws = workspace(new FakeSandbox('ssh'))
       const agent = await ws.session('agent', { profile: 'agent' })
       let done = false
       const line = agent.shell('python3 job.py').finally(() => {
@@ -519,7 +517,7 @@ describe('SandboxMounts', () => {
       },
     }))
     try {
-      const ws = await workspace(new FakeSandbox('ssh'), [], undefined, {
+      const ws = workspace(new FakeSandbox('ssh'), [], undefined, {
         python3: new Limit({ timeoutSeconds: 0.05 }),
       })
       const agent = await ws.session('agent', { profile: 'agent' })
@@ -533,7 +531,7 @@ describe('SandboxMounts', () => {
 
   it('fails loud on a mount of its own under a served prefix', async () => {
     const sandbox = new FakeSandbox('both', ['/data/sub'])
-    const ws = await workspace(sandbox)
+    const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('python3 job.py')
     expect(result.exitCode).toBe(1)
@@ -546,7 +544,7 @@ describe('SandboxMounts', () => {
 
   it('serves a mount added later on the next line', async () => {
     const sandbox = new FakeSandbox('ssh')
-    const ws = await workspace(sandbox)
+    const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     ws.addMount('/extra', new RAMVFS(), MountMode.WRITE)
@@ -557,7 +555,7 @@ describe('SandboxMounts', () => {
 
   it('starts a server that ended again', async () => {
     const sandbox = new FakeSandbox('ssh')
-    const ws = await workspace(sandbox)
+    const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     sandbox.ends.get('/data')?.()
@@ -569,7 +567,7 @@ describe('SandboxMounts', () => {
 
   it('stops a pipe whose unmount failed', async () => {
     const sandbox = new FakeSandbox('ssh')
-    const ws = await workspace(sandbox)
+    const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     sandbox.failUnmount = true
@@ -596,7 +594,7 @@ describe('SandboxMounts', () => {
         return pipe
       }
     }
-    const ws = await workspace(new UnavailableSandbox('ssh', [], true, false))
+    const ws = workspace(new UnavailableSandbox('ssh', [], true, false))
     try {
       const result = await ws.shell('python3 job.py')
       expect(result.exitCode).toBe(1)
@@ -615,7 +613,7 @@ describe('SandboxMounts', () => {
     }))
     try {
       const sandbox = new FakeSandbox('ssh', [], true, false)
-      const ws = await workspace(sandbox)
+      const ws = workspace(sandbox)
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('python3 job.py')
       expect(result.exitCode).toBe(1)
@@ -629,7 +627,7 @@ describe('SandboxMounts', () => {
   it('lets go of its setup when the line is aborted', async () => {
     const sandbox = new FakeSandbox('ssh')
     sandbox.hang = true
-    const ws = await workspace(sandbox)
+    const ws = workspace(sandbox)
     await ws.session('agent', { profile: 'agent' })
     const abort = new AbortController()
     const running = ws.shell('python3 job.py', { sessionId: 'agent', signal: abort.signal })

@@ -14,11 +14,15 @@
 
 import pytest
 
+from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.clone import (
     default_directory,
     remote_head,
 )
 from mirage.commands.cli.builtin.git.transport import Advertisement
+from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 
 ADV = Advertisement(
     {
@@ -66,3 +70,15 @@ def test_the_checkout_follows_head_or_the_named_branch_or_tag(
 def test_a_detached_remote_head_is_checked_out_detached():
     adv = Advertisement({"HEAD": "c" * 40, "refs/heads/main": "b" * 40})
     assert remote_head(adv, None) == (None, "c" * 40)
+
+
+@pytest.mark.asyncio
+async def test_a_third_operand_is_too_many_arguments():
+    with Workspace({"/w/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.shell("mkdir /w/b && echo x > /w/b/f")
+        result = await ws.shell("cd /w && git clone a b c")
+    assert result.exit_code == 129
+    assert result.stderr.startswith(
+        b"fatal: Too many arguments.\n\nusage: git clone "
+    )

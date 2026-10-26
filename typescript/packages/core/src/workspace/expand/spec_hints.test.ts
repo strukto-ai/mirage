@@ -29,7 +29,6 @@ import {
 } from '../../../tests/workspace/fixtures/integration_fixture.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { specForCommand, specWordKinds } from './spec_hints.ts'
 
 class StubVFS extends BaseVFS {
@@ -130,7 +129,7 @@ describe('specWordKinds', () => {
 
 describe('an attached path value reaches the command', () => {
   it('sort -o/<path> writes the file', async () => {
-    const { ws } = await makeIntegrationWS({ 'in.txt': 'b\na\n', 'sub/keep': '' })
+    const { ws } = makeIntegrationWS({ 'in.txt': 'b\na\n', 'sub/keep': '' })
     try {
       const [code, , err] = await runResult(ws, 'sort -o/data/s1.txt /data/in.txt')
       expect(err).toBe('')
@@ -177,7 +176,7 @@ describe('specForCommand', () => {
     })
     const ws = new Workspace(
       { '/longer': new RAMVFS(), '/b': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     try {
       ws.mount('/longer').registerCommands([tree])

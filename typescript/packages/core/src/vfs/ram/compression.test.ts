@@ -21,7 +21,6 @@ import { RAMVFS } from './ram.ts'
 import { PathSpec } from '../../types.ts'
 import { gzip as gzipUtil, gunzip as gunzipUtil } from '../../utils/compress.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 const RAM_GZIP = GENERIC_COMMANDS.filter((c) => c.name === 'gzip' && c.filetype == null)
 const RAM_GUNZIP = GENERIC_COMMANDS.filter((c) => c.name === 'gunzip' && c.filetype == null)
@@ -105,10 +104,7 @@ async function readOnlyShell(line: string): Promise<[number, string, string, str
   vfs.store.files.set('/f.txt', ENC.encode('hello\n'))
   vfs.store.files.set('/f.txt.gz', await gzipUtil(ENC.encode('hello\n')))
   vfs.store.files.set('/g.txt', ENC.encode('fresh\n'))
-  const ws = new Workspace(
-    { '/ro/': [vfs, MountMode.READ] },
-    { shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/ro/': [vfs, MountMode.READ] })
   try {
     const r = await ws.shell(line)
     return [

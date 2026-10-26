@@ -100,7 +100,7 @@ const ERROR_CASES: [string, number, string, string][] = [
 describe('parameter expansion error operators', () => {
   for (const [cmd, exitCode, stdout, stderr] of ERROR_CASES) {
     it(cmd, async () => {
-      const { ws } = await makeIntegrationWS()
+      const { ws } = makeIntegrationWS()
       try {
         expect(await runResult(ws, cmd)).toEqual([exitCode, stdout, stderr])
       } finally {
@@ -110,7 +110,7 @@ describe('parameter expansion error operators', () => {
   }
 
   it('assigns inside a function local without leaking', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(
         await run(ws, 'f(){ local v=; echo "${v:=zz}"; echo "inner=$v"; }; f; echo "outer=[$v]"'),
@@ -165,7 +165,7 @@ const SLICE_CASES: [string, number, string, string][] = [
 describe('substring of an unset parameter', () => {
   for (const [cmd, exitCode, stdout, stderr] of SLICE_CASES) {
     it(cmd, async () => {
-      const { ws } = await makeIntegrationWS()
+      const { ws } = makeIntegrationWS()
       try {
         expect(await runResult(ws, cmd)).toEqual([exitCode, stdout, stderr])
       } finally {
@@ -223,7 +223,7 @@ const NOUNSET_CASES: [string, number, string, string][] = [
 describe('set -u over subscripts and substring bounds', () => {
   for (const [cmd, exitCode, stdout, stderr] of NOUNSET_CASES) {
     it(cmd, async () => {
-      const { ws } = await makeIntegrationWS()
+      const { ws } = makeIntegrationWS()
       try {
         expect(await runResult(ws, cmd)).toEqual([exitCode, stdout, stderr])
       } finally {
@@ -236,7 +236,7 @@ describe('set -u over subscripts and substring bounds', () => {
 describe('parameter expansion operators', () => {
   for (const [cmd, expected] of CASES) {
     it(cmd, async () => {
-      const { ws } = await makeIntegrationWS()
+      const { ws } = makeIntegrationWS()
       try {
         expect(await run(ws, cmd)).toBe(expected)
       } finally {

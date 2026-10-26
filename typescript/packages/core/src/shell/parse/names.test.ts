@@ -11,30 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   arithReads,
   assignmentValues,
   commandInvocations,
   commandWords,
-  createShellParser,
   identifierNames,
   referencedNames,
-  type ShellParser,
 } from './index.ts'
 import type { TSNodeLike } from '../types.ts'
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
+import { parse } from './parse.ts'
 
 describe('referencedNames', () => {
   it.each<[string, string[]]>([
@@ -72,7 +59,7 @@ describe('referencedNames', () => {
     ['f() { echo "$T"; }', []],
     ['f() { echo "$T"; }; echo $U', ['U']],
   ])('%s reads %j', (command, names) => {
-    const root = parser.parse(command) as unknown as TSNodeLike
+    const root = parse(command) as unknown as TSNodeLike
     expect(referencedNames(root)).toEqual(new Set(names))
   })
 })
@@ -94,7 +81,7 @@ describe('commandWords', () => {
     // command word here.
     ['f() { python3 x.py; }; f', ['f']],
   ])('%s speaks %j', (command, words) => {
-    const root = parser.parse(command) as unknown as TSNodeLike
+    const root = parse(command) as unknown as TSNodeLike
     expect(commandWords(root)).toEqual(new Set(words))
   })
 })
@@ -114,7 +101,7 @@ describe('commandInvocations', () => {
     ['export X=1', []],
     ['f() { inner verb; }', []],
   ])('%s invokes %j', (command, invocations) => {
-    const root = parser.parse(command) as unknown as TSNodeLike
+    const root = parse(command) as unknown as TSNodeLike
     expect(commandInvocations(root)).toEqual(invocations)
   })
 })
@@ -161,7 +148,7 @@ describe('arithReads', () => {
     // A definition's body runs at invocation, not here.
     ['f() { echo $((q)); }', []],
   ])('%s reads %j as arithmetic', (command, names) => {
-    const root = parser.parse(command) as unknown as TSNodeLike
+    const root = parse(command) as unknown as TSNodeLike
     expect(arithReads(root)).toEqual(new Set(names))
   })
 })
@@ -181,7 +168,7 @@ describe('assignmentValues', () => {
     // A prefix assignment is one too.
     ['N=v printenv', [['N', 'v', []]]],
   ])('%s assigns %j', (command, values) => {
-    const root = parser.parse(command) as unknown as TSNodeLike
+    const root = parse(command) as unknown as TSNodeLike
     expect(assignmentValues(root)).toEqual(
       values.map(([name, literal, reads]) => [name, literal, new Set(reads)]),
     )

@@ -2,22 +2,15 @@ import { shellQuote } from '../../utils/quote.ts'
 import { MontyRuntime } from '../../runtime/python/monty/runtime.ts'
 import { PyodideRuntime } from '../../runtime/python/pyodide/runtime.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { beforeAll, expect, it } from 'vitest'
-import type { ShellParser } from '../../shell/parse/index.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { expect, it } from 'vitest'
 import { Limit, PathSpec, MountMode } from '../../types.ts'
 import type { ChildProcess } from '../../process/child.ts'
 import type { SpawnRequest } from '../../process/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { Workspace } from './workspace.ts'
 
-let parser: ShellParser
-beforeAll(async () => {
-  parser = await getTestParser()
-})
-
 it('preserves literal argv and uses the admission gate', async () => {
-  const ws = new Workspace({}, { runtimes: [], shellParser: parser })
+  const ws = new Workspace({}, { runtimes: [] })
   try {
     const argv = ['printf', '%s|', 'a b', '$(echo bad)', '*', "a'b", '', '`']
     const child = ws.spawn({ argv })
@@ -39,7 +32,7 @@ it('preserves literal argv and uses the admission gate', async () => {
 })
 
 it('drains stdin and stdout concurrently and isolates cwd', async () => {
-  const ws = new Workspace({}, { runtimes: [], shellParser: parser })
+  const ws = new Workspace({}, { runtimes: [] })
   try {
     const data = new TextEncoder().encode('x'.repeat(300000))
     expect((await ws.spawn({ argv: ['cat'] }).communicate(data)).stdout).toEqual(data)
@@ -54,7 +47,7 @@ it('drains stdin and stdout concurrently and isolates cwd', async () => {
 })
 
 it('revokes captured process entry points on profile replacement', async () => {
-  const ws = new Workspace({}, { runtimes: [], shellParser: parser })
+  const ws = new Workspace({}, { runtimes: [] })
   try {
     ws.createSession('a')
     ws.createSession('b')
@@ -77,10 +70,7 @@ it('revokes captured process entry points on profile replacement', async () => {
 })
 
 it('Monty keeps its unsupported subprocess import', async () => {
-  const ws = new Workspace(
-    {},
-    { mode: MountMode.EXEC, runtimes: [new MontyRuntime()], shellParser: parser },
-  )
+  const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: [new MontyRuntime()] })
   try {
     const result = await ws.spawn({ argv: ['python', '-c', 'import subprocess'] }).communicate()
     expect(result.exitCode).toBe(1)
@@ -96,7 +86,7 @@ it('Monty keeps its unsupported subprocess import', async () => {
 it('Pyodide subprocess flushes writes and invalidates reads without blocking the host', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.EXEC, runtimes: [new PyodideRuntime()], shellParser: parser },
+    { mode: MountMode.EXEC, runtimes: [new PyodideRuntime()] },
   )
   try {
     const code = `import subprocess
@@ -118,10 +108,7 @@ print(subprocess.run(['printf', '%s', '$(literal)'], capture_output=True, text=T
 }, 60000)
 
 it('Pyodide keeps standard subprocess helpers, pipes, environments and timeouts', async () => {
-  const ws = new Workspace(
-    {},
-    { mode: MountMode.EXEC, runtimes: [new PyodideRuntime()], shellParser: parser },
-  )
+  const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: [new PyodideRuntime()] })
   let ticks = 0
   const timer = setInterval(() => {
     ticks++
@@ -201,7 +188,7 @@ print('ok')`
 }, 60000)
 
 it('spawn uses programs and exported environment', async () => {
-  const ws = new Workspace({}, { runtimes: [], shellParser: parser })
+  const ws = new Workspace({}, { runtimes: [] })
   try {
     await ws.shell(
       'LOCAL=private; export PARENT=outer; f() { echo wrong; }; printf() { echo wrong; }',
@@ -230,7 +217,7 @@ it('spawn uses programs and exported environment', async () => {
 })
 
 it('spawn output obeys the command limit wherever the parent writes', async () => {
-  const ws = new Workspace({}, { runtimes: [], shellParser: parser })
+  const ws = new Workspace({}, { runtimes: [] })
   try {
     const session = ws.createSession('capped', {
       profile: { commandLimits: { cat: new Limit({ maxBytes: 4 }) } },
@@ -252,10 +239,7 @@ it('spawn output obeys the command limit wherever the parent writes', async () =
 })
 
 it('Pyodide inherits unread stdin and reaps unfinished children at guest exit', async () => {
-  const ws = new Workspace(
-    {},
-    { mode: MountMode.EXEC, runtimes: [new PyodideRuntime()], shellParser: parser },
-  )
+  const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: [new PyodideRuntime()] })
   try {
     const code = `import subprocess, sys
 assert sys.stdin.buffer.read(2) == b'ab'
@@ -277,10 +261,7 @@ print('done')`
 }, 60000)
 
 it('Pyodide subprocess meets the profile process cap as BlockingIOError', async () => {
-  const ws = new Workspace(
-    {},
-    { mode: MountMode.EXEC, runtimes: [new PyodideRuntime()], shellParser: parser },
-  )
+  const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: [new PyodideRuntime()] })
   try {
     ws.createSession('restricted', { profile: { processes: { max: 1 } } })
     const code = `import errno, subprocess
@@ -299,7 +280,7 @@ else:
 }, 30000)
 
 it('top-level lines cannot bypass the spawn process cap', async () => {
-  const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: [], shellParser: parser })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: [] })
   const session = ws.createSession('capped', { profile: { processes: { max: 1 } } })
   const child = ws.spawn({ argv: ['sleep', '30'] }, 'capped')
   try {
@@ -323,10 +304,7 @@ it('top-level lines cannot bypass the spawn process cap', async () => {
 // child's file calls carry the execution id its handle bound, not the
 // spawning caller's.
 it("records a spawned command's reads under its own execution", async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, runtimes: [], shellParser: parser },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, runtimes: [] })
   try {
     await ws.vfs.write('/data/f', 'x\n')
     ws.vfs.records.splice(0)

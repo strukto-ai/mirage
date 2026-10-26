@@ -15,7 +15,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir, enoent } from '../../../errors/fs.ts'
@@ -74,7 +73,7 @@ async function shell(
     for (const [name, body] of Object.entries(files)) ram.store.files.set(name, bytes(body))
     vfs[prefix] = ram
   }
-  const ws = new Workspace(vfs, { mode: MountMode.WRITE, shellParser: await getTestParser() })
+  const ws = new Workspace(vfs, { mode: MountMode.WRITE })
   try {
     const io = await ws.shell(cmd, { stdin: stdin === '' ? null : bytes(stdin), cwd: '/data' })
     return [io.exitCode, view(io.stdout), view(io.stderr)]

@@ -40,7 +40,6 @@ vi.mock('../../observe/context.ts', async () => {
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
 import { driveFingerprint } from './fingerprint.ts'
@@ -104,13 +103,10 @@ beforeEach(() => {
   installApi({ docs, sheets, slides })
 })
 
-async function workspace(): Promise<Workspace> {
+function workspace(): Workspace {
   const vfs = new GoogleDriveVFS({ clientId: 'x', refreshToken: 'y' })
   Object.assign(vfs, { accessor: makeAccessor() })
-  return new Workspace(
-    { '/drive/': vfs },
-    { mode: MountMode.READ, shellParser: await getTestParser() },
-  )
+  return new Workspace({ '/drive/': vfs }, { mode: MountMode.READ })
 }
 
 describe('a cold gdrive read through a mount', () => {
@@ -132,7 +128,7 @@ describe('a cold gdrive read through a mount', () => {
       yield await Promise.resolve(new TextEncoder().encode('pdf-bytes'))
     })
     drive.captureFileMetadata.mockResolvedValue([null, null])
-    const ws = await workspace()
+    const ws = workspace()
     try {
       const out = (await ws.dispatch('read', '/drive/report.pdf')) as Uint8Array
       expect(new TextDecoder().decode(out)).toBe('pdf-bytes')
@@ -156,7 +152,7 @@ describe('a cold gdrive read through a mount', () => {
       throw new Error(`unexpected folderId=${opts.folderId}`)
     })
     drive.downloadFile.mockRejectedValue(new Error('should not call downloadFile'))
-    const ws = await workspace()
+    const ws = workspace()
     try {
       await expect(ws.dispatch('read', '/drive/missing.txt')).rejects.toMatchObject({
         code: 'ENOENT',
@@ -171,7 +167,7 @@ describe('a cold gdrive read through a mount', () => {
   it('propagates a failed parent listing instead of reporting ENOENT', async () => {
     drive.listFiles.mockRejectedValue(new Error('drive unavailable'))
     drive.downloadFile.mockRejectedValue(new Error('should not call downloadFile'))
-    const ws = await workspace()
+    const ws = workspace()
     try {
       await expect(ws.dispatch('read', '/drive/missing.txt')).rejects.toThrow(/drive unavailable/)
     } finally {

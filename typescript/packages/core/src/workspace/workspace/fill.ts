@@ -44,6 +44,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import { parseFunction } from '../../shell/helpers.ts'
 import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
 import { deref } from '../session/state.ts'
+import { parse } from '../../shell/parse/parse.ts'
 
 // Appended to an alias value before parsing it for the read walk: the
 // rest of the invoking line lands there at dispatch, so the trailing
@@ -104,11 +105,7 @@ function definedBodies(node: TSNodeLike): Map<string, TSNodeLike[]> {
  * recursion terminates; over-selection only ever over-fetches,
  * under-selection is the bug.
  */
-export function lineNodes(
-  node: TSNodeLike,
-  session: SessionState,
-  reparse: (line: string) => TSNodeLike,
-): TSNodeLike[] {
+export function lineNodes(node: TSNodeLike, session: SessionState): TSNodeLike[] {
   const defined = definedBodies(node)
   const live: Readonly<Record<string, string>> =
     (session.shopts.expand_aliases ?? SHOPT_DEFAULTS.get('expand_aliases') ?? false)
@@ -135,7 +132,11 @@ export function lineNodes(
       const site = session.functionSites.get(word)
       const saved = site?.source === stored && site?.aliases != null ? site.aliases : live
       const found: [TSNodeLike, Readonly<Record<string, string>>][] =
-        stored === undefined ? [] : parseFunction(stored, reparse).map((body) => [body, saved])
+        stored === undefined
+          ? []
+          : parseFunction(stored, (line) => parse(line, new Set(Object.keys(saved)))).map(
+              (body) => [body, saved],
+            )
       for (const body of defined.get(word) ?? []) found.push([body, live])
       const aliased = sessionEntry(aliases, word)
       // An alias is a textual prefix: dispatch appends the
@@ -144,7 +145,10 @@ export function lineNodes(
       // argument list honest -- a CLI named in an alias reads as
       // "verbs unknowable" (whole spec tree) rather than "no verb
       // selected".
-      if (aliased !== undefined) found.push([reparse(aliased + ALIAS_REST), aliases])
+      if (aliased !== undefined) {
+        const others = new Set(Object.keys(aliases).filter((name) => name !== word))
+        found.push([parse(aliased + ALIAS_REST, others), aliases])
+      }
       for (const [body] of found) nodes.push(body)
       frontier.push(...found)
     }

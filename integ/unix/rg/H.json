@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -H alpha /data/r4/notes.txt; rg -I -H alpha /data/r4/notes.txt; rg -H -I alpha /data/r4/notes.txt; rg -H --heading alpha /data/r4/notes.txt; rg -H -0 alpha /data/r4/notes.txt | tr '\\000' '@'; rg -H --path-separator '#' alpha /data/r4/notes.txt; rg -H --field-match-separator ' | ' alpha /data/r4/notes.txt",

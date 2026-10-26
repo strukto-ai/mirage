@@ -20,7 +20,6 @@ vi.mock('../../../../core/chroma/client.ts', async () => {
   return { ...actual, fetchPathTree: vi.fn() }
 })
 
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import * as clientMod from '../../../../core/chroma/client.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -111,7 +110,7 @@ it('is not registered by mounting a store', async () => {
     {
       '/knowledge': new Mount(new ChromaVFS({ collectionName: 'docs' }), { mode: MountMode.READ }),
     },
-    { shellParser: await getTestParser() },
+    {},
   )
   try {
     expect((await ws.shell('search refunds /knowledge')).exitCode).toBe(127)
@@ -120,11 +119,8 @@ it('is not registered by mounting a store', async () => {
   }
 })
 
-async function chroma(vfs: ChromaVFS, name = 'search'): Promise<Workspace> {
-  const ws = new Workspace(
-    { '/knowledge': new Mount(vfs, { mode: MountMode.READ }) },
-    { shellParser: await getTestParser() },
-  )
+function chroma(vfs: ChromaVFS, name = 'search'): Workspace {
+  const ws = new Workspace({ '/knowledge': new Mount(vfs, { mode: MountMode.READ }) })
   ws.registerCli(name, SEARCH)
   return ws
 }
@@ -156,7 +152,7 @@ it.each([
   vi.mocked(clientMod.fetchPathTree).mockResolvedValue(JSON.stringify({ 'a.md': { size: 1 } }))
   const vfs = new ChromaVFS({ collectionName: 'docs' })
   const asked = vi.spyOn(vfs.accessor, 'getCollection')
-  const ws = await chroma(vfs)
+  const ws = chroma(vfs)
   try {
     const result = await ws.shell(cmd)
     expect([result.exitCode, result.stderrText]).toEqual([exitCode, stderr])
@@ -184,7 +180,7 @@ it.each([
   ],
 ])('refuses %s under the installed name', async (cmd, exitCode, stderr) => {
   vi.mocked(clientMod.fetchPathTree).mockResolvedValue(JSON.stringify({ 'a.md': { size: 1 } }))
-  const ws = await chroma(new ChromaVFS({ collectionName: 'docs' }), 'lookup')
+  const ws = chroma(new ChromaVFS({ collectionName: 'docs' }), 'lookup')
   try {
     const result = await ws.shell(cmd)
     expect([result.exitCode, result.stderrText]).toEqual([exitCode, stderr])
@@ -204,7 +200,7 @@ it('names search in a failure', async () => {
   vi.spyOn(vfs.accessor, 'getCollection').mockResolvedValue(
     down as unknown as Awaited<ReturnType<typeof vfs.accessor.getCollection>>,
   )
-  const ws = await chroma(vfs)
+  const ws = chroma(vfs)
   try {
     const missing = await ws.shell('search refunds /knowledge/nope')
     const failed = await ws.shell('search refunds /knowledge')
@@ -218,7 +214,7 @@ it('names search in a failure', async () => {
   }
 })
 
-async function dify(): Promise<{ ws: Workspace; posted: unknown[] }> {
+function dify(): { ws: Workspace; posted: unknown[] } {
   const posted: unknown[] = []
   vi.stubGlobal(
     'fetch',
@@ -229,23 +225,20 @@ async function dify(): Promise<{ ws: Workspace; posted: unknown[] }> {
       )
     }),
   )
-  const ws = new Workspace(
-    {
-      '/knowledge/': new DifyVFS({
-        apiKey: 'key',
-        baseUrl: 'https://dify.test/v1',
-        datasetId: 'kb',
-      }),
-    },
-    { shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({
+    '/knowledge/': new DifyVFS({
+      apiKey: 'key',
+      baseUrl: 'https://dify.test/v1',
+      datasetId: 'kb',
+    }),
+  })
   ws.registerCli('search', SEARCH)
   return { ws, posted }
 }
 
 // Twin of test_dify_answers_the_options_a_line_leaves_out.
 it('lets Dify answer the options a line leaves out', async () => {
-  const { ws, posted } = await dify()
+  const { ws, posted } = dify()
   try {
     expect((await ws.shell('search anything /knowledge')).exitCode).toBe(0)
     expect(posted).toEqual([
@@ -277,7 +270,7 @@ describe.each(['/knowledge', '/knowledge/guides'])('over %s', (scope) => {
     ['--threshold 1.2', 1, 'threshold must be in [0, 1]'],
     ['--top-k 0', 2, 'top-k must be positive'],
   ])('does not ask Dify for %s', async (options, exitCode, stderr) => {
-    const { ws, posted } = await dify()
+    const { ws, posted } = dify()
     try {
       const result = await ws.shell(`search ${options} anything ${scope}`)
       expect(result.exitCode).toBe(exitCode)

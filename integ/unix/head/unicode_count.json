@@ -3,7 +3,7 @@
     {
       "id": "head_unicode_digit_count_rejected",
       "seq": 910054,
-      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "tidb-filesystem", "gdrive", "gdrive-folder", "box"],
       "command": "mkdir -p /data/t2headu && printf 'a\nb\n' > /data/t2headu/f && head -n ١٢ /data/t2headu/f",
       "expect": {
         "exit": 1,

@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/zgl && printf 'error: disk full\\nwarning: low memory\\ninfo: all good\\nerror: timeout\\n' > /data/zgl/app.log && printf 'timeout\\n' > /data/zgl/pat && gzip /data/zgl/app.log; zgrep --count error /data/zgl/app.log.gz; zgrep --regexp=warning --regexp=info /data/zgl/app.log.gz; zgrep --ignore-case ERROR /data/zgl/app.log.gz; zgrep --invert-match error /data/zgl/app.log.gz; zgrep --line-number timeout /data/zgl/app.log.gz; zgrep --files-with-matches info /data/zgl/app.log.gz; zgrep --with-filename timeout /data/zgl/app.log.gz; zgrep --max-count=1 error /data/zgl/app.log.gz; zgrep --only-matching disk /data/zgl/app.log.gz; zgrep --word-regexp all /data/zgl/app.log.gz; zgrep --fixed-strings 'info: all' /data/zgl/app.log.gz; zgrep --extended-regexp -c 'err(or)' /data/zgl/app.log.gz; zgrep --quiet error /data/zgl/app.log.gz; echo rc=$?; zgrep --file=/data/zgl/pat /data/zgl/app.log.gz; rm -rf /data/zgl",

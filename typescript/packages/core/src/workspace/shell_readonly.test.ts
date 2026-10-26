@@ -21,7 +21,7 @@ import {
 
 describe('readonly', () => {
   it('blocks reassignment', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       // A bare assignment to a readonly variable is fatal in
       // non-interactive bash: the rest of the line is abandoned.
@@ -34,7 +34,7 @@ describe('readonly', () => {
   })
 
   it('blocks unset', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'readonly X=5; unset X; echo $X')).toBe('5\n')
     } finally {
@@ -43,7 +43,7 @@ describe('readonly', () => {
   })
 
   it('declare -r blocks reassignment', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const code = await runExit(ws, 'declare -r Y=5; Y=10; echo $Y')
       expect(code).toBe(1)
@@ -54,7 +54,7 @@ describe('readonly', () => {
   })
 
   it('emits non-zero exit on reassignment', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const code = await runExit(ws, 'readonly X=1; X=2')
       expect(code).not.toBe(0)
@@ -64,7 +64,7 @@ describe('readonly', () => {
   })
 
   it('first assignment succeeds', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'readonly X=hello; echo $X')).toBe('hello\n')
     } finally {

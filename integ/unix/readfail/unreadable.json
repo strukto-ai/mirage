@@ -4,7 +4,8 @@
       "id": "readfail_unreadable_prep",
       "seq": 1301069,
       "targets": [
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mkdir -p /data/rfu/a /data/rfu/unlistable && echo x > /data/rfu/a/f && echo y > /data/rfu/unlistable/s",
       "expect": {
@@ -44,7 +45,8 @@
       "id": "readfail_unreadable_find_maxdepth_never_opens",
       "seq": 1301072,
       "targets": [
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "find /data/rfu -maxdepth 1",
       "expect": {
@@ -98,7 +100,8 @@
       "id": "readfail_unreadable_find_across_mounts",
       "seq": 1301076,
       "targets": [
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "echo before; find / -name '*zzz*' 2>/dev/null; echo after=$?",
       "expect": {
@@ -139,7 +142,8 @@
       "id": "readfail_unreadable_cleanup",
       "seq": 1301079,
       "targets": [
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mv /data/rfu/unlistable /data/rfu/listable && rm -rf /data/rfu && test ! -e /data/rfu && echo gone",
       "expect": {

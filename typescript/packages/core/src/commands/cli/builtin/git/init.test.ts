@@ -1,25 +1,11 @@
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, expect, it } from 'vitest'
-import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
+import { expect, it } from 'vitest'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 
-const require = createRequire(import.meta.url)
-let parser: ShellParser
-beforeAll(async () => {
-  parser = await createShellParser({
-    engineWasm: readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm')),
-    grammarWasm: readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm')),
-  })
-})
 function workspace(): Workspace {
-  const ws = new Workspace(
-    { '/repo': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  const ws = new Workspace({ '/repo': new RAMVFS() }, { mode: MountMode.WRITE })
   ws.registerCli('git', GIT)
   return ws
 }

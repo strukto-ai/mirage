@@ -6,6 +6,7 @@
       "targets": [
         "disk",
         "ssh",
+        "tidb-filesystem",
         "ram",
         "redis",
         "opfs"
@@ -23,6 +24,7 @@
       "targets": [
         "disk",
         "ssh",
+        "tidb-filesystem",
         "ram",
         "redis",
         "opfs"
@@ -41,6 +43,7 @@
       "targets": [
         "disk",
         "ssh",
+        "tidb-filesystem",
         "ram",
         "redis",
         "opfs"
@@ -58,6 +61,7 @@
       "targets": [
         "disk",
         "ssh",
+        "tidb-filesystem",
         "ram",
         "redis",
         "opfs"
@@ -75,6 +79,7 @@
       "targets": [
         "disk",
         "ssh",
+        "tidb-filesystem",
         "ram",
         "redis",
         "opfs"
@@ -92,6 +97,7 @@
       "targets": [
         "disk",
         "ssh",
+        "tidb-filesystem",
         "ram",
         "redis",
         "opfs"
@@ -110,6 +116,7 @@
       "targets": [
         "disk",
         "ssh",
+        "tidb-filesystem",
         "ram",
         "redis",
         "opfs"

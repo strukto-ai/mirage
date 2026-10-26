@@ -21,7 +21,7 @@ import {
 
 describe('set -u (nounset)', () => {
   it('makes an unset variable fatal', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, out, err] = await runResult(ws, 'set -u; echo $zq1; echo after')
       expect(code).toBe(127)
@@ -33,7 +33,7 @@ describe('set -u (nounset)', () => {
   })
 
   it('makes a braced lookup fatal', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, , err] = await runResult(ws, 'set -u; echo ${zq2}')
       expect(code).toBe(127)
@@ -44,7 +44,7 @@ describe('set -u (nounset)', () => {
   })
 
   it('leaves the default operator safe', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -u; echo ${zq3:-d}')).toBe('d\n')
     } finally {
@@ -53,7 +53,7 @@ describe('set -u (nounset)', () => {
   })
 
   it('leaves an empty set variable safe', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -u; ze1=; echo x${ze1}y')).toBe('xy\n')
     } finally {
@@ -62,7 +62,7 @@ describe('set -u (nounset)', () => {
   })
 
   it('makes an unset positional fatal', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, , err] = await runResult(ws, 'set -u; echo $1')
       expect(code).toBe(127)
@@ -73,7 +73,7 @@ describe('set -u (nounset)', () => {
   })
 
   it('leaves specials safe', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -u; echo ok $# $?')).toBe('ok 0 0\n')
     } finally {
@@ -82,7 +82,7 @@ describe('set -u (nounset)', () => {
   })
 
   it('turns off with set +u', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -u; set +u; echo x${zq4}y')).toBe('xy\n')
     } finally {
@@ -93,7 +93,7 @@ describe('set -u (nounset)', () => {
 
 describe('set -f (noglob)', () => {
   it('keeps glob words literal', async () => {
-    const { ws } = await makeIntegrationWS({ 'g1.txt': 'a\n' })
+    const { ws } = makeIntegrationWS({ 'g1.txt': 'a\n' })
     try {
       expect(await run(ws, 'set -f; echo /data/*.txt')).toBe('/data/*.txt\n')
     } finally {
@@ -102,7 +102,7 @@ describe('set -f (noglob)', () => {
   })
 
   it('restores globbing with set +f', async () => {
-    const { ws } = await makeIntegrationWS({ 'g2.txt': 'a\n' })
+    const { ws } = makeIntegrationWS({ 'g2.txt': 'a\n' })
     try {
       expect(await run(ws, 'set -f; set +f; echo /data/g2*.txt')).toBe('/data/g2.txt\n')
     } finally {
@@ -111,7 +111,7 @@ describe('set -f (noglob)', () => {
   })
 
   it('keeps for-loop words literal', async () => {
-    const { ws } = await makeIntegrationWS({ 'g3.txt': 'a\n' })
+    const { ws } = makeIntegrationWS({ 'g3.txt': 'a\n' })
     try {
       expect(await run(ws, 'set -f; for f in /data/*.txt; do echo $f; done')).toBe('/data/*.txt\n')
     } finally {
@@ -122,7 +122,7 @@ describe('set -f (noglob)', () => {
 
 describe('set -x (xtrace)', () => {
   it('traces commands to stderr', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, out, err] = await runResult(ws, 'set -x; echo hi')
       expect(code).toBe(0)
@@ -134,7 +134,7 @@ describe('set -x (xtrace)', () => {
   })
 
   it('shows expanded words and assignments', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [, out, err] = await runResult(ws, 'set -x; xv1=5; echo $xv1')
       expect(out).toBe('5\n')
@@ -145,7 +145,7 @@ describe('set -x (xtrace)', () => {
   })
 
   it('quotes traced words with spaces', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [, , err] = await runResult(ws, "set -x; echo 'a b'")
       expect(err).toBe("+ echo 'a b'\n")
@@ -155,7 +155,7 @@ describe('set -x (xtrace)', () => {
   })
 
   it('does not trace the set itself', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [, , err] = await runResult(ws, 'set -x; set +x; echo hi')
       expect(err).toContain('+ set +x')

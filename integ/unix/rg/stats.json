@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -j1 --stats foo /data/rgfl/a.txt /data/rgfl/b.txt | grep -v seconds; rg --stats -q foo /data/rgfl/a.txt | grep -v seconds; rg --stats -c foo /data/rgfl/a.txt | grep -v seconds; rg --stats zzz /data/rgfl/a.txt | grep -v seconds; rg --stats --no-stats foo /data/rgfl/a.txt; rm -rf /data/rgfl",
@@ -58,6 +59,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -j1 --stats --heading foo /data/rgfl/a.txt /data/rgfl/b.txt | grep -v seconds; rg --stats --heading foo /data/rgfl/a.txt /data/rgfl/b.txt | grep -v seconds; rg --stats --heading foo /data/rgfl/a.txt | grep -v seconds; rg --stats -U 'foo\\nbar' /data/rgfl/a.txt | grep -v seconds; rg -j1 --stats -l foo /data/rgfl/a.txt /data/rgfl/b.txt | grep -v seconds; rm -rf /data/rgfl",
@@ -95,6 +97,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'foo e\\n' > /data/rgfl/e.txt; rg -j1 --stats -q foo /data/rgfl/a.txt /data/rgfl/b.txt /data/rgfl/e.txt | grep -v seconds; rg -j1 --json -q foo /data/rgfl/a.txt /data/rgfl/e.txt | sed -E 's/\"elapsed\":\\{[^}]*\\}/\"elapsed\":E/g; s/\"elapsed_total\":\\{[^}]*\\}/\"elapsed_total\":E/g; s/\"bytes_printed\":[0-9]+/\"bytes_printed\":N/g'; rg -j1 --stats -q -m1 foo /data/rgfl/a.txt /data/rgfl/e.txt | grep -v seconds; rm -rf /data/rgfl",

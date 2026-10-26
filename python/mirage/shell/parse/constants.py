@@ -42,34 +42,6 @@ BASH_KEYWORDS = frozenset(
     }
 )
 
-# Tokens that make an ERROR node a real syntax error: brackets, quotes,
-# and an expansion or substitution opener left unclosed, for which bash
-# reads to the end of input looking for the match and runs none of the
-# line.
-STRUCTURAL_TOKENS = frozenset(
-    {
-        "(",
-        ")",
-        "{",
-        "}",
-        "[",
-        "]",
-        '"',
-        "'",
-        "`",
-        "$(",
-        "$((",
-        "${",
-        "$[",
-        "<(",
-        ">(",
-    }
-)
-
-# Statement separators. One that lands inside an ERROR node has nothing
-# to separate (a line starting with `;`, `| s`, `a ; ; b`, `a &; b`).
-SEPARATOR_TOKENS = frozenset({";", "&", "|", "&&", "||"})
-
 # The case-item terminators: a list ends at one only inside a case item.
 CASE_TERMINATORS = frozenset({";;", ";&", ";;&"})
 

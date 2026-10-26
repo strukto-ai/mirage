@@ -125,7 +125,7 @@ const CASES: [string, string][] = [
 describe('shell arrays', () => {
   for (const [cmd, expected] of CASES) {
     it(cmd, async () => {
-      const { ws } = await makeIntegrationWS()
+      const { ws } = makeIntegrationWS()
       try {
         expect(await run(ws, cmd)).toBe(expected)
       } finally {
@@ -135,7 +135,7 @@ describe('shell arrays', () => {
   }
 
   it('bad negative subscript aborts the line', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, out, err] = await runResult(ws, 'a=(1); a[-5]=x; echo rc=$?')
       expect(code).toBe(1)
@@ -147,7 +147,7 @@ describe('shell arrays', () => {
   })
 
   it('bad subscript is contained by a subshell', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, out] = await runResult(ws, '(a=(1); a[-5]=x); echo rc=$?')
       expect(code).toBe(0)
@@ -158,7 +158,7 @@ describe('shell arrays', () => {
   })
 
   it('array literal globs resolve to matches', async () => {
-    const { ws } = await makeIntegrationWS({ 'g1.txt': 'x\n', 'g2.txt': 'y\n' })
+    const { ws } = makeIntegrationWS({ 'g1.txt': 'x\n', 'g2.txt': 'y\n' })
     try {
       expect(await run(ws, 'a=(/data/g*.txt); echo "${#a[@]}"')).toBe('2\n')
     } finally {

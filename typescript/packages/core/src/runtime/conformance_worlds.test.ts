@@ -15,11 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { FileType, MountMode } from '../types.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 
@@ -41,12 +37,11 @@ import { MontyRuntime } from './python/monty/index.ts'
 // beside them, and start passing loud when fixed.
 
 async function structureWorld(): Promise<Workspace> {
-  const parser = await getTestParser()
   const base = new RAMVFS()
   const inner = new RAMVFS()
   const ws = new Workspace(
     {},
-    { mode: MountMode.EXEC, shellParser: parser, runtimes: [new MontyRuntime(), 'workspace'] },
+    { mode: MountMode.EXEC, runtimes: [new MontyRuntime(), 'workspace'] },
   )
   ws.addMount('/base', base, MountMode.WRITE)
   ws.addMount('/base/inner', inner, MountMode.WRITE)
@@ -70,13 +65,9 @@ async function structureWorld(): Promise<Workspace> {
 async function scopedWorld(
   runtime: string | MontyRuntime = new MontyRuntime(),
 ): Promise<Workspace> {
-  const parser = await getTestParser()
   const open = new RAMVFS()
   const closed = new RAMVFS()
-  const ws = new Workspace(
-    {},
-    { mode: MountMode.EXEC, shellParser: parser, runtimes: [runtime, 'workspace'] },
-  )
+  const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: [runtime, 'workspace'] })
   ws.addMount('/open', open, MountMode.WRITE)
   ws.addMount('/closed', closed, MountMode.WRITE)
   await ws.vfs.write('/open/pub.txt', 'public')
@@ -156,14 +147,12 @@ describe('structure world', () => {
     // says it exists; plain ls, ls -R (whose walk runs through the
     // cross-mount fan-out) and ls -d must all agree instead of
     // reporting the operand missing.
-    const parser = await getTestParser()
     const base = new RAMVFS()
     const deep = new RAMVFS()
     const ws = new Workspace(
       {},
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new MontyRuntime(), 'workspace'],
       },
     )
@@ -266,14 +255,12 @@ describe('scoped world', () => {
     // engage: skipping it hands the walk to single-mount dispatch,
     // which serves the shadowed key that path dispatch itself
     // refuses.
-    const parser = await getTestParser()
     const base = new RAMVFS()
     const inner = new RAMVFS()
     const ws = new Workspace(
       {},
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new MontyRuntime(), 'workspace'],
       },
     )

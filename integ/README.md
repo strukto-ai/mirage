@@ -249,7 +249,7 @@ flowchart LR
     ts --> J2["integ-ts"]
     core & ts --> J3["integ-shared-py · integ-shared-ts<br/>integ-shared-parity · integ-selftests<br/>integ-facets · integ-wandb"]
     core & ts --> HOST["integ-hosting<br/>interrupts: CPU · streams · disconnect · cancellation<br/>hosting: FastAPI · Fastify · Monty<br/>RAM · S3 · Redis · Slack"]
-    data --> J4["integ-data · integ-events"]
+    data --> J4["integ-data · integ-events<br/>integ-tidb-filesystem"]
     database --> J5["integ-database"]
     observability --> J6["integ-observability"]
     fuse --> J7["integ-fuse · integ-fuse-windows<br/>integ-fskit-macos"]

@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // Regression coverage for GitHub issue #43:
@@ -28,18 +28,17 @@ import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
 
-async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeWs(): Workspace {
   const r = new RAMVFS()
   r.store.dirs.add('/')
   r.store.dirs.add('/src')
   r.store.files.set('/src/a.js', ENC.encode('legacyFetch("/api");\n'))
-  return new Workspace({ '/': r }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/': r }, { mode: MountMode.WRITE })
 }
 
 describe('grep -r recursive exit code (issue #43)', () => {
   it('exit 0 when search root is a single-mount subdir with matches', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('grep -rEn "legacyFetch" /src')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toContain('legacyFetch')
@@ -47,7 +46,7 @@ describe('grep -r recursive exit code (issue #43)', () => {
   })
 
   it('exit 0 when search root is / and descendant mounts exist (fan-out)', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('grep -rEn "legacyFetch" /')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toContain('legacyFetch')
@@ -55,7 +54,7 @@ describe('grep -r recursive exit code (issue #43)', () => {
   })
 
   it('exit 0 when search root is . and descendant mounts exist (fan-out)', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('grep -rEn "legacyFetch" .')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toContain('legacyFetch')
@@ -63,28 +62,28 @@ describe('grep -r recursive exit code (issue #43)', () => {
   })
 
   it('exit 1 when no match exists anywhere under /', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('grep -rEn "doesNotExistAnywhere" /')
     expect(io.exitCode).toBe(1)
     await ws.close()
   })
 
   it('if-then takes the true branch when grep -r / finds a match', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('if grep -rEn "legacyFetch" /; then echo FOUND; fi')
     expect(stdoutStr(io)).toContain('FOUND')
     await ws.close()
   })
 
   it('&& runs the right arm when grep -r / finds a match', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('grep -rEn "legacyFetch" / && echo OK')
     expect(stdoutStr(io)).toContain('OK')
     await ws.close()
   })
 
   it('|| does not run the right arm when grep -r / finds a match', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('grep -rEn "legacyFetch" / || echo SHOULD_NOT_PRINT')
     expect(stdoutStr(io)).not.toContain('SHOULD_NOT_PRINT')
     await ws.close()
@@ -97,10 +96,7 @@ it('keeps binary-only matches through nested mount fan-out', async () => {
   outer.store.dirs.add('/')
   outer.store.dirs.add('/work')
   inner.store.files.set('/paper.pdf', ENC.encode('needle\0tail\n'))
-  const ws = new Workspace(
-    { '/': outer, '/work/remote': inner },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/': outer, '/work/remote': inner }, { mode: MountMode.WRITE })
   try {
     const normal = await ws.shell('grep -r needle /work')
     expect(normal.exitCode).toBe(0)

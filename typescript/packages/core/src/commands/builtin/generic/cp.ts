@@ -1321,8 +1321,9 @@ export async function copyEntries(
  * Copy one file between the strategy's mounts, reporting a failure in GNU's
  * words; false when it failed. A store-to-store copy goes first where the
  * strategy has one: the destination's store copies from the source's without
- * the bytes passing through mirage. EXDEV from it says the stores cannot, and
- * a declined walk says a hide or rule wants the copy made by parts; either way
+ * the bytes passing through mirage. EXDEV from it says the stores cannot, as
+ * ENOTSUP does from a store with no copy of its own, and a declined walk says
+ * a hide or rule wants the copy made by parts; either way
  * the bytes move through a read and a write, the file materialized in
  * between. Mirrors Python's transfer_file.
  */
@@ -1338,7 +1339,8 @@ export async function transferFile(
       await strategy.copy(src, dst)
       return true
     } catch (err) {
-      if ((err as Partial<WalkDeclinedError>).declined !== true && classify(err) !== 'EXDEV') {
+      const cannot = classify(err) === 'EXDEV' || classify(err) === 'ENOTSUP'
+      if ((err as Partial<WalkDeclinedError>).declined !== true && !cannot) {
         if (!isFsError(err)) throw err
         errors.push(
           (err as { virtualPath?: unknown }).virtualPath === src.virtual

@@ -17,7 +17,6 @@ import { QuickJsRuntime } from './runtime.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { Context } from '../../../commands/config.ts'
 import { context } from '../../../../tests/workspace/fixtures/context.ts'
 
@@ -32,7 +31,6 @@ describe('QuickJS cwd', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         runtimes: [rt, 'workspace'],
       },
     )
@@ -73,7 +71,6 @@ it.each([
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         runtimes: [new QuickJsRuntime(), 'workspace'],
       },
     )
@@ -113,7 +110,6 @@ it('a deadline joins the landing of what a stopped guest wrote', async () => {
     { '/data': new SlowRAMVFS() },
     {
       mode: MountMode.EXEC,
-      shellParser: await getTestParser(),
       runtimes: [new QuickJsRuntime(), 'workspace'],
     },
   )
@@ -140,7 +136,7 @@ it('marks a FILE whose flush failed as in error', async () => {
   const rt = new QuickJsRuntime()
   const ws = new Workspace(
     { '/data': new FullVFS() },
-    { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [rt, 'workspace'] },
+    { mode: MountMode.EXEC, runtimes: [rt, 'workspace'] },
   )
   try {
     const result = await execute(

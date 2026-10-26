@@ -23,6 +23,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -61,6 +62,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -95,6 +97,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -129,6 +132,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -163,6 +167,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -197,6 +202,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -231,6 +237,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -265,6 +272,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -299,6 +307,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -337,6 +346,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -371,6 +381,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -405,6 +416,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -439,6 +451,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"

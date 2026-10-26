@@ -13,31 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { EvaluationContext } from '../evaluation.ts'
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
-import { createShellParser, type ShellParser } from '../../shell/parse/index.ts'
 import { MountMode } from '../../types.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
+import { parse } from '../../shell/parse/parse.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { SessionState } from '../session/session.ts'
 import { type ExecuteNodeDeps } from './execute_node.ts'
 import { runCommandTree } from './run_tree.ts'
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
 
 function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
   const dispatch: DispatchFn = () => Promise.resolve([null, new IOResult()])
@@ -57,10 +44,6 @@ function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
 function registry(): MountRegistry {
   const ram = new RAMVFS()
   return new MountRegistry({ '/': ram }, MountMode.WRITE)
-}
-
-function parse(command: string): TSNodeLike {
-  return parser.parse(command) as unknown as TSNodeLike
 }
 
 describe('runCommandTree', () => {

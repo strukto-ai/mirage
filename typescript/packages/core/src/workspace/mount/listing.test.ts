@@ -20,7 +20,6 @@ import { enoent } from '../../errors/fs.ts'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { type Clock, ManualClock } from '../../utils/clock.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import {
@@ -201,12 +200,11 @@ class Folders extends BaseVFS {
 
 const ENC = new TextEncoder()
 
-async function workspace(store: Folders, clock?: Clock): Promise<Workspace> {
+function workspace(store: Folders, clock?: Clock): Workspace {
   return new Workspace(
     { '/f/': store },
     {
       mode: MountMode.WRITE,
-      shellParser: await getTestParser(),
       ...(clock === undefined ? {} : { clock }),
     },
   )
@@ -217,7 +215,7 @@ describe('a mount that keeps its VFS listings', () => {
     const store = new Folders()
     store.add('a.txt', 'root', ENC.encode('hi'))
     store.add('d')
-    const ws = await workspace(store)
+    const ws = workspace(store)
     try {
       await runInCommandScope(async () => {
         expect(((await ws.dispatch('readdir', '/f')) as string[]).sort()).toEqual([
@@ -238,7 +236,7 @@ describe('a mount that keeps its VFS listings', () => {
     const store = new Folders()
     const d = store.add('d')
     const f = store.add('f.txt', d, ENC.encode('deep'))
-    const ws = await workspace(store)
+    const ws = workspace(store)
     try {
       const data = await ws.dispatch('read', '/f/d/f.txt')
       expect(new TextDecoder().decode(data as Uint8Array)).toBe('deep')
@@ -254,7 +252,7 @@ describe('a mount that keeps its VFS listings', () => {
 
   it('hands each level of a nested create the one above', async () => {
     const store = new Folders()
-    const ws = await workspace(store)
+    const ws = workspace(store)
     try {
       await runInCommandScope(async () => {
         await ws.dispatch('mkdir', '/f/a/b/c', [], { parents: true })
@@ -281,7 +279,7 @@ describe('a mount that keeps its VFS listings', () => {
   it('needs no second request for a listing kept through a create', async () => {
     const store = new Folders()
     store.add('old.txt', 'root', ENC.encode('o'))
-    const ws = await workspace(store)
+    const ws = workspace(store)
     try {
       await runInCommandScope(async () => {
         await ws.dispatch('readdir', '/f')
@@ -302,7 +300,7 @@ describe('a mount that keeps its VFS listings', () => {
     const a = store.add('a.txt', 'root', ENC.encode('a'))
     const d = store.add('d')
     const b = store.add('b.txt', d, ENC.encode('b'))
-    const ws = await workspace(store)
+    const ws = workspace(store)
     try {
       await ws.dispatch('rename', '/f/a.txt', [PathSpec.fromStrPath('/f/d/b.txt')])
       expect(store.calls).toContainEqual(['rename', `${a}>${d}!${b}`])
@@ -317,7 +315,7 @@ describe('a mount that keeps its VFS listings', () => {
   it('lists a stale entry again once', async () => {
     const store = new Folders()
     const old = store.add('a.txt', 'root', ENC.encode('old'))
-    const ws = await workspace(store)
+    const ws = workspace(store)
     try {
       await ws.dispatch('readdir', '/f')
       store.nodes.delete(old)
@@ -340,7 +338,7 @@ describe('a mount that keeps its VFS listings', () => {
     const sub = store.add('sub', d)
     store.add('f.txt', d, ENC.encode('f'))
     store.add('g.txt', sub, ENC.encode('gg'))
-    const ws = await workspace(store)
+    const ws = workspace(store)
     try {
       const tree = (await ws.dispatch('read_tree', '/f/d')) as Map<string, FileStat>
       expect([...tree.keys()].sort()).toEqual(['f.txt', 'sub', 'sub/g.txt'])
@@ -395,7 +393,7 @@ describe('a mount that keeps its VFS listings', () => {
     const store = new Folders()
     const a = store.add('a.txt', 'root', ENC.encode('a'))
     const clock = new ManualClock(Date.parse('2026-01-01T00:00:00Z') / 1000)
-    const ws = await workspace(store, clock)
+    const ws = workspace(store, clock)
     try {
       await ws.dispatch('readdir', '/f')
       await ws.dispatch('stat', '/f/a.txt')
@@ -527,10 +525,7 @@ describe('a window', () => {
 
   it('leaves a name beyond it to the backend', async () => {
     const store = new Days()
-    const ws = new Workspace(
-      { '/w/': store },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/w/': store }, { mode: MountMode.READ })
     try {
       await ws.dispatch('readdir', '/w/chan')
       store.calls.length = 0
@@ -548,10 +543,7 @@ describe('a window', () => {
 
   it('lets a glob past it ask the backend', async () => {
     const store = new Days()
-    const ws = new Workspace(
-      { '/w/': store },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/w/': store }, { mode: MountMode.READ })
     try {
       await ws.dispatch('readdir', '/w/chan')
       const io = await ws.shell('echo /w/chan/d*')
@@ -565,10 +557,7 @@ describe('a window', () => {
     // A command's own glob lists through the dispatcher, the pattern riding
     // along.
     const store = new Days()
-    const ws = new Workspace(
-      { '/w/': store },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/w/': store }, { mode: MountMode.READ })
     try {
       await ws.dispatch('readdir', '/w/chan')
       const listed = await ws.shell('ls -d /w/chan/d1*')
@@ -585,10 +574,7 @@ describe('a window', () => {
     // A fresh check clears the index without the lookup's lock: the parent's
     // listing lands, then is gone before its row is read.
     const store = new Days()
-    const ws = new Workspace(
-      { '/w/': store },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/w/': store }, { mode: MountMode.READ })
     try {
       const index = ws.mount('/w').indexStore
       const listed = index.setDir.bind(index)
@@ -611,10 +597,7 @@ describe('a window', () => {
 
   it('lets a root stat list nothing outside the mount', async () => {
     const store = new Days()
-    const ws = new Workspace(
-      { '/m/w/': store },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/m/w/': store }, { mode: MountMode.READ })
     try {
       const root = (await ws.dispatch('stat', '/m/w')) as FileStat
       expect(root.type).toBe(FileType.DIRECTORY)
@@ -664,14 +647,14 @@ class Keys extends BaseVFS {
   }
 }
 
-async function keysWorkspace(keys: Keys): Promise<Workspace> {
-  return new Workspace({ '/k': keys }, { shellParser: await getTestParser() })
+function keysWorkspace(keys: Keys): Workspace {
+  return new Workspace({ '/k': keys })
 }
 
 describe('a name a listing leaves out', () => {
   it('is asked by path past an earlier listing', async () => {
     const keys = new Keys(new Map([['f', ENC.encode('1\n')]]))
-    const ws = await keysWorkspace(keys)
+    const ws = keysWorkspace(keys)
     try {
       await ws.shell('ls /k')
       keys.files.set('new', ENC.encode('2\n'))
@@ -688,7 +671,7 @@ describe('a name a listing leaves out', () => {
 
   it('is absent past a listing the command fetched', async () => {
     const keys = new Keys(new Map([['f', ENC.encode('1\n')]]))
-    const ws = await keysWorkspace(keys)
+    const ws = keysWorkspace(keys)
     try {
       const io = await ws.shell('cat /k/f* /k/missing')
       expect(io.exitCode).toBe(1)
@@ -700,7 +683,7 @@ describe('a name a listing leaves out', () => {
 
   it('is asked by path outside a command', async () => {
     const keys = new Keys(new Map([['f', ENC.encode('1\n')]]))
-    const ws = await keysWorkspace(keys)
+    const ws = keysWorkspace(keys)
     try {
       await ws.shell('ls /k')
       keys.files.set('new', ENC.encode('2\n'))

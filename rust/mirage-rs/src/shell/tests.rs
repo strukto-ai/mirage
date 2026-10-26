@@ -1,4 +1,4 @@
-use super::{FIELDS, KINDS, Tree, parse};
+use super::{FIELDS, KINDS, Tree, parse, parse_with_aliases};
 
 /// The tree as an s-expression: named nodes with their fields, a leaf's
 /// text after `=`.
@@ -180,7 +180,7 @@ fn bash_parses_these_only_when_it_runs_them() {
     assert_eq!(
         read("echo $(( a # )) ${x:.2f} `fi`"),
         "(program (command name: (command_name (word=echo)) argument: (arithmetic_expansion (word=a #)) \
-         argument: (expansion (word=x:.2f)) argument: (command_substitution (word=fi))))"
+         argument: (expansion (variable_name=x) (word=.2f)) argument: (command_substitution (word=fi))))"
     );
     assert_eq!(
         read("[ a"),
@@ -364,4 +364,117 @@ fn a_failed_read_puts_back_every_heredoc_it_took() {
         ),
         "{tree}"
     );
+}
+
+#[test]
+fn an_alias_is_a_command_where_a_reserved_word_would_start() {
+    let aliases = [b"fi".to_vec(), b"in".to_vec()];
+    let tree = parse_with_aliases(b"fi; for i in a; do :; done", &aliases);
+    assert_eq!(tree.error, None);
+    assert!(
+        sexp(&tree).starts_with("(program (command name: (command_name (word=fi))) (for_statement"),
+        "{}",
+        sexp(&tree)
+    );
+    assert!(parse(b"fi").error.is_some());
+}
+
+#[test]
+fn words_the_executor_reads_as_words() {
+    assert_eq!(
+        read("echo ${x:1:2} == =~"),
+        "(program (command name: (command_name (word=echo)) argument: (expansion (variable_name=x) \
+         (word=1:2)) argument: (word===) argument: (word==~)))"
+    );
+    assert_eq!(
+        read("echo @(a|b) x!(c)"),
+        "(program (command name: (command_name (word=echo)) argument: (word=@(a|b)) argument: (word=x!(c))))"
+    );
+    assert_eq!(
+        read("[ a && b ]"),
+        "(program (list (command name: (command_name (word=[)) argument: (word=a)) \
+         (command name: (command_name (word=b)) argument: (word=]))))"
+    );
+    assert_eq!(
+        read("[[ $x == [a\"$x\"] ]]"),
+        "(program (test_command (binary_expression left: (simple_expansion (variable_name=x)) \
+         right: (concatenation (extglob_pattern=[a) (string (simple_expansion (variable_name=x))) \
+         (extglob_pattern=])))))"
+    );
+    assert!(read("case $x in [a\"$x\"]) :;; esac").contains(
+        "(case_item value: (concatenation (extglob_pattern=[a) (string (simple_expansion (variable_name=x))) \
+         (extglob_pattern=]))"
+    ));
+}
+
+#[test]
+fn a_raw_arithmetic_body_keeps_what_bash_expands_first() {
+    assert_eq!(
+        read("echo $(( $10 + ${x}0 ))"),
+        "(program (command name: (command_name (word=echo)) argument: (arithmetic_expansion (concatenation \
+         (simple_expansion (variable_name=1)) (word=0 + ) (expansion (variable_name=x)) (word=0)))))"
+    );
+    assert_eq!(
+        read("for (( i=$10; i<${n}0; )) do :; done"),
+        "(program (c_style_for_statement initializer: (concatenation (word=i=) (simple_expansion (variable_name=1)) \
+         (word=0)) condition: (concatenation (word=i<) (expansion (variable_name=n)) (word=0)) \
+         body: (do_group (command name: (command_name (word=:))))))"
+    );
+    assert_eq!(
+        read("echo $(( a # ))"),
+        "(program (command name: (command_name (word=echo)) argument: (arithmetic_expansion (word=a #))))"
+    );
+}
+
+#[test]
+fn a_pattern_keeps_the_expansions_in_it() {
+    assert_eq!(
+        read("[[ a == [b$x] ]]"),
+        "(program (test_command (binary_expression left: (word=a) right: (concatenation \
+         (extglob_pattern=[b) (simple_expansion (variable_name=x)) (extglob_pattern=])))))"
+    );
+    assert!(read("case a in *$x) :;; esac").contains(
+        "value: (concatenation (extglob_pattern=*) (simple_expansion (variable_name=x)))"
+    ));
+}
+
+#[test]
+fn a_raw_c_style_header_splits_at_its_outer_semicolons() {
+    let tree = read("for (( i=${x}0; i<$(echo 11; :); i++ )) do :; done");
+    assert!(
+        tree.contains("condition: (concatenation (word=i<) (command_substitution"),
+        "{tree}"
+    );
+    assert!(tree.contains("update: (word=i++)"), "{tree}");
+    refused("for (( a; b; c; d )) do :; done");
+}
+
+#[test]
+fn an_in_alias_is_a_command_only_where_one_starts() {
+    let aliases = [b"in".to_vec()];
+    assert_eq!(
+        sexp(&parse_with_aliases(b"in", &aliases)),
+        "(program (command name: (command_name (word=in))))"
+    );
+    for header in [
+        &b"for v in a; do :; done"[..],
+        b"case x in x) :;; esac",
+        b"select s in; do :; done",
+    ] {
+        assert_eq!(parse_with_aliases(header, &aliases).error, None);
+    }
+}
+
+#[test]
+fn tokens_the_executor_reads_by_kind() {
+    let kinds = |source: &str| {
+        let tree = parse(source.as_bytes());
+        tree.nodes
+            .iter()
+            .map(|node| KINDS[usize::from(node.kind)].0)
+            .collect::<Vec<_>>()
+    };
+    assert!(!kinds("for f do :; done").contains(&"in"));
+    assert!(kinds("for f in; do :; done").contains(&"in"));
+    assert!(kinds("cat <>f").contains(&"<>"));
 }

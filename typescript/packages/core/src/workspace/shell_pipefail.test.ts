@@ -17,7 +17,7 @@ import { makeIntegrationWS, run } from '../../tests/workspace/fixtures/integrati
 
 describe('set -o pipefail', () => {
   it('off by default', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'false | true; echo $?')).toBe('0\n')
     } finally {
@@ -26,7 +26,7 @@ describe('set -o pipefail', () => {
   })
 
   it('propagates failure when on', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -o pipefail; false | true; echo $?')).toBe('1\n')
     } finally {
@@ -35,7 +35,7 @@ describe('set -o pipefail', () => {
   })
 
   it('zero when all pass', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -o pipefail; true | true; echo $?')).toBe('0\n')
     } finally {
@@ -44,7 +44,7 @@ describe('set -o pipefail', () => {
   })
 
   it('disabled via +o', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -o pipefail; set +o pipefail; false | true; echo $?')).toBe('0\n')
     } finally {
@@ -53,7 +53,7 @@ describe('set -o pipefail', () => {
   })
 
   it('rightmost failure wins', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -o pipefail; false | false | true; echo $?')).toBe('1\n')
     } finally {

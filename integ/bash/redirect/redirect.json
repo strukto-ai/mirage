@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -53,6 +54,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -85,6 +87,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -117,6 +120,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -149,6 +153,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -181,6 +186,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -215,6 +221,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -249,6 +256,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -281,6 +289,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -311,6 +320,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -340,6 +350,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -369,6 +380,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -398,6 +410,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -427,6 +440,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -456,6 +470,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -485,6 +500,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -514,6 +530,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -543,6 +560,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -572,6 +590,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -601,6 +620,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -630,6 +650,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -659,6 +680,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -688,6 +710,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -717,6 +740,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -746,6 +770,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -775,6 +800,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -804,6 +830,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -833,6 +860,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -862,6 +890,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -891,6 +920,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -920,6 +950,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -949,6 +980,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -978,6 +1010,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1007,6 +1040,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1036,6 +1070,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1065,6 +1100,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1094,6 +1130,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1123,6 +1160,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1152,6 +1190,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1181,6 +1220,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1210,6 +1250,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1239,6 +1280,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1268,6 +1310,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1297,6 +1340,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1326,6 +1370,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1355,6 +1400,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1376,7 +1422,8 @@
         "databricks",
         "databricks-prefix",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "tidb-filesystem"
       ],
       "command": "echo x > NOPEDIR/f; echo next",
       "expect": {
@@ -1396,7 +1443,8 @@
         "databricks",
         "databricks-prefix",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "tidb-filesystem"
       ],
       "command": "echo x > NOPEDIR/f > STOPPED; test -e STOPPED || echo skipped",
       "expect": {
@@ -1416,7 +1464,8 @@
         "databricks",
         "databricks-prefix",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "tidb-filesystem"
       ],
       "command": "echo y > KEPT > NOPEDIR/g; test -e KEPT && wc -c < KEPT",
       "expect": {
@@ -1446,6 +1495,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -1478,6 +1528,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -1510,6 +1561,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -1542,6 +1594,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -1574,6 +1627,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -1606,6 +1660,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -1636,6 +1691,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -1643,6 +1699,166 @@
       "expect": {
         "exit": 0,
         "stdout": "1988895\n300000\n1\n2\n3\n1988897\n300000\nx\nnull=0\nzero=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_among_assignments_opens_its_file",
+      "seq": 501175,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=1 > /data/nameless y=2; echo \"$x $y\"; cat /data/nameless; rm /data/nameless",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_before_the_command_name",
+      "seq": 501176,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "> /data/prefixed echo hi; cat /data/prefixed; rm /data/prefixed",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_inner_and_hoisted_both_open",
+      "seq": 501178,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "true && > /data/a echo hi > /data/b; cat /data/a /data/b; ! > /data/c echo x > /data/d; echo $?; cat /data/c /data/d; echo y | > /data/e cat > /data/g; cat /data/e /data/g; rm /data/a /data/b /data/c /data/d /data/e /data/g",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n1\nx\ny\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_among_assignments_reads_in_order",
+      "seq": 501179,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unset a b; a=one > /dev/null b=$a; echo \"b=$b\"; a=$(false) > /dev/null b=two; echo \"st=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "b=one\nst=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_among_assignments_counts_its_substitutions",
+      "seq": 501180,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "a=1 >\"/dev/null$(false)\" b=2; echo \"st=$?\"; a=$(false) >\"/dev/null$(true)\" b=2; echo \"st=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\nst=0\n",
         "stderr": ""
       }
     }

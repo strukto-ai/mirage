@@ -144,6 +144,7 @@ from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.documentation.documents import Documents
 from mirage.workspace.execution import ExecutionScope
+from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.statement import restore_status
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.globs import GlobOptions, resolve_globs
@@ -680,7 +681,8 @@ class Workspace:
                 default session when empty.
         """
         session = self.get_session(session_id or self.default_session_id)
-        ast = parse(line)
+        aliases = expanding_aliases(session)
+        ast = parse(line, aliases)
         verdicts = await explain_line(
             ast, session, self._registry, self._namespace, every=False
         )
@@ -704,6 +706,7 @@ class Workspace:
                 judged if whole_line else verdicts,
                 lambda command: "",
                 whole_line,
+                aliases,
             )
         answers, placed = await self._router.placement(
             line,
@@ -727,7 +730,9 @@ class Workspace:
         )
         if isinstance(placed, (Deny, Pending)):
             refused = placement_refused(placed, line)
-            said = explained_line(line, judged, verdicts, lambda command: "")
+            said = explained_line(
+                line, judged, verdicts, lambda command: "", aliases=aliases
+            )
             return dataclasses.replace(
                 said,
                 answers=answers,
@@ -748,6 +753,7 @@ class Workspace:
             judged if whole_line else verdicts,
             lambda command: self._router.runtime_for(command, placed),
             whole_line,
+            aliases,
         )
         return dataclasses.replace(said, answers=answers)
 
@@ -2713,6 +2719,7 @@ class Workspace:
         job_table: JobTable | None = None,
         *,
         stream: Literal[True],
+        session: SessionState | None = None,
     ) -> ShellExecution: ...
 
     @overload
@@ -2734,6 +2741,7 @@ class Workspace:
         job_table: JobTable | None = None,
         *,
         stream: Literal[False] = False,
+        session: SessionState | None = None,
     ) -> IOResult: ...
 
     @overload
@@ -2755,6 +2763,7 @@ class Workspace:
         job_table: JobTable | None = None,
         *,
         stream: bool,
+        session: SessionState | None = None,
     ) -> IOResult | ShellExecution: ...
 
     async def shell(
@@ -2775,6 +2784,7 @@ class Workspace:
         job_table: JobTable | None = None,
         *,
         stream: bool = False,
+        session: SessionState | None = None,
     ) -> IOResult | ShellExecution:
         """Execute a shell command, or return its running execution when streamed.
 
@@ -2837,6 +2847,11 @@ class Workspace:
                 ``bash -c``) that the line starts its own in, where its
                 caller's ``jobs`` and ``wait`` never see them; None for
                 the session's.
+            session: Internal. The exact session the line runs on, an
+                unregistered fork of ``session_id``'s included, as an
+                evaluator carries it: the line runs inline there, beside
+                the session's other lines rather than after them, and
+                what it changes stays on that session.
         """
         self._sync_bridge.observe()
         if stream and sink is not None:
@@ -2864,6 +2879,7 @@ class Workspace:
                 call_stack,
                 execution_scope,
                 job_table,
+                session=session,
             )
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
@@ -2886,6 +2902,7 @@ class Workspace:
                 call_stack,
                 scope,
                 job_table,
+                session=session,
             )
 
         execution = ShellExecution(
@@ -2924,6 +2941,8 @@ class Workspace:
         call_stack: CallStack | None = None,
         execution_scope: ExecutionScope | None = None,
         job_table: JobTable | None = None,
+        *,
+        session: SessionState | None = None,
     ) -> IOResult:
         """Run the internal shell invocation with its existing cancellation scope."""
         # The one cancellation seam: the whole line is one task, so a
@@ -2944,31 +2963,42 @@ class Workspace:
             token = bind_caller(current_caller().changed({"stop": stop}))
 
         async def line() -> IOResult:
-            result = await self._serialize_line(
-                session_id,
-                partial(
-                    execute_line,
-                    self._execute_env(),
-                    command,
-                    session_id,
-                    stdin,
-                    cwd,
-                    env,
-                    cancel,
-                    record,
-                    runtime,
-                    routing_decision,
-                    handed,
-                    frame,
-                    sink=sink,
-                    call_stack=call_stack,
-                    execution_scope=execution_scope,
-                    job_table=job_table,
-                ),
+            # A session handed in is bound for the line's own task, so
+            # the line runs on it inline, as an evaluator's line does.
+            bound = (
+                None
+                if session is None
+                else set_current_session(session, self._session_mgr)
             )
-            if sink is not None and isinstance(result, IOResult):
-                await drain_to_sink(sink, result)
-            return result
+            try:
+                result = await self._serialize_line(
+                    session_id,
+                    partial(
+                        execute_line,
+                        self._execute_env(),
+                        command,
+                        session_id,
+                        stdin,
+                        cwd,
+                        env,
+                        cancel,
+                        record,
+                        runtime,
+                        routing_decision,
+                        handed,
+                        frame,
+                        sink=sink,
+                        call_stack=call_stack,
+                        execution_scope=execution_scope,
+                        job_table=job_table,
+                    ),
+                )
+                if sink is not None and isinstance(result, IOResult):
+                    await drain_to_sink(sink, result)
+                return result
+            finally:
+                if bound is not None:
+                    reset_current_session(bound)
 
         try:
             if stop is not None:

@@ -17,11 +17,7 @@ import { runWithSession } from '../context/session_context.ts'
 import { RAMNamespaceStore } from './mount/namespace/ram.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { FileType, MountMode, type FileStat } from '../types.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
@@ -40,10 +36,9 @@ interface GrantsWorkspace {
 
 const open: Workspace[] = []
 
-async function makeGrantsWorkspace(
+function makeGrantsWorkspace(
   options: { rootMount?: boolean; modes?: Record<string, MountMode> } = {},
-): Promise<GrantsWorkspace> {
-  const parser = await getTestParser()
+): GrantsWorkspace {
   const a = new RAMVFS()
   const b = new RAMVFS()
   a.store.files.set('/x.txt', ENC.encode('hi\n'))
@@ -64,7 +59,6 @@ async function makeGrantsWorkspace(
   )
   const ws = new Workspace(specs, {
     mode: MountMode.WRITE,
-    shellParser: parser,
   })
   open.push(ws)
   return { ws, a, b, root }
@@ -76,7 +70,7 @@ afterEach(async () => {
 
 describe('per-session mount grants', () => {
   it('read grant blocks command writes but allows reads', async () => {
-    const { ws, a } = await makeGrantsWorkspace()
+    const { ws, a } = makeGrantsWorkspace()
     ws.createSession('agent', { mounts: { '/a': MountMode.READ } })
 
     const ok = await ws.shell('cat /a/x.txt', { sessionId: 'agent' })
@@ -90,7 +84,7 @@ describe('per-session mount grants', () => {
   })
 
   it('read grant blocks redirect writes', async () => {
-    const { ws, a } = await makeGrantsWorkspace()
+    const { ws, a } = makeGrantsWorkspace()
     ws.createSession('agent', { mounts: { '/a': MountMode.READ } })
 
     const denied = await ws.shell('echo leaked > /a/y.txt', { sessionId: 'agent' })
@@ -107,7 +101,7 @@ describe('per-session mount grants', () => {
   it.each(['echo leaked > /b/y.txt; echo next', 'echo leaked >> /b/y.txt; echo next'])(
     'shell-attributes %s for a hidden mount',
     async (line) => {
-      const { ws, b } = await makeGrantsWorkspace()
+      const { ws, b } = makeGrantsWorkspace()
       ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
 
       const denied = await ws.shell(line, { sessionId: 'agent' })
@@ -119,7 +113,7 @@ describe('per-session mount grants', () => {
   )
 
   it('write grant allows writes', async () => {
-    const { ws, a } = await makeGrantsWorkspace()
+    const { ws, a } = makeGrantsWorkspace()
     ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
 
     const io = await ws.shell('echo new > /a/y.txt', { sessionId: 'agent' })
@@ -128,7 +122,7 @@ describe('per-session mount grants', () => {
   })
 
   it('grant cannot widen a READ mount', async () => {
-    const { ws } = await makeGrantsWorkspace({ modes: { '/a': MountMode.READ } })
+    const { ws } = makeGrantsWorkspace({ modes: { '/a': MountMode.READ } })
     ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
 
     const denied = await ws.shell('echo up > /a/y.txt', { sessionId: 'agent' })
@@ -139,8 +133,8 @@ describe('per-session mount grants', () => {
   // A list used to mean "only these mounts are reachable"; a mount a profile
   // does not name now keeps its own mode, so the list would quietly drop
   // the confinement it used to carry.
-  it('refuses a bare list of mounts', async () => {
-    const { ws } = await makeGrantsWorkspace()
+  it('refuses a bare list of mounts', () => {
+    const { ws } = makeGrantsWorkspace()
     expect(() =>
       ws.createSession('agent', { mounts: ['/a'] as unknown as Record<string, unknown> }),
     ).toThrow('mounts must be a mapping of prefix to its settings')
@@ -149,7 +143,7 @@ describe('per-session mount grants', () => {
   it('a mount the profile does not name stays reachable', async () => {
     // The behavior change worth pinning: naming one mount is not an
     // allowlist over the rest.
-    const { ws } = await makeGrantsWorkspace()
+    const { ws } = makeGrantsWorkspace()
     ws.createSession('agent', { mounts: { '/a': MountMode.READ } })
 
     const io = await ws.shell('cat /b/secret.txt', { sessionId: 'agent' })
@@ -162,7 +156,7 @@ describe('per-session mount grants', () => {
     // exists, so keeping a session away from a mount is a hide, and a
     // hide answers ENOENT: naming the mount in a refusal would confirm
     // to the agent exactly what it was not meant to know is there.
-    const { ws } = await makeGrantsWorkspace()
+    const { ws } = makeGrantsWorkspace()
     ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
 
     const denied = await ws.shell('cat /b/secret.txt', { sessionId: 'agent' })
@@ -179,7 +173,7 @@ describe('per-session mount grants', () => {
   })
 
   it.each(['flat', 'tree'])('never invokes a %s handler bound to a hidden mount', async (shape) => {
-    const { ws } = await makeGrantsWorkspace()
+    const { ws } = makeGrantsWorkspace()
     const calls: string[] = []
     const leaf = new CommandSpec({
       arguments: [new Argument('paths', { type: 'path', nargs: '*' })],
@@ -220,7 +214,7 @@ describe('per-session mount grants', () => {
   })
 
   it('a user-defined root mount is governed like any other', async () => {
-    const { ws } = await makeGrantsWorkspace({ rootMount: true })
+    const { ws } = makeGrantsWorkspace({ rootMount: true })
     ws.createSession('no_root', {
       profile: parseSessionProfile({
         mounts: { '/a': MountMode.WRITE },
@@ -243,7 +237,7 @@ describe('per-session mount grants', () => {
   })
 
   it('the implicit scratch root keeps pathless commands working', async () => {
-    const { ws } = await makeGrantsWorkspace()
+    const { ws } = makeGrantsWorkspace()
     ws.createSession('agent', { mounts: { '/a': MountMode.READ } })
 
     const io = await ws.shell('echo hi | wc -l', { sessionId: 'agent' })
@@ -251,15 +245,15 @@ describe('per-session mount grants', () => {
     expect(stdoutStr(io).trim()).toBe('1')
   })
 
-  it('rejects invalid profiles', async () => {
-    const { ws } = await makeGrantsWorkspace()
+  it('rejects invalid profiles', () => {
+    const { ws } = makeGrantsWorkspace()
     expect(() => ws.createSession('agent', { mounts: { '/a': 'admin' as MountMode } })).toThrow(
       'invalid mount mode',
     )
   })
 
-  it('accepts filesystem alias profiles, rejects bit-style forms', async () => {
-    const { ws } = await makeGrantsWorkspace()
+  it('accepts filesystem alias profiles, rejects bit-style forms', () => {
+    const { ws } = makeGrantsWorkspace()
     const sess = ws.createSession('agent', { mounts: { '/a': 'rw' } })
     expect(sess.mountModes?.get('/a')).toBe(MountMode.WRITE)
     expect(() => ws.createSession('bits', { mounts: { '/a': 'w' } })).toThrow('invalid mount mode')
@@ -267,16 +261,12 @@ describe('per-session mount grants', () => {
 })
 
 describe('structure below a mount whose own content is hidden', () => {
-  async function makeNestedWorkspace(): Promise<Workspace> {
-    const parser = await getTestParser()
+  function makeNestedWorkspace(): Workspace {
     const base = new RAMVFS()
     base.store.files.set('/top.txt', ENC.encode('TOP\n'))
     const inner = new RAMVFS()
     inner.store.files.set('/deep.txt', ENC.encode('needle\n'))
-    const ws = new Workspace(
-      { '/base': base, '/base/inner': inner },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/base': base, '/base/inner': inner }, { mode: MountMode.WRITE })
     open.push(ws)
     return ws
   }
@@ -286,7 +276,7 @@ describe('structure below a mount whose own content is hidden', () => {
     // mount, so readdir and stat on /base answer with the structure; the
     // parent's own hidden content never appears, and a hidden path below
     // it reads as absent rather than as a refusal naming it.
-    const ws = await makeNestedWorkspace()
+    const ws = makeNestedWorkspace()
     const sess = ws.createSession('agent', {
       profile: { paths: { hide: ['/base/top.txt', '/base/other'] } },
     })
@@ -302,7 +292,7 @@ describe('structure below a mount whose own content is hidden', () => {
   })
 
   it('a link below a hidden mount stays out of a scoped listing', async () => {
-    const { ws } = await makeGrantsWorkspace()
+    const { ws } = makeGrantsWorkspace()
     const ln = await ws.shell('ln -s /b/secret.txt /b/leak')
     expect(ln.exitCode).toBe(0)
     const sess = ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
@@ -317,21 +307,14 @@ describe('structure below a mount whose own content is hidden', () => {
 
 describe('sessions on a shared session table', () => {
   it('a session created by one workspace narrows a sibling on the same store', async () => {
-    const parser = await getTestParser()
     const ram = new RAMVFS()
     const store = new RAMNamespaceStore()
-    const wsA = new Workspace(
-      { '/data': ram },
-      { mode: MountMode.EXEC, shellParser: parser, sessionStore: store },
-    )
+    const wsA = new Workspace({ '/data': ram }, { mode: MountMode.EXEC, sessionStore: store })
     open.push(wsA)
     wsA.createSession('narrow', { mounts: { '/data': MountMode.READ } })
     await wsA.flushSessions()
 
-    const wsB = new Workspace(
-      { '/data': ram },
-      { mode: MountMode.EXEC, shellParser: parser, sessionStore: store },
-    )
+    const wsB = new Workspace({ '/data': ram }, { mode: MountMode.EXEC, sessionStore: store })
     open.push(wsB)
     const denied = await wsB.shell('echo blocked > /data/x.txt', { sessionId: 'narrow' })
     expect(denied.exitCode).not.toBe(0)
@@ -344,22 +327,18 @@ describe('nested mount disclosure', () => {
   // backend, so the dispatcher never sees it and cannot refuse it.
   // Before the session filter, `tree /base` drew `private` and counted
   // it, while `ls`, `find` and `du` on the same tree all hid it.
-  async function makeNested(): Promise<Workspace> {
-    const parser = await getTestParser()
+  function makeNested(): Workspace {
     const base = new RAMVFS()
     const priv = new RAMVFS()
     base.store.files.set('/top.txt', ENC.encode('public\n'))
     priv.store.files.set('/secret.txt', ENC.encode('SECRET\n'))
-    const ws = new Workspace(
-      { '/base': base, '/base/private': priv },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/base': base, '/base/private': priv }, { mode: MountMode.WRITE })
     open.push(ws)
     return ws
   }
 
   it('tree does not disclose a hidden nested mount', async () => {
-    const ws = await makeNested()
+    const ws = makeNested()
     ws.createSession('agent', { profile: { paths: { hide: ['/base/private'] } } })
 
     const io = await ws.shell('tree /base', { sessionId: 'agent' })
@@ -370,7 +349,7 @@ describe('nested mount disclosure', () => {
 
   it('tree still crosses a visible nested mount', async () => {
     // The filter must not cost a session the mounts it can see.
-    const ws = await makeNested()
+    const ws = makeNested()
     ws.createSession('agent', { mounts: { '/base': MountMode.READ } })
 
     const io = await ws.shell('tree /base', { sessionId: 'agent' })

@@ -99,6 +99,7 @@ import {
   SSHVFS,
   SupabaseVFS,
   TencentVFS,
+  TiDBFilesystemVFS,
   TrelloVFS,
   WasabiVFS,
   Workspace,
@@ -107,6 +108,7 @@ import {
 import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { normalizePostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
 import { normalizeMongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/config'
+import { normalizeTiDBFilesystemConfig } from '@struktoai/mirage-core/vfs/tidb_filesystem/config'
 import { normalizeTrelloConfig } from '@struktoai/mirage-core/core/trello/config'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { ManualClock } from '@struktoai/mirage-core/utils/clock'
@@ -601,9 +603,11 @@ async function openS3(target: Target, options?: OpenOptions): Promise<Open> {
   const resolved: [string, Mount][] = []
   for (const m of target.mounts) resolved.push([await bucketFor(m), m])
   const build = (): MountMap => {
-    const mounts: Record<string, S3VFS> = {}
+    const mounts: MountMap = {}
     for (const [bucket, m] of resolved) {
-      mounts[m.path] = objectStorageVfs(m.vfs, bucket, m.prefix)
+      const vfs = objectStorageVfs(m.vfs, bucket, m.prefix)
+      mounts[m.path] =
+        m.mode === 'read' ? [vfs, MountMode.READ] : m.mode === 'exec' ? [vfs, MountMode.EXEC] : vfs
     }
     return mounts
   }
@@ -1730,6 +1734,40 @@ async function openSsh(target: Target, options?: OpenOptions): Promise<Open> {
   return { ws: opened.ws, shadow: opened.shadow, cleanup }
 }
 
+// A drive9 server, TiDB Cloud's file system or a local open-source one, named
+// by TIDB_FILESYSTEM_HOST and TIDB_FILESYSTEM_TOKEN. Each mount roots in a
+// folder of this run's own, made and removed through a mount of the file
+// system's root, as python's TiDBFilesystemService does.
+async function openTiDBFilesystem(target: Target): Promise<Open> {
+  const host = process.env.TIDB_FILESYSTEM_HOST
+  const token = process.env.TIDB_FILESYSTEM_TOKEN
+  if (!host || !token) {
+    throw new Error(
+      'tidb-filesystem target requires TIDB_FILESYSTEM_HOST and TIDB_FILESYSTEM_TOKEN',
+    )
+  }
+  const base = `/mirage-integ-${runId()}`
+  const admin = new Workspace(
+    { '/admin': await TiDBFilesystemVFS.create(normalizeTiDBFilesystemConfig({ host, token })) },
+    { mode: MountMode.WRITE },
+  )
+  const paths = target.mounts.map((m) => `/admin${base}/${String(m.root)}`).join(' ')
+  await adminExec(admin, `mkdir -p ${paths}`)
+  const mounts: Record<string, TiDBFilesystemVFS> = {}
+  for (const m of target.mounts) {
+    mounts[m.path] = await TiDBFilesystemVFS.create(
+      normalizeTiDBFilesystemConfig({ host, token, root_path: `${base}/${String(m.root)}` }),
+    )
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await adminExec(admin, `rm -rf /admin${base}`)
+    await admin.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
 const GDRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
 // The gws fake's credential: a bearer as it is, and the one refresh token its
 // /token exchanges.
@@ -1953,21 +1991,25 @@ async function openGws(target: Target, options?: OpenOptions): Promise<Open> {
   // then pure, so a shadow workspace gets its own instances over the same
   // world.
   const build = (): MountMap => {
-    const mounts: Record<
-      string,
-      GoogleDriveVFS | GDocsVFS | GSheetsVFS | GSlidesVFS | GmailVFS | RAMVFS
-    > = {}
+    const mounts: MountMap = {}
     for (const m of target.mounts) {
       if (m.vfs === 'ram') mounts[m.path] = new RAMVFS()
       else if (m.vfs !== 'gdrive') mounts[m.path] = gwsNativeVfs(m.vfs, base, m.config)
-      else
-        mounts[m.path] = new GoogleDriveVFS({
+      else {
+        const vfs = new GoogleDriveVFS({
           clientId: 'integ',
           clientSecret: 'integ',
           refreshToken: GWS_TOKEN,
           apiBase: base,
           folderId: folderIds[m.path] as string,
         })
+        mounts[m.path] =
+          m.mode === 'read'
+            ? [vfs, MountMode.READ]
+            : m.mode === 'exec'
+              ? [vfs, MountMode.EXEC]
+              : vfs
+      }
     }
     return mounts
   }
@@ -2417,6 +2459,7 @@ export const ADAPTERS: Record<string, (target: Target, options?: OpenOptions) =>
   s3: openS3,
   databricks_volume: openDatabricksVolume,
   nextcloud: openNextcloud,
+  tidb_filesystem: openTiDBFilesystem,
   gridfs: openGridfs,
   ssh: openSsh,
   gcal: openGws,

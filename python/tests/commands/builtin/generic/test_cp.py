@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic.cp import (
     TransferLinks,
     cp_generic,
     parse_flags,
+    transfer_file,
     update_mode,
 )
 from mirage.commands.errors import UsageError
@@ -239,6 +240,34 @@ async def test_primitive_write_failure_reports_cannot_create():
         b"cp: cannot create regular file '/d/a.txt': Operation not supported\n"
     )
     assert files["/src/a.txt"] == b"AAA"
+
+
+async def _no_copy(src: PathSpec, dst: PathSpec) -> None:
+    raise enotsup("tidb_filesystem", "copy", dst)
+
+
+@pytest.mark.asyncio
+async def test_a_store_with_no_copy_moves_the_bytes():
+    files = {"/src/a.txt": b"AAA"}
+    _, strategy = _make_primitive(files, {"/src", "/d"})
+    errors: list[str] = []
+    copied = await transfer_file(
+        PrimitiveCopy(
+            read=strategy.read,
+            write=strategy.write,
+            mkdir=strategy.mkdir,
+            readdir=strategy.readdir,
+            copy=_no_copy,
+        ),
+        _spec("/src/a.txt"),
+        _spec("/d/a.txt"),
+        "cp",
+        errors,
+    )
+
+    assert copied
+    assert errors == []
+    assert files["/d/a.txt"] == b"AAA"
 
 
 @pytest.mark.asyncio

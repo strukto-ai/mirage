@@ -15,29 +15,21 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 
 // Direct port of tests/workspace/executor/builtins/test_exec_path.py: a
 // slash-carrying head word runs the file, bash's loader rule.
 
-async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeWs(): Workspace {
   const root = new RAMVFS()
   const work = new RAMVFS()
-  return new Workspace(
-    { '/': root, '/work/': work },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  return new Workspace({ '/': root, '/work/': work }, { mode: MountMode.WRITE })
 }
 
 describe('direct path execution', () => {
   it('runs a script written to a mount', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell("printf 'echo ran\\n' > /work/run.sh")
     const io = await ws.shell('/work/run.sh')
     expect(io.exitCode).toBe(0)
@@ -45,7 +37,7 @@ describe('direct path execution', () => {
   })
 
   it('resolves a relative path against the cwd', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell("printf 'echo rel\\n' > /work/run.sh")
     const io = await ws.shell('cd /work && ./run.sh')
     expect(stdoutStr(io)).toBe('rel\n')
@@ -62,7 +54,7 @@ describe('direct path execution', () => {
     'source /work/run.sh',
     '. /work/run.sh',
   ])('runs `%s` without exec mode', async (line) => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell("printf 'echo ran\\n' > /work/run.sh")
     await ws.shell("printf '#!/usr/bin/env python3\\nprint(1)\\n' > /work/run.py")
     expect((await ws.shell('python3 /work/run.py')).exitCode).toBe(126)
@@ -73,7 +65,7 @@ describe('direct path execution', () => {
   })
 
   it('honors shebang interpreter options', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell("printf '#!/bin/bash -x\\necho traced\\n' > /work/t.sh")
     const io = await ws.shell('/work/t.sh')
     expect(stdoutStr(io)).toBe('traced\n')
@@ -81,14 +73,14 @@ describe('direct path execution', () => {
   })
 
   it('a missing file is 127', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('/work/nope.sh')
     expect(io.exitCode).toBe(127)
     expect(stderrStr(io)).toBe('/work/nope.sh: No such file or directory\n')
   })
 
   it('a directory is 126', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('mkdir -p /work/adir')
     const io = await ws.shell('/work/adir')
     expect(io.exitCode).toBe(126)
@@ -96,7 +88,7 @@ describe('direct path execution', () => {
   })
 
   it('an unknown interpreter reports command not found', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell("printf '#!/usr/bin/env ruby\\nputs 1\\n' > /work/r.rb")
     const io = await ws.shell('/work/r.rb')
     expect(io.exitCode).toBe(127)
@@ -104,7 +96,7 @@ describe('direct path execution', () => {
   })
 
   it('child shell state does not leak', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell("printf 'cd /work\\nexit 3\\n' > /child.sh")
     const io = await ws.shell('/child.sh; echo "$?:$(pwd)"')
     expect(stdoutStr(io)).toBe('3:/\n')
@@ -113,7 +105,7 @@ describe('direct path execution', () => {
   it("consumes env's -S and applies the split interpreter options", async () => {
     // GNU env's -S is how a shebang passes interpreter options; the
     // option must never read as the interpreter itself.
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell("printf '#!/usr/bin/env -S bash -x\\necho ok\\n' > /work/s.sh")
     const io = await ws.shell('/work/s.sh')
     expect(stdoutStr(io)).toBe('ok\n')
@@ -121,7 +113,7 @@ describe('direct path execution', () => {
   })
 
   it('reads the attached and long -S spellings too', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell("printf '#!/usr/bin/env -Sbash -x\\necho a\\n' > /work/a.sh")
     await ws.shell("printf '#!/usr/bin/env --split-string=bash -x\\necho b\\n' > /work/b.sh")
     const a = await ws.shell('/work/a.sh')
@@ -138,9 +130,8 @@ describe('direct path execution', () => {
     // fires on direct execution. Seeding runs through an unguarded
     // workspace sharing the VFS, since a command-less guard also
     // seals the op layer.
-    const parser = await getTestParser()
     const prod = new RAMVFS()
-    const seed = new Workspace({ '/data/': prod }, { mode: MountMode.WRITE, shellParser: parser })
+    const seed = new Workspace({ '/data/': prod }, { mode: MountMode.WRITE })
     await seed.shell('mkdir -p /data/prod')
     await seed.shell("printf 'echo leaked\\n' > /data/prod/run.sh")
     await seed.shell("printf 'echo fine\\n' > /data/ok.sh")
@@ -149,7 +140,6 @@ describe('direct path execution', () => {
       { '/': root, '/data/': prod },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: {
           default: {
             commands: {
@@ -173,7 +163,7 @@ describe('direct path execution', () => {
 })
 
 it('virtual programs need only their own permission, including through links', async () => {
-  const ws = await makeWs()
+  const ws = makeWs()
   try {
     await ws.shell('ln -s /usr/bin/echo /work/say')
     ws.createSession('narrow', { profile: { commands: { allow: ['echo'] } } })
@@ -190,7 +180,7 @@ it('virtual programs need only their own permission, including through links', a
 })
 
 it('virtual programs still check the target command policy', async () => {
-  const ws = await makeWs()
+  const ws = makeWs()
   try {
     ws.createSession('narrow', {
       profile: {
@@ -206,7 +196,7 @@ it('virtual programs still check the target command policy', async () => {
 })
 
 it('virtual programs skip functions and preserve caller aliases', async () => {
-  const ws = await makeWs()
+  const ws = makeWs()
   try {
     await ws.shell("cat() { echo shadow; }; alias cat='echo alias'; shopt -s expand_aliases")
     const io = await ws.shell('/usr/bin/cat /usr/bin/echo')
@@ -233,7 +223,7 @@ it.each([
     'bash /work/binary',
     'sh /work/binary',
   ]) {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.dispatch('write', '/work/binary', [Uint8Array.from(data, (c) => c.charCodeAt(0))])
     const result = await ws.shell(command)
     expect(result.exitCode).toBe(126)
@@ -251,7 +241,7 @@ it.each([
   ['echo BEFORE\necho AFTER\0junk\n', '/work/text', 'BEFORE\nAFTER\0junk\n'],
   ['echo BEFORE\0junk\n', 'source /work/text', 'BEFORE\0junk\n'],
 ])('keeps shell text rules: %j', async (data, command, expected) => {
-  const ws = await makeWs()
+  const ws = makeWs()
   await ws.dispatch('write', '/work/text', [Uint8Array.from(data, (c) => c.charCodeAt(0))])
   const result = await ws.shell(command)
   expect(result.exitCode).toBe(0)

@@ -183,6 +183,10 @@ REGISTRY: dict[str, VFSEntry] = {
         "mirage.vfs.databricks_volume:DatabricksVolumeVFS",
         "mirage.vfs.databricks_volume:DatabricksVolumeConfig",
     ),
+    "tidb_filesystem": VFSEntry(
+        "mirage.vfs.tidb_filesystem:TiDBFilesystemVFS",
+        "mirage.vfs.tidb_filesystem:TiDBFilesystemConfig",
+    ),
     "nextcloud": VFSEntry(
         "mirage.vfs.nextcloud:NextcloudVFS",
         "mirage.vfs.nextcloud:NextcloudConfig",

@@ -16,13 +16,13 @@ import { describe, expect, it } from 'vitest'
 
 import { getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { CondParser, type ExprToken, condLeaves, condTokens, flatTokens } from './test_tokens.ts'
+import { parse } from '../../shell/parse/parse.ts'
 
 // Mirrors python/tests/workspace/node/test_test_tokens.py.
 
-async function testNode(line: string): Promise<TSNodeLike> {
-  const stack = [(await getTestParser()).parse(line)]
+function testNode(line: string): TSNodeLike {
+  const stack = [parse(line)]
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
     if (node.type === NT.TEST_COMMAND) return node
     stack.push(...[...node.children].reverse())
@@ -36,14 +36,14 @@ function spelled(token: ExprToken): string {
 }
 
 describe('test tokens', () => {
-  it('flat tokens are the words test is given', async () => {
+  it('flat tokens are the words test is given', () => {
     // A `-N` tree-sitter splits is one operand again, as test reads it.
-    const node = await testNode('[ -e x -o ! 1 -lt -2 ]')
+    const node = testNode('[ -e x -o ! 1 -lt -2 ]')
     expect(flatTokens(node).map(spelled)).toEqual(['-e', 'x', '-o', '!', '1', '-lt', '-2'])
   })
 
-  it('cond leaves are each test in source order', async () => {
-    const node = await testNode('[[ ! -e a && ( b == c* || -n d ) ]]')
+  it('cond leaves are each test in source order', () => {
+    const node = testNode('[[ ! -e a && ( b == c* || -n d ) ]]')
     const leaves = condLeaves(new CondParser(condTokens(node)).parse())
     expect(leaves.map((leaf) => [leaf.kind, 'op' in leaf ? leaf.op : null])).toEqual([
       ['unary', '-e'],

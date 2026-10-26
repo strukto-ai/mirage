@@ -7,13 +7,12 @@ import { IOResult, materialize } from '../io/types.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
-async function workspace(): Promise<Workspace> {
+function workspace(): Workspace {
   return new Workspace(
     { '/data': new RAMVFS(), '/work': new RAMVFS(), '/tmp': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
 }
 
@@ -28,7 +27,7 @@ describe('shell operand regressions', () => {
     ['echo a "-" 2>&1', 'a -\n', ''],
     ['echo a - >/data/out; cat /data/out', 'a -\n', ''],
   ])('preserves dash arguments: %s', async (line, stdout, stderr) => {
-    const ws = await workspace()
+    const ws = workspace()
     try {
       const result = await ws.shell(line)
       expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([0, stdout, stderr])
@@ -40,7 +39,7 @@ describe('shell operand regressions', () => {
   it.each(['tar -cf /data/o.tar', 'zip -qr /data/o.zip'])(
     'checks %s at execution time',
     async (archive) => {
-      const ws = await workspace()
+      const ws = workspace()
       try {
         await ws.shell('mkdir -p /data/nd; echo hi > /data/nd/a')
         const result = await ws.shell(`d=/data/nd; cd "$d" && ${archive} .; echo rc=$?`)
@@ -61,7 +60,7 @@ describe('shell operand regressions', () => {
     ['/tmp', '/work', true],
     ['/', '/tmp', false],
   ] as const)('creates mktemp from %s on %s (directory=%s)', async (cwd, target, directory) => {
-    const ws = await workspace()
+    const ws = workspace()
     try {
       const result = await ws.shell(`cd ${cwd}; mktemp ${directory ? '-d ' : ''}${target}/t.XXXXXX`)
       expect(result.exitCode, result.stderrText).toBe(0)
@@ -94,7 +93,7 @@ it.each([
   ['cat /dev/stdin', 'a\nb\n'],
   ['paste - -', 'a\tb\n'],
 ])('reads stdin operands: %s', async (command, expected) => {
-  const ws = await workspace()
+  const ws = workspace()
   try {
     await ws.shell('echo file > /data/file')
     const result = await ws.shell("printf 'a\\nb\\n' | " + command)
@@ -105,7 +104,7 @@ it.each([
 })
 
 it('keeps the stdin operand on an installed CLI before an fd redirect', async () => {
-  const ws = await workspace()
+  const ws = workspace()
   const seen: string[] = []
   try {
     ws.registerCli(

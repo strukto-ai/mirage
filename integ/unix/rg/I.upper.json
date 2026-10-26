@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -I alpha /data/r4/sub",
@@ -54,6 +55,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'needle\\000tail\\n' > /data/rg-binary.txt; rg -I needle /data/rg-binary.txt",
@@ -84,6 +86,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'needle\\000tail\\n' > /data/rg-binary.txt; rg -HI needle /data/rg-binary.txt",

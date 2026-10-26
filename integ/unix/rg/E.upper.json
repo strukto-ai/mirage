@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgen; printf '\\357\\273\\277hi there\\nbye\\n' > /data/rgen/u8bom.txt; printf '\\377\\376h\\000i\\000\\n\\000b\\000y\\000e\\000\\n\\000' > /data/rgen/u16le.txt; printf '\\376\\377\\000h\\000i\\000\\n\\000b\\000y\\000e\\000\\n' > /data/rgen/u16be.txt; printf 'h\\000i\\000\\n\\000' > /data/rgen/u16.txt; printf 'caf\\351 hi\\n\\201x hi\\n' > /data/rgen/latin.txt; printf '\\357\\273\\277caf\\351 hi\\n' > /data/rgen/mixed.txt; printf '\\357\\273\\277\\357\\273\\277hi\\n' > /data/rgen/two8.txt; printf '\\377\\376\\377\\376h\\000i\\000\\n\\000' > /data/rgen/two16.txt; printf '\\377\\376h\\000i\\000\\n\\000z' > /data/rgen/odd.txt; printf '\\357\\273\\277caf\\351 hi\\n\\000x\\n' > /data/rgen/nul.txt; printf '\\223\\372\\226\\173 hi\\n' > /data/rgen/sjis.txt; cd /data/rgen; rg -n '^hi' u8bom.txt; rg -b '^hi' u8bom.txt; rg -n bye u16le.txt; rg -b bye u16le.txt; rg -n bye u16be.txt; rg -c hi u16.txt; echo rc=$?; rg -E auto -c bye u16le.txt; printf '\\357\\273\\277hi\\n' | rg -c '^hi'; printf '\\377\\376h\\000i\\000\\n\\000' | rg hi; cd /; rm -rf /data/rgen",
@@ -58,6 +59,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgen; printf '\\357\\273\\277hi there\\nbye\\n' > /data/rgen/u8bom.txt; printf '\\377\\376h\\000i\\000\\n\\000b\\000y\\000e\\000\\n\\000' > /data/rgen/u16le.txt; printf '\\376\\377\\000h\\000i\\000\\n\\000b\\000y\\000e\\000\\n' > /data/rgen/u16be.txt; printf 'h\\000i\\000\\n\\000' > /data/rgen/u16.txt; printf 'caf\\351 hi\\n\\201x hi\\n' > /data/rgen/latin.txt; printf '\\357\\273\\277caf\\351 hi\\n' > /data/rgen/mixed.txt; printf '\\357\\273\\277\\357\\273\\277hi\\n' > /data/rgen/two8.txt; printf '\\377\\376\\377\\376h\\000i\\000\\n\\000' > /data/rgen/two16.txt; printf '\\377\\376h\\000i\\000\\n\\000z' > /data/rgen/odd.txt; printf '\\357\\273\\277caf\\351 hi\\n\\000x\\n' > /data/rgen/nul.txt; printf '\\223\\372\\226\\173 hi\\n' > /data/rgen/sjis.txt; cd /data/rgen; rg -E none '^hi' u8bom.txt; echo rc=$?; rg -E none -c hi u8bom.txt; rg -E none bye u16le.txt; echo rc=$?; rg -E none hi mixed.txt | base64; cd /; rm -rf /data/rgen",
@@ -93,6 +95,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgen; printf '\\357\\273\\277hi there\\nbye\\n' > /data/rgen/u8bom.txt; printf '\\377\\376h\\000i\\000\\n\\000b\\000y\\000e\\000\\n\\000' > /data/rgen/u16le.txt; printf '\\376\\377\\000h\\000i\\000\\n\\000b\\000y\\000e\\000\\n' > /data/rgen/u16be.txt; printf 'h\\000i\\000\\n\\000' > /data/rgen/u16.txt; printf 'caf\\351 hi\\n\\201x hi\\n' > /data/rgen/latin.txt; printf '\\357\\273\\277caf\\351 hi\\n' > /data/rgen/mixed.txt; printf '\\357\\273\\277\\357\\273\\277hi\\n' > /data/rgen/two8.txt; printf '\\377\\376\\377\\376h\\000i\\000\\n\\000' > /data/rgen/two16.txt; printf '\\377\\376h\\000i\\000\\n\\000z' > /data/rgen/odd.txt; printf '\\357\\273\\277caf\\351 hi\\n\\000x\\n' > /data/rgen/nul.txt; printf '\\223\\372\\226\\173 hi\\n' > /data/rgen/sjis.txt; cd /data/rgen; rg -E latin1 hi latin.txt; rg -E windows-1252 -c caf latin.txt; rg -E utf-16le -c hi u16.txt; rg -E ' UTF-16LE ' -c hi u16.txt; rg -E utf-8 hi latin.txt; rg -E x-user-defined hi latin.txt; rg -E iso-8859-16 -c hi latin.txt; rg -E latin1 --no-encoding hi latin.txt | base64; rg --no-encoding -E latin1 -c hi latin.txt; rg -E shift_jis hi sjis.txt; cd /; rm -rf /data/rgen",
@@ -129,6 +132,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgen; printf '\\357\\273\\277hi there\\nbye\\n' > /data/rgen/u8bom.txt; printf '\\377\\376h\\000i\\000\\n\\000b\\000y\\000e\\000\\n\\000' > /data/rgen/u16le.txt; printf '\\376\\377\\000h\\000i\\000\\n\\000b\\000y\\000e\\000\\n' > /data/rgen/u16be.txt; printf 'h\\000i\\000\\n\\000' > /data/rgen/u16.txt; printf 'caf\\351 hi\\n\\201x hi\\n' > /data/rgen/latin.txt; printf '\\357\\273\\277caf\\351 hi\\n' > /data/rgen/mixed.txt; printf '\\357\\273\\277\\357\\273\\277hi\\n' > /data/rgen/two8.txt; printf '\\377\\376\\377\\376h\\000i\\000\\n\\000' > /data/rgen/two16.txt; printf '\\377\\376h\\000i\\000\\n\\000z' > /data/rgen/odd.txt; printf '\\357\\273\\277caf\\351 hi\\n\\000x\\n' > /data/rgen/nul.txt; printf '\\223\\372\\226\\173 hi\\n' > /data/rgen/sjis.txt; cd /data/rgen; rg -E latin1 hi mixed.txt; rg -E utf-8 hi mixed.txt; rg hi mixed.txt | base64; rg -E utf-16le hi mixed.txt; echo rc=$?; rg -E utf-16le hi u16be.txt; rg -E utf-8 hi u16le.txt; rg -E utf-8 '^hi' two8.txt; rg '^hi' two8.txt; echo rc=$?; rg '^hi' two16.txt; rg . odd.txt; cd /; rm -rf /data/rgen",
@@ -163,6 +167,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgen; printf '\\357\\273\\277hi there\\nbye\\n' > /data/rgen/u8bom.txt; printf '\\377\\376h\\000i\\000\\n\\000b\\000y\\000e\\000\\n\\000' > /data/rgen/u16le.txt; printf '\\376\\377\\000h\\000i\\000\\n\\000b\\000y\\000e\\000\\n' > /data/rgen/u16be.txt; printf 'h\\000i\\000\\n\\000' > /data/rgen/u16.txt; printf 'caf\\351 hi\\n\\201x hi\\n' > /data/rgen/latin.txt; printf '\\357\\273\\277caf\\351 hi\\n' > /data/rgen/mixed.txt; printf '\\357\\273\\277\\357\\273\\277hi\\n' > /data/rgen/two8.txt; printf '\\377\\376\\377\\376h\\000i\\000\\n\\000' > /data/rgen/two16.txt; printf '\\377\\376h\\000i\\000\\n\\000z' > /data/rgen/odd.txt; printf '\\357\\273\\277caf\\351 hi\\n\\000x\\n' > /data/rgen/nul.txt; printf '\\223\\372\\226\\173 hi\\n' > /data/rgen/sjis.txt; cd /data/rgen; rg hi nul.txt; rg -E utf-8 hi nul.txt; rg --stats bye u16le.txt | grep bytes; cd /; rm -rf /data/rgen",
@@ -198,6 +203,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgen; printf '\\357\\273\\277hi there\\nbye\\n' > /data/rgen/u8bom.txt; printf '\\377\\376h\\000i\\000\\n\\000b\\000y\\000e\\000\\n\\000' > /data/rgen/u16le.txt; printf '\\376\\377\\000h\\000i\\000\\n\\000b\\000y\\000e\\000\\n' > /data/rgen/u16be.txt; printf 'h\\000i\\000\\n\\000' > /data/rgen/u16.txt; printf 'caf\\351 hi\\n\\201x hi\\n' > /data/rgen/latin.txt; printf '\\357\\273\\277caf\\351 hi\\n' > /data/rgen/mixed.txt; printf '\\357\\273\\277\\357\\273\\277hi\\n' > /data/rgen/two8.txt; printf '\\377\\376\\377\\376h\\000i\\000\\n\\000' > /data/rgen/two16.txt; printf '\\377\\376h\\000i\\000\\n\\000z' > /data/rgen/odd.txt; printf '\\357\\273\\277caf\\351 hi\\n\\000x\\n' > /data/rgen/nul.txt; printf '\\223\\372\\226\\173 hi\\n' > /data/rgen/sjis.txt; cd /data/rgen; rg -E utf16le hi u16.txt; echo rc=$?; rg -E replacement hi u16.txt; echo rc=$?; rg -E AUTO hi u16.txt; echo rc=$?; rg -E latin1 -E bad hi latin.txt; echo rc=$?; rg -E bad -E latin1 hi latin.txt; echo rc=$?; cd /; rm -rf /data/rgen",

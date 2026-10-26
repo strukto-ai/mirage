@@ -12,11 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { createShellParser } from '../shell/parse/index.ts'
 import { ops } from '../test-utils.ts'
 import { DEFAULT_READ_TTL, MountMode, PathSpec, ReadPolicy } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -31,9 +28,6 @@ function boundOf(ws: Workspace, key: string): number | null | undefined {
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 describe('cache is a hidden store, not a mount', () => {
   it('is decoupled from the root mount', async () => {
@@ -79,7 +73,6 @@ describe('warm read serves from the hidden store, command stays on its mount', (
       {
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL },
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {
@@ -105,7 +98,6 @@ describe('the mount bound reaches the cache through a shell read', () => {
       {
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.BOUNDED, ttl: 45 },
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {
@@ -147,7 +139,6 @@ describe('the mount bound reaches the cache through a shell read', () => {
       {
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL },
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {
@@ -173,7 +164,6 @@ describe('the mount bound reaches the cache through a shell read', () => {
       {
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.BOUNDED, ttl: 45 },
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {
@@ -223,7 +213,6 @@ describe('namespace orphan GC on remote delete', () => {
       {
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL },
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {
@@ -264,7 +253,6 @@ describe('a guarded cp reads through the dispatcher', () => {
       {
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL },
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {
@@ -309,7 +297,6 @@ describe('a renderer registered beside the VFS', () => {
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     renderTally(ram)
@@ -338,7 +325,6 @@ describe('a renderer registered beside the VFS', () => {
       { '/data': ram, '/other': other },
       {
         mode: MountMode.WRITE,
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     renderTally(ram)
@@ -373,7 +359,6 @@ describe('a line touching a file twice', () => {
       { '/d': ram },
       {
         mode: MountMode.WRITE,
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {
@@ -404,7 +389,6 @@ describe('a read given up on', () => {
         { '/d': ram },
         {
           mode: MountMode.WRITE,
-          shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
         },
       )
       try {
@@ -441,7 +425,6 @@ describe('mv and the caches', () => {
       { '/m/': ram },
       {
         mode: MountMode.WRITE,
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {

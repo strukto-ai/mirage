@@ -12,23 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 
 import { INT_COMPARATORS } from '../../workspace/executor/builtins/condition/constants.ts'
 import { ARITH_TEST_OPERATORS, DECLARING_NODES, TARGET_NAME_FIELDS } from './constants.ts'
-import { createShellParser, type ShellParser } from './index.ts'
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
+import { parse } from './parse.ts'
 
 // The parse-side set may not drift from the comparators `[[` runs as
 // arithmetic (condition/tree.ts); parse cannot import upward, so the
@@ -43,7 +31,7 @@ it('target name fields match the grammar', () => {
     for_statement: 'for X in a; do :; done',
   }
   for (const [nodeType, field] of Object.entries(TARGET_NAME_FIELDS)) {
-    const node = parser.parse(sources[nodeType] ?? '').namedChildren[0]
+    const node = parse(sources[nodeType] ?? '').namedChildren[0]
     expect(node?.type).toBe(nodeType)
     expect(node?.childForFieldName(field)?.text).toBe('X')
   }
@@ -51,6 +39,6 @@ it('target name fields match the grammar', () => {
 
 it('declaring nodes match the grammar', () => {
   const shapes = ['export X', 'unset X']
-  const types = new Set(shapes.map((src) => parser.parse(src).namedChildren[0]?.type))
+  const types = new Set(shapes.map((src) => parse(src).namedChildren[0]?.type))
   expect(types).toEqual(DECLARING_NODES)
 })

@@ -3,7 +3,7 @@
     {
       "id": "base64_tier2_ignore_garbage",
       "seq": 910005,
-      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "tidb-filesystem", "gdrive", "gdrive-folder", "box"],
       "command": "printf 'aG!VsbG8=' | base64 --decode --ignore-garbage",
       "expect": { "exit": 0, "stdout": "hello", "stderr": "" },
       "flags": ["decode", "ignore-garbage"]
@@ -11,7 +11,7 @@
     {
       "id": "base64_tier2_wrap_alias",
       "seq": 910006,
-      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "tidb-filesystem", "gdrive", "gdrive-folder", "box"],
       "command": "printf 'abcdefghij' | base64 --wrap 4",
       "expect": { "exit": 0, "stdout": "YWJj\nZGVm\nZ2hp\nag==\n", "stderr": "" },
       "flags": ["wrap"]

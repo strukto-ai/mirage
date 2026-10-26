@@ -176,7 +176,8 @@ git --git-dir=/repo/.git --work-tree=/repo status --short
 
 Clone and fetch can read another workspace repository or a smart-HTTP remote.
 Destinations must be writable mounts. There is no push or pull command.
-For authenticated GitHub clones, `gh repo clone` supplies its configured token.
+For authenticated GitHub clones, `gh repo clone` supplies its configured token,
+and only to its configured GitHub origin.
 
 `--git-dir` and `--work-tree` override `GIT_DIR` and `GIT_WORK_TREE` and resolve
 against `-C`. Repository `core.worktree` and `core.bare` affect discovery;

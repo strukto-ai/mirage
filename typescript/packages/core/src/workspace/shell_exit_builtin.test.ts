@@ -23,7 +23,7 @@ import {
 async function withWS(
   fn: (ws: Awaited<ReturnType<typeof makeIntegrationWS>>['ws']) => Promise<void>,
 ): Promise<void> {
-  const { ws } = await makeIntegrationWS()
+  const { ws } = makeIntegrationWS()
   try {
     await fn(ws)
   } finally {

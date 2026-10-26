@@ -19,7 +19,6 @@ import { materialize } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
 import { PathSpec } from '../../types.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 const RAM_JOIN = GENERIC_COMMANDS.filter((c) => c.name === 'join' && c.filetype == null)
 
@@ -68,10 +67,7 @@ async function shell(
   stdin: Uint8Array | null = null,
   seed: Record<string, string> = {},
 ): Promise<[string, string, number]> {
-  const ws = new Workspace(
-    { '/data/': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     for (const [path, body] of Object.entries(seed)) {
       await ws.shell(`tee ${path} > /dev/null`, { stdin: new TextEncoder().encode(body) })

@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PyodideRuntime } from './runtime.ts'
 
@@ -29,7 +28,7 @@ describe('pyodide extended attributes', { timeout: 120_000 }, () => {
     const rt = new PyodideRuntime()
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [rt, 'workspace'], shellParser: await getTestParser() },
+      { mode: MountMode.EXEC, runtimes: [rt, 'workspace'] },
     )
     try {
       await ws.shell('echo hi > /data/f && setfattr -n user.tag -v shell /data/f')

@@ -25,6 +25,7 @@
         "gdrive-folder",
         "box",
         "dropbox",
+        "tidb-filesystem",
         "dropbox-root"
       ],
       "command": "find /data -not -name \"*.txt\"",
@@ -63,6 +64,7 @@
         "gdrive-folder",
         "box",
         "dropbox",
+        "tidb-filesystem",
         "dropbox-root"
       ],
       "command": "find /data ! -name \"*.txt\"",
@@ -101,6 +103,7 @@
         "gdrive-folder",
         "box",
         "dropbox",
+        "tidb-filesystem",
         "dropbox-root"
       ],
       "command": "find /data -name \"*.txt\" ! -empty",
@@ -138,6 +141,7 @@
         "hf",
         "hf-prefix",
         "dropbox",
+        "tidb-filesystem",
         "dropbox-root",
         "gdrive",
         "gdrive-folder"
@@ -179,6 +183,7 @@
         "gdrive-folder",
         "box",
         "dropbox",
+        "tidb-filesystem",
         "dropbox-root"
       ],
       "command": "find /data ! -type f",
@@ -217,6 +222,7 @@
         "gdrive-folder",
         "box",
         "dropbox",
+        "tidb-filesystem",
         "dropbox-root"
       ],
       "command": "find /data ! ! -name \"*.txt\"",
@@ -253,6 +259,7 @@
         "s3-prefix",
         "sharepoint",
         "ssh",
+        "tidb-filesystem",
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix"
@@ -292,6 +299,7 @@
         "s3-prefix",
         "sharepoint",
         "ssh",
+        "tidb-filesystem",
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix"

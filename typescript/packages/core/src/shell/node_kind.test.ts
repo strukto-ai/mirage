@@ -12,21 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { NodeKind, nodeKind } from './node_kind.ts'
-import { createShellParser, type ShellParser } from './parse/index.ts'
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
+import { parse } from './parse/parse.ts'
 
 // One snippet per statement kind. The map must cover the full enum
 // (asserted below), so adding a NodeKind without deciding how it
@@ -60,7 +48,7 @@ const SNIPPETS: Record<NodeKind, string> = {
 }
 
 function firstStatement(snippet: string) {
-  const root = parser.parse(snippet)
+  const root = parse(snippet)
   expect(root.type).toBe('program')
   const first = root.namedChildren[0]
   if (first === undefined) throw new Error('empty program')
@@ -75,7 +63,7 @@ describe('nodeKind', () => {
   for (const kind of Object.values(NodeKind)) {
     it(`classifies ${kind}`, () => {
       const node =
-        kind === NodeKind.PROGRAM ? parser.parse(SNIPPETS[kind]) : firstStatement(SNIPPETS[kind])
+        kind === NodeKind.PROGRAM ? parse(SNIPPETS[kind]) : firstStatement(SNIPPETS[kind])
       expect(nodeKind(node)).toBe(kind)
     })
   }

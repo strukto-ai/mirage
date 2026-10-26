@@ -24,7 +24,7 @@ describe("background jobs respect the session's hides (regression)", () => {
   // (or a switch from ALS to per-session-object enforcement) cannot
   // silently let `cmd &` write where the session cannot see.
   it('cmd & in a restricted session cannot escape the hides', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     ws.createSession('restricted', { profile: { paths: { hide: ['/ram'] } } })
     await ws.shell('echo hello > /ram/leaked.txt &', {
       sessionId: 'restricted',

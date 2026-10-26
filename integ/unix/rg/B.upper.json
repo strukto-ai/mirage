@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -B1 info /data/r4/app.log; rg -B1 --no-context-separator -e info -e note /data/r4/app.log",

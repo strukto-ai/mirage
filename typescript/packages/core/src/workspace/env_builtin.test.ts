@@ -19,7 +19,7 @@ const ENC = new TextEncoder()
 
 describe('workspace: env builtin', () => {
   it('prints the environment unsorted in insertion order', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     await ws.shell('export ZZZ=1')
     await ws.shell('export AAA=2')
     const io = await ws.shell('env')
@@ -29,7 +29,7 @@ describe('workspace: env builtin', () => {
   })
 
   it('-u removes a variable', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     await ws.shell('export DROP=x')
     await ws.shell('export KEEP=y')
     const io = await ws.shell('env -u DROP')
@@ -40,21 +40,21 @@ describe('workspace: env builtin', () => {
   })
 
   it('-0 terminates entries with NUL', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('env -i -0 A=1 B=2')
     expect(stdoutStr(io)).toBe('A=1\0B=2\0')
     await ws.close()
   })
 
   it('run form forwards stdin to the command', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('env -i X=1 cat', { stdin: ENC.encode('piped\n') })
     expect(stdoutStr(io)).toBe('piped\n')
     await ws.close()
   })
 
   it('restores the session environment after the run form', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     await ws.shell('export FOO=original')
     await ws.shell('env -i FOO=temp printenv FOO')
     const io = await ws.shell('printenv FOO')

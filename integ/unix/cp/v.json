@@ -18,6 +18,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box",
@@ -53,6 +54,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box",
@@ -85,6 +87,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box",
@@ -122,7 +125,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "(cd /data && mkdir -p r16vc/s/sub && printf a > r16vc/s/f && printf b > r16vc/s/sub/g && cd r16vc && cp -v s/f nodir/x; echo rc=$?; cp -v s/f newname/; echo rc=$?; cp -rv s/sub nodir/y; echo rc=$?; cd /data && rm -r r16vc)",
       "expect": {
@@ -154,7 +158,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "(cd /data && mkdir -p r16vm/s/sub r16vm/t r16vm/u/sub/g && printf a > r16vm/s/f && printf b > r16vm/s/sub/g && printf x > r16vm/t/sub && cd r16vm && cp -rv s/. t; echo rc=$?; cp -rv s/. u; echo rc=$?; find t u | sort; cd /data && rm -r r16vm)",
       "expect": {

@@ -1,0 +1,51 @@
+---
+title: TiDB Cloud Filesystem
+icon: /images/tidb-logo.svg
+description: Set up a TiDB Cloud Filesystem token for the tidb_filesystem VFS.
+---
+
+## Credentials
+
+The VFS reaches a file system through its REST API with a file system token.
+No extra package is needed in Python or TypeScript.
+
+1. Create a file system in the [TiDB Cloud console](https://tidbcloud.com/) or
+   with `ti fs`, and note its region.
+2. Take its owner token, shown once when the file system is created, or create
+   a scoped token under **File Systems**, your file system, **Access Tokens**,
+   **Create Token**. See [Manage File System Tokens](https://docs.pingcap.com/tidbcloud-filesystem/manage-filesystem-tokens/).
+3. Set `host` to the endpoint of the file system's region. A token works only
+   against its own region.
+
+| Region | `host` |
+| --- | --- |
+| `aws-us-east-1` | `https://aws-us-east-1.drive9.ai` |
+| `aws-us-west-2` | `https://aws-us-west-2.drive9.ai` |
+| `aws-ap-southeast-1` | `https://aws-ap-southeast-1.drive9.ai` |
+| `gcp-us-east1` | `https://gcp-us-east1.drive9.ai` |
+| `azure-centralus` | `https://azure-centralus.drive9.ai` |
+| `alicloud-ap-southeast-1` | `https://alicloud-ap-southeast-1.drive9.ai` |
+
+Your application passes both to the VFS, for example from its environment:
+
+```bash
+TIDB_FILESYSTEM_HOST=https://aws-us-east-1.drive9.ai
+TIDB_FILESYSTEM_TOKEN=...
+```
+
+### Scoped tokens
+
+A scoped token reaches only the path it was created for, and only with the
+operations it allows (read, list, search, write, delete). Mount it with
+`root_path` set to that path, since it cannot list the file system's root.
+
+## Self-hosted drive9
+
+TiDB Cloud Filesystem runs on the open-source
+[drive9](https://github.com/mem9-ai/drive9) server, and the same VFS mounts a
+drive9 server you run yourself: set `host` to its origin and `token` to an API
+key it issued.
+
+See the [Python TiDB Cloud Filesystem VFS](/python/vfs/tidb_filesystem) or
+[TypeScript TiDB Cloud Filesystem VFS](/typescript/setup/tidb_filesystem) page
+for configuration and examples.

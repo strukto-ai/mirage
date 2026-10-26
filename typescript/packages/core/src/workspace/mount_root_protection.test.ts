@@ -15,36 +15,29 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
-async function twoMountWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function twoMountWs(): Workspace {
   const root = new RAMVFS()
   const r2 = new RAMVFS()
   const ram = new RAMVFS()
-  return new Workspace(
-    { '/': root, '/r2': r2, '/ram': ram },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  return new Workspace({ '/': root, '/r2': r2, '/ram': ram }, { mode: MountMode.WRITE })
 }
 
-async function nestedWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function nestedWs(): Workspace {
   const root = new RAMVFS()
   const data = new RAMVFS()
   const inner = new RAMVFS()
   return new Workspace(
     { '/': root, '/data': data, '/data/inner': inner },
-    { mode: MountMode.WRITE, shellParser: parser },
+    { mode: MountMode.WRITE },
   )
 }
 
-async function singleMountWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function singleMountWs(): Workspace {
   const root = new RAMVFS()
   const r2 = new RAMVFS()
-  return new Workspace({ '/': root, '/r2': r2 }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/': root, '/r2': r2 }, { mode: MountMode.WRITE })
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -55,7 +48,7 @@ describe('mount-root protection — rm', () => {
   it('rm refuses a mount root', async () => {
     // Without -r a mount root is a directory first, as GNU says of a mount
     // point (coreutils 9.7).
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('rm /r2')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toBe("rm: cannot remove '/r2': Is a directory\n")
@@ -63,7 +56,7 @@ describe('mount-root protection — rm', () => {
   })
 
   it('rm -rf refuses a mount root', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('rm -rf /r2')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toMatch(/Device or resource busy/)
@@ -71,7 +64,7 @@ describe('mount-root protection — rm', () => {
   })
 
   it('rm -rf refuses a mount root with a trailing slash', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('rm -rf /r2/')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toMatch(/Device or resource busy/)
@@ -79,7 +72,7 @@ describe('mount-root protection — rm', () => {
   })
 
   it('rm inside a mount still works', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell('touch /r2/file')
     const r = await ws.shell('rm /r2/file')
     expect(r.exitCode).toBe(0)
@@ -87,7 +80,7 @@ describe('mount-root protection — rm', () => {
   })
 
   it('rm -rf inside a mount still works', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell('mkdir /r2/sub')
     await ws.shell('touch /r2/sub/x')
     const r = await ws.shell('rm -rf /r2/sub')
@@ -96,7 +89,7 @@ describe('mount-root protection — rm', () => {
   })
 
   it('rm refusal preserves mount contents', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell('touch /r2/keep')
     const r = await ws.shell('rm -rf /r2')
     expect(r.exitCode).toBe(1)
@@ -108,7 +101,7 @@ describe('mount-root protection — rm', () => {
 
 describe('mount-root protection — mv', () => {
   it('mv refuses a mount root as source', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('mv /r2 /elsewhere')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toMatch(/Device or resource busy/)
@@ -118,7 +111,7 @@ describe('mount-root protection — mv', () => {
 
 describe('mount-root protection — mkdir', () => {
   it('mkdir refuses an existing mount root', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('mkdir /r2')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toMatch(/File exists/)
@@ -126,7 +119,7 @@ describe('mount-root protection — mkdir', () => {
   })
 
   it('mkdir -p on a mount root is idempotent (no error)', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('mkdir -p /r2')
     expect(r.exitCode).toBe(0)
     expect(r.stderrText).toBe('')
@@ -134,7 +127,7 @@ describe('mount-root protection — mkdir', () => {
   })
 
   it('mkdir inside a mount is allowed', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('mkdir /r2/newdir')
     expect(r.exitCode).toBe(0)
     await ws.close()
@@ -143,7 +136,7 @@ describe('mount-root protection — mkdir', () => {
 
 describe('mount-root protection — touch', () => {
   it('touch refuses a mount root', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('touch /r2')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toMatch(/Is a directory/)
@@ -151,7 +144,7 @@ describe('mount-root protection — touch', () => {
   })
 
   it('touch inside a mount is allowed', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('touch /r2/newfile')
     expect(r.exitCode).toBe(0)
     await ws.close()
@@ -160,7 +153,7 @@ describe('mount-root protection — touch', () => {
 
 describe('mount-root protection — ln', () => {
   it('ln refuses a mount root as link name', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell('touch /ram/source')
     const r = await ws.shell('ln -T /ram/source /r2')
     expect(r.exitCode).toBe(1)
@@ -169,7 +162,7 @@ describe('mount-root protection — ln', () => {
   })
 
   it('ln -s refuses a mount root as link name', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('ln -sT /ram/source /r2')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toMatch(/File exists/)
@@ -177,7 +170,7 @@ describe('mount-root protection — ln', () => {
   })
 
   it('ln within a single mount is not blocked by the mount-root guard', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell('touch /r2/source')
     const r = await ws.shell('ln -s /r2/source /r2/link')
     // The guard's "File exists" must NOT fire — link target is not a mount root.
@@ -188,7 +181,7 @@ describe('mount-root protection — ln', () => {
 
 describe('mount-root protection — nested mounts', () => {
   it('rm refuses a nested mount root', async () => {
-    const ws = await nestedWs()
+    const ws = nestedWs()
     const r = await ws.shell('rm -rf /data/inner')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toMatch(/Device or resource busy/)
@@ -196,7 +189,7 @@ describe('mount-root protection — nested mounts', () => {
   })
 
   it('rm inside the nested mount still works', async () => {
-    const ws = await nestedWs()
+    const ws = nestedWs()
     await ws.shell('touch /data/inner/x')
     const r = await ws.shell('rm /data/inner/x')
     expect(r.exitCode).toBe(0)
@@ -204,7 +197,7 @@ describe('mount-root protection — nested mounts', () => {
   })
 
   it('rm inside the outer mount still works', async () => {
-    const ws = await nestedWs()
+    const ws = nestedWs()
     await ws.shell('touch /data/outer-file')
     const r = await ws.shell('rm /data/outer-file')
     expect(r.exitCode).toBe(0)
@@ -218,7 +211,7 @@ describe('mount-root protection — nested mounts', () => {
 
 describe('traversal fan-out — find', () => {
   it('find / -maxdepth 1 -mindepth 1 -type d lists mount prefixes', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('find / -maxdepth 1 -mindepth 1 -type d')
     expect(r.exitCode).toBe(0)
     expect(r.stdoutText).toMatch(/\/r2/)
@@ -227,7 +220,7 @@ describe('traversal fan-out — find', () => {
   })
 
   it('find / descends into each mount and surfaces files from all', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell('touch /r2/a')
     await ws.shell('touch /ram/b')
     const r = await ws.shell('find /')
@@ -239,7 +232,7 @@ describe('traversal fan-out — find', () => {
   it('holds a synthesized mount row to the time window', async () => {
     // -newermt lives beside the predicate tree; a mount point is held to
     // it like every real row, so a future cutoff drops it.
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const future = await ws.shell('find / -maxdepth 1 -mindepth 1 -type d -newermt 2099-01-01')
     expect(future.exitCode).toBe(0)
     expect(future.stdoutText).toBe('')
@@ -247,7 +240,7 @@ describe('traversal fan-out — find', () => {
   })
 
   it('find inside one mount does not leak entries from siblings', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell('touch /r2/only-a')
     await ws.shell('touch /ram/only-b')
     const r = await ws.shell('find /r2')
@@ -257,7 +250,7 @@ describe('traversal fan-out — find', () => {
   })
 
   it('find on a single-mount workspace does not fan out', async () => {
-    const ws = await singleMountWs()
+    const ws = singleMountWs()
     await ws.shell('touch /r2/file')
     const r = await ws.shell('find /r2')
     expect(r.exitCode).toBe(0)
@@ -266,7 +259,7 @@ describe('traversal fan-out — find', () => {
   })
 
   it('find / with nested mounts surfaces both layers', async () => {
-    const ws = await nestedWs()
+    const ws = nestedWs()
     await ws.shell('touch /data/outer-file')
     await ws.shell('touch /data/inner/inner-file')
     const r = await ws.shell('find /')
@@ -276,7 +269,7 @@ describe('traversal fan-out — find', () => {
   })
 
   it('find -maxdepth bounds skip too-deep nested mounts', async () => {
-    const ws = await nestedWs()
+    const ws = nestedWs()
     await ws.shell('touch /data/inner/x')
     await ws.shell('touch /data/outer-file')
     const r = await ws.shell('find / -maxdepth 1')
@@ -290,7 +283,7 @@ describe('traversal fan-out — find', () => {
 
 describe('traversal fan-out — grep -r', () => {
   it('grep -r at root searches across mounts', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell("sh -c 'echo needle > /r2/a.txt'")
     await ws.shell("sh -c 'echo other > /ram/b.txt'")
     await ws.shell("sh -c 'echo needle > /ram/c.txt'")
@@ -304,7 +297,7 @@ describe('traversal fan-out — grep -r', () => {
 
 describe('traversal fan-out — du', () => {
   it('du / fans out across mounts', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell("sh -c 'echo content > /r2/file'")
     await ws.shell("sh -c 'echo other > /ram/file'")
     const r = await ws.shell('du /')
@@ -320,7 +313,7 @@ describe('traversal fan-out — du', () => {
 
 describe('ls / unchanged after mount-root protection', () => {
   it('ls / still lists mount prefixes', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const r = await ws.shell('ls /')
     expect(r.stdoutText.split('\n')).toContain('r2')
     expect(r.stdoutText.split('\n')).toContain('ram')
@@ -336,7 +329,7 @@ describe('ls / unchanged after mount-root protection', () => {
 
 describe('rm safety flags', () => {
   it('-I and -i are accepted no-ops; removal still proceeds', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell('touch /r2/a /r2/b')
     expect((await ws.shell('rm -I /r2/a')).exitCode).toBe(0)
     expect((await ws.shell('rm -i /r2/b')).exitCode).toBe(0)
@@ -345,7 +338,7 @@ describe('rm safety flags', () => {
   })
 
   it('--one-file-system is accepted and removes within the mount', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell('mkdir -p /r2/d && touch /r2/d/x')
     const r = await ws.shell('rm --one-file-system -rf /r2/d')
     expect(r.exitCode).toBe(0)
@@ -356,7 +349,7 @@ describe('rm safety flags', () => {
   it('--preserve-root and --no-preserve-root cannot remove a mount root', async () => {
     // mirage protection is structural: --no-preserve-root does not disable
     // it, and / gets GNU's own failsafe first (coreutils 9.7).
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     for (const [cmd, refusal] of [
       [
         'rm --preserve-root -rf /',
@@ -372,7 +365,7 @@ describe('rm safety flags', () => {
   })
 
   it('rm -I no longer errors as an invalid option', async () => {
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     await ws.shell('touch /r2/a')
     const r = await ws.shell('rm -rfI /r2/a')
     expect(r.exitCode).toBe(0)

@@ -8,7 +8,6 @@ import { ExecutionScope } from './execution.ts'
 import { ShellExecution } from './shell_execution.ts'
 import { ExecuteResult } from './workspace/types.ts'
 import { Workspace } from './workspace/workspace.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const enc = new TextEncoder()
 const empty = (): ExecuteResult => new ExecuteResult(new Uint8Array(), new Uint8Array(), 0)
@@ -193,7 +192,7 @@ describe('ShellExecution', () => {
   })
 
   it('preserves session state and channel order with public shell', async () => {
-    const ws = new Workspace({}, { shellParser: await getTestParser() })
+    const ws = new Workspace({})
     try {
       const session = await ws.session('sdk-test')
       const execution = await session.shell('export SDK_STREAM=yes; echo one; echo two >&2', {
@@ -215,14 +214,14 @@ describe('ShellExecution', () => {
   })
 
   it('workspace close reaches a handle before first pull', async () => {
-    const ws = new Workspace({}, { shellParser: await getTestParser() })
+    const ws = new Workspace({})
     const execution = await ws.shell('sleep 60; echo never', { stream: true })
     await ws.close()
     await expect(execution.wait()).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   it('a pre-cancelled handle has no effects', async () => {
-    const ws = new Workspace({}, { shellParser: await getTestParser() })
+    const ws = new Workspace({})
     const stop = new AbortController()
     stop.abort()
     try {
@@ -239,7 +238,7 @@ describe('ShellExecution', () => {
   })
 
   it('cancel reaches a held output drain', async () => {
-    const ws = new Workspace({}, { shellParser: await getTestParser() })
+    const ws = new Workspace({})
     ws.policies.add(new ApproveOutput())
     const sink = new StuckSink()
     try {
@@ -254,7 +253,7 @@ describe('ShellExecution', () => {
   })
 
   it('a pipeline streams its last stage', async () => {
-    const ws = new Workspace({}, { shellParser: await getTestParser() })
+    const ws = new Workspace({})
     try {
       const execution = await ws.shell('{ echo ready; sleep 60; echo never; } | cat', {
         stream: true,
@@ -270,7 +269,7 @@ describe('ShellExecution', () => {
   }, 5000)
 
   it('breaking iteration cancels and joins the running invocation', async () => {
-    const ws = new Workspace({}, { shellParser: await getTestParser() })
+    const ws = new Workspace({})
     try {
       const execution = await ws.shell('echo prefix; sleep 60; echo never', { stream: true })
       for await (const event of execution.events) {

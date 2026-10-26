@@ -22,7 +22,6 @@ import { IOResult } from '../../io/types.ts'
 import { describe, expect, it } from 'vitest'
 import { ops } from '../../test-utils.ts'
 import { MountMode, PathSpec, VFSName } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../ram/ram.ts'
 import { DevicePipe } from '../../core/dev/pipe.ts'
@@ -36,10 +35,9 @@ function call(name: string, dev: DevVFS, path: string, ...args: unknown[]): Prom
   return ops(dev).call(name, PathSpec.fromStrPath(path), args)
 }
 
-async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeWs(): Workspace {
   const data = new RAMVFS()
-  return new Workspace({ '/data': data }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/data': data }, { mode: MountMode.WRITE })
 }
 
 describe('DevVFS', () => {
@@ -84,14 +82,14 @@ describe('DevVFS', () => {
 
 describe('character device commands', () => {
   it('serves ranged zero reads beyond the old finite buffer', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const result = await ws.shell('head -c 2M /dev/zero | wc -c')
     expect(result.stdoutText).toBe('2097152\n')
     await ws.close()
   })
 
   it('bounds an unqualified cat without changing its successful status', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const result = await ws.shell('cat /dev/zero')
     expect(result.exitCode).toBe(0)
     expect(result.stdout.byteLength).toBe(8 << 20)
@@ -101,7 +99,7 @@ describe('character device commands', () => {
   })
 
   it('bounds default head without buffering an endless unterminated line', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const result = await ws.shell('head /dev/zero')
     expect(result.exitCode).toBe(0)
     expect(result.stdout.byteLength).toBe(8 << 20)
@@ -111,7 +109,7 @@ describe('character device commands', () => {
   })
 
   it('does not apply the device safeguard to adjacent regular files', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const size = (8 << 20) + 1
     await ws.vfs.write('/data/large.bin', new Uint8Array(size))
     const result = await ws.shell('cat /dev/null /data/large.bin | wc -c')
@@ -122,7 +120,7 @@ describe('character device commands', () => {
   })
 
   it('classifies and renders active synthetic devices', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     expect((await ws.shell('find /dev -type f')).stdoutText).toBe('')
     expect((await ws.shell('find /dev -type c')).stdoutText).toBe('/dev/null\n/dev/zero\n')
     expect((await ws.shell('find /dev -empty')).stdoutText).toBe('')
@@ -144,7 +142,7 @@ describe('character device commands', () => {
   })
 
   it('answers regular-file and size predicates by kind', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     expect((await ws.shell('test -f /dev/null; echo $?')).stdoutText).toBe('1\n')
     expect((await ws.shell('test -c /dev/null; echo $?')).stdoutText).toBe('0\n')
     expect((await ws.shell('test -s /dev/zero; echo $?')).stdoutText).toBe('1\n')
@@ -152,7 +150,7 @@ describe('character device commands', () => {
   })
 
   it('refuses commands that require a whole read of an endless device', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const commands = [
       'cp /dev/zero /data/out',
       'source /dev/zero',
@@ -171,7 +169,7 @@ describe('character device commands', () => {
 
 describe('dev file removal (GNU rm /dev/null semantics)', () => {
   it('rm /dev/null exits 0 and the path is gone', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const rm = await ws.shell('rm /dev/null')
     expect(rm.exitCode).toBe(0)
     expect(rm.stdoutText).toBe('')
@@ -186,7 +184,7 @@ describe('dev file removal (GNU rm /dev/null semantics)', () => {
   })
 
   it('rm -v /dev/null prints a true removed claim', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const rm = await ws.shell('rm -v /dev/null')
     expect(rm.exitCode).toBe(0)
     expect(rm.stdoutText).toBe("removed '/dev/null'\n")
@@ -196,7 +194,7 @@ describe('dev file removal (GNU rm /dev/null semantics)', () => {
   })
 
   it('rm -rf /dev/null removes the file too', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const rm = await ws.shell('rm -rf /dev/null')
     expect(rm.exitCode).toBe(0)
     const ls = await ws.shell('ls /dev')
@@ -205,7 +203,7 @@ describe('dev file removal (GNU rm /dev/null semantics)', () => {
   })
 
   it('a redirect recreates a removed /dev/null as a regular file', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('rm /dev/null')
     const write = await ws.shell('echo recreated > /dev/null')
     expect(write.exitCode).toBe(0)
@@ -217,7 +215,7 @@ describe('dev file removal (GNU rm /dev/null semantics)', () => {
   })
 
   it('rm /dev/zero is symmetric', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const rm = await ws.shell('rm /dev/zero')
     expect(rm.exitCode).toBe(0)
     const ls = await ws.shell('ls /dev')
@@ -255,7 +253,7 @@ it('keeps process substitution private while another session runs', async () => 
   const release = new Promise<void>((resolve) => {
     releaseResolve = resolve
   })
-  const ws = await makeWs()
+  const ws = makeWs()
   ws.createSession('owner')
   ws.createSession('peer')
   ws.registerCli(
@@ -326,7 +324,7 @@ it('preserves a reused descriptor when an earlier substitution finishes', async 
   const newRelease = new Promise<void>((resolve) => {
     newReleaseResolve = resolve
   })
-  const ws = await makeWs()
+  const ws = makeWs()
   ws.createSession('owner')
   ws.createSession('peer')
   ws.registerCli(
@@ -416,7 +414,7 @@ it.each([false, true])(
     const dev = new DevVFS()
     const ws = new Workspace(
       { '/devices': configured ? new Mount(dev, { index: { ttl: 120 } }) : dev },
-      { index: { ttl: 600 }, shellParser: await getTestParser() },
+      { index: { ttl: 600 } },
     )
     const owner = ws.createSession('owner')
     ws.createSession('peer')

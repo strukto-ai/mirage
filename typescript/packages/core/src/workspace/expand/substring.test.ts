@@ -1,9 +1,9 @@
 import { assert, expect, it, vi } from 'vitest'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { substringOperands } from './substring.ts'
+import { parse } from '../../shell/parse/parse.ts'
 
 it('expands operands only when requested', async () => {
-  const root = (await getTestParser()).parse('echo ${x:$offset:$length}')
+  const root = parse('echo ${x:$offset:$length}')
   const node = root.namedChildren[0]?.namedChildren.at(-1)
   assert(node)
   const expand = vi.fn().mockResolvedValueOnce('1').mockResolvedValueOnce('2')
@@ -25,7 +25,7 @@ it.each([
 ] as [string, string[], string[]][])(
   'splits only source separators: %s',
   async (source, expanded, expected) => {
-    const root = (await getTestParser()).parse('echo ' + source)
+    const root = parse('echo ' + source)
     const node = root.namedChildren[0]?.namedChildren.at(-1)
     assert(node)
     let index = 0

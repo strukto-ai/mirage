@@ -39,7 +39,6 @@ import { Consumer, SHELL_NAMES, lookup, lookupAll } from '../../lookup/index.ts'
 import { SessionState } from '../../session/session.ts'
 import { abortable, sleep } from '../../../utils/abort.ts'
 import { Workspace } from '../../workspace/workspace.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -108,12 +107,11 @@ class InProcessPython extends PythonRuntime {
   }
 }
 
-async function workspace(probe: Runtime, others: Runtime[] = []): Promise<Workspace> {
+function workspace(probe: Runtime, others: Runtime[] = []): Workspace {
   return new Workspace(
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      shellParser: await getTestParser(),
       runtimes: [probe, ...others],
     },
   )
@@ -122,7 +120,7 @@ async function workspace(probe: Runtime, others: Runtime[] = []): Promise<Worksp
 describe('external program capture', () => {
   it('preserves Mirage pipes and VFS redirects', async () => {
     const probe = new ProcessProbe()
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     try {
       const result = await ws.shell("printf 'GPU ready\nother\n' | native-tool | grep GPU > /out")
       expect(result.exitCode).toBe(0)
@@ -138,7 +136,7 @@ describe('external program capture', () => {
 
   it('hands a native runtime chosen for the line the words as typed', async () => {
     const probe = new ProcessProbe({ captures: ['python3'] })
-    const ws = await workspace(new InProcessPython(), [probe])
+    const ws = workspace(new InProcessPython(), [probe])
     try {
       const result = await ws.shell("python3 -c 'print(1)' arg", { runtime: 'probe' })
       expect(result.exitCode).toBe(0)
@@ -150,7 +148,7 @@ describe('external program capture', () => {
 
   it('preserves empty argv and native interpreter options, cwd and temporary env', async () => {
     const probe = new ProcessProbe({ captures: ['python3', EXTERNAL_COMMANDS] })
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     try {
       await ws.shell('mkdir /work; cd /work')
       const result = await ws.shell("TOKEN=one python3 -c 'print(1)' -u 'a b' '$(echo literal)' ''")
@@ -175,7 +173,7 @@ describe('external program capture', () => {
 
   it('captures temporary launch settings before a native stream is pulled', async () => {
     const probe = new StreamingProbe()
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     try {
       await ws.shell('mkdir /work; cd /work')
       const result = await ws.shell('TOKEN=one PATH=/private/bin native-tool | cat')
@@ -191,7 +189,7 @@ describe('external program capture', () => {
 
   it('expands globs against the workspace and preserves quoted patterns', async () => {
     const probe = new ProcessProbe()
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     try {
       await ws.shell('mkdir /work; touch /work/a.txt /work/b.txt')
       const result = await ws.shell("native-tool /work/*.txt '/work/*.txt'")
@@ -212,7 +210,7 @@ describe('external program capture', () => {
     // dotfiles and `x=*` a file named `x=1`, and a quoted or unmatched
     // pattern stays the word as typed.
     const probe = new ProcessProbe()
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     try {
       await ws.shell("mkdir /work; touch /work/.a.txt '/work/x=1'; cd /work")
       const result = await ws.shell("native-tool .*.txt x=* '.*.txt' .none*")
@@ -225,7 +223,7 @@ describe('external program capture', () => {
 
   it('names the external route and keeps shell functions in Mirage', async () => {
     const probe = new ProcessProbe({ captures: ['named-tool', EXTERNAL_COMMANDS] })
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     try {
       expect(DEC.decode((await ws.shell('type -t named-tool')).stdout)).toBe('file\n')
       await ws.shell('native-tool() { echo function; }')
@@ -238,7 +236,7 @@ describe('external program capture', () => {
 
   it('runs a name only the fallback takes, which is not found', async () => {
     const probe = new ProcessProbe()
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     try {
       for (const line of [
         'which native-tool',
@@ -276,7 +274,7 @@ describe('external program timeout', () => {
   ] as const)('honors %s mount timeout %s beyond the default', async (name, timeout) => {
     DEFAULT_COMMAND_LIMITS[name] = new Limit({ timeoutSeconds: 0.05 })
     const probe = new DelayedProcessProbe({ captures: ['python3', EXTERNAL_COMMANDS] })
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     for (const mount of ws.registry.allMounts()) {
       mount.commandLimits.set(name, new Limit({ timeoutSeconds: timeout }))
     }
@@ -296,7 +294,7 @@ describe('external program timeout', () => {
       timeoutSeconds: source === 'default' ? 0.05 : 1,
     })
     const probe = new DelayedProcessProbe()
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     if (source === 'mount') {
       for (const mount of ws.registry.allMounts()) {
         mount.commandLimits.set('native-tool', new Limit({ timeoutSeconds: 0.05 }))
@@ -316,7 +314,7 @@ describe('external program timeout', () => {
   it('includes stdin materialization in the timeout', async () => {
     DEFAULT_COMMAND_LIMITS['native-tool'] = new Limit({ timeoutSeconds: 0.05 })
     const probe = new ProcessProbe()
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     async function* slowStdin(): AsyncGenerator<Uint8Array> {
       await sleep(150)
       yield ENC.encode('late\n')
@@ -368,7 +366,7 @@ describe('external command routing regressions', () => {
   ] as const)('preserves %s command tokens for %s', async (kind, head, expected) => {
     const options = { captures: ['trello board list'] }
     const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     registerBoardList(ws)
     try {
       const result = await ws.shell(head + " 'a b' '$(echo literal)' ''")
@@ -399,7 +397,7 @@ describe('external command routing regressions', () => {
           '/base/inner': new RAMVFS(),
           '/base/other': new RAMVFS(),
         },
-        { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [probe] },
+        { mode: MountMode.EXEC, runtimes: [probe] },
       )
       registerBoardList(ws)
       // Leave the glob pending so command dispatch owns boundary expansion.
@@ -432,7 +430,6 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
     const ws = new Workspace(
       { '/work': new RAMVFS() },
       {
-        shellParser: await getTestParser(),
         runtimes: [probe],
         mode: MountMode.EXEC,
         policies: [
@@ -485,14 +482,14 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
 })
 
 describe.each(['process', 'shell'] as const)('external %s text-slot globs', (kind) => {
-  async function textWorkspace(
+  function textWorkspace(
     captures: string[],
     policies: Policy[] = [],
-  ): Promise<[Workspace, ProcessProbe | ShellProbe]> {
+  ): [Workspace, ProcessProbe | ShellProbe] {
     const probe = kind === 'process' ? new ProcessProbe({ captures }) : new ShellProbe({ captures })
     const ws = new Workspace(
       { '/work': new RAMVFS() },
-      { shellParser: await getTestParser(), runtimes: [probe], mode: MountMode.EXEC, policies },
+      { runtimes: [probe], mode: MountMode.EXEC, policies },
     )
     return [ws, probe]
   }
@@ -509,7 +506,7 @@ describe.each(['process', 'shell'] as const)('external %s text-slot globs', (kin
     ['shopt -s nullglob; python3 s.py *.none x', ['python3', 's.py', 'x']],
     ['set -f; python3 s.py *.txt', ['python3', 's.py', '*.txt']],
   ] as const)('hands %s the words bash would', async (line, tokens) => {
-    const [ws, probe] = await textWorkspace(['python3'])
+    const [ws, probe] = textWorkspace(['python3'])
     try {
       await ws.shell("touch /work/a.txt /work/b.txt /work/.a.txt '/work/x=1'")
       await ws.shell('cd /work')
@@ -523,7 +520,7 @@ describe.each(['process', 'shell'] as const)('external %s text-slot globs', (kin
   })
 
   it('obeys failglob', async () => {
-    const [ws, probe] = await textWorkspace(['python3'])
+    const [ws, probe] = textWorkspace(['python3'])
     try {
       await ws.shell('cd /work')
       await ws.shell('shopt -s failglob')
@@ -537,7 +534,7 @@ describe.each(['process', 'shell'] as const)('external %s text-slot globs', (kin
   })
 
   it('admits the paths of the expanded argv', async () => {
-    const [ws, probe] = await textWorkspace(
+    const [ws, probe] = textWorkspace(
       ['grep', 'python3'],
       [
         profileRule({
@@ -580,7 +577,6 @@ describe.each(['process', 'shell'] as const)('interpreter %s script admission', 
     const ws = new Workspace(
       { '/work': new RAMVFS() },
       {
-        shellParser: await getTestParser(),
         runtimes: [probe],
         mode: MountMode.EXEC,
         policies: [profileRule({ reason: 'protected', paths: ['/work/*'] })],
@@ -653,7 +649,7 @@ describe.each(['process', 'shell'] as const)('native %s builtin precedence', (ki
   it('keeps builtins in Mirage', async () => {
     const options = { captures: [...SHELL_NAMES] }
     const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
-    const ws = await workspace(probe)
+    const ws = workspace(probe)
     try {
       const session = new SessionState({ sessionId: 'lookup' })
       for (const name of SHELL_NAMES) {
@@ -688,7 +684,7 @@ it.each([
   ['kill', '-0 456'],
 ])('explicit %s capture reaches the runtime', async (name, args) => {
   const probe = new ProcessProbe({ captures: [name] })
-  const ws = await workspace(probe)
+  const ws = workspace(probe)
   try {
     const result = await ws.shell(`${name} ${args}`)
     expect(result.exitCode).toBe(0)
@@ -704,7 +700,7 @@ class FailingProcess extends ProcessProbe {
   }
 }
 it('keeps a provider error on its command and continues the line', async () => {
-  const ws = await workspace(new FailingProcess())
+  const ws = workspace(new FailingProcess())
   try {
     const result = await ws.shell('echo before; failed-tool; echo after')
     expect(result.exitCode).toBe(0)
@@ -745,7 +741,6 @@ describe('streamed stderr', () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
-        shellParser: await getTestParser(),
         runtimes: [new ErringProbe()],
         mode: MountMode.EXEC,
         policies: [seen],
@@ -788,7 +783,6 @@ describe('streamed stderr', () => {
       const ws = new Workspace(
         { '/': new RAMVFS() },
         {
-          shellParser: await getTestParser(),
           runtimes: [new WarnsThenFails()],
           mode: MountMode.EXEC,
           policies: [seen],
@@ -820,7 +814,7 @@ class EndlessProbe extends ProcessProbe {
 it('exits 141 when its reader stopped it', async () => {
   const ws = new Workspace(
     { '/': new RAMVFS() },
-    { shellParser: await getTestParser(), runtimes: [new EndlessProbe()], mode: MountMode.EXEC },
+    { runtimes: [new EndlessProbe()], mode: MountMode.EXEC },
   )
   try {
     const io = await ws.shell('endless-tool | head -n 1; echo "${PIPESTATUS[@]}"')
@@ -844,7 +838,6 @@ it('records a program its cap stopped as 141', async () => {
   const ws = new Workspace(
     { '/': new RAMVFS() },
     {
-      shellParser: await getTestParser(),
       runtimes: [new EndlessProbe()],
       mode: MountMode.EXEC,
       policies: [seen],

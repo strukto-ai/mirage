@@ -143,8 +143,8 @@ impl Parser<'_> {
                 None => return self.fail(at),
             }
         }
-        self.skip_space_before(b"in");
-        if self.at_word(b"in") {
+        self.skip_space_before_in();
+        if self.at_spelled(b"in") {
             children.push(self.keyword("in")?);
             loop {
                 self.skip_blank();
@@ -183,12 +183,12 @@ impl Parser<'_> {
         Ok(Syn::node("for_statement", children))
     }
 
-    /// Skip newlines when `word` follows them, as bash allows before a for
+    /// Skip newlines when `in` follows them, as bash allows before a for
     /// loop's `in`.
-    fn skip_space_before(&mut self, word: &[u8]) {
+    fn skip_space_before_in(&mut self) {
         let mark = self.mark();
         self.skip_space();
-        if !self.at_word(word) {
+        if !self.at_spelled(b"in") {
             self.reset(mark);
             self.skip_blank();
         }
@@ -275,7 +275,29 @@ impl Parser<'_> {
 
     /// One case pattern: a word, or an extglob pattern with the quoted
     /// or expanded part that interrupts it.
+    /// One pattern of a case item: as bash reads it when it holds an extglob
+    /// group or the grammar's scanner stops short of it, as the scanner
+    /// reads it otherwise.
     fn case_pattern(&mut self) -> R<Vec<Syn>> {
+        let mark = self.mark();
+        if let Some((word, group)) = self.pattern_word()? {
+            if group || !word.is("extglob_pattern") {
+                return Ok(vec![word]);
+            }
+        }
+        self.reset(mark);
+        let nodes = self.grammar_case_pattern()?;
+        if self.eof() || is_space(self.peek()) || matches!(self.peek(), b'|' | b')') {
+            return Ok(nodes);
+        }
+        self.reset(mark);
+        match self.pattern_word()? {
+            Some((word, _)) => Ok(vec![word]),
+            None => self.fail(self.i),
+        }
+    }
+
+    fn grammar_case_pattern(&mut self) -> R<Vec<Syn>> {
         if let Some(end) = self.extglob_end() {
             let at = self.i;
             self.i = end;

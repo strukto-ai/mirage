@@ -16,7 +16,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { DOC_MIME, FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { statFromItem } from './readdir.ts'
@@ -31,13 +30,10 @@ beforeEach(() => {
   accessor = makeGDriveAccessor(fake)
 })
 
-async function workspace(): Promise<Workspace> {
+function workspace(): Workspace {
   const vfs = new GoogleDriveVFS({ clientId: 'x', refreshToken: 'y' })
   Object.assign(vfs, { accessor })
-  return new Workspace(
-    { '/drive/': vfs },
-    { mode: MountMode.READ, shellParser: await getTestParser() },
-  )
+  return new Workspace({ '/drive/': vfs }, { mode: MountMode.READ })
 }
 
 afterEach(() => {
@@ -77,7 +73,7 @@ describe('gdrive stat through a mount', () => {
   it('lists its parent once when cold', async () => {
     const id = fake.add('fresh.pdf', 'root', undefined, new TextEncoder().encode('xy'))
     const listed = vi.spyOn(fake, 'listFiles')
-    const ws = await workspace()
+    const ws = workspace()
     try {
       const result = (await ws.dispatch('stat', '/drive/fresh.pdf')) as FileStat
       expect(result.extra.file_id).toBe(id)
@@ -90,7 +86,7 @@ describe('gdrive stat through a mount', () => {
 
   it('propagates a failed parent listing', async () => {
     vi.spyOn(fake, 'listFiles').mockRejectedValue(new Error('drive unavailable'))
-    const ws = await workspace()
+    const ws = workspace()
     try {
       await expect(ws.dispatch('stat', '/drive/missing.txt')).rejects.toThrow(/drive unavailable/)
     } finally {

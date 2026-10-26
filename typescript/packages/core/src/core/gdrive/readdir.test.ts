@@ -16,7 +16,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { DriveFile } from '../google/drive.ts'
 import {
@@ -81,10 +80,7 @@ describe('a stat after the listings drop', () => {
     })
     const vfs = new GoogleDriveVFS({ clientId: 'x', refreshToken: 'y' })
     Object.assign(vfs, { accessor: makeAccessor() })
-    const ws = new Workspace(
-      { '/drive/': vfs },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/drive/': vfs }, { mode: MountMode.READ })
     try {
       await ws.dispatch('readdir', '/drive/docs')
       await ws.mount('/drive/').indexStore.invalidate()

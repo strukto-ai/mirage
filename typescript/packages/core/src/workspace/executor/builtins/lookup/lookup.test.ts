@@ -23,7 +23,6 @@ import type { MountRegistry } from '../../../mount/registry.ts'
 import { SessionState } from '../../../session/session.ts'
 import { handleType, handleWhich } from './lookup.ts'
 import { ParseScope } from '../../../../shell/parse/scope.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 // Mirrors python/tests/workspace/executor/builtins/lookup/test_handle.py.
 
@@ -77,13 +76,8 @@ describe('handleType', () => {
 
   it('-a prints the function under a keyword', async () => {
     const session = makeSession()
-    session.functions.then = 'then() { echo x; }'
-    const [out] = handleType(
-      ['-a', 'then'],
-      session,
-      makeRegistry(),
-      new ParseScope(await getTestParser()),
-    )
+    session.functions.then = 'function then { echo x; }'
+    const [out] = handleType(['-a', 'then'], session, makeRegistry(), new ParseScope())
     expect(await body(out)).toBe(
       'then is a shell keyword\nthen is a function\nfunction then () \n{ \n    echo x\n}\n',
     )
@@ -132,12 +126,7 @@ describe('handleType', () => {
   it('-a prints every layer holding the name', async () => {
     const session = makeSession()
     session.functions.linear = 'linear() { :; }'
-    const [out] = handleType(
-      ['-a', 'linear'],
-      session,
-      makeRegistry(true),
-      new ParseScope(await getTestParser()),
-    )
+    const [out] = handleType(['-a', 'linear'], session, makeRegistry(true), new ParseScope())
     expect(await body(out)).toBe(
       'linear is a function\nlinear () \n{ \n    :\n}\nlinear is /usr/bin/linear\n',
     )

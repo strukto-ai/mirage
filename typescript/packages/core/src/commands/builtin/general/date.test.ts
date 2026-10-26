@@ -17,7 +17,6 @@ import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { GENERAL_DATE } from './date.ts'
 
@@ -210,17 +209,16 @@ describe('date output formats through the shell', () => {
     "Valid arguments are:\n  - 'hours'\n  - 'minutes'\n  - 'date'\n  - 'seconds'\n  - 'ns'\n" +
     "Try 'date --help' for more information.\n"
 
-  async function makeWs(): Promise<Workspace> {
-    const parser = await getTestParser()
+  function makeWs(): Workspace {
     const ram = new RAMVFS()
-    return new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, shellParser: parser })
+    return new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
   }
 
   it.each([
     [`date -d ${AT} -Isu`, "date: invalid argument 'su' for '--iso-8601'\n" + ISO_VALID],
     [`date -d ${AT} -I -R a b`, 'date: multiple output formats specified\n'],
   ])('%s refuses', async (line, err) => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell(line)
     await ws.close()
     expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual(['', err, 1])

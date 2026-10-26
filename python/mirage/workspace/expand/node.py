@@ -229,6 +229,7 @@ async def _arith_text(
             NT.PARENTHESIZED_EXPRESSION,
             NT.TERNARY_EXPRESSION,
             NT.POSTFIX_EXPRESSION,
+            NT.CONCATENATION,
         ):
             parts.append(
                 await _arith_text(child, context, execute_fn, call_stack, view)
@@ -242,6 +243,7 @@ async def _arith_text(
         elif child.type in ARITH_OPERATORS or child.type in (
             NT.NUMBER,
             NT.VARIABLE_NAME,
+            NT.WORD,
         ):
             parts.append(get_text(child))
         else:

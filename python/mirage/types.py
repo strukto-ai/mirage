@@ -381,7 +381,7 @@ class PrimitiveCopy:
     mkdir: CopyFn
     readdir: ReaddirFn
     # A store-to-store copy between two mounts, tried before the bytes
-    # move; EXDEV from it says the stores cannot.
+    # move; EXDEV or ENOTSUP from it says the stores cannot.
     copy: CopyFn | None = None
 
 
@@ -898,6 +898,7 @@ class VFSName(StrEnum):
     MEM0 = "mem0"
     CHROMA = "chroma"
     DATABRICKS_VOLUME = "databricks_volume"
+    TIDB_FILESYSTEM = "tidb_filesystem"
     HF_BUCKETS = "hf_buckets"
     HF_DATASETS = "hf_datasets"
     HF_MODELS = "hf_models"

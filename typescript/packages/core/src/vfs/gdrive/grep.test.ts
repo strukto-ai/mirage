@@ -8,7 +8,6 @@ vi.mock('../../core/google/client.ts', async (importOriginal) => ({
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { googleGet, TokenManager } from '../../core/google/client.ts'
 import { FileStat, FileType, MountMode } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { GoogleDriveVFS } from './gdrive.ts'
 
@@ -23,10 +22,7 @@ describe('Drive grep through a mount', () => {
     vi.mocked(googleGet).mockResolvedValue({ title: 'needle\0tail' })
     const vfs = new GoogleDriveVFS({ clientId: 'test', refreshToken: 'test' })
     Object.assign(vfs, { accessor: new GDriveAccessor({ tokenManager: TM }) })
-    const ws = new Workspace(
-      { '/drive/': vfs },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/drive/': vfs }, { mode: MountMode.READ })
     const name = `Report.${kind}.json`
     try {
       await ws.mount('/drive/').indexStore.setDir(

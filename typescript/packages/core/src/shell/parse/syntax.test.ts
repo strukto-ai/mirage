@@ -14,22 +14,11 @@
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { assert, beforeAll, describe, expect, it } from 'vitest'
+import { assert, describe, expect, it } from 'vitest'
 import { decodeText } from '../bytes.ts'
-import { checkSyntax, createShellParser, syntaxErrorResult, type ShellParser } from './index.ts'
+import { checkSyntax, syntaxErrorResult } from './index.ts'
 import { MAX_NESTING } from './constants.ts'
 import { heredocPlan } from './syntax.ts'
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
 
 const CORPUS = (
   JSON.parse(
@@ -161,7 +150,7 @@ it.each([
   ["cat <<'EOF'\n'\"\nEOF", '\'"\n'],
   ["echo $'closed\\''", "closed'\n"],
 ])('literal quotes are not unclosed: %s', async (command, expected) => {
-  const ws = new Workspace({ '/data': new RAMVFS() }, { shellParser: parser })
+  const ws = new Workspace({ '/data': new RAMVFS() })
   try {
     const io = await ws.shell(command)
     expect(io.exitCode).toBe(0)
@@ -186,7 +175,7 @@ const sideEffectCommands = (
 it.each(sideEffectCommands)(
   'a missing quote refuses before any command runs: %s',
   async (command) => {
-    const ws = new Workspace({ '/data': new RAMVFS() }, { shellParser: parser })
+    const ws = new Workspace({ '/data': new RAMVFS() })
     try {
       expect((await ws.shell(command)).exitCode).toBe(2)
       expect((await ws.shell('test -e /data/unexpected')).exitCode).toBe(1)

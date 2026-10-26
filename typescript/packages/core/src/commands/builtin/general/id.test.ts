@@ -15,7 +15,6 @@
 import { expect, it } from 'vitest'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 // A workspace with no agent id has no identity: GNU id's shapes with a dash in
@@ -26,10 +25,7 @@ it.each<[string, [string, string, number]]>([
   ['id -un', ['-\n', 'id: cannot find name for user ID\n', 1]],
   ['id -Gn', ['-\n', 'id: cannot find name for group ID\n', 1]],
 ])('%s without an identity', async (line, expected) => {
-  const ws = new Workspace(
-    { '/': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
   const io = await ws.shell(line)
   await ws.close()
   expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual(expected)

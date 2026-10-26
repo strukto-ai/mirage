@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { execFileSync } from 'node:child_process'
-import { createRequire } from 'node:module'
 import {
   mkdirSync,
   mkdtempSync,
@@ -29,7 +28,6 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import type { SessionProfile } from '../../../../policy/profile.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
@@ -41,16 +39,10 @@ const BUILDER = fileURLToPath(
 )
 const DEC = new TextDecoder()
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
 let tmp: string
 const roots: string[] = []
 
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
+beforeAll(() => {
   tmp = mkdtempSync(join(tmpdir(), 'mirage-git-status-'))
 })
 
@@ -87,10 +79,7 @@ async function stage(
   setup(repo)
 
   const ram = new RAMVFS()
-  const ws = new Workspace(
-    { '/repo': ram },
-    { mode: MountMode.WRITE, shellParser: parser, profiles },
-  )
+  const ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, profiles })
   const dispatch = ws.vfs
   for (const rel of walk(repo)) {
     const target = `/repo/${rel}`

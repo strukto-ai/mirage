@@ -43,13 +43,18 @@ const RESERVED: ReadonlySet<string> = new Set([
 ])
 
 /** Render a portable definition without keeping its parsed tree. */
-export function storedFunctionText(name: string, source: string, parser?: ParseScope): string {
+export function storedFunctionText(
+  name: string,
+  source: string,
+  parser?: ParseScope,
+  aliases: ReadonlySet<string> = new Set(),
+): string {
   if (parser === undefined) throw new Error('function rendering requires a parse scope')
   const scope = parser.fork()
   try {
     return functionText(
       name,
-      parseFunction(source, (line) => scope.parse(line)),
+      parseFunction(source, (line) => scope.parse(line, aliases)),
     )
   } finally {
     scope.release()
@@ -178,9 +183,7 @@ class Printer {
       const op = node.children.find((c) => c.isNamed !== true)?.type ?? '&&'
       return `${this.command(named[0] ?? node, indent)} ${op} ${this.command(named[1] ?? node, indent)}`
     }
-    if (kind === 'negated_command') return `! ${this.command(named[0] ?? node, indent)}`
-    if (kind === 'timed_statement')
-      return `${node.timing?.[0] === true ? 'time -p ' : 'time '}${this.command(named[0] ?? node, indent)}`
+    if (kind === 'negated_command' || kind === 'timed_statement') return this.prefixed(node, indent)
     if (kind === NT.SUBSHELL) return `( ${this.statements(node.children, indent, false)} )`
     if (kind === 'test_command' && getText(node).startsWith('[['))
       return `[[ ${this.condition(named[0] ?? node)} ]]`
@@ -318,9 +321,35 @@ class Printer {
     return `\n${inner}${this.statements(children, inner, true)}\n${indent}done`
   }
 
+  /**
+   * A pipeline under `time` and `!` words, as bash prints it: `time` once
+   * (`-p` if any has it), then `!` when an odd number of them negate it,
+   * then the pipeline, which may be empty. Mirrors Python's _prefixed.
+   */
+  private prefixed(node: TSNodeLike, indent: string): string {
+    let timed = false
+    let portable = false
+    let negated = false
+    let inner: TSNodeLike | undefined = node
+    while (
+      inner !== undefined &&
+      (inner.type === 'negated_command' || inner.type === 'timed_statement')
+    ) {
+      if (inner.type === 'timed_statement') {
+        timed = true
+        portable ||= inner.children.some((c) => c.type === '-p')
+      } else {
+        negated = !negated
+      }
+      inner = inner.namedChildren[0]
+    }
+    const prefix = (timed ? (portable ? 'time -p ' : 'time ') : '') + (negated ? '! ' : '')
+    return prefix + (inner === undefined ? '' : this.command(inner, indent))
+  }
+
   private forStatement(node: TSNodeLike, indent: string): string {
     const [variable, values] = getForParts(node)
-    const words = values.map((v) => this.word(v)).join(' ')
+    const words = values === null ? '"$@"' : values.map((v) => this.word(v)).join(' ')
     const group = node.children.find((c) => c.type === NT.DO_GROUP) ?? null
     const head = node.children[0]?.type ?? 'for'
     return `${head} ${variable} in ${words};\n${indent}do${this.group(group, indent)}`

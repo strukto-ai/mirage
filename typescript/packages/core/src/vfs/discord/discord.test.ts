@@ -2,7 +2,6 @@ import { expect, it, vi } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import { NodeDiscordTransport } from '../../core/discord/client.ts'
 import { FileStat, FileType } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { DiscordVFSBase } from './discord.ts'
 import { seedChannel } from '../../../tests/vfs/discord/_test_util.ts'
@@ -41,7 +40,7 @@ it.each([false, true])(
       name: 'discord',
       accessor: new DiscordAccessor(new NodeDiscordTransport('token')),
     })
-    const ws = new Workspace({ '/chat': vfs }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/chat': vfs })
     const path = '/chat/team__G1/channels/general__C1/2026-04-24/files/report__A1.txt'
     const index = ws.mount('/chat').index
     await seedChannel(index, '/chat', 'team__G1', 'general__C1', 'C1', { dates: ['2026-04-24'] })

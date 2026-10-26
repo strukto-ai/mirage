@@ -33,7 +33,6 @@ import { runWithMountGate } from '../../context/session_context.ts'
 import { CycleError } from '../../utils/path.ts'
 import { readTar } from '../../commands/builtin/tar_helper.ts'
 import { UsageError } from '../../commands/errors.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 const RAM_TAR = GENERIC_COMMANDS.filter((c) => c.name === 'tar' && c.filetype == null)
 const RAM_ZIP = GENERIC_COMMANDS.filter((c) => c.name === 'zip' && c.filetype == null)
@@ -876,10 +875,7 @@ async function readOnlyShell(
   line: string,
 ): Promise<[number, string, string, string[]]> {
   const vfs = new RAMVFS()
-  const ws = new Workspace(
-    { '/ro/': [vfs, MountMode.WRITE] },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/ro/': [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
   try {
     const seeded = await ws.shell(seed)
     if (seeded.exitCode !== 0) throw new Error(DEC.decode(seeded.stderr))

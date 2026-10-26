@@ -17,10 +17,14 @@ pub struct ShellTree {
 
 #[pymethods]
 impl ShellTree {
+    /// `aliases` are the names the shell expands as aliases: one is a
+    /// command where a command starts, never a reserved word.
     #[new]
-    fn new(py: Python<'_>, source: &[u8]) -> Self {
+    #[pyo3(signature = (source, aliases = Vec::new()))]
+    fn new(py: Python<'_>, source: &[u8], aliases: Vec<String>) -> Self {
         let source = source.to_vec();
-        let tree = py.detach(|| streams::shell::parse(&source));
+        let aliases: Vec<Vec<u8>> = aliases.into_iter().map(String::into_bytes).collect();
+        let tree = py.detach(|| streams::shell::parse_with_aliases(&source, &aliases));
         Self {
             tree: Arc::new(tree),
             serial: TREES.fetch_add(1, Ordering::Relaxed),

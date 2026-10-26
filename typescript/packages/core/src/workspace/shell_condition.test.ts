@@ -34,7 +34,7 @@ import {
 let ws: Workspace
 
 beforeAll(async () => {
-  ws = (await makeIntegrationWS({ 'plain.txt': 'apple\nbanana\n' })).ws
+  ws = makeIntegrationWS({ 'plain.txt': 'apple\nbanana\n' }).ws
   await ws.shell('mkdir -p /data/sub')
   await ws.shell("printf '' > /data/empty.txt")
 })

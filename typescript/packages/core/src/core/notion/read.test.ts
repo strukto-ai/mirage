@@ -25,7 +25,6 @@ import { jsonlBytes } from '../render/json.ts'
 import { materialize } from '../../io/types.ts'
 import { NotionVFSBase } from '../../vfs/notion/notion.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { concat } from '../../utils/bytes.ts'
 
 class FakeTransport implements NotionTransport {
@@ -507,7 +506,7 @@ describe('Notion streaming rows', () => {
     async (command) => {
       const transport = streamTransport([STREAM.responses[0] ?? {}, ...STREAM.responses])
       const vfs = new StreamingVFS(transport)
-      const ws = new Workspace({ '/notion': vfs }, { shellParser: await getTestParser() })
+      const ws = new Workspace({ '/notion': vfs })
       const mount = ws.mounts().find((mount) => mount.vfs === vfs)
       if (mount === undefined) throw new Error('missing Notion mount')
       await indexFor(spec(VIRTUAL, '/notion'), mount.index)
@@ -533,7 +532,7 @@ describe('Notion streaming rows', () => {
       { raise: { message: 'access revoked', status: 403, code: 'restricted_resource' } },
     ])
     const vfs = new StreamingVFS(transport)
-    const ws = new Workspace({ '/notion': vfs }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/notion': vfs })
     const mount = ws.mounts().find((mount) => mount.vfs === vfs)
     if (mount === undefined) throw new Error('missing Notion mount')
     await indexFor(spec(VIRTUAL, '/notion'), mount.index)

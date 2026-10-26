@@ -17,7 +17,7 @@ import { CommandSpec, Argument } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, VFSName } from '../types.ts'
-import { getTestParser, stderrStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { ExecuteResult } from './workspace/workspace.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -29,9 +29,8 @@ const SPEC = new CommandSpec({
 const noopFn = (): Promise<[Uint8Array, IOResult]> =>
   Promise.resolve([ENC.encode('ok'), new IOResult()])
 
-async function makeWs(mounts: Record<string, RAMVFS>): Promise<Workspace> {
-  const parser = await getTestParser()
-  return new Workspace(mounts, { mode: MountMode.WRITE, shellParser: parser })
+function makeWs(mounts: Record<string, RAMVFS>): Workspace {
+  return new Workspace(mounts, { mode: MountMode.WRITE })
 }
 
 function seed(r: RAMVFS, path: string, content: string): void {
@@ -51,7 +50,7 @@ describe('cross-VFS dispatch (port of test_cross_provider_dispatch.py)', () => {
     const m2 = new RAMVFS()
     seed(m1, '/a.txt', 'aaa\n')
     seed(m2, '/b.txt', 'bbb\n')
-    const ws = await makeWs({ '/m1': m1, '/m2': m2 })
+    const ws = makeWs({ '/m1': m1, '/m2': m2 })
     const rc = new Command({
       name: 'nocross',
       spec: SPEC,
@@ -70,7 +69,7 @@ describe('cross-VFS dispatch (port of test_cross_provider_dispatch.py)', () => {
     const m2 = new RAMVFS()
     seed(m1, '/a.txt', 'aaa\n')
     seed(m2, '/b.txt', 'bbb\n')
-    const ws = await makeWs({ '/m1': m1, '/m2': m2 })
+    const ws = makeWs({ '/m1': m1, '/m2': m2 })
     const rc = new Command({
       name: 'nocross',
       spec: SPEC,
@@ -90,7 +89,7 @@ describe('cross-VFS dispatch (port of test_cross_provider_dispatch.py)', () => {
     const m2 = new RAMVFS()
     seed(m1, '/a.txt', 'aaa\n')
     seed(m2, '/b.txt', 'bbb\n')
-    const ws = await makeWs({ '/m1': m1, '/m2': m2 })
+    const ws = makeWs({ '/m1': m1, '/m2': m2 })
     const io = await ws.shell('cat /m1/a.txt /m2/b.txt')
     expect(io.exitCode).toBe(0)
     await ws.close()
@@ -101,7 +100,7 @@ describe('cross-VFS dispatch (port of test_cross_provider_dispatch.py)', () => {
     const m2 = new RAMVFS()
     seed(m1, '/a.txt', 'aaa\n')
     seed(m2, '/b.txt', 'bbb\n')
-    const ws = await makeWs({ '/m1': m1, '/m2': m2 })
+    const ws = makeWs({ '/m1': m1, '/m2': m2 })
     const rc = new Command({
       name: 'nocross',
       spec: SPEC,
@@ -121,7 +120,7 @@ describe('cross-VFS dispatch (port of test_cross_provider_dispatch.py)', () => {
     seed(m1, '/a.txt', 'a')
     seed(m2, '/b.txt', 'b')
     seed(m3, '/c.txt', 'c')
-    const ws = await makeWs({ '/m1': m1, '/m2': m2, '/m3': m3 })
+    const ws = makeWs({ '/m1': m1, '/m2': m2, '/m3': m3 })
     const rc = new Command({
       name: 'nocross',
       spec: SPEC,
@@ -140,7 +139,7 @@ describe('cross-VFS dispatch (port of test_cross_provider_dispatch.py)', () => {
     const m1 = new RAMVFS()
     const m2 = new RAMVFS()
     seed(m1, '/a.txt', 'aaa\n')
-    const ws = await makeWs({ '/m1': m1, '/m2': m2 })
+    const ws = makeWs({ '/m1': m1, '/m2': m2 })
     const io = await ws.shell('cat /m1/a.txt /m2/missing.txt')
     expect(io.exitCode).not.toBe(0)
     expect(stderrStr(io).length).toBeGreaterThan(0)
@@ -151,7 +150,7 @@ describe('cross-VFS dispatch (port of test_cross_provider_dispatch.py)', () => {
 describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
   const dec = (io: ExecuteResult): string => io.stdoutText
 
-  async function twoMounts(): Promise<Workspace> {
+  function twoMounts(): Workspace {
     const m1 = new RAMVFS()
     const m2 = new RAMVFS()
     seed(m1, '/a.txt', 'r2\nr1\n')
@@ -162,7 +161,7 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
   }
 
   it('sort orders one merged stream across mounts', async () => {
-    const ws = await twoMounts()
+    const ws = twoMounts()
     const io = await ws.shell('sort /m1/a.txt /m2/c.txt')
     expect(io.exitCode).toBe(0)
     expect(dec(io)).toBe('d1\nr1\nr2\n')
@@ -170,7 +169,7 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
   })
 
   it('cat -n numbers continuously across mounts and globs', async () => {
-    const ws = await twoMounts()
+    const ws = twoMounts()
     const io = await ws.shell('cat -n /m1/*.txt /m2/c.txt')
     expect(io.exitCode).toBe(0)
     const out = dec(io)
@@ -180,7 +179,7 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
   })
 
   it('nl and cut and sed stream across mounts', async () => {
-    const ws = await twoMounts()
+    const ws = twoMounts()
     expect(dec(await ws.shell('nl /m1/b.txt /m2/c.txt'))).toContain('2\td1')
     expect(dec(await ws.shell('cut -c1 /m1/b.txt /m2/c.txt'))).toBe('r\nd\n')
     expect(dec(await ws.shell('sed s/r/x/ /m1/b.txt /m2/c.txt'))).toBe('x3\nd1\n')
@@ -188,7 +187,7 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
   })
 
   it('grep fans out with filenames and any-match exit', async () => {
-    const ws = await twoMounts()
+    const ws = twoMounts()
     const io = await ws.shell('grep r1 /m1/a.txt /m2/d.log')
     expect(io.exitCode).toBe(0)
     expect(dec(io)).toBe('/m1/a.txt:r1\n/m2/d.log:log r1\n')
@@ -198,7 +197,7 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
   })
 
   it('wc re-totals across mounts and globs', async () => {
-    const ws = await twoMounts()
+    const ws = twoMounts()
     const io = await ws.shell('wc -l /m1/*.txt /m2/c.txt')
     // GNU pads to the digits of the files' total size, 12 bytes here.
     expect(dec(io)).toBe(' 2 /m1/a.txt\n 1 /m1/b.txt\n 1 /m2/c.txt\n 4 total\n')
@@ -206,14 +205,14 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
   })
 
   it('head shows headers per operand across mounts', async () => {
-    const ws = await twoMounts()
+    const ws = twoMounts()
     const out = dec(await ws.shell('head -n 1 /m1/a.txt /m2/c.txt'))
     expect(out).toBe('==> /m1/a.txt <==\nr2\n\n==> /m2/c.txt <==\nd1\n')
     await ws.close()
   })
 
   it('sha256sum and stat and file concatenate per operand', async () => {
-    const ws = await twoMounts()
+    const ws = twoMounts()
     const io = await ws.shell('sha256sum /m1/a.txt /m2/c.txt')
     expect(io.exitCode).toBe(0)
     const out = dec(io)
@@ -225,7 +224,7 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
   })
 
   it('write commands fan out per operand mount', async () => {
-    const ws = await twoMounts()
+    const ws = twoMounts()
     expect((await ws.shell('touch /m1/n1.txt /m2/n2.txt')).exitCode).toBe(0)
     expect((await ws.shell('mkdir /m1/d1 /m2/d2')).exitCode).toBe(0)
     expect((await ws.shell('rm /m1/n1.txt /m2/n2.txt')).exitCode).toBe(0)
@@ -237,7 +236,7 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
   })
 
   it('sed -i edits each operand in place across mounts', async () => {
-    const ws = await twoMounts()
+    const ws = twoMounts()
     const io = await ws.shell('sed -i s/r1/z1/ /m1/a.txt /m2/d.log')
     expect(io.exitCode).toBe(0)
     expect(dec(await ws.shell('cat /m1/a.txt /m2/d.log'))).toBe('r2\nz1\nlog z1\n')
@@ -245,7 +244,7 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
   })
 
   it('find fans out per root across mounts', async () => {
-    const ws = await twoMounts()
+    const ws = twoMounts()
     const io = await ws.shell("find /m1 /m2 -name '*.txt'")
     expect(io.exitCode).toBe(0)
     expect(dec(io)).toBe('/m1/a.txt\n/m1/b.txt\n/m2/c.txt\n')
@@ -253,7 +252,7 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
   })
 
   it('a generic builder writes its output operand on the other mount', async () => {
-    const ws = await twoMounts()
+    const ws = twoMounts()
     const io = await ws.shell('uniq /m1/a.txt /m2/c.txt; cat /m2/c.txt')
     expect(io.exitCode).toBe(0)
     expect(dec(io)).toBe('r2\nr1\n')

@@ -35,7 +35,6 @@ import {
 import { singleChunk } from '../utils/operands.ts'
 import { runWithRevisions } from '../../../observe/context.ts'
 import { BatchedRAM, readers } from '../../../test-utils.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 
@@ -250,8 +249,7 @@ it('warms the operands after a glob read', async () => {
   const vfs = new BatchedRAM()
   const names = Array.from({ length: 12 }, (_, i) => `/f${String(i).padStart(2, '0')}`)
   for (const name of names) vfs.store.files.set(name, ENC.encode('x\n'))
-  const parser = await getTestParser()
-  const ws = new Workspace({ '/r': vfs }, { shellParserFactory: () => Promise.resolve(parser) })
+  const ws = new Workspace({ '/r': vfs })
   open.push(ws)
   const out = await ws.shell('cat /r/f*')
   expect(DEC.decode(out.stdout)).toBe('x\n'.repeat(12))
@@ -278,11 +276,7 @@ it('reads no tree a mount sits under on a walk across mounts', async () => {
   vfs.store.files.set('/e/y', new Uint8Array())
   const nested = new RAMVFS()
   nested.store.files.set('/z', new Uint8Array())
-  const parser = await getTestParser()
-  const ws = new Workspace(
-    { '/r': vfs, '/r/d/sub': nested },
-    { shellParserFactory: () => Promise.resolve(parser) },
-  )
+  const ws = new Workspace({ '/r': vfs, '/r/d/sub': nested })
   open.push(ws)
   const out = await ws.shell('ls -R /r')
   expect(DEC.decode(out.stdout)).toBe('/r:\nd\ne\n\n/r/d:\nsub\nx\n\n/r/d/sub:\nz\n\n/r/e:\ny\n')
