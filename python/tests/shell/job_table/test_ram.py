@@ -40,6 +40,10 @@ async def test_a_list_is_written_under_its_generation():
     stored = await store.load("s")
     assert stored is not None
     assert list(stored["jobs"]) == ["1", "2"]
+    assert not await store.delete("s", 1)
+    assert await store.load("s") is not None
+    assert await store.delete("s", 2)
+    assert await store.load("s") is None
 
 
 @pytest.mark.asyncio

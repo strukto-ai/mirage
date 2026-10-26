@@ -23,7 +23,7 @@ import {
   RAMConsoleStore,
   type ReadResult,
 } from '../console/index.ts'
-import { STOP_WAIT_SECONDS, WATCH_RETRY_SECONDS } from './constants.ts'
+import { LIST_CHECK_SECONDS, STOP_WAIT_SECONDS, WATCH_RETRY_SECONDS } from './constants.ts'
 import { RAMJobStore } from './ram.ts'
 import { JobTable } from './table.ts'
 import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
@@ -909,6 +909,19 @@ class DroppedWatches extends RAMJobStore {
   }
 }
 
+/** A job store on which another table starts a job just as a list is about
+ * to go. */
+class StartsOnDelete extends RAMJobStore {
+  peer: JobTable | null = null
+  readonly started: Job[] = []
+
+  override async delete(sessionId: string, expectedGeneration: number): Promise<boolean> {
+    if (this.peer !== null && this.started.length === 0)
+      this.started.push(await sleeping(this.peer))
+    return super.delete(sessionId, expectedGeneration)
+  }
+}
+
 /** A job store whose consoles' output can expire, as Redis's does. */
 class ExpiringOutput extends RAMJobStore {
   readonly expired = new Set<string>()
@@ -1328,5 +1341,49 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
     const stored = (await store.load('s'))?.jobs as Record<string, { ending?: string }>
     expect(stored[job.id.toString()]?.ending).toBe('killed:143')
     expect((jt as unknown as { lease: unknown }).lease).toBeNull()
+  })
+
+  it('a close stops a job started while it closed', async () => {
+    const store = new StartsOnDelete()
+    const a = new JobTable(store)
+    store.peer = new JobTable(store)
+    await sleeping(a)
+    const stopped = await a.closeSession('s')
+    const [late] = store.started
+    expect(stopped.map((j) => j.consoleName)).toEqual(expect.arrayContaining([late?.consoleName]))
+    expect(stopped).toHaveLength(2)
+    await late?.process?.join()
+    expect([late?.status, late?.exitCode]).toEqual([JobStatus.KILLED, 137])
+    expect(await store.load('s')).toBeNull()
+  })
+
+  it('a job whose list was deleted elsewhere stops', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = new RAMJobStore()
+      const job = await sleeping(new JobTable(store))
+      await vi.advanceTimersByTimeAsync(0)
+      await store.clear()
+      await vi.advanceTimersByTimeAsync(LIST_CHECK_SECONDS * 1000 * 2)
+      await job.process?.join()
+      expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 137])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a listed or disowned job runs on past its checks', async () => {
+    vi.useFakeTimers()
+    try {
+      const jt = new JobTable(new RAMJobStore())
+      const listed = await sleeping(jt)
+      const disowned = await sleeping(jt)
+      expect(await jt.disown(disowned.id, 's')).toBe(true)
+      await vi.advanceTimersByTimeAsync(LIST_CHECK_SECONDS * 1000 * 3)
+      expect([listed.status, disowned.status]).toEqual([JobStatus.RUNNING, JobStatus.RUNNING])
+      await jt.killAll()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

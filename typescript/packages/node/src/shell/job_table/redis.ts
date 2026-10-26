@@ -78,9 +78,13 @@ export class RedisJobStore extends JobStore {
     return result === 1
   }
 
-  async delete(sessionId: string): Promise<void> {
+  async delete(sessionId: string, expectedGeneration: number): Promise<boolean> {
     const c = await this.redis.client()
-    await c.hDel(this.listsKey, sessionId)
+    const result = await c.eval(CAS_SCRIPT, {
+      keys: [this.listsKey],
+      arguments: [sessionId, '', String(expectedGeneration)],
+    })
+    return result === 1
   }
 
   console(name: string): RedisConsoleStore {

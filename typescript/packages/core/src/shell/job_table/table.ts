@@ -17,6 +17,7 @@ import { ProcessTable } from '../../process/table.ts'
 import { PathSpec } from '../../types.ts'
 import {
   Channel,
+  type ConsoleStore,
   JobConsole,
   KILLED_OUTCOME,
   exitOutcome,
@@ -25,6 +26,7 @@ import {
 import {
   HANGUP_EXIT_CODE,
   KILLED_EXIT_CODE,
+  LIST_CHECK_SECONDS,
   LIST_MAX_RETRIES,
   STOP_WAIT_SECONDS,
   WATCH_RETRY_SECONDS,
@@ -161,21 +163,82 @@ async function adoptEnding(job: Job): Promise<void> {
 }
 
 /**
- * Stop a job this table runs once another workspace ends it. A failed read
- * is retried until the runner settles, which aborts the watch: one that
- * gave up would leave a kill from elsewhere unheeded while the job ran on.
+ * Whether a console ends, or closes, within `seconds`.
+ *
+ * @param store the console to wait on
+ * @param seconds how long to wait
+ * @param signal aborted once the job's runner settles
+ */
+async function endedWithin(
+  store: ConsoleStore,
+  seconds: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const round = new AbortController()
+  const timer = setTimeout(() => {
+    round.abort()
+  }, seconds * 1000)
+  try {
+    await store.waitEnded(AbortSignal.any([signal, round.signal]))
+  } catch (err) {
+    if (signal.aborted || !round.signal.aborted) throw err
+  } finally {
+    clearTimeout(timer)
+  }
+  return !round.signal.aborted
+}
+
+/**
+ * Whether a job's session list still holds it, listed or disowned.
+ *
+ * @param jobs the job plane the list lives in
+ * @param job a job this table runs
+ */
+async function held(jobs: JobStore, job: Job): Promise<boolean> {
+  const fields = await jobs.load(job.sessionId)
+  if (fields === null) return false
+  const listed = Object.values((fields.jobs ?? {}) as Record<string, ListEntry>)
+  const disowned = (fields.disowned ?? {}) as Record<string, ListEntry>
+  return listed.some((entry) => entry.console === job.consoleName) || job.consoleName in disowned
+}
+
+/**
+ * Stop a job this table runs once another workspace ends it, or once its
+ * session's list no longer holds it.
+ *
+ * A close, a reap and a disown of a running job each end its console or
+ * keep its entry, so a list that dropped one whose console is still open
+ * went with its workspace, deleted elsewhere: an ending written there first
+ * would be deleted before this read it. So the list is checked every
+ * `LIST_CHECK_SECONDS` the console stays open, and a job it dropped stops
+ * as a closed session's does. A failed read is retried until the runner
+ * settles, which aborts the watch: one that gave up would leave a kill from
+ * elsewhere unheeded while the job ran on.
  *
  * @param job the job, run by this table
+ * @param jobs the job plane its session's list lives in
  * @param signal aborted once its runner settles, ending the watch
  */
-async function watch(job: Job, signal: AbortSignal): Promise<void> {
+async function watch(job: Job, jobs: JobStore, signal: AbortSignal): Promise<void> {
   const store = job.console.store
   while (!signal.aborted && !store.closed) {
     try {
-      await store.waitEnded(signal)
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the runner may settle across the await
-      if (!signal.aborted) await adoptEnding(job)
-      return
+      if (await endedWithin(store, LIST_CHECK_SECONDS, signal)) {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the runner may settle across the await
+        if (!signal.aborted) await adoptEnding(job)
+        return
+      }
+      if (job.status === JobStatus.RUNNING && !(await held(jobs, job))) {
+        await adoptEnding(job)
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- an ending may have landed across the await
+        if (job.status === JobStatus.RUNNING) {
+          job.status = JobStatus.KILLED
+          job.exitCode = KILLED_EXIT_CODE
+          job.process?.terminate(9)
+        }
+        return
+      }
+      continue
     } catch (err) {
       console.debug('job watch failed:', err)
     }
@@ -305,7 +368,7 @@ export class JobTable {
           if (job === null) return KILLED_EXIT_CODE
           if (job.status !== JobStatus.RUNNING) return job.exitCode
           const watching = new AbortController()
-          void watch(job, watching.signal).catch((err: unknown) => {
+          void watch(job, this.store, watching.signal).catch((err: unknown) => {
             console.debug('job watch failed:', err)
           })
           try {
@@ -553,22 +616,31 @@ export class JobTable {
    * entry points and stops disowned runners too. Closing a session closes
    * it everywhere, so the jobs other workspaces run in it are stopped too,
    * the disowned ones included: their consoles are ended, which their
-   * owners watch for.
+   * owners watch for. The list goes only while it is the one the stops were
+   * taken from: a job another workspace starts meanwhile changes it, and
+   * the close stops that job too before it tries again.
    */
   async closeSession(sessionId: string): Promise<Job[]> {
-    await this.sync(sessionId)
-    const running = this.runningJobs(sessionId)
-    for (const job of running) await this.kill(job.id, sessionId)
-    const fields = await this.store.load(sessionId)
-    for (const [name, entry] of Object.entries(
-      (fields?.disowned ?? {}) as Record<string, ListEntry>,
-    ))
-      if (entry.owner !== this.owner)
-        await markKilled(new JobConsole(this.store.console(name)), KILLED_EXIT_CODE)
-    this.jobs.delete(sessionId)
-    await this.store.delete(sessionId)
-    this.processes.revokeSession(sessionId)
-    return running
+    const stopped = new Map<string, Job>()
+    for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
+      const fields = await this.store.load(sessionId)
+      await this.sync(sessionId)
+      for (const job of this.runningJobs(sessionId)) {
+        await this.kill(job.id, sessionId)
+        stopped.set(job.consoleName, job)
+      }
+      for (const [name, entry] of Object.entries(
+        (fields?.disowned ?? {}) as Record<string, ListEntry>,
+      ))
+        if (entry.owner !== this.owner)
+          await markKilled(new JobConsole(this.store.console(name)), KILLED_EXIT_CODE)
+      if (await this.store.delete(sessionId, generationOf(fields))) {
+        this.jobs.delete(sessionId)
+        this.processes.revokeSession(sessionId)
+        return [...stopped.values()]
+      }
+    }
+    throw new Error(`job list of session ${sessionId} kept conflicting with another writer`)
   }
 
   /** Stop every running job this table runs in every session, returning

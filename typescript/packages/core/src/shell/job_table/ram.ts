@@ -50,11 +50,12 @@ export class RAMJobStore extends JobStore {
     return Promise.resolve(true)
   }
 
-  delete(sessionId: string): Promise<void> {
+  delete(sessionId: string, expectedGeneration: number): Promise<boolean> {
     const stored = this.lists.get(sessionId)
+    if (generationOf(stored) !== expectedGeneration) return Promise.resolve(false)
     this.lists.delete(sessionId)
     this.drop([...consoleNames(stored)])
-    return Promise.resolve()
+    return Promise.resolve(true)
   }
 
   console(name: string): ConsoleStore {

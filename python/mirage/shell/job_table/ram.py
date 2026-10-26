@@ -71,9 +71,14 @@ class RAMJobStore(JobStore):
             self._drop(_console_names(stored) - _console_names(fields))
         return True
 
-    async def delete(self, session_id: str) -> None:
+    async def delete(self, session_id: str, expected_generation: int) -> bool:
         with self._lock:
-            self._drop(_console_names(self._lists.pop(session_id, None)))
+            stored = self._lists.get(session_id)
+            if generation_of(stored) != expected_generation:
+                return False
+            self._lists.pop(session_id, None)
+            self._drop(_console_names(stored))
+        return True
 
     def console(self, name: str) -> ConsoleStore:
         return self._consoles.setdefault(name, RAMConsoleStore())

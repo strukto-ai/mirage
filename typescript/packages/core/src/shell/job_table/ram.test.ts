@@ -36,6 +36,10 @@ describe('RAMJobStore', () => {
     expect(await store.casSet('s', list(['a', 'b']), 0)).toBe(false)
     expect(await store.casSet('s', list(['a', 'b'], 2), 1)).toBe(true)
     expect(Object.keys((await store.load('s'))?.jobs ?? {})).toEqual(['1', '2'])
+    expect(await store.delete('s', 1)).toBe(false)
+    expect(await store.load('s')).not.toBeNull()
+    expect(await store.delete('s', 2)).toBe(true)
+    expect(await store.load('s')).toBeNull()
   })
 
   it('hands out a copy of a loaded list', async () => {

@@ -70,7 +70,9 @@ async def test_a_list_is_written_under_its_generation(stores):
     assert await store.cas_set("s", {"next": 2, "generation": 1}, 0)
     assert not await store.cas_set("s", {"next": 3, "generation": 1}, 0)
     assert await store.load("s") == {"next": 2, "generation": 1}
-    await store.delete("s")
+    assert not await store.delete("s", 0)
+    assert await store.load("s") == {"next": 2, "generation": 1}
+    assert await store.delete("s", 1)
     assert await store.load("s") is None
 
 

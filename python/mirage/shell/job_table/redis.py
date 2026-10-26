@@ -14,7 +14,7 @@
 
 import json
 from collections.abc import Awaitable, Sequence
-from typing import Any, cast
+from typing import cast
 
 import redis.asyncio as aioredis
 
@@ -78,10 +78,11 @@ class RedisJobStore(JobStore):
         )
         return bool(result)
 
-    async def delete(self, session_id: str) -> None:
-        await cast(
-            "Awaitable[Any]", self._client.hdel(self._lists, session_id)
+    async def delete(self, session_id: str, expected_generation: int) -> bool:
+        result = await self._cas(
+            keys=[self._lists], args=[session_id, "", expected_generation]
         )
+        return bool(result)
 
     def console(self, name: str) -> RedisConsoleStore:
         return RedisConsoleStore(

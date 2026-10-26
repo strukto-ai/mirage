@@ -1041,3 +1041,68 @@ async def test_a_kill_before_the_runner_begins_keeps_its_ending_and_lease():
     assert stored is not None
     assert stored["jobs"][str(job.id)]["ending"] == "killed:143"
     assert table._lease is None
+
+
+class _StartsOnDelete(RAMJobStore):
+    """A job store on which another table starts a job just as a list is
+    about to go."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.peer: JobTable | None = None
+        self.started: list[Job] = []
+
+    async def delete(self, session_id: str, expected_generation: int) -> bool:
+        if self.peer is not None and not self.started:
+            self.started.append(
+                await self.peer.submit(
+                    "late", _run_forever, "/", session_id=session_id
+                )
+            )
+        return await super().delete(session_id, expected_generation)
+
+
+@pytest.mark.asyncio
+async def test_a_close_stops_a_job_started_while_it_closed():
+    store = _StartsOnDelete()
+    a, b = JobTable(store), JobTable(store)
+    store.peer = b
+    await a.submit("sleep 30", _run_forever, "/", session_id="s")
+    stopped = await a.close_session("s")
+    [late] = store.started
+    assert [j.command for j in stopped] == ["sleep 30", "late"]
+    assert late.process is not None
+    async with asyncio.timeout(2):
+        await late.process.join()
+    assert (late.status, late.exit_code) == (JobStatus.KILLED, 137)
+    assert await store.load("s") is None
+
+
+@pytest.mark.asyncio
+async def test_a_job_whose_list_was_deleted_elsewhere_stops(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.shell.job_table.table.LIST_CHECK_SECONDS", 0.02
+    )
+    store = RAMJobStore()
+    table = JobTable(store)
+    job = await table.submit("sleep 30", _run_forever, "/", session_id="s")
+    await asyncio.sleep(0)
+    await store.clear()
+    assert job.process is not None
+    async with asyncio.timeout(2):
+        await job.process.join()
+    assert (job.status, job.exit_code) == (JobStatus.KILLED, 137)
+
+
+@pytest.mark.asyncio
+async def test_a_listed_or_disowned_job_runs_on_past_its_checks(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.shell.job_table.table.LIST_CHECK_SECONDS", 0.02
+    )
+    table = JobTable(RAMJobStore())
+    listed = await table.submit("one", _run_forever, "/", session_id="s")
+    disowned = await table.submit("two", _run_forever, "/", session_id="s")
+    assert await table.disown(disowned.id, "s")
+    await asyncio.sleep(0.1)
+    assert [listed.status, disowned.status] == [JobStatus.RUNNING] * 2
+    await table.kill_all()

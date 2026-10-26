@@ -23,6 +23,11 @@ STOP_WAIT_SECONDS = 10.0
 # read of it failed.
 WATCH_RETRY_SECONDS = 1.0
 
+# How often a job's owner checks that its session's list still holds the
+# job while its console stays open: one deleted with its workspace ends
+# no console the owner could read.
+LIST_CHECK_SECONDS = 10.0
+
 # How long an owner's lease lasts on a store other processes share. The
 # owner renews it at a third of that while it runs jobs, so a workspace
 # that dies is seen as gone at most this long after its last renewal.
