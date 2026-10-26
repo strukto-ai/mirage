@@ -792,6 +792,12 @@ class HostFs:
             self._host.mkdir(path, mode, dir_fd=dir_fd)
             return
         self._adapter.mkdir(virtual)
+        # The new directory's own mode is what the umask left of 0o777, so
+        # the two together are what mkdir(2) leaves of mode (tempfile's
+        # private 0o700 among them).
+        own = self._adapter.stat(virtual).mode & 0o7777
+        if own & mode != own:
+            self._adapter.setattr(virtual, mode=own & mode)
 
     def makedirs(
         self, name: Any, mode: int = 0o777, exist_ok: bool = False
@@ -805,7 +811,7 @@ class HostFs:
 
         Args:
             name (Any): the directory to create.
-            mode (int): dropped, as for mkdir.
+            mode (int): dropped; a single mkdir narrows to its mode.
             exist_ok (bool): stay quiet when the leaf is already there.
         """
         virtual = self._virtual(name)

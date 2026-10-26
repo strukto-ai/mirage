@@ -354,6 +354,12 @@ class TestWrites:
         patched.rmdir("/data/dir/fresh")
         assert patched.path.isdir("/data/dir/fresh") is False
 
+    def test_mkdir_narrows_to_its_mode_as_tempfile_asks(self):
+        _, patched = seeded()
+        patched.mkdir("/data/dir/private", 0o700)
+        mode = patched.stat("/data/dir/private").st_mode
+        assert mode & 0o777 == 0o700
+
     def test_makedirs_creates_every_missing_ancestor(self):
         _, patched = seeded()
         patched.makedirs("/data/deep/x/y")

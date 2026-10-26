@@ -750,6 +750,10 @@ describe('patchNodeFs — calls node makes on its own', () => {
     const made = await fs.promises.mkdtemp('/data/tmp-')
     expect(made).toMatch(/^\/data\/tmp-[A-Za-z0-9]{6}$/)
     expect((await fs.promises.stat(made)).isDirectory()).toBe(true)
+    // Private, as node's own; a mkdir narrows to the mode it asks for.
+    expect((await fs.promises.stat(made)).mode & 0o777).toBe(0o700)
+    await fs.promises.mkdir('/data/m', { mode: 0o750 })
+    expect((await fs.promises.stat('/data/m')).mode & 0o777).toBe(0o750)
     expect(await fs.promises.mkdtemp('/data/tmp-')).not.toBe(made)
     await expect(fs.promises.mkdtemp('/data/nope/x-')).rejects.toMatchObject({
       code: 'ENOENT',
@@ -970,6 +974,25 @@ describe('patchNodeFs — calls node makes on its own', () => {
         'Invalid src or dest: cp returned EINVAL (src and dest cannot be the same) /data/out/sub',
     })
     expect(await fs.promises.readFile('/data/src/sub/g.txt', 'utf-8')).toBe('g')
+    // A link onto a link refuses when one leads into the other's directory.
+    await ws.vfs.mkdir('/data/tree')
+    await ws.vfs.mkdir('/data/tree/in')
+    await ws.vfs.symlink('/data/la', '/data/tree/in')
+    await ws.vfs.symlink('/data/lb', '/data/tree')
+    await expect(fs.promises.cp('/data/la', '/data/lb')).rejects.toMatchObject({
+      code: 'ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY',
+      message:
+        'Cannot overwrite symlink in subdirectory of self: cp returned EINVAL (cannot overwrite /data/tree with /data/tree/in) /data/lb',
+    })
+    await expect(fs.promises.cp('/data/lb', '/data/la')).rejects.toMatchObject({
+      code: 'ERR_FS_CP_EINVAL',
+      message:
+        'Invalid src or dest: cp returned EINVAL (cannot copy /data/tree to a subdirectory of self /data/tree/in) /data/la',
+    })
+    expect([
+      await fs.promises.readlink('/data/la'),
+      await fs.promises.readlink('/data/lb'),
+    ]).toEqual(['/data/tree/in', '/data/tree'])
     await ws.close()
   })
 
@@ -990,6 +1013,23 @@ describe('patchNodeFs — calls node makes on its own', () => {
     expect(await names(fs.promises.glob('/data/d/a.txt/'))).toEqual([])
     expect(await names(fs.promises.glob('/data/d/a.txt', { exclude: () => true }))).toEqual([])
     expect(await names(fs.promises.glob('/data/d/*', { exclude: ['/data/d'] }))).toEqual([])
+    // An exclusion matches from cwd whatever the pattern's spelling.
+    expect(
+      await names(fs.promises.glob('/data/d/**/*.txt', { cwd: '/data/d', exclude: ['sub/**'] })),
+    ).toEqual(['/data/d/a.txt'])
+    // followSymlinks walks a link to a directory, short of one that leads
+    // back to its own ancestor (sub/up is '..').
+    await ws.vfs.symlink('/data/alias', '/data/d/sub')
+    expect(await names(fs.promises.glob('/data/*/*.txt'))).toEqual(['/data/d/a.txt'])
+    expect(
+      await names(fs.promises.glob('/data/**/*.txt', { followSymlinks: true } as object)),
+    ).toEqual([
+      '/data/alias/b.txt',
+      '/data/alias/deep/c.txt',
+      '/data/d/a.txt',
+      '/data/d/sub/b.txt',
+      '/data/d/sub/deep/c.txt',
+    ])
     await ws.close()
   })
 

@@ -105,6 +105,14 @@ function fieldsOf(options: Options): Record<string, unknown> {
   return typeof options === 'object' && options !== null ? options : {}
 }
 
+/** The mode a node call asks for: its number, its octal text, or the
+ * `mode` of its options. */
+function modeOf(options: Options): number | undefined {
+  const mode = typeof options === 'object' ? fieldsOf(options).mode : options
+  if (typeof mode === 'number') return mode
+  return typeof mode === 'string' ? parseInt(mode, 8) : undefined
+}
+
 function encodingOf(options: Options): BufferEncoding | undefined {
   if (typeof options === 'string') return options as BufferEncoding
   return (fieldsOf(options).encoding ?? undefined) as BufferEncoding | undefined
@@ -559,6 +567,7 @@ class HostFs implements Record<
   async mkdir(path: string, options?: Options): Promise<string | undefined> {
     if (fieldsOf(options).recursive !== true) {
       await this.files.mkdir(path)
+      await this.narrowed(path, modeOf(options))
       return undefined
     }
     // Each missing ancestor in turn, stopping at the mount root, as
@@ -595,6 +604,30 @@ class HostFs implements Record<
       await routed.mkdir(parent, { recursive: true })
     }
     await this.copied(src, dst, from, opts)
+  }
+
+  /** Narrow a directory just made to `mode` as mkdir(2) does: its own
+   * mode is what the umask left of 0o777, so the two together are what
+   * mkdir(2) leaves of `mode`. */
+  private async narrowed(path: string, mode: number | undefined): Promise<void> {
+    if (mode === undefined) return
+    const own = (await this.files.stat(path)).mode & 0o7777
+    if ((own & mode) !== own) await this.files.setattr(path, { mode: own & mode })
+  }
+
+  /** Whether the link at `path` leads to a directory other than one of
+   * its own ancestors, which a walk that follows it would loop through. */
+  private async leadsDown(path: string): Promise<boolean> {
+    let target: string
+    try {
+      if (!(await this.entryOf(path, true)).isDirectory()) return false
+      target = await routed.realpath(path)
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+      return false
+    }
+    const parent = await routed.realpath(posix.dirname(path))
+    return parent !== target && !parent.startsWith(`${target}/`)
   }
 
   /** The source's entry once the pair passes the checks node's `cp`
@@ -711,9 +744,35 @@ class HostFs implements Record<
         opts.verbatimSymlinks === true || posix.isAbsolute(target)
           ? target
           : posix.resolve(posix.dirname(src), target)
-      // A link replaces a link there, whatever `force` says; onto any
-      // other entry the symlink itself refuses the name, as node's does.
-      if (to?.isSymbolicLink() === true) await routed.unlink(dst)
+      // A link replaces a link there, whatever `force` says, unless one
+      // leads into the other's directory; onto any other entry the
+      // symlink itself refuses the name, as node's does.
+      if (to?.isSymbolicLink() === true) {
+        const there = await routed.readlink(dst)
+        const leads = posix.resolve(kept)
+        const led = posix.isAbsolute(there) ? there : posix.resolve(posix.dirname(dst), there)
+        if ((await this.entryOf(src, true)).isDirectory()) {
+          if (led === leads || led.startsWith(`${leads}/`)) {
+            throw cpRefusal(
+              'ERR_FS_CP_EINVAL',
+              'Invalid src or dest',
+              'EINVAL',
+              `cannot copy ${kept} to a subdirectory of self ${led}`,
+              dst,
+            )
+          }
+          if (leads.startsWith(`${led}/`)) {
+            throw cpRefusal(
+              'ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY',
+              'Cannot overwrite symlink in subdirectory of self',
+              'EINVAL',
+              `cannot overwrite ${led} with ${kept}`,
+              dst,
+            )
+          }
+        }
+        await routed.unlink(dst)
+      }
       await routed.symlink(kept, dst)
       return
     }
@@ -751,6 +810,7 @@ class HostFs implements Record<
     const cwd = spelled(opts.cwd) ?? process.cwd()
     const exclude = opts.exclude
     const typed = opts.withFileTypes === true
+    const follow = opts.followSymlinks === true
     const seen = new Set<string>()
     for (const raw of Array.isArray(pattern) ? pattern : [pattern]) {
       const spelling = spelled(raw)
@@ -770,9 +830,15 @@ class HostFs implements Record<
       // A `**` that is a whole name, inside braces too, may match at any
       // depth; within a name (`foo**`) it is a `*`.
       const depth = /(^|[/{,])\*\*($|[/},])/.test(rest) ? Infinity : rest.split('/').length
-      const skipped = (path: string, entry: unknown): boolean => {
-        if (typeof exclude === 'function') return Boolean((exclude as Fn)(typed ? entry : path))
-        return Array.isArray(exclude) && exclude.some((ex) => posix.matchesGlob(path, String(ex)))
+      // An exclusion is matched from `cwd` and from the root alike,
+      // whichever way the pattern is spelled, as node matches it.
+      const skipped = (path: string, named: string, entry: unknown): boolean => {
+        if (typeof exclude === 'function') return Boolean((exclude as Fn)(typed ? entry : named))
+        const spellings = [path, posix.relative(cwd, path) || '.']
+        return (
+          Array.isArray(exclude) &&
+          exclude.some((ex) => spellings.some((name) => posix.matchesGlob(name, String(ex))))
+        )
       }
       let top: Stats
       try {
@@ -798,8 +864,11 @@ class HostFs implements Record<
         const [path, relative, level, entry] = next
         const named = shown(path)
         // An excluded name is left out with all under it, the base too.
-        if (skipped(named, entry)) continue
-        const isDirectory = (entry as { isDirectory(): boolean }).isDirectory()
+        if (skipped(path, named, entry)) continue
+        const kind = entry as { isDirectory(): boolean; isSymbolicLink(): boolean }
+        // `followSymlinks` takes a link to a directory as one.
+        const isDirectory =
+          kind.isDirectory() || (follow && kind.isSymbolicLink() && (await this.leadsDown(path)))
         if (
           (magic === -1 ? relative === '' : posix.matchesGlob(relative, rest)) &&
           (!directories || isDirectory) &&
@@ -819,7 +888,7 @@ class HostFs implements Record<
           pending.push([
             childPath,
             relative === '' ? child.name : `${relative}/${child.name}`,
-            child.isSymbolicLink() ? depth : level + 1,
+            child.isSymbolicLink() && !follow ? depth : level + 1,
             child,
           ])
         }
@@ -838,6 +907,7 @@ class HostFs implements Record<
       const path = prefix + tempSuffix()
       try {
         await this.files.mkdir(path)
+        await this.narrowed(path, 0o700)
         return encoded(path, options)
       } catch (err) {
         if (classify(err) !== 'EEXIST') throw fsError(err, 'mkdtemp', path)
