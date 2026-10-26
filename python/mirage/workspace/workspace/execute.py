@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
+from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.context import (
     bind_caller,
     current_caller,
@@ -34,6 +35,7 @@ from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
+from mirage.policy.builtin.output_cap import LINE, line_timeout
 from mirage.policy.decisions import is_pending
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.process.types import ProcessInfo
@@ -1017,28 +1019,40 @@ async def run_prepared_line(
                         names = plan_names(nodes)
             # No seam of its own: the whole line is one task under
             # ``Workspace.shell``, and a cancel lands on whichever await
-            # the tree is in.
-            io, _ = await run_command_tree(
-                ws.dispatch,
-                ws.registry,
-                ws.namespace,
-                job_table or ws.job_table,
-                exec_recursion,
-                ast,
-                context,
-                stdin,
-                cancel,
-                handed=handed,
-                sink=sink,
-                call_stack=call_stack,
-                execution_scope=execution_scope,
-                route=ws.router.context(
-                    command, effective_session, await judged()
-                )
-                if await ws.registry.policies.wants_for(
-                    "post_execute", effective_session.session_id
-                )
-                else None,
+            # the tree is in. A top-level line runs under its ``line``
+            # deadline, which a nested one shares.
+            io, _ = await run_with_timeout(
+                run_command_tree(
+                    ws.dispatch,
+                    ws.registry,
+                    ws.namespace,
+                    job_table or ws.job_table,
+                    exec_recursion,
+                    ast,
+                    context,
+                    stdin,
+                    cancel,
+                    handed=handed,
+                    sink=sink,
+                    call_stack=call_stack,
+                    execution_scope=execution_scope,
+                    route=ws.router.context(
+                        command, effective_session, await judged()
+                    )
+                    if await ws.registry.policies.wants_for(
+                        "post_execute", effective_session.session_id
+                    )
+                    else None,
+                ),
+                (
+                    line_timeout(
+                        ws.registry.command_limits,
+                        effective_session.command_limits,
+                    )
+                    if is_line
+                    else None
+                ),
+                LINE,
             )
             # A record a nested line earned is the line's to report when
             # its own tree earned none (see NestedRefusal).

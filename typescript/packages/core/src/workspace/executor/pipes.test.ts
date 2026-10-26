@@ -338,21 +338,3 @@ it.each(['abort', 'timeout'])('closes a pipeline source on %s through wrappers',
   ).rejects.toBe(failure)
   expect(closed).toBe(true)
 })
-
-it('pipeline timeout releases the caller even when a producer ignores cancellation', async () => {
-  const session = new SessionState({ sessionId: 'timeout' })
-  session.pipelineTimeoutSeconds = 0.01
-  let finish: ((value: Awaited<ReturnType<ExecuteNodeFn>>) => void) | undefined
-  const pending = new Promise<Awaited<ReturnType<ExecuteNodeFn>>>((resolve) => {
-    finish = resolve
-  })
-  const execute: ExecuteNodeFn = (nd) =>
-    nd.text === 'blocked' ? pending : Promise.resolve([null, new IOResult(), new ExecutionNode()])
-  try {
-    await expect(
-      handlePipe(execute, [node('blocked'), node('done')], [false], new EvaluationContext(session)),
-    ).rejects.toThrow('timed out')
-  } finally {
-    finish?.([null, new IOResult(), new ExecutionNode()])
-  }
-})

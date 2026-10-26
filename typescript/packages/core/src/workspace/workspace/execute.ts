@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CommandTimeoutError } from '../../errors/types.ts'
+import { LINE, lineTimeout } from '../../policy/builtin/output_cap.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
@@ -1142,7 +1144,20 @@ async function runParsedLine(
       )
       if (filled !== null) return filled
     }
+    // A top-level line runs under its `line` deadline, which a nested one
+    // shares: past it the tree is stopped like an abort and the line answers
+    // 124, as Python's asyncio.timeout does.
+    const lineSeconds = isLine
+      ? lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits)
+      : null
+    const deadline = lineSeconds !== null && lineSeconds > 0 ? new AbortController() : null
     const runBody = async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
+      const timer =
+        deadline === null || lineSeconds === null
+          ? undefined
+          : setTimeout(() => {
+              deadline.abort()
+            }, lineSeconds * 1000)
       try {
         // The one cancellation seam, the twin of Python's run_cancellable:
         // a responsive tree unwinds at its checkpoints and reports its own
@@ -1151,7 +1166,9 @@ async function runParsedLine(
         // stop side effects and free producers, not to release the caller.
         const release = deps.parser instanceof ParseScope ? deps.parser.retain() : undefined
         const running = runCommandTree(
-          deps,
+          deadline === null
+            ? deps
+            : { ...deps, signal: mergeSignals(deps.signal, deadline.signal) ?? deadline.signal },
           rootNode,
           context,
           stdin,
@@ -1164,7 +1181,7 @@ async function runParsedLine(
         // A `kill` names a signal, and what the line started gets the stop
         // bound to answer it, as Python joins the cancelled line whole.
         const runner = currentCaller().process
-        const result = await joinOrAbort(running, killed, () =>
+        const result = await joinOrAbort(running, mergeSignals(killed, deadline?.signal), () =>
           (runner?.signal ?? stopSignal(killed)) === null
             ? ABORT_JOIN_MS
             : STOP_WAIT_SECONDS * 1000,
@@ -1178,10 +1195,19 @@ async function runParsedLine(
         // a throw. Once the caller aborted, the line's answer is the abort,
         // whatever a leaf threw while unwinding.
         const aborted = killed?.aborted === true
-        executionFailure = { error: aborted ? makeAbortError(killed) : error }
+        const expired = !aborted && deadline?.signal.aborted === true && lineSeconds !== null
+        executionFailure = {
+          error: aborted
+            ? makeAbortError(killed)
+            : expired
+              ? new CommandTimeoutError(LINE, lineSeconds)
+              : error,
+        }
         const failed = failureResult(executionFailure.error)
         if (aborted) failed.exitCode = 130
         return [null, new IOResult(failed), new ExecutionNode({ command, ...failed })]
+      } finally {
+        clearTimeout(timer)
       }
     }
     try {

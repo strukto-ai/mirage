@@ -38,6 +38,9 @@ export const FALLBACK_LIMIT = new Limit({ timeoutSeconds: DEFAULT_TIMEOUT_SECOND
 /** The entry naming every command in a limit table. Mirrors Python's ALL_COMMANDS. */
 export const ALL_COMMANDS = '*'
 
+/** The entry naming the whole line, whose `timeoutSeconds` is its deadline. Mirrors Python's LINE. */
+export const LINE = 'line'
+
 interface LimitMount {
   commandLimits: Map<string, Limit>
   defaultLimit: Limit
@@ -179,5 +182,20 @@ export function commandLimitsToJSON(
       }
       return [name, Object.fromEntries(Object.entries(block).filter(([, v]) => v !== null))]
     }),
+  )
+}
+
+/**
+ * The whole line's deadline: the `line` entry's `timeoutSeconds`, the
+ * profile's over the workspace's; null for none, which is the default.
+ * Mirrors Python's line_timeout.
+ */
+export function lineTimeout(
+  workspaceLimits: Readonly<Record<string, Limit>> = {},
+  profileLimits: Readonly<Record<string, Limit>> = {},
+): number | null {
+  return (
+    Limit.layered([ownLimit(profileLimits, LINE), ownLimit(workspaceLimits, LINE)])
+      ?.timeoutSeconds ?? null
   )
 }

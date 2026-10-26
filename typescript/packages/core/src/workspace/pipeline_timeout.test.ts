@@ -17,7 +17,7 @@ import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
-import { MountMode } from '../types.ts'
+import { Limit, MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const require = createRequire(import.meta.url)
@@ -39,19 +39,36 @@ async function* slowStdin(): AsyncGenerator<Uint8Array> {
   }
 }
 
-function buildWs(): Workspace {
+function buildWs(line: number | null = null): Workspace {
   const ram = new RAMVFS()
-  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace(
+    { '/data': ram },
+    {
+      mode: MountMode.WRITE,
+      shellParser: parser,
+      ...(line === null ? {} : { commandLimits: { line: new Limit({ timeoutSeconds: line }) } }),
+    },
+  )
 }
 
-describe('pipeline timeout', () => {
+describe('line deadline', () => {
   it('bounds a slow final stage', async () => {
-    const ws = buildWs()
-    ws.getSession(ws.defaultSessionId).pipelineTimeoutSeconds = 0.1
+    const ws = buildWs(0.1)
     try {
       const r = await ws.shell('cat | cat', { stdin: slowStdin() })
       expect(r.exitCode).toBe(124)
-      expect(DEC.decode(r.stderr)).toContain('pipeline: timed out after 0.1s')
+      expect(DEC.decode(r.stderr)).toContain('line: timed out after 0.1s')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('cuts a loop of fast commands', async () => {
+    const ws = buildWs(0.2)
+    try {
+      const r = await ws.shell('while :; do :; done')
+      expect(r.exitCode).toBe(124)
+      expect(DEC.decode(r.stderr)).toContain('line: timed out after 0.2s')
     } finally {
       await ws.close()
     }

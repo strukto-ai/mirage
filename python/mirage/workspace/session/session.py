@@ -369,7 +369,6 @@ class SessionState:
     # the manager by id so a fork shares them, never another session's.
     decisions: tuple[Decision, ...] = ()
     generation: int = 0
-    pipeline_timeout_seconds: float | None = None
     last_bg_job_id: int | None = None
     positional_args: list[str] = field(default_factory=list)
     # What `$0` expands to. None is the shell itself; a nested `bash`/`sh`

@@ -30,6 +30,7 @@ DEFAULT_COMMAND_LIMITS: dict[str, Limit] = {
 FALLBACK_LIMIT = Limit(timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
 
 ALL_COMMANDS = "*"
+LINE = "line"
 
 
 class LimitMount(Protocol):
@@ -156,3 +157,26 @@ def command_limits_to_json(
         }
         for name, limit in limits.items()
     }
+
+
+def line_timeout(
+    workspace_limits: Mapping[str, Limit] | None = None,
+    profile_limits: Mapping[str, Limit] | None = None,
+) -> float | None:
+    """The whole line's deadline: the ``line`` entry's
+    ``timeout_seconds``, the profile's over the workspace's; None for
+    none, which is the default.
+
+    Args:
+        workspace_limits (Mapping[str, Limit] | None): the workspace's
+            command limits.
+        profile_limits (Mapping[str, Limit] | None): the session
+            profile's.
+    """
+    found = Limit.layered(
+        (
+            (profile_limits or {}).get(LINE),
+            (workspace_limits or {}).get(LINE),
+        )
+    )
+    return found.timeout_seconds if found is not None else None
