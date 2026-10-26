@@ -287,4 +287,19 @@ describe('a clock behind stored history', () => {
     await o.logCommandText('a', 's')
     expect((await o.events()).map((e) => e.timestamp)).toEqual([-1000])
   })
+
+  it('a torn line costs only itself and the line appended onto it', async () => {
+    const store = new RAMObserverStore()
+    const o = new Observer(store, new ManualClock(NEW_YEAR))
+    await logCommand(o, 'first', 's1', NEW_YEAR)
+    const [path] = [...store.files.keys()]
+    const torn = new TextEncoder().encode('{"type": "command", "session": "s1", "command": "caf\u00e9')
+    await store.append(path, torn.slice(0, -1))
+    await logCommand(o, 'second', 's1', NEW_YEAR + 1)
+    await logCommand(o, 'third', 's1', NEW_YEAR + 2)
+    const shown = await o.sessionCommandEvents('s1')
+    expect(shown.map((e) => e.command)).toEqual(['first', 'third'])
+    const every = await o.commandEvents()
+    expect(every.map((e) => e.command)).toEqual(['first', 'third'])
+  })
 })
