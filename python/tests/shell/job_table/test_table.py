@@ -32,6 +32,7 @@ from mirage.shell.job_table import table as table_module
 from mirage.shell.job_table.ram import RAMJobStore
 from mirage.shell.job_table.table import JobTable
 from mirage.shell.job_table.types import Job, JobStatus
+from mirage.types import PathSpec
 from mirage.utils.clock import ManualClock
 from mirage.workspace.record.types import RecordFields, generation_of
 from mirage.workspace.types import ExecutionNode
@@ -1313,7 +1314,7 @@ async def test_a_lapsed_owners_runs_are_reaped(unreached):
 
     async def reaper(runs: list, signum: int) -> list:
         reaped.append((runs, signum))
-        return [box] if unreached else []
+        return [run for run in runs if unreached and run == box]
 
     b = JobTable(store)
     b.reaper = reaper
@@ -1321,7 +1322,7 @@ async def test_a_lapsed_owners_runs_are_reaped(unreached):
     async with asyncio.timeout(5):
         while b._reaping:
             await asyncio.sleep(0.01)
-    assert reaped == [([host, box], 15)]
+    assert reaped == [([host], 15), ([box], 15)]
     kept = await store.processes()
     if unreached:
         assert kept == {
@@ -1340,3 +1341,175 @@ async def test_a_closed_table_drops_its_record():
     await store.publish(a.owner, {"2": {"pid": 2, "runs": []}})
     await a.close()
     assert await store.processes() == {}
+
+
+class _VouchedStore(RAMJobStore):
+    """A store that notes, at every write of a non-empty record, whether
+    the owner's lease vouched for it."""
+
+    def __init__(self) -> None:
+        super().__init__(lease_seconds=30.0)
+        self.vouched: list[bool] = []
+
+    async def publish(self, owner, processes) -> None:
+        if processes:
+            self.vouched.append(await self.alive(owner))
+        await super().publish(owner, processes)
+
+
+# The lease goes ahead of the record it vouches for, so no workspace ever
+# reads a record whose owner it takes for lapsed, even for a process that
+# is no job (a line, a spawned child) and so renewed nothing first; and
+# the record is written again with every renewal, so it outlives its
+# store's expiry and comes back after a workspace dropped it.
+@pytest.mark.asyncio
+async def test_a_record_is_vouched_for_and_written_again(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = _VouchedStore()
+    store.lease_seconds = 0.03
+    a = _publishing(store)
+
+    async def forever() -> int:
+        await asyncio.Event().wait()
+        return 0
+
+    runner = a.processes.start(
+        session_id="s",
+        command="sleep 30",
+        cwd=PathSpec.from_str_path("/"),
+        run=forever,
+    )
+
+    async def written_again() -> bool:
+        return len(store.vouched) >= 3
+
+    await _until(written_again)
+    await RAMJobStore.publish(store, a.owner, {})
+
+    async def back() -> bool:
+        return a.owner in await store.processes()
+
+    await _until(back)
+    assert all(store.vouched)
+    runner.terminate()
+    await runner.join()
+    await a.close()
+
+
+class _Revives(RAMJobStore):
+    """A store whose one owner reads as lapsed once, then as renewed."""
+
+    def __init__(self) -> None:
+        super().__init__(lease_seconds=30.0)
+        self.asked = 0
+
+    async def alive(self, owner: str) -> bool:
+        self.asked += 1
+        return self.asked > 1
+
+
+# An owner that renews while its runs are being reaped keeps them: the
+# lease is read again before each run is stopped.
+@pytest.mark.asyncio
+async def test_an_owner_that_renews_keeps_its_runs():
+    store = _Revives()
+    run = {"runtime": "docker", "tag": "t", "command": "x"}
+    await store.publish(
+        "back", {"2": {"pid": 2, "session": "s", "runs": [run]}}
+    )
+    reaped: list[list] = []
+
+    async def reaper(runs: list, signum: int) -> list:
+        reaped.append(runs)
+        return []
+
+    b = JobTable(store)
+    b.reaper = reaper
+    assert await b.remote_processes() == {}
+    async with asyncio.timeout(5):
+        while b._reaping:
+            await asyncio.sleep(0.01)
+    assert reaped == []
+    assert "back" in await store.processes()
+    await b.close()
+
+
+# Teardown stops the reaping, before the runtimes it goes through close:
+# a reap under way is cancelled and no listing starts another.
+@pytest.mark.asyncio
+async def test_teardown_stops_the_reaping():
+    store = RAMJobStore(lease_seconds=30.0)
+    run = {"runtime": "docker", "tag": "t", "command": "x"}
+    await store.publish(
+        "dead", {"2": {"pid": 2, "session": "s", "runs": [run]}}
+    )
+    started, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def reaper(runs: list, signum: int) -> list:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return []
+
+    b = JobTable(store)
+    b.reaper = reaper
+    await b.remote_processes()
+    await asyncio.wait_for(started.wait(), 5)
+    await b.kill_all()
+    assert cancelled.is_set() and not b._reaping
+    b._reaped.clear()
+    await b.remote_processes()
+    assert not b._reaping
+    await b.close()
+
+
+# A stop that fails to apply leaves the others it came with to be applied.
+@pytest.mark.asyncio
+async def test_one_failed_stop_leaves_the_others(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMJobStore(lease_seconds=30.0)
+    a = _publishing(store)
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+    applied: list[int] = []
+    stop = a._stop_asked
+
+    async def stopping(pid: int, signal: int) -> None:
+        if pid == 999:
+            raise RuntimeError("cannot stop")
+        applied.append(pid)
+        await stop(pid, signal)
+
+    monkeypatch.setattr(a, "_stop_asked", stopping)
+    await store.request_stop(a.owner, 999, 15)
+    await store.request_stop(a.owner, job.pid, 15)
+    assert job.process is not None
+    async with asyncio.timeout(5):
+        await job.process.join()
+    assert applied == [job.pid]
+    await a.close()
+
+
+# A child shell's table keeps its job list private but reaches the other
+# workspaces' processes through the workspace's.
+@pytest.mark.asyncio
+async def test_a_child_shells_table_reaches_the_process_plane(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMJobStore(lease_seconds=30.0)
+    a, b = _publishing(store), _publishing(store)
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+    child = b.child().child()
+
+    async def listed() -> bool:
+        return a.owner in await child.remote_processes()
+
+    await _until(listed)
+    every = ProcessPermissions(list="workspace", kill="workspace")
+    assert await child.signal_remote(a.owner, job.pid, 15, "s", every)
+    assert job.process is not None
+    async with asyncio.timeout(5):
+        await job.process.join()
+    await a.close()
+    await b.close()

@@ -245,6 +245,15 @@ export class JobTable {
   private publishTick: { timer: ReturnType<typeof setTimeout>; wake: () => void } | null = null
   private closed = false
   private reaping = new Set<Promise<void>>()
+  // Lapsed owners this table already set about reaping, so a listing that
+  // finds one again does not stop its runs again; and whether teardown
+  // stopped the reaping, which its runtimes are closing for.
+  private reaped = new Set<string>()
+  private reapingStopped = false
+  // The table whose store and owner the process plane is read and written
+  // through: this one, or for a child shell's table the workspace's, since
+  // a child shell keeps only its job list private.
+  private plane: JobTable = this
   /**
    * Stops the native runs a lapsed owner left, given them and the first
    * signal, and answers the ones this workspace cannot reach; the workspace
@@ -274,10 +283,14 @@ export class JobTable {
    * A table for a child shell (`bash -c`, a script, `( )`, `$( )`): a job
    * list of its own on the same processes, kept in memory, since a child
    * shell's jobs end with it on this workspace and no other one lists
-   * them. `parent` is the table a `$( )` still lists in `jobs`.
+   * them. `parent` is the table a `$( )` still lists in `jobs`. It lists
+   * and stops other workspaces' processes through this table, on the
+   * workspace's store.
    */
   child(parent: JobTable | null = null): JobTable {
-    return new JobTable(null, this.processes, parent, this.clock)
+    const table = new JobTable(null, this.processes, parent, this.clock)
+    table.plane = this.plane
+    return table
   }
 
   private sessionJobs(sessionId: string): Map<number, Job> {
@@ -608,8 +621,12 @@ export class JobTable {
    * the ones that were running. Disowned jobs are stopped too: the shell
    * forgot them, the workspace did not, and a teardown that left them
    * running would leak tasks. Another workspace's jobs are its own to
-   * stop. */
+   * stop. The reaping of lapsed owners' runs stops here as well, before the
+   * runtimes it reaches them through close: none starts, and one under way
+   * is waited for, bounded as a reap is. */
   async killAll(): Promise<Job[]> {
+    this.reapingStopped = true
+    await Promise.allSettled([...this.reaping])
     const running = this.allRunningJobs().filter((j) => j.process !== null)
     for (const job of [...running, ...this.disowned])
       if (job.status === JobStatus.RUNNING && job.process !== null) await stop(job)
@@ -768,6 +785,7 @@ export class JobTable {
    * stopped meanwhile.
    */
   async remoteProcesses(): Promise<Record<string, Record<string, RecordFields>>> {
+    if (this.plane !== this) return this.plane.remoteProcesses()
     const found: Record<string, Record<string, RecordFields>> = {}
     for (const [owner, records] of Object.entries(await this.store.processes())) {
       if (owner === this.owner || Object.keys(records).length === 0) continue
@@ -798,13 +816,19 @@ export class JobTable {
     sessionId: string,
     permissions: ProcessPermissions,
   ): Promise<boolean> {
+    if (this.plane !== this)
+      return this.plane.signalRemote(owner, pid, signal, sessionId, permissions)
     const records = await this.store.processes()
-    const owners = Object.keys(records).filter(
+    let owners = Object.keys(records).filter(
       (found) =>
         found !== this.owner &&
         found.startsWith(owner) &&
         Object.hasOwn(records[found] ?? {}, String(pid)),
     )
+    if (owners.length > 1) {
+      const live = await Promise.all(owners.map((found) => this.store.alive(found)))
+      owners = owners.filter((_, at) => live[at])
+    }
     const [found] = owners
     if (owners.length !== 1 || found === undefined) return false
     const record = records[found]?.[String(pid)] ?? {}
@@ -1173,8 +1197,12 @@ export class JobTable {
    * while it runs any, renewing its lease with them, and stop those other
    * workspaces asked it to stop. Once it runs none, its record goes and the
    * publishing stops. The lease is renewed every third of it, counted in
-   * rounds. A failed round is logged and tried again the next one; the
-   * sleep between rounds keeps no host alive on its own.
+   * rounds, ahead of the record it vouches for, and the record is written
+   * again with it, so it outlives its store's expiry and comes back should a
+   * workspace have taken this one for lapsed. A failed round is logged and
+   * tried again the next one, and a stop that fails leaves the others it
+   * came with to be applied; the sleep between rounds keeps no host alive
+   * on its own.
    */
   private async publish(): Promise<void> {
     let published: string | null = null
@@ -1186,16 +1214,22 @@ export class JobTable {
       const records = this.records()
       const text = JSON.stringify(records)
       try {
-        if (text !== published) {
+        if (renewal > 0 && rounds >= due) {
+          await this.store.renew(this.owner)
+          await this.store.publish(this.owner, records)
+          published = text
+          due = rounds + renewal
+        } else if (text !== published) {
           await this.store.publish(this.owner, records)
           published = text
         }
-        if (renewal > 0 && rounds >= due) {
-          await this.store.renew(this.owner)
-          due = rounds + renewal
+        for (const [pid, signal] of await this.store.takeStops(this.owner)) {
+          try {
+            await this.stopAsked(pid, signal)
+          } catch (err) {
+            console.debug(`stop of ${String(pid)} not applied:`, err)
+          }
         }
-        for (const [pid, signal] of await this.store.takeStops(this.owner))
-          await this.stopAsked(pid, signal)
       } catch (err) {
         console.debug('process publish failed:', err)
       }
@@ -1235,6 +1269,8 @@ export class JobTable {
 
   /** Stop the native runs a lapsed owner left, without waiting. */
   private reapLater(owner: string): void {
+    if (this.reapingStopped || this.reaped.has(owner)) return
+    this.reaped.add(owner)
     const reaping = this.reapOwner(owner).finally(() => {
       this.reaping.delete(reaping)
     })
@@ -1244,14 +1280,18 @@ export class JobTable {
   /**
    * Stop the native runs a lapsed owner left, those this workspace reaches,
    * and keep its record holding only the rest, for a workspace that reaches
-   * them. An owner that renewed meanwhile keeps its record as it is.
+   * them. The owner's lease is checked again before each run is stopped, so
+   * one that renewed meanwhile keeps its runs, and its record as it is.
    */
   private async reapOwner(owner: string): Promise<void> {
     try {
       const records = (await this.store.processes())[owner] ?? {}
       const runsOf = (record: RecordFields) => record.runs as Record<string, JsonValue>[]
-      const runs = Object.values(records).flatMap(runsOf)
-      const left = this.reaper !== null && runs.length > 0 ? await this.reaper(runs, 15) : runs
+      const left: Record<string, JsonValue>[] = []
+      for (const run of Object.values(records).flatMap(runsOf)) {
+        if (await this.store.alive(owner)) return
+        if (this.reaper === null || (await this.reaper([run], 15)).length > 0) left.push(run)
+      }
       const kept: Record<string, RecordFields> = {}
       for (const [pid, record] of Object.entries(records)) {
         const remaining = runsOf(record).filter((run) => left.includes(run))

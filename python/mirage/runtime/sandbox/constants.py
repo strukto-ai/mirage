@@ -174,14 +174,20 @@ def wrap_line(argv: Sequence[str], env: Mapping[str, str], cwd: str) -> str:
     return " ".join(parts)
 
 
+# What the stop line exits with when no process carries the run's id: the
+# box it ran in holds nothing of the run.
+REAP_ABSENT = 3
+
+
 def reap_line(exec_id: str, signum: int = 15) -> str:
     """The shell line that stops every process of the run ``exec_id``.
 
     Each process whose environment holds the run's id, found through
     ``/proc``, gets ``signum``, and what still runs a second later gets
-    KILL, so a program that ignores it stops too. The line looks grep up
-    on its own PATH (``REAP_PATH``) and exits 127 without it, so it
-    needs only a POSIX shell, grep and ``/proc``.
+    KILL, so a program that ignores it stops too. The line exits 0 once
+    it stopped them and ``REAP_ABSENT`` when there were none. It looks
+    grep up on its own PATH (``REAP_PATH``) and exits 127 without it, so
+    it needs only a POSIX shell, grep and ``/proc``.
 
     Args:
         exec_id (str): the run's id, as ``EXEC_ID`` carries it.
@@ -195,7 +201,7 @@ def reap_line(exec_id: str, signum: int = 15) -> str:
         "left() { l=; for p in /proc/[0-9]*; do "
         'grep -qs "$m" "$p/environ" && l="$l ${p#/proc/}"; done; '
         '[ -n "$l" ]; }; '
-        f"left || exit 0; kill -{signum} $l 2>/dev/null; "
+        f"left || exit {REAP_ABSENT}; kill -{signum} $l 2>/dev/null; "
         "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; "
         "kill -KILL $l 2>/dev/null; true"
     )

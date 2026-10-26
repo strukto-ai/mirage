@@ -1431,6 +1431,24 @@ function remoteInfo(record: RecordFields): ProcessInfo {
 }
 
 /**
+ * The shortest start of each owner's id, six characters at least, that no
+ * other owner's begins with, as `ps` names their processes.
+ */
+export function ownerTags(owners: readonly string[]): Map<string, string> {
+  const tags = new Map<string, string>()
+  for (const owner of owners) {
+    let size = 6
+    while (
+      size < owner.length &&
+      owners.some((other) => other !== owner && other.startsWith(owner.slice(0, size)))
+    )
+      size += 1
+    tags.set(owner, owner.slice(0, size))
+  }
+  return tags
+}
+
+/**
  * Where a native run goes on, as `ps` names it: `host PID` for a host
  * program, the runtime and the start of its tag for a sandbox's.
  */
@@ -1449,8 +1467,8 @@ function runWhere(run: Record<string, JsonValue>): string {
  * procps's message and usage.
  *
  * The runners other workspaces on a shared store run follow this
- * workspace's, as `owner:pid` with the owner's id shortened, within the
- * same view. In the compact rows each runner is followed by the native runs
+ * workspace's, as `owner:pid` with the owner's id shortened as far as it
+ * stays unique, within the same view. In the compact rows each runner is followed by the native runs
  * it has going, a host program by its host PID and a sandbox's by its
  * runtime and tag, each as `-<TAB>└ where: command`.
  */
@@ -1477,7 +1495,9 @@ export async function handlePs(
     .list()
     .filter((info) => every || options.pids.has(info.pid))
     .map((info) => ['', info, runs.get(info.pid) ?? []])
-  for (const [owner, records] of Object.entries(await jobTable.remoteProcesses())) {
+  const remote = await jobTable.remoteProcesses()
+  const tags = ownerTags(Object.keys(remote))
+  for (const [owner, records] of Object.entries(remote)) {
     for (const record of Object.values(records)) {
       if (permissions.list === 'session' && record.session !== sid) continue
       if (
@@ -1485,7 +1505,7 @@ export async function handlePs(
         options.remote.some(([prefix, pid]) => owner.startsWith(prefix) && record.pid === pid)
       )
         rows.push([
-          owner.slice(0, 6),
+          tags.get(owner) ?? owner,
           remoteInfo(record),
           record.runs as Record<string, JsonValue>[],
         ])

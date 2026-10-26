@@ -282,9 +282,11 @@ function startedAt(pid: number): Promise<number | null> {
  * Stop a host run a lapsed workspace left: its process group gets `signum`,
  * then KILL after `STOP_GRACE_SECONDS`. Only a run of this host is reached,
  * and only while its PID still names a process started when the run did, to
- * the second `ps` shows, so a PID the host reused is left alone. Answers
- * true once the run is stopped or gone, false when this workspace cannot
- * reach it. Mirrors Python's `reap_host_run`.
+ * the second `ps` shows, so a PID the host reused is left alone. A group
+ * this workspace may not signal is not reached while its leader still runs
+ * (macOS answers EPERM for one that only exited unreaped). Answers true once
+ * the run is stopped or gone, false when this workspace cannot reach it.
+ * Mirrors Python's `reap_host_run`.
  */
 export async function reapHostRun(
   run: Readonly<Record<string, JsonValue>>,
@@ -317,12 +319,14 @@ export async function reapHostRun(
     debuglog('mirage')('process group %d outlived signal %d', pid, signum)
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
-    if (code === 'ESRCH' || code === 'EPERM') return true
+    if (code === 'ESRCH') return true
+    if (code === 'EPERM') return (await startedAt(pid)) === null
     throw err
   }
   try {
     process.kill(-pid, 9)
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EPERM') return (await startedAt(pid)) === null
     debuglog('mirage')('process group %d has already exited: %s', pid, err)
   }
   return true

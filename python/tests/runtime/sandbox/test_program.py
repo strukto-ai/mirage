@@ -628,3 +628,32 @@ async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
         if child.returncode is None:
             child.kill()
             await child.wait()
+
+
+# A group this workspace may not signal is out of its reach while its
+# leader still runs, so a workspace with the rights can stop it later; a
+# group whose leader is gone was stopped already.
+@pytest.mark.asyncio
+async def test_a_host_run_it_may_not_signal_is_out_of_reach(
+    tmp_path, monkeypatch
+):
+    pid_file = tmp_path / "pid"
+    child = await asyncio.create_subprocess_exec(
+        "sh",
+        "-c",
+        f"echo $$ > {pid_file}; while :; do sleep 0.05; done",
+        start_new_session=True,
+    )
+    pid = await _wait_for_pid(pid_file)
+    run = host_run(pid, ["sh"])
+
+    def denied(group: int, signum: int) -> None:
+        raise PermissionError(errno.EPERM, "Operation not permitted")
+
+    monkeypatch.setattr(os, "killpg", denied)
+    try:
+        assert not await reap_host_run(run, 15)
+    finally:
+        monkeypatch.undo()
+        child.kill()
+        await child.wait()

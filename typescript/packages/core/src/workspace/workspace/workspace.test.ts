@@ -385,12 +385,12 @@ describe('a manual clock workspace', () => {
   })
 })
 
-/** A sandbox runtime that records the runs it was asked to reap. */
+/** A sandbox runtime that records the runs it was asked to reap, and holds those its tags name. */
 class ReapedBox extends RemoteSandbox {
   readonly name = 'reapbox'
   readonly reaped: [string, number][] = []
 
-  constructor() {
+  constructor(private readonly holds: readonly string[]) {
     super({ captures: ['never-run'] })
   }
 
@@ -402,21 +402,26 @@ class ReapedBox extends RemoteSandbox {
     return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
   }
 
-  override reap(tag: string, signum: number): Promise<void> {
+  override reap(tag: string, signum: number): Promise<boolean> {
     this.reaped.push([tag, signum])
-    return Promise.resolve()
+    if (tag === 'broken') return Promise.reject(new Error('box not answering'))
+    return Promise.resolve(this.holds.includes(tag))
   }
 }
 
 // A lapsed workspace's runs are stopped by whatever reaches them here: a
-// sandbox run by every runtime of its name, which stops it by its tag. A
-// run of another host, or of a runtime this workspace lacks, is answered
-// back as out of reach.
+// sandbox run by the runtime of its name, and reached once its box held it.
+// A run the box does not hold (another box of the name, as another
+// workspace's docker may target), one whose box did not answer, a run of
+// another host and one of a runtime this workspace lacks are answered back
+// as out of reach.
 it('reaps the runs its runtimes reach', async () => {
-  const box = new ReapedBox()
+  const box = new ReapedBox(['t1'])
   const ws = new Workspace({}, { runtimes: [box] })
   try {
     const mine = { runtime: 'reapbox', tag: 't1', command: 'x' }
+    const elsewhere = { runtime: 'reapbox', tag: 't3', command: 'z' }
+    const broken = { runtime: 'reapbox', tag: 'broken', command: 'w' }
     const theirs = { runtime: 'otherbox', tag: 't2', command: 'y' }
     const host = { host: 'elsewhere', pid: 41, started_at: 1 }
     const reap = (
@@ -424,8 +429,17 @@ it('reaps the runs its runtimes reach', async () => {
         reapRuns: (runs: Record<string, unknown>[], signum: number) => Promise<unknown[]>
       }
     ).reapRuns.bind(ws)
-    expect(await reap([mine, theirs, host], 15)).toEqual([theirs, host])
-    expect(box.reaped).toEqual([['t1', 15]])
+    expect(await reap([mine, elsewhere, broken, theirs, host], 15)).toEqual([
+      elsewhere,
+      broken,
+      theirs,
+      host,
+    ])
+    expect(box.reaped).toEqual([
+      ['t1', 15],
+      ['t3', 15],
+      ['broken', 15],
+    ])
   } finally {
     await ws.close()
   }

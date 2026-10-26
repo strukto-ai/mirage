@@ -23,7 +23,7 @@ import { Workspace } from '../workspace/workspace.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { ExecutionNode } from '../types.ts'
-import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
+import { handleFg, handleJobs, handleKill, handlePs, handleWait, ownerTags } from './jobs.ts'
 
 /** A runner that finishes immediately with no output. */
 const quiet: JobRunner = () => Promise.resolve([new IOResult(), new ExecutionNode()] as JobResult)
@@ -949,5 +949,40 @@ it('kill refuses an owner:pid nobody runs', async () => {
     expect([picked.exitCode, stdoutStr(picked)]).toEqual([1, ''])
   } finally {
     await ws.close()
+  }
+})
+
+// Each owner is named by the shortest start of its id, six characters at
+// least, that no other owner's begins with, so every name ps prints reaches
+// one process.
+it('keeps owner names unique', () => {
+  expect(Object.fromEntries(ownerTags(['abcdef12', 'abcdef34', '0123456789']))).toEqual({
+    abcdef12: 'abcdef1',
+    abcdef34: 'abcdef3',
+    '0123456789': '012345',
+  })
+})
+
+// A child shell, a script and a command substitution list and stop other
+// workspaces' processes as the top-level shell does.
+it("child shells reach another's processes", async () => {
+  const store = new RAMWorkspaceStateStore()
+  const a = sharing(store)
+  const b = sharing(store)
+  try {
+    await a.shell('sleep 30 &', { sessionId: 's' })
+    const job = a.jobTable.get(1, 's')
+    const name = `${a.jobTable.owner.slice(0, 6)}:${String(job?.pid)}`
+    await listed(b, `${name}\tsleep 30`)
+    for (const line of [`bash -c 'ps -p ${name} -o comm='`, `echo $(ps -p ${name} -o comm=)`]) {
+      expect(stdoutStr(await b.shell(line, { sessionId: 's' })), line).toBe('sleep\n')
+    }
+    expect(stdoutStr(await b.shell(`bash -c 'kill ${name}'; echo $?`, { sessionId: 's' }))).toBe(
+      '0\n',
+    )
+    await job?.process?.join()
+  } finally {
+    await a.close()
+    await b.close()
   }
 })

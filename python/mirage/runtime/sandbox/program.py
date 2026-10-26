@@ -255,7 +255,9 @@ async def reap_host_run(run: Mapping[str, JsonValue], signum: int) -> bool:
 
     Only a run of this host is reached, and only while its PID still
     names a process started when the run did, to the second ``ps``
-    shows, so a PID the host reused is left alone.
+    shows, so a PID the host reused is left alone. A group this
+    workspace may not signal is not reached while its leader still
+    runs (macOS answers EPERM for one that only exited unreaped).
 
     Args:
         run (Mapping[str, JsonValue]): the run as ``host_run`` keeps it.
@@ -286,14 +288,18 @@ async def reap_host_run(run: Mapping[str, JsonValue], signum: int) -> bool:
             while True:
                 await asyncio.sleep(STOP_POLL_SECONDS)
                 os.killpg(pid, 0)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError:
         return True
+    except PermissionError:
+        return await _started_at(pid) is None
     except TimeoutError:
         logger.debug("process group %d outlived signal %d", pid, signum)
     try:
         os.killpg(pid, 9)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError:
         logger.debug("process group %d has already exited", pid)
+    except PermissionError:
+        return await _started_at(pid) is None
     return True
 
 

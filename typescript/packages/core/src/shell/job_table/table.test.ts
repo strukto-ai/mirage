@@ -23,9 +23,15 @@ import {
   RAMConsoleStore,
   type ReadResult,
 } from '../console/index.ts'
-import { LIST_CHECK_SECONDS, STOP_WAIT_SECONDS, WATCH_RETRY_SECONDS } from './constants.ts'
+import {
+  LIST_CHECK_SECONDS,
+  PUBLISH_SECONDS,
+  STOP_WAIT_SECONDS,
+  WATCH_RETRY_SECONDS,
+} from './constants.ts'
 import { RAMJobStore } from './ram.ts'
 import { ProcessTable } from '../../process/table.ts'
+import { PathSpec } from '../../types.ts'
 import { JobTable } from './table.ts'
 import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 import { ManualClock } from '../../utils/clock.ts'
@@ -1599,12 +1605,158 @@ describe('JobTable process plane', () => {
     }
     expect(await b.remoteProcesses()).toEqual({})
     await until(
-      async () => reaped.length === 1 && (await store.processes()).dead?.['2'] === undefined,
+      async () => reaped.length === 2 && (await store.processes()).dead?.['2'] === undefined,
     )
-    expect(reaped).toEqual([[[host, box], 15]])
+    expect(reaped).toEqual([
+      [[host], 15],
+      [[box], 15],
+    ])
     expect(await store.processes()).toEqual(
       unreached ? { dead: { '3': { pid: 3, session: 's', runs: [box] } } } : {},
     )
+    await b.close()
+  })
+
+  // The lease goes ahead of the record it vouches for, so no workspace ever
+  // reads a record whose owner it takes for lapsed, even for a process that
+  // is no job (a line, a spawned child) and so renewed nothing first; and
+  // the record is written again with every renewal, so it outlives its
+  // store's expiry and comes back after a workspace dropped it.
+  it('vouches for its record and writes it again', async () => {
+    const vouched: boolean[] = []
+    class VouchedStore extends RAMJobStore {
+      override async publish(
+        owner: string,
+        processes: Readonly<Record<string, RecordFields>>,
+      ): Promise<void> {
+        if (Object.keys(processes).length > 0) vouched.push(await this.alive(owner))
+        await super.publish(owner, processes)
+      }
+    }
+    const store = new VouchedStore(3 * PUBLISH_SECONDS)
+    const a = publishing(store)
+    const abort = new AbortController()
+    const runner = a.processes.start({
+      sessionId: 's',
+      command: 'sleep 30',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => {
+        abort.abort()
+      },
+      run: () =>
+        new Promise<number>((_resolve, reject) => {
+          abort.signal.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+        }),
+    })
+    await until(() => Promise.resolve(vouched.length >= 3))
+    await RAMJobStore.prototype.publish.call(store, a.owner, {})
+    await until(async () => a.owner in (await store.processes()))
+    expect(vouched.every(Boolean)).toBe(true)
+    runner.terminate()
+    await runner.join()
+    await a.close()
+  }, 15_000)
+
+  // An owner that renews while its runs are being reaped keeps them: the
+  // lease is read again before each run is stopped.
+  it('lets an owner that renews keep its runs', async () => {
+    let asked = 0
+    class Revives extends RAMJobStore {
+      override alive(): Promise<boolean> {
+        asked += 1
+        return Promise.resolve(asked > 1)
+      }
+    }
+    const store = new Revives(30)
+    const run = { runtime: 'docker', tag: 't', command: 'x' }
+    await store.publish('back', { '2': { pid: 2, session: 's', runs: [run] } })
+    const reaped: unknown[] = []
+    const b = new JobTable(store)
+    b.reaper = (runs) => {
+      reaped.push(runs)
+      return Promise.resolve([])
+    }
+    expect(await b.remoteProcesses()).toEqual({})
+    await b.killAll()
+    expect(reaped).toEqual([])
+    expect('back' in (await store.processes())).toBe(true)
+    await b.close()
+  })
+
+  // Teardown stops the reaping, before the runtimes it goes through close:
+  // a reap under way is waited for, and no listing starts another.
+  it('stops the reaping at teardown', async () => {
+    const store = new RAMJobStore(30)
+    const run = { runtime: 'docker', tag: 't', command: 'x' }
+    await store.publish('dead', { '2': { pid: 2, session: 's', runs: [run] } })
+    let calls = 0
+    let finished = false
+    const b = new JobTable(store)
+    b.reaper = async () => {
+      calls += 1
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      finished = true
+      return []
+    }
+    await b.remoteProcesses()
+    await until(() => Promise.resolve(calls === 1))
+    await b.killAll()
+    expect(finished).toBe(true)
+    await store.publish('dead', { '2': { pid: 2, session: 's', runs: [run] } })
+    await b.remoteProcesses()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(calls).toBe(1)
+    await b.close()
+  })
+
+  // A stop that fails to apply leaves the others it came with to be applied.
+  it('applies the other stops when one fails', async () => {
+    const store = new RAMJobStore(30)
+    const a = publishing(store)
+    const abort = new AbortController()
+    const job = await a.submit({
+      command: 'sleep 30',
+      run: pending(abort),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    const applied: number[] = []
+    const table = a as unknown as { stopAsked: (pid: number, signal: number) => Promise<void> }
+    const stop = table.stopAsked.bind(a)
+    table.stopAsked = async (pid, signal) => {
+      if (pid === 999) throw new Error('cannot stop')
+      applied.push(pid)
+      await stop(pid, signal)
+    }
+    await store.requestStop(a.owner, 999, 15)
+    await store.requestStop(a.owner, job.pid, 15)
+    await job.process?.join()
+    expect(applied).toEqual([job.pid])
+    await a.close()
+  }, 15_000)
+
+  // A child shell's table keeps its job list private but reaches the other
+  // workspaces' processes through the workspace's.
+  it("reaches the process plane from a child shell's table", async () => {
+    const store = new RAMJobStore(30)
+    const [a, b] = [publishing(store), publishing(store)]
+    const abort = new AbortController()
+    const job = await a.submit({
+      command: 'sleep 30',
+      run: pending(abort),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    const child = b.child().child()
+    await until(async () => a.owner in (await child.remoteProcesses()))
+    const every = { list: 'workspace', kill: 'workspace', max: null } as const
+    expect(await child.signalRemote(a.owner, job.pid, 15, 's', every)).toBe(true)
+    await job.process?.join()
+    await a.close()
     await b.close()
   })
 

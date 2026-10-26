@@ -806,35 +806,45 @@ async def test_close_cancels_streamed_lines_in_the_order_they_started(
 
 
 class _ReapedBox(RemoteSandbox):
-    """A sandbox runtime that records the runs it was asked to reap."""
+    """A sandbox runtime that records the runs it was asked to reap, and
+    holds those its tags name."""
 
     name = "reapbox"
 
-    def __init__(self) -> None:
+    def __init__(self, holds: tuple[str, ...]) -> None:
         super().__init__(captures=("never-run",))
+        self.holds = holds
         self.reaped: list[tuple[str, int]] = []
 
     async def connect(self) -> None:
         return None
 
-    async def reap(self, tag: str, signum: int) -> None:
+    async def reap(self, tag: str, signum: int) -> bool:
         self.reaped.append((tag, signum))
+        if tag == "broken":
+            raise RuntimeError("box not answering")
+        return tag in self.holds
 
 
 # A lapsed workspace's runs are stopped by whatever reaches them here: a
-# sandbox run by every runtime of its name, which stops it by its tag. A
-# run of another host, or of a runtime this workspace lacks, is answered
+# sandbox run by the runtime of its name, and reached once its box held
+# it. A run the box does not hold (another box of the name, as another
+# workspace's docker may target), one whose box did not answer, a run of
+# another host and one of a runtime this workspace lacks are answered
 # back as out of reach.
 @pytest.mark.asyncio
 async def test_a_workspace_reaps_the_runs_its_runtimes_reach():
-    box = _ReapedBox()
+    box = _ReapedBox(("t1",))
     ws = Workspace({}, runtimes=[box])
     try:
         mine = {"runtime": "reapbox", "tag": "t1", "command": "x"}
+        elsewhere = {"runtime": "reapbox", "tag": "t3", "command": "z"}
+        broken = {"runtime": "reapbox", "tag": "broken", "command": "w"}
         theirs = {"runtime": "otherbox", "tag": "t2", "command": "y"}
         host = {"host": "elsewhere", "pid": 41, "started_at": 1.0}
-        left = await ws._reap_runs([mine, theirs, host], 15)
-        assert left == [theirs, host]
-        assert box.reaped == [("t1", 15)]
+        runs = [mine, elsewhere, broken, theirs, host]
+        left = await ws._reap_runs(runs, 15)
+        assert left == [elsewhere, broken, theirs, host]
+        assert box.reaped == [("t1", 15), ("t3", 15), ("broken", 15)]
     finally:
         await ws.close()

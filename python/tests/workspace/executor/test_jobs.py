@@ -28,6 +28,7 @@ from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.jobs import (
+    _owner_tags,
     handle_disown,
     handle_fg,
     handle_jobs,
@@ -1503,3 +1504,44 @@ async def test_kill_refuses_an_owner_pid_nobody_runs():
         assert (listed.exit_code, listed.stdout) == (1, b"")
     finally:
         await ws.close()
+
+
+# Each owner is named by the shortest start of its id, six characters at
+# least, that no other owner's begins with, so every name ps prints
+# reaches one process.
+def test_owner_names_stay_unique():
+    assert _owner_tags(["abcdef12", "abcdef34", "0123456789"]) == {
+        "abcdef12": "abcdef1",
+        "abcdef34": "abcdef3",
+        "0123456789": "012345",
+    }
+
+
+# A child shell, a script and a command substitution list and stop other
+# workspaces' processes as the top-level shell does.
+@pytest.mark.asyncio
+async def test_child_shells_reach_anothers_processes(monkeypatch):
+    monkeypatch.setattr(job_table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMWorkspaceStateStore()
+    a, b = _sharing(store), _sharing(store)
+    try:
+        await a.shell("sleep 30 &", session_id="s")
+        job = a.job_table.get(1, "s")
+        assert job is not None and job.process is not None
+        name = f"{a.job_table.owner[:6]}:{job.pid}"
+        await _listed(b, f"{name}\tsleep 30")
+        for line in (
+            f"bash -c 'ps -p {name} -o comm='",
+            f"echo $(ps -p {name} -o comm=)",
+        ):
+            listed = await b.shell(line, session_id="s")
+            assert listed.stdout == b"sleep\n", line
+        killed = await b.shell(
+            f"bash -c 'kill {name}'; echo $?", session_id="s"
+        )
+        assert killed.stdout == b"0\n"
+        async with asyncio.timeout(5):
+            await job.process.join()
+    finally:
+        await a.close()
+        await b.close()

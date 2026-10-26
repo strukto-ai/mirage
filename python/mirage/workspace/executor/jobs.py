@@ -1699,6 +1699,25 @@ def _remote_info(record: RecordFields) -> ProcessInfo:
     )
 
 
+def _owner_tags(owners: list[str]) -> dict[str, str]:
+    """The shortest start of each owner's id, six characters at least,
+    that no other owner's begins with, as ``ps`` names their processes.
+
+    Args:
+        owners (list[str]): the owners' ids.
+    """
+    tags: dict[str, str] = {}
+    for owner in owners:
+        size = 6
+        while size < len(owner) and any(
+            other != owner and other.startswith(owner[:size])
+            for other in owners
+        ):
+            size += 1
+        tags[owner] = owner[:size]
+    return tags
+
+
 def _run_where(run: dict[str, JsonValue]) -> str:
     """Where a native run goes on, as ``ps`` names it: ``host PID`` for a
     host program, the runtime and the start of its tag for a sandbox's.
@@ -1728,10 +1747,11 @@ async def handle_ps(
     usage.
 
     The runners other workspaces on a shared store run follow this
-    workspace's, as ``owner:pid`` with the owner's id shortened, within
-    the same view. In the compact rows each runner is followed by the
-    native runs it has going, a host program by its host PID and a
-    sandbox's by its runtime and tag, each as ``-<TAB>└ where: command``.
+    workspace's, as ``owner:pid`` with the owner's id shortened as far as
+    it stays unique, within the same view. In the compact rows each
+    runner is followed by the native runs it has going, a host program
+    by its host PID and a sandbox's by its runtime and tag, each as
+    ``-<TAB>└ where: command``.
 
     Args:
         job_table (JobTable): the workspace's job table.
@@ -1758,7 +1778,9 @@ async def handle_ps(
         for info in _process_view(job_table, session).list()
         if every or info.pid in options.pids
     ]
-    for owner, records in (await job_table.remote_processes()).items():
+    remote = await job_table.remote_processes()
+    tags = _owner_tags(list(remote))
+    for owner, records in remote.items():
         for record in records.values():
             if permissions.list == "session" and record["session"] != sid:
                 continue
@@ -1766,7 +1788,9 @@ async def handle_ps(
                 owner.startswith(prefix) and record["pid"] == pid
                 for prefix, pid in options.remote
             ):
-                rows.append((owner[:6], _remote_info(record), record["runs"]))
+                rows.append(
+                    (tags[owner], _remote_info(record), record["runs"])
+                )
     if options.columns:
         keys = [key for key, _ in options.columns]
         ctx = _PsContext(

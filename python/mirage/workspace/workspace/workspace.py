@@ -1382,7 +1382,10 @@ class Workspace:
         """Stop native runs a lapsed workspace left, answering the ones
         this workspace cannot reach: a host run directly when it runs on
         this host, a sandbox run through every runtime of its name here,
-        each of which stops what its tag marks in the box it reaches.
+        each of which stops what its tag marks in the box it reaches. A
+        run counts as reached only once a box held it and it was stopped:
+        a box of the same name that holds none of it, or one that could
+        not be reached, leaves it to a workspace that reaches its own.
 
         Args:
             runs (list[dict[str, JsonValue]]): the runs, as their process
@@ -1402,8 +1405,10 @@ class Workspace:
                 ) or runtime.name != run.get("runtime"):
                     continue
                 try:
-                    await runtime.reap(str(run.get("tag")), signum)
-                    reached = True
+                    reached = (
+                        await runtime.reap(str(run.get("tag")), signum)
+                        or reached
+                    )
                 except Exception as exc:
                     logger.debug("%s: run not reaped: %s", runtime.name, exc)
             if not reached:

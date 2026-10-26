@@ -334,6 +334,15 @@ class JobTable:
         self._checking: asyncio.Task[None] | None = None
         self._publishing: asyncio.Task[None] | None = None
         self._reaping: set[asyncio.Task[None]] = set()
+        # Lapsed owners this table already set about reaping, so a listing
+        # that finds one again does not stop its runs again; and whether
+        # teardown stopped the reaping, which its runtimes are closing for.
+        self._reaped: set[str] = set()
+        self._reaping_stopped = False
+        # The table whose store and owner the process plane is read and
+        # written through: this one, or for a child shell's table the
+        # workspace's, since a child shell keeps only its job list private.
+        self._plane = self
         # Stops the native runs a lapsed owner left, given them and the
         # first signal, and answers the ones this workspace cannot reach;
         # the workspace sets it, since it holds the runtimes that reach
@@ -355,11 +364,16 @@ class JobTable:
         memory, since a child shell's jobs end with it on this workspace
         and no other one lists them.
 
+        It lists and stops other workspaces' processes through this
+        table, on the workspace's store.
+
         Args:
             parent (JobTable | None): the table a ``$( )`` still lists
                 in ``jobs``.
         """
-        return JobTable(None, self.processes, parent, self.clock)
+        table = JobTable(None, self.processes, parent, self.clock)
+        table._plane = self._plane
+        return table
 
     async def submit(
         self,
@@ -726,7 +740,14 @@ class JobTable:
         Disowned jobs are stopped too: the shell forgot them, the
         workspace did not, and a teardown that left them running would
         leak their tasks. Another workspace's jobs are its own to stop.
+        The reaping of lapsed owners' runs stops here as well, before the
+        runtimes it reaches them through close.
         """
+        self._reaping_stopped = True
+        reaping = list(self._reaping)
+        for task in reaping:
+            task.cancel()
+        await asyncio.gather(*reaping, return_exceptions=True)
         running = [j for j in self.all_running_jobs() if j.process is not None]
         for job in [*running, *self._disowned]:
             if job.status == JobStatus.RUNNING and job.process is not None:
@@ -878,6 +899,8 @@ class JobTable:
         A lapsed owner's are left out: whatever it ran was lost with it,
         and the native runs it left are stopped meanwhile.
         """
+        if self._plane is not self:
+            return await self._plane.remote_processes()
         found: dict[str, dict[str, RecordFields]] = {}
         for owner, records in (await self.store.processes()).items():
             if owner == self.owner or not records:
@@ -918,6 +941,10 @@ class JobTable:
             PermissionError: the process is one the session sees but
                 may not stop.
         """
+        if self._plane is not self:
+            return await self._plane.signal_remote(
+                owner, pid, signal, session_id, permissions
+            )
         records = await self.store.processes()
         owners = [
             found
@@ -926,6 +953,10 @@ class JobTable:
             and found.startswith(owner)
             and str(pid) in processes
         ]
+        if len(owners) > 1:
+            owners = [
+                found for found in owners if await self.store.alive(found)
+            ]
         if len(owners) != 1:
             return False
         record = records[owners[0]][str(pid)]
@@ -1340,8 +1371,12 @@ class JobTable:
         them, and stop those other workspaces asked it to stop. Once it
         runs none, its record goes and the publishing stops.
 
-        The lease is renewed every third of it, counted in rounds. A
-        failed round is logged and tried again the next one.
+        The lease is renewed every third of it, counted in rounds, ahead
+        of the record it vouches for, and the record is written again with
+        it, so it outlives its store's expiry and comes back should a
+        workspace have taken this one for lapsed. A failed round is logged
+        and tried again the next one, and a stop that fails leaves the
+        others it came with to be applied.
         """
         published: dict[str, RecordFields] | None = None
         lease = self.store.lease_seconds
@@ -1354,14 +1389,19 @@ class JobTable:
         while True:
             records = self._records()
             try:
-                if records != published:
-                    await self.store.publish(self.owner, records)
-                    published = records
                 if renewal and rounds >= due:
                     await self.store.renew(self.owner)
+                    await self.store.publish(self.owner, records)
+                    published = records
                     due = rounds + renewal
+                elif records != published:
+                    await self.store.publish(self.owner, records)
+                    published = records
                 for pid, signal in await self.store.take_stops(self.owner):
-                    await self._stop_asked(pid, signal)
+                    try:
+                        await self._stop_asked(pid, signal)
+                    except Exception as exc:
+                        logger.debug("stop of %d not applied: %s", pid, exc)
             except Exception as exc:
                 logger.debug("process publish failed: %s", exc)
             if published == {} and not self._records():
@@ -1397,6 +1437,9 @@ class JobTable:
         Args:
             owner (str): the lapsed owner.
         """
+        if self._reaping_stopped or owner in self._reaped:
+            return
+        self._reaped.add(owner)
         task = asyncio.ensure_future(self._reap_owner(owner))
         self._reaping.add(task)
         task.add_done_callback(self._reaping.discard)
@@ -1404,22 +1447,22 @@ class JobTable:
     async def _reap_owner(self, owner: str) -> None:
         """Stop the native runs a lapsed owner left, those this
         workspace reaches, and keep its record holding only the rest, for
-        a workspace that reaches them. An owner that renewed meanwhile
-        keeps its record as it is.
+        a workspace that reaches them. The owner's lease is checked again
+        before each run is stopped, so one that renewed meanwhile keeps
+        its runs, and its record as it is.
 
         Args:
             owner (str): the lapsed owner.
         """
         try:
             records = (await self.store.processes()).get(owner, {})
-            runs = [
-                run for record in records.values() for run in record["runs"]
-            ]
-            left = (
-                await self.reaper(runs, 15)
-                if self.reaper is not None and runs
-                else runs
-            )
+            left: list[dict[str, JsonValue]] = []
+            for record in records.values():
+                for run in record["runs"]:
+                    if await self.store.alive(owner):
+                        return
+                    if self.reaper is None or await self.reaper([run], 15):
+                        left.append(run)
             kept = {
                 pid: {
                     **record,

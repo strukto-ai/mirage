@@ -635,8 +635,10 @@ export class Workspace {
    * Stop native runs a lapsed workspace left, answering the ones this
    * workspace cannot reach: a host run through `reapHostRun`, a sandbox run
    * through every runtime of its name here, each of which stops what its
-   * tag marks in the box it reaches. Mirrors Python's
-   * `Workspace._reap_runs`.
+   * tag marks in the box it reaches. A run counts as reached only once a box
+   * held it and it was stopped: a box of the same name that holds none of
+   * it, or one that could not be reached, leaves it to a workspace that
+   * reaches its own. Mirrors Python's `Workspace._reap_runs`.
    */
   private async reapRuns(
     runs: Record<string, JsonValue>[],
@@ -652,8 +654,7 @@ export class Workspace {
       for (const runtime of this.runtimes()) {
         if (!(runtime instanceof RemoteSandbox) || runtime.name !== run.runtime) continue
         try {
-          await runtime.reap(run.tag as string, signum)
-          reached = true
+          reached = (await runtime.reap(run.tag as string, signum)) || reached
         } catch (err) {
           console.debug(`${runtime.name}: run not reaped:`, err)
         }

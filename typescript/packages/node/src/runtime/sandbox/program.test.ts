@@ -597,4 +597,29 @@ describe('host runs', () => {
       if (child.exitCode === null && child.signalCode === null) process.kill(-pid, 'SIGKILL')
     }
   })
+
+  // A group this workspace may not signal is out of its reach while its
+  // leader still runs, so a workspace with the rights can stop it later.
+  it('leaves a host run it may not signal out of reach', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const child = spawn('sh', ['-c', `echo $$ > ${pidFile}; while :; do sleep 0.05; done`], {
+      detached: true,
+      stdio: 'ignore',
+    })
+    const pid = await escapedPid(pidFile)
+    const kill = process.kill.bind(process)
+    const spy = vi.spyOn(process, 'kill').mockImplementation((target, signal) => {
+      if (target === -pid)
+        throw Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })
+      return kill(target, signal)
+    })
+    try {
+      expect(await reapHostRun(hostRun(pid, ['sh']), 15)).toBe(false)
+    } finally {
+      spy.mockRestore()
+      process.kill(-pid, 'SIGKILL')
+      child.unref()
+    }
+  })
 })
