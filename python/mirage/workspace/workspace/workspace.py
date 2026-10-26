@@ -2731,11 +2731,12 @@ class Workspace:
         caller stamps after the last of its output is delivered. It
         writes to a terminal of its own, as a typed line does to its
         session's: it answers with what waited on the session's terminal
-        first, then with what it and its jobs write, and once it ends,
-        what its jobs still write goes on to the session's terminal for
-        the next line. A line nested in one of the session's (a callback
-        fired mid-line) continues in that line instead, as
-        ``_serialize_line`` runs it.
+        first, unless a line of the session runs to answer with it, then
+        with what it and its jobs write; once it ends, what its jobs
+        still write goes on to the session's terminal, without the line
+        waiting for it to be taken. A line nested in one of the
+        session's (a callback fired mid-line) continues in that line
+        instead, as ``_serialize_line`` runs it.
 
         Args:
             session_id (str | None): the session the caller named, or
@@ -2763,13 +2764,14 @@ class Workspace:
         session.process_id = None
         session.job_table = self.job_table.child()
         session.tty = Terminal()
-        session.tty.chunks, source.tty.chunks = source.tty.chunks, deque()
+        if not self._session_mgr.line_lock_for(source.session_id).locked():
+            session.tty.chunks, source.tty.chunks = source.tty.chunks, deque()
         token = set_current_session(session, self._session_mgr)
         try:
             return await run(tty=session.tty), source
         finally:
             reset_current_session(token)
-            await session.tty.attach(source.tty.jobs)
+            session.tty.hand_over(source.tty.jobs)
 
     @overload
     async def shell(

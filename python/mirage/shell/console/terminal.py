@@ -13,13 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mirage.concurrency.limiter import owned_task
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.types import Channel, OwnedStream
+
+logger = logging.getLogger(__name__)
 
 
 class Terminal(JobConsole):
@@ -42,6 +46,7 @@ class Terminal(JobConsole):
         self.ended = 0
         self.attaching: asyncio.Event | None = None
         self._prefix = bytearray()
+        self._handing: asyncio.Task[None] | None = None
 
     @property
     def stdout_prefix(self) -> bytes:
@@ -111,6 +116,27 @@ class Terminal(JobConsole):
             if self.attaching is attaching:
                 self.attaching = None
             attaching.set()
+
+    def hand_over(self, reader: JobConsole) -> None:
+        """Once its last line has ended, send on to ``reader`` what is
+        left here and what jobs write from now on, without waiting for
+        it to take them: it may be another line's to stream.
+
+        Args:
+            reader (JobConsole): where the rest goes.
+        """
+        self._handing = owned_task(self._hand(reader))
+
+    async def _hand(self, reader: JobConsole) -> None:
+        """Attach ``reader``, reporting a reader that fails.
+
+        Args:
+            reader (JobConsole): where the rest goes.
+        """
+        try:
+            await self.attach(reader)
+        except Exception as exc:
+            logger.debug("late job output was not handed over: %s", exc)
 
     def drain(self) -> tuple[bytes, bytes]:
         """What reached the terminal so far, stdout and stderr, taken out

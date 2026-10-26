@@ -17,6 +17,13 @@ import { CHUNK_SIZE } from '../../io/cooperative.ts'
 import { JobConsole } from './job_console.ts'
 import { Channel, type OwnedStream } from './types.ts'
 
+/** Host diagnostics stay separate from what the shell writes. */
+const logger = {
+  debug(message: string): void {
+    console.error(message)
+  },
+}
+
 /**
  * A shell's screen: what its lines and its background jobs wrote, in the
  * order it arrived, until a line takes it.
@@ -106,6 +113,18 @@ export class Terminal extends JobConsole {
       if (this.attaching === attaching) this.attaching = null
       attached()
     }
+  }
+
+  /**
+   * Once its last line has ended, send on to `reader` what is left here and
+   * what jobs write from now on, without waiting for it to take them: it may
+   * be another line's to stream.
+   */
+  handOver(reader: JobConsole): void {
+    void this.attach(reader).catch((error: unknown) => {
+      const reason = error instanceof Error ? error.message : String(error)
+      logger.debug(`late job output was not handed over: ${reason}`)
+    })
   }
 
   /** What reached the terminal so far, taken out to be bounded and put back. */

@@ -54,6 +54,11 @@ export class KeyLock {
     }
   }
 
+  /** Whether someone holds the key now. */
+  held(key: string): boolean {
+    return this.queues.has(key)
+  }
+
   discard(key: string): void {
     this.queues.delete(key)
   }
