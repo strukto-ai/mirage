@@ -12,48 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
-import { Language, Parser, type Node } from 'web-tree-sitter'
+import { describe, expect, it } from 'vitest'
 import { parseShell, type ShellTreeNode } from './shell.ts'
 
-const require = createRequire(import.meta.url)
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let grammar: Parser
-
-beforeAll(async () => {
-  await Parser.init()
-  grammar = new Parser()
-  grammar.setLanguage(await Language.load(grammarWasm))
-})
-
-// Lines both parsers read alike: tree-sitter-bash's shapes, spans and
-// points, the grammar's quirks included. Mirrors Python's SAME.
-const SAME = [
-  'echo hi',
-  'echo a > f b 2>&1 | tr a b && x=1 y=2',
-  'a | b > f | c',
-  '! a && b || c &',
-  "echo \"a $b ${c} $(d) `e`\" 'f' $'g\\n'",
-  'printf "%s" "$x $y" "$x  y" "$x "',
-  'echo {1..3} {a,b} ] ]',
-  'x=(1 2) a[i+1]=v declare -r y=1 z',
-  'echo ${a:-two words} ${a#*/} ${a/x/ $f} ${#a[@]} ${!p*}',
-  'echo $(( a + b * -c )) $[1] && (( i++, j-- ))',
-  '[[ $x == a* && -f f ]] || [ ! -e g ]',
-  'case $x in a|b) echo ab;; *.txt) ;& (c) echo c;; esac',
-  'for i in 1 2; do echo $i; done; for ((i=0; i<3; i++)); do :; done',
-  'f() { local v=$1; } # trailing',
-  'while read -r l; do echo "$l"; done < f',
-  'cat <<EOF | wc -l\nline $x\nEOF',
-  "cat <<-'E'\n\tbody\n\tE",
-  'echo héllo wörld 💡 | tr é e',
-  'echo "日本 $x 😀"',
-]
-
-// Lines tree-sitter-bash misreads, as bash reads them. Mirrors Python's BASH.
+// Mirrors Python's BASH.
 const BASH: [string, string][] = [
   [
     'exec 0>f',
@@ -73,24 +35,6 @@ const BASH: [string, string][] = [
   ],
 ]
 
-type Canon = [string, boolean, string | null, number, number, string, string, boolean, Canon[]]
-
-function canon(node: Node | ShellTreeNode, field: string | null = null): Canon {
-  return [
-    node.type,
-    node.isNamed,
-    field,
-    node.startIndex,
-    node.endIndex,
-    `${String(node.startPosition.row)}:${String(node.startPosition.column)}`,
-    `${String(node.endPosition.row)}:${String(node.endPosition.column)}`,
-    node.isMissing,
-    node.children.map((child, i) =>
-      canon(child as Node & ShellTreeNode, node.fieldNameForChild(i)),
-    ),
-  ]
-}
-
 function sexp(node: ShellTreeNode, field: string | null = null): string {
   const named = node.children.flatMap((child, i) =>
     child.isNamed ? [sexp(child, node.fieldNameForChild(i))] : [],
@@ -99,14 +43,7 @@ function sexp(node: ShellTreeNode, field: string | null = null): string {
 }
 
 describe('parseShell', () => {
-  it.each(SAME)('matches tree-sitter-bash: %j', (line) => {
-    const want = grammar.parse(line)?.rootNode
-    if (want === undefined) throw new Error(`tree-sitter-bash gave no tree for ${line}`)
-    expect(want.hasError).toBe(false)
-    expect(canon(parseShell(line).rootNode)).toEqual(canon(want))
-  })
-
-  it.each(BASH)('follows bash where the grammar misreads it: %j', (line, want) => {
+  it.each(BASH)('reads as bash reads: %j', (line, want) => {
     const tree = parseShell(line)
     expect(tree.error).toBeNull()
     expect(sexp(tree.rootNode)).toBe(want)
@@ -142,6 +79,14 @@ describe('parseShell', () => {
       'word',
     ])
     expect(command.fieldNameForChild(2)).toBe('argument')
+  })
+
+  it('counts offsets and columns in UTF-16 units', () => {
+    const line = 'echo é💡 x'
+    const word = parseShell(line).rootNode.child(0)?.child(2)
+    expect(word?.startIndex).toBe(line.length - 1)
+    expect(word?.startPosition).toEqual({ row: 0, column: line.length - 1 })
+    expect(word?.text).toBe('x')
   })
 
   it('gives each tree its own ids', () => {

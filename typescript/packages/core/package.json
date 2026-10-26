@@ -77,7 +77,6 @@
     "esbuild": "^0.28.2",
     "pyodide": "^314.0.5",
     "quickjs-emscripten": "^0.32.0",
-    "tree-sitter-bash": "^0.25.1",
     "typescript": "^6.0.0",
     "@types/node": "^22.0.0",
     "@types/sha.js": "^2.4.4",
@@ -96,7 +95,6 @@
     "jq-wasm": "3.0.0-jq-1.8.2",
     "modern-tar": "^0.8.4",
     "sha.js": "^2.4.12",
-    "web-tree-sitter": "^0.26.13",
     "zod": "^4.6.6"
   },
   "peerDependencies": {

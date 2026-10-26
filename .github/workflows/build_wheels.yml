@@ -76,7 +76,7 @@ jobs:
   # arm64 wheels on arm64 runners, the x86_64 macOS wheel on an Intel one,
   # the musl wheels in Alpine. --prefer-binary takes an older dependency
   # with a wheel over a newer sdist, as cryptography's latest has none for
-  # Windows arm64; tree-sitter has none for musl arm64, so Alpine gets a
+  # Windows arm64; dulwich has none for musl arm64, so Alpine gets a
   # compiler.
   check:
     needs: build
