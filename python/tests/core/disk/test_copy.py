@@ -74,6 +74,37 @@ async def test_copy_blames_the_source_when_it_is_the_missing_operand(accessor):
 
 
 @pytest.mark.asyncio
+async def test_copy_blames_the_source_when_it_is_unreadable(accessor):
+    (accessor.root / "src").chmod(0)
+    try:
+        with pytest.raises(PermissionError) as excinfo:
+            await copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/dst"),
+            )
+    finally:
+        (accessor.root / "src").chmod(0o644)
+    assert excinfo.value.filename == "/src"
+
+
+@pytest.mark.asyncio
+async def test_copy_blames_the_destination_when_it_is_unwritable(accessor):
+    (accessor.root / "ro").mkdir()
+    (accessor.root / "ro").chmod(0o555)
+    try:
+        with pytest.raises(PermissionError) as excinfo:
+            await copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/ro/dst"),
+            )
+    finally:
+        (accessor.root / "ro").chmod(0o755)
+    assert excinfo.value.filename == "/ro/dst"
+
+
+@pytest.mark.asyncio
 async def test_copy_never_leaks_the_host_path(accessor):
     for src, dst in (("/src", "/a/b/dst"), ("/nope", "/dst")):
         with pytest.raises(OSError) as excinfo:

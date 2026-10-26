@@ -360,6 +360,36 @@ describe('DiskVFS — folder versions knob', () => {
   })
 })
 
+describe('DiskVFS — cp of a file it may not use', () => {
+  // GNU (coreutils 9.7) opens the source for reading, then creates the
+  // destination, and names whichever one refused.
+  it.skipIf(process.getuid?.() === 0)('names the operand that refused', async () => {
+    await writeFile(join(root, 'secret'), 'x\n')
+    await writeFile(join(root, 'plain'), 'y\n')
+    await mkdir(join(root, 'ro'))
+    await chmod(join(root, 'secret'), 0)
+    await chmod(join(root, 'ro'), 0o555)
+    const ws = new Workspace({ '/data': [res, MountMode.WRITE] as const })
+    try {
+      const unreadable = await ws.shell('cp /data/secret /data/copy')
+      const unwritable = await ws.shell('cp /data/plain /data/ro/x')
+      expect(unreadable.exitCode).toBe(1)
+      expect(DEC.decode(unreadable.stderr)).toBe(
+        "cp: cannot open '/data/secret' for reading: Permission denied\n",
+      )
+      expect(existsSync(join(root, 'copy'))).toBe(false)
+      expect(unwritable.exitCode).toBe(1)
+      expect(DEC.decode(unwritable.stderr)).toBe(
+        "cp: cannot create regular file '/data/ro/x': Permission denied\n",
+      )
+    } finally {
+      await chmod(join(root, 'secret'), 0o644)
+      await chmod(join(root, 'ro'), 0o755)
+      await ws.close()
+    }
+  })
+})
+
 describe('DiskVFS — cp -r past a folder it may not open', () => {
   // GNU (coreutils 9.7): `cp: cannot access 'src/locked': Permission
   // denied`, dst/locked is made, every other entry copies, exit 1.
