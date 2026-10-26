@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ProcessPermissions } from '../../process/config.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import { ProcessTable } from '../../process/table.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, type JsonValue } from '../../types.ts'
 import {
   Channel,
   JobConsole,
@@ -28,6 +29,7 @@ import {
   KILLED_EXIT_CODE,
   LIST_CHECK_SECONDS,
   LIST_MAX_RETRIES,
+  PUBLISH_SECONDS,
   STOP_WAIT_SECONDS,
   WATCH_RETRY_SECONDS,
 } from './constants.ts'
@@ -238,6 +240,19 @@ export class JobTable {
   // The bounds on killed jobs' stops (endKilled): each one's ending, and
   // the cut that ends its wait at once.
   private stopping = new Map<Job, { ending: Promise<void>; cut: () => void }>()
+  private publishing: Promise<void> | null = null
+  // The publisher's pending sleep, which a close ends at once.
+  private publishTick: { timer: ReturnType<typeof setTimeout>; wake: () => void } | null = null
+  private closed = false
+  private reaping = new Set<Promise<void>>()
+  /**
+   * Stops the native runs a lapsed owner left, given them and the first
+   * signal, and answers the ones this workspace cannot reach; the workspace
+   * sets it, since it holds the runtimes that reach them.
+   */
+  reaper:
+    | ((runs: Record<string, JsonValue>[], signum: number) => Promise<Record<string, JsonValue>[]>)
+    | null = null
 
   /**
    * @param store the job plane holding each session's list and each job's
@@ -528,6 +543,7 @@ export class JobTable {
       await this.stopRunner(job, job.process, signal)
       return true
     }
+    if (!(await this.store.alive(job.owner))) await this.reapOwner(job.owner)
     await markKilled(job.console, 128 + signal)
     await this.refresh(job)
     return (job.status as JobStatus) === JobStatus.KILLED
@@ -613,6 +629,17 @@ export class JobTable {
     if (this.checking !== null) clearTimeout(this.checking)
     this.lease = null
     this.checking = null
+    this.closed = true
+    if (this.publishTick !== null) {
+      clearTimeout(this.publishTick.timer)
+      this.publishTick.wake()
+    }
+    await this.publishing
+    try {
+      await this.store.publish(this.owner, {})
+    } catch (err) {
+      console.debug('process record not dropped:', err)
+    }
     const stopping = [...this.stopping.values()]
     for (const { cut } of stopping) cut()
     await Promise.all(stopping.map(({ ending }) => ending))
@@ -725,6 +752,74 @@ export class JobTable {
   }
 
   /** Another workspace's job, as its list entry describes it. */
+  /**
+   * Publish the processes this table's workspace runs, now that one
+   * started: the publishing goes on while any runs (`publish`).
+   */
+  processesChanged(): void {
+    if (this.publishing !== null || this.closed) return
+    this.publishing = this.publish()
+  }
+
+  /**
+   * The processes other workspaces on the store run, owner to PID to
+   * process, as each last published them. A lapsed owner's are left out:
+   * whatever it ran was lost with it, and the native runs it left are
+   * stopped meanwhile.
+   */
+  async remoteProcesses(): Promise<Record<string, Record<string, RecordFields>>> {
+    const found: Record<string, Record<string, RecordFields>> = {}
+    for (const [owner, records] of Object.entries(await this.store.processes())) {
+      if (owner === this.owner || Object.keys(records).length === 0) continue
+      if (await this.store.alive(owner)) found[owner] = records
+      else this.reapLater(owner)
+    }
+    return found
+  }
+
+  /**
+   * Signal a process another workspace runs, named by a prefix of its
+   * owner's id and the owner's PID: its owner stops it once it takes the
+   * stop, within `PUBLISH_SECONDS`. Signal 0 only probes. A lapsed owner's
+   * process is gone, and the native runs it left are stopped instead.
+   * Answers whether one live process was signalled; throws EPERM for one
+   * the session sees but may not stop.
+   *
+   * @param owner a prefix of the owner's id, as `ps` shows it.
+   * @param pid the process, by the owner's PID.
+   * @param signal the signal, 0 to probe.
+   * @param sessionId the calling session.
+   * @param permissions whose processes it may see and stop.
+   */
+  async signalRemote(
+    owner: string,
+    pid: number,
+    signal: number,
+    sessionId: string,
+    permissions: ProcessPermissions,
+  ): Promise<boolean> {
+    const records = await this.store.processes()
+    const owners = Object.keys(records).filter(
+      (found) =>
+        found !== this.owner &&
+        found.startsWith(owner) &&
+        Object.hasOwn(records[found] ?? {}, String(pid)),
+    )
+    const [found] = owners
+    if (owners.length !== 1 || found === undefined) return false
+    const record = records[found]?.[String(pid)] ?? {}
+    const own = record.session === sessionId
+    if (permissions.list === 'session' && !own) return false
+    if (!(await this.store.alive(found))) {
+      await this.reapOwner(found)
+      return false
+    }
+    if (permissions.kill === 'session' && !own)
+      throw Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })
+    if (signal !== 0) await this.store.requestStop(found, pid, signal)
+    return true
+  }
+
   private remote(jobId: number, sessionId: string, entry: ListEntry): Job {
     return new Job({
       id: jobId,
@@ -839,6 +934,7 @@ export class JobTable {
     let outcome = await job.console.outcome()
     if (outcome === null) {
       if (await this.store.alive(job.owner)) return
+      this.reapLater(job.owner)
       await markKilled(job.console, HANGUP_EXIT_CODE)
       outcome = await job.console.outcome()
       if (outcome === null) return
@@ -1045,6 +1141,121 @@ export class JobTable {
       } catch (err) {
         console.debug('job list check failed:', err)
       }
+    }
+  }
+
+  /**
+   * The live processes this workspace runs, as its record keeps them, each
+   * with the native runs it has going.
+   */
+  private records(): Record<string, RecordFields> {
+    const records: Record<string, RecordFields> = {}
+    for (const handle of this.processes.live()) {
+      const info = handle.info
+      records[String(info.pid)] = {
+        pid: info.pid,
+        parent: info.parentPid,
+        group: info.groupId,
+        session: info.sessionId,
+        command: info.command,
+        cwd: info.cwd.virtual,
+        started_at: info.startedAt,
+        state: info.state,
+        execution: info.executionId,
+        runs: Object.values(handle.runs),
+      }
+    }
+    return records
+  }
+
+  /**
+   * Publish the processes this workspace runs every `PUBLISH_SECONDS`
+   * while it runs any, renewing its lease with them, and stop those other
+   * workspaces asked it to stop. Once it runs none, its record goes and the
+   * publishing stops. A failed round is logged and tried again the next
+   * one; the sleep between rounds keeps no host alive on its own.
+   */
+  private async publish(): Promise<void> {
+    let published: string | null = null
+    let renewed = -Infinity
+    const lease = this.store.leaseSeconds
+    for (;;) {
+      const records = this.records()
+      const text = JSON.stringify(records)
+      try {
+        if (text !== published) {
+          await this.store.publish(this.owner, records)
+          published = text
+        }
+        if (lease !== null && performance.now() - renewed >= (lease * 1000) / 3) {
+          await this.store.renew(this.owner)
+          renewed = performance.now()
+        }
+        for (const [pid, signal] of await this.store.takeStops(this.owner))
+          await this.stopAsked(pid, signal)
+      } catch (err) {
+        console.debug('process publish failed:', err)
+      }
+      if (this.closed || (published === '{}' && this.processes.live().length === 0)) {
+        this.publishing = null
+        return
+      }
+      await new Promise<void>((wake) => {
+        const timer = setTimeout(wake, PUBLISH_SECONDS * 1000)
+        ;(timer as { unref?: () => void }).unref?.()
+        this.publishTick = { timer, wake }
+      })
+      this.publishTick = null
+    }
+  }
+
+  /**
+   * Stop one of this workspace's processes another workspace asked to
+   * stop: a job's runner the way `kill` stops a job, any other runner
+   * directly.
+   */
+  private async stopAsked(pid: number, signal: number): Promise<void> {
+    for (const job of this.allJobs()) {
+      if (job.process !== null && job.pid === pid && job.status === JobStatus.RUNNING) {
+        await this.kill(job.id, job.sessionId, signal)
+        return
+      }
+    }
+    for (const handle of this.processes.live()) {
+      if (handle.info.pid === pid) {
+        handle.terminate(signal)
+        return
+      }
+    }
+  }
+
+  /** Stop the native runs a lapsed owner left, without waiting. */
+  private reapLater(owner: string): void {
+    const reaping = this.reapOwner(owner).finally(() => {
+      this.reaping.delete(reaping)
+    })
+    this.reaping.add(reaping)
+  }
+
+  /**
+   * Stop the native runs a lapsed owner left, those this workspace reaches,
+   * and keep its record holding only the rest, for a workspace that reaches
+   * them. An owner that renewed meanwhile keeps its record as it is.
+   */
+  private async reapOwner(owner: string): Promise<void> {
+    try {
+      const records = (await this.store.processes())[owner] ?? {}
+      const runsOf = (record: RecordFields) => record.runs as Record<string, JsonValue>[]
+      const runs = Object.values(records).flatMap(runsOf)
+      const left = this.reaper !== null && runs.length > 0 ? await this.reaper(runs, 15) : runs
+      const kept: Record<string, RecordFields> = {}
+      for (const [pid, record] of Object.entries(records)) {
+        const remaining = runsOf(record).filter((run) => left.includes(run))
+        if (remaining.length > 0) kept[pid] = { ...record, runs: remaining }
+      }
+      if (!(await this.store.alive(owner))) await this.store.publish(owner, kept)
+    } catch (err) {
+      console.debug(`lapsed owner ${owner} not reaped:`, err)
     }
   }
 

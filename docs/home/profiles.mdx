@@ -43,7 +43,8 @@ profiles:
 ```
 
 `processes.list` and `processes.kill` take `session`, the default, or
-`workspace`. `kill` cannot reach past `list`, and a bare scope such as
+`workspace`, for the processes other workspaces on a shared store run as well.
+`kill` cannot reach past `list`, and a bare scope such as
 `processes: workspace` sets both. Starting a process past `max` fails with
 `Resource temporarily unavailable`.
 

@@ -17,6 +17,7 @@ import errno
 import os
 import shlex
 import signal
+import socket
 import sys
 import time
 from collections.abc import AsyncIterator
@@ -29,7 +30,9 @@ from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
 from mirage.runtime.sandbox.program import (
     Children,
     close_children,
+    host_run,
     open_program_pipe,
+    reap_host_run,
     run_program,
 )
 from mirage.types import PathSpec
@@ -563,3 +566,65 @@ async def test_stopping_a_pipe_does_not_wait_on_output_nobody_read(script):
     await asyncio.sleep(0.5)
     async with asyncio.timeout(5):
         await pipe.stop()
+
+
+# A host program a runtime keeps as its child is one of the runner's
+# native runs while it runs: this host, its PID and when it started, so a
+# workspace that outlives this one can stop it; it goes once it ended.
+@pytest.mark.asyncio
+async def test_a_kept_child_is_a_native_run_of_its_runner(tmp_path):
+    pid_file = tmp_path / "pid"
+    children: Children = {}
+
+    async def run() -> int:
+        ran = await run_program(
+            "sh",
+            None,
+            ["-c", f"echo $$ > {pid_file}; sleep 0.3"],
+            None,
+            children=children,
+        )
+        return ran.exit_code
+
+    runner = ProcessTable(bind=run_with_execution).start(
+        session_id="s", command="sh", cwd=PathSpec.from_str_path("/"), run=run
+    )
+    pid = await _wait_for_pid(pid_file)
+    run = runner.runs[f"host:{pid}"]
+    assert (run["host"], run["pid"], run["command"]) == (
+        socket.gethostname(),
+        pid,
+        f"sh -c 'echo $$ > {pid_file}; sleep 0.3'",
+    )
+    assert abs(float(run["started_at"]) - time.time()) < 5
+    assert (await runner.join()).exit_code == 0
+    assert runner.runs == {}
+
+
+# A run a lapsed workspace left on this host is stopped, its whole group,
+# while its PID still names the process it started; a PID that names a
+# later process, or a run of another host, is left alone.
+@pytest.mark.asyncio
+async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
+    pid_file = tmp_path / "pid"
+    child = await asyncio.create_subprocess_exec(
+        "sh",
+        "-c",
+        f"trap '' TERM; echo $$ > {pid_file}; while :; do sleep 0.05; done",
+        start_new_session=True,
+    )
+    pid = await _wait_for_pid(pid_file)
+    run = host_run(pid, ["sh"])
+    try:
+        assert not await reap_host_run({**run, "host": "elsewhere"}, 15)
+        assert not await reap_host_run({**run, "started_at": None}, 15)
+        assert await reap_host_run({**run, "started_at": 0.0}, 15)
+        assert child.returncode is None
+        async with asyncio.timeout(5):
+            assert await reap_host_run(run, 15)
+            await child.wait()
+        assert child.returncode == -9
+    finally:
+        if child.returncode is None:
+            child.kill()
+            await child.wait()

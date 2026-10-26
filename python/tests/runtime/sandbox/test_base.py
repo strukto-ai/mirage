@@ -250,6 +250,53 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
     assert [line for line, _, _ in box.execs] == ["yes", reap_line(exec_id, 2)]
 
 
+# A run in the box is one its runner has going, by its runtime and tag,
+# so the process plane lists it and a workspace that outlives this one
+# stops it; it goes once the run ends.
+@pytest.mark.asyncio
+async def test_a_run_in_the_box_is_kept_on_its_runner_while_it_runs():
+    seen: list[dict] = []
+
+    class WatchedBox(RecordingSandbox):
+        async def exec_line(
+            self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+        ) -> RunResult:
+            seen.append(dict(runner.runs))
+            return await super().exec_line(line, stdin, env, cwd)
+
+    box = WatchedBox(captures=("yes",))
+    ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
+
+    async def run() -> int:
+        return (await box.run_line(None, [], [], ctx)).exit_code
+
+    runner = ProcessTable(bind=run_with_execution).start(
+        session_id="s", command="yes", cwd=ctx.cwd, run=run
+    )
+    assert (await runner.join()).exit_code == 0
+    tag = box.exec_envs[0][EXEC_ID]
+    assert seen == [
+        {
+            f"box:{tag}": {
+                "runtime": "recbox",
+                "tag": tag,
+                "command": "/bin/sh -c yes",
+            }
+        }
+    ]
+    assert runner.runs == {}
+
+
+# A run another workspace left is stopped by its tag, the box reached
+# first if this runtime never was.
+@pytest.mark.asyncio
+async def test_a_left_run_is_reaped_by_its_tag():
+    box = RecordingSandbox(captures=("yes",))
+    await box.reap("t1", 15)
+    assert box.connected == 1
+    assert [line for line, _, _ in box.execs] == [reap_line("t1", 15)]
+
+
 @pytest.mark.asyncio
 async def test_a_box_that_stops_answering_holds_a_cancel_only_so_long(
     monkeypatch,

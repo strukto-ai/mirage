@@ -15,7 +15,7 @@
 import copy
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from mirage.shell.console import ConsoleStore, RAMConsoleStore
 from mirage.shell.job_table.store import JobStore
@@ -53,6 +53,8 @@ class RAMJobStore(JobStore):
         self._lists: dict[str, RecordFields] = {}
         self._consoles: dict[str, RAMConsoleStore] = {}
         self._leases: dict[str, float] = {}
+        self._processes: dict[str, dict[str, RecordFields]] = {}
+        self._stops: dict[str, list[tuple[int, int]]] = {}
         self._lock = threading.Lock()
 
     async def load(self, session_id: str) -> RecordFields | None:
@@ -92,10 +94,34 @@ class RAMJobStore(JobStore):
             return True
         return self._leases.get(owner, 0.0) > time.monotonic()
 
+    async def publish(
+        self, owner: str, processes: Mapping[str, RecordFields]
+    ) -> None:
+        with self._lock:
+            if processes:
+                self._processes[owner] = copy.deepcopy(dict(processes))
+            else:
+                self._processes.pop(owner, None)
+                self._stops.pop(owner, None)
+
+    async def processes(self) -> dict[str, dict[str, RecordFields]]:
+        with self._lock:
+            return copy.deepcopy(self._processes)
+
+    async def request_stop(self, owner: str, pid: int, signal: int) -> None:
+        with self._lock:
+            self._stops.setdefault(owner, []).append((pid, signal))
+
+    async def take_stops(self, owner: str) -> list[tuple[int, int]]:
+        with self._lock:
+            return self._stops.pop(owner, [])
+
     async def clear(self) -> None:
         self._lists.clear()
         self._consoles.clear()
         self._leases.clear()
+        self._processes.clear()
+        self._stops.clear()
 
     async def close(self) -> None:
         pass

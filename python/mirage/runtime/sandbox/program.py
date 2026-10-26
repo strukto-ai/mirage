@@ -16,7 +16,9 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import sys
+import time
 from collections.abc import Mapping, Sequence
 from contextvars import Context
 
@@ -28,6 +30,7 @@ from mirage.io.types import ByteSource
 from mirage.process.handle import ProcessHandle
 from mirage.runtime.sandbox.constants import (
     EXEC_PRELUDE,
+    HOST_START_SLACK_SECONDS,
     PIPE_DIAGNOSTIC_BYTES,
     PIPE_DIAGNOSTIC_WAIT_SECONDS,
     STOP_GRACE_SECONDS,
@@ -35,6 +38,8 @@ from mirage.runtime.sandbox.constants import (
     stop_signal,
 )
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
+from mirage.shell.join import shell_join
+from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +122,12 @@ async def run_program(
         if hint is None:
             raise
         raise RuntimeError(hint) from None
+    run_key = f"host:{process.pid}"
+    runner = current_caller().process
     if children is not None:
         children[process] = (transport, loop)
+        if runner is not None:
+            runner.add_run(run_key, host_run(process.pid, [executable, *args]))
     assert process.stdout is not None and process.stderr is not None
 
     writer = process.stdin
@@ -149,7 +158,6 @@ async def run_program(
             reading, erring, feeding, waiting
         )
     except BaseException:
-        runner = current_caller().process
         signum = stop_signal(runner)
         try:
             # The input ends first, as a pipe whose writer went away
@@ -185,12 +193,108 @@ async def run_program(
         await close_quietly(stdin)
         if children is not None:
             children.pop(process, None)
+            if runner is not None:
+                runner.drop_run(run_key)
     code = process.returncode if process.returncode is not None else 1
     return RunResult(
         stdout=stdout,
         stderr=stderr or None,
         exit_code=128 - code if code < 0 else code,
     )
+
+
+def host_run(pid: int, argv: Sequence[str]) -> dict[str, JsonValue]:
+    """How another workspace on this host reaches a child ``run_program``
+    started, which leads its own process group: the host, the PID, and
+    when it started, so a PID the host reused is never taken for it.
+    Mirrors TypeScript's ``hostRun``.
+
+    Args:
+        pid (int): the child's PID.
+        argv (Sequence[str]): what it runs.
+    """
+    return {
+        "host": socket.gethostname(),
+        "pid": pid,
+        "started_at": time.time(),
+        "command": shell_join(argv),
+    }
+
+
+async def _started_at(pid: int) -> float | None:
+    """When a host process started, as ``ps -o lstart`` prints it, in
+    epoch seconds; None once no process has the PID.
+
+    Args:
+        pid (int): the process.
+
+    Raises:
+        OSError: the host has no ``ps``.
+    """
+    ps = await asyncio.create_subprocess_exec(
+        "ps",
+        "-o",
+        "lstart=",
+        "-p",
+        str(pid),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        env={**os.environ, "LC_ALL": "C"},
+    )
+    out, _ = await ps.communicate()
+    text = out.decode().strip()
+    if not text:
+        return None
+    return time.mktime(time.strptime(text, "%a %b %d %H:%M:%S %Y"))
+
+
+async def reap_host_run(run: Mapping[str, JsonValue], signum: int) -> bool:
+    """Stop a host run a lapsed workspace left: its process group gets
+    ``signum``, then KILL after ``STOP_GRACE_SECONDS``. Mirrors
+    TypeScript's ``reapHostRun``.
+
+    Only a run of this host is reached, and only while its PID still
+    names a process started when the run did, to the second ``ps``
+    shows, so a PID the host reused is left alone.
+
+    Args:
+        run (Mapping[str, JsonValue]): the run as ``host_run`` keeps it.
+        signum (int): the first signal.
+
+    Returns:
+        bool: True once the run is stopped or gone; False when this
+        workspace cannot reach it.
+    """
+    pid, recorded = run.get("pid"), run.get("started_at")
+    if (
+        sys.platform == "win32"
+        or run.get("host") != socket.gethostname()
+        or not isinstance(pid, int)
+        or not isinstance(recorded, (int, float))
+    ):
+        return False
+    try:
+        started = await _started_at(pid)
+    except OSError as exc:
+        logger.debug("process %d not checked: %s", pid, exc)
+        return False
+    if started is None or abs(started - recorded) > HOST_START_SLACK_SECONDS:
+        return True
+    try:
+        os.killpg(pid, signum)
+        async with asyncio.timeout(STOP_GRACE_SECONDS):
+            while True:
+                await asyncio.sleep(STOP_POLL_SECONDS)
+                os.killpg(pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return True
+    except TimeoutError:
+        logger.debug("process group %d outlived signal %d", pid, signum)
+    try:
+        os.killpg(pid, 9)
+    except (ProcessLookupError, PermissionError):
+        logger.debug("process group %d has already exited", pid)
+    return True
 
 
 async def read_into(

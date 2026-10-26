@@ -24,6 +24,8 @@ import { ManualClock } from '../../utils/clock.ts'
 import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { ExecuteOptions, SessionExecuteOptions } from './types.ts'
 import { Session, Workspace } from './workspace.ts'
+import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
+import type { RunResult } from '../../runtime/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -381,4 +383,50 @@ describe('a manual clock workspace', () => {
       await ws.close()
     }
   })
+})
+
+/** A sandbox runtime that records the runs it was asked to reap. */
+class ReapedBox extends RemoteSandbox {
+  readonly name = 'reapbox'
+  readonly reaped: [string, number][] = []
+
+  constructor() {
+    super({ captures: ['never-run'] })
+  }
+
+  connect(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  protected execArgv(): Promise<RunResult> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+
+  override reap(tag: string, signum: number): Promise<void> {
+    this.reaped.push([tag, signum])
+    return Promise.resolve()
+  }
+}
+
+// A lapsed workspace's runs are stopped by whatever reaches them here: a
+// sandbox run by every runtime of its name, which stops it by its tag. A
+// run of another host, or of a runtime this workspace lacks, is answered
+// back as out of reach.
+it('reaps the runs its runtimes reach', async () => {
+  const box = new ReapedBox()
+  const ws = new Workspace({}, { runtimes: [box] })
+  try {
+    const mine = { runtime: 'reapbox', tag: 't1', command: 'x' }
+    const theirs = { runtime: 'otherbox', tag: 't2', command: 'y' }
+    const host = { host: 'elsewhere', pid: 41, started_at: 1 }
+    const reap = (
+      ws as unknown as {
+        reapRuns: (runs: Record<string, unknown>[], signum: number) => Promise<unknown[]>
+      }
+    ).reapRuns.bind(ws)
+    expect(await reap([mine, theirs, host], 15)).toEqual([theirs, host])
+    expect(box.reaped).toEqual([['t1', 15]])
+  } finally {
+    await ws.close()
+  }
 })

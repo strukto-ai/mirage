@@ -70,9 +70,28 @@ waits for it. Two workspaces never hand out the same job number.
 
 A job runs in the workspace that started it. If that workspace goes away
 without stopping it, the others report the job ended with status 129, as Bash
-reports a hangup, about 30 seconds later. `ps` and `kill PID` see only the
-workspace's own processes, `jobs -l` shows another workspace's job under its
-job number in place of a PID, and `$!` is set only where the job started.
+reports a hangup, about 30 seconds later. `jobs -l` shows another workspace's
+job under its job number in place of a PID, and `$!` is set only where the job
+started.
+
+`ps` lists the processes the other workspaces run too, within the session's
+process view, as `owner:pid`: the start of the owner's id, then its own PID.
+`ps -p owner:pid` selects one, and `kill owner:pid` stops it within about a
+second. The workspace's own processes keep plain PIDs. Each process in `ps`'s
+rows is followed by what it runs outside Mirage: a host program by its host
+PID, a sandbox run by its runtime and tag.
+
+```
+1	ps
+f8f8ed:2	sleep 300
+f8f8ed:3	python3 train.py
+-	└ host 19443: python3 train.py
+```
+
+When a workspace goes away without stopping what it ran, the next workspace
+that lists processes or waits on one of its jobs stops what it left: a sandbox
+run through a runtime of the same name, and a host program on the same
+machine while its PID still names the process that was started.
 
 ### Per-session mount modes
 

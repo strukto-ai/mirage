@@ -114,6 +114,11 @@ export const REAP_WAIT_SECONDS = 5
 // KILL, for its handlers to clean up: the stop line's same second.
 export const STOP_GRACE_SECONDS = 1
 
+// How far a host process's start, as `ps` prints it to the second, may be
+// from when a run recorded starting it and still be that run's: past it the
+// PID names another process, which a reap leaves alone.
+export const HOST_START_SLACK_SECONDS = 2
+
 // How often a stop in its grace checks whether the signalled group ended.
 export const STOP_POLL_SECONDS = 0.02
 

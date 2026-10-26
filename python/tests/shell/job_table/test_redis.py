@@ -106,6 +106,21 @@ async def test_clear_drops_lists_consoles_and_leases(stores, prefix):
 
 
 @pytest.mark.asyncio
+async def test_an_owners_processes_reach_every_store_and_go(stores, prefix):
+    a, b = stores(), stores()
+    record = {"pid": 2, "command": "sleep 30", "runs": []}
+    await a.publish("a", {"2": record})
+    assert await b.processes() == {"a": {"2": record}}
+    await b.request_stop("a", 2, 15)
+    await b.request_stop("a", 3, 9)
+    assert await a.take_stops("a") == [(2, 15), (3, 9)]
+    assert await a.take_stops("a") == []
+    await a.publish("a", {})
+    assert await b.processes() == {}
+    assert [k async for k in a._client.scan_iter(f"{prefix}*")] == []
+
+
+@pytest.mark.asyncio
 async def test_a_table_on_another_store_kills_and_waits_on_a_job(stores):
     a, b = JobTable(stores()), JobTable(stores())
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")

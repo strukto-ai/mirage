@@ -104,6 +104,8 @@ from mirage.runtime.binding import (
 )
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RoutePolicy
+from mirage.runtime.sandbox.base import RemoteSandbox
+from mirage.runtime.sandbox.program import reap_host_run
 from mirage.runtime.table import whole_line_runtime
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.secrets.config import EnvVar, SecretSource
@@ -337,10 +339,15 @@ class Workspace:
         # VFS overrides) stay open here; their origin closes them.
         self._shared_mounts: set[int] = set()
         self._drift = DriftQueue()
-        self.processes = ProcessTable(self._ids, bind=run_with_execution)
+        self.processes = ProcessTable(
+            self._ids,
+            bind=run_with_execution,
+            changed=lambda: self.job_table.processes_changed(),
+        )
         self.job_table = JobTable(
             stores.jobs, self.processes, clock=self._clock
         )
+        self.job_table.reaper = self._reap_runs
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: dict[ShellExecution, None] = {}
         self._admitting = asyncio.Event()
@@ -1368,6 +1375,40 @@ class Workspace:
     def runtimes(self) -> list[Runtime[Any]]:
         """The ordered runtime world, first capturer first."""
         return list(self._runtimes.entries)
+
+    async def _reap_runs(
+        self, runs: list[dict[str, JsonValue]], signum: int
+    ) -> list[dict[str, JsonValue]]:
+        """Stop native runs a lapsed workspace left, answering the ones
+        this workspace cannot reach: a host run directly when it runs on
+        this host, a sandbox run through every runtime of its name here,
+        each of which stops what its tag marks in the box it reaches.
+
+        Args:
+            runs (list[dict[str, JsonValue]]): the runs, as their process
+                records keep them.
+            signum (int): the first signal.
+        """
+        left: list[dict[str, JsonValue]] = []
+        for run in runs:
+            if "host" in run:
+                if not await reap_host_run(run, signum):
+                    left.append(run)
+                continue
+            reached = False
+            for runtime in self.runtimes():
+                if not isinstance(
+                    runtime, RemoteSandbox
+                ) or runtime.name != run.get("runtime"):
+                    continue
+                try:
+                    await runtime.reap(str(run.get("tag")), signum)
+                    reached = True
+                except Exception as exc:
+                    logger.debug("%s: run not reaped: %s", runtime.name, exc)
+            if not reached:
+                left.append(run)
+        return left
 
     def add_runtime(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
         """Append a runtime entry to the workspace's ordered set.

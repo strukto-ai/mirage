@@ -155,7 +155,7 @@ moves one part to a backend of its own.
 | `namespace` | unset | A separate store block for symlinks and file attributes. |
 | `observer` | unset | A separate store block for command history. |
 | `workspace` | unset | A separate store block for sessions and workspace metadata. |
-| `jobs` | unset | A separate store block for background jobs: each session's job list and each job's output. |
+| `jobs` | unset | A separate store block for background jobs: each session's job list and each job's output, and the processes each workspace runs. |
 
 A group block takes the same keys with `type` `ram`, `disk` or `redis`. Only
 `workspace` also accepts `s3`, which takes the [S3 config fields](/home/setup/s3)
@@ -163,8 +163,9 @@ with `key_prefix` defaulting to `mirage/`. `jobs` takes `ram` or `redis` only,
 and a `disk` store keeps its jobs in memory. Redis keeps a job's output for a
 day after its last write.
 
-Workspaces that share a store share each session's background jobs, as
-described in [Shell](/home/core/shell#jobs-across-workspaces).
+Workspaces that share a store share each session's background jobs and list
+each other's processes, as described in
+[Shell](/home/core/shell#jobs-across-workspaces).
 
 ```yaml
 store:

@@ -37,6 +37,7 @@ from mirage.runtime.types import (
     RunResult,
     RuntimeReach,
 )
+from mirage.shell.join import shell_join
 from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,16 @@ class RemoteSandbox(
             if refusal is not None:
                 return refusal
         exec_id = uuid.uuid4().hex
+        runner = current_caller().process
+        if runner is not None:
+            runner.add_run(
+                f"box:{exec_id}",
+                {
+                    "runtime": self.name,
+                    "tag": exec_id,
+                    "command": shell_join(argv),
+                },
+            )
         try:
             return await self._exec_argv(
                 argv,
@@ -196,10 +207,25 @@ class RemoteSandbox(
                 errors,
             )
         except asyncio.CancelledError:
-            runner = current_caller().process
             signum = runner.signal if runner is not None else None
             await asyncio.shield(self._reap(exec_id, signum or 15))
             raise
+        finally:
+            if runner is not None:
+                runner.drop_run(f"box:{exec_id}")
+
+    async def reap(self, tag: str, signum: int) -> None:
+        """Stop a run a lapsed workspace left in the box: every process
+        its ``EXEC_ID`` tag marks gets ``signum``, then KILL a second
+        later. A box this runtime does not reach holds none, and the
+        reap finds nothing there.
+
+        Args:
+            tag (str): the run's ``EXEC_ID``, as its process record has it.
+            signum (int): the first signal.
+        """
+        await self._ensure_connected()
+        await self._reap(tag, signum)
 
     async def _reap(self, exec_id: str, signum: int) -> None:
         """Stop what a cancelled run left in the box (``EXEC_ID``), for

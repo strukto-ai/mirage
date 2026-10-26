@@ -192,13 +192,13 @@ describe('handlePs', () => {
     const abort = new AbortController()
     const task = pendingRun(abort)
     await jt.submit({ command: 'sleep', run: task, abort, cwd: '/' })
-    const [out] = handlePs(jt, ['ps'])
+    const [out] = await handlePs(jt, ['ps'])
     expect(decode(out as Uint8Array)).toMatch(/1\tsleep/)
   })
 
-  it('returns empty output when no running jobs', () => {
+  it('returns empty output when no running jobs', async () => {
     const jt = new JobTable()
-    const [out] = handlePs(jt, ['ps'])
+    const [out] = await handlePs(jt, ['ps'])
     expect((out as Uint8Array).byteLength).toBe(0)
   })
 
@@ -754,8 +754,8 @@ it.each([
   [['-K'], 'unsupported SysV option'],
   [['--bogus'], 'unknown gnu long option'],
   [['bogus'], 'unsupported option (BSD syntax)'],
-] as const)('ps refuses %j in procps words', (args, message) => {
-  const [out, io] = handlePs(new JobTable(), ['ps', ...args])
+] as const)('ps refuses %j in procps words', async (args, message) => {
+  const [out, io] = await handlePs(new JobTable(), ['ps', ...args])
   expect(out).toBeNull()
   expect([io.exitCode, decode(io.stderr as Uint8Array)]).toEqual([
     1,
@@ -869,5 +869,85 @@ it("a substitution lists another's jobs", async () => {
   } finally {
     await a.close()
     await b.close()
+  }
+})
+
+/** `ps` on `ws` once it lists `row`, within five seconds. */
+async function listed(ws: Workspace, row: string): Promise<string> {
+  const deadline = Date.now() + 5000
+  for (;;) {
+    const out = stdoutStr(await ws.shell('ps', { sessionId: 's' }))
+    if (out.split('\n').includes(row)) return out
+    if (Date.now() > deadline) throw new Error(`ps never listed ${row}: ${out}`)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
+// ps lists the processes another workspace on the store runs as owner:pid,
+// -p selects one of them and -o prints its ids tagged; kill owner:pid asks
+// its owner to stop it.
+it("a workspace lists and kills another's process", async () => {
+  const store = new RAMWorkspaceStateStore()
+  const a = sharing(store)
+  const b = sharing(store)
+  try {
+    await a.shell('sleep 30 &', { sessionId: 's' })
+    const job = a.jobTable.get(1, 's')
+    const name = `${a.jobTable.owner.slice(0, 6)}:${String(job?.pid)}`
+    await listed(b, `${name}\tsleep 30`)
+    const picked = stdoutStr(await b.shell(`ps -p ${name} -o pid=,comm=`, { sessionId: 's' }))
+    expect(picked.split(/\s+/).filter((w) => w !== '')).toEqual([name, 'sleep'])
+    expect(stdoutStr(await b.shell(`kill ${name}; echo $?`, { sessionId: 's' }))).toBe('0\n')
+    await job?.process?.join()
+    expect([job?.status, job?.exitCode]).toEqual([JobStatus.KILLED, 143])
+  } finally {
+    await a.close()
+    await b.close()
+  }
+})
+
+// A runner's native runs follow it in the compact rows, on every workspace
+// that lists it.
+it('ps shows the native runs a process has going', async () => {
+  const store = new RAMWorkspaceStateStore()
+  const a = sharing(store)
+  const b = sharing(store)
+  try {
+    await a.shell('sleep 30 &', { sessionId: 's' })
+    const job = a.jobTable.get(1, 's')
+    job?.process?.addRun('box:t', { runtime: 'docker', tag: '0123456789abcdef', command: 'x' })
+    const run = '-\t└ docker 0123456789ab: x'
+    const own = stdoutStr(await a.shell('ps', { sessionId: 's' })).split('\n')
+    expect(own.slice(0, 2)).toEqual([`${String(job?.pid)}\tsleep 30`, run])
+    const lines = (await listed(b, run)).split('\n')
+    const name = `${a.jobTable.owner.slice(0, 6)}:${String(job?.pid)}`
+    expect(lines[lines.indexOf(`${name}\tsleep 30`) + 1]).toBe(run)
+    await a.shell('kill %1', { sessionId: 's' })
+  } finally {
+    await a.close()
+    await b.close()
+  }
+})
+
+// An owner:pid no live workspace answers to is no such process; one with no
+// owner or no number is no process ID at all.
+it('kill refuses an owner:pid nobody runs', async () => {
+  const ws = new Workspace({}, { sessionId: 's' })
+  try {
+    const killed = await ws.shell('kill ab12:3 :3 ab12:x', { sessionId: 's' })
+    expect(killed.exitCode).toBe(1)
+    expect(
+      stderrStr(killed)
+        .split('\n')
+        .filter((l) => l !== ''),
+    ).toEqual([
+      'bash: kill: (ab12:3) - No such process',
+      'bash: kill: :3: arguments must be process or job IDs',
+      'bash: kill: ab12:x: arguments must be process or job IDs',
+    ])
+    const picked = await ws.shell('ps -p ab12:3', { sessionId: 's' })
+    expect([picked.exitCode, stdoutStr(picked)]).toEqual([1, ''])
+  } finally {
+    await ws.close()
   }
 })

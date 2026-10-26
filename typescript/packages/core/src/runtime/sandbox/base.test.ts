@@ -26,6 +26,7 @@ import { isLineExecutor } from '../mixin.ts'
 import type { RunResult } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
 import { ProcessTable } from '../../process/table.ts'
+import type { ProcessHandle } from '../../process/handle.ts'
 import { runWithExecution } from '../../context/session_context.ts'
 
 const ENC = new TextEncoder()
@@ -306,6 +307,49 @@ describe('RemoteSandbox', () => {
     expect((await runner.join()).exitCode).toBe(130)
     const execId = box.execs[0]?.[2][EXEC_ID] ?? ''
     expect(box.execs.map(([line]) => line)).toEqual(['yes', reapLine(execId, 2)])
+  })
+
+  // A run in the box is one its runner has going, by its runtime and tag,
+  // so the process plane lists it and a workspace that outlives this one
+  // stops it; it goes once the run ends.
+  it('keeps a run in the box on its runner while it runs', async () => {
+    const seen: Record<string, unknown>[] = []
+    let runner: ProcessHandle | null = null
+    class WatchedBox extends RecordingSandbox {
+      override execLine(
+        line: string,
+        stdin: Uint8Array | null,
+        env: Record<string, string>,
+        cwd: string,
+      ): Promise<RunResult> {
+        seen.push({ ...runner?.runs })
+        return super.execLine(line, stdin, env, cwd)
+      }
+    }
+    const box = new WatchedBox({ captures: ['yes'] })
+    const ctx = { stdin: null, flags: { c: 'yes' }, env: {}, cwd: PathSpec.fromStrPath('/') }
+    runner = new ProcessTable(runWithExecution).start({
+      sessionId: 's',
+      command: 'yes',
+      cwd: ctx.cwd,
+      cancel: () => undefined,
+      run: async () => (await box.runLine(undefined, [], [], ctx)).exitCode,
+    })
+    expect((await runner.join()).exitCode).toBe(0)
+    const tag = box.execs[0]?.[2][EXEC_ID] ?? ''
+    expect(seen).toEqual([
+      { [`box:${tag}`]: { runtime: 'recbox', tag, command: '/bin/sh -c yes' } },
+    ])
+    expect(runner.runs).toEqual({})
+  })
+
+  // A run another workspace left is stopped by its tag, the box reached
+  // first if this runtime never was.
+  it('reaps a left run by its tag', async () => {
+    const box = new RecordingSandbox({ captures: ['yes'] })
+    await box.reap('t1', 15)
+    expect(box.connectedCount).toBe(1)
+    expect(box.execs.map(([line]) => line)).toEqual([reapLine('t1', 15)])
   })
 
   it('holds a cancel only so long when the box stops answering', async () => {

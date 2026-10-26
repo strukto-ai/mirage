@@ -22,6 +22,7 @@ from mirage.io import IOResult
 from mirage.policy.profile import SessionProfile
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.job_table import Job, JobStatus, JobTable
+from mirage.shell.job_table import table as job_table_module
 from mirage.types import MountMode, PathSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
@@ -1414,3 +1415,91 @@ async def test_a_substitution_lists_anothers_jobs():
     finally:
         await a.close()
         await b.close()
+
+
+async def _listed(ws: Workspace, row: str) -> str:
+    """``ps`` on ``ws`` once it lists ``row``, within five seconds.
+
+    Args:
+        ws (Workspace): the workspace to list on.
+        row (str): a line the listing has to hold.
+    """
+    async with asyncio.timeout(5):
+        while True:
+            out = (await ws.shell("ps", session_id="s")).stdout.decode()
+            if row in out.splitlines():
+                return out
+            await asyncio.sleep(0.01)
+
+
+# ps lists the processes another workspace on the store runs as
+# owner:pid, -p selects one of them and -o prints its ids tagged; kill
+# owner:pid asks its owner to stop it.
+@pytest.mark.asyncio
+async def test_a_workspace_lists_and_kills_anothers_process(monkeypatch):
+    monkeypatch.setattr(job_table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMWorkspaceStateStore()
+    a, b = _sharing(store), _sharing(store)
+    try:
+        await a.shell("sleep 30 &", session_id="s")
+        job = a.job_table.get(1, "s")
+        assert job is not None and job.process is not None
+        name = f"{a.job_table.owner[:6]}:{job.pid}"
+        await _listed(b, f"{name}\tsleep 30")
+        picked = await b.shell(f"ps -p {name} -o pid=,comm=", session_id="s")
+        assert picked.stdout.decode().split() == [name, "sleep"]
+        killed = await b.shell(f"kill {name}; echo $?", session_id="s")
+        assert killed.stdout == b"0\n"
+        async with asyncio.timeout(5):
+            await job.process.join()
+        assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
+    finally:
+        await a.close()
+        await b.close()
+
+
+# A runner's native runs follow it in the compact rows, on every
+# workspace that lists it.
+@pytest.mark.asyncio
+async def test_ps_shows_the_native_runs_a_process_has_going(monkeypatch):
+    monkeypatch.setattr(job_table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMWorkspaceStateStore()
+    a, b = _sharing(store), _sharing(store)
+    try:
+        await a.shell("sleep 30 &", session_id="s")
+        job = a.job_table.get(1, "s")
+        assert job is not None and job.process is not None
+        job.process.add_run(
+            "box:t",
+            {"runtime": "docker", "tag": "0123456789abcdef", "command": "x"},
+        )
+        run = "-\t└ docker 0123456789ab: x"
+        own = (await a.shell("ps", session_id="s")).stdout.decode()
+        assert own.splitlines()[:2] == [f"{job.pid}\tsleep 30", run]
+        listed = await _listed(b, run)
+        name = f"{a.job_table.owner[:6]}:{job.pid}"
+        lines = listed.splitlines()
+        assert lines[lines.index(f"{name}\tsleep 30") + 1] == run
+        await a.shell("kill %1", session_id="s")
+    finally:
+        await a.close()
+        await b.close()
+
+
+# An owner:pid no live workspace answers to is no such process; one with
+# no owner or no number is no process ID at all.
+@pytest.mark.asyncio
+async def test_kill_refuses_an_owner_pid_nobody_runs():
+    ws = Workspace({}, session_id="s")
+    try:
+        killed = await ws.shell("kill ab12:3 :3 ab12:x", session_id="s")
+        assert killed.exit_code == 1
+        assert killed.stderr.decode().splitlines() == [
+            "bash: kill: (ab12:3) - No such process",
+            "bash: kill: :3: arguments must be process or job IDs",
+            "bash: kill: ab12:x: arguments must be process or job IDs",
+        ]
+        listed = await ws.shell("ps -p ab12:3", session_id="s")
+        assert (listed.exit_code, listed.stdout) == (1, b"")
+    finally:
+        await ws.close()

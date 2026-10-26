@@ -41,7 +41,9 @@ import { abortable, mergeSignals } from '../../utils/abort.ts'
 import type { SessionView } from '../../view/types.ts'
 import { type Decisions, isPending } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
-import type { Refusal } from '../../types.ts'
+import { PathSpec, type JsonValue, type Refusal } from '../../types.ts'
+import { DEFAULT_PROCESS_PERMISSIONS } from '../../process/config.ts'
+import type { RecordFields } from '../record/types.ts'
 import type { ProcessInfo, ProcessState } from '../../process/types.ts'
 import type { ProcessView } from '../../process/view.ts'
 import { UNKNOWN_NAME } from '../../commands/builtin/utils/identity.ts'
@@ -885,7 +887,8 @@ function runnerless(jobs: Job[], operand: string): Job | null {
  * signal cancels the runner with it. Every operand is tried and each failure is
  * named in bash's words; the status is 0 when any operand was signalled,
  * as bash's is. A job spec is `%N`; a negative number is a process group,
- * which no managed runner leads.
+ * which no managed runner leads. `owner:pid` names another workspace's
+ * runner, as `ps` lists it: its owner stops it once it takes the stop.
  */
 export async function handleKill(
   jobTable: JobTable,
@@ -928,7 +931,31 @@ export async function handleKill(
   const errors: string[] = []
   let signalled = false
   await jobTable.sync(sid)
+  const permissions = session?.processes ?? DEFAULT_PROCESS_PERMISSIONS
   for (const operand of words) {
+    const colon = operand.indexOf(':')
+    if (colon >= 0 && !operand.startsWith('%')) {
+      const owner = operand.slice(0, colon)
+      const owned = operand.slice(colon + 1)
+      if (owner === '' || !/^[0-9]+$/.test(owned)) {
+        errors.push(`${voice}kill: ${operand}: arguments must be process or job IDs`)
+        continue
+      }
+      let found: boolean
+      try {
+        found = await jobTable.signalRemote(owner, Number(owned), signal, sid, permissions)
+      } catch (err) {
+        if ((err as { code?: unknown }).code !== 'EPERM') throw err
+        errors.push(`${voice}kill: (${operand}) - Operation not permitted`)
+        continue
+      }
+      if (!found) {
+        errors.push(`${voice}kill: (${operand}) - No such process`)
+        continue
+      }
+      signalled = true
+      continue
+    }
     const jobs = jobTable.listJobs(sid)
     const [pid, refusal] = killPid(jobs, operand)
     if (pid === null) {
@@ -1187,18 +1214,32 @@ const PS_STATES: Readonly<Record<ProcessState, string>> = {
 // Letters that select every process: SysV -e/-A/-a/-x, BSD a/x.
 const PS_ALL = new Set(['e', 'A', 'a', 'x'])
 
-/** What a ps line selects and prints. */
+/**
+ * What a ps line selects and prints. `remote` selects other workspaces'
+ * processes, `owner:pid`, by owner prefix.
+ */
 interface PsOptions {
   readonly pids: ReadonlySet<number>
+  readonly remote: readonly (readonly [string, number])[]
   readonly all: boolean
   readonly columns: readonly (readonly [string, string])[]
 }
 
-/** One `-p` list, refused in procps's words. */
-function psPids(value: string, option: string): number[] {
+/**
+ * One `-p` list, refused in procps's words: this workspace's PIDs, and
+ * other workspaces' as `owner:pid`.
+ */
+function psPids(value: string, option: string): (number | [string, number])[] {
   const tokens = value.split(/[\s,]+/).filter((t) => t !== '')
   if (tokens.length === 0) throw new Error(`list of process IDs must follow ${option}`)
   return tokens.map((token) => {
+    const colon = token.indexOf(':')
+    if (colon >= 0) {
+      const owner = token.slice(0, colon)
+      const pid = token.slice(colon + 1)
+      if (owner === '' || !/^[0-9]+$/.test(pid)) throw new Error('process ID list syntax error')
+      return [owner, Number(pid)]
+    }
     if (!/^[+-]?[0-9]+$/.test(token)) throw new Error('process ID list syntax error')
     const number = Number(token)
     if (number <= 0 || number > MAX_PID_OPERAND) throw new Error('process ID out of range')
@@ -1231,6 +1272,13 @@ function psColumns(value: string, option: string): [string, string][] {
  */
 function parsePs(words: string[]): PsOptions {
   const pids = new Set<number>()
+  const remote: [string, number][] = []
+  const select = (picked: (number | [string, number])[]) => {
+    for (const pid of picked) {
+      if (typeof pid === 'number') pids.add(pid)
+      else remote.push(pid)
+    }
+  }
   const columns: [string, string][] = []
   let all = false
   let at = 0
@@ -1241,7 +1289,7 @@ function parsePs(words: string[]): PsOptions {
       const option = equal < 0 ? word : word.slice(0, equal)
       if (option !== '--pid' && option !== '--format') throw new Error('unknown gnu long option')
       const value = equal < 0 ? (words[at++] ?? '') : word.slice(equal + 1)
-      if (option === '--pid') for (const pid of psPids(value, option)) pids.add(pid)
+      if (option === '--pid') select(psPids(value, option))
       else for (const item of psColumns(value, option)) columns.push(item)
       continue
     }
@@ -1262,11 +1310,11 @@ function parsePs(words: string[]): PsOptions {
       if (flag !== 'p' && flag !== 'o') throw new Error('unsupported SysV option')
       const value = letters !== '' ? letters : (words[at++] ?? '')
       letters = ''
-      if (flag === 'p') for (const pid of psPids(value, '-p')) pids.add(pid)
+      if (flag === 'p') select(psPids(value, '-p'))
       else for (const item of psColumns(value, '-o')) columns.push(item)
     }
   }
-  return { pids, all, columns }
+  return { pids, remote, all, columns }
 }
 
 /** One row in procps's layout: each column padded but the last. */
@@ -1334,18 +1382,19 @@ function started(fact: string, info: ProcessInfo, ctx: PsContext): string {
  * profile this one cannot name. A runner of the calling session belongs to the
  * session `$$` leads; another session's to its own group.
  */
-function psCell(key: string, info: ProcessInfo, ctx: PsContext): string {
+function psCell(key: string, info: ProcessInfo, ctx: PsContext, owner = ''): string {
   const fact = PS_COLUMNS[key]?.[3] ?? ''
   const fixed = PS_FIXED[fact]
   if (fixed !== undefined) return fixed
+  const tag = owner !== '' ? `${owner}:` : ''
   const session =
-    info.sessionId === ctx.sessionId && ctx.shellPid !== null
+    owner === '' && info.sessionId === ctx.sessionId && ctx.shellPid !== null
       ? ctx.shellPid
       : info.groupId || info.pid
-  if (fact === 'pid') return String(info.pid)
-  if (fact === 'ppid') return String(info.parentPid ?? 0)
-  if (fact === 'pgid') return String(info.groupId || info.pid)
-  if (fact === 'sid') return String(session)
+  if (fact === 'pid') return `${tag}${String(info.pid)}`
+  if (fact === 'ppid') return info.parentPid ? `${tag}${String(info.parentPid)}` : '0'
+  if (fact === 'pgid') return `${tag}${String(info.groupId || info.pid)}`
+  if (fact === 'sid') return `${tag}${String(session)}`
   if (fact === 'stat' || fact === 'state') {
     return PS_STATES[info.state] + (fact === 'stat' && info.pid === session ? 's' : '')
   }
@@ -1363,6 +1412,33 @@ function psCell(key: string, info: ProcessInfo, ctx: PsContext): string {
   return info.command
 }
 
+/** Another workspace's runner as its process record keeps it. */
+function remoteInfo(record: RecordFields): ProcessInfo {
+  return {
+    pid: record.pid as number,
+    sessionId: record.session as string,
+    command: record.command as string,
+    cwd: PathSpec.fromStrPath(record.cwd as string),
+    startedAt: record.started_at as number,
+    executionId: record.execution as string,
+    state: record.state as ProcessState,
+    cancellationRequested: false,
+    exitCode: null,
+    failure: null,
+    parentPid: record.parent as number | null,
+    groupId: record.group as number,
+  }
+}
+
+/**
+ * Where a native run goes on, as `ps` names it: `host PID` for a host
+ * program, the runtime and the start of its tag for a sandbox's.
+ */
+function runWhere(run: Record<string, JsonValue>): string {
+  if ('host' in run) return `host ${String(run.pid as number)}`
+  return `${run.runtime as string} ${(run.tag as string).slice(0, 12)}`
+}
+
 /**
  * List managed runners with procps's selection and `-o` columns. A runner
  * has no CPU, RSS or TTY accounting, so without `-o` the rows stay mirage's
@@ -1371,13 +1447,19 @@ function psCell(key: string, info: ProcessInfo, ctx: PsContext): string {
  * a header row prints unless every header is empty. Selecting nothing (`-p`
  * of an absent PID) exits 1, as procps does, and an option error is
  * procps's message and usage.
+ *
+ * The runners other workspaces on a shared store run follow this
+ * workspace's, as `owner:pid` with the owner's id shortened, within the
+ * same view. In the compact rows each runner is followed by the native runs
+ * it has going, a host program by its host PID and a sandbox's by its
+ * runtime and tag, each as `-<TAB>└ where: command`.
  */
-export function handlePs(
+export async function handlePs(
   jobTable: JobTable,
   parts: string[],
   session: SessionState | null = null,
   _view: SessionView | null = null,
-): JobHandlerResult {
+): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
   let options: PsOptions
   try {
@@ -1385,9 +1467,30 @@ export function handlePs(
   } catch (err) {
     return jobResult(cmdStr, `error: ${(err as Error).message}\n${PS_USAGE}`, 1)
   }
-  const processes = processView(jobTable, session)
+  const sid = sessionOf(session)
+  const permissions = session?.processes ?? DEFAULT_PROCESS_PERMISSIONS
+  const every = options.all || (options.pids.size === 0 && options.remote.length === 0)
+  const runs = new Map(
+    jobTable.processes.live().map((handle) => [handle.info.pid, Object.values(handle.runs)]),
+  )
+  const rows: [string, ProcessInfo, Record<string, JsonValue>[]][] = processView(jobTable, session)
     .list()
-    .filter((info) => options.all || options.pids.size === 0 || options.pids.has(info.pid))
+    .filter((info) => every || options.pids.has(info.pid))
+    .map((info) => ['', info, runs.get(info.pid) ?? []])
+  for (const [owner, records] of Object.entries(await jobTable.remoteProcesses())) {
+    for (const record of Object.values(records)) {
+      if (permissions.list === 'session' && record.session !== sid) continue
+      if (
+        every ||
+        options.remote.some(([prefix, pid]) => owner.startsWith(prefix) && record.pid === pid)
+      )
+        rows.push([
+          owner.slice(0, 6),
+          remoteInfo(record),
+          record.runs as Record<string, JsonValue>[],
+        ])
+    }
+  }
   let lines: string[]
   if (options.columns.length > 0) {
     const keys = options.columns.map(([key]) => key)
@@ -1395,13 +1498,13 @@ export function handlePs(
       now: Date.now() / 1000,
       zone: (session !== null ? zoneFromEnv(session.env) : null) ?? LOCAL_ZONE,
       group: session?.profile ?? null,
-      sessionId: sessionOf(session),
+      sessionId: sid,
       shellPid: session?.shellPid ?? null,
     }
-    lines = processes.map((info) =>
+    lines = rows.map(([owner, info]) =>
       psRow(
         keys,
-        keys.map((key) => psCell(key, info, ctx)),
+        keys.map((key) => psCell(key, info, ctx, owner)),
       ),
     )
     if (options.columns.some(([, header]) => header !== ''))
@@ -1412,9 +1515,12 @@ export function handlePs(
         ),
       )
   } else {
-    lines = processes.map((info) => `${String(info.pid)}\t${info.command}`)
+    lines = rows.flatMap(([owner, info, native]) => [
+      `${owner !== '' ? `${owner}:` : ''}${String(info.pid)}\t${info.command}`,
+      ...native.map((run) => `-\t└ ${runWhere(run)}: ${run.command as string}`),
+    ])
   }
-  const code = processes.length > 0 ? 0 : 1
+  const code = rows.length > 0 ? 0 : 1
   const out = encodeText(lines.length > 0 ? lines.join('\n') + '\n' : '')
   return [
     out,

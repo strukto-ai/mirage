@@ -26,6 +26,8 @@ import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
+import { reapHostRun } from './runtime/sandbox/program.ts'
+import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import './commands/builtin/utils/http.ts'
 import './io/spool.ts'
@@ -39,6 +41,11 @@ export class Workspace extends CoreWorkspace {
   protected static override async buildSavedVfs(entry: MountSnapshot): Promise<BaseVFS | null> {
     const build = savedVfsBuild(entry, (name) => knownVfsNames().includes(name))
     return build === null ? null : buildVfs(build.name, build.config)
+  }
+
+  /** A host run a lapsed workspace left reaches this host's processes. */
+  protected override reapHostRun(run: Record<string, JsonValue>, signum: number): Promise<boolean> {
+    return reapHostRun(run, signum)
   }
 
   private fuseSetupPromise: Promise<void> | null = null

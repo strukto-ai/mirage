@@ -28,6 +28,10 @@ export const WATCH_RETRY_SECONDS = 1
 // could read.
 export const LIST_CHECK_SECONDS = 10
 
+// How often a workspace on a shared store publishes the processes it runs,
+// and takes the stops other workspaces asked of it, while it runs any.
+export const PUBLISH_SECONDS = 1
+
 // How long an owner's lease lasts on a store other processes share. The
 // owner renews it at a third of that while it runs jobs, so a workspace that
 // dies is seen as gone at most this long after its last renewal.

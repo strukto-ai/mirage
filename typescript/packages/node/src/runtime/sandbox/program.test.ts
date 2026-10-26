@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { spawnSync, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { closeChildren, openProgramPipe, runProgram } from './program.ts'
+import { closeChildren, hostRun, openProgramPipe, reapHostRun, runProgram } from './program.ts'
 import { ProcessTable } from '@struktoai/mirage-core/process/table'
 import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
@@ -533,5 +533,68 @@ describe('openProgramPipe', () => {
     await delay(500)
     const stopped = pipe.stop().then(() => 'stopped')
     expect(await Promise.race([stopped, delay(5000, 'stuck', { ref: false })])).toBe('stopped')
+  })
+})
+
+describe('host runs', () => {
+  // A host program a runtime keeps as its child is one of the runner's
+  // native runs while it runs: this host, its PID and when it started, so a
+  // workspace that outlives this one can stop it; it goes once it ended.
+  it("keeps a kept child as one of its runner's native runs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const children = new Set<ChildProcess>()
+    const runner = new ProcessTable(runWithExecution).start({
+      sessionId: 's',
+      command: 'sh',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      run: async () =>
+        (
+          await runProgram('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.3`], null, {
+            children,
+          })
+        ).exitCode,
+    })
+    const pid = await escapedPid(pidFile)
+    const run = runner.runs[`host:${String(pid)}`]
+    expect([run?.host, run?.pid, run?.command]).toEqual([
+      hostname(),
+      pid,
+      `sh -c 'echo $$ > ${pidFile}; sleep 0.3'`,
+    ])
+    expect(Math.abs((run?.started_at as number) - Date.now() / 1000)).toBeLessThan(5)
+    expect((await runner.join()).exitCode).toBe(0)
+    expect(runner.runs).toEqual({})
+  })
+
+  // A run a lapsed workspace left on this host is stopped, its whole group,
+  // while its PID still names the process it started; a PID that names a
+  // later process, or a run of another host, is left alone.
+  it('reaps a left host run only while it is the same', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const child = spawn(
+      'sh',
+      ['-c', `trap '' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`],
+      { detached: true, stdio: 'ignore' },
+    )
+    const exited = new Promise<string | null>((resolve) => {
+      child.once('exit', (_code, signal) => {
+        resolve(signal)
+      })
+    })
+    const pid = await escapedPid(pidFile)
+    const run = hostRun(pid, ['sh'])
+    try {
+      expect(await reapHostRun({ ...run, host: 'elsewhere' }, 15)).toBe(false)
+      expect(await reapHostRun({ ...run, started_at: null }, 15)).toBe(false)
+      expect(await reapHostRun({ ...run, started_at: 0 }, 15)).toBe(true)
+      expect(child.exitCode === null && child.signalCode === null).toBe(true)
+      expect(await reapHostRun(run, 15)).toBe(true)
+      expect(await exited).toBe('SIGKILL')
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) process.kill(-pid, 'SIGKILL')
+    }
   })
 })

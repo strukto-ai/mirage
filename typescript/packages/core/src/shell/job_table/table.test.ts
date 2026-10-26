@@ -25,6 +25,7 @@ import {
 } from '../console/index.ts'
 import { LIST_CHECK_SECONDS, STOP_WAIT_SECONDS, WATCH_RETRY_SECONDS } from './constants.ts'
 import { RAMJobStore } from './ram.ts'
+import { ProcessTable } from '../../process/table.ts'
 import { JobTable } from './table.ts'
 import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 import { ManualClock } from '../../utils/clock.ts'
@@ -1484,5 +1485,135 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+/** A table whose processes are published on `store`, as a workspace's are. */
+function publishing(store: RAMJobStore): JobTable {
+  const processes: ProcessTable = new ProcessTable(undefined, undefined, () => {
+    table.processesChanged()
+  })
+  const table: JobTable = new JobTable(store, processes)
+  return table
+}
+
+/** Poll `check` until it holds, for at most five seconds. */
+async function until(check: () => Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + 5000
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error('condition never held')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
+describe('JobTable process plane', () => {
+  // A table on a shared store publishes the processes it runs while it runs
+  // any, and its record goes once it runs none; another table lists them.
+  it('publishes its processes while it runs any', async () => {
+    const store = new RAMJobStore(30)
+    const [a, b] = [publishing(store), publishing(store)]
+    const abort = new AbortController()
+    const job = await a.submit({
+      command: 'sleep 30',
+      run: pending(abort),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    await until(async () => a.owner in (await b.remoteProcesses()))
+    const record = (await b.remoteProcesses())[a.owner]?.[String(job.pid)]
+    expect([record?.command, record?.session, record?.runs]).toEqual(['sleep 30', 's', []])
+    expect(await a.remoteProcesses()).toEqual({})
+    expect(await a.kill(job.id, 's')).toBe(true)
+    await until(async () => Object.keys(await store.processes()).length === 0)
+    await a.close()
+    await b.close()
+  })
+
+  // A stop another table asks of a process reaches its owner, which stops it
+  // as kill does: a job's runner ends the job killed by that signal.
+  it("stops the owner's job when another table asks", async () => {
+    const store = new RAMJobStore(30)
+    const [a, b] = [publishing(store), publishing(store)]
+    const abort = new AbortController()
+    const job = await a.submit({
+      command: 'sleep 30',
+      run: pending(abort),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    await until(async () => a.owner in (await b.remoteProcesses()))
+    const every = { list: 'workspace', kill: 'workspace', max: null } as const
+    expect(await b.signalRemote(a.owner.slice(0, 6), job.pid, 0, 't', every)).toBe(true)
+    expect(job.status).toBe(JobStatus.RUNNING)
+    expect(await b.signalRemote(a.owner.slice(0, 6), job.pid, 15, 't', every)).toBe(true)
+    await job.process?.join()
+    expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
+    expect(await b.signalRemote('ffffffff', job.pid, 15, 't', every)).toBe(false)
+    await a.close()
+    await b.close()
+  })
+
+  // Another table's process is seen and stopped within the session's view:
+  // one another session runs is not found, or not permitted to stop.
+  it("keeps a remote signal to the session's view", async () => {
+    const store = new RAMJobStore(30)
+    const [a, b] = [publishing(store), publishing(store)]
+    const abort = new AbortController()
+    const job = await a.submit({
+      command: 'sleep 30',
+      run: pending(abort),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    await until(async () => a.owner in (await b.remoteProcesses()))
+    const own = { list: 'session', kill: 'session', max: null } as const
+    const seen = { list: 'workspace', kill: 'session', max: null } as const
+    expect(await b.signalRemote(a.owner, job.pid, 15, 't', own)).toBe(false)
+    await expect(b.signalRemote(a.owner, job.pid, 15, 't', seen)).rejects.toMatchObject({
+      code: 'EPERM',
+    })
+    expect(await b.signalRemote(a.owner, job.pid, 15, 's', own)).toBe(true)
+    await a.close()
+    await b.close()
+  })
+
+  // A lapsed owner's processes are not listed; the native runs it left are
+  // handed to the reaper, and its record keeps only the runs nobody here
+  // reached.
+  it.each([false, true])("reaps a lapsed owner's runs (one unreached: %s)", async (unreached) => {
+    const store = new RAMJobStore(30)
+    const host = { host: 'h', pid: 41, started_at: 1, command: 'x' }
+    const box = { runtime: 'docker', tag: 't', command: 'y' }
+    await store.publish('dead', {
+      '2': { pid: 2, session: 's', runs: [host] },
+      '3': { pid: 3, session: 's', runs: [box] },
+    })
+    const reaped: [unknown[], number][] = []
+    const b = new JobTable(store)
+    b.reaper = (runs, signum) => {
+      reaped.push([runs, signum])
+      return Promise.resolve(runs.filter((run) => unreached && run.tag === 't'))
+    }
+    expect(await b.remoteProcesses()).toEqual({})
+    await until(
+      async () => reaped.length === 1 && (await store.processes()).dead?.['2'] === undefined,
+    )
+    expect(reaped).toEqual([[[host, box], 15]])
+    expect(await store.processes()).toEqual(
+      unreached ? { dead: { '3': { pid: 3, session: 's', runs: [box] } } } : {},
+    )
+    await b.close()
+  })
+
+  // A table that closes drops its record, so it never reads as lapsed.
+  it('drops its record once closed', async () => {
+    const store = new RAMJobStore(30)
+    const a = new JobTable(store)
+    await store.publish(a.owner, { '2': { pid: 2, runs: [] } })
+    await a.close()
+    expect(await store.processes()).toEqual({})
   })
 })

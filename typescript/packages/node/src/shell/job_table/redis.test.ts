@@ -112,6 +112,30 @@ describe.skipIf(REDIS_URL === '')('RedisJobStore', () => {
     expect(keys).toEqual([])
   })
 
+  it("reaches an owner's processes and stops from every store, and drops them", async () => {
+    const [a, b] = [open(), open()]
+    const record = { pid: 2, command: 'sleep 30', runs: [] }
+    await a.publish('a', { '2': record })
+    expect(await b.processes()).toEqual({ a: { '2': record } })
+    await b.requestStop('a', 2, 15)
+    await b.requestStop('a', 3, 9)
+    expect(await a.takeStops('a')).toEqual([
+      [2, 15],
+      [3, 9],
+    ])
+    expect(await a.takeStops('a')).toEqual([])
+    await a.publish('a', {})
+    expect(await b.processes()).toEqual({})
+    const client = createClient({ url: REDIS_URL })
+    await client.connect()
+    const keys: string[] = []
+    for await (const k of client.scanIterator({ MATCH: `${prefix}*` })) {
+      keys.push(...(Array.isArray(k) ? k : [k]))
+    }
+    await client.quit()
+    expect(keys).toEqual([])
+  })
+
   it('lets a table on another store kill and wait on a job', async () => {
     const a = new JobTable(open())
     const b = new JobTable(open())

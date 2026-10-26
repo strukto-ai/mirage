@@ -164,6 +164,22 @@ describe('ProcessHandle', () => {
     expect([done.exitCode, handle.signal, children]).toEqual([137, 9, [15, 9]])
   })
 
+  // The native runs a runner has going are kept under their keys until each
+  // ends, and the view of them is a copy.
+  it('keeps the native runs a runner has going', () => {
+    const handle = new ProcessHandle(info(), () => Promise.resolve(3), ignore, ignore)
+    handle.addRun('host:41', { host: 'h', pid: 41 })
+    handle.addRun('box:t', { runtime: 'docker', tag: 't' })
+    delete handle.runs['host:41']
+    expect(handle.runs).toEqual({
+      'host:41': { host: 'h', pid: 41 },
+      'box:t': { runtime: 'docker', tag: 't' },
+    })
+    handle.dropRun('host:41')
+    handle.dropRun('host:41')
+    expect(handle.runs).toEqual({ 'box:t': { runtime: 'docker', tag: 't' } })
+  })
+
   // What a program the runner started exited with after handling the
   // signal is the program's, kept apart from the runner's own 128 plus it.
   it('keeps the status of a program that handled the signal', async () => {

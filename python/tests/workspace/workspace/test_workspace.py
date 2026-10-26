@@ -25,6 +25,7 @@ from mirage.cache.index import IndexConfig
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.context import reset_current_session, set_current_session
+from mirage.runtime.sandbox import RemoteSandbox
 from mirage.types import MountBackend, MountMode
 from mirage.utils.clock import ManualClock
 from mirage.utils.ids import SeededIdSource, SystemIdSource
@@ -802,3 +803,38 @@ async def test_close_cancels_streamed_lines_in_the_order_they_started(
     started = [await ws.shell("sleep 100", stream=True) for _ in range(4)]
     await ws.close()
     assert cancelled[: len(started)] == started
+
+
+class _ReapedBox(RemoteSandbox):
+    """A sandbox runtime that records the runs it was asked to reap."""
+
+    name = "reapbox"
+
+    def __init__(self) -> None:
+        super().__init__(captures=("never-run",))
+        self.reaped: list[tuple[str, int]] = []
+
+    async def connect(self) -> None:
+        return None
+
+    async def reap(self, tag: str, signum: int) -> None:
+        self.reaped.append((tag, signum))
+
+
+# A lapsed workspace's runs are stopped by whatever reaches them here: a
+# sandbox run by every runtime of its name, which stops it by its tag. A
+# run of another host, or of a runtime this workspace lacks, is answered
+# back as out of reach.
+@pytest.mark.asyncio
+async def test_a_workspace_reaps_the_runs_its_runtimes_reach():
+    box = _ReapedBox()
+    ws = Workspace({}, runtimes=[box])
+    try:
+        mine = {"runtime": "reapbox", "tag": "t1", "command": "x"}
+        theirs = {"runtime": "otherbox", "tag": "t2", "command": "y"}
+        host = {"host": "elsewhere", "pid": 41, "started_at": 1.0}
+        left = await ws._reap_runs([mine, theirs, host], 15)
+        assert left == [theirs, host]
+        assert box.reaped == [("t1", 15)]
+    finally:
+        await ws.close()

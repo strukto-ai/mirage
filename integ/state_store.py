@@ -19,6 +19,7 @@ sys.path[:] = [p for p in sys.path if p not in (_INTEG_DIR, "")]
 
 import asyncio  # noqa: E402
 import os  # noqa: E402
+import re  # noqa: E402
 import uuid  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
@@ -418,6 +419,71 @@ async def jobs_peer(prefix: str) -> None:
     await store.close()
 
 
+PROCESS_ROW = re.compile(r"^([0-9a-f]{6}:[0-9]+)\tsleep 30$", re.MULTILINE)
+
+
+async def processes_own(prefix: str) -> None:
+    """Run a job the other language's peer finds in ps by its owner:pid,
+    kills by that name and waits on.
+
+    Stays up until the peer has reaped it, since a process dies with its
+    owner."""
+    ws, store = make_jobs_workspace(prefix)
+    plane = store.jobs(JOBS_WORKSPACE_ID)
+
+    async def reaped() -> bool:
+        listed = await plane.load(JOBS_SESSION)
+        return listed is not None and not listed["jobs"]
+
+    result = await ws.shell("sleep 30 &", session_id=JOBS_SESSION)
+    check("py own: sleep started", result.exit_code == 0)
+    job = ws.job_table.get(1, JOBS_SESSION)
+    if job is not None and job.process is not None:
+        joined = asyncio.ensure_future(job.process.join())
+        await asyncio.wait({joined}, timeout=20)
+    check(
+        "py own: the peer's kill owner:pid stopped it by TERM",
+        job is not None
+        and (job.status, job.exit_code) == (JobStatus.KILLED, 143),
+        f"got {(job.status, job.exit_code) if job is not None else None!r}",
+    )
+    check("py own: the peer's wait reaped it", await until(reaped))
+    await plane.clear()
+    await ws.close()
+    await store.close()
+
+
+async def processes_peer(prefix: str) -> None:
+    """Find the other language's process in ps, kill it by owner:pid and
+    wait on its job."""
+    ws, store = make_jobs_workspace(prefix)
+    names: list[str] = []
+
+    async def listed() -> bool:
+        result = await ws.shell("ps", session_id=JOBS_SESSION)
+        names[:] = PROCESS_ROW.findall(result.stdout.decode())
+        return len(names) == 1
+
+    check("py peer: ps lists the owner's process", await until(listed))
+    name = names[0] if names else "none:0"
+    result = await ws.shell(f"ps -p {name} -o pid=,comm=", session_id=JOBS_SESSION)
+    check(
+        "py peer: ps -p selects it with its ids tagged",
+        result.stdout.decode().split() == [name, "sleep"],
+        f"got {result.stdout!r}",
+    )
+    result = await ws.shell(f"kill {name}", session_id=JOBS_SESSION)
+    check(f"py peer: kill {name}", result.exit_code == 0, f"got {result.stderr!r}")
+    result = await ws.shell("wait %1; echo $?", session_id=JOBS_SESSION)
+    check(
+        "py peer: wait answers TERM's status",
+        result.stdout == b"143\n",
+        f"got {result.stdout!r}",
+    )
+    await ws.close()
+    await store.close()
+
+
 async def main() -> None:
     role = sys.argv[1]
     prefix = sys.argv[2]
@@ -433,6 +499,10 @@ async def main() -> None:
         await jobs_own(prefix)
     elif role == "jobs-peer":
         await jobs_peer(prefix)
+    elif role == "processes-own":
+        await processes_own(prefix)
+    elif role == "processes-peer":
+        await processes_peer(prefix)
     else:
         raise SystemExit(f"unknown role: {role!r}")
     if fail:

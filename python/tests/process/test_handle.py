@@ -173,6 +173,22 @@ async def test_a_kill_racing_the_settle_is_the_status_it_reports():
     assert (killed, info.exit_code) == ([True], 137)
 
 
+# The native runs a runner has going are kept under their keys until each
+# ends, and the view of them is a copy.
+def test_a_runner_keeps_the_native_runs_it_has_going():
+    handle = ProcessHandle(_info(), _exits_3, lambda _pid: None)
+    handle.add_run("host:41", {"host": "h", "pid": 41})
+    handle.add_run("box:t", {"runtime": "docker", "tag": "t"})
+    handle.runs.clear()
+    assert handle.runs == {
+        "host:41": {"host": "h", "pid": 41},
+        "box:t": {"runtime": "docker", "tag": "t"},
+    }
+    handle.drop_run("host:41")
+    handle.drop_run("host:41")
+    assert handle.runs == {"box:t": {"runtime": "docker", "tag": "t"}}
+
+
 # What a program the runner started exited with after handling the signal
 # is the program's, kept apart from the runner's own 128 plus the signal.
 @pytest.mark.asyncio

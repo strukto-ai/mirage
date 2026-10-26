@@ -19,6 +19,8 @@ from functools import partial
 import pytest
 
 from mirage.io import IOResult
+from mirage.process.config import ProcessPermissions
+from mirage.process.table import ProcessTable
 from mirage.shell.console import (
     Channel,
     ConsoleStore,
@@ -26,6 +28,7 @@ from mirage.shell.console import (
     RAMConsoleStore,
 )
 from mirage.shell.console.types import ConsoleChunk, ReadResult
+from mirage.shell.job_table import table as table_module
 from mirage.shell.job_table.ram import RAMJobStore
 from mirage.shell.job_table.table import JobTable
 from mirage.shell.job_table.types import Job, JobStatus
@@ -1186,3 +1189,154 @@ async def test_a_list_check_that_failed_a_read_checks_again(monkeypatch):
         await job.process.join()
     assert (job.status, job.exit_code) == (JobStatus.KILLED, 137)
     assert store.failures == 0
+
+
+def _publishing(store: RAMJobStore) -> JobTable:
+    """A table whose processes are published on ``store``, as a
+    workspace's are.
+
+    Args:
+        store (RAMJobStore): the shared store.
+    """
+    processes = ProcessTable(changed=lambda: table.processes_changed())
+    table = JobTable(store, processes)
+    return table
+
+
+async def _until(check: Callable[[], Awaitable[bool]]) -> None:
+    """Poll ``check`` until it holds, for at most five seconds.
+
+    Args:
+        check (Callable[[], Awaitable[bool]]): the condition.
+    """
+    async with asyncio.timeout(5):
+        while not await check():
+            await asyncio.sleep(0.01)
+
+
+# A table on a shared store publishes the processes it runs while it runs
+# any, and its record goes once it runs none; another table lists them.
+@pytest.mark.asyncio
+async def test_a_table_publishes_its_processes_while_it_runs_any(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMJobStore(lease_seconds=30.0)
+    a, b = _publishing(store), _publishing(store)
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+
+    async def listed() -> bool:
+        return a.owner in await b.remote_processes()
+
+    await _until(listed)
+    record = (await b.remote_processes())[a.owner][str(job.pid)]
+    assert (record["command"], record["session"], record["runs"]) == (
+        "sleep 30",
+        "s",
+        [],
+    )
+    assert await a.remote_processes() == {}
+    assert await a.kill(job.id, "s")
+
+    async def dropped() -> bool:
+        return await store.processes() == {}
+
+    await _until(dropped)
+    await a.close()
+    await b.close()
+
+
+# A stop another table asks of a process reaches its owner, which stops
+# it as kill does: a job's runner ends the job killed by that signal.
+@pytest.mark.asyncio
+async def test_a_stop_asked_elsewhere_stops_the_owners_job(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMJobStore(lease_seconds=30.0)
+    a, b = _publishing(store), _publishing(store)
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+
+    async def listed() -> bool:
+        return a.owner in await b.remote_processes()
+
+    await _until(listed)
+    every = ProcessPermissions(list="workspace", kill="workspace")
+    assert await b.signal_remote(a.owner[:6], job.pid, 0, "t", every)
+    assert job.status == JobStatus.RUNNING
+    assert await b.signal_remote(a.owner[:6], job.pid, 15, "t", every)
+    assert job.process is not None
+    async with asyncio.timeout(5):
+        await job.process.join()
+    assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
+    assert not await b.signal_remote("ffffffff", job.pid, 15, "t", every)
+    await a.close()
+    await b.close()
+
+
+# Another table's process is seen and stopped within the session's view:
+# one another session runs is not found, or not permitted to stop.
+@pytest.mark.asyncio
+async def test_a_remote_signal_keeps_to_the_sessions_view(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMJobStore(lease_seconds=30.0)
+    a, b = _publishing(store), _publishing(store)
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+
+    async def listed() -> bool:
+        return a.owner in await b.remote_processes()
+
+    await _until(listed)
+    own = ProcessPermissions()
+    seen = ProcessPermissions(list="workspace", kill="session")
+    assert not await b.signal_remote(a.owner, job.pid, 15, "t", own)
+    with pytest.raises(PermissionError):
+        await b.signal_remote(a.owner, job.pid, 15, "t", seen)
+    assert await b.signal_remote(a.owner, job.pid, 15, "s", own)
+    await a.close()
+    await b.close()
+
+
+# A lapsed owner's processes are not listed; the native runs it left are
+# handed to the reaper, and its record keeps only the runs nobody here
+# reached.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unreached", [False, True])
+async def test_a_lapsed_owners_runs_are_reaped(unreached):
+    store = RAMJobStore(lease_seconds=30.0)
+    host = {"host": "h", "pid": 41, "started_at": 1.0, "command": "x"}
+    box = {"runtime": "docker", "tag": "t", "command": "y"}
+    await store.publish(
+        "dead",
+        {
+            "2": {"pid": 2, "session": "s", "runs": [host]},
+            "3": {"pid": 3, "session": "s", "runs": [box]},
+        },
+    )
+    reaped: list[tuple[list, int]] = []
+
+    async def reaper(runs: list, signum: int) -> list:
+        reaped.append((runs, signum))
+        return [box] if unreached else []
+
+    b = JobTable(store)
+    b.reaper = reaper
+    assert await b.remote_processes() == {}
+    async with asyncio.timeout(5):
+        while b._reaping:
+            await asyncio.sleep(0.01)
+    assert reaped == [([host, box], 15)]
+    kept = await store.processes()
+    if unreached:
+        assert kept == {
+            "dead": {"3": {"pid": 3, "session": "s", "runs": [box]}}
+        }
+    else:
+        assert kept == {}
+    await b.close()
+
+
+# A table that closes drops its record, so it never reads as lapsed.
+@pytest.mark.asyncio
+async def test_a_closed_table_drops_its_record():
+    store = RAMJobStore(lease_seconds=30.0)
+    a = JobTable(store)
+    await store.publish(a.owner, {"2": {"pid": 2, "runs": []}})
+    await a.close()
+    assert await store.processes() == {}

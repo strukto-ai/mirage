@@ -35,6 +35,8 @@ export class RAMJobStore extends JobStore {
   private readonly lists = new Map<string, RecordFields>()
   private readonly consoles = new Map<string, RAMConsoleStore>()
   private readonly leases = new Map<string, number>()
+  private readonly published = new Map<string, Record<string, RecordFields>>()
+  private readonly stops = new Map<string, [number, number][]>()
 
   load(sessionId: string): Promise<RecordFields | null> {
     const fields = this.lists.get(sessionId)
@@ -79,10 +81,38 @@ export class RAMJobStore extends JobStore {
     return Promise.resolve((this.leases.get(owner) ?? 0) > performance.now())
   }
 
+  publish(owner: string, processes: Readonly<Record<string, RecordFields>>): Promise<void> {
+    if (Object.keys(processes).length > 0) this.published.set(owner, structuredClone(processes))
+    else {
+      this.published.delete(owner)
+      this.stops.delete(owner)
+    }
+    return Promise.resolve()
+  }
+
+  processes(): Promise<Record<string, Record<string, RecordFields>>> {
+    return Promise.resolve(structuredClone(Object.fromEntries(this.published)))
+  }
+
+  requestStop(owner: string, pid: number, signal: number): Promise<void> {
+    const asked = this.stops.get(owner) ?? []
+    asked.push([pid, signal])
+    this.stops.set(owner, asked)
+    return Promise.resolve()
+  }
+
+  takeStops(owner: string): Promise<[number, number][]> {
+    const asked = this.stops.get(owner) ?? []
+    this.stops.delete(owner)
+    return Promise.resolve(asked)
+  }
+
   clear(): Promise<void> {
     this.lists.clear()
     this.consoles.clear()
     this.leases.clear()
+    this.published.clear()
+    this.stops.clear()
     return Promise.resolve()
   }
 
