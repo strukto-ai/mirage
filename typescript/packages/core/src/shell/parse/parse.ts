@@ -12,187 +12,43 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { repairAssignments } from './assignment.ts'
-
-import { ParseTrees, type NativeParser } from './engine.ts'
-import { ParsedProgram, ProgramNode } from './program.ts'
-import { Language, Parser } from 'web-tree-sitter'
-import type { ShellParserConfig } from './config.ts'
+import { parseShell } from '../../rs/shell.ts'
+import { ParsedProgram } from './program.ts'
 import { heredocOperators } from './heredoc/index.ts'
-import { lowerTiming, wrapTiming, type TimingMark } from './timing.ts'
 import { discoverHeredocs, readPlanned } from './heredoc/reader.ts'
-import { heredocPlan, patternSource } from './syntax.ts'
-import { dropSourceChars, lowerHeredocs, rebaseSource } from './heredoc/lower.ts'
+import { heredocPlan } from './syntax.ts'
+import { dropSourceChars, lowerHeredocs } from './heredoc/lower.ts'
 import { HeredocNode } from './heredoc/node.ts'
 import { continuationIndices, joinContinuations, sourceOffsets } from './source.ts'
-import {
-  isArithmetic,
-  operatorSource,
-  parseProtected,
-  failedArithOpeners,
-  repairForHeaders,
-  repairOrphanedDollars,
-  repairRedirectDashes,
-  statementBoundaries,
-} from './recovery.ts'
-import type { ShellNode, TSNodeLike } from '../types.ts'
+import type { ShellNode } from '../types.ts'
 
-export interface ShellParser {
-  parseProgram(command: string): ParsedProgram
-  dispose(): void
-  parse(command: string): ShellNode
-  /** Where each char of the source `parse` read sits in `command`. */
-  sourceOffsets(command: string, root: TSNodeLike): readonly number[]
-}
-
-// `Parser.init` boots one wasm module for the whole process, so two callers
-// that start at the same time used to race it: the second read the language
-// out of a half-built module and threw "Incompatible language version 0".
-// Every caller now awaits the same boot. A failed boot is not kept, or one bad
-// start would poison every later parser.
-let engineBoot: Promise<void> | null = null
-
-export async function createShellParser(config: ShellParserConfig): Promise<ShellParser> {
-  engineBoot ??= Parser.init({ wasmBinary: toArrayBuffer(config.engineWasm) }).catch(
-    (err: unknown) => {
-      engineBoot = null
-      throw err
-    },
-  )
-  await engineBoot
-  const language = await Language.load(toUint8(config.grammarWasm))
-  const parser = new Parser()
-  parser.setLanguage(language)
-  let disposed = false
-  return {
-    /**
-     * Parse shell structure after the source reader gathers heredocs.
-     * Bodies become inline expansion words with reader-owned input metadata;
-     * nodes retain their original source for nested evaluation. A line the
-     * reader refuses takes its heredocs from the grammar's.
-     *
-     * A leading `((` is lexed as the arithmetic opener and the lexer
-     * cannot back out, so a subshell that immediately opens another
-     * subshell (`((echo a); echo b)`) fails to parse. Bash resolves the
-     * same ambiguity by trying the arithmetic command and reparsing as
-     * nested subshells when that fails; this does the same, splitting
-     * only openers that already sit inside an error and keeping the
-     * retry only if it parses cleanly. Commands that parse today are
-     * untouched, so no working command's offsets move.
-     *
-     * A later unbraced `$var` followed by a name-terminating character
-     * is mis-lexed by the grammar, leaving a literal `$` token behind
-     * (see orphanedDollarOffsets); those expansions are rebraced and
-     * the line reparsed, so the returned tree can spell `$id` as
-     * `${id}`.
-     */
-    parse(this: ShellParser, command: string): ShellNode {
-      return this.parseProgram(command).root
-    },
-    parseProgram(command: string): ParsedProgram {
-      if (disposed) throw new Error('shell parser is disposed')
-      const trees = new ParseTrees(parser)
-      try {
-        const root = parseRoot(trees, command)
-        const offsets = sourceOffsets(trees, command, root)
-        const tree = trees.take(root)
-        return new ParsedProgram(command, root, offsets, () => {
-          tree.delete()
-        })
-      } finally {
-        trees.release()
-      }
-    },
-    dispose(): void {
-      if (disposed) return
-      disposed = true
-      parser.delete()
-    },
-    sourceOffsets(command: string, root: TSNodeLike): readonly number[] {
-      if (root instanceof ProgramNode && root.program.original === command)
-        return root.program.offsets
-      const trees = new ParseTrees(parser)
-      try {
-        return sourceOffsets(trees, command, root)
-      } finally {
-        trees.release()
-      }
-    },
-  }
-}
-
-function toArrayBuffer(bytes: Uint8Array | ArrayBuffer): ArrayBuffer {
-  if (bytes instanceof ArrayBuffer) return bytes
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-}
-
-function toUint8(bytes: Uint8Array | ArrayBuffer): Uint8Array {
-  return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
-}
-
-function parseRoot(parser: NativeParser, command: string): ShellNode {
+/**
+ * Parse shell structure after the source reader gathers heredocs. Bodies
+ * become inline expansion words with reader-owned input metadata; nodes
+ * retain their original source for nested evaluation. A line the reader
+ * refuses takes its heredocs from the parser's tree. Line continuations are
+ * joined first, so a word's text is what bash reads. `aliases` are the names
+ * the shell expands as aliases: one is a command where a command starts. A
+ * line the parser refuses ends in an `ERROR` node. Mirrors Python's parse.
+ */
+export function parse(command: string, aliases: ReadonlySet<string> = new Set()): ShellNode {
   const plan = command.includes('<<') ? heredocPlan(command) : null
-  const patterned = command.includes('<<') && plan === null ? patternSource(command) : command
-  let hinted =
-    command.includes('<<') && plan === null ? (parser.parse(patterned)?.rootNode ?? null) : null
-  if (hinted !== null) {
-    const lexed = operatorSource(parser, patterned, hinted)
-    if (lexed !== patterned) hinted = parser.parse(lexed)?.rootNode ?? hinted
-  }
-  const documents =
-    plan !== null
+  const documents = !command.includes('<<')
+    ? []
+    : plan !== null
       ? readPlanned(command, plan)
-      : hinted === null
-        ? []
-        : discoverHeredocs(command, heredocOperators(hinted))
-  const lowered = documents.length > 0 ? lowerHeredocs(command, documents, plan?.closes) : null
-  let heredocs =
-    lowered === null ? null : dropSourceChars(lowered, continuationIndices(parser, lowered.source))
-  let input = heredocs?.source ?? joinContinuations(parser, command)
-  let timingMarks: readonly TimingMark[] = []
-  if (input.includes('time') || input.includes('!')) {
-    heredocs ??= dropSourceChars(
-      {
-        original: command,
-        source: command,
-        offsets: Array.from({ length: command.length + 1 }, (_, i) => i),
-        documents: [],
-        closes: [],
-      },
-      continuationIndices(parser, command),
-    )
-    ;[heredocs, timingMarks] = lowerTiming(parser, heredocs)
-    input = heredocs.source
-  }
-  const source = statementBoundaries(parser, input)
-  let root = parseProtected(parser, source)
-  let text = source
-  if (root.hasError) {
-    const offsets = [...new Set(failedArithOpeners(root))].filter(
-      (o) => !isArithmetic(parser, source, o),
-    )
-    if (offsets.length > 0) {
-      let split = source
-      for (const offset of offsets.sort((a, b) => b - a)) {
-        split = `${split.slice(0, offset + 1)} ${split.slice(offset + 1)}`
-      }
-      const retried = parseProtected(parser, split)
-      if (!retried.hasError) {
-        root = retried
-        text = split
-      }
-    }
-  }
-  ;[root, text] = repairRedirectDashes(parser, root, text)
-  if (text.includes('for') || text.includes('select')) {
-    ;[root, text] = repairForHeaders(parser, root, text)
-  }
-  if (text.includes('$')) {
-    root = repairOrphanedDollars(parser, root, text)
-  }
-  root = repairAssignments(parser, root, text.slice(0, root.startIndex) + root.text)
-  if (heredocs === null) return root
-  const mappedSource = rebaseSource(heredocs, heredocs.source.slice(0, root.startIndex) + root.text)
-  const mapped = new HeredocNode(root, mappedSource)
-  return timingMarks.length === 0 ? mapped : wrapTiming(mapped, mappedSource, timingMarks)
+      : discoverHeredocs(command, heredocOperators(parseShell(command).rootNode))
+  if (documents.length === 0) return parseShell(joinContinuations(command), aliases).rootNode
+  const lowered = lowerHeredocs(command, documents, plan?.closes)
+  const source = dropSourceChars(lowered, continuationIndices(lowered.source))
+  return new HeredocNode(parseShell(source.source, aliases).rootNode, source)
+}
+
+/** Parse a line into a program its holders release when done with it. */
+export function parseProgram(
+  command: string,
+  aliases: ReadonlySet<string> = new Set(),
+): ParsedProgram {
+  const root = parse(command, aliases)
+  return new ParsedProgram(command, root, sourceOffsets(command, root))
 }

@@ -57,17 +57,9 @@ LINE_BLANKS = frozenset(b" \t\r")
 # Bytes a body may open with that never reach the scanner as body text.
 SKIPPED_BLANKS = LINE_BLANKS | {NEWLINE}
 
-# What a backslash escapes in an unquoted body (`\$`, `` \` ``, `\\`).
-ESCAPE_PARTNERS = frozenset(b"$`\\")
-
 # What a backslash escapes inside a double-quoted word; before any other
 # character it stays literal, so `"E\xF"` names E\xF.
 DQUOTE_ESCAPABLE = frozenset('$`"\\')
-
-# The letter written over a masked byte, and the one used instead when
-# the delimiter itself starts with it.
-FILLER = ord("x")
-ALTERNATE_FILLER = ord("y")
 
 HEREDOC_START = "heredoc_start"
 HEREDOC_BODY = "heredoc_body"

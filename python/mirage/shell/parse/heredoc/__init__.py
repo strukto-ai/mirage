@@ -30,12 +30,7 @@ from mirage.shell.parse.heredoc.line import (
     reserved_word,
 )
 from mirage.shell.parse.heredoc.prefix import body_prefix, tree_root
-from mirage.shell.parse.heredoc.shield import (
-    first_content_line,
-    heredoc_operators,
-    protected_source,
-    terminator_lookalikes,
-)
+from mirage.shell.parse.heredoc.shield import heredoc_operators
 from mirage.shell.parse.heredoc.types import HeredocOperator
 
 __all__ = [
@@ -46,15 +41,12 @@ __all__ = [
     "construct_closer",
     "construct_end",
     "delimiter_quoted",
-    "first_content_line",
     "heredoc_bodies",
     "heredoc_operators",
     "next_line",
     "operator_line_end",
-    "protected_source",
     "quote_end",
     "reserved_word",
     "terminator_line",
-    "terminator_lookalikes",
     "tree_root",
 ]

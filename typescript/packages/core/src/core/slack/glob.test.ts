@@ -18,7 +18,6 @@ import { SlackAccessor } from '../../accessor/slack.ts'
 import { PathSpec } from '../../types.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
 import { SlackVFSBase } from '../../vfs/slack/slack.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
@@ -108,7 +107,7 @@ describe('a glob through a mount', () => {
     })
     const ws = new Workspace(
       { '/slack/': new SlackVFSBase({ accessor: new SlackAccessor(t) }) },
-      { shellParser: await getTestParser() },
+      {},
     )
     try {
       const result = await ws.shell('echo /slack/channels/general__C001/2026-04-10/files/*.pdf')

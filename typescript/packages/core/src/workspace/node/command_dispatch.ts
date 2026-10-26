@@ -52,7 +52,7 @@ import { argumentListTooLong } from '../executor/command/handler.ts'
 import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/command.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
-import { checkSyntax, syntaxErrorResult } from '../../shell/parse/index.ts'
+import { checkSyntax, sourceOffsets, syntaxErrorResult } from '../../shell/parse/index.ts'
 import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
@@ -179,11 +179,12 @@ export async function executeCommand(
       const previous = session.aliasExpansion
       const scope = parser.fork()
       try {
-        const ast = scope.parse(line)
+        const aliases = new Set([...expandingAliases(session), ...names])
+        const ast = scope.parse(line, aliases)
         const found =
           checkSyntax(
             line,
-            new Set([...expandingAliases(session), ...names]),
+            aliases,
             (name, at) => owners[at]?.has(name) ?? false,
             session.shopts.extglob ?? false,
           ) ?? findSyntaxIssue(ast)
@@ -199,7 +200,7 @@ export async function executeCommand(
         const mapped = [...owners, new Set<string>()]
         session.aliasExpansion = {
           root: ast.id,
-          owners: scope.sourceOffsets(line, ast).map((i) => {
+          owners: sourceOffsets(line, ast).map((i) => {
             const owner = mapped[i]
             if (owner === undefined) throw new Error('alias source offset is out of bounds')
             return owner
@@ -326,7 +327,17 @@ export async function executeCommand(
       return writeRefused(err, name)
     }
     const cmdLabel = prefixAssignments.map(([k, v]) => `${k}=${v}`).join(' ')
-    return [null, new IOResult(), new ExecutionNode({ command: cmdLabel, exitCode: 0 })]
+    const landed: [null, IOResult, ExecutionNode] = [
+      null,
+      new IOResult(),
+      new ExecutionNode({ command: cmdLabel, exitCode: 0 }),
+    ]
+    // Redirects among the assignments (`x=1 > f y=2`) still open their
+    // files, and one that fails fails the line; the assignments stand
+    // either way.
+    const runner = redirectRunnerFor(node)
+    if (runner === null) return landed
+    return runner(() => Promise.resolve(landed), undefined, '', [])
   }
 
   const savedEnvOverrides = new TempEnv()

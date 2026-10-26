@@ -11,27 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
-import {
-  createShellParser,
-  envReads,
-  implicitReads,
-  opaqueReads,
-  type ShellParser,
-} from './index.ts'
+import { describe, expect, it } from 'vitest'
+import { envReads, implicitReads, opaqueReads } from './index.ts'
 import type { TSNodeLike } from '../types.ts'
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
+import { parse } from './parse.ts'
 
 describe('envReads', () => {
   it.each<[string, boolean, string[], string[]]>([
@@ -113,7 +96,7 @@ describe('envReads', () => {
     ['x=$(env)', true, [], []],
     ['f() { env; }', false, [], []],
   ])('%s renders whole=%s names=%j excluded=%j', (command, whole, names, excluded) => {
-    const root = parser.parse(command) as unknown as TSNodeLike
+    const root = parse(command) as unknown as TSNodeLike
     const reads = envReads(root)
     expect(reads.whole).toBe(whole)
     expect(reads.names).toEqual(new Set(names))
@@ -137,7 +120,7 @@ describe('opaqueReads', () => {
     // A definition's body is not read at definition time.
     ['f() { echo ${!name}; }', false],
   ])('%s opaque=%s', (command, opaque) => {
-    const root = parser.parse(command) as unknown as TSNodeLike
+    const root = parse(command) as unknown as TSNodeLike
     expect(opaqueReads(root)).toBe(opaque)
   })
 })
@@ -166,7 +149,7 @@ describe('implicitReads', () => {
     // A definition's body runs at invocation, not here.
     ['f() { cd; }', []],
   ])('%s reads %j', (command, names) => {
-    const root = parser.parse(command) as unknown as TSNodeLike
+    const root = parse(command) as unknown as TSNodeLike
     expect(implicitReads(root)).toEqual(new Set(names))
   })
 })

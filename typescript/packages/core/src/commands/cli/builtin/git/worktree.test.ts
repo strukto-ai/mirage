@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { type FileStat, MountMode, type PathSpec } from '../../../../types.ts'
 import type { Handed } from '../../../../vfs/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -37,7 +36,7 @@ describe('a work tree past the walk_limit', () => {
   ] as [string, number, boolean][])('git %s at %i refused: %s', async (line, limit, refused) => {
     const ws = new Workspace(
       { '/repo': new RAMVFS({ walkLimit: limit }) },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     ws.registerCli('git', GIT)
     try {
@@ -79,10 +78,7 @@ class TreeRAM extends RAMVFS {
 
 async function scanned(setup: string, line: string): Promise<[string, TreeRAM['trees']]> {
   const vfs = new TreeRAM()
-  const ws = new Workspace(
-    { '/repo': vfs },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/repo': vfs }, { mode: MountMode.WRITE })
   ws.registerCli('git', GIT)
   try {
     await ws.shell(`git init -q /repo && ${setup}`)

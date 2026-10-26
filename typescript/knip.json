@@ -9,12 +9,10 @@
       "entry": ["*.ts"]
     },
     "packages/node": {
-      "ignoreDependencies": ["tree-sitter-bash", "web-tree-sitter"],
       "entry": ["scripts/*.mjs"]
     },
     "packages/browser": {
-      "entry": ["scripts/*.mjs"],
-      "ignoreDependencies": ["tree-sitter-bash", "web-tree-sitter"]
+      "entry": ["scripts/*.mjs"]
     }
   }
 }

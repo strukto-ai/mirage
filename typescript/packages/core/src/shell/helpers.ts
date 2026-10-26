@@ -126,7 +126,7 @@ export function getParts(node: TSNodeLike): TSNodeLike[] {
   for (let position = 0; position < children.length; position += 1) {
     const c = children[position]
     if (c === undefined) continue
-    if (c.isNamed === true && c.type !== NT.FILE_REDIRECT) {
+    if (c.isNamed === true && !REDIRECT_NODE_TYPES.has(c.type)) {
       parts.push(c)
     } else if (c.type === '$') {
       const nxt = children[position + 1]
@@ -417,6 +417,7 @@ export function isBackgrounded(node: TSNodeLike): boolean {
 export const REDIRECT_NODE_TYPES: ReadonlySet<string> = new Set([
   NT.FILE_REDIRECT,
   NT.HEREDOC_REDIRECT,
+  NT.HERESTRING_REDIRECT,
 ])
 
 // RAW_STRING (single quotes) belongs here alongside STRING (double
@@ -469,9 +470,6 @@ const REDIRECT_OPERATORS: ReadonlySet<string> = new Set([
  * is STDOUT or STDERR by the descriptor it claims.
  */
 function parseFileRedirect(child: TSNodeLike): Redirect {
-  // The parser's redirect shield lets the grammar see `0<f` and `3<<< w`
-  // with their descriptor (`operatorSource`); a redirect whose text opens
-  // with `<<<` is a herestring.
   let fd: number | null = null
   let target: string | number = ''
   let targetNode: TSNodeLike | null = null
@@ -496,7 +494,6 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
     }
   }
 
-  if (/^\d*<<</.test(getText(child))) return parseHerestringRedirect(child, fd ?? 0)
   if (child.heredoc !== undefined) {
     return new Redirect({
       fd: fd ?? 0,
@@ -549,10 +546,11 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
   })
 }
 
-function parseHerestringRedirect(child: TSNodeLike, fd: number): Redirect {
+function parseHerestringRedirect(child: TSNodeLike): Redirect {
+  const descriptor = child.namedChildren.find((candidate) => candidate.type === NT.FILE_DESCRIPTOR)
   const word = child.namedChildren.find((candidate) => candidate.type !== NT.FILE_DESCRIPTOR)
   return new Redirect({
-    fd,
+    fd: descriptor === undefined ? 0 : parseInt(getText(descriptor), 10),
     target: word === undefined ? '' : getText(word),
     targetNode: word ?? null,
     kind: RedirectKind.HERESTRING,
@@ -599,13 +597,29 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
       }
     } else if (child?.type === NT.FILE_REDIRECT) {
       redirects.push(parseFileRedirect(child))
+    } else if (child?.type === NT.HERESTRING_REDIRECT) {
+      redirects.push(parseHerestringRedirect(child))
     }
   }
 
+  if (command?.type !== NT.COMMAND) return [command, redirects]
   return [
-    command?.type === NT.COMMAND && getParts(command).length === 0 ? null : command,
-    redirects,
+    getParts(command).length === 0 ? null : command,
+    [...commandRedirects(command), ...redirects],
   ]
+}
+
+/**
+ * The redirects written among a simple command's words, in order: bash
+ * applies them wherever they stand (`> f echo hi`, `cat <<< x`).
+ */
+export function commandRedirects(node: TSNodeLike): Redirect[] {
+  const redirects: Redirect[] = []
+  for (const child of node.namedChildren) {
+    if (child.type === NT.FILE_REDIRECT) redirects.push(parseFileRedirect(child))
+    else if (child.type === NT.HERESTRING_REDIRECT) redirects.push(parseHerestringRedirect(child))
+  }
+  return redirects
 }
 
 /**

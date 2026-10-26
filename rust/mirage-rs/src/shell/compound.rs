@@ -275,7 +275,27 @@ impl Parser<'_> {
 
     /// One case pattern: a word, or an extglob pattern with the quoted
     /// or expanded part that interrupts it.
+    /// One pattern of a case item: as bash reads it when it holds an extglob
+    /// group or the grammar's scanner stops short of it, as the scanner
+    /// reads it otherwise.
     fn case_pattern(&mut self) -> R<Vec<Syn>> {
+        let mark = self.mark();
+        if let Some((word, true)) = self.pattern_word()? {
+            return Ok(vec![word]);
+        }
+        self.reset(mark);
+        let nodes = self.grammar_case_pattern()?;
+        if self.eof() || is_space(self.peek()) || matches!(self.peek(), b'|' | b')') {
+            return Ok(nodes);
+        }
+        self.reset(mark);
+        match self.pattern_word()? {
+            Some((word, _)) => Ok(vec![word]),
+            None => self.fail(self.i),
+        }
+    }
+
+    fn grammar_case_pattern(&mut self) -> R<Vec<Syn>> {
         if let Some(end) = self.extglob_end() {
             let at = self.i;
             self.i = end;

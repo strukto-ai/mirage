@@ -12,115 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Node } from 'web-tree-sitter'
-import { ParseTrees, type NativeParser, type WrappedNode } from './engine.ts'
+import { parseShell } from '../../rs/shell.ts'
 import { VERBATIM_TYPES } from './constants.ts'
 import { dropChars, dropSourceChars, rebaseSource } from './heredoc/lower.ts'
 import { HeredocNode } from './heredoc/node.ts'
-import { PrefixNode } from './timing.ts'
+import { ProgramNode } from './program.ts'
 import type { ShellNode, TSNodeLike } from '../types.ts'
 
-/**
- * A node of a shielded parse that reads the original text.
- *
- * Every shield keeps the source's width, so a span names the same text in
- * both. Text and row/column positions use the original source: pattern
- * shielding can hide a newline inside a word. Reparsing against the
- * shielded tree did the same until tree-sitter relexed a statement on its
- * own, which it does at a line's end. Mirrors Python's SourceNode.
- */
-export class SourceNode implements WrappedNode {
-  constructor(
-    protected readonly node: ShellNode,
-    protected readonly original: string,
-    private readonly lines: readonly number[] = [
-      0,
-      ...Array.from(original.matchAll(/\n/g), (match) => match.index + 1),
-    ],
-  ) {}
-  get inner(): ShellNode {
-    return this.node
-  }
-  get type(): string {
-    if (this.node.type === '$(' && (this.text === '<(' || this.text === '>(')) return this.text
-    if (this.node.type === 'command_substitution' && /^(?:<|>)\(/.test(this.text))
-      return 'process_substitution'
-    return this.node.type
-  }
-  get text(): string {
-    return this.original.slice(this.node.startIndex, this.node.endIndex)
-  }
-  get id(): number {
-    return this.node.id
-  }
-  get startIndex(): number {
-    return this.node.startIndex
-  }
-  get endIndex(): number {
-    return this.node.endIndex
-  }
-  get startPosition() {
-    return this.point(this.node.startIndex)
-  }
-  get endPosition() {
-    return this.point(this.node.endIndex)
-  }
-  private point(at: number): { row: number; column: number } {
-    let lo = 0
-    let hi = this.lines.length
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1
-      if ((this.lines[mid] ?? 0) <= at) lo = mid + 1
-      else hi = mid
-    }
-    const row = lo - 1
-    return { row, column: at - (this.lines[row] ?? 0) }
-  }
-  get isNamed(): boolean {
-    return this.node.isNamed
-  }
-  get isMissing(): boolean {
-    return this.node.isMissing
-  }
-  get hasError(): boolean {
-    return this.node.hasError
-  }
-  get childCount(): number {
-    return this.node.childCount
-  }
-  child(index: number): SourceNode | null {
-    return this.wrap(this.node.child(index))
-  }
-  get children(): SourceNode[] {
-    return this.node.children.map((node) => this.wrap(node)).filter((node) => node !== null)
-  }
-  get namedChildren(): SourceNode[] {
-    return this.node.namedChildren.map((node) => this.wrap(node)).filter((node) => node !== null)
-  }
-  protected wrap(node: ShellNode | null): SourceNode | null {
-    return node === null ? null : new SourceNode(node, this.original, this.lines)
-  }
-  get parent(): SourceNode | null {
-    return this.wrap(this.node.parent)
-  }
-  get previousSibling(): SourceNode | null {
-    return this.wrap(this.node.previousSibling)
-  }
-  get nextSibling(): SourceNode | null {
-    return this.wrap(this.node.nextSibling)
-  }
-  childForFieldName(name: string): SourceNode | null {
-    return this.wrap(this.node.childForFieldName(name))
-  }
-}
-
-/**
- * Spans whose backslashes escape nothing: comments and strings in single
- * quotes, ANSI-C ones included.
- */
-function verbatimSpans(root: Node): [number, number][] {
+function verbatimSpans(root: ShellNode): [number, number][] {
   const spans: [number, number][] = []
-  const stack: Node[] = [root]
+  const stack: ShellNode[] = [root]
   for (;;) {
     const node = stack.pop()
     if (node === undefined) break
@@ -146,19 +47,9 @@ function verbatimSpans(root: Node): [number, number][] {
  * heredoc body is lowered into a quoted word before this runs, where
  * every backslash it holds is escaped, so no body loses a character here.
  */
-export function continuationIndices(parser: NativeParser, text: string): number[] {
+export function continuationIndices(text: string): number[] {
   if (!text.includes('\\\n') && !text.endsWith('\\')) return []
-  if (!(parser instanceof ParseTrees)) {
-    const trees = new ParseTrees(parser)
-    try {
-      return continuationIndices(trees, text)
-    } finally {
-      trees.release()
-    }
-  }
-  const tree = parser.parse(text)
-  if (tree === null) throw new Error('shell parse returned null')
-  const spans = verbatimSpans(tree.rootNode)
+  const spans = verbatimSpans(parseShell(text).rootNode)
   const dropped: number[] = []
   let at = 0
   let index = text.indexOf('\\')
@@ -178,17 +69,14 @@ export function continuationIndices(parser: NativeParser, text: string): number[
 
 /**
  * Where each char of the source `parse` read sits in `command`. `parse`
- * deletes line continuations and inserts text to repair the grammar, so a
- * node's offsets index the source it read rather than the line as typed;
- * indexed by one of them, this gives the char of `command` it came from, and
- * an inserted char gives the char after it. Mirrors Python's source_offsets.
+ * deletes line continuations and lowers heredocs, so a node's offsets index
+ * the source it read rather than the line as typed; indexed by one of them,
+ * this gives the char of `command` it came from, and an inserted char gives
+ * the char after it. Mirrors Python's source_offsets.
  */
-export function sourceOffsets(
-  parser: NativeParser,
-  command: string,
-  root: TSNodeLike,
-): readonly number[] {
-  if (root instanceof HeredocNode || root instanceof PrefixNode) return root.offsets
+export function sourceOffsets(command: string, root: TSNodeLike): readonly number[] {
+  if (root instanceof ProgramNode && root.program.original === command) return root.program.offsets
+  if (root instanceof HeredocNode) return root.offsets
   const source = dropSourceChars(
     {
       original: command,
@@ -197,12 +85,12 @@ export function sourceOffsets(
       documents: [],
       closes: [],
     },
-    continuationIndices(parser, command),
+    continuationIndices(command),
   )
   return rebaseSource(source, source.source.slice(0, root.startIndex ?? 0) + root.text).offsets
 }
 
 /** The line as bash's reader hands it on, continuations removed. */
-export function joinContinuations(parser: NativeParser, command: string): string {
-  return dropChars(command, continuationIndices(parser, command))
+export function joinContinuations(command: string): string {
+  return dropChars(command, continuationIndices(command))
 }

@@ -180,7 +180,7 @@ class Printer {
     }
     if (kind === 'negated_command') return `! ${this.command(named[0] ?? node, indent)}`
     if (kind === 'timed_statement')
-      return `${node.timing?.[0] === true ? 'time -p ' : 'time '}${this.command(named[0] ?? node, indent)}`
+      return `${node.children.some((c) => c.type === '-p') ? 'time -p ' : 'time '}${this.command(named[0] ?? node, indent)}`
     if (kind === NT.SUBSHELL) return `( ${this.statements(node.children, indent, false)} )`
     if (kind === 'test_command' && getText(node).startsWith('[['))
       return `[[ ${this.condition(named[0] ?? node)} ]]`

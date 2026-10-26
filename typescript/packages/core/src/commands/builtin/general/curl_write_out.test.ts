@@ -1,21 +1,10 @@
-import { readFileSync } from 'node:fs'
 import { PathSpec } from '../../../types.ts'
-import { createRequire } from 'node:module'
-import { afterEach, beforeAll, expect, it, vi } from 'vitest'
-import { createShellParser, type ShellParser } from '../../../shell/parse/index.ts'
+import { afterEach, expect, it, vi } from 'vitest'
 import { GENERAL_CURL } from './curl.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
-const require = createRequire(import.meta.url)
-let parser: ShellParser
-beforeAll(async () => {
-  parser = await createShellParser({
-    engineWasm: readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm')),
-    grammarWasm: readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm')),
-  })
-})
 afterEach(() => vi.unstubAllGlobals())
 it('wget enforces its deadline and returns the network failure code', async () => {
   vi.stubGlobal(
@@ -30,7 +19,7 @@ it('wget enforces its deadline and returns the network failure code', async () =
         }),
     ),
   )
-  const ws = new Workspace({}, { shellParser: parser })
+  const ws = new Workspace({})
   try {
     const result = await ws.shell('wget --timeout=0.01 -q -O - https://example.test/hello')
     expect(result.exitCode).toBe(4)

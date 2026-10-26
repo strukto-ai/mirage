@@ -23,7 +23,6 @@ vi.mock('./history.ts', async (importOriginal) => {
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { MountMode } from '../../types.ts'
 import { SlackVFSBase } from '../../vfs/slack/slack.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import {
@@ -339,7 +338,7 @@ async function onSlack(line: string, fake = new FakeSlack(), walkLimit = 1000): 
   vi.mocked(getHistoryJsonl).mockClear()
   const ws = new Workspace(
     { '/slack': new Mount(new SearchSlackVFS(fake, walkLimit), { mode: MountMode.READ }) },
-    { shellParser: await getTestParser() },
+    {},
   )
   try {
     const result = await ws.shell(line)

@@ -30,7 +30,6 @@ import {
 } from '../../../types.ts'
 import { DIR_SIZE } from '../../../utils/stat_view.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { statGeneric } from './stat.ts'
 import { Files } from '../../../workspace/files.ts'
@@ -278,10 +277,9 @@ describe('stat -c directive formatting', () => {
 
 describe('stat -c workspace integration', () => {
   it('reflects overlay chmod/chown on a setattr-less backend', async () => {
-    const parser = await getTestParser()
     const vfs = new OverlayRAMVFS()
     vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
-    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, shellParser: parser })
+    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
     await run(ws, 'chmod 600 /data/f.txt')
     await run(ws, 'chown 501:staff /data/f.txt')
     const [code, out] = await run(ws, 'stat -c "%a %u %g" /data/f.txt')
@@ -290,14 +288,12 @@ describe('stat -c workspace integration', () => {
   })
 
   it('defaults owner to the profile', async () => {
-    const parser = await getTestParser()
     const vfs = new RAMVFS()
     vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
     const ws = new Workspace(
       { '/data': vfs },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: { agent7: parseSessionProfile({}) },
         profile: 'agent7',
       },
@@ -309,10 +305,9 @@ describe('stat -c workspace integration', () => {
   })
 
   it('falls back to "-" when the workspace is unclaimed', async () => {
-    const parser = await getTestParser()
     const vfs = new RAMVFS()
     vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
-    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, shellParser: parser })
+    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
     const [code, out] = await run(ws, 'stat -c "%U:%G" /data/f.txt')
     expect(code).toBe(0)
     expect(out).toBe('-:-\n')

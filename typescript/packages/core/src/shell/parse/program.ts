@@ -14,72 +14,41 @@
 
 import type { ShellNode, TSNodeLike } from '../types.ts'
 
-interface Resource {
-  references: number
-  dispose: (() => void) | null
-}
-
-function releaseResource(resource: Resource): void {
-  if (resource.dispose === null) return
-  const dispose = resource.dispose
-  resource.dispose = null
-  resource.references = 0
-  dispose()
-}
-
-// Legacy parse() callers own their nodes through reachability. Execution
-// uses explicit leases; this fallback never determines a running scope's lifetime.
-const collected = new FinalizationRegistry<Resource>(releaseResource)
-
 /** One parse of a line: its tree, where each of its chars sits in the line as
- * typed, and the references that keep it; the last release frees the native
- * tree. */
+ * typed, and the references that keep it readable. Mirrors Python's
+ * ParsedProgram. */
 export class ParsedProgram {
   readonly root: ProgramNode
-  private readonly resource: Resource
+  references = 1
   private released = false
 
   constructor(
     readonly original: string,
     root: ShellNode,
     readonly offsets: readonly number[],
-    dispose: () => void,
   ) {
-    this.resource = { references: 1, dispose }
     this.root = new ProgramNode(root, this)
-    collected.register(this, this.resource, this)
-  }
-
-  get references(): number {
-    return this.resource.references
   }
 
   check(): void {
-    if (this.resource.references === 0) throw new Error('parsed program is released')
+    if (this.references === 0) throw new Error('parsed program is released')
   }
 
   retain(): () => void {
     this.check()
-    this.resource.references += 1
+    this.references += 1
     let released = false
     return () => {
       if (released) return
       released = true
-      this.drop()
+      this.references -= 1
     }
   }
 
   release(): void {
     if (this.released) return
     this.released = true
-    this.drop()
-  }
-
-  private drop(): void {
-    this.resource.references -= 1
-    if (this.resource.references !== 0) return
-    collected.unregister(this)
-    releaseResource(this.resource)
+    this.references -= 1
   }
 }
 
@@ -98,9 +67,6 @@ export class ProgramNode implements ShellNode {
   }
   get heredoc() {
     return this.node.heredoc
-  }
-  get timing() {
-    return this.node.timing ?? []
   }
   get warnings() {
     return this.node.warnings ?? ''

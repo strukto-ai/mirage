@@ -1,6 +1,4 @@
-use super::lex::{
-    blank_end, digits_end, is_blank, is_name, is_name_start, is_operator, is_space, name_end,
-};
+use super::lex::{digits_end, is_blank, is_name, is_name_start, is_operator, is_space, name_end};
 use super::parser::{Fail, Mark, Parser, R};
 use super::tree::Syn;
 
@@ -124,17 +122,6 @@ impl Parser<'_> {
             }
             if assigns && self.at_compound_assignment() {
                 children.push(self.assignment(false)?.with_field("argument"));
-                continue;
-            }
-            if self.at_match_operator() {
-                let at = self.i;
-                let op = if self.at(1) == b'~' { "=~" } else { "==" };
-                self.i += 2;
-                children.push(Syn::token(op, at, self.i).with_field("argument"));
-                self.skip_blank();
-                if let Some(value) = self.literal_opt(super::word::Ctx::default())? {
-                    children.push(value.with_field("argument"));
-                }
                 continue;
             }
             match self.literal_opt(super::word::Ctx::default())? {
@@ -275,21 +262,6 @@ impl Parser<'_> {
             ]
             .iter()
             .any(|word| self.at_word(word))
-    }
-
-    /// `==` or `=~` as a token of its own with a word after it, which the
-    /// grammar reads as an operator argument.
-    fn at_match_operator(&self) -> bool {
-        if !(self.starts(b"=~") || self.starts(b"=="))
-            || super::lex::word_end(self.s, self.i) != self.i + 2
-        {
-            return false;
-        }
-        let mut at = self.i + 2;
-        at = blank_end(self.s, at);
-        self.s
-            .get(at)
-            .is_some_and(|byte| !is_space(*byte) && !is_operator(*byte))
     }
 
     /// bash reads an array element that starts with a bare `[` as a

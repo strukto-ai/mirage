@@ -1,5 +1,5 @@
 {
-  "baseline": 2984,
+  "baseline": 2973,
  "modules": {
   "vfs/ram/store": {
    "python_only": {
@@ -582,26 +582,6 @@
   "core/box/api": {
    "typescript_only": {
     "BoxFileInfo": "The shape of GET /files/{id} with the fields the fresh check asks for (path_collection, item_status) beside BoxItem's; Python reads the same answer as a plain dict, as it does every Box item."
-   }
-  },
-  "shell/parse/engine": {
-   "typescript_only": {
-    "NativeParser": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
-    "ParseTrees": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
-    "treeOf": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
-    "WrappedNode": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker."
-   }
-  },
-  "shell/parse/program": {
-   "typescript_only": {
-    "Resource": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases.",
-    "collected": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases.",
-    "releaseResource": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases."
-   }
-  },
-  "shell/parse/parse": {
-   "python_only": {
-    "parse_program": "Python exposes the native singleton entry point as a module function; TypeScript exposes parseProgram on the asynchronously created ShellParser instance."
    }
   },
   "workspace/node/explain": {

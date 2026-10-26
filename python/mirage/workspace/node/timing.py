@@ -1,9 +1,12 @@
 import re
 
 from mirage.shell.bytes import encode_text
+from mirage.shell.types import NodeType as NT
+from mirage.shell.types import TSNodeLike
 
 DEFAULT_FORMAT = "\nreal\t%3lR\nuser\t%3lU\nsys\t%3lS"
 TOKEN = re.compile(r"%(?:([0-9])?(l)?([RUS])|([%P]))")
+PREFIXES = frozenset({NT.TIMED_STATEMENT, NT.NEGATED_COMMAND})
 
 
 def timing_report(
@@ -46,3 +49,32 @@ def timing_report(
     if "%" in tail:
         return b"mirage: TIMEFORMAT: invalid format character\n"
     return encode_text("".join(pieces) + tail + "\n")
+
+
+def timed_by(node: TSNodeLike) -> bool | None:
+    """How a ``time`` reports its pipeline. bash times a pipeline once,
+    however many ``time`` words and ``!`` lead it: the outermost ``time``
+    reports, portable when any of them takes ``-p``.
+
+    Args:
+        node (TSNodeLike): a timed_statement.
+
+    Returns:
+        bool | None: whether the report is portable; None when an outer
+        ``time`` already times the pipeline.
+    """
+    parent = node.parent
+    while parent is not None and parent.type in PREFIXES:
+        if parent.type == NT.TIMED_STATEMENT:
+            return None
+        parent = parent.parent
+    portable = False
+    inner: TSNodeLike | None = node
+    while inner is not None and inner.type in PREFIXES:
+        if inner.type == NT.TIMED_STATEMENT and any(
+            child.type == "-p" for child in inner.children
+        ):
+            portable = True
+        named = inner.named_children
+        inner = named[0] if named else None
+    return portable

@@ -20,7 +20,6 @@ import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { IOResult } from '../../io/types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
@@ -251,10 +250,7 @@ describe('matchRaw via resolveGlobs', () => {
 describe('a glob listing under a non-root mount prefix', () => {
   it('is handed keys below the prefix on every expansion path', async () => {
     const vfs = new RAMVFS()
-    const ws = new Workspace(
-      { '/mnt/x+/': vfs },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/mnt/x+/': vfs }, { mode: MountMode.WRITE })
     const derived = vfs.readdir.bind(vfs)
     const seen: [string, string][] = []
     vfs.readdir = (path) => {
@@ -301,7 +297,7 @@ describe('a glob under a session that hides paths', () => {
   ])('never matches what it hides: %s', async (line, expected) => {
     const ws = new Workspace(
       { '/': new RAMVFS(), '/base/inner': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     try {
       for (const seed of [

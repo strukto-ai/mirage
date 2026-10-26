@@ -20,7 +20,6 @@ import { IndexView } from '../../cache/index/view.ts'
 import { FakeGitHub } from '../../../tests/core/github/_test_util.ts'
 import { MountMode, ReadPolicy } from '../../types.ts'
 import { RAMVFS } from '../ram/ram.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { GitHubVFS } from './github.ts'
@@ -54,20 +53,17 @@ async function vfsOf(): Promise<GitHubVFS> {
   return vfs
 }
 
-async function wsOf(
+function wsOf(
   vfs: GitHubVFS,
   read: { policy: ReadPolicy; ttl: number } | null = { policy: ReadPolicy.BOUNDED, ttl: 1 },
   prefix = '/gh',
   clock?: ManualClock,
-): Promise<Workspace> {
+): Workspace {
   const mount =
     read === null
       ? new Mount(vfs, { mode: MountMode.READ })
       : new Mount(vfs, { mode: MountMode.READ, read })
-  return new Workspace(
-    { [prefix]: mount },
-    { shellParser: await getTestParser(), ...(clock === undefined ? {} : { clock }) },
-  )
+  return new Workspace({ [prefix]: mount }, { ...(clock === undefined ? {} : { clock }) })
 }
 
 async function out(w: Workspace, line: string, sessionId?: string): Promise<string> {
@@ -134,7 +130,7 @@ function gateRefill(): { wiped: Promise<void>; release: () => void } {
 
 describe('github listings under a shared view', () => {
   it('refills once for seven sessions after an expiry', async () => {
-    const w = await wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
+    const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     try {
       const ids = sessions(w, 7)
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
@@ -149,7 +145,7 @@ describe('github listings under a shared view', () => {
   })
 
   it('waits on a refill in progress instead of duplicating it', async () => {
-    const w = await wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
+    const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     let first: Promise<string> | undefined
     let second: Promise<string> | undefined
     let gate: { wiped: Promise<void>; release: () => void } | undefined
@@ -175,7 +171,7 @@ describe('github listings under a shared view', () => {
   })
 
   it('has a glob wait on a refill in progress as a listing does', async () => {
-    const w = await wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
+    const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     let first: Promise<string> | undefined
     let glob: Promise<string> | undefined
     let gate: { wiped: Promise<void>; release: () => void } | undefined
@@ -204,7 +200,7 @@ describe('github listings under a shared view', () => {
   })
 
   it('never deadlocks mixed commands after an expiry', async () => {
-    const w = await wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
+    const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     try {
       const ids = sessions(w, 3)
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
@@ -280,7 +276,7 @@ describe('github tree walks after the listing expires', () => {
     ['subdirectory operand', SUBDIR],
   ] as const) {
     it.each(rows)(`${kind}: %s sees a remote add with one refill`, async (line, prefix, want) => {
-      const w = await wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 }, prefix)
+      const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 }, prefix)
       try {
         expect(await out(w, `ls ${prefix}/docs`)).toBe(OLD_LS)
         gh.set('docs/c.txt', 'charlie\n')
@@ -297,7 +293,7 @@ describe('github tree walks after the listing expires', () => {
 
   it('never refills a truncated tree in a loop', async () => {
     gh.truncatedRecursive = true
-    const w = await wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
+    const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     try {
       await w.shell('find /gh -name a.txt')
       const walks = gh.count('recursive')
@@ -315,7 +311,7 @@ describe('github listings respect the mount ttl', () => {
     it.each(FIRST)(
       `${policy}: a listing first filled by %s expires with the mount`,
       async (first) => {
-        const w = await wsOf(await vfsOf(), { policy, ttl: 1 })
+        const w = wsOf(await vfsOf(), { policy, ttl: 1 })
         try {
           await out(w, first)
           gh.set('docs/c.txt', 'charlie\n')
@@ -337,7 +333,7 @@ describe('github listings respect the mount ttl', () => {
     ['find /gh -name c.txt', '/gh/docs/c.txt\n'],
   ]
   it.each(PROBE)('the first command after the expiry, %s, sees the change', async (line, want) => {
-    const w = await wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 1 })
+    const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 1 })
     try {
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
       gh.set('docs/c.txt', 'charlie\n')
@@ -352,19 +348,16 @@ describe('github listings respect the mount ttl', () => {
 
   it('bounds each prefix of one VFS by its own mount ttl', async () => {
     const vfs = await vfsOf()
-    const w = new Workspace(
-      {
-        '/a': new Mount(vfs, {
-          mode: MountMode.READ,
-          read: { policy: ReadPolicy.BOUNDED, ttl: 1 },
-        }),
-        '/b': new Mount(vfs, {
-          mode: MountMode.READ,
-          read: { policy: ReadPolicy.BOUNDED, ttl: 600 },
-        }),
-      },
-      { shellParser: await getTestParser() },
-    )
+    const w = new Workspace({
+      '/a': new Mount(vfs, {
+        mode: MountMode.READ,
+        read: { policy: ReadPolicy.BOUNDED, ttl: 1 },
+      }),
+      '/b': new Mount(vfs, {
+        mode: MountMode.READ,
+        read: { policy: ReadPolicy.BOUNDED, ttl: 600 },
+      }),
+    })
     try {
       expect(await out(w, 'ls /a/docs')).toBe(OLD_LS)
       expect(await out(w, 'ls /b/docs')).toBe(OLD_LS)
@@ -380,7 +373,7 @@ describe('github listings respect the mount ttl', () => {
   it('writes the listing a */ directory stat refills through the mount view', async () => {
     const clock = new ManualClock(T0)
     const vfs = await vfsOf()
-    const w = await wsOf(vfs, { policy: ReadPolicy.BOUNDED, ttl: 2 }, '/gh', clock)
+    const w = wsOf(vfs, { policy: ReadPolicy.BOUNDED, ttl: 2 }, '/gh', clock)
     try {
       const readdir = vfs.readdir.bind(vfs)
       vi.spyOn(vfs, 'readdir').mockImplementationOnce(async (path, handed) => {
@@ -400,7 +393,7 @@ describe('github listings respect the mount ttl', () => {
 
   it('caps a mount with no ttl key at the default 600 s', async () => {
     const clock = new ManualClock(T0)
-    const w = await wsOf(await vfsOf(), null, '/gh', clock)
+    const w = wsOf(await vfsOf(), null, '/gh', clock)
     try {
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
       gh.set('docs/c.txt', 'charlie\n')
@@ -419,7 +412,7 @@ describe('github listings respect the mount ttl', () => {
 // answers locally, with no request at all.
 describe('an invalid walk after an expiry', () => {
   it.each(['du -s -a /gh', 'find /gh -maxdepth nope'])('%s fetches nothing', async (line) => {
-    const w = await wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
+    const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     try {
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
       await indexOf(w, '/gh').invalidate()
@@ -443,13 +436,13 @@ function three(): void {
   vi.stubGlobal('fetch', gh.fetch)
 }
 
-async function freshOf(vfs: GitHubVFS, clock?: ManualClock): Promise<Workspace> {
+function freshOf(vfs: GitHubVFS, clock?: ManualClock): Workspace {
   return new Workspace(
     {
       '/gh': new Mount(vfs, { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 } }),
       '/r': [new RAMVFS(), MountMode.WRITE],
     },
-    { shellParser: await getTestParser(), ...(clock === undefined ? {} : { clock }) },
+    { ...(clock === undefined ? {} : { clock }) },
   )
 }
 
@@ -477,7 +470,7 @@ const FRESH_BUDGET: [string, [number, number, number]][] = [
 describe('a fresh mount re-lists once per command', () => {
   it.each(FRESH_BUDGET)('%s checks the version once', async (line, expected) => {
     three()
-    const w = await freshOf(await vfsOf())
+    const w = freshOf(await vfsOf())
     try {
       await out(w, 'ls /gh')
       gh.log.length = 0
@@ -492,7 +485,7 @@ describe('a fresh mount re-lists once per command', () => {
   // show the file.
   it('sees a file added outside mirage on the next ls', async () => {
     three()
-    const w = await freshOf(await vfsOf())
+    const w = freshOf(await vfsOf())
     try {
       expect(await out(w, 'ls /gh/d1')).toBe('a.txt\nb.txt\nc.txt\n')
       gh.set('d1/new.txt', 'new\n')
@@ -509,7 +502,7 @@ describe('a fresh mount re-lists once per command', () => {
   // listing the first one fetched.
   it('lets each command of a loop see changes made before it', async () => {
     three()
-    const w = await freshOf(await vfsOf())
+    const w = freshOf(await vfsOf())
     try {
       await out(w, 'ls /gh')
       gh.log.length = 0
@@ -544,19 +537,16 @@ describe('a fresh mount re-lists once per command', () => {
       GitHubVFS.create({ token: 't', owner: 'o', repo: 'r', ref: 'main', baseUrl })
     const freshVfs = await create(freshHub.url)
     const boundedVfs = await create(BOUNDED)
-    const w = new Workspace(
-      {
-        '/gh': new Mount(freshVfs, {
-          mode: MountMode.READ,
-          read: { policy: ReadPolicy.FRESH, ttl: 600 },
-        }),
-        '/gb': new Mount(boundedVfs, {
-          mode: MountMode.READ,
-          read: { policy: ReadPolicy.BOUNDED, ttl: 600 },
-        }),
-      },
-      { shellParser: await getTestParser() },
-    )
+    const w = new Workspace({
+      '/gh': new Mount(freshVfs, {
+        mode: MountMode.READ,
+        read: { policy: ReadPolicy.FRESH, ttl: 600 },
+      }),
+      '/gb': new Mount(boundedVfs, {
+        mode: MountMode.READ,
+        read: { policy: ReadPolicy.BOUNDED, ttl: 600 },
+      }),
+    })
     try {
       await out(w, 'ls /gh/d1 /gb/d1')
       freshHub.log.length = 0
@@ -575,7 +565,7 @@ describe('a fresh mount re-lists once per command', () => {
   // The version check replaces the tree refetch (Task 1.3).
   it('shares one refetch across seven fresh sessions', async () => {
     three()
-    const w = await freshOf(await vfsOf())
+    const w = freshOf(await vfsOf())
     let release = (): void => undefined
     try {
       const ids = sessions(w, 7)
@@ -610,7 +600,7 @@ describe('a fresh mount re-lists once per command', () => {
   it('trusts a listing for the window on an unscoped read', async () => {
     const clock = new ManualClock(100)
     three()
-    const w = await freshOf(await vfsOf(), clock)
+    const w = freshOf(await vfsOf(), clock)
     try {
       await out(w, 'ls /gh')
       gh.log.length = 0
@@ -646,7 +636,7 @@ describe('a truncated tree is walked folder by folder', () => {
   it.each(['find /gh', 'du -a /gh'])('%s sees every folder and an outside add', async (line) => {
     three()
     gh.truncatedRecursive = true
-    const w = await freshOf(await vfsOf())
+    const w = freshOf(await vfsOf())
     try {
       await out(w, 'ls /gh')
       gh.set('d1/new.txt', 'new\n')
@@ -662,7 +652,7 @@ describe('a truncated tree is walked folder by folder', () => {
   it('honours find -maxdepth 1', async () => {
     three()
     gh.truncatedRecursive = true
-    const w = await freshOf(await vfsOf())
+    const w = freshOf(await vfsOf())
     try {
       await out(w, 'ls /gh')
       const listed = await out(w, 'find /gh -maxdepth 1')
@@ -682,7 +672,7 @@ describe('a truncated tree is walked folder by folder', () => {
   // costs one check instead of a refetch (Task 1.3).
   it('keeps a complete tree walk on the tree', async () => {
     three()
-    const w = await freshOf(await vfsOf())
+    const w = freshOf(await vfsOf())
     try {
       await out(w, 'ls /gh')
       gh.log.length = 0
@@ -697,10 +687,7 @@ describe('a truncated tree is walked folder by folder', () => {
 it('fresh tree refill preserves a nested shared index', async () => {
   const vfs = await vfsOf()
   const opts = { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 } }
-  const ws = new Workspace(
-    { '/gh': new Mount(vfs, opts), '/gh/sub/nested': new Mount(vfs, opts) },
-    { shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/gh': new Mount(vfs, opts), '/gh/sub/nested': new Mount(vfs, opts) })
   try {
     await out(ws, 'ls /gh')
     await out(ws, 'ls /gh/sub/nested')

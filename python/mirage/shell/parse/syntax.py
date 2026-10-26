@@ -79,38 +79,6 @@ def check_syntax(
     return SyntaxDiagnostic(found[0].offending, message, found[-1].status)
 
 
-def pattern_source(data: bytes) -> bytes:
-    """Shield pattern operators while preserving expansions and byte spans.
-
-    The syntax gate separately decides whether extglob is enabled. The
-    structural parser always recognizes it, including the implicit mode
-    on the right of a conditional comparison. Process substitutions borrow
-    the command-substitution grammar to remain inside one word; SourceNode
-    restores their original types and text.
-
-    Args:
-        data (bytes): encoded shell source.
-    """
-    command = data.decode("utf-8", errors="surrogateescape")
-    if "[" not in command and not any(
-        c + "(" in command for c in constants.EXTGLOB_OPENERS
-    ):
-        return data
-    reader = _LineReader(command, frozenset(), None, True)
-    reader.refusals()
-    out = list(command)
-    for start, end in reader.patterns:
-        if (
-            end == start + 1
-            and command[start] in "<>"
-            and command[start + 1 : start + 2] == "("
-        ):
-            out[start] = "$"
-        else:
-            out[start:end] = ":" * (end - start)
-    return encode_text("".join(out))
-
-
 def heredoc_plan(command: str) -> HeredocPlan | None:
     """The heredocs bash reads in a line: each one's ``<<`` and where its
     body starts and ends, in the order bash reads the bodies (those a
@@ -153,61 +121,19 @@ def syntax_error_result(found: SyntaxDiagnostic) -> IOResult:
 
 
 def find_syntax_issue(node: TSNodeLike) -> SyntaxDiagnostic | None:
-    """A structural error the grammar left in a line bash reads.
-
-    ``check_syntax`` judges the line; this catches the lines it accepts
-    that the grammar still cannot build a tree for, which mirage then has
-    nothing to run for; it is worded as an unexpected token, status 2.
-    Parameter syntax is judged as the word expands (a bad substitution),
-    a ``[`` test's arguments by that builtin, and a ``$(...)`` body as the
-    line it runs as; the words of an associative subscript may hold
-    blanks, and the grammar recovers a ``for`` header's ``in`` as an
-    error of its own, and the ``;`` it misses
-    between a compound command and the reserved word closing around it
-    (``{ { a; } }``) as a missing token.
+    """A refusal of the parser in a line ``check_syntax`` accepts, which
+    mirage then has nothing to run for: worded as an unexpected token,
+    status 2. The parser ends a line it refuses in one ``ERROR`` node.
 
     Args:
         node (TSNodeLike): root node from parse().
     """
-    if node.type == "expansion" or not node.has_error:
+    if not node.has_error:
         return None
-    if node.type == "command_substitution" and (node.text or b"").startswith(
-        b"$("
-    ):
-        return None
-    if (
-        node.type == "test_command"
-        and node.children
-        and node.children[0].type == "["
-    ):
-        return None
-    for child in node.children:
-        if (
-            node.type == "subscript"
-            and child.type == "ERROR"
-            and child.children
-            and all(
-                part.type == "word" and not part.has_error
-                for part in child.children
-            )
-        ):
-            continue
-        if child.is_missing and child.type != ";":
-            return _issue(child)
-        if (
-            child.type == "ERROR"
-            and _is_structural_error(child)
-            and not (
-                node.type == "for_statement"
-                and (child.text or b"").strip() == b"in"
-            )
-        ):
-            return _issue(child)
-        if child.type != "ERROR":
-            nested = find_syntax_issue(child)
-            if nested is not None:
-                return nested
-    return None
+    return next(
+        (_issue(child) for child in node.children if child.type == "ERROR"),
+        None,
+    )
 
 
 def _issue(node: TSNodeLike) -> SyntaxDiagnostic:
@@ -219,21 +145,6 @@ def _issue(node: TSNodeLike) -> SyntaxDiagnostic:
         else "mirage: syntax error in command\n"
     )
     return SyntaxDiagnostic(text, message)
-
-
-def _is_structural_error(node: TSNodeLike) -> bool:
-    """Whether an ERROR node holds a token that structures a line.
-
-    Args:
-        node (TSNodeLike): the ERROR node.
-    """
-    return any(
-        child.is_named
-        or child.type in constants.BASH_KEYWORDS
-        or child.type in constants.STRUCTURAL_TOKENS
-        or child.type in constants.SEPARATOR_TOKENS
-        for child in node.children
-    )
 
 
 def _mirage_wording(line: str) -> str:
@@ -357,7 +268,6 @@ class _LineReader:
         self.aliases = aliases
         self.own = own
         self.extglob = extglob
-        self.patterns: list[tuple[int, int]] = []
         self.subs: dict[
             tuple[int, int | None], tuple[int, tuple[ReaderHeredoc, ...]]
         ] = {}
@@ -632,12 +542,11 @@ class _LineReader:
         return self.substitution(i, at + 1)
 
     def extended_pattern(self, i: int) -> int:
-        """Read a pattern group, shielding only its literal syntax.
+        """Read a pattern group to the parenthesis closing it.
 
         Args:
             i (int): the extended pattern's operator.
         """
-        self.patterns.append((i, i + 2))
         j, depth = i + 2, 1
         while j < self.n:
             c = self.text[j]
@@ -645,18 +554,12 @@ class _LineReader:
                 j = self.word_char(j)
                 continue
             if c in "<>" and self.char_at(j + 1) == "(":
-                self.patterns.append((j, j + 1))
                 j = self.process_substitution(j)
                 continue
             if c == "(":
                 depth += 1
             elif c == ")":
                 depth -= 1
-            if c in "()| \t\n;&<>" or (
-                c in constants.EXTGLOB_OPENERS
-                and self.text[j + 1 : j + 2] == "("
-            ):
-                self.patterns.append((j, j + 1))
             j += 1
             if depth == 0:
                 return j
@@ -675,7 +578,6 @@ class _LineReader:
             if c == "}":
                 return j + 1
             if c in "<>" and self.char_at(j + 1) == "(":
-                self.patterns.append((j, j + 1))
                 j = self.process_substitution(j)
                 continue
             j = self.word_char(j)
@@ -1687,7 +1589,6 @@ class _LineReader:
                 ):
                     self.fail_token(tok)
                 after_in = False
-                self.pattern_brackets(tok.start, tok.end)
                 self.take(tok)
                 tok = self.peek()
                 if tok.kind == "op" and tok.text == ")":
@@ -1920,22 +1821,6 @@ class _LineReader:
                 refusal.lines.append(line)
             raise
 
-    def pattern_brackets(self, start: int, end: int) -> None:
-        """Keep a bracket pattern containing quotes or expansions one word.
-
-        Args:
-            start (int): the pattern's first character.
-            end (int): the position after the pattern.
-        """
-        word = self.text[start:end]
-        if "[" not in word or not any(c in word for c in "'\"`$\\"):
-            return
-        j = start
-        while j < end:
-            if self.text[j] in "[]":
-                self.patterns.append((j, j + 1))
-            j = self.word_char(j)
-
     def pattern_word(self) -> ReaderToken:
         """The right side of ``==``, ``=`` or ``!=``, read with extglob on."""
         i = self.blank_end(self.pos)
@@ -1957,7 +1842,6 @@ class _LineReader:
             if c in constants.WORD_BREAKS:
                 break
             j = self.word_char(j)
-        self.pattern_brackets(i, j)
         if not extended:
             return tok
         return ReaderToken("word", text[i:j].replace("\\\n", ""), i, j)

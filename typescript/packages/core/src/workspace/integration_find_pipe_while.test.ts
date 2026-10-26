@@ -23,14 +23,14 @@ const FILES: Record<string, string> = {
   'data.json': '{"key": "value"}\n',
 }
 
-async function fresh(): Promise<{ ws: Awaited<ReturnType<typeof makeIntegrationWS>>['ws'] }> {
-  const { ws } = await makeIntegrationWS(FILES)
+function fresh(): { ws: Awaited<ReturnType<typeof makeIntegrationWS>>['ws'] } {
+  const { ws } = makeIntegrationWS(FILES)
   return { ws }
 }
 
 describe('integration: find_pipe_while', () => {
   it('find -type f', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = (await run(ws, 'find /data -type f | sort')).trim()
     const lines = result.split('\n')
     expect(lines).toContain('/data/data.json')
@@ -41,14 +41,14 @@ describe('integration: find_pipe_while', () => {
   })
 
   it('find -maxdepth 0 -type f (search root is a dir, no matches)', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = (await run(ws, 'find /data -maxdepth 0 -type f | sort')).trim()
     expect(result).toBe('')
     await ws.close()
   })
 
   it('find -maxdepth 1 -type f (direct children only)', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = (await run(ws, 'find /data -maxdepth 1 -type f | sort')).trim()
     const lines = result.split('\n')
     expect(lines).toContain('/data/data.json')
@@ -60,7 +60,7 @@ describe('integration: find_pipe_while', () => {
   })
 
   it("find -name '*.txt'", async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = (await run(ws, "find /data -name '*.txt' | sort")).trim()
     const lines = result.split('\n')
     expect(lines).toEqual(['/data/docs/notes.txt', '/data/docs/readme.txt'])
@@ -68,7 +68,7 @@ describe('integration: find_pipe_while', () => {
   })
 
   it('find | sort | while read | echo', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = await run(
       ws,
       'find /data -maxdepth 2 -type f | sort | while read f; do echo "=== $f ==="; done',
@@ -85,7 +85,7 @@ describe('integration: find_pipe_while', () => {
   })
 
   it('find -name + sort + while read + file', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = await run(
       ws,
       'find /data -maxdepth 2 -type f -name \'*.json\' | sort | while read f; do echo "=== $f ==="; file $f; done',
@@ -97,7 +97,7 @@ describe('integration: find_pipe_while', () => {
   })
 
   it('find | while read | echo content', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = await run(
       ws,
       'find /data -name \'*.txt\' -type f | sort | while read f; do echo "FILE: $f"; done',
@@ -112,7 +112,7 @@ describe('integration: find_pipe_while', () => {
   })
 
   it('find -type d', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = (await run(ws, 'find /data -type d | sort')).trim()
     const lines = result === '' ? [] : result.split('\n')
     for (const line of lines) {

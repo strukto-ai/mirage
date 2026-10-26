@@ -117,11 +117,14 @@ pub(super) struct Parser<'a> {
     /// a parse that backtracks over nested input would otherwise let grow
     /// without bound.
     pub work: &'a std::cell::Cell<usize>,
+    /// The names the shell expands as aliases: one is a command where a
+    /// command starts, never a reserved word.
+    pub aliases: &'a [Vec<u8>],
 }
 
 /// Parse a whole program.
-pub(super) fn parse(source: &[u8]) -> Tree {
-    let mut pass = parse_pass(source);
+pub(super) fn parse(source: &[u8], aliases: &[Vec<u8>]) -> Tree {
+    let mut pass = parse_pass(source, aliases);
     let dropped = continuations(source, &pass);
     if !dropped.is_empty() {
         let mut logical = Vec::with_capacity(source.len());
@@ -136,7 +139,7 @@ pub(super) fn parse(source: &[u8]) -> Tree {
             map.push(at);
         }
         map.push(source.len());
-        pass = parse_pass(&logical);
+        pass = parse_pass(&logical, aliases);
         remap(&mut pass.root, &map);
         for comment in &mut pass.comments {
             *comment = span(*comment, &map);
@@ -167,9 +170,9 @@ struct Pass {
     error: Option<(usize, String)>,
 }
 
-fn parse_pass(source: &[u8]) -> Pass {
+fn parse_pass(source: &[u8], aliases: &[Vec<u8>]) -> Pass {
     let work = std::cell::Cell::new(0);
-    let mut parser = Parser::new(source, &work);
+    let mut parser = Parser::new(source, &work, aliases);
     let mut children = Vec::new();
     let mut error = None;
     loop {
@@ -322,7 +325,11 @@ fn remap(root: &mut Syn, map: &[usize]) {
 
 impl<'a> Parser<'a> {
     /// A parser at the start of `s`, counting its work in `work`.
-    pub(super) fn new(s: &'a [u8], work: &'a std::cell::Cell<usize>) -> Self {
+    pub(super) fn new(
+        s: &'a [u8],
+        work: &'a std::cell::Cell<usize>,
+        aliases: &'a [Vec<u8>],
+    ) -> Self {
         Self {
             s,
             i: 0,
@@ -336,6 +343,7 @@ impl<'a> Parser<'a> {
             line_break: false,
             braces: 0,
             work,
+            aliases,
         }
     }
 }
@@ -523,12 +531,15 @@ impl Parser<'_> {
         end
     }
 
-    /// Whether the reserved word `word` is next.
+    /// Whether the reserved word `word` is next. An alias of that name is
+    /// a command instead, as bash expands it before it reads a reserved
+    /// word; `in` stands where no alias expands.
     pub(super) fn at_word(&self, word: &[u8]) -> bool {
-        is_word(self.s, self.i, word)
+        let next = is_word(self.s, self.i, word)
             || (self.in_backtick
                 && self.s[self.i..].starts_with(word)
-                && self.s.get(self.i + word.len()) == Some(&b'`'))
+                && self.s.get(self.i + word.len()) == Some(&b'`'));
+        next && (word == b"in" || !self.aliases.iter().any(|alias| alias == word))
     }
 
     fn at_close(&self, close: Close) -> bool {

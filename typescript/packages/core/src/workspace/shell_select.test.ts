@@ -23,7 +23,7 @@ const SELECT_CMD = 'select x in aa bb; do echo got:$x; break; done'
 
 describe('select', () => {
   it('picks the choice read from stdin', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [code, out, err] = await runResult(ws, `printf '2\\n' | ${SELECT_CMD}`)
       expect(code).toBe(0)
@@ -35,7 +35,7 @@ describe('select', () => {
   })
 
   it('sets the variable empty for an invalid choice', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(
         await run(ws, "printf '9\\n' | select x in aa bb; do echo got:${x:-none}; break; done"),
@@ -46,7 +46,7 @@ describe('select', () => {
   })
 
   it('keeps the raw reply in REPLY', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(
         await run(ws, "printf 'zz\\n' | select x in aa bb; do echo r:$REPLY; break; done"),
@@ -57,7 +57,7 @@ describe('select', () => {
   })
 
   it('redisplays the menu on an empty line', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [, out, err] = await runResult(ws, `printf '\\n2\\n' | ${SELECT_CMD}`)
       expect(out).toBe('got:bb\n')
@@ -68,7 +68,7 @@ describe('select', () => {
   })
 
   it('ends the loop at EOF', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       // bash terminates the prompt line with a newline at EOF.
       const [code, out, err] = await runResult(
@@ -84,7 +84,7 @@ describe('select', () => {
   })
 
   it('loops until break', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(
         await run(

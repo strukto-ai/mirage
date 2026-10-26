@@ -18,12 +18,13 @@ from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import replace
 from functools import partial
-from typing import Any, cast
+from typing import Any
 
 from mirage.cache.index.scope import command_scope
 from mirage.context import (
     program_invocation,
     redirect_paths_for,
+    redirect_runner_for,
     reset_current_session,
     reset_program_invocation,
     reset_redirect_paths,
@@ -56,6 +57,7 @@ from mirage.shell.constants import (
 )
 from mirage.shell.errors import ArithError, ExitSignal, ReadonlyError
 from mirage.shell.helpers import (
+    command_redirects,
     get_case_items,
     get_case_word,
     get_cfor_parts,
@@ -76,7 +78,6 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
-from mirage.shell.parse.timing import PrefixNode
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import (
     PipelineStages,
@@ -144,7 +145,7 @@ from mirage.workspace.node.test_expr import (
     expand_double_bracket,
     expand_test_expr,
 )
-from mirage.workspace.node.timing import timing_report
+from mirage.workspace.node.timing import timed_by, timing_report
 from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session.elements import landed_arith
 from mirage.workspace.session.functions import FunctionSite
@@ -1241,15 +1242,21 @@ async def _execute_node(
 
     if kind == NodeKind.TIMED:
         started = time.monotonic()
-        inner = node.named_children[0]
-        stdout, io, exec_node = await stream(inner, context, stdin, cs)
-        stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-        elapsed = time.monotonic() - started
-        report = b"".join(
-            timing_report(elapsed, portable, session.env.get("TIMEFORMAT"))
-            for portable in reversed(cast(PrefixNode, node).timing)
-        )
-        io.stderr = (await io.materialize_stderr()) + report
+        body = node.named_children
+        if body:
+            stdout, io, exec_node = await stream(body[0], context, stdin, cs)
+            stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+        else:
+            stdout, io = None, IOResult()
+            exec_node = ExecutionNode(command="", exit_code=0)
+        portable = timed_by(node)
+        if portable is not None:
+            report = timing_report(
+                time.monotonic() - started,
+                portable,
+                session.env.get("TIMEFORMAT"),
+            )
+            io.stderr = (await io.materialize_stderr()) + report
         return stdout, io, exec_node
 
     if kind == NodeKind.COMMENT:
@@ -1307,6 +1314,29 @@ async def _execute_node(
             inline=call_stack is not None,
             execute_fn=execute_fn,
         )
+
+    own = (
+        command_redirects(node)
+        if kind == NodeKind.COMMAND and redirect_runner_for(node.id) is None
+        else []
+    )
+    if own:
+        ran = await _run_redirected(
+            recurse,
+            dispatch,
+            execute_fn,
+            registry,
+            namespace,
+            view,
+            node,
+            own,
+            job_table.processes if job_table is not None else None,
+            context,
+            stdin,
+            cs,
+            sink=sink,
+        )
+        return ran if sink is None else await drained(sink, *ran)
 
     if kind == NodeKind.COMMAND:
         expanded = ExpandedWords()

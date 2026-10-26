@@ -15,11 +15,8 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { FileStat, FileType, MountMode, type PathSpec } from '../types.ts'
 import { eacces } from '../errors/fs.ts'
@@ -27,15 +24,9 @@ import { applyStateDict, toStateDict } from './snapshot/state.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { dispatched } from '../test-utils.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
 let tempDir: string
 
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
+beforeAll(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'mirage-symlinks-'))
 })
 
@@ -45,7 +36,7 @@ afterAll(() => {
 
 function buildWorkspace(): Workspace {
   const ram = new RAMVFS()
-  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
 }
 
 const dec = (b: Uint8Array | null): string => (b === null ? '' : new TextDecoder().decode(b))
@@ -119,7 +110,7 @@ describe('symlinks (namespace-backed)', () => {
     // live collection as a directory. Refusing on either reading denied
     // the ordinary case of adding a link inside a mounted tree.
     const ram = new RAMVFS()
-    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
+    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
     const stat = vi.spyOn(ram, 'stat').mockImplementation((path) =>
       Promise.resolve(
         new FileStat({
@@ -160,10 +151,7 @@ describe('symlinks (namespace-backed)', () => {
     // The link rename is the dispatcher's, where every op a line makes is
     // judged. mv used to move the node itself, which made it the one write
     // in the shell no gate could see.
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('echo hi > /data/a.txt')
     await ws.shell('ln -s /data/a.txt /data/lk')
     const seen = dispatched(ws)
@@ -1466,7 +1454,7 @@ it.each([
 ])('%s names a link whose target refuses stat', async (line, code, stdout, stderr) => {
   const ws = new Workspace(
     { '/data': new RAMVFS(), '/sec': [new SealedRAMVFS(), MountMode.READ] },
-    { mode: MountMode.WRITE, shellParser: parser },
+    { mode: MountMode.WRITE },
   )
   await ws.shell(
     'mkdir -p /data/d /data/e/ld && echo a > /data/d/a && echo a > /data/e/a && ' +
@@ -1482,7 +1470,7 @@ it.each([
 it('cp -ru names a destination link it may not stat and goes on', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS(), '/sec': [new SealedRAMVFS(), MountMode.READ] },
-    { mode: MountMode.WRITE, shellParser: parser },
+    { mode: MountMode.WRITE },
   )
   await ws.shell(
     'mkdir -p /data/s /data/t && echo A > /data/s/a && echo B > /data/s/b && ln -s /sec/a /data/t/a',

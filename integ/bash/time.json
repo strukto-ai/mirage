@@ -179,6 +179,21 @@
         "stdout": "",
         "stderr": "timed\n"
       }
+    },
+    {
+      "id": "time_reports_a_leading_chain_once",
+      "seq": 511012,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "TIMEFORMAT=timed; time ! time true; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": "timed\n"
+      }
     }
   ]
 }

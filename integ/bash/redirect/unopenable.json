@@ -40,6 +40,26 @@
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1 v=\nfailed=1\nunexpanded\nrouted=1\nmissing/leaf: No such file or directory\nstderr=1\nempty\nfd=1\nempty\n",
         "stderr": "nodir/f: No such file or directory\nnodir/g: No such file or directory\nnodir/h: No such file or directory\nnodir/i: No such file or directory\nmissing/leaf: No such file or directory\nmissing/err: No such file or directory\nmissing/err: No such file or directory\n"
       }
+    },
+    {
+      "id": "redirect_unopenable_among_assignments_keeps_them",
+      "seq": 501177,
+      "targets": [
+        "ram",
+        "redis",
+        "opfs",
+        "disk",
+        "databricks",
+        "databricks-prefix",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/r11 && cd /data/r11 && x=3 > nodir/f y=4; echo \"rc=$? $x $y\"; cd / && rm -r /data/r11",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1 3 4\n",
+        "stderr": "nodir/f: No such file or directory\n"
+      }
     }
   ]
 }

@@ -102,8 +102,7 @@ it.each(['mapfile values', 'read -N 131072 value'])(
   'aborts %s while consuming ready stdin and closes the producer',
   async (command) => {
     const { Workspace } = await import('../workspace/workspace/workspace.ts')
-    const { getTestParser } = await import('../../tests/workspace/fixtures/workspace_fixture.ts')
-    const ws = new Workspace({}, { shellParser: await getTestParser() })
+    const ws = new Workspace({})
     const controller = new AbortController()
     let closed = false
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -161,8 +160,7 @@ it('uses the current read signal when reusing buffered stdin', async () => {
 
 it.each(['timeout', 'read failure'])('records %s while finalizing a shell reader', async (kind) => {
   const { Workspace } = await import('../workspace/workspace/workspace.ts')
-  const { getTestParser } = await import('../../tests/workspace/fixtures/workspace_fixture.ts')
-  const ws = new Workspace({}, { shellParser: await getTestParser() })
+  const ws = new Workspace({})
   async function* source() {
     yield ENC.encode('partial\n')
     throw kind === 'timeout' ? new CommandTimeoutError('mapfile', 1) : new Error('read failed')
@@ -181,8 +179,7 @@ it.each(['timeout', 'read failure'])('records %s while finalizing a shell reader
 
 it('preserves a caller-supplied abort reason and records cancellation', async () => {
   const { Workspace } = await import('../workspace/workspace/workspace.ts')
-  const { getTestParser } = await import('../../tests/workspace/fixtures/workspace_fixture.ts')
-  const ws = new Workspace({}, { shellParser: await getTestParser() })
+  const ws = new Workspace({})
   const controller = new AbortController()
   const reason = new Error('caller stopped the run')
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -255,8 +252,7 @@ describe('chunks under a stalled source', () => {
 
 it('answers a timeout signal with an AbortError that carries the timeout', async () => {
   const { Workspace } = await import('../workspace/workspace/workspace.ts')
-  const { getTestParser } = await import('../../tests/workspace/fixtures/workspace_fixture.ts')
-  const ws = new Workspace({}, { shellParser: await getTestParser() })
+  const ws = new Workspace({})
   async function* source() {
     for (let i = 0; i < 50; i++) {
       await new Promise<void>((resolve) => setTimeout(resolve, 5))

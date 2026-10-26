@@ -4,9 +4,9 @@
 // Licensed under MIT. See licenses/third_party/tree-sitter-bash-parser.txt.
 use super::arith::{BINARY, PREFIX, TERNARY, UNARY};
 use super::lex::is_space;
-use super::parser::{Fail, Parser, R};
+use super::parser::{Parser, R};
 use super::tree::Syn;
-use super::word::Ctx;
+use super::word::{Ctx, push_run};
 
 /// Where a `-op` test operator binds.
 const TEST: u8 = 10;
@@ -129,7 +129,8 @@ impl Parser<'_> {
                 self.i = end;
                 (Syn::leaf("test_operator", at, end), TEST)
             } else if let Some((text, prec)) = self.test_binary_operator() {
-                if prec < min {
+                // A list or pipe operator ends a `[` command's words.
+                if prec < min || closer == Closer::Single && matches!(text, "&&" | "||" | "|") {
                     break;
                 }
                 self.i += text.len();
@@ -146,10 +147,16 @@ impl Parser<'_> {
             let right = match op.kind {
                 "=~" => self.regex_operand(closer)?,
                 "==" | "!=" => self.pattern_operand(closer, prec)?,
-                "=" if closer != Closer::Single => match self.extglob_word()? {
-                    Some(word) => word,
-                    None => self.test_expression(closer, prec + 1)?,
-                },
+                "=" if closer != Closer::Single => {
+                    let mark = self.mark();
+                    match self.pattern_word()? {
+                        Some((word, true)) => word,
+                        _ => {
+                            self.reset(mark);
+                            self.test_expression(closer, prec + 1)?
+                        }
+                    }
+                }
                 _ => {
                     let next = if op.kind == "**" { prec } else { prec + 1 };
                     self.test_expression(closer, next)?
@@ -247,6 +254,7 @@ impl Parser<'_> {
         }
         let ctx = Ctx {
             bracket: closer == Closer::Single,
+            conditional: closer != Closer::Single,
             ..Default::default()
         };
         match self.literal_opt(ctx)? {
@@ -346,21 +354,23 @@ impl Parser<'_> {
 
     /// The right side of `==` and `!=`: an extglob pattern when the
     /// grammar's pattern scanner takes one, an expression otherwise. Inside
-    /// `[[`, a word holding an extglob group is read as bash reads it,
-    /// and is one pattern token where the scanner takes all of it.
+    /// `[[`, the word bash reads where the scanner stops short of it or it
+    /// holds an extglob group, one pattern token where the scanner takes
+    /// all of it.
     fn pattern_operand(&mut self, closer: Closer, prec: u8) -> R<Syn> {
         let at = self.i;
         let grammar = self.extglob_end();
-        let word = if closer == Closer::Single {
-            None
-        } else {
-            self.extglob_word()?
-        };
-        if let Some(word) = word {
-            if grammar == Some(self.i) {
-                return Ok(Syn::leaf("extglob_pattern", at, self.i));
+        if closer != Closer::Single {
+            let mark = self.mark();
+            if let Some((word, group)) = self.pattern_word()? {
+                if grammar == Some(self.i) {
+                    return Ok(Syn::leaf("extglob_pattern", at, self.i));
+                }
+                if group || grammar.is_some() {
+                    return Ok(word);
+                }
             }
-            return Ok(word);
+            self.reset(mark);
         }
         if let Some(end) = grammar {
             self.i = end;
@@ -369,73 +379,56 @@ impl Parser<'_> {
         self.test_expression(closer, prec + 1)
     }
 
-    /// A pattern word holding an extglob group, whose parentheses bash
-    /// matches across blanks and newlines: runs of pattern text, with
-    /// the quotes and expansions in it as their own nodes. None, the
-    /// cursor kept, when the word holds no group.
-    fn extglob_word(&mut self) -> R<Option<Syn>> {
+    /// A pattern word as bash reads it, its extglob groups matched across
+    /// blanks and newlines: runs of pattern text with the quotes and
+    /// expansions in it as their own nodes, and whether it holds a group.
+    /// None when no word starts here.
+    pub(super) fn pattern_word(&mut self) -> R<Option<(Syn, bool)>> {
         let start = self.i;
-        let mark = self.mark();
         let mut pieces = Vec::new();
         let mut run = start;
-        let mut depth = 0usize;
         let mut group = false;
         loop {
-            if self.eof() {
-                if depth > 0 {
-                    return Err(Fail::eof(self.i, ')'));
-                }
-                break;
-            }
             let byte = self.peek();
-            if depth == 0
-                && (is_space(byte) || matches!(byte, b';' | b'&' | b'|' | b'<' | b'>' | b')'))
+            if self.eof()
+                || is_space(byte)
+                || matches!(byte, b';' | b'&' | b'|' | b'<' | b'>' | b')')
             {
                 break;
             }
-            match byte {
-                b'(' if depth > 0 => depth += 1,
-                b'(' if self.i > start
-                    && matches!(self.s[self.i - 1], b'?' | b'*' | b'+' | b'@' | b'!')
-                    && !super::lex::escaped(self.s, self.i - 1) =>
-                {
-                    group = true;
-                    depth = 1;
-                }
-                b'(' => break,
-                b')' => depth -= 1,
-                b'\\' => self.i += 1,
-                b'"' | b'\'' | b'`' | b'$' => {
-                    let at = self.i;
-                    let piece = match byte {
-                        b'"' => self.string()?,
-                        b'\'' => self.raw_string()?,
-                        b'`' => self.backtick()?,
-                        _ => self.dollar()?,
-                    };
-                    if piece.is("$") {
-                        continue;
-                    }
-                    if at > run {
-                        pieces.push(Syn::leaf("extglob_pattern", run, at));
-                    }
-                    pieces.push(piece);
+            let at = self.i;
+            let piece = match byte {
+                b'(' if self.i > start && self.at_extglob_group() => {
+                    push_run(&mut pieces, "extglob_pattern", run, at);
+                    self.extglob_group(&mut pieces, "extglob_pattern")?;
                     run = self.i;
+                    group = true;
                     continue;
                 }
-                _ => {}
+                b'(' => break,
+                b'\\' => {
+                    self.i += 2;
+                    continue;
+                }
+                b'"' => self.string()?,
+                b'\'' => self.raw_string()?,
+                b'`' => self.backtick()?,
+                b'$' => self.dollar()?,
+                _ => {
+                    self.i += 1;
+                    continue;
+                }
+            };
+            if piece.is("$") {
+                continue;
             }
-            self.i += 1;
-        }
-        if !group {
-            self.reset(mark);
-            return Ok(None);
+            push_run(&mut pieces, "extglob_pattern", run, at);
+            pieces.push(piece);
+            run = self.i;
         }
         self.i = self.i.min(self.s.len());
-        if self.i > run {
-            pieces.push(Syn::leaf("extglob_pattern", run, self.i));
-        }
-        Ok(Syn::concat(pieces))
+        push_run(&mut pieces, "extglob_pattern", run, self.i);
+        Ok(Syn::concat(pieces).map(|word| (word, group)))
     }
 
     /// Where an extglob pattern ends, if the pattern scanner of

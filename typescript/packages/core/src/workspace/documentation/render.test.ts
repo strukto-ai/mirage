@@ -28,7 +28,6 @@ import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { SharePointVFS } from '../../vfs/sharepoint/sharepoint.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { CHANGES } from './constants.ts'
 
 const SUPPORTED = '## Supported Unix Commands for VFS'
@@ -141,8 +140,7 @@ async function seeded(
   vfs: RAMVFS = new RAMVFS(),
   profile: Record<string, unknown> | null = null,
 ): Promise<Workspace> {
-  const shellParser = await getTestParser()
-  const seed = new Workspace({ '/m': [vfs, MountMode.WRITE] }, { shellParser })
+  const seed = new Workspace({ '/m': [vfs, MountMode.WRITE] })
   expect((await seed.shell(SETUP)).exitCode).toBe(0)
   const base = BaseVFS.prototype as unknown as Record<string, unknown>
   for (const op of ops)
@@ -151,7 +149,6 @@ async function seeded(
     { '/m': [vfs, MountMode.WRITE] },
     {
       mode: MountMode.WRITE,
-      shellParser,
       profiles: profile === null ? {} : { default: parseSessionProfile(profile) },
     },
   )

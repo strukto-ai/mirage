@@ -17,7 +17,6 @@ import { BaseVFS } from '../../../../vfs/base.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { parseSessionProfile } from '../../../../policy/profile.ts'
 import { parseGroup, parseOwner, parseTouchStamp, walkOwned } from './metadata.ts'
@@ -66,11 +65,10 @@ describe('parseGroup', () => {
   })
 })
 
-async function makeWs(mode: MountMode = MountMode.WRITE): Promise<[Workspace, RAMVFS]> {
-  const parser = await getTestParser()
+function makeWs(mode: MountMode = MountMode.WRITE): [Workspace, RAMVFS] {
   const vfs = new RAMVFS()
   vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
-  const ws = new Workspace({ '/data': vfs }, { mode, shellParser: parser })
+  const ws = new Workspace({ '/data': vfs }, { mode })
   return [ws, vfs]
 }
 
@@ -118,15 +116,14 @@ class RejectingRAMVFS extends OverlayRAMVFS {
   }
 }
 
-async function makeOverlayWs(
+function makeOverlayWs(
   files: Record<string, string>,
   vfs: RAMVFS = new OverlayRAMVFS(),
-): Promise<[Workspace, RAMVFS]> {
-  const parser = await getTestParser()
+): [Workspace, RAMVFS] {
   for (const [p, data] of Object.entries(files)) {
     vfs.store.files.set(p, new TextEncoder().encode(data))
   }
-  const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
   return [ws, vfs]
 }
 
@@ -141,7 +138,7 @@ async function run(ws: Workspace, cmd: string): Promise<[number, string, string]
 
 describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   it('chmod renders in ls -l', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     const [code] = await run(ws, 'chmod 601 /data/f.txt')
     expect(code).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
@@ -150,7 +147,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('symbolic chmod starts from the current mode', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'chmod 644 /data/f.txt')
     await run(ws, 'chmod u+x /data/f.txt')
     const [, out] = await run(ws, 'ls -l /data')
@@ -159,7 +156,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('chmod rejects a bad mode', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     const [code, , err] = await run(ws, 'chmod zz /data/f.txt')
     expect(code).toBe(1)
     expect(err).toContain('invalid mode')
@@ -167,7 +164,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('chmod reports missing files', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     const [code, , err] = await run(ws, 'chmod 644 /data/nope.txt')
     expect(code).toBe(1)
     expect(err).toContain('nope.txt')
@@ -175,7 +172,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('chown renders owner and group', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     const [code] = await run(ws, 'chown 500:dev /data/f.txt')
     expect(code).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
@@ -184,7 +181,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('touch -t sets the displayed mtime', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     const [code] = await run(ws, 'touch -t 202603041200 /data/f.txt')
     expect(code).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
@@ -193,7 +190,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('touch creates missing files; -c does not', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'touch /data/new.txt')
     const [, out] = await run(ws, 'ls /data')
     expect(out).toContain('new.txt')
@@ -204,7 +201,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('chmod follows symlinks to the target', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'ln -s /data/f.txt /data/link')
     await run(ws, 'chmod 640 /data/link')
     const [, out] = await run(ws, 'ls -l /data')
@@ -216,7 +213,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('metadata commands refuse a read-only mount', async () => {
-    const [ws] = await makeWs(MountMode.READ)
+    const [ws] = makeWs(MountMode.READ)
     for (const [cmd, action] of [
       ['chmod 644', 'changing permissions of'],
       ['chown alice', 'changing ownership of'],
@@ -233,7 +230,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('falls back to the namespace overlay when the mount has no setattr', async () => {
-    const [ws, vfs] = await makeOverlayWs({ '/f.txt': 'hello' })
+    const [ws, vfs] = makeOverlayWs({ '/f.txt': 'hello' })
     const [code] = await run(
       ws,
       'chmod 601 /data/f.txt && chown 500:dev /data/f.txt && touch -t 202603041200 /data/f.txt',
@@ -251,7 +248,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   it('renders overlay attrs in ls -l when the mount has no setattr', async () => {
     // ls stats through the backend, which has no attribute slot here; the
     // injected namespace overlay must still render chmod/chown/touch.
-    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' })
+    const [ws] = makeOverlayWs({ '/f.txt': 'hello' })
     await run(
       ws,
       'chmod 664 /data/f.txt && chown 500:dev /data/f.txt && touch -t 202603041200 /data/f.txt',
@@ -264,7 +261,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('touch cannot create on a stat-only mount', async () => {
-    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' }, new StatOnlyRAMVFS())
+    const [ws] = makeOverlayWs({ '/f.txt': 'hello' }, new StatOnlyRAMVFS())
     const [code, , err] = await run(ws, 'touch /data/new.txt')
     expect(code).toBe(1)
     expect(err).toContain("cannot touch '/data/new.txt': Read-only file system")
@@ -274,7 +271,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('touch reports a failed upload and the line goes on', async () => {
-    const [ws] = await makeOverlayWs({}, new RejectingRAMVFS(new Error('upload refused: 503')))
+    const [ws] = makeOverlayWs({}, new RejectingRAMVFS(new Error('upload refused: 503')))
     expect(await run(ws, 'touch /data/new.txt; echo "s=$?"')).toEqual([
       0,
       's=1\n',
@@ -291,20 +288,20 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     ],
     ['touch /data/d/', "touch: setting times of '/data/d/': stat refused: 503\n"],
   ])('touch reports a refused stat and the line goes on: %s', async (line, stderr) => {
-    const [ws] = await makeOverlayWs({}, new RejectingRAMVFS(new Error('stat refused: 503'), true))
+    const [ws] = makeOverlayWs({}, new RejectingRAMVFS(new Error('stat refused: 503'), true))
     expect(await run(ws, `${line}; echo "s=$?"`)).toEqual([0, 's=1\n', stderr])
     await ws.close()
   })
 
   it('touch lets a timeout on upload end the line', async () => {
-    const [ws] = await makeOverlayWs({}, new RejectingRAMVFS(new CommandTimeoutError('write', 1)))
+    const [ws] = makeOverlayWs({}, new RejectingRAMVFS(new CommandTimeoutError('write', 1)))
     const [code, out] = await run(ws, 'touch /data/new.txt; echo after')
     expect([code, out]).toEqual([124, ''])
     await ws.close()
   })
 
   it('touch on a stat-only mount still stamps existing files via the overlay', async () => {
-    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' }, new StatOnlyRAMVFS())
+    const [ws] = makeOverlayWs({ '/f.txt': 'hello' }, new StatOnlyRAMVFS())
     const [code] = await run(ws, 'touch -t 202603041200 /data/f.txt')
     expect(code).toBe(0)
     expect((await statOf(ws, '/data/f.txt')).modified).toBe('2026-03-04T12:00:00Z')
@@ -312,7 +309,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('symbolic chmod on a directory builds on 755', async () => {
-    const [ws] = await makeOverlayWs({})
+    const [ws] = makeOverlayWs({})
     await run(ws, 'mkdir /data/sub')
     const [code, , err] = await run(ws, 'chmod g+w /data/sub')
     expect(code, err).toBe(0)
@@ -321,7 +318,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('touch -r resolves a relative reference against cwd', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'touch -t 202603041200 /data/f.txt')
     const [code, , err] = await run(ws, 'cd /data && touch -r f.txt new.txt')
     expect(code, err).toBe(0)
@@ -331,7 +328,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('a content write clears overlay times but keeps the mode', async () => {
-    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' })
+    const [ws] = makeOverlayWs({ '/f.txt': 'hello' })
     await run(ws, 'chmod 601 /data/f.txt')
     await run(ws, 'touch -t 202603041200 /data/f.txt')
     const [code] = await run(ws, 'echo more >> /data/f.txt')
@@ -343,7 +340,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('mv replacing a file drops the destination meta', async () => {
-    const [ws] = await makeOverlayWs({ '/src.txt': 'new', '/dst.txt': 'old' })
+    const [ws] = makeOverlayWs({ '/src.txt': 'new', '/dst.txt': 'old' })
     await run(ws, 'chmod 601 /data/dst.txt')
     const [code, , err] = await run(ws, 'mv /data/src.txt /data/dst.txt')
     expect(code, err).toBe(0)
@@ -352,7 +349,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('mv carries the source meta over the destination meta', async () => {
-    const [ws] = await makeOverlayWs({ '/src.txt': 'new', '/dst.txt': 'old' })
+    const [ws] = makeOverlayWs({ '/src.txt': 'new', '/dst.txt': 'old' })
     await run(ws, 'chmod 601 /data/dst.txt')
     await run(ws, 'chmod 640 /data/src.txt')
     const [code, , err] = await run(ws, 'mv /data/src.txt /data/dst.txt')
@@ -367,7 +364,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
       // rename(2) leaves a file's times alone, so a time only the node
       // table holds moves with the name, whether a command or the
       // dispatcher's own caller (FUSE, ws.vfs) renames it.
-      const [ws] = await makeOverlayWs({ '/a.txt': 'x' })
+      const [ws] = makeOverlayWs({ '/a.txt': 'x' })
       await run(ws, 'touch -t 202603041200 /data/a.txt')
       const before = await statOf(ws, '/data/a.txt')
       if (line === null) await ws.vfs.rename('/data/a.txt', '/data/b.txt')
@@ -381,7 +378,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   )
 
   it('mv into a symlinked directory keys meta under the real path', async () => {
-    const [ws] = await makeOverlayWs({ '/f.txt': 'hi' })
+    const [ws] = makeOverlayWs({ '/f.txt': 'hi' })
     await run(ws, 'mkdir /data/sub')
     await run(ws, 'chmod 601 /data/f.txt')
     await run(ws, 'ln -s /data/sub /data/lnk')
@@ -392,7 +389,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('glob rm drops the meta of expanded files', async () => {
-    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' })
+    const [ws] = makeOverlayWs({ '/f.txt': 'hello' })
     await run(ws, 'chmod 601 /data/f.txt')
     const [code, , err] = await run(ws, 'rm /data/*.txt')
     expect(code, err).toBe(0)
@@ -402,7 +399,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('chgrp renders the group and leaves the owner default', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     const [code, , err] = await run(ws, 'chgrp staff /data/f.txt')
     expect(code, err).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
@@ -411,7 +408,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('chgrp changes only the group, keeping a prior chown owner', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'chown alice:devs /data/f.txt')
     const [code, , err] = await run(ws, 'chgrp 20 /data/f.txt')
     expect(code, err).toBe(0)
@@ -421,7 +418,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('chgrp reports missing operand, invalid group, -R, and missing files', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     expect((await run(ws, 'chgrp staff'))[0]).toBe(1)
     expect((await run(ws, "chgrp '' /data/f.txt"))[0]).toBe(1)
     const [code, , err] = await run(ws, 'chgrp staff /data/nope.txt')
@@ -431,7 +428,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('chgrp falls back to the namespace overlay when the mount has no setattr', async () => {
-    const [ws, vfs] = await makeOverlayWs({ '/f.txt': 'hello' })
+    const [ws, vfs] = makeOverlayWs({ '/f.txt': 'hello' })
     const [code] = await run(ws, 'chgrp dev /data/f.txt')
     expect(code).toBe(0)
     expect(vfs.store.attrs.size).toBe(0)
@@ -440,7 +437,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('chgrp -h targets the link node, leaving the target group untouched', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'ln -s /data/f.txt /data/link')
     const [code, , err] = await run(ws, 'chgrp -h ops /data/link')
     expect(code, err).toBe(0)
@@ -450,7 +447,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('chgrp refuses a read-only mount', async () => {
-    const [ws] = await makeWs(MountMode.READ)
+    const [ws] = makeWs(MountMode.READ)
     const [code, , err] = await run(ws, 'chgrp staff /data/f.txt')
     expect(code).toBe(1)
     expect(err).toBe("chgrp: changing group of '/data/f.txt': Read-only file system\n")
@@ -460,7 +457,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
 
 describe('recursive metadata flags (-R)', () => {
   it('chmod -R covers the whole subtree', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'mkdir -p /data/tree/sub')
     await run(ws, 'echo aaa > /data/tree/a.txt')
     await run(ws, 'echo bbb > /data/tree/sub/b.txt')
@@ -481,7 +478,7 @@ describe('recursive metadata flags (-R)', () => {
   })
 
   it('chmod -R changes neither a traversed link nor its referent', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'mkdir -p /data/tree')
     await run(ws, 'echo aaa > /data/outside.txt')
     await run(ws, 'chmod 600 /data/outside.txt')
@@ -497,7 +494,7 @@ describe('recursive metadata flags (-R)', () => {
   })
 
   it('chmod -R follows a command-line link to a directory', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'mkdir -p /data/tree/sub')
     await run(ws, 'echo bbb > /data/tree/sub/b.txt')
     await run(ws, 'ln -s /data/tree/sub /data/dirlink')
@@ -509,7 +506,7 @@ describe('recursive metadata flags (-R)', () => {
   })
 
   it('chown -R changes a traversed link itself', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'mkdir -p /data/tree')
     await run(ws, 'echo aaa > /data/tree/a.txt')
     await run(ws, 'ln -s /data/tree/a.txt /data/tree/link.txt')
@@ -525,7 +522,7 @@ describe('recursive metadata flags (-R)', () => {
   })
 
   it('chown -R does not follow a link operand (implicit -P)', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'mkdir -p /data/tree/sub')
     await run(ws, 'echo bbb > /data/tree/sub/b.txt')
     await run(ws, 'ln -s /data/tree/sub /data/dirlink')
@@ -537,7 +534,7 @@ describe('recursive metadata flags (-R)', () => {
   })
 
   it('chgrp -R reaches links and files alike', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'mkdir -p /data/tree')
     await run(ws, 'echo aaa > /data/tree/a.txt')
     await run(ws, 'ln -s /data/tree/a.txt /data/tree/link.txt')
@@ -549,7 +546,7 @@ describe('recursive metadata flags (-R)', () => {
   })
 
   it('chown -h ownership reaches ls and stat', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     await run(ws, 'ln -s /data/f.txt /data/link')
     const [code] = await run(ws, 'chown -h alice /data/link')
     expect(code).toBe(0)
@@ -561,7 +558,7 @@ describe('recursive metadata flags (-R)', () => {
   })
 
   it('chmod -R reports a missing operand', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     const [code, , err] = await run(ws, 'chmod -R 700 /data/nope')
     expect(code).toBe(1)
     expect(err).toBe("chmod: cannot access '/data/nope': No such file or directory\n")
@@ -569,7 +566,7 @@ describe('recursive metadata flags (-R)', () => {
   })
 
   it('chmod -R walks a deep tree', async () => {
-    const [ws] = await makeWs()
+    const [ws] = makeWs()
     const deep = '/data' + '/d'.repeat(300)
     await run(ws, `mkdir -p ${deep} && touch ${deep}/f`)
     expect(await run(ws, `chmod -R 700 /data/d && stat -c %a ${deep}/f`)).toEqual([0, '700\n', ''])
@@ -582,10 +579,9 @@ describe('recursive metadata flags (-R)', () => {
 // lets a stat through and refuses the attribute write and the listing. With
 // `mounted`, the sealed folder is a mount of its own.
 async function sealedWs(mounted = false): Promise<Workspace> {
-  const parser = await getTestParser()
   const ws = new Workspace(
     mounted ? { '/data': new RAMVFS(), '/data/t/sealed': new RAMVFS() } : { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: parser },
+    { mode: MountMode.WRITE },
   )
   ws.createSession('g', {
     profile: parseSessionProfile({

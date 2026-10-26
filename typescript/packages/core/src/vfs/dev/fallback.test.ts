@@ -10,7 +10,6 @@ import { MountMode } from '../../types.ts'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 vi.mock('../../utils/async_context.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof AsyncContext>()
@@ -58,10 +57,7 @@ it('refuses descriptor access when fallback contexts overlap', async () => {
 })
 
 it('refuses moving a live pipe across mounts while browser sessions overlap', async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   ws.createSession('peer')
   let peerIn!: () => void
   const entered = new Promise<void>((r) => {

@@ -1,6 +1,6 @@
-import type { ShellParser } from './parse.ts'
+import { parseProgram } from './parse.ts'
 import type { ParsedProgram } from './program.ts'
-import type { ShellNode, TSNodeLike } from '../types.ts'
+import type { ShellNode } from '../types.ts'
 
 /** A line and its asynchronous jobs share ownership of incidental parses. */
 export class ParseScope {
@@ -8,21 +8,15 @@ export class ParseScope {
   private readonly programs: ParsedProgram[] = []
   private released = false
 
-  constructor(private readonly parser: ShellParser) {}
-
-  parse(command: string): ShellNode {
+  parse(command: string, aliases: ReadonlySet<string> = new Set()): ShellNode {
     if (this.references === 0) throw new Error('parse scope is released')
-    const program = this.parser.parseProgram(command)
+    const program = parseProgram(command, aliases)
     this.programs.push(program)
     return program.root
   }
 
   fork(): ParseScope {
-    return new ParseScope(this.parser)
-  }
-
-  sourceOffsets(command: string, root: TSNodeLike): readonly number[] {
-    return this.parser.sourceOffsets(command, root)
+    return new ParseScope()
   }
 
   retain(): () => void {

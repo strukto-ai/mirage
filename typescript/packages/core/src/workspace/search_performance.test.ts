@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest'
 import { AsyncLineIterator } from '../io/async_line_iterator.ts'
 import { MountMode } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { getTestParser, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const COMMANDS = [
@@ -23,14 +23,13 @@ const COMMANDS = [
 ]
 
 it.each(COMMANDS)('skips nonmatching blocks through the shell: %s', async (command) => {
-  const parser = await getTestParser()
   const ram = new RAMVFS()
   ram.store.dirs.add('/')
   ram.store.dirs.add('/tree')
   const data = new TextEncoder().encode('abcdefg\n'.repeat(40000))
   ram.store.files.set('/tree/a.txt', data)
   ram.store.files.set('/tree/b.txt', data)
-  const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
   const lines = vi.spyOn(AsyncLineIterator.prototype, 'readline')
   const records = vi.spyOn(AsyncLineIterator.prototype, 'readUntil')
   try {

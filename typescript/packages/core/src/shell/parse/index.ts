@@ -22,7 +22,6 @@ export {
   referencedNames,
   sameNode,
 } from './names.ts'
-export type { ShellParserConfig } from './config.ts'
-export { createShellParser, type ShellParser } from './parse.ts'
-export { joinContinuations } from './source.ts'
+export { parse } from './parse.ts'
+export { joinContinuations, sourceOffsets } from './source.ts'
 export { checkSyntax, syntaxErrorResult } from './syntax.ts'

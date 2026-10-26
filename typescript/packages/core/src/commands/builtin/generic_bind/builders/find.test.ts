@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
 import { BaseVFS } from '../../../../vfs/base.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -45,7 +44,7 @@ it.each(['find /ram/d -maxdepth 1', 'tree /ram/d'])(
   '%s hands its listing the limit',
   async (line) => {
     const vfs = new AskedRAM()
-    const ws = new Workspace({ '/ram': vfs }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/ram': vfs })
     try {
       await ws.shell(line)
       expect(vfs.asked).toEqual([3])

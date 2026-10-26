@@ -1645,6 +1645,70 @@
         "stdout": "1988895\n300000\n1\n2\n3\n1988897\n300000\nx\nnull=0\nzero=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "redirect_among_assignments_opens_its_file",
+      "seq": 501175,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=1 > /data/nameless y=2; echo \"$x $y\"; cat /data/nameless; rm /data/nameless",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_before_the_command_name",
+      "seq": 501176,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "> /data/prefixed echo hi; cat /data/prefixed; rm /data/prefixed",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
+      }
     }
   ]
 }

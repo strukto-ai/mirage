@@ -19,18 +19,13 @@ import { LanguageRuntime } from '../../runtime/language.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 const DEC = new TextDecoder()
 
-async function makeWs(
-  mounts: Record<string, RAMVFS> = { '/data': new RAMVFS() },
-): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeWs(mounts: Record<string, RAMVFS> = { '/data': new RAMVFS() }): Workspace {
   return new Workspace(mounts, {
     mode: MountMode.WRITE,
-    shellParserFactory: () => Promise.resolve(parser),
   })
 }
 
@@ -43,7 +38,7 @@ describe('the empty operand', () => {
     // rm -f silences the empty name's ENOENT, and the bookkeeping after a
     // clean rm used to purge the node table under its `virtual`, the
     // working directory, taking every link there with it.
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('mkdir -p /data/d; echo x > /data/d/f; ln -s f /data/d/l')
     const r = await ws.shell("cd /data/d && rm -rf ''")
     expect(r.exitCode).toBe(0)
@@ -54,7 +49,7 @@ describe('the empty operand', () => {
   it('routes nowhere, so the line is not cross-mount', async () => {
     // Its `virtual` is the working directory, here the root mount, which
     // used to make the line span mounts it never names.
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('echo a > /data/a.txt')
     const r = await ws.shell("cd / && cat '' /data/a.txt")
     expect(r.exitCode).toBe(1)
@@ -63,7 +58,7 @@ describe('the empty operand', () => {
   })
 
   it('does not fan out over the mounts under the cwd', async () => {
-    const ws = await makeWs({ '/base': new RAMVFS(), '/base/inner': new RAMVFS() })
+    const ws = makeWs({ '/base': new RAMVFS(), '/base/inner': new RAMVFS() })
     for (const [line, err] of [
       ["du ''", 'du: invalid zero-length file name\n'],
       ["find ''", "find: '': No such file or directory\n"],
@@ -78,7 +73,7 @@ describe('the empty operand', () => {
 
 describe('a link loop', () => {
   it('fails its operand, not the line', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell(
       'echo a > /data/a.txt; echo b > /data/b.txt; ln -s /data/l2 /data/l1; ln -s /data/l1 /data/l2',
     )
@@ -109,7 +104,7 @@ describe('a prefix assignment', () => {
     async (line) => {
       const ws = new Workspace(
         { '/data': new RAMVFS() },
-        { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [new ShellsOut()] },
+        { mode: MountMode.EXEC, runtimes: [new ShellsOut()] },
       )
       try {
         expect(text((await ws.shell(line)).stdout)).toBe('one\n')

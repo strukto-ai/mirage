@@ -178,7 +178,7 @@ def get_parts(node: TSNodeLike) -> list[TSNodeLike]:
     children = node.children
     parts: list[TSNodeLike] = []
     for position, c in enumerate(children):
-        if c.is_named and c.type != NT.FILE_REDIRECT:
+        if c.is_named and c.type not in REDIRECT_NODE_TYPES:
             parts.append(c)
         elif c.type == "$":
             nxt = (
@@ -507,6 +507,7 @@ REDIRECT_NODE_TYPES = frozenset(
     {
         NT.FILE_REDIRECT,
         NT.HEREDOC_REDIRECT,
+        NT.HERESTRING_REDIRECT,
     }
 )
 
@@ -551,10 +552,8 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
 
     The operator token decides the shape and the explicit descriptor,
     when there is one, is kept as typed: `3<f` claims fd 3 and `<&3`
-    duplicates from it (`shell/descriptors.py`); the parser's redirect
-    shield lets the grammar see `0<f` and `3<<< w` that way too
-    (`operator_source`). A redirect whose text opens with `<<<` is a
-    herestring. Three forms carry an int target: a dup (`2>&1`, `>&2`,
+    duplicates from it (`shell/descriptors.py`). Three forms carry an
+    int target: a dup (`2>&1`, `>&2`,
     `<&0`) names the descriptor it copies, a close (`>&-`, `<&-`)
     carries FD_CLOSE, and `&>` claims FD_BOTH.
     `2>&1` alone keeps the STDERR_TO_STDOUT kind the fd router keys on;
@@ -581,8 +580,6 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
             target_node = c
             break
 
-    if re.match(r"^\d*<<<", get_text(child)):
-        return _parse_herestring_redirect(child, 0 if fd is None else fd)
     document = getattr(child, "heredoc", None)
     if document is not None:
         return Redirect(
@@ -646,7 +643,15 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
     )
 
 
-def _parse_herestring_redirect(child: TSNodeLike, fd: int = 0) -> Redirect:
+def _parse_herestring_redirect(child: TSNodeLike) -> Redirect:
+    fd = next(
+        (
+            int(get_text(c))
+            for c in child.named_children
+            if c.type == NT.FILE_DESCRIPTOR
+        ),
+        0,
+    )
     word = next(
         (
             candidate
@@ -807,14 +812,30 @@ def get_redirects(
                     redirects.append(_parse_file_redirect(hc))
         elif child.type == NT.FILE_REDIRECT:
             redirects.append(_parse_file_redirect(child))
+        elif child.type == NT.HERESTRING_REDIRECT:
+            redirects.append(_parse_herestring_redirect(child))
 
-    if (
-        command is not None
-        and command.type == NT.COMMAND
-        and not get_parts(command)
-    ):
-        command = None
+    if command is not None and command.type == NT.COMMAND:
+        redirects = [*command_redirects(command), *redirects]
+        if not get_parts(command):
+            command = None
     return command, redirects
+
+
+def command_redirects(node: TSNodeLike) -> list[Redirect]:
+    """The redirects written among a simple command's words, in order:
+    bash applies them wherever they stand (``> f echo hi``, ``cat <<< x``).
+
+    Args:
+        node (TSNodeLike): a command node.
+    """
+    redirects: list[Redirect] = []
+    for child in node.named_children:
+        if child.type == NT.FILE_REDIRECT:
+            redirects.append(_parse_file_redirect(child))
+        elif child.type == NT.HERESTRING_REDIRECT:
+            redirects.append(_parse_herestring_redirect(child))
+    return redirects
 
 
 def get_list_parts(

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { enotsup } from '../errors/fs.ts'
 import { MountCore } from '../mount/core.ts'
 import {
@@ -596,10 +595,7 @@ describe('RuntimeFiles over a core', () => {
     // A change by path the guest makes past the core's own ops (utimes,
     // chmod, a whole-file write) reaches the files open there at once, as
     // fstat after utime(2) does. Mirrors test_files.py.
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.vfs.write('/data/a.txt', enc.encode('abc'))
       const files = new RuntimeFiles(

@@ -20,7 +20,6 @@ import { type FileStat, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { joints, predicates, shifted } from './find.ts'
 
 const DEC = new TextDecoder()
@@ -68,7 +67,7 @@ class Unlisted extends RAMVFS {
   }
 }
 
-async function workspace(rows = true, outer = new RAMVFS()): Promise<Workspace> {
+function workspace(rows = true, outer = new RAMVFS()): Workspace {
   const inner = new RAMVFS()
   outer.loadState({
     type: 'ram',
@@ -76,10 +75,7 @@ async function workspace(rows = true, outer = new RAMVFS()): Promise<Workspace> 
     dirs: ['/', '/d', '/n'],
   })
   inner.loadState({ type: 'ram', files: { '/g': ENC.encode('z') } })
-  const ws = new Workspace(
-    { '/a': outer, '/a/n': inner },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/a': outer, '/a/n': inner }, { mode: MountMode.WRITE })
   for (const cmd of rowsFromItsOwnFind(rows)) ws.registry.mountFor('/a/n/x').register(cmd)
   return ws
 }
@@ -115,7 +111,7 @@ it('names the directories between the operand and its mounts', () => {
 })
 
 it('lets each mount answer for its own part', async () => {
-  const ws = await workspace()
+  const ws = workspace()
   try {
     expect(DEC.decode((await ws.shell('find /a')).stdout)).toBe('/a\n/a/d\n/a/d/f\n/a/n/own\n')
     expect(DEC.decode((await ws.shell('find / -maxdepth 1 -name usr')).stdout)).toBe('/usr\n')
@@ -127,7 +123,7 @@ it('lets each mount answer for its own part', async () => {
 it.each(['find /a -name x -prune -o -print', 'find -L /a -type f'])(
   'keeps the one walk for an expression across mounts: %s',
   async (line) => {
-    const ws = await workspace()
+    const ws = workspace()
     try {
       const rows = DEC.decode((await ws.shell(line)).stdout)
       expect(rows).toContain('/a/n/g')
@@ -139,7 +135,7 @@ it.each(['find /a -name x -prune -o -print', 'find -L /a -type f'])(
 )
 
 it('keeps the one walk for a find without rows', async () => {
-  const ws = await workspace(false)
+  const ws = workspace(false)
   try {
     expect(DEC.decode((await ws.shell('find /a -type f')).stdout)).toBe('/a/d/f\n/a/n/g\n')
   } finally {
@@ -151,7 +147,7 @@ it.each([
   ['listed', new RAMVFS(), '/a/n/own\n'],
   ['unlisted', new Unlisted(), ''],
 ])('counts a mount below a failed part where the walk reaches: %s', async (_, outer, expected) => {
-  const ws = await workspace(true, outer)
+  const ws = workspace(true, outer)
   for (const cmd of refused()) ws.registry.mountFor('/a/x').register(cmd)
   try {
     const result = await ws.shell('find /a')

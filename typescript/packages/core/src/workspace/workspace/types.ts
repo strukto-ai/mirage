@@ -28,7 +28,6 @@ import type { Mount } from '../mount/spec.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ConsoleFactory, JobTable } from '../../shell/job_table/index.ts'
-import type { ShellParser } from '../../shell/parse/index.ts'
 import type { Clock } from '../../utils/clock.ts'
 import type { IdSource } from '../../utils/ids.ts'
 import type { Limit, DriftPolicy, MountMode, ReadSpec, Refusal, WritePolicy } from '../../types.ts'
@@ -81,8 +80,6 @@ export interface WorkspaceOptions {
    *   for fingerprinted paths.
    */
   driftPolicy?: DriftPolicy
-  shellParser?: ShellParser
-  shellParserFactory?: () => Promise<ShellParser>
   sessionId?: string
   cacheLimit?: string | number
   /**

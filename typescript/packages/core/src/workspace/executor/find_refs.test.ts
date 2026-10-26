@@ -15,14 +15,12 @@
 import { type PathSpec, FileStat, FileType, MountMode } from '../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { resolveNewerRefs } from './find_refs.ts'
 
-async function shellWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function shellWs(): Workspace {
   const root = new RAMVFS()
-  const ws = new Workspace({ '/': root }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/': root }, { mode: MountMode.WRITE })
   ws.createSession('s')
   return ws
 }
@@ -80,7 +78,7 @@ describe('resolveNewerRefs', () => {
   it('intersects repeated -newer references', async () => {
     // GNU find 4.9: `-newer old -newer new` keeps only what is newer than
     // both references.
-    const ws = await shellWs()
+    const ws = shellWs()
     try {
       await ws.shell(
         'printf o > /w/old; printf c > /w/cand; printf n > /w/new; cd /w; ' +
@@ -107,7 +105,7 @@ describe('resolveNewerRefs', () => {
     // mtime, -H and -L against its target's; a dangling reference is its
     // own row under every policy; a loop is an ordinary reference under
     // -P and a refusal when followed.
-    const ws = await shellWs()
+    const ws = shellWs()
     try {
       await ws.shell(
         'mkdir -p /w/d; printf t > /w/target; printf c > /w/d/cand; cd /w; ' +

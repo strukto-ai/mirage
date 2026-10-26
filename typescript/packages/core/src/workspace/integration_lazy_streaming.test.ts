@@ -28,14 +28,14 @@ const FILES: Record<string, string> = {
   'csv.txt': 'name,age,city\nalice,30,nyc\nbob,25,sf\n',
 }
 
-async function fresh(): Promise<{ ws: Awaited<ReturnType<typeof makeIntegrationWS>>['ws'] }> {
-  const { ws } = await makeIntegrationWS(FILES)
+function fresh(): { ws: Awaited<ReturnType<typeof makeIntegrationWS>>['ws'] } {
+  const { ws } = makeIntegrationWS(FILES)
   return { ws }
 }
 
 describe('integration: lazy streaming', () => {
   it("cat | grep 'line 1' | head -n 3", async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = (await run(ws, "cat /data/big.txt | grep 'line 1' | head -n 3")).trim()
     const lines = result.split('\n')
     expect(lines.length).toBe(3)
@@ -43,7 +43,7 @@ describe('integration: lazy streaming', () => {
   })
 
   it('cat | head -n 5 early termination', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = (await run(ws, 'cat /data/big.txt | head -n 5')).trim()
     const lines = result.split('\n')
     expect(lines.length).toBe(5)
@@ -52,7 +52,7 @@ describe('integration: lazy streaming', () => {
   })
 
   it('cat | cut | head', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = (await run(ws, 'cat /data/csv.txt | cut -d , -f 1 | head -n 2')).trim()
     const lines = result.split('\n')
     expect(lines.length).toBe(2)
@@ -62,7 +62,7 @@ describe('integration: lazy streaming', () => {
   })
 
   it('cat | sort | head', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = (await run(ws, 'cat /data/small.txt | sort | head -n 2')).trim()
     const lines = result.split('\n')
     expect(lines.length).toBe(2)
@@ -71,14 +71,14 @@ describe('integration: lazy streaming', () => {
   })
 
   it('cat | uniq', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = (await run(ws, 'cat /data/dupes.txt | uniq')).trim()
     expect(result.split('\n')).toEqual(['a', 'b', 'c'])
     await ws.close()
   })
 
   it('cat | tr a A | grep Ap', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = await run(ws, 'cat /data/small.txt | tr a A | grep Ap')
     const found = result.includes('Apple') || result.includes('Apricot')
     expect(found).toBe(true)
@@ -86,14 +86,14 @@ describe('integration: lazy streaming', () => {
   })
 
   it('cat | grep a | wc -l', async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = (await run(ws, 'cat /data/small.txt | grep a | wc -l')).trim()
     expect(result).toBe('3')
     await ws.close()
   })
 
   it("find -name '*.txt'", async () => {
-    const { ws } = await fresh()
+    const { ws } = fresh()
     const result = await run(ws, "find /data -name '*.txt'")
     expect(result).toContain('/data/')
     await ws.close()

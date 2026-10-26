@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
@@ -29,10 +28,7 @@ describe('git grep past the walk limit', () => {
     ['grep -e e -- c.txt', 0, 'c.txt:three\n', ''],
     ['grep -q -e one', 0, '', ''],
   ])('git %s', async (line, code, out, err) => {
-    const ws = new Workspace(
-      { '/repo': new RAMVFS({ walkLimit: 2 }) },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/repo': new RAMVFS({ walkLimit: 2 }) }, { mode: MountMode.WRITE })
     ws.registerCli('git', GIT)
     try {
       await ws.shell(
@@ -57,7 +53,7 @@ describe('git grep over a work tree on another mount', () => {
   ])('git grep %s-e e', async (flag, out, err) => {
     const ws = new Workspace(
       { '/meta': new RAMVFS({ walkLimit: -1 }), '/data': new RAMVFS({ walkLimit: 2 }) },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     ws.registerCli('git', GIT)
     const git = 'git --git-dir=/meta/.git --work-tree=/data'

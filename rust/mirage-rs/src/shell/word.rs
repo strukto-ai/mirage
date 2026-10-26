@@ -16,6 +16,8 @@ pub(super) struct Ctx {
     pub brace: bool,
     /// `]` closes it: a subscript or a `[` test.
     pub bracket: bool,
+    /// Inside `[[`, where only a pattern operand reads extglob groups.
+    pub conditional: bool,
 }
 
 /// Bytes after `$` that name a special parameter.
@@ -37,13 +39,84 @@ impl Parser<'_> {
     /// a concatenation.
     pub(super) fn word_from(&mut self, first: Syn, ctx: Ctx) -> R<Syn> {
         let mut pieces = vec![first];
-        while self.concat_continues(ctx) {
+        loop {
+            // bash reads an extglob group in any word; the extglob option
+            // only decides whether it may run, which the syntax check knows.
+            let word = pieces
+                .last()
+                .is_some_and(|last| last.is("word") && last.end == self.i);
+            if self.peek() == b'(' && word && !ctx.conditional && self.at_extglob_group() {
+                self.extglob_group(&mut pieces, "word")?;
+                continue;
+            }
+            if !self.concat_continues(ctx) {
+                break;
+            }
             match self.piece(ctx, false)? {
                 Some(piece) => pieces.push(piece),
                 None => break,
             }
         }
         Ok(Syn::concat(pieces).expect("a first piece"))
+    }
+
+    /// Whether the `(` at the cursor opens an extglob group: an unescaped
+    /// `?`, `*`, `+`, `@` or `!` comes right before it.
+    pub(super) fn at_extglob_group(&self) -> bool {
+        self.i > 0
+            && matches!(self.s[self.i - 1], b'?' | b'*' | b'+' | b'@' | b'!')
+            && !super::lex::escaped(self.s, self.i - 1)
+    }
+
+    /// The extglob group whose `(` is at the cursor, as bash reads it: its
+    /// parentheses matched across blanks and newlines, its text runs of
+    /// `kind`, which join the run before them, and the quotes, expansions
+    /// and substitutions in it pieces of their own.
+    pub(super) fn extglob_group(&mut self, pieces: &mut Vec<Syn>, kind: &'static str) -> R<()> {
+        let mut depth = 0usize;
+        let mut run = self.i;
+        loop {
+            if self.eof() {
+                return Err(Fail::eof(self.s.len(), ')'));
+            }
+            let at = self.i;
+            let piece = match self.peek() {
+                b'(' => {
+                    depth += 1;
+                    None
+                }
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        self.i += 1;
+                        break;
+                    }
+                    None
+                }
+                b'\\' => {
+                    self.i += 2;
+                    None
+                }
+                b'"' => Some(self.string()?),
+                b'\'' => Some(self.raw_string()?),
+                b'`' => Some(self.backtick()?),
+                b'$' => Some(self.dollar()?).filter(|node| !node.is("$")),
+                b'<' | b'>' if self.at(1) == b'(' => Some(self.process_substitution()?),
+                _ => None,
+            };
+            match piece {
+                Some(piece) => {
+                    push_run(pieces, kind, run, at);
+                    pieces.push(piece);
+                    run = self.i;
+                }
+                None if self.i == at => self.i += 1,
+                None => {}
+            }
+        }
+        self.i = self.i.min(self.s.len());
+        push_run(pieces, kind, run, self.i);
+        Ok(())
     }
 
     /// Lone `{ } [ ]` words separated only by blanks, which the grammar
@@ -576,8 +649,22 @@ impl Parser<'_> {
             depth: self.depth,
             comsub: self.comsub,
             braces: self.braces,
-            ..Parser::new(self.s, self.work)
+            ..Parser::new(self.s, self.work, self.aliases)
         }
+    }
+}
+
+/// Text from `start` to `end` as a run of `kind`, joining a run of it that
+/// ends there.
+pub(super) fn push_run(pieces: &mut Vec<Syn>, kind: &'static str, start: usize, end: usize) {
+    if end <= start {
+        return;
+    }
+    match pieces.last_mut() {
+        Some(last) if last.is(kind) && last.children.is_empty() && last.end == start => {
+            last.end = end
+        }
+        _ => pieces.push(Syn::leaf(kind, start, end)),
     }
 }
 

@@ -73,7 +73,7 @@ const EXPORT_P_CASES: [string, string][] = [
 
 describe('env carries only exported names', () => {
   it.each(ENV_CASES)('%s', async (cmd, want) => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     expect(stdoutStr(await ws.shell(cmd))).toBe(want)
     await ws.close()
   })
@@ -81,7 +81,7 @@ describe('env carries only exported names', () => {
 
 describe('declare -p renders the attributes', () => {
   it.each(DECLARE_CASES)('%s', async (cmd, want) => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     expect(stdoutStr(await ws.shell(cmd))).toBe(want)
     await ws.close()
   })
@@ -89,7 +89,7 @@ describe('declare -p renders the attributes', () => {
 
 describe('export -p lists the exported set', () => {
   it.each(EXPORT_P_CASES)('%s', async (cmd, want) => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     expect(stdoutStr(await ws.shell(cmd))).toBe(want)
     await ws.close()
   })
@@ -99,7 +99,7 @@ describe('the process view is not the shell view', () => {
   it('printenv sees exported names only', async () => {
     // printenv is a separate binary in GNU, so the only names it can
     // possibly see are exported ones; a plain variable exits 1.
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const plain = await ws.shell('X=plain; printenv X')
     expect(plain.exitCode).toBe(1)
     expect(stdoutStr(plain)).toBe('')
@@ -111,14 +111,14 @@ describe('the process view is not the shell view', () => {
     // The narrowing is the *process* view only. `visibleEnv` used to be
     // the same function as `envSnapshot` in TS, so narrowing one would
     // have stopped `$X` resolving a plain assignment.
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     expect(stdoutStr(await ws.shell('X=hello; echo $X'))).toBe('hello\n')
     expect(stdoutStr(await ws.shell('X=hello; set'))).toContain('X=hello\n')
     await ws.close()
   })
 
   it('exports PWD from startup', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     expect(stdoutStr(await ws.shell('env'))).toContain('PWD=')
     await ws.close()
   })
@@ -128,7 +128,7 @@ describe('the process view is not the shell view', () => {
     // $OLDPWD is created by the first `cd`, so it is marked there; $PWD
     // keeps the mark it was seeded with because `seedVar` replaces the
     // value rather than the record.
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const out = stdoutStr(
       await ws.shell('mkdir -p /ram/d; cd /ram/d; cd /ram; declare -p PWD OLDPWD'),
     )
@@ -155,7 +155,7 @@ describe('declare -p reports an unknown name', () => {
     // and exits 1. Deliberate divergence: mirage's diagnostic carries no
     // `line N:` (GNU says `bash: line 1: declare: NOPE: not found`),
     // matching how every other mirage builtin words its errors.
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('G=good; declare -p G NOPE')
     expect(io.exitCode).toBe(1)
     expect(stdoutStr(io)).toBe('declare -- G="good"\n')
@@ -183,7 +183,7 @@ describe('an array is exportable like anything else', () => {
     ['declare -rx X=1; declare -p X', 'declare -rx X="1"\n'],
   ]
   it.each(CASES)('%s', async (cmd, want) => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     expect(stdoutStr(await ws.shell(cmd))).toBe(want)
     await ws.close()
   })
@@ -191,7 +191,7 @@ describe('an array is exportable like anything else', () => {
   it('stays out of the process view all the same', async () => {
     // Marked, listed by `export -p`, and still absent from `env`: bash
     // puts no array in a child's environment.
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('export ARR=(a b); env | grep -c ARR || true')
     expect(stdoutStr(io)).toBe('0\n')
     await ws.close()
@@ -210,13 +210,13 @@ describe('a bare local declares without assigning', () => {
     ['f() { local L=; echo "[${L-UNSET}]"; }; f', '[]\n'],
   ]
   it.each(CASES)('%s', async (cmd, want) => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     expect(stdoutStr(await ws.shell(cmd))).toBe(want)
     await ws.close()
   })
 
   it('refuses `local` outside a function', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell('local x=1; echo rc=$?')
     expect(stderrStr(io)).toBe('bash: local: can only be used in a function\n')
     expect(stdoutStr(io)).toBe('rc=1\n')

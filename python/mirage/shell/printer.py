@@ -221,7 +221,7 @@ class _Printer:
         if kind == "negated_command":
             return "! " + self.command(node.named_children[0], indent)
         if kind == "timed_statement":
-            portable = bool(getattr(node, "timing", (False,))[0])
+            portable = any(child.type == "-p" for child in node.children)
             return ("time -p " if portable else "time ") + self.command(
                 node.named_children[0], indent
             )

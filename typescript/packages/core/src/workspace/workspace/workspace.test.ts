@@ -21,7 +21,7 @@ import { applyStateDict, toStateDict } from '../snapshot/state.ts'
 import { MountMode } from '../../types.ts'
 import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
 import { ManualClock } from '../../utils/clock.ts'
-import { getTestParser, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { ExecuteOptions, SessionExecuteOptions } from './types.ts'
 import { Session, Workspace } from './workspace.ts'
 
@@ -34,12 +34,10 @@ afterEach(async () => {
 })
 
 async function seeded(): Promise<Workspace> {
-  const parser = await getTestParser()
   const ws = new Workspace(
     { '/repo': [new RAMVFS(), MountMode.WRITE] as const },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       profiles: { reviewer: parseSessionProfile({ paths: { hide: ['/repo/secrets'] } }) },
     },
   )
@@ -87,14 +85,12 @@ describe('Session', () => {
     // table, recreate a persisted session bare, and hand the next
     // flush a record that overwrote the stored profile. The entry point
     // hydrates first, so the stored session is adopted as is.
-    const parser = await getTestParser()
     const store = new RAMSessionStore()
     const build = (): Workspace => {
       const ws = new Workspace(
         { '/repo': [new RAMVFS(), MountMode.WRITE] as const },
         {
           mode: MountMode.WRITE,
-          shellParser: parser,
           profiles: { reviewer: parseSessionProfile({ paths: { hide: ['/repo/secrets'] } }) },
           sessionStore: store,
         },
@@ -146,10 +142,7 @@ describe('handle parity with the workspace entry point', () => {
 
 describe('session tools', () => {
   async function plain(): Promise<Workspace> {
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(ws)
     await ws.shell('echo one > /a.txt')
     return ws
@@ -185,10 +178,7 @@ describe('session tools', () => {
   it('follows the default session a snapshot restores', async () => {
     const source = await plain()
     const state = await toStateDict(source)
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(ws)
     const tools = ws.tools
     await applyStateDict(ws, state)
@@ -201,10 +191,7 @@ describe('session tools', () => {
   it('keeps an explicit default id on its session after a restore', async () => {
     const source = await plain()
     const state = await toStateDict(source)
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(ws)
     const pinned = new Session(ws, ws.defaultSessionId).tools
     expect(pinned).not.toBe(ws.tools)
@@ -289,7 +276,7 @@ async function replay(seed: number): Promise<string[]> {
       '/data': [new RAMVFS(), MountMode.WRITE] as const,
       '/more': [new RAMVFS(), MountMode.WRITE] as const,
     },
-    { mode: MountMode.WRITE, shellParser: await getTestParser(), ids: new SeededIdSource(seed) },
+    { mode: MountMode.WRITE, ids: new SeededIdSource(seed) },
   )
   open.push(ws)
   await ws.shell('seq 1 20 > /data/n.txt && seq 30 40 > /more/m.txt')
@@ -372,10 +359,7 @@ describe('the workspace id source', () => {
 describe('a manual clock workspace', () => {
   it('keeps one time domain in its history', async () => {
     const clock = new ManualClock(1_000_000)
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser(), clock },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, clock })
     try {
       await ws.shell('echo hi > /data/a.txt')
       clock.advance(5)

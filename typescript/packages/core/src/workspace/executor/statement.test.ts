@@ -27,7 +27,7 @@ import {
   restoreStatus,
   snapshotStatus,
 } from './statement.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { parse } from '../../shell/parse/parse.ts'
 
 const decode = (b: Uint8Array | null): string => new TextDecoder().decode(b ?? new Uint8Array())
 
@@ -123,9 +123,9 @@ describe('forks', () => {
     ['$cmd x', ['head', 'x'], true],
     ['$c head', ['command', 'head'], true],
     ['$f', ['g'], false],
-  ] as const)('%s with %j: %s', async (line, words, forked) => {
+  ] as const)('%s with %j: %s', (line, words, forked) => {
     const session = new SessionState({ sessionId: 's', functions: { g: 'g() { :; }' } })
-    const node = (await getTestParser()).parse(line).children[0]
+    const node = parse(line).children[0]
     expect(node !== undefined && forks(node, session, words)).toBe(forked)
   })
 })
@@ -136,15 +136,15 @@ describe('errexitActs', () => {
     ['false', 0, true, false],
     ['false', 1, false, false],
     ['! true', 1, true, false],
-  ] as const)('%s, status %d, errexit %s: %s', async (line, status, errexit, acts) => {
+  ] as const)('%s, status %d, errexit %s: %s', (line, status, errexit, acts) => {
     const session = new SessionState({ sessionId: 's', shellOptions: { errexit } })
-    const node = (await getTestParser()).parse(line).children[0]
+    const node = parse(line).children[0]
     expect(node !== undefined && errexitActs(node, status, session)).toBe(acts)
   })
 
   it('is scoped off inside an ignored context', async () => {
     const session = new SessionState({ sessionId: 's', shellOptions: { errexit: true } })
-    const node = (await getTestParser()).parse('false').children[0]
+    const node = parse('false').children[0]
     if (node === undefined) throw new Error('no statement')
     await ignoringErrexit(session, async () => {
       expect(errexitActs(node, 1, session)).toBe(false)

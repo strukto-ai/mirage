@@ -26,7 +26,7 @@ it.each([
   ['f() { :; }; echo "[${PIPESTATUS[@]}]"', '[]\n'],
   ['x=1; echo "[${PIPESTATUS[@]}]"', '[0]\n'],
 ])('PIPESTATUS after a construct that runs no pipeline: %s', async (command, stdout) => {
-  const { ws } = await makeIntegrationWS()
+  const { ws } = makeIntegrationWS()
   try {
     const io = await ws.shell(command)
     expect(io.stdoutText).toBe(stdout)

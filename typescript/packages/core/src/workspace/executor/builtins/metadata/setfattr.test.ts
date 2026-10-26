@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { decodeValue } from './setfattr.ts'
 
@@ -28,8 +27,7 @@ const USAGE =
 const DEC = new TextDecoder()
 
 async function open(): Promise<Workspace> {
-  const parser = await getTestParser()
-  const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.shell('echo hi > /r/f && ln -s f /r/l')
   return ws
 }

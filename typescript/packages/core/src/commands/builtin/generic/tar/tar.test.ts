@@ -22,7 +22,6 @@ import { readTar } from '../../tar_helper.ts'
 import { expect, it } from 'vitest'
 import { PathSpec, FileStat, FileType, MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -32,10 +31,7 @@ async function shell(
   line: string,
   seed: Record<string, Uint8Array>,
 ): Promise<[number, string, string]> {
-  const ws = new Workspace(
-    { '/data/': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     for (const [path, data] of Object.entries(seed)) {
       await ws.shell(`tee ${path} > /dev/null`, { stdin: data })
@@ -72,7 +68,6 @@ it('streams an archive without a writable root or a dash file', async () => {
     { '/data': [new RAMVFS(), MountMode.WRITE] },
     {
       mode: MountMode.READ,
-      shellParser: await getTestParser(),
     },
   )
   await ws.shell('printf hello > /data/a')

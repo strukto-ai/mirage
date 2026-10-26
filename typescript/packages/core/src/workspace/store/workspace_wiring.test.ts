@@ -17,7 +17,6 @@ import { RAMObserverStore } from '../../observe/store.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { RAMWorkspaceStateStore } from './ram.ts'
 
@@ -46,11 +45,10 @@ afterEach(async () => {
   for (const ws of open.splice(0)) await ws.close()
 })
 
-async function mkWs(store: RAMWorkspaceStateStore, workspaceId: string, ram?: RAMVFS) {
-  const parser = await getTestParser()
+function mkWs(store: RAMWorkspaceStateStore, workspaceId: string, ram?: RAMVFS) {
   const ws = new Workspace(
     { '/data': ram ?? new RAMVFS() },
-    { mode: MountMode.EXEC, shellParser: parser, workspaceId, store },
+    { mode: MountMode.EXEC, workspaceId, store },
   )
   open.push(ws)
   return ws
@@ -59,7 +57,7 @@ async function mkWs(store: RAMWorkspaceStateStore, workspaceId: string, ram?: RA
 describe('Workspace on a WorkspaceStateStore', () => {
   it('writes the discovery record on first execute', async () => {
     const store = new RAMWorkspaceStateStore()
-    const ws = await mkWs(store, 'ws-a')
+    const ws = mkWs(store, 'ws-a')
     await ws.shell('echo hi')
     const meta = await store.loadMeta('ws-a')
     expect(meta?.workspace_id).toBe('ws-a')
@@ -68,17 +66,10 @@ describe('Workspace on a WorkspaceStateStore', () => {
     expect(meta?.created_at as number).toBeGreaterThan(0)
   })
 
-  it('a bare workspace mints uuid7 ids', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser },
-    )
+  it('a bare workspace mints uuid7 ids', () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
     open.push(ws)
-    const sibling = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser },
-    )
+    const sibling = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
     open.push(sibling)
     expect(ws.workspaceId).toMatch(UUID7_RE)
     expect(ws.defaultSessionId).toMatch(UUID7_RE)
@@ -87,11 +78,11 @@ describe('Workspace on a WorkspaceStateStore', () => {
 
   it('attach adopts the stored default session pointer', async () => {
     const store = new RAMWorkspaceStateStore()
-    const wsA = await mkWs(store, 'shared')
+    const wsA = mkWs(store, 'shared')
     await wsA.shell('export MARK=1')
     await wsA.flushSessions()
 
-    const wsB = await mkWs(store, 'shared')
+    const wsB = mkWs(store, 'shared')
     const minted = wsB.defaultSessionId
     await wsB.ensureSessionsLoaded()
     expect(wsB.defaultSessionId).toBe(wsA.defaultSessionId)
@@ -104,12 +95,11 @@ describe('Workspace on a WorkspaceStateStore', () => {
     // session store alone, so it ran as the minted default rather than
     // the writer's, whose hides the discovery record points at.
     const store = new RAMWorkspaceStateStore()
-    const parser = await getTestParser()
     const ram = new RAMVFS()
     const build = (): Workspace =>
       new Workspace(
         { '/data': [ram, MountMode.WRITE] as const },
-        { mode: MountMode.WRITE, shellParser: parser, workspaceId: 'shared', store },
+        { mode: MountMode.WRITE, workspaceId: 'shared', store },
       )
     const wsA = build()
     open.push(wsA)
@@ -130,15 +120,13 @@ describe('Workspace on a WorkspaceStateStore', () => {
 
   it('an explicit session id is not adopted away', async () => {
     const store = new RAMWorkspaceStateStore()
-    const wsA = await mkWs(store, 'shared')
+    const wsA = mkWs(store, 'shared')
     await wsA.shell('echo hi')
 
-    const parser = await getTestParser()
     const wsB = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         workspaceId: 'shared',
         store,
         sessionId: 'pinned',
@@ -153,11 +141,11 @@ describe('Workspace on a WorkspaceStateStore', () => {
     'changes the %s session profile after hydration',
     async (target) => {
       const store = new RAMWorkspaceStateStore()
-      const writer = await mkWs(store, 'shared')
+      const writer = mkWs(store, 'shared')
       writer.createSession('named')
       await writer.ensureSessionsLoaded()
       await writer.flushSessions()
-      const attached = await mkWs(store, 'shared')
+      const attached = mkWs(store, 'shared')
       const provisional = attached.defaultSessionId
       const requested = target === 'default' ? provisional : 'named'
       const expected = target === 'default' ? writer.defaultSessionId : 'named'
@@ -173,7 +161,7 @@ describe('Workspace on a WorkspaceStateStore', () => {
 
   it('refuses a profile change if shutdown starts during hydration', async () => {
     const store = new RAMWorkspaceStateStore()
-    const ws = await mkWs(store, 'shared')
+    const ws = mkWs(store, 'shared')
     const entered = deferred()
     const release = deferred()
     const sessions = store.sessions('shared')
@@ -209,7 +197,7 @@ describe('Workspace on a WorkspaceStateStore', () => {
       },
       0,
     )
-    const ws = await mkWs(store, 'ws-a')
+    const ws = mkWs(store, 'ws-a')
     await ws.shell('echo hi')
     const meta = await store.loadMeta('ws-a')
     expect(meta?.default_session_id).toBe('sess_x')
@@ -219,8 +207,8 @@ describe('Workspace on a WorkspaceStateStore', () => {
   it('concurrent attach admits a single discovery record', async () => {
     const store = new YieldingStore()
     const ram = new RAMVFS()
-    const wsA = await mkWs(store, 'ws-a', ram)
-    const wsB = await mkWs(store, 'ws-a', ram)
+    const wsA = mkWs(store, 'ws-a', ram)
+    const wsB = mkWs(store, 'ws-a', ram)
     await Promise.all([wsA.ensureSessionsLoaded(), wsB.ensureSessionsLoaded()])
     const meta = await store.loadMeta('ws-a')
     expect(meta).not.toBeNull()
@@ -232,22 +220,22 @@ describe('Workspace on a WorkspaceStateStore', () => {
   it('same workspace id shares sessions across workspaces', async () => {
     const store = new RAMWorkspaceStateStore()
     const ram = new RAMVFS()
-    const wsA = await mkWs(store, 'shared', ram)
+    const wsA = mkWs(store, 'shared', ram)
     wsA.createSession('narrow', { mounts: { '/data': MountMode.READ } })
     await wsA.flushSessions()
 
-    const wsB = await mkWs(store, 'shared', ram)
+    const wsB = mkWs(store, 'shared', ram)
     const denied = await wsB.shell('echo blocked > /data/x.txt', { sessionId: 'narrow' })
     expect(denied.exitCode).not.toBe(0)
   })
 
   it('different workspace ids are isolated', async () => {
     const store = new RAMWorkspaceStateStore()
-    const wsA = await mkWs(store, 'a')
+    const wsA = mkWs(store, 'a')
     wsA.createSession('narrow', { mounts: { '/data': MountMode.READ } })
     await wsA.flushSessions()
 
-    const wsB = await mkWs(store, 'b')
+    const wsB = mkWs(store, 'b')
     await wsB.ensureSessionsLoaded()
     expect(wsB.listSessions().every((s) => s.sessionId !== 'narrow')).toBe(true)
   })
@@ -255,10 +243,10 @@ describe('Workspace on a WorkspaceStateStore', () => {
   it('shares history through the provider', async () => {
     const store = new RAMWorkspaceStateStore()
     const ram = new RAMVFS()
-    const wsA = await mkWs(store, 'shared', ram)
+    const wsA = mkWs(store, 'shared', ram)
     await wsA.shell('echo one')
 
-    const wsB = await mkWs(store, 'shared', ram)
+    const wsB = mkWs(store, 'shared', ram)
     const result = await wsB.shell('history')
     expect(result.stdoutText).toContain('echo one')
   })
@@ -266,15 +254,14 @@ describe('Workspace on a WorkspaceStateStore', () => {
   it('a direct observe option wins over the provider plane', async () => {
     const direct = new RAMObserverStore()
     const store = new RAMWorkspaceStateStore()
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, workspaceId: 'ws-a', store, observe: direct },
+      { mode: MountMode.EXEC, workspaceId: 'ws-a', store, observe: direct },
     )
     open.push(ws)
     await ws.shell('echo hi')
 
-    const sibling = await mkWs(store, 'ws-a')
+    const sibling = mkWs(store, 'ws-a')
     const result = await sibling.shell('history')
     expect(result.stdoutText).not.toContain('echo hi')
   })

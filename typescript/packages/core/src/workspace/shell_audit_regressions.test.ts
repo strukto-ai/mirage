@@ -17,7 +17,7 @@ import { makeIntegrationWS, run } from '../../tests/workspace/fixtures/integrati
 
 describe('audit regressions: subshell isolation, errexit propagation, prefix scoping', () => {
   it('subshell isolates readonly', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, '(readonly X=1); X=2; echo $X')).toBe('2\n')
     } finally {
@@ -26,7 +26,7 @@ describe('audit regressions: subshell isolation, errexit propagation, prefix sco
   })
 
   it('subshell isolates arrays', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, '(a=(1 2 3)); echo "${a[0]:-empty}"')).toBe('empty\n')
     } finally {
@@ -35,7 +35,7 @@ describe('audit regressions: subshell isolation, errexit propagation, prefix sco
   })
 
   it('subshell isolates shell options', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'set -e; (set +e; true); echo continued')).toBe('continued\n')
     } finally {
@@ -44,7 +44,7 @@ describe('audit regressions: subshell isolation, errexit propagation, prefix sco
   })
 
   it('function prefix is restored after the call', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'f() { echo "FOO=$FOO"; }; FOO=bar f; echo "after=$FOO"')
       expect(out).toBe('FOO=bar\nafter=\n')
@@ -54,7 +54,7 @@ describe('audit regressions: subshell isolation, errexit propagation, prefix sco
   })
 
   it('command prefix does not persist', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'FOO=bar echo "FOO=$FOO"; echo "after=$FOO"')
       expect(out).toContain('after=\n')
@@ -64,7 +64,7 @@ describe('audit regressions: subshell isolation, errexit propagation, prefix sco
   })
 
   it('readonly blocks prefix assignment', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'readonly X=1; X=2 echo done; echo $X')
       expect(out.endsWith('1\n')).toBe(true)
@@ -74,7 +74,7 @@ describe('audit regressions: subshell isolation, errexit propagation, prefix sco
   })
 
   it('array in mixed string preserves data', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'a=(1 2 3); echo "x${a[@]}y"')
       expect(out).toContain('x')
@@ -87,7 +87,7 @@ describe('audit regressions: subshell isolation, errexit propagation, prefix sco
   })
 
   it('array single element with prefix and suffix', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'a=(only); echo "x${a[@]}y"')).toBe('xonlyy\n')
     } finally {
@@ -96,7 +96,7 @@ describe('audit regressions: subshell isolation, errexit propagation, prefix sco
   })
 
   it('errexit inside subshell body', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'set -e; (false; echo unreached); echo after')
       expect(out).not.toContain('unreached')
@@ -106,7 +106,7 @@ describe('audit regressions: subshell isolation, errexit propagation, prefix sco
   })
 
   it('errexit inside function body', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'set -e; f() { false; echo unreached; }; f; echo after')
       expect(out).not.toContain('unreached')
@@ -116,7 +116,7 @@ describe('audit regressions: subshell isolation, errexit propagation, prefix sco
   })
 
   it('errexit inside compound group', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'set -e; { false; echo unreached; }; echo after')
       expect(out).not.toContain('unreached')

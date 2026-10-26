@@ -17,7 +17,6 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import {
   makeIntegrationWS,
   run,
@@ -27,7 +26,7 @@ import {
 
 describe('heredoc body expansion', () => {
   it('expands braced vars and command substitutions', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'v=mirage\ncat <<END\nval=$v\nbrace=${v}\nsub=$(echo inner)\nEND')
       expect(out).toBe('val=mirage\nbrace=mirage\nsub=inner\n')
@@ -37,7 +36,7 @@ describe('heredoc body expansion', () => {
   })
 
   it('evaluates $((...)) parsed as cmdsub-of-subshell', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'cat <<END\nmath=$((2 + 3))\nEND')).toBe('math=5\n')
     } finally {
@@ -46,7 +45,7 @@ describe('heredoc body expansion', () => {
   })
 
   it('evaluates arithmetic with a var ref', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'v=3\ncat <<END\nx=$(($v + 2))\nEND')).toBe('x=5\n')
     } finally {
@@ -55,7 +54,7 @@ describe('heredoc body expansion', () => {
   })
 
   it('expands undefined vars to empty', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'cat <<END\n[$__undefined_var__]\nEND')).toBe('[]\n')
     } finally {
@@ -64,7 +63,7 @@ describe('heredoc body expansion', () => {
   })
 
   it('keeps escaped dollars literal', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'v=real\ncat <<END\nesc=\\$v exp=$v\nEND')).toBe('esc=$v exp=real\n')
     } finally {
@@ -73,7 +72,7 @@ describe('heredoc body expansion', () => {
   })
 
   it('joins backslash-newline continuations', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'cat <<END\nline \\\njoined\nEND')).toBe('line joined\n')
     } finally {
@@ -82,7 +81,7 @@ describe('heredoc body expansion', () => {
   })
 
   it('quoted delimiter disables expansion', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, "v=zzz\ncat <<'END'\nraw=$v\nsub=$(echo x)\nEND")
       expect(out).toBe('raw=$v\nsub=$(echo x)\n')
@@ -92,7 +91,7 @@ describe('heredoc body expansion', () => {
   })
 
   it('partially quoted delimiter disables expansion', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, "cat <<EN'D'\nmixed=$((1+1))\nEND\n")).toBe('mixed=$((1+1))\n')
     } finally {
@@ -101,7 +100,7 @@ describe('heredoc body expansion', () => {
   })
 
   it('<<- strips tabs, not spaces', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'cat <<-END\n\ttab-stripped\n   spaces-kept\nEND')
       expect(out).toBe('tab-stripped\n   spaces-kept\n')
@@ -111,7 +110,7 @@ describe('heredoc body expansion', () => {
   })
 
   it('<<- strips tabs before expansions', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'v=deep\ncat <<-END\n\t$v\n\t\tEND')).toBe('deep\n')
     } finally {
@@ -120,7 +119,7 @@ describe('heredoc body expansion', () => {
   })
 
   it('feeds a pipeline', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'cat <<END | tr a-z A-Z\nshout this\nEND')).toBe('SHOUT THIS\n')
     } finally {
@@ -131,7 +130,7 @@ describe('heredoc body expansion', () => {
 
 describe('process substitution stdin redirect', () => {
   it('feeds inner stdout via < <(cmd)', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, "sort < <(printf 'b\\na\\n')")).toBe('a\nb\n')
     } finally {
@@ -140,7 +139,7 @@ describe('process substitution stdin redirect', () => {
   })
 
   it('counts lines via wc -l < <(cmd)', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, out] = await runResult(ws, "wc -l < <(printf 'x\\ny\\n')")
       expect(exit).toBe(0)
@@ -156,7 +155,7 @@ it.each([
   'echo $(printf warning >&2) > >(cat) 2>/dev/null',
   'printf warning > >(cat >&2)',
 ])('preserves diagnostics with process substitution: %s', async (command) => {
-  const { ws } = await makeIntegrationWS()
+  const { ws } = makeIntegrationWS()
   try {
     const [exit, out, err] = await runResult(ws, command + '; echo after=$?')
     expect(exit).toBe(0)
@@ -172,7 +171,7 @@ describe('quoted redirect targets', () => {
   // single-quoted target used to leave the parsed target empty, so the
   // write silently went nowhere and exited 0 (silent data loss).
   it.each(["'/data/Q'", '"/data/Q"', '/data/Q'])('%s creates the file', async (target) => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit, , err] = await runResult(ws, `printf 'V\\n' > ${target}`)
       expect(exit).toBe(0)
@@ -184,7 +183,7 @@ describe('quoted redirect targets', () => {
   })
 
   it('appends to a single-quoted target', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await ws.shell("printf 'one\\n' > '/data/APP'")
       await ws.shell("printf 'two\\n' >> '/data/APP'")
@@ -197,7 +196,7 @@ describe('quoted redirect targets', () => {
   it('captures stderr into a single-quoted target', async () => {
     // The empty-target fallback swallowed stderr entirely: the command
     // failed with no message anywhere.
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const [exit] = await runResult(ws, "cat /data/missing 2> '/data/ERR'")
       expect(exit).not.toBe(0)
@@ -208,7 +207,7 @@ describe('quoted redirect targets', () => {
   })
 
   it('reads stdin from a single-quoted source', async () => {
-    const { ws } = await makeIntegrationWS({ IN: 'a\nb\n' })
+    const { ws } = makeIntegrationWS({ IN: 'a\nb\n' })
     try {
       expect(await run(ws, "wc -l < '/data/IN'")).toBe('2\n')
     } finally {
@@ -217,7 +216,7 @@ describe('quoted redirect targets', () => {
   })
 
   it('routes both streams to a single-quoted target', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await ws.shell("{ echo out; echo err >&2; } &> '/data/BOTH'")
       expect(await run(ws, 'cat /data/BOTH')).toBe('out\nerr\n')
@@ -232,7 +231,7 @@ describe('quoted redirect targets', () => {
     // unrelated name returned another file's bytes. Asserted on the
     // bytes rather than the message: the missing-source wording for `<`
     // still differs between the hosts and from GNU.
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await ws.shell("printf 'first\\n' > '/data/A1'")
       const [exit, out] = await runResult(ws, "cat < '/data/A2'")
@@ -244,7 +243,7 @@ describe('quoted redirect targets', () => {
   })
 
   it('handles a single-quoted target containing a space', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await ws.shell("printf 'S\\n' > '/data/sp ace.txt'")
       expect(await run(ws, "cat '/data/sp ace.txt'")).toBe('S\n')
@@ -256,7 +255,7 @@ describe('quoted redirect targets', () => {
   it('delivers a single-quoted herestring body into a redirect', async () => {
     // `<<< 'text'` shares the target-type gate; it delivered an empty
     // body (a bare newline) instead of the text.
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await ws.shell("cat <<< 'hi' > /data/HS")
       expect(await run(ws, 'cat /data/HS')).toBe('hi\n')
@@ -272,7 +271,7 @@ describe('quoted redirect targets', () => {
 // repairs the tree; these pin the end-to-end behavior.
 describe('later unbraced var in a redirect target', () => {
   it('writes the fully expanded path', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await ws.shell('c=aa; id=1; mkdir -p /api/$c')
       expect(await runExit(ws, 'echo hi > /api/$c/$id.json')).toBe(0)
@@ -284,7 +283,7 @@ describe('later unbraced var in a redirect target', () => {
   })
 
   it('delivers a heredoc into the fully expanded path', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await ws.shell('c=aa; id=1; mkdir -p /api/$c')
       await ws.shell('cat > /api/$c/$id.json <<EOF\nbody\nEOF')
@@ -295,7 +294,7 @@ describe('later unbraced var in a redirect target', () => {
   })
 
   it('expands three suffixless vars in one target', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await ws.shell('a=x; b=y; c=z; mkdir -p /w/$a/$b')
       await ws.shell('echo hi > /w/$a/$b/$c')
@@ -306,7 +305,7 @@ describe('later unbraced var in a redirect target', () => {
   })
 
   it('keeps a bare word one argument', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'c=aa; id=1; echo /api/$c/$id.json')).toBe('/api/aa/1.json\n')
     } finally {
@@ -315,7 +314,7 @@ describe('later unbraced var in a redirect target', () => {
   })
 
   it('keeps an assignment one assignment', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'c=aa; id=1; p=/api/$c/$id.json; echo $p')).toBe('/api/aa/1.json\n')
     } finally {
@@ -335,7 +334,7 @@ const readerCases = JSON.parse(
 
 describe('heredoc reader integration (Bash 5.2 goldens)', () => {
   it.each(readerCases.cases)('$id', async (testCase) => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await runResult(ws, testCase.command)).toEqual([
         testCase.expect.exit,
@@ -362,7 +361,7 @@ describe('heredocs across nested mounts', () => {
     const ghost = new RAMVFS()
     const ws = new Workspace(
       { '/data': parent, '/data/inner': child, '/ghost/deep': ghost },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     try {
       const [exit, stdout, stderr] = await runResult(ws, testCase.command)

@@ -17,7 +17,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Workspace } from './workspace/workspace.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { makeIntegrationWS, runResult } from '../../tests/workspace/fixtures/integration_fixture.ts'
 
 let ws: Workspace | null = null
@@ -456,7 +455,7 @@ const CASES: [string, string, string, string, number][] = [
 describe('bash builtins: let, umask, shopt, alias, mapfile, read flags, nameref, disown/wait, exec', () => {
   for (const [id, cmd, wantOut, wantErr, wantCode] of CASES) {
     it(id, async () => {
-      ;({ ws } = await makeIntegrationWS())
+      ;({ ws } = makeIntegrationWS())
       const [code, out, err] = await runResult(ws, cmd)
       expect([out, err, code]).toEqual([wantOut, wantErr, wantCode])
     })
@@ -468,7 +467,6 @@ it('extglob reuses the namespace walk across mounts', async () => {
     { '/left': new RAMVFS(), '/right': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      shellParser: await getTestParser(),
     },
   )
   await ws.shell('touch /left/a.txt /right/b.txt; shopt -s extglob')
@@ -485,7 +483,7 @@ it('extglob reuses the namespace walk across mounts', async () => {
 })
 
 it('requires extglob before the read, with implicit conditional matching', async () => {
-  ;({ ws } = await makeIntegrationWS())
+  ;({ ws } = makeIntegrationWS())
   expect((await runResult(ws, 'shopt -s extglob; echo @(a|b)'))[0]).toBe(2)
   expect(await runResult(ws, 'shopt -q extglob')).toEqual([1, '', ''])
   expect(await runResult(ws, '[[ ab == +(a|b) ]]; echo $?')).toEqual([0, '0\n', ''])

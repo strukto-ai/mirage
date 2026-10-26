@@ -21,7 +21,6 @@ import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -60,7 +59,7 @@ class Unlisted extends RAMVFS {
   }
 }
 
-async function workspace(fn: CommandFn, outer = new RAMVFS()): Promise<Workspace> {
+function workspace(fn: CommandFn, outer = new RAMVFS()): Workspace {
   const inner = new RAMVFS()
   const other = new RAMVFS()
   outer.loadState({
@@ -70,10 +69,7 @@ async function workspace(fn: CommandFn, outer = new RAMVFS()): Promise<Workspace
   })
   inner.loadState({ type: 'ram', files: { '/g': ENC.encode('123') } })
   other.loadState({ type: 'ram', files: { '/h': ENC.encode('22') } })
-  const ws = new Workspace(
-    { '/a': outer, '/a/n': inner, '/b': other },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/a': outer, '/a/n': inner, '/b': other }, { mode: MountMode.WRITE })
   const spec = SPECS.du
   if (spec === undefined) throw new Error('Missing spec: du')
   for (const cmd of command({ name: 'du', vfs: 'ram', spec, fn }))
@@ -87,7 +83,7 @@ it.each([
   ['du -c -d 0 /a /b', '1005\t/a\n2\t/b\n1007\ttotal\n'],
   ['du -a /a/n /b', '1000\t/a/n/big\n1000\t/a/n\n2\t/b/h\n2\t/b\n'],
 ])('lets each mount measure its own part: %s', async (line, expected) => {
-  const ws = await workspace(measured)
+  const ws = workspace(measured)
   try {
     const result = await ws.shell(line)
     expect(DEC.decode(result.stdout)).toBe(expected)
@@ -100,7 +96,7 @@ it.each([
 it.each(['du -c /a', 'du -c /a/n /b'])(
   'keeps the one walk for a du without a measurement: %s',
   async (line) => {
-    const ws = await workspace(unmeasured)
+    const ws = workspace(unmeasured)
     try {
       const rows = DEC.decode((await ws.shell(line)).stdout)
       expect(rows).not.toContain('777')
@@ -115,7 +111,7 @@ it.each([
   ['listed', new RAMVFS(), '1005\t/a\n'],
   ['unlisted', new Unlisted(), '5\t/a\n'],
 ])('counts a mount below a failed part where the walk reaches: %s', async (_, outer, expected) => {
-  const ws = await workspace(measured, outer)
+  const ws = workspace(measured, outer)
   const spec = SPECS.du
   if (spec === undefined) throw new Error('Missing spec: du')
   for (const cmd of command({ name: 'du', vfs: 'ram', spec, fn: partlyMeasured }))

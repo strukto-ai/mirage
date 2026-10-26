@@ -17,7 +17,6 @@ import type * as asyncContextModule from '../utils/async_context.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { type JsonValue, MountMode } from '../types.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import type { Policy } from './base.ts'
 import {
@@ -68,7 +67,7 @@ describe('a method without task isolation', () => {
     }
     const ws = new Workspace(
       { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser(), policies: [writer] },
+      { mode: MountMode.WRITE, policies: [writer] },
     )
     try {
       await ws.vfs.write('/data/team', 'core')
@@ -113,7 +112,6 @@ describe('a method without task isolation', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         policies: [coded],
         profiles: {
           checked: {
@@ -153,7 +151,6 @@ describe('a method without task isolation', () => {
       { '/data/': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         policies: [asker],
         onAsk: async (record: Decision) => {
           if (record.sessionId === 'a') {
@@ -193,7 +190,6 @@ describe('a method without task isolation', () => {
       { '/data/': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         onAsk: async (record: Decision) => {
           if (record.sessionId === 'a') {
             entered()
@@ -235,7 +231,6 @@ describe('a method without task isolation', () => {
       { '/data/': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         onAsk: async (record: Decision) => {
           if (record.sessionId === 'b') await held
           else askedA.push(record.sessionId)
@@ -264,10 +259,7 @@ describe('a method without task isolation', () => {
   it("covers a file tool's own reads with one nod", async () => {
     // A write tool reads the file back to stamp its version: the nod for
     // the call covers that read too, and is spent with the call.
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     ws.createSession('agent', {
       profile: { commands: { ask: [{ reason: 'outbox needs a nod', paths: ['/data/out/*'] }] } },
     })
@@ -295,7 +287,7 @@ describe('a method without task isolation', () => {
     }
     const ws = new Workspace(
       { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser(), policies: [sealed] },
+      { mode: MountMode.WRITE, policies: [sealed] },
     )
     ws.createSession('agent')
     const tools = new Session(ws, 'agent').tools
@@ -321,7 +313,6 @@ describe('a method without task isolation', () => {
       { '/data/': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         profiles: { narrow: { paths: { hide: ['/data/secret'] } } },
         profile: 'narrow',
         onAsk: async (record: Decision) => {
@@ -366,7 +357,6 @@ describe('a method without task isolation', () => {
       { '/data/': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         onAsk: async (record: Decision) => {
           asked.push(record.argv.join(' '))
           if (asked.length === 1) {
@@ -409,7 +399,6 @@ it('carries the script issuer through postVfs without task isolation', async () 
     { '/data': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      shellParser: await getTestParser(),
       profiles: {
         checked: {
           policy: {

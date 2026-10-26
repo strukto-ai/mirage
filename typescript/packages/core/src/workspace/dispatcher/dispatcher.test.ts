@@ -48,7 +48,6 @@ import {
   OnExceed,
   PathSpec,
 } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
@@ -57,7 +56,6 @@ const DEC = new TextDecoder()
 
 describe('dispatch applies limits on the executing mount', () => {
   it('a mount read entry cuts nothing, through a link either', async () => {
-    const parser = await getTestParser()
     const data = new RAMVFS()
     const plain = new RAMVFS()
     const ws = new Workspace(
@@ -65,7 +63,7 @@ describe('dispatch applies limits on the executing mount', () => {
         '/data': [data, MountMode.EXEC, { read: new Limit({ maxBytes: 8 }) }],
         '/r': plain,
       },
-      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.EXEC },
     )
     try {
       await ws.shell('echo 0123456789abcdef > /data/big.txt')
@@ -129,10 +127,9 @@ describe('dispatch rename across mounts', () => {
       // filesystems: a missing one is ENOENT and one through a file ENOTDIR;
       // /x, which the namespace holds above the /x/m mount, is there, so the
       // answer is EXDEV.
-      const parser = await getTestParser()
       const ws = new Workspace(
         { '/a': new RAMVFS(), '/b': new RAMVFS(), '/x/m': new RAMVFS() },
-        { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+        { mode: MountMode.EXEC },
       )
       try {
         await ws.shell('echo moved-bytes > /a/x.txt; echo f > /b/f')
@@ -154,11 +151,7 @@ describe('dispatch rename across mounts', () => {
       // is a filesystem boundary, so rename(2) answers EXDEV across two before
       // it looks the source up, and nothing moves: the source's backend never
       // takes '/b/y.txt' for one of its own keys.
-      const parser = await getTestParser()
-      const ws = new Workspace(
-        { '/a': new RAMVFS(), '/b': new RAMVFS() },
-        { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
-      )
+      const ws = new Workspace({ '/a': new RAMVFS(), '/b': new RAMVFS() }, { mode: MountMode.EXEC })
       try {
         await ws.shell('echo moved-bytes > /a/x.txt')
         await expect(
@@ -180,7 +173,6 @@ describe('dispatch resolves a rendered filetype by path extension', () => {
     // gdocs/gsheets/gslides render their reads under a compound filetype.
     // Every dispatch-based path (crossmount relay, FUSE) reaches the
     // renderer by the path's extension, as the shell does.
-    const parser = await getTestParser()
     class DocRAM extends RAMVFS {
       override readonly renderers: Readonly<Record<string, string>> = {
         '.gdoc.json': 'readDoc',
@@ -191,10 +183,7 @@ describe('dispatch resolves a rendered filetype by path extension', () => {
       }
     }
     const ram = new DocRAM()
-    const ws = new Workspace(
-      { '/m': ram },
-      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/m': ram }, { mode: MountMode.EXEC })
     try {
       await ws.shell('echo raw > /m/doc.gdoc.json')
       const bytes = (await ws.dispatch('read', '/m/doc.gdoc.json')) as Uint8Array
@@ -208,11 +197,7 @@ describe('dispatch resolves a rendered filetype by path extension', () => {
 it('names the path the op ran on in its report', async () => {
   // A record names the file a link led to, read off the report rather than
   // from a second follow of the link.
-  const parser = await getTestParser()
-  const ws = new Workspace(
-    { '/ram': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-  )
+  const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     await ws.shell('echo body > /ram/a.txt; ln -s a.txt /ram/lk')
     const report = new OpReport()
@@ -387,7 +372,7 @@ describe('native streamed writes', () => {
     const destination = new StreamWritingRAM()
     const ws = new Workspace(
       { '/src': new RAMVFS(), '/dst': destination },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.vfs.write('/src/f', 'a\nb\nc')
@@ -407,10 +392,7 @@ describe('native streamed writes', () => {
     ["sed -n -e 'w /dst/a' -e 'w /dst/b' /dst/f", { '/dst/a': 'a\nb\nc', '/dst/b': 'a\nb\nc' }],
   ])('never rereads or reopens its output: %s', async (line, expected) => {
     const destination = new StreamWritingRAM()
-    const ws = new Workspace(
-      { '/dst': destination },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/dst': destination }, { mode: MountMode.WRITE })
     try {
       await ws.vfs.write('/dst/f', 'a\nb\nc')
       const result = await ws.shell(line)
@@ -428,10 +410,7 @@ describe('native streamed writes', () => {
 
   it('invalidates a failed write and closes its input', async () => {
     const destination = new StreamWritingRAM()
-    const ws = new Workspace(
-      { '/dst': destination },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/dst': destination }, { mode: MountMode.WRITE })
     let closed = false
     try {
       await ws.vfs.write('/dst/f', 'old')
@@ -463,12 +442,8 @@ describe('unlink of a namespace link', () => {
     // that has never heard of the name and answers ENOENT, leaving the link
     // in place. That is what left `git checkout` unable to drop a link the
     // other branch does not have.
-    const parser = await getTestParser()
     const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/ram': ram },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
     try {
       await ws.shell('echo hi > /ram/a.txt')
       await ws.shell('ln -s a.txt /ram/link')
@@ -481,12 +456,8 @@ describe('unlink of a namespace link', () => {
   })
 
   it('still reaches the backend for an ordinary file', async () => {
-    const parser = await getTestParser()
     const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/ram': ram },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
     try {
       await ws.shell('echo hi > /ram/a.txt')
       await ws.dispatch('unlink', '/ram/a.txt')
@@ -500,12 +471,8 @@ describe('unlink of a namespace link', () => {
 
 describe('the node table answers every verb that names a link', () => {
   async function linkWorkspace(): Promise<Workspace> {
-    const parser = await getTestParser()
     const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/ram': ram },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
     await ws.shell('echo hi > /ram/a.txt')
     await ws.shell('mkdir /ram/d')
     await ws.shell('ln -s a.txt /ram/link')
@@ -603,10 +570,7 @@ describe('the node table answers every verb that names a link', () => {
   it('drops the listing an empty directory a tree copy made joins', async () => {
     // The copy wrote no file, so only the directory it made says which
     // listing changed.
-    const ws = new Workspace(
-      { '/ram/': new TreeCopyRAM() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/ram/': new TreeCopyRAM() }, { mode: MountMode.WRITE })
     try {
       await ws.shell('mkdir -p /ram/s/e /ram/d && echo x > /ram/d/x')
       expect(DEC.decode((await ws.shell('ls /ram/d')).stdout)).toBe('x\n')
@@ -667,10 +631,9 @@ describe('the node table answers every verb that names a link', () => {
   it('writes a tree copy through a link into another mount', async () => {
     // cp walks a destination holding a link, and the write follows it
     // across mounts where a backend copy would answer EXDEV.
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/ram': new RAMVFS(), '/scratch': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.shell('mkdir -p /ram/d /ram/e/d && echo new > /ram/d/a.txt')
@@ -820,12 +783,8 @@ describe('the fenced remnant cascade rides the mount revisions', () => {
     // revision-pinned mount, so the binding is pinned here through the
     // one public trigger: an rmdir whose only remnants the session
     // cannot see.
-    const parser = await getTestParser()
     const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/ram': ram },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
     try {
       await ws.shell('mkdir /ram/d && echo x > /ram/d/h.txt')
       const original = ram.readdir.bind(ram)
@@ -857,11 +816,7 @@ describe('the turf mode gates the node table', () => {
     // renamed its sibling link: the table verbs ran no mode check at
     // all, so `mounts: {"/extra": "read"}` protected everything on the
     // mount except its names.
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/extra': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/extra': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.shell('echo b > /extra/plain.txt')
       await ws.shell('ln -s plain.txt /extra/lk')
@@ -1002,10 +957,9 @@ describe('the turf mode gates the node table', () => {
     // blaming the destination, the way the backend gate checks both ends
     // of a rename. The grant is what binds, so both mounts are writable
     // and the session is the only thing narrowing either.
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/rw': new RAMVFS(), '/ro': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.shell('ln -s t /rw/lk')
@@ -1030,11 +984,7 @@ describe('a rename moves what the node table holds', () => {
     // node was not, so an overlay recorded there stayed at the emptied
     // name: it never reached the landing, and whatever was created at
     // the old name next inherited it.
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/a': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/a': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.shell('printf one > /a/f.txt')
       await ws.namespace.setAttrs('/a/f.txt', { mode: 0o400 })
@@ -1050,11 +1000,7 @@ describe('a rename moves what the node table holds', () => {
     // rename(2) replaces the destination, so the overlay it carried
     // goes with it rather than staying to shadow what just landed; what
     // lands there is the moved file's own node, its write time included.
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/a': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/a': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.shell('printf one > /a/f.txt && printf two > /a/g.txt')
       await ws.namespace.setAttrs('/a/g.txt', { mode: 0o400 })
@@ -1074,11 +1020,7 @@ describe('a hide answers a create by what its parent answers', () => {
     // hidden prefixes by probing writes. The parent decides, a rename
     // destination is a create, and the shell's redirect renders the
     // same refusal an ordinary missing directory does.
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/ram': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.shell(
         'mkdir -p /ram/vault /ram/open && echo s > /ram/vault/secret && echo p > /ram/open/pub.txt && echo q > /ram/open/q.txt',
@@ -1125,17 +1067,13 @@ describe('a hide answers a create by what its parent answers', () => {
 
 describe('a failed backend probe is not evidence of absence', () => {
   it('symlink refuses a name whose backend could not answer', async () => {
-    const parser = await getTestParser()
     class BrokenVFS extends RAMVFS {
       override stat(): Promise<FileStat> {
         return Promise.reject(new Error('401 bad credentials'))
       }
     }
     const broken = new BrokenVFS()
-    const ws = new Workspace(
-      { '/r': new RAMVFS(), '/data': broken },
-      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/r': new RAMVFS(), '/data': broken }, { mode: MountMode.EXEC })
     try {
       // The dispatcher probes the name before linking over it. A backend that
       // cannot answer has not reported the name free, so the link must not
@@ -1149,17 +1087,13 @@ describe('a failed backend probe is not evidence of absence', () => {
   }, 30_000)
 
   it('a failing parent listing propagates out of the parent-listing probe', async () => {
-    const parser = await getTestParser()
     const listing = new RAMVFS()
     // The store's key iteration is reached only by the parent readdir, not
     // by the stat probe ahead of it, so this fails exactly the one channel.
     vi.spyOn(listing.store.files, 'keys').mockImplementation(() => {
       throw new Error('backend listing failed')
     })
-    const ws = new Workspace(
-      { '/r': new RAMVFS(), '/data': listing },
-      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/r': new RAMVFS(), '/data': listing }, { mode: MountMode.EXEC })
     try {
       // The stat probe misses on a name RAM does not hold, which is the
       // one route into the parent-listing probe. The parent's readdir is
@@ -1174,11 +1108,7 @@ describe('a failed backend probe is not evidence of absence', () => {
   }, 30_000)
 
   it('readlink still answers ENOENT where no mount serves the path', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/r': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.EXEC })
     try {
       await expect(ws.dispatch('readlink', '/nowhere/x')).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
@@ -1189,11 +1119,7 @@ describe('a failed backend probe is not evidence of absence', () => {
 
 describe('the dispatcher answers extended attributes from the node table', () => {
   const open = async (): Promise<Workspace> => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/r': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('printf x > /r/f && ln -s f /r/lk')
     return ws
   }
@@ -1313,11 +1239,7 @@ describe('shell mutations share read-only admission', () => {
       "truncate: cannot open '/ro/file' for writing: Read-only file system\n",
     ],
   ])('%s', async (command, diagnostic) => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/ro': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/ro': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.dispatch('write', '/ro/file', [ENC.encode('original')])
       ws.namespace.mountFor('/ro/file').mode = MountMode.READ
@@ -1360,11 +1282,7 @@ describe('a write reads the mode again as it starts', () => {
 
 describe('links into hidden space', () => {
   it('are hidden with their target', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.shell(
         'mkdir -p /data/secret /data/pub /data/shared; ' +
@@ -1423,11 +1341,7 @@ describe('rmdir namespace entries', () => {
   it.each([false, true])(
     'accounts for a directory containing only a link (hidden=%s)',
     async (hidden) => {
-      const parser = await getTestParser()
-      const ws = new Workspace(
-        { '/data': new RAMVFS() },
-        { mode: MountMode.WRITE, shellParser: parser },
-      )
+      const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
       try {
         await ws.shell('mkdir /data/d; ln -s nowhere /data/d/link')
         const session = ws.createSession('remover', {
@@ -1445,11 +1359,7 @@ describe('rmdir namespace entries', () => {
   )
 
   it('takes a link into hidden space with the directory', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.shell(
         'mkdir -p /data/secret /data/d; echo s > /data/secret/f; ln -s /data/secret/f /data/d/l',
@@ -1466,11 +1376,7 @@ describe('rmdir namespace entries', () => {
   })
 
   it('keeps a link created while the backend removes the directory', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.shell('mkdir /data/d; ln -s nowhere /data/d/old')
       const mount = ws.mount('/data')
@@ -1504,10 +1410,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
     const fetched: string[] = []
     const vfs = new RAMVFS()
     Object.assign(vfs, { cachesReads: true })
-    const ws = new Workspace(
-      { '/data': vfs },
-      { mode: MountMode.WRITE, shellParserFactory: getTestParser },
-    )
+    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
     const read = async (
       path: PathSpec,
       _index?: IndexCacheStore,
@@ -1587,11 +1490,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
         )
       }
     }
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/m': new FollowedRAM() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/m': new FollowedRAM() }, { mode: MountMode.WRITE })
     try {
       await ws.vfs.write('/m/day', '{"ts":"1"}\n')
       const stream = (await ws.dispatch(
@@ -1622,11 +1521,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
     // The index holds a listing up to its TTL old: `wc -c` and `cmp -s` take
     // the size from a stat that asks the backend now. Mirrors python's
     // test_a_fresh_stat_asks_past_a_stale_listing.
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/m': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.vfs.write('/m/f', 'grown\n')
       await ws
@@ -1756,11 +1651,7 @@ function refusing(refused: string) {
 
 // A workspace with a linked directory and a link to a file inside it.
 async function linkedWs(): Promise<Workspace> {
-  const parser = await getTestParser()
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.shell(
     'mkdir -p /data/real && echo s > /data/real/secret && ' +
       'ln -s /data/real /data/alias && ln -s /data/real/secret /data/flink',
@@ -1969,11 +1860,7 @@ describe('dispatch runs writers to one path one at a time', () => {
     // writes it back, so without one writer at a time per path every
     // write puts back three bytes the others had just replaced. Mirrors
     // python's test_offset_writes_to_one_path_all_land_on_a_splicing_store.
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': new SplicingRAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/data': new SplicingRAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
       await Promise.all(
@@ -1996,12 +1883,8 @@ describe('dispatch runs writers to one path one at a time', () => {
     // The same store under two names: one writer at a time by the store's
     // own key, not by the name. Mirrors python's
     // test_offset_writes_through_two_mounts_of_one_store_all_land.
-    const parser = await getTestParser()
     const store = new SplicingRAMVFS()
-    const ws = new Workspace(
-      { '/a': store, '/b': store },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/a': store, '/b': store }, { mode: MountMode.WRITE })
     try {
       await ws.dispatch('write', '/a/f', [ENC.encode('0123456789')])
       await Promise.all(
@@ -2026,12 +1909,11 @@ describe('dispatch runs writers to one path one at a time', () => {
     // The stalled call keeps the path, since it may still write; a writer
     // queued behind it times out on its own budget and then never runs.
     const store = new StalledRAMVFS()
-    const parser = await getTestParser()
     const ws = new Workspace(
       {
         '/data': [store, MountMode.WRITE, { pwrite: new Limit({ timeoutSeconds: 0.01 }) }],
       },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
@@ -2050,13 +1932,12 @@ describe('dispatch runs writers to one path one at a time', () => {
     // The hold outlives the timeout, the mount's activity does not: a store
     // call that never answers must not keep the store from being removed.
     const store = new StalledRAMVFS()
-    const parser = await getTestParser()
     const ws = new Workspace(
       {
         '/data': [store, MountMode.WRITE, { pwrite: new Limit({ timeoutSeconds: 0.01 }) }],
         '/other': new RAMVFS(),
       },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
@@ -2074,10 +1955,9 @@ describe('dispatch runs writers to one path one at a time', () => {
     // another store mounted at the prefix: the late call must not touch
     // the new mount's links.
     const store = new StalledRAMVFS('rename')
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.dispatch('write', '/data/a', [ENC.encode('a')])
@@ -2101,10 +1981,9 @@ describe('dispatch runs writers to one path one at a time', () => {
     // after the timeout owns that name now: the late rename must not touch
     // its links.
     const store = new StalledRAMVFS('rename')
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.dispatch('write', '/data/a', [ENC.encode('a')])
@@ -2132,10 +2011,9 @@ describe('dispatch runs writers to one path one at a time', () => {
       override readonly local: boolean = false
     }
     const store = new StalledRAMVFS('rename')
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.dispatch('mkdir', '/data/d')
@@ -2169,7 +2047,6 @@ describe('dispatch runs writers to one path one at a time', () => {
         markLost(PathSpec.fromStrPath('/data/d/f'), 'refused')
       }
     }
-    const parser = await getTestParser()
     const ws = new Workspace(
       {
         '/data': [
@@ -2178,7 +2055,7 @@ describe('dispatch runs writers to one path one at a time', () => {
           { rename: new Limit({ timeoutSeconds: 0.01 }) },
         ],
       },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.dispatch('mkdir', '/data/d')
@@ -2199,11 +2076,10 @@ describe('dispatch runs writers to one path one at a time', () => {
     // The rename holds /data/f and waits for /data/g, which a stalled
     // pwrite keeps; once the rename times out, /data/f is free again.
     const store = new StalledRAMVFS()
-    const parser = await getTestParser()
     const limit = new Limit({ timeoutSeconds: 0.01 })
     const ws = new Workspace(
       { '/data': [store, MountMode.WRITE, { pwrite: limit, rename: limit }] },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('f')])
@@ -2237,10 +2113,9 @@ describe('dispatch runs writers to one path one at a time', () => {
       }
     }
     const store = new LateRAMVFS()
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/data': [store, MountMode.WRITE, { write: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('old')])
@@ -2266,7 +2141,6 @@ describe('dispatch runs writers to one path one at a time', () => {
         throw new Error('store went away')
       }
     }
-    const parser = await getTestParser()
     const ws = new Workspace(
       {
         '/data': [
@@ -2275,7 +2149,7 @@ describe('dispatch runs writers to one path one at a time', () => {
           { pwrite: new Limit({ timeoutSeconds: 0.01 }) },
         ],
       },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
@@ -2293,7 +2167,6 @@ describe('dispatch runs writers to one path one at a time', () => {
     // A timeout rejects the caller but cannot stop the call: the timed-out
     // pwrite still writes back what it read, so the next writer (a whole
     // write, which has no timeout) must land after it, not under it.
-    const parser = await getTestParser()
     const ws = new Workspace(
       {
         '/data': [
@@ -2302,7 +2175,7 @@ describe('dispatch runs writers to one path one at a time', () => {
           { pwrite: new Limit({ timeoutSeconds: 0.01 }) },
         ],
       },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
@@ -2557,18 +2430,16 @@ describe('a write and the cached bytes', () => {
 })
 
 describe('a link at the final name', () => {
-  async function linked(mounts: Record<string, RAMVFS>): Promise<Workspace> {
-    const parser = await getTestParser()
+  function linked(mounts: Record<string, RAMVFS>): Workspace {
     return new Workspace(mounts, {
       mode: MountMode.WRITE,
-      shellParserFactory: () => Promise.resolve(parser),
     })
   }
 
   it('a subtree read names the links on its own mount', async () => {
     // No backend stores a link, so the walk a subtree read stands in for
     // meets them only here; one below a nested mount is that mount's.
-    const ws = await linked({ '/base/': new RAMVFS(), '/base/inner/': new RAMVFS() })
+    const ws = linked({ '/base/': new RAMVFS(), '/base/inner/': new RAMVFS() })
     try {
       await ws.shell('echo hi > /base/f.txt')
       await ws.shell('ln -s /base/f.txt /base/kept')
@@ -2589,7 +2460,7 @@ describe('a link at the final name', () => {
     // A writer past mirage can put a key where a link stands; a stat of the
     // name answers the link, so the subtree read answers it too.
     const ram = new RAMVFS()
-    const ws = await linked({ '/base/': ram })
+    const ws = linked({ '/base/': ram })
     try {
       await ws.shell('echo hi > /base/f.txt')
       await ws.shell('ln -s /base/f.txt /base/d')
@@ -2610,7 +2481,7 @@ describe('a link at the final name', () => {
   it('a listing that does not follow stops at a link', async () => {
     // As open(2) answers a link with O_DIRECTORY | O_NOFOLLOW. A listing
     // that follows names the children under the link it was handed.
-    const ws = await linked({ '/data/': new RAMVFS() })
+    const ws = linked({ '/data/': new RAMVFS() })
     try {
       await ws.shell('mkdir /data/d && echo hi > /data/d/f.txt')
       await ws.shell('ln -s /data/d /data/dlink')
@@ -2640,7 +2511,7 @@ describe('a link at the final name', () => {
     // Under read: fresh the probe already asked the backend about the
     // command's operand. The stat after it is that answer, stamped as any
     // stat is; a write in the command sends the next one to the backend.
-    const ws = await linked({ '/data/': new RAMVFS() })
+    const ws = linked({ '/data/': new RAMVFS() })
     try {
       await ws.shell('echo hello > /data/a.txt')
       const spec = PathSpec.fromStrPath('/data/a.txt')
@@ -2661,7 +2532,7 @@ describe('a link at the final name', () => {
   it('a stat names the device of the mount serving it', async () => {
     // The id a runtime reports as st_dev: one per mount, the namespace's
     // own for a directory no mount serves, and a link's is its mount's.
-    const ws = await linked({
+    const ws = linked({
       '/base/': new RAMVFS(),
       '/base/inner/': new RAMVFS(),
       '/far/deep/': new RAMVFS(),
@@ -2699,11 +2570,7 @@ describe('a command reads at the dispatcher', () => {
     'sort /d/a.txt',
     'md5sum /d/a.txt',
   ])('%s', async (line) => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/d': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.vfs.write('/d/a.txt', 'a\nb\n')
       const seen = dispatched(ws)
@@ -2827,10 +2694,7 @@ describe('a read of a hidden link', () => {
     const vfs = new RAMVFS()
     vfs.store.dirs.add('/')
     vfs.store.files.set('/sub/x', ENC.encode('x'))
-    const ws = new Workspace(
-      { '/m': vfs },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
     try {
       await ws.shell('ln -s /m/sub /m/alias')
       ws.createSession('agent', { profile: { paths: { hide: ['/m/alias'] } } })
@@ -2887,10 +2751,7 @@ describe.each(WS_READS)('a %s read through ws.vfs', (_, read) => {
     const vfs = new RAMVFS()
     vfs.store.dirs.add('/')
     vfs.store.files.set('/sub/x', ENC.encode('x'))
-    const ws = new Workspace(
-      { '/m': vfs },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
     try {
       await ws.shell('ln -s /m/sub /m/alias; ln -s /m/nope /m/gone')
       const refused = (p: string) =>
@@ -3426,7 +3287,7 @@ describe('a hide filters a one-call read', () => {
 
   // Twin of test_a_search_past_the_walk_limit_stops_there.
   it.each([LimitedRAM, ListedRAM])('stops a search past the walk limit (%o)', async (cls) => {
-    const ws = new Workspace({ '/ram': limited(cls, 3) }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/ram': limited(cls, 3) })
     try {
       const out = await ws.shell('grep -r a /ram/d')
       expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
@@ -3452,7 +3313,7 @@ describe('a hide filters a one-call read', () => {
       ).map(([line, out, code]) => [cls, line, out, code] as const),
     ),
   )('stops a listing past the walk limit (%o, %s)', async (cls, line, out, code) => {
-    const ws = new Workspace({ '/ram': limited(cls, 3) }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/ram': limited(cls, 3) })
     try {
       const result = await ws.shell(line)
       const name = line.split(' ')[0] ?? ''
@@ -3466,10 +3327,7 @@ describe('a hide filters a one-call read', () => {
 
   // Twin of test_a_listing_across_mounts_stops_at_each_mounts_limit.
   it('stops a listing across mounts at each mount limit', async () => {
-    const ws = new Workspace(
-      { '/a': limited(LimitedRAM, 3), '/b': limited(LimitedRAM, 3) },
-      { shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/a': limited(LimitedRAM, 3), '/b': limited(LimitedRAM, 3) })
     try {
       const result = await ws.shell('ls -R /a/d /b/d')
       expect([result.stdoutText, new TextDecoder().decode(result.stderr), result.exitCode]).toEqual(
@@ -3494,10 +3352,7 @@ describe('a hide filters a one-call read', () => {
     ['cat /ram/d/a*', 'a\na\n', ''],
     ['echo /ram/d/*/b.txt', '/ram/d/secret/b.txt\n', ''],
   ])('refuses a glob past the walk limit: %s', async (line, out, err) => {
-    const ws = new Workspace(
-      { '/ram': limited(LimitedRAM, 3) },
-      { shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/ram': limited(LimitedRAM, 3) })
     try {
       const result = await ws.shell(line)
       expect([result.stdoutText, new TextDecoder().decode(result.stderr)]).toEqual([out, err])
@@ -3513,7 +3368,7 @@ describe('a hide filters a one-call read', () => {
     for (let i = 0; i < 2; i++) {
       vfs.store.files.set(`/d/a${String(i)}.txt`, new TextEncoder().encode('a\n'))
     }
-    const ws = new Workspace({ '/ram': vfs }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/ram': vfs })
     try {
       const out = await ws.shell('grep -r a /ram/d /ram/d/a0.txt')
       expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
@@ -3533,7 +3388,7 @@ describe('a hide filters a one-call read', () => {
     for (let i = 0; i < 4; i++) {
       vfs.store.files.set(`/d/f${String(i)}.txt`, new TextEncoder().encode('hello\nother\n'))
     }
-    const ws = new Workspace({ '/ram': vfs }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/ram': vfs })
     try {
       const out = await ws.shell('grep -r hello /ram/d')
       expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
@@ -3557,10 +3412,7 @@ describe('a hide filters a one-call read', () => {
       for (let i = 0; i < 4; i++) {
         remote.store.files.set(`/r${String(i)}.txt`, new TextEncoder().encode('hello\n'))
       }
-      const ws = new Workspace(
-        { '/a': top, '/a/remote': remote },
-        { shellParser: await getTestParser() },
-      )
+      const ws = new Workspace({ '/a': top, '/a/remote': remote })
       try {
         const out = await ws.shell(`rg --sort ${sort} -l hello /a`)
         expect([
@@ -3587,10 +3439,7 @@ describe('a hide filters a one-call read', () => {
     for (let i = 0; i < 3; i++) {
       remote.store.files.set(`/r${String(i)}.txt`, new TextEncoder().encode('r\n'))
     }
-    const ws = new Workspace(
-      { '/a': top, '/a/remote': remote },
-      { shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/a': top, '/a/remote': remote })
     const refused = '/a/*/*.txt: matches more than 2 files (walk_limit); narrow the path'
     try {
       const out = await ws.shell(`${command} /a/*/*.txt; echo $?`)
@@ -3611,7 +3460,7 @@ describe('a hide filters a one-call read', () => {
     }
     const ws = new Workspace(
       { '/a': top, '/a/remote': new RAMVFS({ walkLimit: 2 }) },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     try {
       await ws.shell('ln -s /a/data /a/remote/link')
@@ -3638,7 +3487,7 @@ describe('a hide filters a one-call read', () => {
       }
       const ws = new Workspace(
         { '/ram': vfs, '/ram/d/sub': new RAMVFS() },
-        { mode: MountMode.WRITE, shellParser: await getTestParser() },
+        { mode: MountMode.WRITE },
       )
       try {
         const out = await ws.shell('rm -r /ram/d; echo $?')
@@ -3659,10 +3508,7 @@ describe('a hide filters a one-call read', () => {
 
   // Twin of test_a_copy_past_the_walk_limit_is_refused.
   it.each([LimitedRAM, ListedRAM])('refuses a copy past the walk limit (%o)', async (cls) => {
-    const ws = new Workspace(
-      { '/ram': limited(cls, 3) },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/ram': limited(cls, 3) }, { mode: MountMode.WRITE })
     try {
       const out = await ws.shell('tar -cf /ram/d.tar /ram/d')
       expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
@@ -3684,10 +3530,7 @@ describe('a hide filters a one-call read', () => {
     for (let i = 0; i < 3; i++) {
       vfs.store.files.set(`/d/sub/c${String(i)}.txt`, new TextEncoder().encode('c\n'))
     }
-    const ws = new Workspace(
-      { '/ram': vfs, '/ram/d/sub': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/ram': vfs, '/ram/d/sub': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       const out = await ws.shell('tar -cf /ram/d.tar /ram/d; tar -tf /ram/d.tar')
       expect([out.stdoutText, out.exitCode]).toEqual(['ram/d/\nram/d/sub/\nram/d/x.txt\n', 0])
@@ -3698,7 +3541,7 @@ describe('a hide filters a one-call read', () => {
 
   // Twin of test_a_walk_within_the_walk_limit_runs.
   it.each([LimitedRAM, ListedRAM])('runs a walk within the walk limit (%o)', async (cls) => {
-    const ws = new Workspace({ '/ram': limited(cls, 2) }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/ram': limited(cls, 2) })
     try {
       const out = await ws.shell('grep -rl a /ram/d')
       expect([out.stdoutText, out.exitCode]).toEqual(['/ram/d/a0.txt\n', 0])
@@ -3773,10 +3616,7 @@ describe('a hide filters a one-call read', () => {
 
 it('path admission checks aliases without backend I/O', async () => {
   const ram = new RAMVFS()
-  const ws = new Workspace(
-    { '/data': ram },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
   try {
     await ws.shell('mkdir /data/real; ln -s /data/real /data/alias')
     const call = vi
@@ -3805,7 +3645,7 @@ describe('hides answer before any policy', () => {
     }
     const ws = new Workspace(
       { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, policies: [sealedReads], shellParser: await getTestParser() },
+      { mode: MountMode.WRITE, policies: [sealedReads] },
     )
     try {
       await ws.shell('echo s > /data/secret')
@@ -3834,10 +3674,7 @@ describe('hides answer before any policy', () => {
       },
     }
     const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/data': ram },
-      { mode: MountMode.WRITE, policies: [listening], shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, policies: [listening] })
     try {
       await ws.shell('mkdir /data/hid && echo k > /data/hid/x')
       const internals = ws as unknown as {
@@ -3992,7 +3829,6 @@ it.each([false, true])(
           : null
       },
     }
-    const parser = await getTestParser()
     const source = new NativeCopyRAM()
     const other = new NativeCopyRAM()
     const ws = new Workspace(
@@ -4000,7 +3836,6 @@ it.each([false, true])(
       {
         mode: MountMode.WRITE,
         policies: [policy],
-        shellParserFactory: () => Promise.resolve(parser),
       },
     )
     const destination = crossMount ? '/other/copied' : '/data/copied'
@@ -4089,12 +3924,8 @@ it.each([
 ])("declines a line's tree removal only for a rule below it (%s)", async (sealed, removals) => {
   // The line's gate answers for the profile's rules, scoped to the paths a
   // walk reaches: a rule over another mount declines nothing.
-  const parser = await getTestParser()
   const vfs = new CountedRemoval()
-  const ws = new Workspace(
-    { '/d': vfs, '/other': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
-  )
+  const ws = new Workspace({ '/d': vfs, '/other': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     ws.createSession('agent', {
       profile: { commands: { deny: [{ paths: [sealed], reason: 'sealed' }] } },
@@ -4136,11 +3967,7 @@ it('has a preVfs policy judge a shortcut without a whole read', async () => {
 it('leaves the rest of a live pipe to the next reader under a postVfs policy', async () => {
   // A pipe's bytes come from the line's own writer; collecting them for a
   // postVfs policy would take what the next reader is owed.
-  const parser = await getTestParser()
-  const ws = new Workspace(
-    { '/ram': new RAMVFS() },
-    { policies: [{ postVfs: () => null }], shellParserFactory: () => Promise.resolve(parser) },
-  )
+  const ws = new Workspace({ '/ram': new RAMVFS() }, { policies: [{ postVfs: () => null }] })
   try {
     const result = await ws.shell(
       'f() { head -c 1 "$1"; echo; cat "$1"; }; f <(printf a; sleep 1; printf rest)',
@@ -4175,7 +4002,6 @@ it('has a policy refusing reads refuse their shortcuts', async () => {
 it.each([false, true])('admits a copy as a read of its source (refused: %s)', async (refused) => {
   // A preVfs hook needs no bytes: the source is judged as a read and the
   // backend's own copy runs, so a document stays a document.
-  const parser = await getTestParser()
   const vfs = new NativeCopyRAM()
   const policy: Policy = {
     preVfs: (ctx) =>
@@ -4186,7 +4012,6 @@ it.each([false, true])('admits a copy as a read of its source (refused: %s)', as
     {
       mode: MountMode.WRITE,
       policies: [policy],
-      shellParserFactory: () => Promise.resolve(parser),
     },
   )
   try {
@@ -4200,13 +4025,11 @@ it.each([false, true])('admits a copy as a read of its source (refused: %s)', as
 })
 
 it('keeps the bytes of a copy from a pipe under file hooks', async () => {
-  const parser = await getTestParser()
   const ws = new Workspace(
     { '/ram': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       policies: [{ preVfs: () => null, postVfs: () => null }],
-      shellParserFactory: () => Promise.resolve(parser),
     },
   )
   try {

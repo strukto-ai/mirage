@@ -56,7 +56,7 @@ def test_type_reports_keyword():
 
 def test_type_a_prints_the_function_under_a_keyword():
     session = make_session()
-    session.functions["then"] = "then() { echo x; }"
+    session.functions["then"] = "function then { echo x; }"
     assert _out(handle_type(["-a", "then"], session, make_registry())) == (
         "then is a shell keyword\nthen is a function\n"
         "function then () \n{ \n    echo x\n}\n"

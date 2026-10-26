@@ -1,7 +1,9 @@
 import { encodeText } from '../../shell/bytes.ts'
+import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 
 const DEFAULT_FORMAT = '\nreal\t%3lR\nuser\t%3lU\nsys\t%3lS'
 const TOKEN = /%(?:([0-9])?(l)?([RUS])|([%P]))/g
+const PREFIXES: ReadonlySet<string> = new Set([NT.TIMED_STATEMENT, NT.NEGATED_COMMAND])
 
 /** CPU time is zero: browsers lack per-job counters and process totals include unrelated agents. */
 export function timingReport(
@@ -33,4 +35,24 @@ export function timingReport(
   const tail = template.slice(cursor)
   if (tail.includes('%')) return encodeText('mirage: TIMEFORMAT: invalid format character\n')
   return encodeText(pieces.join('') + tail + '\n')
+}
+
+/**
+ * How a `time` reports its pipeline. bash times a pipeline once, however
+ * many `time` words and `!` lead it: the outermost `time` reports,
+ * portable when any of them takes `-p`. Null when an outer `time` already
+ * times the pipeline. Mirrors Python's timed_by.
+ */
+export function timedBy(node: TSNodeLike): boolean | null {
+  for (let parent = node.parent ?? null; parent !== null && PREFIXES.has(parent.type);) {
+    if (parent.type === NT.TIMED_STATEMENT) return null
+    parent = parent.parent ?? null
+  }
+  let portable = false
+  for (let inner: TSNodeLike | undefined = node; inner !== undefined && PREFIXES.has(inner.type);) {
+    if (inner.type === NT.TIMED_STATEMENT && inner.children.some((child) => child.type === '-p'))
+      portable = true
+    inner = inner.namedChildren[0]
+  }
+  return portable
 }

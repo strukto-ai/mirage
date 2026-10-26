@@ -88,42 +88,14 @@ export function syntaxErrorResult(found: SyntaxDiagnostic): IOResult {
 }
 
 /**
- * A structural error the grammar left in a line bash reads. `checkSyntax`
- * judges the line; this catches the lines it accepts that the grammar still
- * cannot build a tree for, which mirage then has nothing to run for; it is
- * worded as an unexpected token, status 2. Parameter syntax is judged as the
- * word expands (a bad substitution), a `[` test's arguments by that builtin,
- * and a `$(...)` body as the line it runs as; the words of an associative
- * subscript may hold blanks, and the grammar recovers a `for` header's `in` as
- * an error of its own, and the `;` it misses
- * between a compound command and the reserved word closing around it
- * (`{ { a; } }`) as a missing token.
+ * A refusal of the parser in a line `checkSyntax` accepts, which mirage
+ * then has nothing to run for: worded as an unexpected token, status 2.
+ * The parser ends a line it refuses in one `ERROR` node.
  */
 export function findSyntaxIssue(node: TSNodeLike): SyntaxDiagnostic | null {
-  if (node.type === 'expansion' || !node.hasError) return null
-  if (node.type === 'command_substitution' && node.text.startsWith('$(')) return null
-  if (node.type === 'test_command' && node.children[0]?.type === '[') return null
-  for (const child of node.children) {
-    if (
-      node.type === 'subscript' &&
-      child.type === 'ERROR' &&
-      child.children.length > 0 &&
-      child.children.every((part) => part.type === 'word' && !part.hasError)
-    )
-      continue
-    if (child.isMissing && child.type !== ';') return issue(child)
-    if (
-      child.type === 'ERROR' &&
-      isStructuralError(child) &&
-      !(node.type === 'for_statement' && child.text.trim() === 'in')
-    )
-      return issue(child)
-    if (child.type !== 'ERROR') {
-      const nested = findSyntaxIssue(child)
-      if (nested !== null) return nested
-    }
-  }
-  return null
+  if (!node.hasError) return null
+  const error = node.children.find((child) => child.type === 'ERROR')
+  return error === undefined ? null : issue(error)
 }
 
 function issue(node: TSNodeLike): SyntaxDiagnostic {
@@ -136,17 +108,6 @@ function issue(node: TSNodeLike): SyntaxDiagnostic {
         : 'mirage: syntax error in command\n',
     status: 2,
   }
-}
-
-/** Whether an ERROR node holds a token that structures a line. */
-function isStructuralError(node: TSNodeLike): boolean {
-  return node.children.some(
-    (child) =>
-      child.isNamed === true ||
-      constants.BASH_KEYWORDS.has(child.type) ||
-      constants.STRUCTURAL_TOKENS.has(child.type) ||
-      constants.SEPARATOR_TOKENS.has(child.type),
-  )
 }
 
 /** One of bash's diagnostic lines as mirage prints it. */
@@ -218,30 +179,12 @@ function isTestClose(tok: ReaderToken): boolean {
   return tok.kind === 'word' && tok.plain && tok.text === ']]'
 }
 
-/** Shield pattern operators while preserving expansions and source spans.
- * Process substitutions borrow command-substitution grammar to remain inside
- * one word; SourceNode restores their original types and text. */
-export function patternSource(text: string): string {
-  if (!text.includes('[') && ![...constants.EXTGLOB_OPENERS].some((c) => text.includes(c + '(')))
-    return text
-  const reader = new LineReader(text, new Set(), null, true)
-  reader.refusals()
-  const out = text.split('')
-  for (const [start, end] of reader.patterns) {
-    if (end === start + 1 && '<>'.includes(text.charAt(start)) && text.charAt(start + 1) === '(')
-      out[start] = '$'
-    else for (let i = start; i < end; i += 1) out[i] = ':'
-  }
-  return out.join('')
-}
-
 /**
  * Bash's reader over one line: a lexer whose modes the grammar sets.
  * `frames` tracks arrays and substitutions; `bodies` and `closes` keep
- * the heredoc plan. Pattern spans share this reader's quote boundaries.
+ * the heredoc plan.
  */
 class LineReader {
-  readonly patterns: [number, number][] = []
   private readonly n: number
   private readonly quotedEnd: boolean
   private pos = 0
@@ -462,9 +405,8 @@ class LineReader {
     return j + 1
   }
 
-  /** Read a pattern group, shielding only its literal syntax. */
+  /** Read a pattern group to the parenthesis closing it. */
   extendedPattern(i: number): number {
-    this.patterns.push([i, i + 2])
     let j = i + 2
     let depth = 1
     while (j < this.n) {
@@ -474,17 +416,11 @@ class LineReader {
         continue
       }
       if ((c === '<' || c === '>') && this.text.charAt(j + 1) === '(') {
-        this.patterns.push([j, j + 1])
         j = this.processSubstitution(j)
         continue
       }
       if (c === '(') depth += 1
       else if (c === ')') depth -= 1
-      if (
-        '()| \t\n;&<>'.includes(c) ||
-        (constants.EXTGLOB_OPENERS.has(c) && this.text.charAt(j + 1) === '(')
-      )
-        this.patterns.push([j, j + 1])
       j += 1
       if (depth === 0) return j
     }
@@ -1363,7 +1299,6 @@ class LineReader {
         )
           this.failToken(next)
         afterIn = false
-        this.patternBrackets(next.start, next.end)
         this.take(next)
         next = this.peek()
         if (next.kind === 'op' && next.text === ')') {
@@ -1569,17 +1504,6 @@ class LineReader {
     }
   }
 
-  /** Keep a bracket pattern containing quotes or expansions one word. */
-  patternBrackets(start: number, end: number): void {
-    const word = this.text.slice(start, end)
-    if (!word.includes('[') || !/["'`$\\]/.test(word)) return
-    let j = start
-    while (j < end) {
-      if ('[]'.includes(this.text.charAt(j))) this.patterns.push([j, j + 1])
-      j = this.wordChar(j)
-    }
-  }
-
   /** The right side of `==`, `=` or `!=`, read with extglob on. */
   patternWord(): ReaderToken {
     const i = this.blankEnd(this.pos)
@@ -1602,7 +1526,6 @@ class LineReader {
       if (constants.WORD_BREAKS.has(c)) break
       j = this.wordChar(j)
     }
-    this.patternBrackets(i, j)
     if (!extended) return tok
     return token('word', text.slice(i, j).replaceAll('\\\n', ''), i, j)
   }

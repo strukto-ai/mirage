@@ -20,7 +20,7 @@ import type { ParseScope } from '../../shell/parse/scope.ts'
 
 import { ExecutionScope } from '../execution.ts'
 import { newExecutionId } from '../../execution/context.ts'
-import { timingReport } from './timing.ts'
+import { timedBy, timingReport } from './timing.ts'
 import { PathSpec } from '../../types.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 
@@ -48,6 +48,7 @@ import {
   getListParts,
   getNegatedCommand,
   getPipelineStages,
+  commandRedirects,
   getRedirects,
   readRow,
   takeContinuation,
@@ -64,6 +65,7 @@ import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.t
 import {
   runWithRedirectPaths,
   redirectPathsFor,
+  redirectRunnerFor,
   redirectSyntaxFor,
   type RedirectRunner,
 } from '../../context/session_context.ts'
@@ -1102,24 +1104,23 @@ async function executeNodeBody(
   if (kind === NodeKind.TIMED) {
     const started = performance.now()
     const inner = node.namedChildren[0]
-    if (inner === undefined) throw new Error('timed statement has no body')
-    const [body, io, execNode] = await stream(inner, context, stdin, callStack)
-    const stdout = await applyBarrier(body, io, BarrierPolicy.VALUE)
-    const elapsed = (performance.now() - started) / 1000
-    const stderr = await io.materializeStderr()
-    const reports = [...(node.timing ?? [])]
-      .reverse()
-      .map((portable) => timingReport(elapsed, portable, session.env.TIMEFORMAT))
-    const merged = new Uint8Array(
-      stderr.length + reports.reduce((n, report) => n + report.length, 0),
-    )
-    merged.set(stderr)
-    let offset = stderr.length
-    for (const report of reports) {
-      merged.set(report, offset)
-      offset += report.length
+    const [stdout, io, execNode] =
+      inner === undefined
+        ? [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
+        : await stream(inner, context, stdin, callStack).then(
+            async ([body, ran, ranNode]) =>
+              [await applyBarrier(body, ran, BarrierPolicy.VALUE), ran, ranNode] as const,
+          )
+    const portable = timedBy(node)
+    if (portable !== null) {
+      const elapsed = (performance.now() - started) / 1000
+      const stderr = await io.materializeStderr()
+      const report = timingReport(elapsed, portable, session.env.TIMEFORMAT)
+      const merged = new Uint8Array(stderr.length + report.length)
+      merged.set(stderr)
+      merged.set(report, stderr.length)
+      io.stderr = merged
     }
-    io.stderr = merged
     return [stdout, io, execNode]
   }
 
@@ -1182,6 +1183,27 @@ async function executeNodeBody(
       inline,
       executeFn,
     )
+  }
+
+  const own =
+    kind === NodeKind.COMMAND && redirectRunnerFor(node) === null ? commandRedirects(node) : []
+  if (own.length > 0) {
+    const ran = await runRedirected(
+      recurse,
+      dispatch,
+      executeFn,
+      registry,
+      deps.namespace,
+      node,
+      own,
+      deps.signal,
+      jobTable.processes,
+      sink,
+      context,
+      stdin,
+      callStack,
+    )
+    return sink === undefined ? ran : drained(sink, ...ran)
   }
 
   if (kind === NodeKind.COMMAND) {

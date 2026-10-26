@@ -50,7 +50,6 @@ import { PlacementPolicy } from '../../policy/builtin/placement.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { Decisions } from '../../policy/decisions.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
-import type { ShellParser } from '../../shell/parse/index.ts'
 import { buildFileCache } from './cache.ts'
 import { DriftQueue, installDriftState } from '../snapshot/drift.ts'
 import { readSnapshot, snapshot as writeSnapshot } from '../snapshot/api.ts'
@@ -191,9 +190,6 @@ export class Workspace {
   private readonly readDefault: ReadSpec
   /** The write policy a mount added without one takes. */
   readonly writeDefault: WritePolicy
-  private shellParser: ShellParser | null
-  private readonly shellParserFactory: (() => Promise<ShellParser>) | null
-  private shellParserPromise: Promise<ShellParser> | null = null
   readonly processes: ProcessSupervisor
   readonly jobTable: JobTable
   readonly cache: FileCache & BaseVFS
@@ -372,8 +368,6 @@ export class Workspace {
       this.sessionManager,
       options.sessionId !== undefined,
     )
-    this.shellParser = options.shellParser ?? null
-    this.shellParserFactory = options.shellParserFactory ?? null
     this.eventManager = new EventManager(this.registry)
     const sandboxResolver = new PrefixResolver(
       () => this.sandboxVisibleMounts(),
@@ -865,18 +859,6 @@ export class Workspace {
       )
   }
 
-  private async getShellParser(): Promise<ShellParser> {
-    if (this.shellParser !== null) return this.shellParser
-    if (this.shellParserFactory === null) {
-      throw new Error(
-        'Workspace requires a shellParser or shellParserFactory — use `@struktoai/mirage-node` or `@struktoai/mirage-browser` for an auto-configured Workspace',
-      )
-    }
-    this.shellParserPromise ??= this.shellParserFactory()
-    this.shellParser = await this.shellParserPromise
-    return this.shellParser
-  }
-
   // ── Public accessors aligned with Python's Workspace API ────────────
 
   /**
@@ -1194,7 +1176,7 @@ export class Workspace {
   /** `explain`'s judging, run with its policies deciding. */
   private async explained(line: string, sessionId: string): Promise<ShellExplanation> {
     const session = this.getSession(sessionId === '' ? this.defaultSessionId : sessionId)
-    const parser = new ParseScope(await this.getShellParser())
+    const parser = new ParseScope()
     try {
       const reparse = (text: string): TSNodeLike => parser.parse(text)
       const root = parser.parse(line)
@@ -1705,7 +1687,6 @@ export class Workspace {
   /** Everything the module-level executor needs, assembled from this workspace. */
   private executeEnv(): ExecuteEnv {
     return {
-      parser: () => this.getShellParser(),
       meta: this.meta,
       drift: this.drift,
       statFn: (p) => this.dispatchInternal('stat', p, [], { index: new ListingCheckStore() }),
@@ -2143,8 +2124,6 @@ export class Workspace {
       ...(options.profiles != null ? { profiles: options.profiles, profile: null } : {}),
       ...(options.profile != null ? { profile: options.profile } : {}),
     }
-    const parser = options.shellParser ?? this.shellParser
-    if (parser !== null) opts.shellParser = parser
     const overrides: Record<string, Mount> = {}
     for (const mount of this.registry.allMounts()) {
       for (const snap of state.mounts) {

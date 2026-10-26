@@ -12,30 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { JobStatus } from '../../shell/job_table/index.ts'
-import type { ShellParser } from '../../shell/parse/index.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { eacces } from '../../errors/fs.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import type { Dispatcher } from '../dispatcher/dispatcher.ts'
 
 const DEC = new TextDecoder()
 
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await getTestParser()
-})
-
 function buildWs(): Workspace {
-  return new Workspace(
-    { '/m': [new RAMVFS(), MountMode.WRITE] },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  return new Workspace({ '/m': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
 }
 
 /** Run a backgrounded command and return its finished console. */

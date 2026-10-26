@@ -25,7 +25,7 @@ import { LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
 import type { RunResult } from '../runtime/types.ts'
 import { MountMode, VFSName } from '../types.ts'
 import { Channel, type ConsoleChunk, JobConsole, RAMConsoleStore } from '../shell/console/index.ts'
-import { getTestParser, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { ExecuteResult } from './workspace/workspace.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { dispatched } from '../test-utils.ts'
@@ -34,8 +34,7 @@ const DEC = new TextDecoder()
 
 const ENC = new TextEncoder()
 
-async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeWs(): Workspace {
   const r = new RAMVFS()
   r.store.dirs.add('/')
   r.store.dirs.add('/subdir')
@@ -43,19 +42,19 @@ async function makeWs(): Promise<Workspace> {
   r.store.files.set('/subdir/file.txt', ENC.encode('hello'))
   r.store.files.set('/subdir/nested/deep.txt', ENC.encode('deep'))
 
-  return new Workspace({ '/ram/': r }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/ram/': r }, { mode: MountMode.WRITE })
 }
 
 describe('execute({ cwd }): bash subshell semantics', () => {
   it('runs the command in the override cwd, like (cd /ram/subdir && pwd)', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const r = await ws.shell('pwd', { cwd: '/ram/subdir' })
     expect(stdoutStr(r).trim()).toBe('/ram/subdir')
     await ws.close()
   })
 
   it('does not mutate session.cwd', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const before = ws.cwd
     await ws.shell('pwd', { cwd: '/ram/subdir' })
     expect(ws.cwd).toBe(before)
@@ -63,7 +62,7 @@ describe('execute({ cwd }): bash subshell semantics', () => {
   })
 
   it('does not let `cd` inside the call leak back to session.cwd', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const before = ws.cwd
     await ws.shell('cd /ram/subdir', { cwd: '/ram' })
     expect(ws.cwd).toBe(before)
@@ -71,7 +70,7 @@ describe('execute({ cwd }): bash subshell semantics', () => {
   })
 
   it('does not leak between parallel calls (isolation regression guard)', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [a, b] = await Promise.all([
       ws.shell('pwd', { cwd: '/ram/subdir' }),
       ws.shell('pwd', { cwd: '/ram' }),
@@ -82,7 +81,7 @@ describe('execute({ cwd }): bash subshell semantics', () => {
   })
 
   it('setup mutates session, per-call overrides inherit and do not leak', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const cwdBefore = ws.cwd
     await ws.shell('export DEBUG=1')
     const [a, b] = await Promise.all([
@@ -99,14 +98,14 @@ describe('execute({ cwd }): bash subshell semantics', () => {
   })
 
   it('propagates lastExitCode back to the persistent session', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('false', { cwd: '/ram/subdir' })
     expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
     await ws.close()
   })
 
   it('does not let function definitions leak back to session.functions', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('greet() { echo hi; }', { cwd: '/ram' })
     const session = ws.sessionManager.get(ws.sessionManager.defaultId)
     expect(session.functions.greet).toBeUndefined()
@@ -115,7 +114,7 @@ describe('execute({ cwd }): bash subshell semantics', () => {
 
 describe('execute({ env }): bash subshell semantics', () => {
   it('exposes override env to the command, like env FOO=bar printenv FOO', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const r = await ws.shell('printenv FOO', { env: { FOO: 'bar' } })
     expect(r.exitCode).toBe(0)
     expect(stdoutStr(r).trim()).toBe('bar')
@@ -123,7 +122,7 @@ describe('execute({ env }): bash subshell semantics', () => {
   })
 
   it('does not mutate session.env', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const before = { ...ws.env }
     await ws.shell('printenv FOO', { env: { FOO: 'bar' } })
     expect(ws.env).toEqual(before)
@@ -131,14 +130,14 @@ describe('execute({ env }): bash subshell semantics', () => {
   })
 
   it('does not let `export` inside the call leak back to session.env', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('export LEAKED=yes', { env: { FOO: 'bar' } })
     expect(ws.env.LEAKED).toBeUndefined()
     await ws.close()
   })
 
   it('layers onto, does not replace, session env', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('export BASE=keep')
     const r = await ws.shell('printenv BASE; printenv FOO', { env: { FOO: 'bar' } })
     expect(stdoutStr(r)).toContain('keep')
@@ -149,7 +148,7 @@ describe('execute({ env }): bash subshell semantics', () => {
   })
 
   it('does not leak between parallel calls (isolation regression guard)', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [a, b] = await Promise.all([
       ws.shell('printenv X', { env: { X: 'one' } }),
       ws.shell('printenv X', { env: { X: 'two' } }),
@@ -165,7 +164,7 @@ describe('execute({ signal }): concurrent lines on one session', () => {
   // abort restores the `$?` it found before B ever stamps its own, and
   // the shell ends on B's status, never on a resurrected older one.
   it('a queued line runs after the aborted one and keeps its status', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('true')
 
     const ac = new AbortController()
@@ -184,7 +183,7 @@ describe('execute({ signal }): concurrent lines on one session', () => {
   })
 
   it('releases a caller that aborts while queued and never runs its line', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const ac = new AbortController()
     const blocked = ws.shell('sleep 5', { signal: ac.signal })
     const settled = blocked.catch(() => undefined)
@@ -204,7 +203,7 @@ describe('execute({ signal }): concurrent lines on one session', () => {
 
 describe('execute({ signal }): mid-flight cancellation', () => {
   it('rejects with AbortError when signal is pre-aborted (regression guard)', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const ac = new AbortController()
     ac.abort()
     await expect(ws.shell('echo hi', { signal: ac.signal })).rejects.toMatchObject({
@@ -214,7 +213,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('aborts a sleeping command within ~timeout window', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const t0 = Date.now()
     await expect(ws.shell('sleep 5', { signal: AbortSignal.timeout(100) })).rejects.toMatchObject({
       name: 'AbortError',
@@ -224,7 +223,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('aborts inside a for loop within one iteration', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const t0 = Date.now()
     const ac = new AbortController()
     setTimeout(() => {
@@ -240,7 +239,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('aborts between LIST stages', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const t0 = Date.now()
     const ac = new AbortController()
     setTimeout(() => {
@@ -256,7 +255,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('aborts inside a while loop', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const t0 = Date.now()
     const ac = new AbortController()
     setTimeout(() => {
@@ -270,7 +269,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('aborts mid-pipeline', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const t0 = Date.now()
     const ac = new AbortController()
     setTimeout(() => {
@@ -284,7 +283,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('aborts inside a command substitution', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const ac = new AbortController()
     let entered!: () => void
     const started = new Promise<void>((resolve) => {
@@ -316,7 +315,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   }, 10_000)
 
   it('aborts on manual AbortController.abort() during sleep', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const t0 = Date.now()
     const ac = new AbortController()
     setTimeout(() => {
@@ -330,7 +329,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('aborts inside a shell-syntax subshell (sleep 5)', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const t0 = Date.now()
     await expect(ws.shell('(sleep 5)', { signal: AbortSignal.timeout(100) })).rejects.toMatchObject(
       { name: 'AbortError' },
@@ -340,7 +339,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('aborts inside a user-defined function body', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('loopy() { while true; do sleep 1; done; }')
     const t0 = Date.now()
     await expect(ws.shell('loopy', { signal: AbortSignal.timeout(100) })).rejects.toMatchObject({
@@ -351,7 +350,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('workspace remains usable after an aborted command', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await expect(ws.shell('sleep 5', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
       name: 'AbortError',
     })
@@ -362,7 +361,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('does not pollute session.lastExitCode on abort', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('true')
     expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(0)
     await expect(ws.shell('sleep 5', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
@@ -375,7 +374,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('undoes a status stamped by a statement before the abort', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('false')
     await expect(
       ws.shell('true; sleep 5', { signal: AbortSignal.timeout(50) }),
@@ -390,7 +389,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     // The leaf returns at once with a lazy stream that ignores the signal
     // and yields past the grace, so the drain settles on a shell the
     // caller was already released from.
-    const ws = await makeWs()
+    const ws = makeWs()
     const late = new Command({
       name: 'latecmd',
       spec: new CommandSpec({
@@ -423,10 +422,9 @@ describe('execute({ signal }): mid-flight cancellation', () => {
         return new Promise<never>(() => undefined)
       }
     }
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, sessionStore: new Stalled() },
+      { mode: MountMode.EXEC, sessionStore: new Stalled() },
     )
     await expect(ws.shell('echo hi', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
       name: 'AbortError',
@@ -451,11 +449,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
       }
     }
     const store = new Stalled()
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, sessionStore: store },
-    )
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, sessionStore: store })
     // The first line persists the fresh session; after it, status is not
     // a durable field, so only the env write below has a flush to stall.
     await ws.shell('false')
@@ -481,10 +475,9 @@ describe('execute({ signal }): mid-flight cancellation', () => {
         return super.casSet(sessionId, fields, expectedGeneration)
       }
     }
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, sessionStore: new Slow() },
+      { mode: MountMode.EXEC, sessionStore: new Slow() },
     )
     await ws.shell('false')
     // An env write is durable, so this line has a flush to land on.
@@ -511,12 +504,10 @@ describe('execute({ signal }): mid-flight cancellation', () => {
         return new Promise<never>(() => undefined)
       }
     }
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new Answers(), 'workspace'],
         observe: new Stalled(),
       },
@@ -531,7 +522,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     // The status write reads the signal of the line that produced the
     // statement, so an aborted sibling cannot make this line throw or
     // stop early.
-    const ws = await makeWs()
+    const ws = makeWs()
     const kept = ws.shell('sleep 0.4; echo kept')
     await expect(ws.shell('sleep 5', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
       name: 'AbortError',
@@ -547,14 +538,13 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     // past the grace, so the caller is released. The held unlink then
     // completes and the handler resumes; the second operand must not
     // reach the dispatcher. Python's cancelled task never gets there.
-    const parser = await getTestParser()
     const ram = new RAMVFS()
     const seen: string[] = []
     const held: { armed: boolean; release: () => void } = { armed: false, release: () => undefined }
     const first = new Promise<void>((resolve) => {
       held.release = resolve
     })
-    const ws = new Workspace({ '/ram/': ram }, { mode: MountMode.WRITE, shellParser: parser })
+    const ws = new Workspace({ '/ram/': ram }, { mode: MountMode.WRITE })
     dispatched(ws, async (name, path) => {
       if (!held.armed || name !== 'unlink') return
       seen.push(path.virtual)
@@ -579,14 +569,13 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     // the first unlink held at the dispatcher past the grace.
     // The handler resumes after the release; the second file must keep
     // its bytes.
-    const parser = await getTestParser()
     const ram = new RAMVFS()
     const seen: string[] = []
     const held: { armed: boolean; release: () => void } = { armed: false, release: () => undefined }
     const first = new Promise<void>((resolve) => {
       held.release = resolve
     })
-    const ws = new Workspace({ '/ram/': ram }, { mode: MountMode.WRITE, shellParser: parser })
+    const ws = new Workspace({ '/ram/': ram }, { mode: MountMode.WRITE })
     dispatched(ws, async (name, path) => {
       if (!held.armed || name !== 'unlink') return
       seen.push(path.virtual)
@@ -617,10 +606,9 @@ describe('execute({ signal }): mid-flight cancellation', () => {
         return new Promise<never>(() => undefined)
       }
     }
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [new Hanging(), 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: [new Hanging(), 'workspace'] },
     )
     await expect(
       ws.shell('hangcmd now', { signal: AbortSignal.timeout(50) }),
@@ -631,7 +619,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('aborts while the file cache is being filled', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('false')
     const controller = new AbortController()
     const dispatcher = (ws as unknown as { dispatcher: { keepVersions: () => Promise<void> } })
@@ -662,7 +650,7 @@ describe('execute(): agent harness pattern', () => {
   }
 
   it('parallel toolCalls with their own cwd+env+timeout all succeed', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [a, b] = await Promise.all([
       toolCall(ws, 'pwd; printenv DEBUG', '/ram/subdir', { DEBUG: 'one' }, 5000),
       toolCall(ws, 'pwd; printenv DEBUG', '/ram', { DEBUG: 'two' }, 5000),
@@ -677,7 +665,7 @@ describe('execute(): agent harness pattern', () => {
   })
 
   it('one parallel toolCall aborts on its own timeout while siblings continue', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const settled = await Promise.allSettled([
       toolCall(ws, 'sleep 5', '/ram/subdir', { DEBUG: 'one' }, 100),
       toolCall(ws, 'echo ok', '/ram', { DEBUG: 'two' }, 5000),
@@ -696,7 +684,7 @@ describe('execute(): agent harness pattern', () => {
 
 describe('execute({ sink }): streaming output to a console', () => {
   it('streams the output to the console and returns empty stdout', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const console_ = new JobConsole()
     const result = await ws.shell('echo hello', { sink: console_ })
     // The bytes went to the console, so the result carries only the code.
@@ -708,7 +696,7 @@ describe('execute({ sink }): streaming output to a console', () => {
   })
 
   it('emits each statement of a compound line as its own chunk', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const console_ = new JobConsole()
     await ws.shell('echo a; echo b; echo c', { sink: console_ })
     const [chunks] = await console_.readFrom(0)
@@ -719,7 +707,7 @@ describe('execute({ sink }): streaming output to a console', () => {
   })
 
   it('routes stderr to the console on its own channel', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const console_ = new JobConsole()
     const result = await ws.shell('echo oops >&2', { sink: console_ })
     expect(result.exitCode).toBe(0)
@@ -728,7 +716,7 @@ describe('execute({ sink }): streaming output to a console', () => {
   })
 
   it('sends a syntax error to the console, not the result', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const console_ = new JobConsole()
     // The syntax gate answers before the walk that emits, so this is
     // output the console would never see without the drain.
@@ -746,7 +734,7 @@ describe('execute({ sink }): streaming output to a console', () => {
         return new Promise<never>(() => undefined)
       }
     }
-    const ws = await makeWs()
+    const ws = makeWs()
     const console_ = new JobConsole(new Stalled())
     // The syntax gate answers with bytes in hand, so the only await left
     // after the tree is the drain into the store.
@@ -763,7 +751,7 @@ describe('execute({ sink }): streaming output to a console', () => {
         return super.append(channel, data)
       }
     }
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('false')
     // The syntax gate stamps 2 and answers with bytes in hand; the abort
     // lands on their drain, which settles inside the grace.
@@ -775,7 +763,7 @@ describe('execute({ sink }): streaming output to a console', () => {
   })
 
   it("sends a failed command's stderr to the console", async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const console_ = new JobConsole()
     const result = await ws.shell('cat /ram/missing.txt', { sink: console_ })
     expect(result.exitCode).not.toBe(0)

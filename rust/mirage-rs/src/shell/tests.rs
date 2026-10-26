@@ -1,4 +1,4 @@
-use super::{FIELDS, KINDS, Tree, parse};
+use super::{FIELDS, KINDS, Tree, parse, parse_with_aliases};
 
 /// The tree as an s-expression: named nodes with their fields, a leaf's
 /// text after `=`.
@@ -180,7 +180,7 @@ fn bash_parses_these_only_when_it_runs_them() {
     assert_eq!(
         read("echo $(( a # )) ${x:.2f} `fi`"),
         "(program (command name: (command_name (word=echo)) argument: (arithmetic_expansion (word=a #)) \
-         argument: (expansion (word=x:.2f)) argument: (command_substitution (word=fi))))"
+         argument: (expansion (variable_name=x) (word=.2f)) argument: (command_substitution (word=fi))))"
     );
     assert_eq!(
         read("[ a"),
@@ -364,4 +364,45 @@ fn a_failed_read_puts_back_every_heredoc_it_took() {
         ),
         "{tree}"
     );
+}
+
+#[test]
+fn an_alias_is_a_command_where_a_reserved_word_would_start() {
+    let aliases = [b"fi".to_vec(), b"in".to_vec()];
+    let tree = parse_with_aliases(b"fi; for i in a; do :; done", &aliases);
+    assert_eq!(tree.error, None);
+    assert!(
+        sexp(&tree).starts_with("(program (command name: (command_name (word=fi))) (for_statement"),
+        "{}",
+        sexp(&tree)
+    );
+    assert!(parse(b"fi").error.is_some());
+}
+
+#[test]
+fn words_the_executor_reads_as_words() {
+    assert_eq!(
+        read("echo ${x:1:2} == =~"),
+        "(program (command name: (command_name (word=echo)) argument: (expansion (variable_name=x) \
+         (word=1:2)) argument: (word===) argument: (word==~)))"
+    );
+    assert_eq!(
+        read("echo @(a|b) x!(c)"),
+        "(program (command name: (command_name (word=echo)) argument: (word=@(a|b)) argument: (word=x!(c))))"
+    );
+    assert_eq!(
+        read("[ a && b ]"),
+        "(program (list (command name: (command_name (word=[)) argument: (word=a)) \
+         (command name: (command_name (word=b)) argument: (word=]))))"
+    );
+    assert_eq!(
+        read("[[ $x == [a\"$x\"] ]]"),
+        "(program (test_command (binary_expression left: (simple_expansion (variable_name=x)) \
+         right: (concatenation (extglob_pattern=[a) (string (simple_expansion (variable_name=x))) \
+         (extglob_pattern=])))))"
+    );
+    assert!(read("case $x in [a\"$x\"]) :;; esac").contains(
+        "(case_item value: (concatenation (extglob_pattern=[a) (string (simple_expansion (variable_name=x))) \
+         (extglob_pattern=]))"
+    ));
 }

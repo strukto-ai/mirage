@@ -15,20 +15,18 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const DEC = new TextDecoder()
 
-async function ws(): Promise<Workspace> {
-  const parser = await getTestParser()
+function ws(): Workspace {
   const root = new RAMVFS()
-  return new Workspace({ '/': root }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/': root }, { mode: MountMode.WRITE })
 }
 
 describe('touch reports an unusable destination like GNU', () => {
   it('a missing parent is reported on the operand', async () => {
-    const w = await ws()
+    const w = ws()
     try {
       const io = await w.shell('touch /missing/f.txt')
       expect(io.exitCode).toBe(1)
@@ -41,7 +39,7 @@ describe('touch reports an unusable destination like GNU', () => {
   }, 30_000)
 
   it('a missing parent leaves no orphan', async () => {
-    const w = await ws()
+    const w = ws()
     try {
       await w.shell('touch /missing/f.txt')
       const listing = await w.shell('ls /')
@@ -53,7 +51,7 @@ describe('touch reports an unusable destination like GNU', () => {
   }, 30_000)
 
   it('a parent that is a plain file is Not a directory', async () => {
-    const w = await ws()
+    const w = ws()
     try {
       await w.shell('echo x > /plain')
       const io = await w.shell('touch /plain/f.txt')
@@ -65,7 +63,7 @@ describe('touch reports an unusable destination like GNU', () => {
   }, 30_000)
 
   it('a plain file deeper in the chain is Not a directory', async () => {
-    const w = await ws()
+    const w = ws()
     try {
       await w.shell('echo x > /plain')
       const io = await w.shell('touch /plain/sub/f.txt')
@@ -80,7 +78,7 @@ describe('touch reports an unusable destination like GNU', () => {
 
   it('keeps going after a failed operand', async () => {
     // GNU reports the bad operand and still creates the rest, exiting 1.
-    const w = await ws()
+    const w = ws()
     try {
       const io = await w.shell('touch /ok1.txt /missing/f.txt /ok2.txt')
       expect(io.exitCode).toBe(1)
@@ -98,7 +96,7 @@ describe('touch reports an unusable destination like GNU', () => {
 
 describe('mkdir reports an unusable destination like GNU', () => {
   it('a missing parent is reported on the operand', async () => {
-    const w = await ws()
+    const w = ws()
     try {
       const io = await w.shell('mkdir /missing/sub')
       expect(io.exitCode).toBe(1)
@@ -111,7 +109,7 @@ describe('mkdir reports an unusable destination like GNU', () => {
   }, 30_000)
 
   it('a parent that is a plain file is Not a directory', async () => {
-    const w = await ws()
+    const w = ws()
     try {
       await w.shell('echo x > /plain')
       const io = await w.shell('mkdir /plain/sub')
@@ -125,7 +123,7 @@ describe('mkdir reports an unusable destination like GNU', () => {
   }, 30_000)
 
   it('keeps going after a failed operand', async () => {
-    const w = await ws()
+    const w = ws()
     try {
       const io = await w.shell('mkdir /ok1 /missing/sub /ok2')
       expect(io.exitCode).toBe(1)
@@ -142,7 +140,7 @@ describe('redirect and tee report an unusable destination like GNU', () => {
   // Deliberate divergence, pinned elsewhere: mirage names the redirect
   // target without a `bash: line N:` prefix, since it is not bash.
   it('a redirect into a missing parent names the target', async () => {
-    const w = await ws()
+    const w = ws()
     try {
       const io = await w.shell('echo hi > /missing/f.txt')
       expect(io.exitCode).toBe(1)
@@ -153,7 +151,7 @@ describe('redirect and tee report an unusable destination like GNU', () => {
   }, 30_000)
 
   it('a redirect under a plain file is Not a directory', async () => {
-    const w = await ws()
+    const w = ws()
     try {
       await w.shell('echo x > /plain')
       const io = await w.shell('echo hi > /plain/f.txt')
@@ -165,7 +163,7 @@ describe('redirect and tee report an unusable destination like GNU', () => {
   }, 30_000)
 
   it('an append into a missing parent names the target', async () => {
-    const w = await ws()
+    const w = ws()
     try {
       const io = await w.shell('echo hi >> /missing/f.txt')
       expect(io.exitCode).toBe(1)
@@ -176,7 +174,7 @@ describe('redirect and tee report an unusable destination like GNU', () => {
   }, 30_000)
 
   it('tee reports the strerror, not the backend exception text', async () => {
-    const w = await ws()
+    const w = ws()
     try {
       const io = await w.shell('echo hi | tee /missing/f.txt')
       expect(io.exitCode).toBe(1)

@@ -24,7 +24,6 @@ import { ManualClock } from '../../../../utils/clock.ts'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 import type * as FilesModule from '../../../files.ts'
 
@@ -279,10 +278,7 @@ describe('handleCd', () => {
 it('cd reads links on the workspace clock', async () => {
   seenClocks.length = 0
   const clock = new ManualClock()
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser(), clock },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, clock })
   try {
     await ws.shell('mkdir /data/d && ln -s /data/d /data/link && cd /data/link')
   } finally {

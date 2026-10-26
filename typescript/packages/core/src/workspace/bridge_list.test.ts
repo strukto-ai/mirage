@@ -20,7 +20,6 @@ import { workspaceBridge } from '../runtime/binding.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { RuntimeFiles } from '../runtime/files.ts'
 import { MountMode, PathSpec } from '../types.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { FILE_MODE, LINK_MODE } from '../utils/stat_view.ts'
 
@@ -123,7 +122,6 @@ describe('a guest sees the marks the workspace wired', () => {
       { '/data': vfs },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         runtimes: [new MontyRuntime()],
       },
     )

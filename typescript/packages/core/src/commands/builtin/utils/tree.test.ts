@@ -18,7 +18,6 @@ import type { Handed } from '../../../vfs/types.ts'
 import { enotdir, enotsup, walkDeclined } from '../../../errors/fs.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import type { MountView } from '../../../view/types.ts'
 import { WalkBudget, treeWalk } from './tree.ts'
@@ -167,10 +166,7 @@ async function guarded(line: string): Promise<[GuardedRAM, string, string, numbe
   vfs.store.files.set('/d/a.txt', enc.encode('ada\n'))
   vfs.store.files.set('/d/sub/b.txt', enc.encode('bob\n'))
   vfs.store.files.set('/e/a.txt', enc.encode('x\n'))
-  const ws = new Workspace(
-    { '/g': vfs, '/out': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/g': vfs, '/out': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     const out = await ws.shell(line)
     const dec = new TextDecoder()

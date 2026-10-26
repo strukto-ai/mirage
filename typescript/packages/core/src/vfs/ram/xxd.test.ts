@@ -16,7 +16,6 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from './ram.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -37,10 +36,7 @@ describe('xxd -r into its own input', () => {
     // Python's test_xxd_reverse_into_its_own_input_reads_back_patched.
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
-    const ws = new Workspace(
-      { '/data': ram },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
     try {
       await ws.shell("printf '00000000: 4142  AB\\n' > /data/d")
       await ws.shell('cat /data/d')
@@ -60,10 +56,7 @@ describe('xxd -r across mounts', () => {
     // test_xxd_reverse_across_mounts_writes_into_the_stored_bytes.
     const source = new TallyRAMVFS()
     const target = new TallyRAMVFS()
-    const ws = new Workspace(
-      { '/a': source, '/b': target },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/a': source, '/b': target }, { mode: MountMode.WRITE })
     try {
       await ws.shell('printf ABCDEFGH > /b/out.tally')
       await ws.shell("printf '00000004: 6869  hi\\n' > /a/dump")

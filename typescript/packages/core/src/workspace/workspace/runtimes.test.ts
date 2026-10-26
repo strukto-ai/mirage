@@ -20,7 +20,6 @@ import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { Program, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
@@ -82,12 +81,11 @@ class Gate extends Runtime implements LineExecutor {
   }
 }
 
-async function workspace(...runtimes: Runtime[]): Promise<Workspace> {
+function workspace(...runtimes: Runtime[]): Workspace {
   return new Workspace(
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      shellParser: await getTestParser(),
       runtimes: [...runtimes, 'workspace'],
     },
   )
@@ -101,7 +99,7 @@ async function python3(ws: Workspace, runtime?: string): Promise<[number, string
 describe('removeRuntime', () => {
   it('swaps engines as remove then add and keeps a removed instance out', async () => {
     const alpha = new Engine('alpha')
-    const ws = await workspace(alpha, new Engine('beta'))
+    const ws = workspace(alpha, new Engine('beta'))
     try {
       expect(await python3(ws)).toEqual([0, 'alpha\n', ''])
       await ws.removeRuntime('alpha')
@@ -118,7 +116,7 @@ describe('removeRuntime', () => {
     const alpha = new Engine('alpha')
     const gate = latch()
     alpha.release = gate.promise
-    const ws = await workspace(alpha)
+    const ws = workspace(alpha)
     try {
       const line = python3(ws)
       await alpha.entered.promise
@@ -140,7 +138,7 @@ describe('removeRuntime', () => {
   it('refuses a line that resolved the runtime before its removal', async () => {
     const alpha = new Engine('alpha')
     const gate = new Gate()
-    const ws = await workspace(gate, alpha)
+    const ws = workspace(gate, alpha)
     try {
       const line = ws.shell('gate; python3 -c x', { runtime: 'alpha' })
       await gate.entered.promise
@@ -157,7 +155,7 @@ describe('removeRuntime', () => {
   it('close settles a removal and closes the runtime once', async () => {
     const alpha = new Engine('alpha')
     alpha.release = new Promise<void>(() => undefined)
-    const ws = await workspace(alpha)
+    const ws = workspace(alpha)
     const line = ws.shell('python3 -c x').then(
       () => 'finished',
       (err: unknown) => (err instanceof Error ? err.name : String(err)),

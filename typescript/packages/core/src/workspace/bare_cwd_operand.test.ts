@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // GNU find/tree/du/ls typed bare behave exactly as if `.` had been
@@ -24,19 +24,18 @@ import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
 
-async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeWs(): Workspace {
   const r = new RAMVFS()
   r.store.dirs.add('/')
   r.store.dirs.add('/sub')
   r.store.files.set('/a.txt', ENC.encode('hello\n'))
   r.store.files.set('/sub/b.txt', ENC.encode('hello\n'))
-  return new Workspace({ '/': r }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/': r }, { mode: MountMode.WRITE })
 }
 
 describe('bare invocations default to the cwd', () => {
   it('find walks the cwd dot-spelled', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('find')
     expect(io.exitCode).toBe(0)
     const out = stdoutStr(io)
@@ -52,7 +51,7 @@ describe('bare invocations default to the cwd', () => {
   })
 
   it('plain ls still lists the cwd', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('ls')
     expect(io.exitCode).toBe(0)
     // The dev mount is a row like any other now, so it sorts into the

@@ -228,10 +228,11 @@ async def execute_command(
             previous = session._alias_expansion
             scope = ParseScope()
             try:
-                ast = scope.parse(line)
+                aliases = expanding_aliases(session) | names
+                ast = scope.parse(line, aliases)
                 found = check_syntax(
                     line,
-                    expanding_aliases(session) | names,
+                    aliases,
                     lambda name, at: name in owners[offsets[at]],
                     extglob=session.shopts.get("extglob", False),
                 ) or find_syntax_issue(ast)
@@ -377,7 +378,7 @@ async def execute_command(
         except PolicyDenied as exc:
             restore(olds)
             return _write_refused(exc, name)
-        return (
+        landed: RedirectResult = (
             None,
             IOResult(),
             ExecutionNode(
@@ -385,6 +386,21 @@ async def execute_command(
                 exit_code=0,
             ),
         )
+        # Redirects among the assignments (`x=1 > f y=2`) still open
+        # their files, and one that fails fails the line; the assignments
+        # stand either way.
+        runner = redirect_runner_for(node.id)
+        if runner is None:
+            return landed
+
+        async def assigned_only(
+            given: ByteSource | None,
+            sink: JobConsole | None,
+            paths: tuple[PathSpec, ...],
+        ) -> RedirectResult:
+            return landed
+
+        return await runner(assigned_only, None, "", ())
 
     saved_env_overrides = TempEnv()
 

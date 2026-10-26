@@ -437,7 +437,6 @@ export type BuiltinGroup = (typeof BuiltinGroup)[keyof typeof BuiltinGroup]
  * Python side reading nodes through shell.types.
  */
 export interface TSNodeLike {
-  readonly timing?: readonly boolean[]
   readonly heredoc?: Heredoc | undefined
   readonly warnings?: string
   readonly sourceText?: string

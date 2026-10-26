@@ -462,18 +462,12 @@ importers:
       e2b:
         specifier: ^2.45.0
         version: 2.45.0
-      tree-sitter-bash:
-        specifier: ^0.25.1
-        version: 0.25.1
       typescript:
         specifier: ^6.0.0
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@22.19.17)(vite@7.3.7(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
-      web-tree-sitter:
-        specifier: ^0.26.13
-        version: 0.26.13
 
   packages/claude-agent-sdk:
     dependencies:
@@ -788,15 +782,9 @@ importers:
       https-proxy-agent:
         specifier: ^7.0.6
         version: 7.0.6
-      tree-sitter-bash:
-        specifier: ^0.25.1
-        version: 0.25.1
       undici:
         specifier: ^7.30.1
         version: 7.30.1
-      web-tree-sitter:
-        specifier: ^0.26.13
-        version: 0.26.13
       yaml:
         specifier: ^2.6.0
         version: 2.9.0
