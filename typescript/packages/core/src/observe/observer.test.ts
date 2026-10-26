@@ -293,7 +293,9 @@ describe('a clock behind stored history', () => {
     const o = new Observer(store, new ManualClock(NEW_YEAR))
     await logCommand(o, 'first', 's1', NEW_YEAR)
     const [path] = [...store.files.keys()]
-    const torn = new TextEncoder().encode('{"type": "command", "session": "s1", "command": "caf\u00e9')
+    const torn = new TextEncoder().encode(
+      '{"type": "command", "session": "s1", "command": "caf\u00e9',
+    )
     await store.append(path, torn.slice(0, -1))
     await logCommand(o, 'second', 's1', NEW_YEAR + 1)
     await logCommand(o, 'third', 's1', NEW_YEAR + 2)
