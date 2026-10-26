@@ -26,6 +26,7 @@ export function serverLocation(url: string): string {
   const query = parts.searchParams.get('db')
   if (parts.protocol === 'unix:') return `unix:${parts.pathname}/${query ?? '0'}`
   const db = query ?? (parts.pathname.replace(/^\/+|\/+$/g, '') || '0')
+  // The scheme is ignored on purpose: one host and port is one store.
   let host = (parts.hostname.replace(/^\[|\]$/g, '') || 'localhost').toLowerCase()
   if (LOOPBACK.has(host)) host = 'localhost'
   return `${host}:${parts.port || String(DEFAULT_PORT)}/${db}`

@@ -37,6 +37,7 @@ def server_location(url: str) -> str:
     if parts.scheme == "unix":
         return f"unix:{parts.path}/{query.get('db', ['0'])[0]}"
     db = query.get("db", [parts.path.strip("/") or "0"])[0]
+    # The scheme is ignored on purpose: one host and port is one store.
     host = (parts.hostname or "localhost").lower()
     if host in LOOPBACK:
         host = "localhost"
