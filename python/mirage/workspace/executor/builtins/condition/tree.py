@@ -14,7 +14,7 @@
 
 from mirage.context import reset_admission, set_admission
 from mirage.rs.errors import RegexError
-from mirage.rs.regex import posix_escape, posix_regex
+from mirage.rs.regex import posix_regex
 from mirage.shell.array import make_array
 from mirage.shell.bytes import byte_view, text_view, utf8_locale
 from mirage.shell.errors import ArithError, ReadonlyError
@@ -122,14 +122,13 @@ async def _regex_status(ctx: CondContext, node: CondBinary) -> int:
         ctx (CondContext): evaluation context.
         node (CondBinary): the ``=~`` condition.
     """
-    pattern = posix_escape(node.right) if node.right_literal else node.right
     # The shell's own locale, which an unexported LC_ALL sets as well.
     utf8 = utf8_locale(visible_env(ctx.session))
     left = byte_view(node.left, utf8)
     # bash hands the pattern to regcomp(REG_EXTENDED): glibc's
     # POSIX_EXTENDED syntax, where `\d` is a `d` and `(?` is refused.
     try:
-        regex = posix_regex(byte_view(pattern, utf8), True, utf8=utf8)
+        regex = posix_regex(byte_view(node.right, utf8), True, utf8=utf8)
         found = await regex.search(left)
     except RegexError:
         return 2

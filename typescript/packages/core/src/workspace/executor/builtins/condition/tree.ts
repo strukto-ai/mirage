@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { RegexError } from '../../../../rs/errors.ts'
-import { posixEscape, posixRegex } from '../../../../rs/regex.ts'
+import { posixRegex } from '../../../../rs/regex.ts'
 import { randomReader, seedVar, sessionArith, visibleEnv } from '../../../session/state.ts'
 import { byteView, textView, utf8Locale } from '../../../../shell/bytes.ts'
 import type { ArithResult, ArithWrite } from '../../../../shell/types.ts'
@@ -83,7 +83,6 @@ async function regexStatus(
   ctx: CondContext,
   node: Extract<CondNode, { kind: 'binary' }>,
 ): Promise<number> {
-  const pattern = node.rightLiteral ? posixEscape(node.right) : node.right
   // The shell's own locale, which an unexported LC_ALL sets as well.
   const utf8 = utf8Locale(visibleEnv(ctx.session))
   const left = byteView(node.left, utf8)
@@ -91,7 +90,7 @@ async function regexStatus(
   // POSIX_EXTENDED syntax, where `\d` is a `d` and `(?` is refused.
   let found
   try {
-    found = await posixRegex(byteView(pattern, utf8), true, 'posix', false, utf8).search(
+    found = await posixRegex(byteView(node.right, utf8), true, 'posix', false, utf8).search(
       left,
       0,
       ctx.signal,

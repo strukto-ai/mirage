@@ -20,7 +20,6 @@ import { patternShape } from '../../utils/fnmatch.ts'
 import { parseBashArgs } from '../executor/builtins/script/bash.ts'
 import {
   CondParser,
-  CondSyntax,
   type ExprToken,
   PATTERN_OPS,
   condLeaves,
@@ -56,23 +55,11 @@ export function readWord(node: TSNodeLike, home: string | null = null): Word {
   return { raw: getText(node), text: literalWord(node, home), glob: wordGlobs(node) }
 }
 
-// What a test's expression nests its words in, and the tokens that are no
-// word of it: its brackets.
-const TEST_NESTS: ReadonlySet<string> = new Set([
-  NT.BINARY_EXPRESSION,
-  NT.UNARY_EXPRESSION,
-  NT.NEGATION_EXPRESSION,
-  NT.PARENTHESIZED_EXPRESSION,
-])
-const TEST_SKIPS: ReadonlySet<string> = new Set(['[', ']', '[[', ']]'])
-
 /**
  * One test of a `[ ]` or `[[ ]]` as the gate admits it: its opener, then
  * what it tests. `stated` says whether the gate admits it on these very
  * words once each is literal; a comparison's pattern side is read in the
- * matcher's dialect instead, and a `[[` its grammar cannot read is admitted
- * test by test as the run reaches each, so a question about either is left
- * to the gate.
+ * matcher's dialect instead, so a question about one is left to the gate.
  */
 export interface TestRead {
   readonly words: Word[]
@@ -96,25 +83,18 @@ export function readsOfTest(node: TSNodeLike, home: string | null = null): TestR
     return [{ words: [{ raw: '[', text: '[' }, ...words, { raw: ']', text: ']' }], stated: true }]
   }
   const opener: Word = { raw: '[[', text: '[[' }
-  let leaves: ReturnType<typeof condLeaves>
-  try {
-    leaves = condLeaves(new CondParser(condTokens(node)).parse())
-  } catch (error) {
-    if (!(error instanceof CondSyntax)) throw error
-    return [{ words: [opener, ...testWords(node, home)], stated: false }]
-  }
-  return leaves.map((leaf) => {
+  return condLeaves(new CondParser(condTokens(node)).parse()).map((leaf) => {
     let words: Word[]
     if (leaf.kind === 'unary') {
-      words = [{ raw: leaf.op, text: leaf.op }, tokenWord(leaf.operand, home)]
+      words = [{ raw: leaf.op, text: leaf.op }, readWord(leaf.operand, home)]
     } else if (leaf.kind === 'binary') {
       words = [
-        tokenWord(leaf.left, home),
+        readWord(leaf.left, home),
         { raw: leaf.op, text: leaf.op },
-        tokenWord(leaf.right, home),
+        readWord(leaf.right, home),
       ]
     } else {
-      words = [tokenWord(leaf.operand, home)]
+      words = [readWord(leaf.operand, home)]
     }
     const stated = leaf.kind !== 'binary' || !PATTERN_OPS.has(leaf.op)
     return { words: [opener, ...words], stated }
@@ -128,27 +108,6 @@ function tokenWord(token: ExprToken, home: string | null): Word {
   if (!token.negative) return word
   const text = word.text === null ? null : '-' + word.text
   return { raw: '-' + word.raw, text, glob: word.glob === true }
-}
-
-/**
- * Every operator and operand of a test in source order, for a `[[` its
- * grammar cannot read.
- */
-function testWords(node: TSNodeLike, home: string | null): Word[] {
-  const words: Word[] = []
-  const stack = [...node.children].reverse()
-  for (let child = stack.pop(); child !== undefined; child = stack.pop()) {
-    if (TEST_SKIPS.has(child.type)) continue
-    if (TEST_NESTS.has(child.type)) {
-      for (const item of [...child.children].reverse()) stack.push(item)
-    } else if (child.isNamed !== true || child.type === NT.TEST_OPERATOR) {
-      const text = getText(child)
-      words.push({ raw: text, text })
-    } else {
-      words.push(readWord(child, home))
-    }
-  }
-  return words
 }
 
 /** The text the gate works with: the literal when it has one, the word as typed otherwise. */

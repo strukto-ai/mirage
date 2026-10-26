@@ -839,6 +839,41 @@
         "stdout": "ok\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cmdsub_dparen_reads_to_matching_paren",
+      "seq": 18500007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( for l in 'echo $((case x in x) echo y;; esac))' 'echo $((echo a #)\n))' 'echo $((echo a # (\n) )'; do bash -c \"$l\"; echo $?; done; echo $((echo a)|cat) $((echo \"$(echo \")\")\") ) $( (case x in x) echo y;; esac) ) )",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n2\n2\na ) y\n",
+        "stderr": "mirage: syntax error near ')'\nmirage: syntax error near ')'\nmirage: unexpected EOF while looking for matching `)'\n"
+      }
     }
   ]
 }

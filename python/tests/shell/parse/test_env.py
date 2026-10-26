@@ -135,6 +135,7 @@ def test_opaque_reads(command, opaque):
         ("echo ~", {"HOME"}),
         ("echo ~/logs", {"HOME"}),
         ("cat < ~/f", {"HOME"}),
+        ("[[ /h =~ ~ ]]; [[ /h/x =~ ~/x ]]", {"HOME"}),
         ('echo "~" b~ ~user', set()),
         # cd reads $HOME bare, $OLDPWD for -, $CDPATH for a searchable
         # relative operand, and everything for a dynamic word.

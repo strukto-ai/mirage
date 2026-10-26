@@ -29,7 +29,7 @@ export type CondNode =
   | CondLazy
   | { kind: 'word'; value: string }
   | { kind: 'unary'; op: string; operand: string }
-  | { kind: 'binary'; left: string; op: string; right: string; rightLiteral: boolean }
+  | { kind: 'binary'; left: string; op: string; right: string }
   | { kind: 'not'; inner: CondNode }
   | { kind: 'and'; left: CondNode; right: CondNode }
   | { kind: 'or'; left: CondNode; right: CondNode }

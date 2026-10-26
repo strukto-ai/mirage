@@ -101,6 +101,10 @@ describe('expandPattern', () => {
     expect(await expand('~/x', { HOME: '/home/u' })).toBe('/home/u/x')
   })
 
+  it('expands a pattern of many pieces whole', async () => {
+    expect(await expand('x\\a'.repeat(70000) + '""')).toBe('xa'.repeat(70000))
+  })
+
   it('keeps an escaped tilde literal', async () => {
     expect(await expand('\\~', { HOME: '/home/u' })).toBe('~')
   })

@@ -25,7 +25,6 @@ from mirage.workspace.executor.builtins.script.bash import parse_bash_args
 from mirage.workspace.node.test_tokens import (
     PATTERN_OPS,
     CondParser,
-    CondSyntax,
     ExprToken,
     cond_leaves,
     cond_tokens,
@@ -76,19 +75,6 @@ def read_word(node: TSNodeLike, home: str | None = None) -> Word:
     return Word(get_text(node), literal_word(node, home), _word_globs(node))
 
 
-# What a test's expression nests its words in, and the tokens that are
-# no word of it: its brackets.
-_TEST_NESTS = frozenset(
-    {
-        NT.BINARY_EXPRESSION,
-        NT.UNARY_EXPRESSION,
-        NT.NEGATION_EXPRESSION,
-        NT.PARENTHESIZED_EXPRESSION,
-    }
-)
-_TEST_SKIPS = frozenset({"[", "]", "[[", "]]"})
-
-
 @dataclass(frozen=True, slots=True)
 class TestRead:
     """One test of a ``[ ]`` or ``[[ ]]`` as the gate admits it.
@@ -97,9 +83,8 @@ class TestRead:
         words (list[Word]): its opener, then what it tests.
         stated (bool): whether the gate admits it on these very words
             once each is literal; a comparison's pattern side is read in
-            the matcher's dialect instead, and a ``[[`` its grammar
-            cannot read is admitted test by test as the run reaches
-            each, so a question about either is left to the gate.
+            the matcher's dialect instead, so a question about one is
+            left to the gate.
     """
 
     __test__ = False
@@ -126,22 +111,18 @@ def reads_of_test(node: TSNodeLike, home: str | None = None) -> list[TestRead]:
         words = [_token_word(t, home) for t in flat_tokens(node)]
         return [TestRead([Word("[", "["), *words, Word("]", "]")])]
     opener = Word("[[", "[[")
-    try:
-        leaves = cond_leaves(CondParser(cond_tokens(node)).parse())
-    except CondSyntax:
-        return [TestRead([opener, *_test_words(node, home)], False)]
     out: list[TestRead] = []
-    for leaf in leaves:
+    for leaf in cond_leaves(CondParser(cond_tokens(node)).parse()):
         if leaf[0] == "unary":
-            words = [Word(leaf[1], leaf[1]), _token_word(leaf[2], home)]
+            words = [Word(leaf[1], leaf[1]), read_word(leaf[2], home)]
         elif leaf[0] == "binary":
             words = [
-                _token_word(leaf[2], home),
+                read_word(leaf[2], home),
                 Word(leaf[1], leaf[1]),
-                _token_word(leaf[3], home),
+                read_word(leaf[3], home),
             ]
         else:
-            words = [_token_word(leaf[1], home)]
+            words = [read_word(leaf[1], home)]
         stated = leaf[0] != "binary" or leaf[1] not in PATTERN_OPS
         out.append(TestRead([opener, *words], stated))
     return out
@@ -161,30 +142,6 @@ def _token_word(token: ExprToken, home: str | None) -> Word:
         return word
     text = None if word.text is None else "-" + word.text
     return Word("-" + word.raw, text, word.glob)
-
-
-def _test_words(node: TSNodeLike, home: str | None) -> list[Word]:
-    """Every operator and operand of a test in source order, for a
-    ``[[`` its grammar cannot read.
-
-    Args:
-        node (TSNodeLike): the test_command node.
-        home (str | None): the home directory a leading tilde names.
-    """
-    words: list[Word] = []
-    stack = list(reversed(node.children))
-    while stack:
-        child = stack.pop()
-        if child.type in _TEST_SKIPS:
-            continue
-        if child.type in _TEST_NESTS:
-            stack.extend(reversed(child.children))
-        elif not child.is_named or child.type == NT.TEST_OPERATOR:
-            text = get_text(child)
-            words.append(Word(text, text))
-        else:
-            words.append(read_word(child, home))
-    return words
 
 
 @dataclass(frozen=True, slots=True)

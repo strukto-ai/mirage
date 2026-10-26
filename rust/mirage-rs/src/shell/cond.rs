@@ -1,7 +1,7 @@
 use super::parser::{Fail, Parser, R, line};
 
 /// Unary operators of a conditional command.
-const UNARY: &[&[u8]] = &[
+pub(super) const UNARY: &[&[u8]] = &[
     b"-a", b"-b", b"-c", b"-d", b"-e", b"-f", b"-g", b"-h", b"-k", b"-p", b"-r", b"-s", b"-t",
     b"-u", b"-w", b"-x", b"-G", b"-L", b"-N", b"-O", b"-S", b"-z", b"-n", b"-o", b"-v", b"-R",
 ];

@@ -303,9 +303,9 @@ function cdReads(args: (string | null)[]): ReadonlySet<string> {
  * Names the program reads without a `$NAME` in the text.
  *
  * Tilde expansion resolves `~` and `~/...` against `$HOME` wherever a
- * word expands (patterns and redirect targets included), and the word
- * scan mirrors the expansion exactly: `~user`, a mid-word tilde and a
- * quoted one stay literal. `cd` reads `$HOME` bare, `$OLDPWD` for `-`
+ * word expands (patterns, `=~`'s regex and redirect targets included),
+ * and the word scan mirrors the expansion exactly: `~user`, a mid-word
+ * tilde and a quoted one stay literal. `cd` reads `$HOME` bare, `$OLDPWD` for `-`
  * and `$CDPATH` for a searchable relative operand; `read` splits on
  * `$IFS`; `getopts` resumes from `$OPTIND` and consults `$OPTERR`.
  * These join the fill plan exactly as a spelled reference does, so a
@@ -314,7 +314,10 @@ function cdReads(args: (string | null)[]): ReadonlySet<string> {
 export function implicitReads(node: TSNodeLike): ReadonlySet<string> {
   const out = new Set<string>()
   for (const current of walkNamedOutsideDefs(node)) {
-    if (current.type === 'word' && (current.text === '~' || current.text.startsWith('~/'))) {
+    if (
+      (current.type === 'word' || current.type === 'regex') &&
+      (current.text === '~' || current.text.startsWith('~/'))
+    ) {
       out.add('HOME')
     }
   }

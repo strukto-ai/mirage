@@ -21,7 +21,7 @@ from mirage.shell.parse import parse
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
 from mirage.workspace.evaluation import EvaluationContext
-from mirage.workspace.expand.pattern import _unquoted_pattern, expand_pattern
+from mirage.workspace.expand.pattern import expand_pattern
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 
@@ -60,17 +60,9 @@ def test_escaped_text_matches_itself_and_nothing_else():
     assert not fnmatch("b", escape_glob("[^a]"))
 
 
-@pytest.mark.parametrize(
-    "text,expected",
-    [
-        ("a*", "a*"),
-        (r"a\*b", "a[*]b"),
-        (r"\?", "[?]"),
-        ("a\\", "a\\"),
-    ],
-)
-def test_unquoted_pattern_backslash_escapes(text, expected):
-    assert _unquoted_pattern(text) == expected
+def test_unquoted_pattern_backslash_escapes():
+    assert _expand(r"a\*b") == "a[*]b"
+    assert _expand(r"\?") == "[?]"
 
 
 def test_single_quoted_pattern_is_literal():
@@ -108,6 +100,10 @@ def test_concatenation_mixes_literal_and_live_segments():
 
 def test_tilde_expands_in_an_unquoted_pattern():
     assert _expand("~/x", env={"HOME": "/home/u"}) == "/home/u/x"
+
+
+def test_a_pattern_of_many_pieces_expands_whole():
+    assert _expand("x\\a" * 70000 + '""') == "xa" * 70000
 
 
 def test_escaped_tilde_stays_literal():

@@ -565,8 +565,9 @@ impl Parser<'_> {
     }
 
     /// `$((`: arithmetic when the parentheses close with `))`, else a
-    /// command substitution whose first command is a subshell, which bash
-    /// parses when it runs it.
+    /// command substitution up to the `)` matching its first `(`, whose
+    /// first command is a subshell. bash parses that text when it runs it,
+    /// so a body that does not parse to there is one raw word.
     pub(super) fn arithmetic_or_substitution(&mut self) -> R<Syn> {
         let start = self.i;
         let end = self.scan_matched(self.joined(start + 2) + 1, start, b'(', b')')?;
@@ -576,27 +577,23 @@ impl Parser<'_> {
         if self.double_paren_end(self.i + 1).is_some() {
             return self.arithmetic_expansion();
         }
-        let at = self.i;
+        let end = self.scan_matched(start + 2, start, b'(', b')')? + 1;
         let mark = self.mark();
-        match self.command_substitution() {
-            Ok(node) => Ok(node),
-            Err(fail) => {
-                let Some(end) = super::lex::pair_end(self.s, at + 1, b'(', b')') else {
-                    return Err(fail);
-                };
-                self.reset(mark);
-                self.check_raw(at + 2, end - 1, false)?;
-                self.i = end;
-                Ok(Syn::node(
-                    "command_substitution",
-                    vec![
-                        Syn::token("$(", at, at + 2),
-                        Syn::leaf("word", at + 2, end - 1),
-                        Syn::token(")", end - 1, end),
-                    ],
-                ))
-            }
+        let parsed = self.command_substitution();
+        if parsed.is_ok() && self.i == end {
+            return parsed;
         }
+        self.reset(mark);
+        self.check_raw(start + 2, end - 1, false)?;
+        self.i = end;
+        Ok(Syn::node(
+            "command_substitution",
+            vec![
+                Syn::token("$(", start, start + 2),
+                Syn::leaf("word", start + 2, end - 1),
+                Syn::token(")", end - 1, end),
+            ],
+        ))
     }
 
     /// Past the `))` closing the `((` at `at`, if the pair closes with

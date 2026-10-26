@@ -1,4 +1,4 @@
-// Token rules for test operators, regexes and extglob patterns adapted from
+// Token rules for test operators and extglob patterns adapted from
 // tree-sitter-bash 0.25.1, src/scanner.c.
 // https://github.com/tree-sitter/tree-sitter-bash
 // Licensed under MIT. See licenses/third_party/tree-sitter-bash-parser.txt.
@@ -18,8 +18,18 @@ enum Closer {
     Single,
     /// `]]`.
     Double,
-    /// `)` of a parenthesized expression elsewhere, as in `${x:(i)}`.
+    /// `)` of a parenthesized expression in a `[` test or a subscript.
     Paren,
+    /// `)` of a group inside `[[`.
+    Group,
+}
+
+impl Closer {
+    /// Inside `[[`, whose grammar has words, its own operators and no
+    /// arithmetic.
+    fn conditional(self) -> bool {
+        matches!(self, Closer::Double | Closer::Group)
+    }
 }
 
 impl Parser<'_> {
@@ -37,12 +47,7 @@ impl Parser<'_> {
         }
         self.test_space(closer);
         if !self.at_test_close(closer) {
-            let expression = if double {
-                self.top_test_expression()?
-            } else {
-                self.test_expression(closer, 0)?
-            };
-            children.push(expression);
+            children.push(self.test_expression(closer, 0)?);
             self.test_space(closer);
         }
         if !self.at_test_close(closer) {
@@ -57,41 +62,13 @@ impl Parser<'_> {
         let (text, len): (&[u8], usize) = match closer {
             Closer::Single => (b"]", 1),
             Closer::Double => (b"]]", 2),
-            Closer::Paren => (b")", 1),
+            Closer::Paren | Closer::Group => (b")", 1),
         };
         self.starts(text)
-            && (closer == Closer::Paren
+            && (matches!(closer, Closer::Paren | Closer::Group)
                 || self.s.get(self.i + len).is_none_or(|byte| {
                     is_space(*byte) || matches!(byte, b';' | b'&' | b'|' | b')' | b'<' | b'>')
                 }))
-    }
-
-    /// `[[ left = right ]]` reads its right side as a pattern up to a
-    /// blank; anything else is an ordinary expression.
-    fn top_test_expression(&mut self) -> R<Syn> {
-        let mark = self.mark();
-        let left = self.test_unary(Closer::Double)?;
-        self.test_space(Closer::Double);
-        if self.peek() == b'=' && is_space(self.at(1)) {
-            let at = self.i;
-            self.i += 1;
-            let op = Syn::token("=", at, at + 1).with_field("operator");
-            self.test_space(Closer::Double);
-            if let Some(end) = self.regex_no_space_end() {
-                let regex_at = self.i;
-                self.i = end;
-                let right = Syn::leaf("regex", regex_at, end).with_field("right");
-                self.test_space(Closer::Double);
-                if self.at_test_close(Closer::Double) {
-                    return Ok(Syn::node(
-                        "binary_expression",
-                        vec![left.with_field("left"), op, right],
-                    ));
-                }
-            }
-        }
-        self.reset(mark);
-        self.test_expression(Closer::Double, 0)
     }
 
     /// A test expression whose binary operators bind at least `min`.
@@ -146,16 +123,9 @@ impl Parser<'_> {
             let right = match op.kind {
                 "=~" => self.regex_operand(closer)?,
                 "==" | "!=" => self.pattern_operand(closer, prec)?,
-                "=" if closer != Closer::Single => {
-                    let mark = self.mark();
-                    match self.pattern_word()? {
-                        Some((word, true)) => word,
-                        _ => {
-                            self.reset(mark);
-                            self.test_expression(closer, prec + 1)?
-                        }
-                    }
-                }
+                "=" if closer.conditional() => self.pattern_operand(closer, prec)?,
+                "&&" | "||" => self.test_expression(closer, prec + 1)?,
+                _ if closer.conditional() => self.test_operand(closer)?,
                 _ => {
                     let next = if op.kind == "**" { prec } else { prec + 1 };
                     self.test_expression(closer, next)?
@@ -189,9 +159,15 @@ impl Parser<'_> {
         (end > self.i + 1 && self.s.get(end).is_some_and(|byte| is_space(*byte))).then_some(end)
     }
 
+    /// A unary test, a prefixed operand or an operand. Inside `[[` only
+    /// bash's unary operators and `!` prefix one; any other word is a
+    /// word, `--`, `-1` and `~/x` among them.
     fn test_unary(&mut self, closer: Closer) -> R<Syn> {
         let at = self.i;
-        if let Some(end) = self.test_operator_end() {
+        let operator = self
+            .test_operator_end()
+            .filter(|end| !closer.conditional() || super::cond::UNARY.contains(&&self.s[at..*end]));
+        if let Some(end) = operator {
             self.i = end;
             let op = Syn::leaf("test_operator", at, end).with_field("operator");
             self.test_space(closer);
@@ -199,16 +175,23 @@ impl Parser<'_> {
                 self.i = at;
                 return self.test_operand(closer);
             }
-            let operand = self.test_expression(closer, TEST)?;
+            let operand = if closer.conditional() {
+                self.test_operand(closer)?
+            } else {
+                self.test_expression(closer, TEST)?
+            };
             return Ok(Syn::node("unary_expression", vec![op, operand]));
         }
-        let prefix: Option<(&'static str, u8)> = if self.starts(b"++") {
+        let not = self.peek() == b'!' && (is_space(self.at(1)) || self.at(1) == b'(');
+        let prefix: Option<(&'static str, u8)> = if closer.conditional() {
+            not.then_some(("!", UNARY))
+        } else if self.starts(b"++") {
             Some(("++", PREFIX))
         } else if self.starts(b"--") {
             Some(("--", PREFIX))
         } else {
             match self.peek() {
-                b'!' if is_space(self.at(1)) || self.at(1) == b'(' => Some(("!", UNARY)),
+                b'!' if not => Some(("!", UNARY)),
                 b'-' | b'+' | b'~' if !is_space(self.at(1)) => {
                     let text = match self.peek() {
                         b'-' => "-",
@@ -232,6 +215,9 @@ impl Parser<'_> {
             return Ok(Syn::node("unary_expression", vec![op, operand]));
         }
         let mut operand = self.test_operand(closer)?;
+        if closer.conditional() {
+            return Ok(operand);
+        }
         loop {
             let at = self.i;
             let text = if self.starts(b"++") {
@@ -249,7 +235,11 @@ impl Parser<'_> {
 
     fn test_operand(&mut self, closer: Closer) -> R<Syn> {
         if self.peek() == b'(' {
-            return self.parenthesized();
+            return self.parenthesized(if closer.conditional() {
+                Closer::Group
+            } else {
+                Closer::Paren
+            });
         }
         let ctx = Ctx {
             bracket: closer == Closer::Single,
@@ -266,19 +256,19 @@ impl Parser<'_> {
     /// newline reads the bodies of the heredocs pending there, as it does
     /// between commands.
     fn test_space(&mut self, closer: Closer) {
-        if closer == Closer::Double {
+        if closer.conditional() {
             self.skip_space_bodies();
         } else {
             self.skip_space();
         }
     }
 
-    /// `(expression)`, in a test or where an expansion's offset takes one.
-    pub(super) fn parenthesized(&mut self) -> R<Syn> {
+    /// `(expression)` in a test, up to `closer`.
+    fn parenthesized(&mut self, closer: Closer) -> R<Syn> {
         let open = self.expect("(")?;
-        self.skip_space();
-        let inner = self.test_expression(Closer::Paren, 0)?;
-        self.skip_space();
+        self.test_space(closer);
+        let inner = self.test_expression(closer, 0)?;
+        self.test_space(closer);
         let close = self.expect(")")?;
         Ok(Syn::node(
             "parenthesized_expression",
@@ -291,82 +281,60 @@ impl Parser<'_> {
         self.test_expression(Closer::Single, 0)
     }
 
-    /// The right side of `=~`: a regex up to a blank when it holds more
-    /// than letters, digits, `$`, `-` and `_`; an ordinary operand
-    /// otherwise. bash reads an empty regex before `&&`.
+    /// The right side of `=~`: inside `[[`, a regex as bash reads it, up
+    /// to a blank or `&` outside parentheses, its runs of regex text and
+    /// the quotes and expansions in it nodes of their own; an ordinary
+    /// operand elsewhere. bash reads an empty regex before `&&`.
     fn regex_operand(&mut self, closer: Closer) -> R<Syn> {
-        if self.starts(b"&&") {
-            return Ok(Syn::leaf("regex", self.i, self.i));
+        if !closer.conditional() {
+            return self.test_expression(closer, 2);
         }
-        if let Some(end) = self.regex_no_space_end() {
-            let at = self.i;
-            self.i = end;
-            return Ok(Syn::leaf("regex", at, end));
-        }
-        self.test_expression(closer, 2)
-    }
-
-    /// Where a regex without blanks ends, if one starts here; an `&`
-    /// outside parentheses ends it, as it ends bash's.
-    fn regex_no_space_end(&self) -> Option<usize> {
-        if self.peek() == b'"' {
-            return None;
-        }
-        let mut end = self.i;
-        let mut special = false;
+        let start = self.i;
+        let mut pieces = Vec::new();
+        let mut run = start;
         let mut depth = 0usize;
-        let mut quoted = false;
-        while end < self.s.len() {
-            let byte = self.s[end];
-            if quoted {
-                if byte == b'\'' {
-                    quoted = false;
-                }
-                end += 1;
-                continue;
+        while !self.eof() {
+            let byte = self.peek();
+            if depth == 0 && (is_space(byte) || matches!(byte, b'&' | b')')) {
+                break;
             }
-            match byte {
-                b'\\' => {
-                    special = true;
-                    end += 2;
+            let at = self.i;
+            let piece = match byte {
+                b'(' | b')' => {
+                    depth = if byte == b'(' { depth + 1 } else { depth - 1 };
+                    self.i += 1;
                     continue;
                 }
-                b'\'' => {
-                    quoted = true;
-                    special = true;
+                b'\\' => {
+                    self.i += 2;
+                    continue;
                 }
-                b'(' => depth += 1,
-                b')' => {
-                    if depth == 0 {
-                        break;
-                    }
-                    depth -= 1;
+                b'"' => self.string()?,
+                b'\'' => self.raw_string()?,
+                b'`' => self.backtick()?,
+                b'$' => self.dollar()?,
+                _ => {
+                    self.i += 1;
+                    continue;
                 }
-                b'&' if depth == 0 => break,
-                b'$' => {
-                    if self.s.get(end + 1) == Some(&b'(') {
-                        return None;
-                    }
-                    if self.s.get(end + 1).is_some_and(|next| is_space(*next)) {
-                        return Some(end + 1);
-                    }
-                }
-                _ if is_space(byte) && depth == 0 => break,
-                _ => {}
+            };
+            if piece.is("$") {
+                continue;
             }
-            if !(byte.is_ascii_alphanumeric() || matches!(byte, b'$' | b'-' | b'_')) {
-                special = true;
-            }
-            end += 1;
+            push_run(&mut pieces, "regex", run, at);
+            pieces.push(piece);
+            run = self.i;
         }
-        (special && end > self.i).then_some(end.min(self.s.len()))
+        self.i = self.i.min(self.s.len());
+        push_run(&mut pieces, "regex", run, self.i);
+        Ok(Syn::concat(pieces).unwrap_or_else(|| Syn::leaf("regex", start, start)))
     }
 
-    /// The right side of `==` and `!=`: an extglob pattern when the
-    /// grammar's pattern scanner takes one, an expression otherwise. Inside
-    /// `[[`, the word bash reads where the scanner stops short of it or it
-    /// holds an extglob group, one pattern token where the scanner takes
-    /// all of it.
+    /// The right side of `==` and `!=`, and of `=` inside `[[`: an extglob
+    /// pattern when the grammar's pattern scanner takes one, an expression
+    /// otherwise. Inside `[[`, the word bash reads where the scanner stops
+    /// short of it or it holds an extglob group, one pattern token where the
+    /// scanner takes all of it, a word where it takes none.
     fn pattern_operand(&mut self, closer: Closer, prec: u8) -> R<Syn> {
         let at = self.i;
         let grammar = self.extglob_end();
@@ -386,6 +354,9 @@ impl Parser<'_> {
         if let Some(end) = grammar {
             self.i = end;
             return Ok(Syn::leaf("extglob_pattern", at, end));
+        }
+        if closer.conditional() {
+            return self.test_operand(closer);
         }
         self.test_expression(closer, prec + 1)
     }
