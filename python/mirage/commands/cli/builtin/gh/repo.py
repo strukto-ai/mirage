@@ -634,15 +634,19 @@ async def clone_cmd(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    """``gh repo clone``: mirage's ``git clone`` of the repository, the words
-    after ``--`` as git's options. The token rides only as the request's
-    Authorization, never on the line, in the config or in the output; a fork's
+    """``gh repo clone``: mirage's ``git clone`` of the repository. As gh
+    does, the words after the repository that are not gh's own flags go to
+    git: the first one, when it has no leading dash, is the directory, put
+    after the URL unless it is empty, and the rest go before the URL. The
+    token rides only as the request's Authorization, never on the line, in
+    the config or in the output, and only when git clones from the
+    install's origin, as gh's credential helper is scoped to it; a fork's
     ``upstream`` remote is not added.
 
     Args:
         accessor (GitHubAccount): the install's account.
         paths (list[PathSpec]): the path operands.
-        texts (list[str]): the repository, the directory and git's options.
+        texts (list[str]): the repository, then the words for git.
         ctx (Context): the original argv and context.
     """
     names, gitflags = split_marked(tuple(texts), ctx.argv)
@@ -654,10 +658,12 @@ async def clone_cmd(
         ref = RepoRef(owner=await login(accessor), repo=spec)
     else:
         ref = parse_repo(spec)
-    url = f"{web_origin(accessor)}/{ref.owner}/{ref.repo}.git"
-    target = names[1] if len(names) > 1 else ref.repo
+    origin = web_origin(accessor)
+    url = f"{origin}/{ref.owner}/{ref.repo}.git"
+    rest = [*names[1:], *gitflags]
+    target = rest[:1] if rest and not rest[0].startswith("-") else []
     leaf, _ = find_node(GIT.spec, ["clone"]) or (GIT.spec, ())
-    words = [*gitflags, url, target]
+    words = [*rest[len(target) :], url, *filter(None, target)]
     parsed = parse_command(
         leaf,
         words,
@@ -679,12 +685,14 @@ async def clone_cmd(
         processes=ctx.processes,
         spec=leaf,
     )
+    operands = [word for word, _ in parsed.args]
+    same_origin = bool(operands) and operands[0].startswith(f"{origin}/")
     return await git_clone(
         NOOPAccessor(),
         [],
-        [word for word, _ in parsed.args],
+        operands,
         git,
-        token_header(accessor),
+        token_header(accessor) if same_origin else None,
     )
 
 

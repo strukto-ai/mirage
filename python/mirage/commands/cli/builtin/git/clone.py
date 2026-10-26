@@ -178,6 +178,10 @@ async def clone(
             "fatal: You must specify a repository to clone.\n\n"
             + verb_usage(ctx),
         )
+    if len(texts) > 2:
+        raise UsageError(
+            "", "fatal: Too many arguments.\n\n" + verb_usage(ctx)
+        )
     url = texts[0]
     name = texts[1] if len(texts) > 1 else default_directory(url)
     quiet = fl.as_bool("quiet")

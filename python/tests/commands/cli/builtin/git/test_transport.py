@@ -399,6 +399,34 @@ async def test_gh_repo_clone_sends_the_token_only_as_authorization(repos):
 
 
 @pytest.mark.asyncio
+async def test_gh_repo_clone_withholds_the_token_from_another_origin(repos):
+    pytest.importorskip("httpx")
+    _, root = repos
+    seen: list[tuple[str, str | None]] = []
+    server = _backend(root, seen=seen)
+    other = f"http://127.0.0.1:{server.server_address[1]}/repo.git"
+    try:
+        with Workspace({"/w/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+            ws.register_cli("git", GIT)
+            ws.register_cli(
+                "gh",
+                GH,
+                {"token": "t0k", "base_url": "https://ghe.test/api/v3"},
+            )
+            result = await ws.shell(
+                f"cd /w && gh repo clone o/r {other} -- -b"
+            )
+    finally:
+        server.shutdown()
+    assert (result.exit_code, result.stderr) == (
+        128,
+        b"Cloning into 'repo'...\nfatal: Remote branch "
+        b"https://ghe.test/o/r.git not found in upstream origin\n",
+    )
+    assert seen == [("GET", None)]
+
+
+@pytest.mark.asyncio
 async def test_a_plain_directory_is_no_repository_to_clone(git_rw):
     await git_rw.shell("mkdir /repo/plain")
     result = await git_rw.shell("git -C /repo clone /repo/plain /repo/c")

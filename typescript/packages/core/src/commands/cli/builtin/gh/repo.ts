@@ -452,10 +452,13 @@ function tokenHeader(accessor: GitHubAccount): Record<string, string> {
 }
 
 /**
- * `gh repo clone`: mirage's `git clone` of the repository, the words after `--`
- * as git's options. The token rides only as the request's Authorization, never
- * on the line, in the config or in the output; a fork's `upstream` remote is
- * not added.
+ * `gh repo clone`: mirage's `git clone` of the repository. As gh does, the
+ * words after the repository that are not gh's own flags go to git: the first
+ * one, when it has no leading dash, is the directory, put after the URL unless
+ * it is empty, and the rest go before the URL. The token rides only as the
+ * request's Authorization, never on the line, in the config or in the output,
+ * and only when git clones from the install's origin, as gh's credential
+ * helper is scoped to it; a fork's `upstream` remote is not added.
  */
 export async function cloneCmd(
   accessor: GitHubAccount,
@@ -471,10 +474,12 @@ export async function cloneCmd(
     !spec.includes('/') && !spec.includes(':')
       ? { owner: await login(accessor.transport), repo: spec }
       : parseRepo(spec)
-  const url = `${webOrigin(accessor)}/${ref.owner}/${ref.repo}.git`
-  const target = names[1] ?? ref.repo
+  const origin = webOrigin(accessor)
+  const url = `${origin}/${ref.owner}/${ref.repo}.git`
+  const rest = [...names.slice(1), ...gitflags]
+  const target = rest[0] !== undefined && !rest[0].startsWith('-') ? rest.slice(0, 1) : []
   const leaf = findNode(GIT.spec, ['clone'])?.node ?? GIT.spec
-  const words = [...gitflags, url, target]
+  const words = [...rest.slice(target.length), url, ...target.filter(Boolean)]
   const parsed = parseCommand(leaf, words, ctx.cwd.virtual, 'git clone', ctx.env, true)
   const git: Context = {
     argv: ['clone', ...words],
@@ -487,13 +492,9 @@ export async function cloneCmd(
     ...(ctx.processes !== undefined ? { processes: ctx.processes } : {}),
     spec: leaf,
   }
-  return gitClone(
-    new NOOPAccessor(),
-    [],
-    parsed.args.map(([word]) => word),
-    git,
-    tokenHeader(accessor),
-  )
+  const operands = parsed.args.map(([word]) => word)
+  const sameOrigin = operands[0]?.startsWith(`${origin}/`) ?? false
+  return gitClone(new NOOPAccessor(), [], operands, git, sameOrigin ? tokenHeader(accessor) : {})
 }
 
 /**
