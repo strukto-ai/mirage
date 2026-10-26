@@ -542,17 +542,20 @@ class OutputCapture(io.RawIOBase):
     """One of the run's output streams, each write handed to the host as
     it is made. As CPython's to a pipe, stdout is written a block at a
     time and stderr a line at a time; text goes to the block at once, so
-    it keeps its order with what the guest writes to ``buffer``.
+    it keeps its order with what the guest writes to ``buffer``. Under
+    ``-u`` the text sits on the stream itself, as CPython's does, so
+    every write goes out as it is made.
 
     Args:
         fd (int): 1 for stdout, 2 for stderr.
+        unbuffered (bool): the run's ``-u``.
     """
 
-    def __init__(self, fd):
+    def __init__(self, fd, unbuffered=False):
         super().__init__()
         self.fd = fd
         self.text = io.TextIOWrapper(
-            io.BufferedWriter(self),
+            self if unbuffered else io.BufferedWriter(self),
             encoding="utf-8",
             errors="replace",
             write_through=True,
@@ -733,8 +736,11 @@ def run(request, arm_interrupt, disarm_interrupt):
     had_main = "__main__" in sys.modules
     saved_main = sys.modules.get("__main__")
 
-    out_bytes = OutputCapture(1)
-    err_bytes = OutputCapture(2)
+    flags = dict(init_flags) if init_flags is not None else {}
+    unbuffered = bool(flags.get("u"))
+
+    out_bytes = OutputCapture(1, unbuffered)
+    err_bytes = OutputCapture(2, unbuffered)
     out_text = out_bytes.text
     err_text = err_bytes.text
 
@@ -742,8 +748,6 @@ def run(request, arm_interrupt, disarm_interrupt):
     stdin_text = io.TextIOWrapper(
         stdin_pipe, encoding="utf-8", errors="replace"
     )
-
-    flags = dict(init_flags) if init_flags is not None else {}
 
     with out_bytes, err_bytes:
         exit_code = 0

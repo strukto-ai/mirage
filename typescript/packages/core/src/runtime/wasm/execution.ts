@@ -387,16 +387,22 @@ export class WasmExecution {
     }
   }
 
-  /** A started worker, listening. */
+  /** A started worker, listening; one that fails to start is let go,
+   * its blob URL with it. */
   private async ready(): Promise<Port> {
     const port = await startWorker()
     if (port === null) throw new Error(NO_WORKER)
-    await new Promise<void>((resolve, reject) => {
-      port.listen((message) => {
-        if (message instanceof Error) reject(message)
-        else if (message.kind === 'ready') resolve()
+    try {
+      await new Promise<void>((resolve, reject) => {
+        port.listen((message) => {
+          if (message instanceof Error) reject(message)
+          else if (message.kind === 'ready') resolve()
+        })
       })
-    })
+    } catch (error) {
+      port.terminate()
+      throw error
+    }
     return port
   }
 

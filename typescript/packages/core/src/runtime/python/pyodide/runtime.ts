@@ -105,7 +105,7 @@ function bridgeStderr(value: Uint8Array | ArrayLike<number>): Uint8Array | null 
 // them instead of pretending. See execution.py for what honoring the
 // five below amounts to; -P takes the working directory off sys.path
 // for the run, and no script's directory goes there in its place.
-const HONORED_FLAGS: readonly string[] = ['B', 'O', 'P', 'W', 'X']
+const HONORED_FLAGS: readonly string[] = ['B', 'O', 'P', 'W', 'X', 'u']
 
 function decodeNoticeLines(notice: Uint8Array): string[] {
   if (notice.length === 0) return []

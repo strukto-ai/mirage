@@ -478,6 +478,41 @@ small = [str(i).encode() for i in range(100000)]
     }
   })
 
+  // Under -u each write goes out as it is made, as CPython's does, so a
+  // print os._exit follows is kept.
+  it('writes through under -u, as CPython does', async () => {
+    const guest = new PyodideExecution(await loadPyodideRuntime())
+    const out: string[] = []
+    try {
+      const result = guest.run(
+        {
+          code: "import os\nprint('kept')\nos._exit(0)",
+          argv: ['-c'],
+          cwd: '/',
+          flags: { u: true },
+          script_cli: false,
+          filename: null,
+          script: false,
+          env: {},
+          stdin: null,
+        },
+        () => undefined,
+        () => undefined,
+        {
+          read: () => new Uint8Array(),
+          write: (fd, bytes) => {
+            if (fd === 1) out.push(new TextDecoder().decode(bytes))
+            return true
+          },
+        },
+      )
+      expect(result[2]).toBe(0)
+      expect(out.join('')).toBe('kept\n')
+    } finally {
+      guest.close()
+    }
+  })
+
   // CPython reports a stdout flush that fails as it exits and makes the
   // exit 120, whatever the program's own; the WASI guest answers the same.
   it('reports a stdout its reader left as it exits, as CPython does', async () => {
