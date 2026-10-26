@@ -98,8 +98,8 @@ class StatementRecorder extends Recorder {
  * the next statement, so a later `set +n` never runs. `set -v` echoes each
  * input line once, as the first statement on it runs, from the line after
  * the last one echoed, comments and blank lines included, so `set -v; echo
- * a` echoes nothing. An ERROR node is a fragment the grammar recovered from
- * in a line bash reads (checkSyntax refuses the rest), skipped.
+ * a` echoes nothing. An ERROR node, the rest of a line the parser refused,
+ * is skipped.
  */
 export async function executeProgram(
   recurse: ExecuteNodeFn,
