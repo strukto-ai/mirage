@@ -194,10 +194,12 @@ fn heredocs_after_a_line_are_read_in_order() {
         );
     }
     // Nor does a newline in it read a heredoc opened before it.
-    let tree = read("cat <<A; echo `echo\nA\ncat <<B`\nB\nA");
-    assert!(
-        tree.ends_with("(heredoc_body=B\n) (heredoc_end=A))"),
-        "{tree}"
+    assert_eq!(
+        lowered("cat <<A; echo `echo\nA\ncat <<B`\nB\nA"),
+        (
+            "cat <\"B\n\"; echo `echo\nA\ncat <<B`\n".into(),
+            vec![heredoc("A", "B\n", true)]
+        )
     );
 }
 
