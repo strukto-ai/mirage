@@ -294,7 +294,7 @@ describe('a damaged history file', () => {
     const store = new RAMObserverStore()
     const o = new Observer(store, new ManualClock(NEW_YEAR))
     await logCommand(o, 'first', 's1', NEW_YEAR)
-    const [path] = [...store.files.keys()]
+    const [path = ''] = [...store.files.keys()]
     const torn = new TextEncoder().encode(
       '{"type": "command", "session": "s1", "command": "caf\u00e9',
     )
@@ -311,7 +311,7 @@ describe('a damaged history file', () => {
     const store = new RAMObserverStore()
     const o = new Observer(store, new ManualClock(NEW_YEAR))
     await logCommand(o, 'first', 's1', NEW_YEAR)
-    const [path] = [...store.files.keys()]
+    const [path = ''] = [...store.files.keys()]
     const raw =
       '{"type": "command", "session": "s1", "timestamp": 1609459201000, "command": "a\u2028b\u0085c"}\n'
     await store.append(path, new TextEncoder().encode(raw))
