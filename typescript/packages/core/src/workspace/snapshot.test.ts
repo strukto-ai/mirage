@@ -314,6 +314,25 @@ describe('a rebuilt RAM mount', () => {
   })
 })
 
+// Twin of test_an_override_naming_no_limits_keeps_the_saved_ones.
+it.each([undefined, {}])(
+  'keeps the saved limits for an override naming none (%o)',
+  async (named) => {
+    const ws = new Workspace({
+      '/d': new Mount(new RAMVFS(), { commandLimits: { cat: new Limit({ maxBytes: 2 }) } }),
+    })
+    const state = await toStateDict(ws)
+    await ws.close()
+    const override = new Mount(new RAMVFS(), named === undefined ? {} : { commandLimits: named })
+    const restored = await Workspace.fromState(state, {}, { '/d/': override })
+    try {
+      expect(restored.mount('/d/').commandLimits.get('cat')?.maxBytes).toBe(2)
+    } finally {
+      await restored.close()
+    }
+  },
+)
+
 describe('Workspace.copy', () => {
   it('creates an independent workspace with the same content', async () => {
     const ws = buildWorkspace()

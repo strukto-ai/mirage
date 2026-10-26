@@ -1224,6 +1224,27 @@ async def test_a_rebuilt_local_mount_keeps_its_walk_limit(
         await ws.close()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("named", [None, {}])
+async def test_an_override_naming_no_limits_keeps_the_saved_ones(named):
+    saved = {"cat": Limit(max_bytes=2)}
+    ws = Workspace({"/d": Mount(vfs=RAMVFS(), command_limits=saved)})
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    override = (
+        Mount(vfs=RAMVFS())
+        if named is None
+        else Mount(vfs=RAMVFS(), command_limits=named)
+    )
+    restored = await Workspace.from_state(state, mounts={"/d/": override})
+    try:
+        assert restored.mount("/d").command_limits["cat"].max_bytes == 2
+    finally:
+        await restored.close()
+
+
 class RootOnlyDisk(DiskVFS):
     def __init__(self, root: str) -> None:
         super().__init__(root)
