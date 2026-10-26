@@ -429,6 +429,134 @@ small = [str(i).encode() for i in range(100000)]
     }
   })
 
+  // As CPython's BufferedReader: an empty read asks nothing of the pipe,
+  // and readinto fills any writable buffer by its bytes.
+  it('reads its input as a BufferedReader does', async () => {
+    const guest = new PyodideExecution(await loadPyodideRuntime())
+    const log: string[] = []
+    let input: Uint8Array | null = new TextEncoder().encode('abcdefgh')
+    try {
+      const result = guest.run(
+        {
+          code: [
+            'import array, sys',
+            "print('a', flush=True)",
+            'empty = sys.stdin.buffer.read1(0)',
+            "print('b', flush=True)",
+            "a = array.array('I', [0, 0])",
+            'print(empty, sys.stdin.buffer.readinto(a), a.tobytes())',
+          ].join('\n'),
+          argv: ['-c'],
+          cwd: '/',
+          flags: {},
+          script_cli: false,
+          filename: null,
+          script: false,
+          env: {},
+          stdin: null,
+          piped: true,
+        },
+        () => undefined,
+        () => undefined,
+        {
+          read: () => {
+            log.push('read')
+            const data = input ?? new Uint8Array()
+            input = null
+            return data
+          },
+          write: (fd, bytes) => {
+            if (fd === 1) log.push(new TextDecoder().decode(bytes))
+            return true
+          },
+        },
+      )
+      expect(result[2]).toBe(0)
+      expect(log).toEqual(['a\n', 'b\n', 'read', "b'' 8 b'abcdefgh'\n"])
+    } finally {
+      guest.close()
+    }
+  })
+
+  // Under -u each write goes out as it is made, as CPython's does, so a
+  // print os._exit follows is kept; a write counts bytes, whatever the
+  // buffer's item size.
+  it('writes through under -u, as CPython does', async () => {
+    const guest = new PyodideExecution(await loadPyodideRuntime())
+    const out: string[] = []
+    try {
+      const result = guest.run(
+        {
+          code: [
+            'import array, os, sys',
+            'print(sys.stdout.buffer.write(array.array("I", [0x0a434241, 0x0a434241])))',
+            "print('kept')",
+            'os._exit(0)',
+          ].join('\n'),
+          argv: ['-c'],
+          cwd: '/',
+          flags: { u: true },
+          script_cli: false,
+          filename: null,
+          script: false,
+          env: {},
+          stdin: null,
+        },
+        () => undefined,
+        () => undefined,
+        {
+          read: () => new Uint8Array(),
+          write: (fd, bytes) => {
+            if (fd === 1) out.push(new TextDecoder().decode(bytes))
+            return true
+          },
+        },
+      )
+      expect(result[2]).toBe(0)
+      expect(out.join('')).toBe('ABC\nABC\n8\nkept\n')
+    } finally {
+      guest.close()
+    }
+  })
+
+  // CPython reports a stdout flush that fails as it exits and makes the
+  // exit 120, whatever the program's own; the WASI guest answers the same.
+  it('reports a stdout its reader left as it exits, as CPython does', async () => {
+    const guest = new PyodideExecution(await loadPyodideRuntime())
+    const errors: number[] = []
+    try {
+      const result = guest.run(
+        {
+          code: 'import sys\nprint(1)\nsys.exit(3)',
+          argv: ['-c'],
+          cwd: '/',
+          flags: {},
+          script_cli: false,
+          filename: null,
+          script: false,
+          env: {},
+          stdin: null,
+        },
+        () => undefined,
+        () => undefined,
+        {
+          read: () => new Uint8Array(),
+          write: (fd, bytes) => {
+            if (fd === 1) return false
+            errors.push(...bytes)
+            return true
+          },
+        },
+      )
+      expect(result[2]).toBe(120)
+      expect(new TextDecoder().decode(new Uint8Array(errors))).toMatch(
+        /^Exception ignored (while|on) flushing sys\.stdout:\nBrokenPipeError: \[Errno \d+\] Broken pipe\n$/,
+      )
+    } finally {
+      guest.close()
+    }
+  })
+
   it('registers an isolated main module for imports and pickling across exits', async () => {
     const pyodide = await loadPyodideRuntime()
     const guest = new PyodideExecution(pyodide)

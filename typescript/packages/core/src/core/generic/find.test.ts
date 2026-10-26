@@ -61,7 +61,7 @@ describe('walkFind', () => {
     'does not read cached bytes for a %s',
     async (type) => {
       const cache = new RAMFileCacheStore()
-      const get = vi.spyOn(cache, 'get')
+      const sizes = vi.spyOn(cache, 'sizes')
       const manager = new CacheManager(cache, null, '', true)
       const stats = new Map([
         ['/', new FileStat({ name: '', type: FileType.DIRECTORY, size: 0 })],
@@ -76,14 +76,14 @@ describe('walkFind', () => {
       }
       const result = await runWithCacheManager(manager, () => walkFind(ROOT, deps))
       expect(result).toEqual(['/', '/entry'])
-      expect(get.mock.calls).toEqual([])
+      expect(sizes.mock.calls).toEqual([])
     },
   )
 
   it('backfills an unknown file size from cached bytes', async () => {
     const cache = new RAMFileCacheStore()
     await cache.set('/entry', new TextEncoder().encode('cached'))
-    const get = vi.spyOn(cache, 'get')
+    const sizes = vi.spyOn(cache, 'sizes')
     const manager = new CacheManager(cache, null, '', true)
     const stats = new Map([
       ['/', new FileStat({ name: '', type: FileType.DIRECTORY, size: 0 })],
@@ -100,7 +100,7 @@ describe('walkFind', () => {
       walkFind(ROOT, deps, { minSize: 6, maxSize: 6 }),
     )
     expect(result).toEqual(['/entry'])
-    expect(get.mock.calls.length).toBeGreaterThan(0)
+    expect(sizes.mock.calls.length).toBeGreaterThan(0)
   })
 
   it('does not classify an unknown-size file as empty', async () => {

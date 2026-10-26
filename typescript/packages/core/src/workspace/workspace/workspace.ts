@@ -1952,9 +1952,10 @@ export class Workspace {
    * process table (`ps`, `kill`); and its status is the session's `$?` once
    * it ends. It writes to a terminal of its own, as a typed line does to its
    * session's: it answers with what waited on the session's terminal first,
-   * then with what it and its jobs write, and once it ends, what its jobs
-   * still write goes on to the session's terminal for the next line. A line
-   * nested in one of the session's (a host callback fired mid-line)
+   * unless a line of the session runs to answer with it, then with what it
+   * and its jobs write; once it ends, what its jobs still write goes on to
+   * the session's terminal, without the line waiting for it to be taken. A
+   * line nested in one of the session's (a host callback fired mid-line)
    * continues in that line instead, as `serializeLine` runs it.
    *
    * @param command the line.
@@ -1975,8 +1976,10 @@ export class Workspace {
     session.processId = null
     session.jobTable = this.jobTable.child()
     session.tty = new Terminal()
-    session.tty.chunks = source.tty.chunks
-    source.tty.chunks = []
+    if (!this.lineLock.held(source.sessionId)) {
+      session.tty.chunks = source.tty.chunks
+      source.tty.chunks = []
+    }
     let result: ExecuteResult
     try {
       result = await executeLine(this.executeEnv(), command, {
@@ -1985,7 +1988,7 @@ export class Workspace {
         tty: session.tty,
       })
     } finally {
-      await session.tty.attach(source.tty.jobs)
+      session.tty.handOver(source.tty)
     }
     // Stamped in a frame of its own, so the status is never credited to a
     // line still waiting on the session: where tasks share one frame stack

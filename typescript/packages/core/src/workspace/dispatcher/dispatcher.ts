@@ -475,8 +475,33 @@ async function sized(mount: MountEntry, path: PathSpec, row: unknown): Promise<u
     manager === null
   )
     return row
-  const size = await manager.cachedSize(path)
-  return size === null ? row : row.with({ size })
+  const [size] = await manager.cachedSizes([path])
+  return size == null ? row : row.with({ size })
+}
+
+/**
+ * A subtree read with each row sized as `sized` sizes a stat, so a walk
+ * answered from it reads the sizes its stats would, in one ask of the file
+ * cache. Mirrors Python's `_sized_tree`.
+ */
+async function sizedTree(
+  mount: MountEntry,
+  path: PathSpec,
+  tree: Map<string, FileStat>,
+): Promise<Map<string, FileStat>> {
+  const manager = mount.cacheManager
+  const unsized = [...tree].filter(([, row]) => row.type === FileType.FILE && row.size === null)
+  if (manager === null || unsized.length === 0) return tree
+  const base = rstripSlash(path.virtual)
+  const sizes = await manager.cachedSizes(
+    unsized.map(([rel]) => PathSpec.fromStrPath(`${base}/${rel}`)),
+  )
+  const out = new Map(tree)
+  unsized.forEach(([rel, row], i) => {
+    const size = sizes[i]
+    if (size != null) out.set(rel, row.with({ size }))
+  })
+  return out
 }
 
 /** The dispatcher's link follow of one path, the final name too (`last`) or
@@ -2301,6 +2326,9 @@ export class Dispatcher {
           )
         }
         if (name === 'stat') result = await sized(mount, p, result)
+        else if (name === 'read_tree' && result instanceof Map) {
+          result = await sizedTree(mount, p, result as Map<string, FileStat>)
+        }
       }
     } catch (err) {
       const code = (err as { code?: string }).code

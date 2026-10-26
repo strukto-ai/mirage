@@ -26,17 +26,25 @@ const rg: CommandFn = async (_accessor, paths, texts, ctx) => {
   const resolved = await resolveOrEmpty(files, paths)
   const readdir = (p: PathSpec): Promise<string[]> => files.readdir(p)
   const stat = (p: PathSpec): Promise<FileStat> => files.stat(p)
+  const [levelReaddir, levelStat] = treeWalk<string[], FileStat>(
+    files.readTree,
+    readdir,
+    stat,
+    false,
+    files.signal,
+  )
   return rgGeneric(
     resolved,
     texts,
     ctx,
-    stat,
-    readdir,
+    levelStat,
+    levelReaddir,
     await searchReads(files, 'rg', resolved, texts, ctx),
     treeWalk<string[], FileStat>(
-      files.answers('read_tree') ? files.readTree : undefined,
+      files.readTree,
       readdir,
       stat,
+      files.answers('read_tree'),
       files.signal,
     ),
   )

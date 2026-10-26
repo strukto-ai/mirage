@@ -428,9 +428,7 @@ export class SessionState {
   tty = new Terminal()
   jobOutput: JobOutput | null = null
   jobWaits: JobWaits | null = null
-  // The jobs this shell's lines start theirs in when no caller hands a
-  // table: a per-call line's own, so a callback fired in it reaches them;
-  // null for the workspace's.
+  // A per-call line's jobs, which a callback in it reaches; null otherwise.
   jobTable: JobTable | null = null
   shellOptions: Record<string, boolean>
   // Transient `set -e` marker: true when the failure just returned

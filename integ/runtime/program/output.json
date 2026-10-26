@@ -27,6 +27,7 @@
       "runtimes": [
         "monty",
         "wasi",
+        "pyodide",
         "quickjs",
         "local"
       ],
@@ -140,6 +141,70 @@
             "exit": 0,
             "stdout": "after exit\n",
             "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "output_into_a_mount_lands_whole",
+      "note": "Over 1 MiB of output, redirected into a file and appended to, on stores that take a stream and those that take one body. QuickJS writes it in one call: qjs flushes each console.log, and on the python host each flush waits on the host's loop.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "local"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": {
+            "python": "python3 -c \"for i in range(1, 200001):\n    print(i)\" > /data/out.txt",
+            "js": "node -e \"console.log(Array.from({ length: 200000 }, (_, i) => i + 1).join('\\n'))\" > /data/out.txt"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "wc -c < /data/out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "1288895\n"
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"print('tail')\" >> /data/out.txt",
+            "js": "node -e \"console.log('tail')\" >> /data/out.txt"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "tail -n 2 /data/out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "200000\ntail\n"
           }
         }
       ]

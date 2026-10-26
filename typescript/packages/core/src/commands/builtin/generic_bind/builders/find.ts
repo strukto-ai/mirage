@@ -64,9 +64,10 @@ export function findWalk(
       // A walk -maxdepth bounds reads its own levels, not the whole tree.
       const whole = files.answers('read_tree') && (options.maxDepth ?? null) === null
       const [readdir, stat] = treeWalk<string[], FileStat>(
-        whole ? files.readTree : undefined,
+        files.readTree,
         files.readdir,
         files.stat,
+        whole,
         files.signal,
       )
       const home = bounded && mounts !== undefined ? landingRoot(mounts, links, root.virtual) : null

@@ -26,9 +26,10 @@ const grep: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
   const [readdir, stat] = treeWalk<string[], FileStat>(
-    files.answers('read_tree') ? files.readTree : undefined,
+    files.readTree,
     (p) => files.readdir(p),
     files.stat,
+    files.answers('read_tree'),
     files.signal,
   )
   return grepGeneric(

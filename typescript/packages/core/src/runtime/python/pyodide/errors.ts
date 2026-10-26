@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { failureText } from './worker/failure.ts'
+import { failureText } from '../../wasm/transport.ts'
 
 export class PyodideUnavailableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {

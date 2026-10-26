@@ -1,0 +1,88 @@
+{
+  "cases": [
+    {
+      "id": "std_and_os_surface",
+      "note": "The real engine's std and os, as qjs runs them on WASI: its globals, signals, strerror, the environment, writeFile and loadFile, fdopen, FILE calls, evalScript and loadScript, os.sleep, and its timers.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "p.js": "const r = []\nconst P = (k, f) => {\n  try {\n    const v = f()\n    r.push(k + ' = ' + JSON.stringify(v, (_, x) => (typeof x === 'bigint' ? 'big:' + x : x)))\n  } catch (e) {\n    r.push(k + ' ! ' + (e && e.name) + ': ' + (e && e.message))\n  }\n}\n// bjson, the engine's binary JSON, is the real engine's alone.\nP('globals', () => Object.getOwnPropertyNames(globalThis).filter((n) => !/^[A-Z]/.test(n) && n !== 'bjson').sort().join(' '))\nP('SIG', () => [os.SIGINT, os.SIGABRT, os.SIGFPE, os.SIGILL, os.SIGSEGV, os.SIGTERM])\nP('exePath', () => os.exePath())\nP('now', () => typeof os.now())\nP('strerror', () => [std.strerror(2), std.strerror(44), std.strerror(0), std.strerror(9999)])\nP('getenviron', () => typeof std.getenviron())\nP('setenv', () => { std.setenv('ZZ', 'v'); return [std.getenv('ZZ'), std.getenviron().ZZ] })\nP('unsetenv', () => { std.unsetenv('ZZ'); return [std.getenv('ZZ'), 'ZZ' in std.getenviron()] })\nP('writeFile str', () => std.writeFile('/data/w1', 'hello'))\nP('loadFile w1', () => std.loadFile('/data/w1'))\nP('writeFile ab', () => std.writeFile('/data/w2', new Uint8Array([104, 105]).buffer))\nP('writeFile u8', () => std.writeFile('/data/w3', new Uint8Array([104, 105, 106])))\nP('loadFile w2 w3', () => [std.loadFile('/data/w2'), std.loadFile('/data/w3')])\nP('writeFile bad dir', () => std.writeFile('/data/nope/x', 'a'))\nP('writeFile num', () => std.writeFile('/data/w4', 42))\nP('loadFile w4', () => std.loadFile('/data/w4'))\nP('loadFile binary', () => { const b = std.loadFile('/data/w1', { binary: true }); return [typeof b, b && b.constructor && b.constructor.name, b && Array.from(b)] })\nP('loadFile missing', () => std.loadFile('/data/missing'))\nP('fdopen', () => { const fd = os.open('/data/w1', os.O_RDONLY); const f = std.fdopen(fd, 'r'); const s = f.readAsString(); const n = f.fileno(); f.close(); return [fd, n, s] })\nP('fdopen bad', () => { const e = {}; const f = std.fdopen(99, 'r', e); return [f, e.errno] })\nP('fdopen write', () => { const fd = os.open('/data/w6', os.O_WRONLY | os.O_CREAT | os.O_TRUNC); const f = std.fdopen(fd, 'w'); f.puts('fd'); f.close(); return std.loadFile('/data/w6') })\nP('fileno', () => { const f = std.open('/data/w1', 'r'); const n = f.fileno(); f.close(); return n })\nP('std fileno', () => [std.in.fileno(), std.out.fileno(), std.err.fileno()])\nP('tello', () => { const f = std.open('/data/w1', 'r'); f.seek(2, std.SEEK_SET); const t = f.tello(); f.close(); return [typeof t, String(t)] })\nP('readAsArrayBuffer', () => { const f = std.open('/data/w1', 'r'); const b = f.readAsArrayBuffer(); const b2 = f.readAsArrayBuffer(); f.close(); return [b instanceof ArrayBuffer, Array.from(new Uint8Array(b)), b2.byteLength] })\nP('readAsArrayBuffer max', () => { const f = std.open('/data/w1', 'r'); const b = f.readAsArrayBuffer(3); f.close(); return Array.from(new Uint8Array(b)) })\nP('file printf', () => { const f = std.open('/data/w5', 'w'); const n = f.printf('%d-%s', 7, 'x'); f.close(); return [n, std.loadFile('/data/w5')] })\nP('out fileno printf', () => typeof std.out.printf)\nP('puts', () => std.puts('P\\n'))\nP('evalScript', () => std.evalScript('1+2'))\nP('evalScript global', () => { std.evalScript('var gq = 5'); return globalThis.gq })\nP('loadScript', () => { std.writeFile('/data/s.js', 'globalThis.ls = 9; 3*3'); return [std.loadScript('/data/s.js'), globalThis.ls] })\nP('loadScript missing', () => std.loadScript('/data/none.js'))\nP('gc', () => std.gc())\nP('sleep', () => { const t = os.now(); os.sleep(50); return os.now() - t >= 45 })\nP('signal', () => os.signal(os.SIGINT, null))\nP('handlers', () => [typeof os.setReadHandler, typeof os.setWriteHandler])\nP('global timers', () => [typeof setTimeout, typeof clearTimeout, typeof setInterval, typeof clearInterval])\nos.setTimeout(() => print('timeout fired'), 10)\nconst h = os.setTimeout(() => print('cleared fired'), 20)\nos.clearTimeout(h)\nlet k = 0\nconst iv = os.setInterval(() => { k++; if (k === 2) { os.clearInterval(iv); print('interval 2') } }, 15)\nos.sleepAsync(200).then(() => print('sleepAsync done'))\nprint(r.join('\\n'))\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node /data/p.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "P\nglobals = \"argv0 atob btoa console decodeURI decodeURIComponent encodeURI encodeURIComponent escape eval execArgv gc globalThis isFinite isNaN navigator os parseFloat parseInt performance print queueMicrotask scriptArgs std undefined unescape\"\nSIG = [2,6,8,4,11,15]\nexePath = undefined\nnow = \"number\"\nstrerror = [\"Permission denied\",\"No such file or directory\",\"Success\",\"Success\"]\ngetenviron = \"object\"\nsetenv = [\"v\",\"v\"]\nunsetenv = [null,false]\nwriteFile str = undefined\nloadFile w1 = \"hello\"\nwriteFile ab = undefined\nwriteFile u8 = undefined\nloadFile w2 w3 = [\"hi\",\"hij\"]\nwriteFile bad dir ! Error: error opening /data/nope/x for writing\nwriteFile num = undefined\nloadFile w4 = \"42\"\nloadFile binary = [\"object\",\"Uint8Array\",[104,101,108,108,111]]\nloadFile missing = null\nfdopen = [13,13,\"hello\"]\nfdopen bad = [{},0]\nfdopen write = \"fd\"\nfileno = 16\nstd fileno = [0,1,2]\ntello = [\"bigint\",\"2\"]\nreadAsArrayBuffer = [true,[104,101,108,108,111],0]\nreadAsArrayBuffer max = [104,101,108]\nfile printf = [3,\"7-x\"]\nout fileno printf = \"function\"\nputs = undefined\nevalScript = 3\nevalScript global = 5\nloadScript = [9,9]\nloadScript missing ! ReferenceError: could not load '/data/none.js'\ngc = undefined\nsleep = true\nsignal = undefined\nhandlers = [\"function\",\"function\"]\nglobal timers = [\"undefined\",\"undefined\",\"undefined\",\"undefined\"]\ntimeout fired\ninterval 2\nsleepAsync done\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "standard_streams",
+      "note": "std.in, std.out and std.err and descriptors 0 to 2 as qjs on WASI has them: a pipe with no position, stdio's buffer between FILE and os.read, EINVAL writing input and EBADF reading output; the wasi-libc strerror table and std.Error.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "p.js": "const r = []\nconst P = (k, f) => {\n  try {\n    const v = f()\n    r.push(k + ' = ' + JSON.stringify(v, (_, x) => (typeof x === 'bigint' ? 'big:' + x : x)))\n  } catch (e) {\n    r.push(k + ' ! ' + (e && e.name) + ': ' + (e && e.message))\n  }\n}\nP('in line', () => std.in.getline())\nP('in byte', () => std.in.getByte())\nP('in read', () => { const b = new ArrayBuffer(3); const n = std.in.read(b, 0, 3); return [n, Array.from(new Uint8Array(b, 0, n))] })\nP('os read 0', () => { const b = new ArrayBuffer(4); const n = os.read(0, b, 0, 4); return [n, Array.from(new Uint8Array(b, 0, Math.max(n, 0)))] })\nP('in rest', () => std.in.readAsString())\nP('in eof', () => std.in.eof())\nP('in members', () => Object.getOwnPropertyNames(Object.getPrototypeOf(std.in)).sort().join(' '))\nP('out write', () => std.out.write(new Uint8Array([79, 10]).buffer, 0, 2))\nP('out putByte', () => std.out.putByte(81))\nP('out flush', () => std.out.flush())\nP('os write 1', () => os.write(1, new Uint8Array([87, 10]).buffer, 0, 2))\nP('os write 2', () => os.write(2, new Uint8Array([69, 10]).buffer, 0, 2))\nP('os write 0', () => os.write(0, new Uint8Array([69]).buffer, 0, 1))\nP('os read 1', () => os.read(1, new ArrayBuffer(1), 0, 1))\nP('isatty', () => [os.isatty(0), os.isatty(1), os.isatty(2), os.isatty(99)])\nP('out tell', () => [std.out.tell(), std.in.tell()])\nP('err puts ret', () => std.err.puts('e2\\n'))\nP('out close', () => typeof std.out.close)\nP('evalScript async', () => { const p = std.evalScript('await 1; 5', { async: true }); return [typeof p, p instanceof Promise] })\nP('writeFile obj', () => { std.writeFile('/data/w7', { a: 1 }); return std.loadFile('/data/w7') })\nP('writeFile undef', () => { std.writeFile('/data/w8', undefined); return std.loadFile('/data/w8') })\nP('strerror', () => { const o = []; for (let i = 0; i <= 80; i++) o.push(i + ':' + std.strerror(i)); return o.join('|') })\nP('Error keys', () => Object.keys(std.Error).sort().map((k) => k + '=' + std.Error[k]).join(','))\nprint(r.join('\\n'))\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "printf 'line1\\nABCDEFGHIJ\\nrest\\n' | node /data/p.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "O\nQW\nin line = \"line1\"\nin byte = 65\nin read = [3,[66,67,68]]\nos read 0 = [0,[]]\nin rest = \"EFGHIJ\\nrest\\n\"\nin eof = true\nin members = \"clearerr close eof error fileno flush getByte getline printf putByte puts read readAsArrayBuffer readAsString seek tell tello write\"\nout write = 2\nout putByte = 81\nout flush = undefined\nos write 1 = 2\nos write 2 = 2\nos write 0 = -28\nos read 1 = -8\nisatty = [false,false,false,false]\nout tell = [-1,-1]\nerr puts ret = undefined\nout close = \"function\"\nevalScript async = [\"object\",true]\nwriteFile obj = \"[object Object]\"\nwriteFile undef ! Error: error writing to /data/w8\nstrerror = \"0:Success|1:Argument list too long|2:Permission denied|3:Address in use|4:Address not available|5:Address family not supported by protocol|6:Resource temporarily unavailable|7:Operation already in progress|8:Bad file descriptor|9:Bad message|10:Resource busy|11:Operation canceled|12:No child process|13:Connection aborted|14:Connection refused|15:Connection reset by peer|16:Resource deadlock would occur|17:Destination address required|18:Domain error|19:Quota exceeded|20:File exists|21:Bad address|22:File too large|23:Host is unreachable|24:Identifier removed|25:Illegal byte sequence|26:Operation in progress|27:Interrupted system call|28:Invalid argument|29:I/O error|30:Socket is connected|31:Is a directory|32:Symbolic link loop|33:No file descriptors available|34:Too many links|35:Message too large|36:Multihop attempted|37:Filename too long|38:Network is down|39:Connection reset by network|40:Network unreachable|41:Too many open files in system|42:No buffer space available|43:No such device|44:No such file or directory|45:Exec format error|46:No locks available|47:Link has been severed|48:Out of memory|49:No message of desired type|50:Protocol not available|51:No space left on device|52:Function not implemented|53:Socket not connected|54:Not a directory|55:Directory not empty|56:State not recoverable|57:Not a socket|58:Not supported|59:Not a tty|60:No such device or address|61:Value too large for data type|62:Previous owner died|63:Operation not permitted|64:Broken pipe|65:Protocol error|66:Protocol not supported|67:Protocol wrong type for socket|68:Result not representable|69:Read-only file system|70:Invalid seek|71:No such process|72:Stale file handle|73:Operation timed out|74:Text file busy|75:Cross-device link|76:Capabilities insufficient|77:Success|78:Success|79:Success|80:Success\"\nError keys = \"\"\n",
+            "stderr": "E\ne2\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "event_loop",
+      "note": "Once the script ends, the loop calls a read handler while its descriptor reads and a timer once it is due, until none is left; a callback that throws ends the run with 1. The real engine's message adds a stack.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "p.js": "const t = os.setTimeout(() => {}, 1)\nprint('setTimeout returns', typeof t, JSON.stringify(t))\nos.clearTimeout(12345)\nprint('clear unknown ok')\nprint('stdin seek', std.in.seek(0, std.SEEK_SET), 'tell', std.in.tell())\ntry { std.writeFile('/data/w8', undefined) } catch (e) { print('w8', e.message) }\nprint('w8 exists', os.stat('/data/w8')[1], JSON.stringify(std.loadFile('/data/w8')))\nlet n = 0\nos.setReadHandler(0, () => { const l = std.in.getline(); print('rh', JSON.stringify(l)); if (l === null || ++n > 3) os.setReadHandler(0, null) })\nconst fd = os.open('/data/w1', os.O_RDONLY | os.O_CREAT)\nlet m = 0\nos.setReadHandler(fd, () => { m++; if (m === 2) { os.setReadHandler(fd, null); print('file rh 2') } })\nos.setTimeout(() => { print('before throw'); throw new Error('boom') }, 500)\nos.setTimeout(() => print('after throw timer'), 1000)\nprint('end of script')\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "printf 'a\\nb\\n' | node /data/p.js; echo rc=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "setTimeout returns number 1\nclear unknown ok\nstdin seek -70 tell -1\nw8 error writing to /data/w8\nw8 exists 0 \"\"\nend of script\nrh \"a\"\nrh \"b\"\nrh null\nfile rh 2\nbefore throw\nrc=1\n",
+            "stderr_contains": "Error: boom"
+          }
+        }
+      ]
+    }
+  ]
+}

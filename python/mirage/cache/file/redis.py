@@ -149,6 +149,20 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         name = key if isinstance(key, str) else key.mount_path
         return bool(await self._cache_client.exists(self._data_key(name)))
 
+    async def sizes(self, keys: list[str]) -> list[int | None]:
+        out: list[int | None] = []
+        for start in range(0, len(keys), KEY_BATCH):
+            pipe = self._cache_client.pipeline()
+            for key in keys[start : start + KEY_BATCH]:
+                pipe.exists(self._data_key(key))
+                pipe.strlen(self._data_key(key))
+            got = await pipe.execute()
+            out.extend(
+                length if held else None
+                for held, length in zip(got[::2], got[1::2], strict=True)
+            )
+        return out
+
     async def fingerprints(self, keys: list[str]) -> list[str | None]:
         out: list[str | None] = []
         for start in range(0, len(keys), KEY_BATCH):

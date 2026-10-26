@@ -11,6 +11,7 @@ import { build } from 'esbuild'
 const workers = {
   pyodide_worker: 'runtime/python/pyodide/worker/entry.ts',
   computation_worker: 'concurrency/worker_entry.ts',
+  wasm_worker: 'runtime/wasm/worker.ts',
 }
 const output = new URL('../src/generated/', import.meta.url)
 mkdirSync(output, { recursive: true })

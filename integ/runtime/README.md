@@ -53,7 +53,7 @@ differs.
 | monty                                              | `pydantic_monty`, file calls via OS callbacks | `@pydantic/monty`, file calls via OS callbacks |
 | wasi                                               | CPython built for WASI, in wasmtime           | not on this host                               |
 | pyodide                                            | not on this host                              | Pyodide, Emscripten FS with a journal          |
-| quickjs                                            | `qjs` from quickjs-ng built for WASI          | quickjs-emscripten with a `std`/`os` shim      |
+| quickjs                                            | `qjs` from quickjs-ng built for WASI          | the same, in a worker                          |
 | local                                              | the host's `python3`                          | the host's `python3`                           |
 | host                                               | the runner itself, inside `with ws:`          | the runner itself, under `patchNodeFs`         |
 | sandlock                                           | host `python3` and `node` under Landlock      | the same                                       |
@@ -98,7 +98,9 @@ because the runners run one case at a time. No CLI reaches a process's own
   cannot check the op ledger, which holds every branch's ops.
 - `backends` repeats a case over `ram`, `disk`, `ssh`, `s3` and `redis`;
   each mount gets its own key space or directory. `ssh` mounts a fresh
-  directory on the ssh runtime's box over SFTP.
+  directory on the ssh runtime's box over SFTP. `<backend>+cache` serves
+  repeat reads from the workspace file cache, as `s3` does already; its
+  `expect_on` takes the backend's entry, then its own.
 - A runtime the hosted runners cannot give every job (e2b, smolvm,
   microsandbox, apple_container, sandlock) is skipped when its requirement is unmet, even
   under `INTEG_RUNTIME_STRICT=1`.

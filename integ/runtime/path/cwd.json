@@ -134,6 +134,16 @@
             "stdout": "hello\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -212,6 +222,16 @@
             "stdout": "[('PosixPath', 'sub/item', 'item')]\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -262,7 +282,7 @@
             "wasi": {
               "stdout": "/data/sub\nchild\nhello\n/data/sub/..\n"
             },
-            "quickjs@python": {
+            "quickjs": {
               "stdout": "0\n/data/sub\nchild\nhello\n/data/sub/..\n"
             },
             "monty@typescript": {
@@ -347,6 +367,16 @@
             "stdout": "kept"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     }
   ]

@@ -12,9 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { classify } from '../../../../errors/index.ts'
-import { failureText } from './failure.ts'
-import type { VfsRequest } from './types.ts'
+import { classify } from '../../errors/index.ts'
+
+/**
+ * What a worker guest's blocking call carries besides its own fields:
+ * the shared memory it waits on for the answer, or the id the page's
+ * service worker holds it under where no memory is shared.
+ */
+export interface BridgeCall {
+  kind: 'vfs'
+  buffer?: SharedArrayBuffer
+  id?: string
+}
 
 const CAPACITY = 64 * 1024
 const HEADER_BYTES = 16
@@ -25,6 +34,22 @@ const DEC = new TextDecoder()
 export const PARAM = 'mirage-pyodide'
 /** The header that carries an answer's format across the bridge. */
 export const FORMAT = 'x-mirage-pyodide-format'
+
+/**
+ * A thrown value, told the way a command can print it. Most guest
+ * failures are Errors, but Emscripten and a crashed worker can surface a
+ * plain object, whose String() is `[object Object]`: its name and message
+ * say more, and failing those its keys.
+ */
+export function failureText(value: unknown): string {
+  if (value instanceof Error) return value.message
+  if (typeof value !== 'object' || value === null) return String(value)
+  const { name, message } = value as { name?: unknown; message?: unknown }
+  const said = [name, message].filter((part) => typeof part === 'string' && part !== '')
+  if (said.length > 0) return said.join(': ')
+  const keys = Object.keys(value).join(', ')
+  return `an object with keys: ${keys !== '' ? keys : '(none)'}`
+}
 
 /** An answer as bytes and their format: 0 JSON, 1 raw bytes, 2 a JSON error. */
 async function encode(
@@ -53,9 +78,9 @@ function decode(format: number, bytes: Uint8Array): unknown {
 }
 
 /** Worker-only blocking half; the host always answers asynchronously. */
-export function requestSync(
-  post: (message: VfsRequest) => void,
-  request: Omit<VfsRequest, 'kind' | 'buffer' | 'id'>,
+export function requestSync<T extends object>(
+  post: (message: T & BridgeCall) => void,
+  request: T,
   interrupt?: Int32Array,
 ): unknown {
   const buffer = new SharedArrayBuffer(HEADER_BYTES + CAPACITY)
@@ -72,11 +97,11 @@ export function requestSync(
       ) {
         Atomics.store(cells, 0, -1)
         Atomics.notify(cells, 0)
-        throw new Error('pyodide filesystem request interrupted')
+        throw new Error("the guest worker's file request was interrupted")
       }
       Atomics.wait(cells, 0, 0, 100)
     }
-    if (Atomics.load(cells, 0) === -1) throw new Error('pyodide worker closed')
+    if (Atomics.load(cells, 0) === -1) throw new Error('the guest worker closed')
     output ??= new Uint8Array(Atomics.load(cells, 1))
     const length = Atomics.load(cells, 2)
     const format = Atomics.load(cells, 3)
@@ -125,9 +150,9 @@ export async function respond(
  *   request: the call to make.
  *   bridge: the page URL the service worker answers bridge requests at.
  */
-export function requestOverBridge(
-  post: (message: VfsRequest) => void,
-  request: Omit<VfsRequest, 'kind' | 'buffer' | 'id'>,
+export function requestOverBridge<T extends object>(
+  post: (message: T & BridgeCall) => void,
+  request: T,
   bridge: string,
 ): unknown {
   const id = crypto.randomUUID()
@@ -137,7 +162,8 @@ export function requestOverBridge(
   xhr.responseType = 'arraybuffer'
   xhr.send()
   const format = xhr.getResponseHeader(FORMAT)
-  if (format === null) throw new Error(`pyodide filesystem bridge answered ${String(xhr.status)}`)
+  if (format === null)
+    throw new Error(`the guest worker's file bridge answered ${String(xhr.status)}`)
   return decode(Number(format), new Uint8Array(xhr.response as ArrayBuffer))
 }
 
@@ -162,7 +188,7 @@ export async function answerOverBridge(
     headers: { [FORMAT]: String(format) },
   })
   if (!response.headers.has(FORMAT))
-    throw new Error(`pyodide filesystem bridge answered ${String(response.status)}`)
+    throw new Error(`the guest worker's file bridge answered ${String(response.status)}`)
 }
 
 /**
@@ -174,4 +200,18 @@ export async function answerOverBridge(
 export async function bridged(bridge: string): Promise<boolean> {
   const response = await fetch(`${bridge}?${PARAM}=ping`)
   return response.headers.has(FORMAT)
+}
+
+/**
+ * The page URL its service worker bridges file calls at, or null when no
+ * service worker controlling the page answers the bridge.
+ */
+export async function serviceWorkerBridge(): Promise<string | null> {
+  const host = globalThis as {
+    navigator?: { serviceWorker?: { controller: unknown } }
+    location?: { origin: string; pathname: string }
+  }
+  if (host.navigator?.serviceWorker?.controller == null || host.location === undefined) return null
+  const bridge = host.location.origin + host.location.pathname
+  return (await bridged(bridge)) ? bridge : null
 }

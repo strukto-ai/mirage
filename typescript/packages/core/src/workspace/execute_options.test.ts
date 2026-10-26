@@ -73,6 +73,29 @@ class StalledConsole extends JobConsole {
   }
 }
 
+class HeldConsole extends JobConsole {
+  readonly reached: Promise<void>
+  release: () => void = () => undefined
+  private reach = (): void => undefined
+  private readonly released: Promise<void>
+
+  constructor() {
+    super()
+    this.reached = new Promise<void>((resolve) => {
+      this.reach = resolve
+    })
+    this.released = new Promise<void>((resolve) => {
+      this.release = resolve
+    })
+  }
+
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    this.reach()
+    await this.released
+    await super.emit(channel, data)
+  }
+}
+
 function makeWs(): Workspace {
   const r = new RAMVFS()
   r.store.dirs.add('/')
@@ -277,6 +300,45 @@ describe('execute({ cwd }): a process of its own', () => {
     while (!(await ws.vfs.exists('/ram/done'))) await new Promise((r) => setTimeout(r, 10))
     const io = await ws.shell('echo next', { cwd: '/ram' })
     expect(stdoutStr(io)).toBe('late\nnext\n')
+    await ws.close()
+  })
+
+  it("leaves a running line's output to it", async () => {
+    const ws = makeWs()
+    await ws.shell('{ sleep 0.05; echo late1; echo late2; touch /ram/done; } &')
+    while (!(await ws.vfs.exists('/ram/done'))) await new Promise((r) => setTimeout(r, 10))
+    const reader = new HeldConsole()
+    const typed = ws.shell('echo typed', { sink: reader })
+    await reader.reached
+    const fast = await ws.shell('echo fast', { cwd: '/ram' })
+    reader.release()
+    await typed
+    expect(stdoutStr(fast)).toBe('fast\n')
+    expect(DEC.decode(await reader.snapshot(Channel.STDOUT))).toBe('late1\nlate2\ntyped\n')
+    await ws.close()
+  })
+
+  it("hands its jobs' output on unheld when the caller aborts it", async () => {
+    const ws = makeWs()
+    await ws.shell(
+      '{ sleep 0.05; echo w1; echo w2; touch /ram/j1; while [ ! -f /ram/go ]; do sleep 0.01; done; echo w3; touch /ram/j2; } &',
+    )
+    while (!(await ws.vfs.exists('/ram/j1'))) await new Promise((r) => setTimeout(r, 10))
+    const own = new HeldConsole()
+    const abort = new AbortController()
+    const call = ws.shell('echo c', { cwd: '/ram', sink: own, signal: abort.signal })
+    await own.reached
+    await ws.vfs.write('/ram/go', '')
+    while (!(await ws.vfs.exists('/ram/j2'))) await new Promise((r) => setTimeout(r, 10))
+    const reader = new HeldConsole()
+    const typed = ws.shell('echo typed', { sink: reader })
+    await reader.reached
+    abort.abort()
+    await expect(call).rejects.toMatchObject({ name: 'AbortError' })
+    reader.release()
+    own.release()
+    await typed
+    expect(DEC.decode(await reader.snapshot(Channel.STDOUT))).toBe('w3\nw2\ntyped\n')
     await ws.close()
   })
 

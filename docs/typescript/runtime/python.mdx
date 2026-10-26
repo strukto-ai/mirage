@@ -93,15 +93,15 @@ if (container.controller === null) {
 }
 ```
 
-The service worker answers only Pyodide's file calls and lets every other
-request through. The check after `register` covers a first visit and a hard
+The service worker answers only the file calls of Pyodide and QuickJS, which
+runs in a worker the same way, and lets every other request through. The check after `register` covers a first visit and a hard
 reload, which both leave the page uncontrolled. Service workers need HTTPS or
 `localhost`. A site that already has a service worker adds the bridge to it
 instead: call `importScripts('/pyodide-sw.js')` at the top of that worker
 (`import '/pyodide-sw.js'` in a module worker) and register it in place of
 `/pyodide-sw.js`.
 
-With neither, `python3` exits 127 and says why. JSPI is not needed.
+With neither, `python3` and `node` exit 127 and say why. JSPI is not needed.
 
 In a browser, Pyodide loads from its CDN unless `home` names another place,
 such as a folder on your site holding the `pyodide` package's files

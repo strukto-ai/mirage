@@ -31,8 +31,8 @@ class FakeManager {
     return null
   }
 
-  cachedSize(_path: PathSpec): Promise<number | null> {
-    return Promise.resolve(null)
+  cachedSizes(paths: readonly PathSpec[]): Promise<(number | null)[]> {
+    return Promise.resolve(paths.map(() => null))
   }
 
   isCached(_path: PathSpec): Promise<boolean> {

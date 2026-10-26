@@ -17,6 +17,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mirage.concurrency.limiter import owned_task
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.types import Channel, OwnedStream
@@ -42,6 +43,7 @@ class Terminal(JobConsole):
         self.ended = 0
         self.attaching: asyncio.Event | None = None
         self._prefix = bytearray()
+        self._draining: asyncio.Task[None] | None = None
 
     @property
     def stdout_prefix(self) -> bytes:
@@ -63,7 +65,10 @@ class Terminal(JobConsole):
 
     async def put(self, channel: Channel, data: bytes, job: bool) -> None:
         """Pass a chunk to the reader, or keep it for the line; while a
-        reader takes what waited (``attach``), keep it and wait.
+        reader takes what waited (``attach``), keep it and wait. What was
+        handed back to an attached reader (``hand_over``) goes to it
+        first, all of it even if the writer is cancelled meanwhile: the
+        reader is the line's, not the writer's.
 
         Args:
             channel (Channel): stdout or stderr.
@@ -72,12 +77,17 @@ class Terminal(JobConsole):
         """
         if not data:
             return
-        if self.reader is not None:
+        reader = self.reader
+        if reader is not None and not self.chunks:
             self._remember(channel, data)
-            await self.reader.emit(channel, data)
+            await reader.emit(channel, data)
             return
         self.chunks.append((channel, data, job))
-        if self.attaching is not None:
+        if reader is not None:
+            self.reader = None
+            self._draining = owned_task(self._pass(reader))
+            await asyncio.shield(self._draining)
+        elif self.attaching is not None:
             await self.attaching.wait()
 
     async def attach(self, reader: JobConsole | None) -> None:
@@ -97,6 +107,15 @@ class Terminal(JobConsole):
         if reader is None:
             self.reader = None
             return
+        await self._pass(reader)
+
+    async def _pass(self, reader: JobConsole) -> None:
+        """Hand ``reader`` what waits, one chunk at a time, and make it
+        the line's reader once none is left.
+
+        Args:
+            reader (JobConsole): where the caller streams the line.
+        """
         ended = self.ended
         attaching = self.attaching = asyncio.Event()
         try:
@@ -111,6 +130,19 @@ class Terminal(JobConsole):
             if self.attaching is attaching:
                 self.attaching = None
             attaching.set()
+
+    def hand_over(self, to: "Terminal") -> None:
+        """Once its last line has ended, give ``to`` what is left here,
+        ahead of what reached it meanwhile, and send there what jobs
+        write from now on. A reader attached to ``to`` takes it before
+        anything written after.
+
+        Args:
+            to (Terminal): the terminal that takes the rest.
+        """
+        to.chunks = self.chunks + to.chunks
+        self.chunks = deque()
+        self.reader = to.jobs
 
     def drain(self) -> tuple[bytes, bytes]:
         """What reached the terminal so far, stdout and stderr, taken out

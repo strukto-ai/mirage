@@ -453,6 +453,10 @@ class BaseVFS:
         ``readdir`` of ``path`` raises otherwise. A read_tree that also
         takes ``limit: int | None`` is handed the most entries the walk
         can still use, and may return None once the tree holds more.
+        A walk that reads one directory at a time asks with
+        ``level=True``, which the mount answers from its own listing
+        (the directory's children, each with its stat) and never asks
+        this function.
 
         Args:
             path (PathSpec): the directory.

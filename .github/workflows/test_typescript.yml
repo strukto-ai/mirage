@@ -113,8 +113,12 @@ jobs:
     # does not carry this variable skips those files and still reports green,
     # which is how a split silently drops coverage. One declaration cannot
     # drift between legs the way three could.
+    # QuickJS runs quickjs-ng's WASI build, the one the Python host runs,
+    # which the tests find through MIRAGE_QUICKJS_HOME.
     env:
       REDIS_URL: redis://localhost:6379/0
+      QUICKJS_BUILD: v0.16.2
+      MIRAGE_QUICKJS_HOME: /tmp/quickjs
 
     steps:
       - uses: actions/checkout@v7
@@ -168,6 +172,22 @@ jobs:
           path: typescript/packages/*/node_modules/.vite/vitest
           key: vitest-results-${{ matrix.leg }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: vitest-results-${{ matrix.leg }}-
+
+      - name: Cache the quickjs WASI build
+        id: quickjs-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/quickjs
+          key: quickjs-wasi-${{ env.QUICKJS_BUILD }}
+
+      - name: Download the quickjs WASI build
+        if: steps.quickjs-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/quickjs
+          gh release download "$QUICKJS_BUILD" -R quickjs-ng/quickjs \
+            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
 
       - name: Run TypeScript tests
         working-directory: typescript

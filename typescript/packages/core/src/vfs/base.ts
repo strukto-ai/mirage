@@ -475,7 +475,10 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * Resolve null to have the command walk `readdir` the usual way; reject with
    * what `readdir` of `path` rejects with otherwise. `handed.limit` is the
    * most entries the walk can still use; resolve null once the tree holds
-   * more. Mirrors Python's `read_tree`.
+   * more. A walk that reads one directory at a time asks with `level: true`,
+   * which the mount answers from its own listing (the directory's children,
+   * each with its stat) and never asks this function. Mirrors Python's
+   * `read_tree`.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
   readTree(path: PathSpec, _handed?: Handed): Promise<Map<string, FileStat> | null> {

@@ -31,8 +31,9 @@ async def tree(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     resolved = await files.resolve_glob(paths)
-    readdir = files.readdir
-    stat = files.stat
+    readdir, stat = tree_walk(
+        files.read_tree, files.readdir, files.stat, False
+    )
     return await tree_generic(
         resolved,
         list(texts),
@@ -40,9 +41,10 @@ async def tree(
         readdir,
         stat,
         unbounded=tree_walk(
-            (files.read_tree if files.answers("read_tree") else None),
-            readdir,
-            stat,
+            files.read_tree,
+            files.readdir,
+            files.stat,
+            files.answers("read_tree"),
         ),
     )
 

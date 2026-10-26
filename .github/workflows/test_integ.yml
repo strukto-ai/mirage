@@ -564,12 +564,32 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx root.ts
 
+      - name: Cache the lifecycle policy engine
+        id: lifecycle-quickjs-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/quickjs
+          key: quickjs-wasi-v0.16.2
+
+      - name: Download the lifecycle policy engine
+        if: steps.lifecycle-quickjs-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/quickjs
+          gh release download v0.16.2 -R quickjs-ng/quickjs \
+            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
+
       - name: Run workspace lifecycle JSON scenarios (Node and browser wrappers)
         working-directory: integ
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: pnpm exec tsx lifecycle/run.ts
 
       - name: Run the policy corpus (Node and browser wrappers)
         working-directory: integ
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: pnpm exec tsx lifecycle/run.ts policy/cases.json
 
       # The browser wrapper again, in a real Chrome page: there is no
@@ -577,6 +597,8 @@ jobs:
       # fallback slot that Node never exercises.
       - name: Run shell cases and session concurrency in Chrome
         working-directory: integ
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: pnpm exec tsx browser/run.ts
 
       - name: Generate integ Prisma clients
@@ -1750,11 +1772,11 @@ jobs:
             --predicate '(process == "fskitd" OR process == "fskit_agent") AND messageType == error' \
             2>/dev/null | tail -40 || true
 
-  # The suite battery is split in three: the runner, both in-process hosts and
-  # the CLI driver all take the same suite-name filter, so one leg's list
-  # drives every step that costs time. Legs A and B name folders; leg C
-  # is whatever is left, so a new folder under integ/runtime joins a leg
-  # instead of leaving CI.
+  # The suite battery is split in eight: the runner, both in-process hosts
+  # and the CLI driver all take the same suite-name filter, so one leg's
+  # list drives every step that costs time. Legs A to G name folders or
+  # suites; leg H is whatever is left, so a new folder or suite under
+  # integ/runtime joins a leg instead of leaving CI.
   integ-runtime:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true') }}
@@ -1763,7 +1785,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [a, b, c]
+        leg: [a, b, c, d, e, f, g, h]
     services:
       redis:
         image: redis:7
@@ -1806,14 +1828,21 @@ jobs:
       INTEG_RUNTIME_STRICT: "1"
       # cli.sh runs both hosts at once, each over two lanes that take the
       # next suite nobody has claimed, so a leg costs about half of
-      # max(python, typescript) rather than their sum. Legs split by
-      # top-level folder of integ/runtime, balanced using the per-suite
-      # timings in run 37891950998. Re-read the `suite <host>/<name>
-      # <n>s` lines cli.sh prints before moving a folder across; that step
-      # is most of the job's test time, and it is the only one timed per
-      # suite.
-      LEG_A_FOLDERS: "dir facade open quickjs"
-      LEG_B_FOLDERS: "path policy read routing"
+      # max(python, typescript) rather than their sum. The JSON drivers run
+      # each case on every backend it lists, so they cost more than cli.sh,
+      # mostly Pyodide starting a fresh interpreter for each run (about 2 s
+      # on a runner). Legs split by top-level folder of integ/runtime, and
+      # path by suite, balanced using run 40260308235: each leg's job time,
+      # the `suite <host>/<name> <n>s` lines cli.sh prints, and the gaps
+      # between the `ok` lines the JSON drivers stream once cli.sh is done.
+      # Re-read them before moving a folder across.
+      LEG_A_SUITES: "path/cwd path/rename path/stat"
+      LEG_B_SUITES: "path/exists path/link path/remove path/symlink path/unlink path/utime path/xattr"
+      LEG_C_SUITES: "open"
+      LEG_D_SUITES: "dir facade"
+      LEG_E_SUITES: "read routing workspace"
+      LEG_F_SUITES: "write"
+      LEG_G_SUITES: "policy program quickjs"
     steps:
       - uses: actions/checkout@v7
 
@@ -1825,7 +1854,7 @@ jobs:
           # Collation for sort/comm, and for the name pattern below.
           export LC_ALL=C
           # A suite is named by its path under integ/runtime, without
-          # `.json`; a leg takes whole top-level folders. A name outside the
+          # `.json`; a leg takes top-level folders or suites. A name outside the
           # pattern is refused rather than dropped: a dropped name reaches
           # neither leg, so all three drivers would skip its cases and CI
           # would pass without running them.
@@ -1850,7 +1879,7 @@ jobs:
             # A case's `backends` runs it once per backend, and the backend
             # folder reads real S3, so either needs MinIO wherever it lands.
             if [[ "$n" == backend/* ]] || \
-                jq -e 'any(.cases[]?; any((.backends // [])[]; . == "s3"))' "$f" >/dev/null; then
+                jq -e 'any(.cases[]?; any((.backends // [])[]; split("+")[0] == "s3"))' "$f" >/dev/null; then
               minio_suites+=("$n")
             fi
             # A case naming a runtime, through a `runtimes` matrix or its
@@ -1862,39 +1891,54 @@ jobs:
             if named wasi; then wasi_suites+=("$n"); fi
             if named docker || named ssh; then box_suites+=("$n"); fi
             # The ssh backend mounts the ssh runtime's box over SFTP.
-            if jq -e 'any(.cases[]?; any((.backends // [])[]; . == "ssh"))' "$f" >/dev/null; then
+            if jq -e 'any(.cases[]?; any((.backends // [])[]; split("+")[0] == "ssh"))' "$f" >/dev/null; then
               ssh_suites+=("$n")
             fi
           done < <(find integ/runtime -name '*.json' | sort)
           all=$(printf '%s\n' "${names[@]}" | sort -u)
           folders=$(printf '%s\n' "${names[@]}" | cut -d/ -f1 | sort -u)
-          select_folders() {
+          # A leg's entry is a folder, every suite in it, or one suite. They
+          # match as plain strings, since a suite name may hold a `+`.
+          select_suites() {
             local wanted unknown
             wanted=$(printf '%s' "$1" | tr ' ' '\n' | grep -v '^$' | sort -u)
-            unknown=$(comm -13 <(printf '%s\n' "$folders") <(printf '%s\n' "$wanted"))
+            unknown=$(comm -13 <(printf '%s\n%s\n' "$folders" "$all" | sort -u) <(printf '%s\n' "$wanted"))
             if [ -n "$unknown" ]; then
-              echo "leg names folders with no suite: $unknown" >&2
+              echo "leg names no folder or suite: $unknown" >&2
               return 1
             fi
-            grep -E "^($(printf '%s' "$wanted" | paste -sd'|' -))/" <<<"$all" || true
+            awk -v wanted="$(tr '\n' ' ' <<<"$wanted")" '
+              BEGIN { n = split(wanted, entries, " ") }
+              { for (i = 1; i <= n; i++) if ($0 == entries[i] || index($0, entries[i] "/") == 1) { print; next } }
+            ' <<<"$all"
           }
-          a=$(select_folders "$LEG_A_FOLDERS")
-          b=$(select_folders "$LEG_B_FOLDERS")
-          overlap=$(comm -12 <(printf '%s\n' "$a") <(printf '%s\n' "$b"))
+          named=""
+          for leg in A B C D E F G; do
+            var="LEG_${leg}_SUITES"
+            picked=$(select_suites "${!var:-}")
+            if [ -z "$picked" ]; then
+              echo "leg $leg is empty" >&2
+              exit 1
+            fi
+            named+="$picked"$'\n'
+          done
+          named=$(grep -v '^$' <<<"$named" | sort)
+          overlap=$(uniq -d <<<"$named")
           if [ -n "$overlap" ]; then
-            echo "suites claimed by both legs: $overlap" >&2
+            echo "suites claimed by two legs: $overlap" >&2
             exit 1
           fi
-          c=$(comm -23 <(printf '%s\n' "$all") <(printf '%s\n%s\n' "$a" "$b" | sort -u))
-          if [ -z "$a" ] || [ -z "$b" ] || [ -z "$c" ]; then
-            echo "a leg is empty" >&2
+          rest=$(comm -23 <(printf '%s\n' "$all") <(printf '%s\n' "$named"))
+          if [ -z "$rest" ]; then
+            echo "leg H is empty" >&2
             exit 1
           fi
           # Refuse a matrix leg with no corresponding suite selection.
           case "$LEG" in
-            a) suites="$a" ;;
-            b) suites="$b" ;;
-            c) suites="$c" ;;
+            [a-g])
+              var="LEG_$(tr a-g A-G <<<"$LEG")_SUITES"
+              suites=$(select_suites "${!var}") ;;
+            h) suites="$rest" ;;
             *) echo "no suite list for leg '$LEG'" >&2; exit 1 ;;
           esac
           echo "SUITES=$(printf '%s' "$suites" | tr '\n' ' ')" >> "$GITHUB_ENV"
@@ -2046,7 +2090,7 @@ jobs:
             sleep 1
           done
 
-      # The CLI step is the long pole, so the JSON drivers run behind it. They
+      # The JSON drivers run behind the CLI step, on the cores it leaves. They
       # share nothing with it: run ids scope the MinIO prefixes, the sandbox
       # suites send stateless commands, no driver binds a fixed port, and the
       # CLI never reaches MongoDB. They do share MongoDB with each other: each
@@ -2069,7 +2113,7 @@ jobs:
 
       - name: Run every runtime through the JSON suites (python, then typescript)
         if: ${{ !cancelled() }}
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: integ/scripts/background.sh wait json
 
       - name: Verify the oldest supported Pyodide

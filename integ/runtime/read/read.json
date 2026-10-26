@@ -14,7 +14,10 @@
         "disk",
         "ssh",
         "s3",
-        "redis"
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ],
       "world": {
         "mounts": {
@@ -392,6 +395,16 @@
             "stdout": "RangeError: invalid array index\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -404,7 +417,9 @@
       ],
       "backends": [
         "ram",
-        "disk"
+        "disk",
+        "ram+cache",
+        "disk+cache"
       ],
       "world": {
         "mounts": {
@@ -435,6 +450,54 @@
             "node": {
               "exit": 0,
               "stdout": "0 3\n"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_mounted_file_cannot_be_mapped",
+      "note": "A mount has no pages a process could map, so mmap of a mounted file is refused: ENODEV, mmap(2)'s answer for a filesystem that cannot map, where the runtime has mmap at all.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "x.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import errno\ntry:\n    import mmap\n    with open('/data/x.txt', 'r+b') as f:\n        mmap.mmap(f.fileno(), 0)\nexcept ImportError:\n    print('ImportError')\nexcept OSError as e:\n    print(type(e).__name__, errno.errorcode.get(e.errno))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "OSError ENODEV\n"
+          },
+          "expect_on": {
+            "wasi": {
+              "stdout": "ImportError\n"
+            },
+            "host": {
+              "stdout": "UnsupportedOperation None\n"
             }
           }
         }

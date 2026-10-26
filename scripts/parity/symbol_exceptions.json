@@ -1,5 +1,5 @@
 {
-  "baseline": 2964,
+  "baseline": 2957,
  "modules": {
   "vfs/tidb_filesystem/config": {
    "typescript_only": {
@@ -1002,6 +1002,67 @@
   "policy/builtin/output_cap": {
    "typescript_only": {
     "WIRE_FIELDS": "A command_limits entry spells each Limit field in snake_case; pydantic validates and dumps those names itself, a TypeScript Limit takes camelCase, so the config reader and writer map them here."
+   }
+  },
+  "runtime/wasm/constants": {
+   "python_only": {
+    "READONLY_HINT": "The refusal for a write into the interpreter's own build, which only Python routes beside the mounts (BuildDir, for CPython on WASI); the TypeScript host runs qjs alone, which carries no files.",
+    "TERMINATION_SHIM": "A wasm module that traps for proc_exit and a stopped poll, since wasmtime-py keeps a Python callback's exception in a process-wide slot; a JS host function unwinds the guest by throwing (GuestExit)."
+   }
+  },
+  "runtime/wasm/execution": {
+   "python_only": {
+    "_join_cancelled": "Joins the worker thread under asyncio cancellation; a TypeScript run ends its worker instead, the only way to stop a busy guest there.",
+    "_written": "Holds a guest write on the event loop as an asyncio task a cancelled run waits for; TypeScript answers the write through the bridge and awaits it there.",
+    "epoch_engine": "A wasmtime engine with epoch interruption, which is how Python stops a busy guest; a JS host ends the guest's worker."
+   },
+   "typescript_only": {
+    "GuestCall": "The blocking call a worker guest makes of the host, a message across the bridge; Python's guest calls the host's functions directly on its thread.",
+    "GuestReply": "What a worker reports at its end, a message; Python's thread returns its result.",
+    "GuestRun": "The run a host posts to its worker, a message; Python passes the run's arguments to the thread's function.",
+    "Message": "Every message a guest's worker sends, typed once.",
+    "NO_WORKER": "Why a page cannot start a guest's worker (no shared memory, no service worker); Python always has threads.",
+    "Port": "A worker as one run sees it, node's or a page's; Python has no worker to wrap.",
+    "crossing": "A stat row as it crosses to the worker, without its backend row, which structured clone cannot carry; Python's guest reads the row in-process.",
+    "portOf": "Builds a Port over node's or a page's worker.",
+    "startWorker": "Starts the worker a guest runs on, from its file in Node and its embedded bundle on a page; Python starts a thread (asyncio.to_thread).",
+    "workerUnavailable": "Lets the runtime answer 127 before a run where no worker can start; Python always has threads."
+   }
+  },
+  "runtime/wasm/fs": {
+   "python_only": {
+    "_call_guarded": "Python wraps each wasmtime callback; TypeScript maps an error to its errno in the import table wasiImports builds.",
+    "_spec": "wasmtime-py needs each import's FuncType; a JS import takes plain numbers and bigints, so TypeScript lists only the names (CALLS).",
+    "install_wasi_fs": "Defines the imports on a wasmtime Linker; TypeScript hands them to WebAssembly.instantiate (wasiImports).",
+    "pack_u32": "struct packing for guest memory; TypeScript writes through a DataView in WasiFs.",
+    "pack_u64": "struct packing for guest memory; TypeScript writes through a DataView in WasiFs.",
+    "unpack_iovs": "struct unpacking of iovecs; TypeScript reads them through a DataView in WasiFs."
+   },
+   "typescript_only": {
+    "CALLS": "The preview1 names wasiImports serves, the twin of _spec's keys.",
+    "GuestExit": "Unwinds _start for proc_exit or a stop met in a host call, which Python's TERMINATION_SHIM does by trapping.",
+    "GuestFile": "An open file of the host's, answered across the bridge; Python's WasiFs holds the Descriptor itself.",
+    "GuestView": "The run's WasmView, answered across the bridge; Python's WasiFs holds the view itself.",
+    "clockNs": "Reads the clocks preview1 asks for in nanoseconds; Python's time module answers in them (time.time_ns, monotonic_ns).",
+    "wasiImports": "The import table for WebAssembly.instantiate, the twin of install_wasi_fs."
+   }
+  },
+  "runtime/wasm/loader": {
+   "python_only": {
+    "Func": "The wasmtime names Python imports to run a module; a JS host runs it with WebAssembly, which needs no import.",
+    "FuncType": "The wasmtime names Python imports to run a module; a JS host runs it with WebAssembly, which needs no import.",
+    "ValType": "The wasmtime names Python imports to run a module; a JS host runs it with WebAssembly, which needs no import.",
+    "wasmtime": "The wasmtime names Python imports to run a module; a JS host runs it with WebAssembly, which needs no import.",
+    "wasmtime_func": "The wasmtime names Python imports to run a module; a JS host runs it with WebAssembly, which needs no import.",
+    "wasmtime_slab": "The wasmtime names Python imports to run a module; a JS host runs it with WebAssembly, which needs no import."
+   },
+   "typescript_only": {
+    "loadWasm": "Reads the module's bytes from a directory on Node or fetches them on a page; wasmtime reads a module from disk itself."
+   }
+  },
+  "runtime/wasm/stat": {
+   "typescript_only": {
+    "nanoseconds": "A stat's epoch milliseconds as the nanoseconds preview1 asks in; Python's rows are nanoseconds already."
    }
   }
  }

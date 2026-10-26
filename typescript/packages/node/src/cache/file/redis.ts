@@ -200,6 +200,20 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     await this.dropMatching(prefix, excluded)
   }
 
+  async sizes(keys: readonly string[]): Promise<(number | null)[]> {
+    const c = await this.cacheClient()
+    const out: (number | null)[] = []
+    for (let start = 0; start < keys.length; start += KEY_BATCH) {
+      const pipe = c.multi()
+      for (const key of keys.slice(start, start + KEY_BATCH)) {
+        pipe.exists(this.dataKey(key)).strLen(this.dataKey(key))
+      }
+      const got = (await pipe.exec()) as unknown as number[]
+      for (let i = 0; i < got.length; i += 2) out.push(got[i] === 0 ? null : (got[i + 1] ?? null))
+    }
+    return out
+  }
+
   async fingerprints(keys: readonly string[]): Promise<(string | null)[]> {
     const c = await this.cacheClient()
     const out: (string | null)[] = []

@@ -2001,6 +2001,53 @@ class MountEntry:
         listed = await readdir(path, **_handed_on(readdir, index, **handed))
         return await keep_listing(index, key, listed)
 
+    async def _level(
+        self, virtual: str, limit: int | None
+    ) -> dict[str, FileStat] | None:
+        """One level of a subtree read: the directory's listing, as
+        ``readdir`` answers it, each child keyed by its name with the row
+        its ``stat`` answers from that listing. None where a stat does
+        not come from the listing: a mount that keeps none, or whose
+        index keeps no listing live (a zero ttl), one under ``read:
+        fresh``, whose stats check the backend, a listing the index does
+        not hold live once listed, and a child whose row a stat would
+        finish (``_whole``). A listing cut at the walk's limit answers
+        for the children it names, as their stats do.
+
+        Args:
+            virtual (str): the directory.
+            limit (int | None): the listing's limit, as a walk hands it.
+        """
+        index = self.index
+        if (
+            not self._lists
+            or self.read.policy is ReadPolicy.FRESH
+            or index.ttl <= 0
+        ):
+            return None
+        names = await self.call(
+            "readdir", virtual, **({} if limit is None else {"limit": limit})
+        )
+        listing = await index.list_dir(
+            index_key(self.prefix, self._scope(virtual))
+        )
+        held = (
+            listing.entries
+            if listing.entries is not None
+            else listing.partial_entries
+        )
+        if held is None:
+            return None
+        live = set(held)
+        rows = await index.get_many(names)
+        found: dict[str, FileStat] = {}
+        for child in names:
+            row = self._whole(rows.get(child)) if child in live else None
+            if row is None:
+                return None
+            found[child.rsplit("/", 1)[-1]] = row
+        return found
+
     async def _stat(self, index: IndexCacheStore, path: PathSpec) -> FileStat:
         """A stat of ``path`` on this mount, as ``call`` answers one.
 
@@ -2338,6 +2385,8 @@ class MountEntry:
         file. A VFS with no ``read`` of its own (gdocs, gsheets, gslides)
         stores the rendering, so its stored bytes are the renderer's.
         TypeScript spells the same override ``read(path, {raw: true})``.
+        A ``read_tree`` of one level (``level=True``) is the mount's own
+        listing with each child's row (``_level``).
 
         Args:
             name (str): operation name (e.g. "read", "stat").
@@ -2345,6 +2394,8 @@ class MountEntry:
                 lists its directory for the pattern.
         """
         virtual = path if isinstance(path, str) else path.virtual
+        if name == "read_tree" and kwargs.pop("level", False):
+            return await self._level(virtual, kwargs.get("limit"))
         async with self.use():
             filetype = (
                 kwargs.pop("filetype")

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir, rename, stat, unlink } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { generationOf } from '@struktoai/mirage-core/workspace/record/types'
@@ -43,8 +43,8 @@ function isMissing(e: unknown): boolean {
  * One JSON-record-per-file client with lockfile CAS.
  *
  * The disk twin of `S3RecordClient`: a record is one file at
- * `{root}/{prefix}{name}.json`, written atomically (tmp then rename(2))
- * so readers never see a torn record. The conditional write serializes
+ * `{root}/{prefix}{name}.json`, written atomically (tmp, synced, then
+ * rename(2)) so readers never see a torn record. The conditional write serializes
  * on a `{record}.lock` created with O_CREAT|O_EXCL, so compare and
  * write hit the same stored version. Record names are percent-encoded
  * into filenames, so any id is safe. Mirrors the Python
@@ -186,44 +186,83 @@ export class DiskRecordClient {
     }
   }
 
-  // True when the lock is gone or was stale and removed; false when a
-  // live writer still holds it.
+  /**
+   * True when the lock is gone or was stale and removed; false when a
+   * live writer still holds it or another waiter is reclaiming it.
+   *
+   * Reclaimers serialize on a `.reclaim` guard, a lock of its own and
+   * reclaimed the same way, and re-check the age under it: no waiter
+   * creates a lock while the stale one exists, so the lock found stale
+   * is the one removed, unless a live holder outlived the stale window.
+   */
   private async reclaimStaleLock(lockPath: string): Promise<boolean> {
-    let mtimeMs: number
-    try {
-      mtimeMs = (await stat(lockPath)).mtimeMs
-    } catch (e) {
-      if (isMissing(e)) return true
-      throw e
+    const age = async (): Promise<number | null> => {
+      try {
+        return (Date.now() - (await stat(lockPath)).mtimeMs) / 1000
+      } catch (e) {
+        if (isMissing(e)) return null
+        throw e
+      }
     }
-    const age = (Date.now() - mtimeMs) / 1000
-    if (age <= LOCK_STALE_SECONDS) return false
-    console.warn(`mirage: reclaiming stale lock ${lockPath} (age ${age.toFixed(1)}s)`)
-    try {
-      await unlink(lockPath)
-    } catch (e) {
-      // The holder released it between the stat and the unlink; the
-      // lock is gone either way, which is all this method promises.
-      if (!isMissing(e)) throw e
+    let seen = await age()
+    if (seen === null || seen <= LOCK_STALE_SECONDS) return seen === null
+    const guard = `${lockPath}.reclaim`
+    let fh = await this.acquireLock(guard)
+    if (fh === null) {
+      if (!(await this.reclaimStaleLock(guard))) return false
+      fh = await this.acquireLock(guard)
+      if (fh === null) return false
     }
-    return true
+    try {
+      seen = await age()
+      if (seen === null || seen <= LOCK_STALE_SECONDS) return seen === null
+      console.warn(`mirage: reclaiming stale lock ${lockPath} (age ${seen.toFixed(1)}s)`)
+      try {
+        await unlink(lockPath)
+      } catch (e) {
+        // The holder released it between the stat and the unlink; the
+        // lock is gone either way, which is all this method promises.
+        if (!isMissing(e)) throw e
+      }
+      return true
+    } finally {
+      await this.releaseLock(fh, guard)
+    }
   }
 
+  // Unlink only after closing: on Windows an open, unlinked lock can block the next one.
   private async releaseLock(fh: FileHandle, lockPath: string): Promise<void> {
-    await fh.close()
+    let owned = false
     try {
-      await unlink(lockPath)
+      const held = await fh.stat({ bigint: true })
+      const current = await stat(lockPath, { bigint: true })
+      owned = held.dev === current.dev && held.ino === current.ino
     } catch (e) {
-      // Only reachable when another writer reclaimed this lock as
-      // stale; the record write already landed, nothing to undo.
       if (!isMissing(e)) throw e
-      console.warn(`mirage: lock ${lockPath} vanished before release (reclaimed?)`)
+    } finally {
+      await fh.close()
     }
+    if (owned) {
+      try {
+        await unlink(lockPath)
+        return
+      } catch (e) {
+        if (!isMissing(e)) throw e
+      }
+    }
+    // The lock vanished or changed hands before release; nothing to undo.
+    console.warn(`mirage: lock ${lockPath} was gone or taken before release`)
   }
 
   private async writeRecord(target: string, fields: Record<string, unknown>): Promise<void> {
     const tmp = `${target}.${String(process.pid)}.${String(tmpCounter++)}.tmp`
-    await writeFile(tmp, JSON.stringify(fields))
+    const fh = await open(tmp, 'w')
+    try {
+      await fh.writeFile(JSON.stringify(fields))
+      await fh.sync()
+    } finally {
+      await fh.close()
+    }
     await rename(tmp, target)
   }
 }

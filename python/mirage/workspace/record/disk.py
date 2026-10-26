@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 from collections.abc import Iterable
 from itertools import count
@@ -25,8 +26,11 @@ from urllib.parse import quote, unquote
 import aiofiles
 import aiofiles.os
 
-from mirage.concurrency.limiter import settle
+from mirage.concurrency.limiter import run_blocking, settle
 from mirage.workspace.record.types import generation_of
+
+if sys.platform == "darwin":
+    import fcntl
 
 logger = logging.getLogger(__name__)
 
@@ -58,33 +62,62 @@ def _acquire_lock(lock_path: str) -> int | None:
 
 def _reclaim_stale_lock(lock_path: str) -> bool:
     """True when the lock is gone or was stale and removed; False when a
-    live writer still holds it."""
+    live writer still holds it or another waiter is reclaiming it.
+
+    Reclaimers serialize on a ``.reclaim`` guard, a lock of its own and
+    reclaimed the same way, and re-check the age under it: no waiter
+    creates a lock while the stale one exists, so the lock found stale
+    is the one removed, unless a live holder outlived the stale window."""
+
+    def age() -> float | None:
+        try:
+            return time.time() - os.stat(lock_path).st_mtime
+        except FileNotFoundError:
+            return None
+
+    seen = age()
+    if seen is None or seen <= LOCK_STALE_SECONDS:
+        return seen is None
+    guard = f"{lock_path}.reclaim"
+    fd = _acquire_lock(guard)
+    if fd is None:
+        if not _reclaim_stale_lock(guard):
+            return False
+        fd = _acquire_lock(guard)
+        if fd is None:
+            return False
     try:
-        age = time.time() - os.stat(lock_path).st_mtime
-    except FileNotFoundError:
+        seen = age()
+        if seen is None or seen <= LOCK_STALE_SECONDS:
+            return seen is None
+        logger.warning("reclaiming stale lock %s (age %.1fs)", lock_path, seen)
+        try:
+            os.unlink(lock_path)
+        except FileNotFoundError:
+            # The holder released it between the stat and the unlink; the
+            # lock is gone either way, which is all this function promises.
+            pass
         return True
-    if age <= LOCK_STALE_SECONDS:
-        return False
-    logger.warning("reclaiming stale lock %s (age %.1fs)", lock_path, age)
-    try:
-        os.unlink(lock_path)
-    except FileNotFoundError:
-        # The holder released it between the stat and the unlink; the
-        # lock is gone either way, which is all this function promises.
-        pass
-    return True
+    finally:
+        _release_lock(fd, guard)
 
 
 def _release_lock(fd: int, lock_path: str) -> None:
-    os.close(fd)
+    # Unlink only after closing: Windows refuses to unlink an open file.
     try:
-        os.unlink(lock_path)
+        owned = os.path.samestat(os.fstat(fd), os.stat(lock_path))
     except FileNotFoundError:
-        # Only reachable when another writer reclaimed this lock as
-        # stale; the record write already landed, nothing to undo.
-        logger.warning(
-            "lock %s vanished before release (reclaimed?)", lock_path
-        )
+        owned = False
+    finally:
+        os.close(fd)
+    if owned:
+        try:
+            os.unlink(lock_path)
+            return
+        except FileNotFoundError:
+            pass
+    # The lock vanished or changed hands before release; nothing to undo.
+    logger.warning("lock %s was gone or taken before release", lock_path)
 
 
 async def _acquire_owned(lock_path: str) -> int | None:
@@ -111,8 +144,8 @@ class DiskRecordClient:
     """One JSON-record-per-file client with lockfile CAS.
 
     The disk twin of ``S3RecordClient``: a record is one file at
-    ``{root}/{prefix}{name}.json``, written atomically (tmp then
-    rename(2)) so readers never see a torn record. The conditional
+    ``{root}/{prefix}{name}.json``, written atomically (tmp, synced,
+    then rename(2)) so readers never see a torn record. The conditional
     write serializes on a ``{record}.lock`` created with O_CREAT|O_EXCL,
     so compare and write hit the same stored version. Record names are
     percent-encoded into filenames, so any id is safe.
@@ -195,6 +228,22 @@ class DiskRecordClient:
         tmp = f"{path}.{os.getpid()}.{next(_TMP_COUNTER)}.tmp"
         async with aiofiles.open(tmp, "wb") as f:
             await f.write(json.dumps(fields).encode())
+            await f.flush()
+            fd = f.fileno()
+
+            def sync() -> None:
+                # Full sync on macOS; plain fsync where the volume refuses it.
+                if sys.platform == "darwin":
+                    try:
+                        fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+                        return
+                    except OSError:
+                        logger.debug(
+                            "F_FULLFSYNC refused on %s", tmp, exc_info=True
+                        )
+                os.fsync(fd)
+
+            await run_blocking(sync)
         await aiofiles.os.replace(tmp, path)
 
     async def list_names(self) -> list[str]:

@@ -198,8 +198,40 @@ async def _sized(mount: MountEntry, path: PathSpec, row: Any) -> Any:
         or manager is None
     ):
         return row
-    size = await manager.cached_size(path)
+    [size] = await manager.cached_sizes([path])
     return row if size is None else row.model_copy(update={"size": size})
+
+
+async def _sized_tree(
+    mount: MountEntry, path: PathSpec, tree: dict[str, FileStat]
+) -> dict[str, FileStat]:
+    """A subtree read with each row sized as ``_sized`` sizes a stat, so
+    a walk answered from it reads the sizes its stats would, in one ask of
+    the file cache.
+
+    Args:
+        mount (MountEntry): the mount that answered the read.
+        path (PathSpec): the directory it answered for.
+        tree (dict[str, FileStat]): the answer, keyed below ``path``.
+    """
+    manager = mount.cache_manager
+    unsized = [
+        rel
+        for rel, row in tree.items()
+        if row.type is FileType.FILE and row.size is None
+    ]
+    if manager is None or not unsized:
+        return tree
+    base = path.virtual.rstrip("/")
+    sizes = await manager.cached_sizes(
+        [PathSpec.from_str_path(f"{base}/{rel}") for rel in unsized]
+    )
+    found = {
+        rel: tree[rel].model_copy(update={"size": size})
+        for rel, size in zip(unsized, sizes, strict=True)
+        if size is not None
+    }
+    return {rel: found.get(rel, row) for rel, row in tree.items()}
 
 
 def _appends_nothing(name: str, kwargs: dict[str, Any]) -> bool:
@@ -2317,6 +2349,8 @@ class Dispatcher:
                     )
                 if call.name == "stat":
                     result = await _sized(mount, call.path, result)
+                elif call.name == "read_tree" and isinstance(result, dict):
+                    result = await _sized_tree(mount, call.path, result)
         except (FileNotFoundError, NotADirectoryError):
             result = self._namespace_result(
                 call.name, call.path.virtual, call.vis

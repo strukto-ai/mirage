@@ -394,9 +394,7 @@ class SessionState:
     tty: Terminal = field(default_factory=Terminal, repr=False)
     job_output: JobOutput | None = field(default=None, repr=False)
     job_waits: JobWaits | None = field(default=None, repr=False)
-    # The jobs this shell's lines start theirs in when no caller hands a
-    # table: a per-call line's own, so a callback fired in it reaches
-    # them; None for the workspace's.
+    # A per-call line's jobs, which a callback in it reaches; None otherwise.
     job_table: JobTable | None = field(default=None, repr=False)
     # Transient `set -e` marker: True when the failure just returned
     # came from a short-circuited &&/|| branch or a `!`-negated command,

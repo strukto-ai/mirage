@@ -1,0 +1,99 @@
+{
+  "cases": [
+    {
+      "id": "pathlib_answers_what_is_there",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "abc",
+              "d/b.txt": "b"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "from pathlib import Path\nfor name in ('a.txt', 'd', 'nope'):\n    p = Path('/data') / name\n    print(name, p.exists(), p.is_file(), p.is_dir())\nprint(Path('/data/a.txt').stat().st_size)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "a.txt True True False\nd True False True\nnope False False False\n3\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "os_path_answers_what_is_there",
+      "note": "Monty has no os.path.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "abc",
+              "d/b.txt": "b"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nfor name in ('a.txt', 'd', 'nope'):\n    p = os.path.join('/data', name)\n    print(name, os.path.exists(p), os.path.isfile(p), os.path.isdir(p))\nprint(os.path.getsize('/data/a.txt'), os.access('/data/a.txt', os.R_OK))",
+            "js": "for (const name of ['a.txt', 'd', 'nope']) {\n  const [st, err] = os.stat('/data/' + name)\n  const kind = err !== 0 ? 'none' : (st.mode & os.S_IFMT) === os.S_IFDIR ? 'dir' : (st.mode & os.S_IFMT) === os.S_IFREG ? 'file' : 'other'\n  console.log(name, err, kind, err === 0 && kind === 'file' ? st.size : '')\n}",
+            "node": "const fsp = require('node:fs').promises\nfor (const name of ['a.txt', 'd', 'nope']) {\n  const p = '/data/' + name\n  const there = await fsp.access(p).then(() => true, () => false)\n  const st = await fsp.stat(p).catch((e) => e.code)\n  console.log(name, there, typeof st === 'string' ? st : st.isFile(), typeof st === 'string' ? st : st.isDirectory())\n}\nconsole.log((await fsp.stat('/data/a.txt')).size)"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "a.txt True True False\nd True False True\nnope False False False\n3 True\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "a.txt 0 file 3\nd 0 dir \nnope 44 none \n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "a.txt true true false\nd true false true\nnope false ENOENT ENOENT\n3\n"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

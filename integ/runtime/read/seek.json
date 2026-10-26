@@ -1,0 +1,146 @@
+{
+  "cases": [
+    {
+      "id": "a_file_seeks_and_reads_lines",
+      "note": "readline, tell, seeks from the start, the position and the end, and iteration over lines, in text and in binary.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "one\ntwo\nthree\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "f = open('/data/f.txt')\nprint(repr(f.readline()), f.tell())\nf.seek(0, 2)\nprint(f.tell())\nf.seek(2)\nprint(repr(f.read(3)))\nf.seek(0)\nprint([line.rstrip() for line in f.readlines()])\nf.close()\nb = open('/data/f.txt', 'rb')\nb.seek(-4, 2)\nprint(b.read())\nb.seek(4)\nb.seek(2, 1)\nprint(b.read(2), b.tell())\nb.close()",
+            "js": "const f = std.open('/data/f.txt', 'r')\nconsole.log(JSON.stringify(f.getline()), f.tell())\nf.seek(0, std.SEEK_END)\nconsole.log(f.tell())\nf.seek(2, std.SEEK_SET)\nconsole.log(JSON.stringify(f.readAsString(3)))\nf.seek(-4, std.SEEK_END)\nconsole.log(JSON.stringify(f.readAsString()))\nf.seek(4, std.SEEK_SET)\nf.seek(2, std.SEEK_CUR)\nconsole.log(f.getByte(), f.tell())\nf.seek(0, std.SEEK_END)\nconsole.log(f.getByte(), f.eof())\nf.close()",
+            "node": "const fsp = require('node:fs').promises\nconst f = await fsp.open('/data/f.txt', 'r')\nconst buf = Buffer.alloc(3)\nconst { bytesRead } = await f.read(buf, 0, 3, 2)\nconsole.log(bytesRead, JSON.stringify(buf.toString()))\nconst tail = Buffer.alloc(10)\nconst end = await f.read(tail, 0, 10, 10)\nconsole.log(end.bytesRead, JSON.stringify(tail.subarray(0, end.bytesRead).toString()))\nconsole.log((await f.stat()).size)\nawait f.close()\nfor await (const line of (await fsp.open('/data/f.txt')).readLines()) console.log(line)"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "'one\\n' 4\n14\n'e\\nt'\n['one', 'two', 'three']\nb'ree\\n'\nb'o\\n' 8\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "\"one\" 4\n14\n\"e\\nt\"\n\"ree\\n\"\n111 7\n-1 true\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "3 \"e\\nt\"\n4 \"ree\\n\"\n14\none\ntwo\nthree\n"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_file_iterates_its_lines",
+      "note": "Monty's file is not iterable.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "one\ntwo\nthree"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "with open('/data/f.txt') as f:\n    print(repr(next(f)))\n    for line in f:\n        print(repr(line))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "'one\\n'\n'two\\n'\n'three'\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_descriptor_seeks_from_each_whence",
+      "note": "Monty has no os.open; QuickJS's os.seek returns the new offset as a bigint when given one.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "one\ntwo\nthree\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nfd = os.open('/data/f.txt', os.O_RDONLY)\nprint(os.lseek(fd, -6, os.SEEK_END), os.read(fd, 5))\nprint(os.lseek(fd, 0, os.SEEK_CUR))\nprint(os.lseek(fd, 4, os.SEEK_SET), os.read(fd, 3))\nprint(os.lseek(fd, 1, os.SEEK_CUR), os.read(fd, 100))\nos.close(fd)",
+            "js": "const fd = os.open('/data/f.txt', os.O_RDONLY)\nconst buf = new ArrayBuffer(5)\nconst text = (n) => String.fromCharCode(...new Uint8Array(buf, 0, n))\nconsole.log(os.seek(fd, -6, std.SEEK_END), text(os.read(fd, buf, 0, 5)))\nconsole.log(os.seek(fd, 0, std.SEEK_CUR))\nconsole.log(os.seek(fd, 4, std.SEEK_SET), text(os.read(fd, buf, 0, 3)))\nconsole.log(os.close(fd))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "8 b'three'\n13\n4 b'two'\n8 b'three\\n'\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "8 three\n13\n4 two\n0\n"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
