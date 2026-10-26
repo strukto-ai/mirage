@@ -185,7 +185,9 @@ def _regex_text(pieces: list[Piece]) -> str:
     """Pattern pieces as a POSIX extended regex. A literal character is
     escaped, except inside a bracket expression, where a backslash is a
     member of its own and every character stands for itself: bash reads
-    ``['^'a]`` as ``[^a]`` and ``[a'-'c]`` as a range.
+    ``['^'a]`` as ``[^a]`` and ``[a'-'c]`` as a range. The pieces are
+    joined as they are, so a live backslash escapes only a live character
+    after it.
 
     Args:
         pieces (list[Piece]): from ``_pattern_pieces``.
@@ -193,13 +195,14 @@ def _regex_text(pieces: list[Piece]) -> str:
     chars = [(ch, lit) for text, lit in pieces for ch in text]
     out: list[str] = []
     members = -1
+    unclosed: set[str] = set()
     i = 0
     while i < len(chars):
         ch, lit = chars[i]
         if members < 0:
             if lit:
                 out.append(posix_escape(ch))
-            elif ch == "\\" and i + 1 < len(chars):
+            elif ch == "\\" and i + 1 < len(chars) and not chars[i + 1][1]:
                 out.append(ch + chars[i + 1][0])
                 i += 1
             else:
@@ -212,7 +215,9 @@ def _regex_text(pieces: list[Piece]) -> str:
             i += 1
             continue
         nxt = chars[i + 1][0] if i + 1 < len(chars) else ""
-        if ch == "[" and nxt in (":", ".", "="):
+        # A delimiter whose closing pair is missing is missing after any
+        # later opening too, so the search runs once for it.
+        if ch == "[" and nxt in (":", ".", "=") and nxt not in unclosed:
             close = next(
                 (
                     j
@@ -225,6 +230,7 @@ def _regex_text(pieces: list[Piece]) -> str:
                 out.extend(c for c, _ in chars[i : close + 2])
                 i = close + 2
                 continue
+            unclosed.add(nxt)
         out.append(ch)
         if ch == "]" and i > members:
             members = -1

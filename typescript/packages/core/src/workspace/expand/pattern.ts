@@ -151,7 +151,8 @@ export async function expandRegex(
  * Pattern pieces as a POSIX extended regex. A literal character is escaped,
  * except inside a bracket expression, where a backslash is a member of its
  * own and every character stands for itself: bash reads `['^'a]` as `[^a]`
- * and `[a'-'c]` as a range.
+ * and `[a'-'c]` as a range. The pieces are joined as they are, so a live
+ * backslash escapes only a live character after it.
  */
 function regexText(pieces: Piece[]): string {
   const chars: Piece[] = pieces.flatMap(([text, literal]) =>
@@ -160,6 +161,7 @@ function regexText(pieces: Piece[]): string {
   const at = (index: number): string => chars[index]?.[0] ?? ''
   const out: string[] = []
   let members = -1
+  const unclosed = new Set<string>()
   let i = 0
   while (i < chars.length) {
     const ch = at(i)
@@ -167,7 +169,7 @@ function regexText(pieces: Piece[]): string {
     if (members < 0) {
       if (literal) {
         out.push(posixEscape(ch))
-      } else if (ch === '\\' && i + 1 < chars.length) {
+      } else if (ch === '\\' && i + 1 < chars.length && chars[i + 1]?.[1] === false) {
         out.push(ch + at(i + 1))
         i += 1
       } else {
@@ -184,7 +186,9 @@ function regexText(pieces: Piece[]): string {
       continue
     }
     const next = at(i + 1)
-    if (ch === '[' && (next === ':' || next === '.' || next === '=')) {
+    // A delimiter whose closing pair is missing is missing after any later
+    // opening too, so the search runs once for it.
+    if (ch === '[' && (next === ':' || next === '.' || next === '=') && !unclosed.has(next)) {
       let close = -1
       for (let j = i + 2; j < chars.length - 1; j += 1) {
         if (at(j) === next && at(j + 1) === ']') {
@@ -197,6 +201,7 @@ function regexText(pieces: Piece[]): string {
         i = close + 2
         continue
       }
+      unclosed.add(next)
     }
     out.push(ch)
     if (ch === ']' && i > members) members = -1
