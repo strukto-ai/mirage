@@ -377,8 +377,8 @@ export class Limit {
   readonly maxLines: number | null
   readonly timeoutSeconds: number | null
   readonly walkLimit: number | null
-  // Null until a layer names it, so `layered` can tell an inherited mode
-  // from a chosen one; Python reads `model_fields_set` for the same.
+  /** The fields the limit names, null among them; the rest inherit. Mirrors Python's model_fields_set. */
+  readonly fieldsSet: ReadonlySet<keyof LimitInit>
   private readonly exceed: OnExceed | null
 
   constructor(init: LimitInit = {}) {
@@ -405,36 +405,35 @@ export class Limit {
     this.timeoutSeconds = timeoutSeconds
     this.walkLimit = walkLimit
     this.exceed = init.onExceed ?? null
+    this.fieldsSet = new Set(
+      (Object.keys(init) as (keyof LimitInit)[]).filter((key) => init[key] !== undefined),
+    )
   }
 
   get onExceed(): OnExceed {
     return this.exceed ?? OnExceed.TRUNCATE
   }
 
-  /** The mode a layer named, null when it inherits one. */
-  get chosenOnExceed(): OnExceed | null {
-    return this.exceed
-  }
 
   /**
-   * Each field from the first limit that sets it, most specific first: a
-   * layer naming one bound inherits the others from the layers below it.
-   * Returns null when nothing is configured. Mirrors Python's Limit.layered.
+   * Each field from the first limit that names it, most specific first: a
+   * layer naming one bound inherits the others from the layers below it, and
+   * one naming a bound as null lifts it. Returns null when nothing is
+   * configured. Mirrors Python's Limit.layered.
    */
   static layered(limits: Iterable<Limit | null>): Limit | null {
     const present = [...limits].filter((s): s is Limit => s !== null)
     if (present.length === 0) return null
-    const pick = <K extends 'maxBytes' | 'maxLines' | 'timeoutSeconds' | 'walkLimit'>(
-      key: K,
-    ): number | null => present.find((s) => s[key] !== null)?.[key] ?? null
-    const exceed = present.find((s) => s.exceed !== null)?.exceed
-    return new Limit({
-      maxBytes: pick('maxBytes'),
-      maxLines: pick('maxLines'),
-      timeoutSeconds: pick('timeoutSeconds'),
-      walkLimit: pick('walkLimit'),
-      ...(exceed === undefined || exceed === null ? {} : { onExceed: exceed }),
-    })
+    const init: LimitInit = {}
+    for (const key of LIMIT_FIELDS) {
+      const layer = present.find((s) => s.fieldsSet.has(key))
+      if (layer !== undefined) Object.assign(init, { [key]: layer.named(key) })
+    }
+    return new Limit(init)
+  }
+
+  private named(key: keyof LimitInit): LimitInit[keyof LimitInit] {
+    return key === 'onExceed' ? this.onExceed : this[key]
   }
 
   /**
@@ -451,14 +450,23 @@ export class Limit {
     if (present.length === 0) return null
     const init: LimitInit = {}
     for (const key of Object.keys(LIMIT_AGGR) as LimitAggrField[]) {
-      Object.assign(init, { [key]: LIMIT_AGGR[key](present) })
+      if (present.some((s) => s.fieldsSet.has(key)))
+        Object.assign(init, { [key]: LIMIT_AGGR[key](present) })
     }
     return new Limit(init)
   }
 }
 
 /** Every Limit field that composes; `kind` is the wire discriminant, not a bound. */
-type LimitAggrField = Exclude<keyof Limit, 'kind' | 'chosenOnExceed'>
+type LimitAggrField = Exclude<keyof Limit, 'kind' | 'fieldsSet'>
+
+const LIMIT_FIELDS: readonly (keyof LimitInit)[] = [
+  'maxBytes',
+  'maxLines',
+  'timeoutSeconds',
+  'walkLimit',
+  'onExceed',
+]
 
 /**
  * Each bound's composition law, keyed by field.

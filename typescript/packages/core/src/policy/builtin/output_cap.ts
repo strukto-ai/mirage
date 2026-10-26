@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Limit, OnExceed, type Producer } from '../../types.ts'
+import { Limit, type LimitInit, OnExceed, type Producer } from '../../types.ts'
 
 const DEFAULT_MAX_LINES = 2000
 const DEFAULT_TIMEOUT_SECONDS = 600
@@ -126,6 +126,15 @@ export function resolveProducer(
   )
 }
 
+// Each Limit field as config spells it.
+const WIRE_FIELDS: readonly (readonly [string, keyof LimitInit])[] = [
+  ['max_lines', 'maxLines'],
+  ['max_bytes', 'maxBytes'],
+  ['timeout_seconds', 'timeoutSeconds'],
+  ['walk_limit', 'walkLimit'],
+  ['on_exceed', 'onExceed'],
+]
+
 /** The canonical snake_case command-limit mapping used by config and stored sessions. */
 export function parseCommandLimits(raw: unknown): Record<string, Limit> {
   if (raw === undefined || raw === null) return {}
@@ -151,37 +160,33 @@ export function parseCommandLimits(raw: unknown): Record<string, Limit> {
       block.on_exceed !== OnExceed.TRUNCATE
     )
       throw new Error(`command_limits.${name}.on_exceed must be truncate or error`)
-    result[name] = new Limit({
-      maxLines: (block.max_lines as number | null | undefined) ?? null,
-      maxBytes: (block.max_bytes as number | null | undefined) ?? null,
-      timeoutSeconds: (block.timeout_seconds as number | null | undefined) ?? null,
-      walkLimit: (block.walk_limit as number | null | undefined) ?? null,
-      ...(block.on_exceed === undefined ? {} : { onExceed: block.on_exceed }),
-    })
+    const init: LimitInit = {}
+    for (const [key, field] of WIRE_FIELDS) {
+      if (key in block) Object.assign(init, { [field]: block[key] })
+    }
+    result[name] = new Limit(init)
   }
   return result
 }
 
 /**
- * A limit table as config spells it, each entry with only the fields it
- * sets, so a stored entry still inherits the rest. Mirrors Python's
- * command_limits_to_json.
+ * A limit table as config spells it, each entry with only the fields it names
+ * (a null among them), so a stored entry still inherits the rest. Mirrors
+ * Python's command_limits_to_json.
  */
 export function commandLimitsToJSON(
   limits: Readonly<Record<string, Limit>>,
 ): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(limits).map(([name, limit]) => {
-      const exceed = limit.chosenOnExceed
-      const block: Record<string, unknown> = {
-        max_lines: limit.maxLines,
-        max_bytes: limit.maxBytes,
-        timeout_seconds: limit.timeoutSeconds,
-        walk_limit: limit.walkLimit,
-        ...(exceed === null ? {} : { on_exceed: exceed }),
-      }
-      return [name, Object.fromEntries(Object.entries(block).filter(([, v]) => v !== null))]
-    }),
+    Object.entries(limits).map(([name, limit]) => [
+      name,
+      Object.fromEntries(
+        WIRE_FIELDS.filter(([, field]) => limit.fieldsSet.has(field)).map(([key, field]) => [
+          key,
+          field === 'onExceed' ? limit.onExceed : limit[field],
+        ]),
+      ),
+    ]),
   )
 }
 

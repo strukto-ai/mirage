@@ -795,6 +795,8 @@ class Limit(BaseModel):
             return None
         kwargs: dict[str, Any] = {}
         for name, info in cls.model_fields.items():
+            if not any(name in s.model_fields_set for s in present):
+                continue
             rule = next(
                 (m for m in info.metadata if isinstance(m, Aggr)), None
             )
@@ -806,9 +808,10 @@ class Limit(BaseModel):
 
     @classmethod
     def layered(cls, limits: "Iterable[Limit | None]") -> "Limit | None":
-        """Each field from the first limit that sets it, most specific
+        """Each field from the first limit that names it, most specific
         first: a layer naming one bound inherits the others from the
-        layers below it. Returns None when nothing is configured.
+        layers below it, and one naming a bound as None lifts it. Returns
+        None when nothing is configured.
 
         Args:
             limits (Iterable[Limit | None]): layers, most specific first.
@@ -819,9 +822,8 @@ class Limit(BaseModel):
         kwargs: dict[str, Any] = {}
         for name in cls.model_fields:
             for layer in present:
-                value = getattr(layer, name)
-                if name in layer.model_fields_set and value is not None:
-                    kwargs[name] = value
+                if name in layer.model_fields_set:
+                    kwargs[name] = getattr(layer, name)
                     break
         return cls(**kwargs)
 

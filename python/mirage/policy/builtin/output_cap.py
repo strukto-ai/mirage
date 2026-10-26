@@ -143,18 +143,14 @@ def command_limits_to_json(
     limits: Mapping[str, Limit],
 ) -> dict[str, dict[str, JsonValue]]:
     """A limit table as config spells it, each entry with only the
-    fields it sets, so a stored entry still inherits the rest.
+    fields it names (a None among them), so a stored entry still
+    inherits the rest.
 
     Args:
         limits (Mapping[str, Limit]): the table, keyed by command.
     """
     return {
-        name: {
-            key: value
-            for key, value in limit.model_dump(mode="json").items()
-            if value is not None
-            and (key != "on_exceed" or key in limit.model_fields_set)
-        }
+        name: limit.model_dump(mode="json", include=limit.model_fields_set)
         for name, limit in limits.items()
     }
 
