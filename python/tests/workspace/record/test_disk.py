@@ -130,11 +130,6 @@ async def test_cancel_during_acquisition_releases_lock(
     assert await client.cas_put("k", {"generation": 1}, 0)
 
 
-LATE_STEPS = pytest.mark.parametrize(
-    "late_step", ["unlink", "open"], ids=["together", "after"]
-)
-
-
 def _race_two_reclaimers(
     monkeypatch, lock_path: str, late_step: Literal["unlink", "open"]
 ) -> None:
@@ -181,31 +176,9 @@ def _stale_lock(
 
 
 @pytest.mark.asyncio
-@LATE_STEPS
-async def test_two_reclaimers_of_one_stale_lock_never_both_hold_it(
-    tmp_path, monkeypatch, late_step
-):
-    client = DiskRecordClient(str(tmp_path), "")
-    _race_two_reclaimers(monkeypatch, _stale_lock(client, "k"), late_step)
-    inside = 0
-    most = 0
-
-    async def hold() -> None:
-        nonlocal inside, most
-        fd = await client.lock("k")
-        inside += 1
-        most = max(most, inside)
-        await asyncio.sleep(0.3)
-        inside -= 1
-        await client.unlock("k", fd)
-
-    await asyncio.gather(hold(), hold())
-    assert most == 1
-    assert os.listdir(tmp_path) == []
-
-
-@pytest.mark.asyncio
-@LATE_STEPS
+@pytest.mark.parametrize(
+    "late_step", ["unlink", "open"], ids=["together", "after"]
+)
 async def test_two_claims_over_one_stale_lock_have_one_winner(
     tmp_path, monkeypatch, late_step
 ):
@@ -276,27 +249,22 @@ async def test_a_reclaimer_that_loses_the_guard_leaves_the_lock(
     assert os.listdir(tmp_path) == ["k.json.lock"]
 
 
-@pytest.mark.asyncio
-async def test_release_leaves_a_lock_another_writer_took(tmp_path):
-    client = DiskRecordClient(str(tmp_path), "")
-    mine = await client.lock("k")
-    lock_path = client.path("k") + ".lock"
-    os.unlink(lock_path)
-    theirs = await client.lock("k")
-    await client.unlock("k", mine)
-    assert os.listdir(tmp_path) == ["k.json.lock"]
-    await client.unlock("k", theirs)
-    assert os.listdir(tmp_path) == []
-
-
 def _refuse_full_sync(fd: int, cmd: int) -> None:
     raise OSError(errno.ENOTSUP, "full sync not supported")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("platform", ["darwin", "linux"])
+@pytest.mark.parametrize(
+    "platform, refused, how",
+    [
+        ("darwin", False, "full sync"),
+        ("darwin", True, "fsync"),
+        ("linux", False, "fsync"),
+    ],
+    ids=["darwin", "darwin-refused", "linux"],
+)
 async def test_a_record_reaches_the_disk_before_it_is_renamed_in(
-    tmp_path, monkeypatch, platform
+    tmp_path, monkeypatch, platform, refused, how
 ):
     steps: list[tuple[str, int, int]] = []
     real_fsync = os.fsync
@@ -318,7 +286,8 @@ async def test_a_record_reaches_the_disk_before_it_is_renamed_in(
         steps.append(("replace", moved.st_size, moved.st_ino))
         await real_replace(src, dst)
 
-    fake = SimpleNamespace(F_FULLFSYNC=51, fcntl=full_sync)
+    sync = _refuse_full_sync if refused else full_sync
+    fake = SimpleNamespace(F_FULLFSYNC=51, fcntl=sync)
     monkeypatch.setattr(disk.sys, "platform", platform)
     monkeypatch.setattr(disk, "fcntl", fake, raising=False)
     monkeypatch.setattr(os, "fsync", fsync)
@@ -327,28 +296,7 @@ async def test_a_record_reaches_the_disk_before_it_is_renamed_in(
     await client.put("k", {"generation": 0})
     body = len(json.dumps({"generation": 0}))
     record = os.stat(client.path("k")).st_ino
-    how = "full sync" if platform == "darwin" else "fsync"
     assert steps == [(how, body, record), ("replace", body, record)]
-
-
-@pytest.mark.asyncio
-async def test_a_volume_without_full_sync_falls_back_to_fsync(
-    tmp_path, monkeypatch
-):
-    sizes: list[int] = []
-    real_fsync = os.fsync
-
-    def fsync(fd: int) -> None:
-        sizes.append(os.fstat(fd).st_size)
-        real_fsync(fd)
-
-    fake = SimpleNamespace(F_FULLFSYNC=51, fcntl=_refuse_full_sync)
-    monkeypatch.setattr(disk.sys, "platform", "darwin")
-    monkeypatch.setattr(disk, "fcntl", fake, raising=False)
-    monkeypatch.setattr(os, "fsync", fsync)
-    client = DiskRecordClient(str(tmp_path), "")
-    await client.put("k", {"generation": 0})
-    assert sizes == [len(json.dumps({"generation": 0}))]
 
 
 @pytest.mark.asyncio
@@ -379,9 +327,13 @@ async def test_release_closes_the_lock_before_unlinking_it(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("after_check", [False, True], ids=["before", "after"])
-async def test_release_survives_its_lock_vanishing(
-    tmp_path, monkeypatch, after_check
+@pytest.mark.parametrize(
+    "after_check, retaken",
+    [(False, False), (False, True), (True, False)],
+    ids=["before", "retaken", "after"],
+)
+async def test_release_after_its_lock_vanished(
+    tmp_path, monkeypatch, after_check, retaken
 ):
     client = DiskRecordClient(str(tmp_path), "")
     fd = await client.lock("k")
@@ -398,5 +350,9 @@ async def test_release_survives_its_lock_vanishing(
         monkeypatch.setattr(os, "stat", stat)
     else:
         os.unlink(lock_path)
+    theirs = await client.lock("k") if retaken else None
     await client.unlock("k", fd)
-    assert os.listdir(tmp_path) == []
+    assert os.listdir(tmp_path) == (["k.json.lock"] if retaken else [])
+    if theirs is not None:
+        await client.unlock("k", theirs)
+        assert os.listdir(tmp_path) == []

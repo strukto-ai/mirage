@@ -99,27 +99,6 @@ describe('DiskRecordClient lock reclaim and release', () => {
   })
 
   it.each(LATE_STEPS)(
-    'never lets two reclaimers of one stale lock both hold it (%s)',
-    async (_, lateStep) => {
-      const client = new DiskRecordClient(root, '')
-      raceTwoReclaimers(staleLock(client, 'k'), lateStep)
-      let inside = 0
-      let most = 0
-      const hold = async (): Promise<void> => {
-        const fh = await client.lock('k')
-        inside += 1
-        most = Math.max(most, inside)
-        await pause(300)
-        inside -= 1
-        await client.unlock('k', fh)
-      }
-      await Promise.all([hold(), hold()])
-      expect(most).toBe(1)
-      expect(readdirSync(root)).toEqual([])
-    },
-  )
-
-  it.each(LATE_STEPS)(
     'gives two claims over one stale lock one winner (%s)',
     async (_, lateStep) => {
       const client = new DiskRecordClient(root, '')
@@ -176,18 +155,6 @@ describe('DiskRecordClient lock reclaim and release', () => {
     expect(readdirSync(root)).toEqual(['k.json.lock'])
   })
 
-  it('leaves a lock another writer took on release', async () => {
-    const client = new DiskRecordClient(root, '')
-    const mine = await client.lock('k')
-    const lock = `${client.path('k')}.lock`
-    rmSync(lock)
-    const theirs = await client.lock('k')
-    await client.unlock('k', mine)
-    expect(readdirSync(root)).toEqual(['k.json.lock'])
-    await client.unlock('k', theirs)
-    expect(readdirSync(root)).toEqual([])
-  })
-
   it('closes the lock before unlinking it on release', async () => {
     const client = new DiskRecordClient(root, '')
     const fh = await client.lock('k')
@@ -207,9 +174,10 @@ describe('DiskRecordClient lock reclaim and release', () => {
   })
 
   it.each([
-    ['before', false],
-    ['after', true],
-  ])('releases a lock that vanished %s its ownership check', async (_, afterCheck) => {
+    ['before its ownership check', false, false],
+    ['and was re-taken', false, true],
+    ['after its ownership check', true, false],
+  ])('releases a lock that vanished %s', async (_, afterCheck, retaken) => {
     const client = new DiskRecordClient(root, '')
     const fh = await client.lock('k')
     const lock = `${client.path('k')}.lock`
@@ -222,8 +190,13 @@ describe('DiskRecordClient lock reclaim and release', () => {
     } else {
       rmSync(lock)
     }
+    const theirs = retaken ? await client.lock('k') : null
     await client.unlock('k', fh)
-    expect(readdirSync(root)).toEqual([])
+    expect(readdirSync(root)).toEqual(retaken ? ['k.json.lock'] : [])
+    if (theirs !== null) {
+      await client.unlock('k', theirs)
+      expect(readdirSync(root)).toEqual([])
+    }
   })
 
   it('puts a record on disk before renaming it in', async () => {
