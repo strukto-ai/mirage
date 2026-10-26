@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from typing import Any, cast
+from urllib.parse import quote
 
 from mirage.core.redis.capacity import capacity as _capacity
 from mirage.core.redis.copy import copy as _copy
 from mirage.core.redis.create import create as _create
 from mirage.core.redis.exists import exists as _exists
+from mirage.core.redis.location import server_location
 from mirage.core.redis.mkdir import mkdir as _mkdir
 from mirage.core.redis.read import read as _read
 from mirage.core.redis.readdir import readdir as _readdir
@@ -157,12 +159,10 @@ class RedisVFS(BaseVFS):
         return await _capacity(self.accessor)
 
     def storage_location(self) -> str:
-        # The server URL (host, port and db) plus the key prefix pin the
-        # keyspace two mounts would share. The prefix is joined path-like
-        # so nested prefixes collapse onto one key.
-        prefix = self.key_prefix.strip("/")
-        base = f"{self.name}:{self.url}"
-        return f"{base}/{prefix}" if prefix else base
+        # Keys are {prefix}file:{path}, so only an identical prefix shares
+        # them: it is escaped whole so a "/" in it never meets the path.
+        prefix = quote(self.key_prefix, safe="!'()*")
+        return f"{self.name}:{server_location(self.url)}:{prefix}"
 
     def get_state(self) -> dict[str, Any]:
         prefix = self._store._prefix

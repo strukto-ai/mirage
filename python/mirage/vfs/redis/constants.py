@@ -1,3 +1,7 @@
+DEFAULT_PORT = 6379
+
+LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
+
 TRUNCATE_SCRIPT = """
 if ARGV[3] == '1' and redis.call('EXISTS', KEYS[1]) == 0 then
     return 0

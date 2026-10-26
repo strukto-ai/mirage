@@ -1,3 +1,7 @@
+export const DEFAULT_PORT = 6379
+
+export const LOOPBACK: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '::1'])
+
 export const TRUNCATE_SCRIPT = `
 if ARGV[3] == '1' and redis.call('EXISTS', KEYS[1]) == 0 then
     return 0

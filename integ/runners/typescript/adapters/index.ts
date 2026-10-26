@@ -236,6 +236,7 @@ function openWorkspaces(
 }
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
+const LOOPBACK_SWAP: Record<string, string> = { localhost: '127.0.0.1', '127.0.0.1': 'localhost' }
 const MONGODB_URI = process.env.MONGODB_URI ?? 'mongodb://localhost:27017'
 const S3_ENDPOINT = process.env.S3_ENDPOINT
 const S3_REGION = process.env.S3_REGION ?? 'us-east-1'
@@ -451,8 +452,15 @@ async function openRedis(target: Target): Promise<Open> {
   const id = runId()
   const mounts: Record<string, RedisVFS> = {}
   for (const m of target.mounts) {
-    const safe = m.path.replace(/\/+/g, '-').replace(/^-|-$/g, '') || 'root'
-    mounts[m.path] = new RedisVFS({ url: REDIS_URL, keyPrefix: `mirage-integ-${id}-${safe}` })
+    // keyspace_of reopens another mount's keys through the other loopback
+    // spelling of REDIS_URL: one keyspace that must still read as one store.
+    const owner = m.keyspace_of ?? m.path
+    const safe = owner.replace(/\/+/g, '-').replace(/^-|-$/g, '') || 'root'
+    const alias = new URL(REDIS_URL)
+    const other = LOOPBACK_SWAP[alias.hostname]
+    if (other !== undefined) alias.hostname = other
+    const url = m.keyspace_of === undefined || other === undefined ? REDIS_URL : alias.href
+    mounts[m.path] = new RedisVFS({ url, keyPrefix: `mirage-integ-${id}-${safe}` })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
