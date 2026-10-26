@@ -162,3 +162,17 @@ fn csplit_holds_no_line_past_its_limit() {
     let (host, _) = run("csplit", json!({}), &["in", "2"], &format!("{line}\nb\n"));
     assert_eq!(host.out, format!("{}\n2\n", line.len() + 1).into_bytes());
 }
+
+#[test]
+fn csplit_goes_on_with_a_long_back_referenced_search_across_drains() {
+    let line = "a".repeat(26);
+    let input = format!("{line}b\n{line}c\nzz\n");
+    let (host, status) = run(
+        "csplit",
+        json!({}),
+        &["in", "/^\\(a\\|aa\\)*\\1c$/"],
+        &input,
+    );
+    assert_eq!((host.out.as_slice(), status), (b"28\n31\n".as_slice(), 0));
+    assert!(host.drains > 2, "{}", host.drains);
+}

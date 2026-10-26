@@ -159,24 +159,25 @@ def pattern_warnings(matcher: LineRegex, prog: str = "grep") -> bytes:
     ).encode()
 
 
-def line_selected(matcher: LineRegex, line: str) -> bool:
+async def line_selected(matcher: LineRegex, line: str) -> bool:
     """Whether a pattern list selects one line.
 
     Args:
         matcher (LineRegex): the compiled pattern list.
         line (str): the line as a byte view, without its terminator.
     """
-    return matcher.matches(line)
+    return await matcher.matches(line)
 
 
-def line_pieces(matcher: LineRegex, line: str) -> list[tuple[int, str]]:
+async def line_pieces(matcher: LineRegex, line: str) -> list[tuple[int, str]]:
     """What -o prints from one line: each match's start and text.
 
     Args:
         matcher (LineRegex): the compiled pattern list.
         line (str): the line as a byte view, without its terminator.
     """
-    return [(start, line[start:end]) for start, end in matcher.extents(line)]
+    extents = await matcher.extents(line)
+    return [(start, line[start:end]) for start, end in extents]
 
 
 def compile_pattern(

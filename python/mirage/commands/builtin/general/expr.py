@@ -363,7 +363,7 @@ def compare(left: str, op: str, right: str) -> str:
     return "1" if held else "0"
 
 
-def colon_match(subject: str, pattern: str, utf8: bool = False) -> str:
+async def colon_match(subject: str, pattern: str, utf8: bool = False) -> str:
     """The `:` operator, which `match` is the prefix spelling of.
 
     POSIX: the pattern is a BRE anchored at the start of the subject. A
@@ -395,7 +395,7 @@ def colon_match(subject: str, pattern: str, utf8: bool = False) -> str:
         regex = posix_regex(pattern, utf8=utf8)
     except RegexError as exc:
         raise ExprError(f"expr: {exc.message}") from exc
-    found = regex.search(subject)
+    found = await regex.search(subject)
     # The leftmost match is the one at the start, when there is one.
     if found is not None and found[0] is not None and found[0][0] != 0:
         found = None
@@ -523,45 +523,45 @@ class ExprReader:
         self.next += 1
         return word
 
-    def either(self, live: bool) -> str:
+    async def either(self, live: bool) -> str:
         """`A | B`: A unless it is null or 0, else B unless it is, else 0."""
-        left = self.both(live)
+        left = await self.both(live)
         while self.take_if(("|",)):
-            right = self.both(live and is_null(left))
+            right = await self.both(live and is_null(left))
             if live and is_null(left):
                 left = right if not is_null(right) else "0"
         return left
 
-    def both(self, live: bool) -> str:
+    async def both(self, live: bool) -> str:
         """`A & B`: A when neither is null or 0, else 0."""
-        left = self.relation(live)
+        left = await self.relation(live)
         while self.take_if(("&",)):
-            right = self.relation(live and not is_null(left))
+            right = await self.relation(live and not is_null(left))
             if live:
                 left = "0" if is_null(left) or is_null(right) else left
         return left
 
-    def relation(self, live: bool) -> str:
-        left = self.sum(live)
+    async def relation(self, live: bool) -> str:
+        left = await self.sum(live)
         while (op := self.take_if(CMP_OPS)) is not None:
-            right = self.sum(live)
+            right = await self.sum(live)
             if live:
                 left = compare(left, op, right)
         return left
 
-    def sum(self, live: bool) -> str:
-        left = self.product(live)
+    async def sum(self, live: bool) -> str:
+        left = await self.product(live)
         while (op := self.take_if(ADD_OPS)) is not None:
-            right = self.product(live)
+            right = await self.product(live)
             if live:
                 a, b = parse_int_operand(left), parse_int_operand(right)
                 left = digits_of_int(a + b if op == "+" else a - b)
         return left
 
-    def product(self, live: bool) -> str:
-        left = self.matching(live)
+    async def product(self, live: bool) -> str:
+        left = await self.matching(live)
         while (op := self.take_if(MUL_OPS)) is not None:
-            right = self.matching(live)
+            right = await self.matching(live)
             if live:
                 a, b = parse_int_operand(left), parse_int_operand(right)
                 if op == "*":
@@ -572,15 +572,15 @@ class ExprReader:
                     left = digits_of_int(trunc_mod(a, b))
         return left
 
-    def matching(self, live: bool) -> str:
-        left = self.operand(live)
+    async def matching(self, live: bool) -> str:
+        left = await self.operand(live)
         while self.take_if((":",)):
-            right = self.operand(live)
+            right = await self.operand(live)
             if live:
-                left = colon_match(left, right, self.utf8)
+                left = await colon_match(left, right, self.utf8)
         return left
 
-    def operand(self, live: bool) -> str:
+    async def operand(self, live: bool) -> str:
         """One operand under `:`, prefix keywords applied.
 
         A keyword reads its own operands at this same level, so
@@ -595,27 +595,27 @@ class ExprReader:
             if word in KEYWORD_ARITY:
                 waiting.append((word, []))
                 continue
-            value = self.simple(word, live)
+            value = await self.simple(word, live)
             while waiting:
                 keyword, given = waiting[-1]
                 given.append(value)
                 if len(given) < KEYWORD_ARITY[keyword]:
                     break
                 waiting.pop()
-                value = self.keyword(keyword, given) if live else ""
+                value = await self.keyword(keyword, given) if live else ""
             if not waiting:
                 return value
 
-    def keyword(self, keyword: str, given: list[str]) -> str:
+    async def keyword(self, keyword: str, given: list[str]) -> str:
         if keyword == "length":
             return str(len(given[0]))
         if keyword == "index":
             return do_index(given[0], given[1])
         if keyword == "substr":
             return do_substr(given[0], given[1], given[2])
-        return colon_match(given[0], given[1], self.utf8)
+        return await colon_match(given[0], given[1], self.utf8)
 
-    def simple(self, word: str, live: bool) -> str:
+    async def simple(self, word: str, live: bool) -> str:
         """`+ WORD`, `( EXPR )` or a word standing for itself.
 
         Args:
@@ -631,7 +631,7 @@ class ExprReader:
         if self.depth >= MAX_NESTING:
             raise ExprError(NESTING_TOO_DEEP)
         self.depth += 1
-        value = self.either(live)
+        value = await self.either(live)
         self.depth -= 1
         if self.take_if((")",)) is None:
             raise ExprError(
@@ -640,7 +640,7 @@ class ExprReader:
         return value
 
 
-def _expr_eval(args: list[str], utf8: bool = False) -> tuple[str, int]:
+async def _expr_eval(args: list[str], utf8: bool = False) -> tuple[str, int]:
     """Evaluate a whole expr line.
 
     Args:
@@ -658,7 +658,7 @@ def _expr_eval(args: list[str], utf8: bool = False) -> tuple[str, int]:
         ExprError: anything GNU refuses.
     """
     reader = ExprReader(args, utf8)
-    value = reader.either(True)
+    value = await reader.either(True)
     if not reader.done():
         raise ExprError(unexpected_argument(reader.words[reader.next], utf8))
     return value, 1 if is_null(value) else 0
@@ -677,7 +677,7 @@ async def expr(
         )
     utf8 = utf8_locale(ctx.env)
     try:
-        result, exit_code = _expr_eval(
+        result, exit_code = await _expr_eval(
             [byte_view(t, utf8) for t in texts], utf8
         )
     except ExprError as exc:

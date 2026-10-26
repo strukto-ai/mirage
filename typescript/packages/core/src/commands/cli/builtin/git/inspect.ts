@@ -317,7 +317,7 @@ export async function config(
       if (
         listing ||
         (pattern
-          ? pattern.search(byteView(line.path, utf8)) !== null
+          ? (await pattern.search(byteView(line.path, utf8), 0, ctx.signal)) !== null
           : line.path === configKey(key))
       )
         values.push([source, line.path, line.value ?? ''])
@@ -373,7 +373,7 @@ export async function revList(
     throw new UsageError('', verbUsage(ctx))
   }
   const repo = await opened(ctx, fl)
-  const parsed = parseFlags(fl)
+  const parsed = parseFlags(fl, null, ctx.signal)
   const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
   // A line naming only paths has no revision either (git 2.47.3).
   if (!revisions.length && !parsed.allRefs) throw new UsageError('', verbUsage(ctx))

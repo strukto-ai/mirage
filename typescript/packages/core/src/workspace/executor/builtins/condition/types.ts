@@ -145,4 +145,6 @@ export interface CondContext {
   // then; absent where the words were admitted whole before the test ran
   // (`test`, `[`).
   admit?: AdmitTest
+  // The line's abort, which a long `=~` search stops at.
+  signal?: AbortSignal
 }

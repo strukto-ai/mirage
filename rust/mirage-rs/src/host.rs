@@ -32,6 +32,8 @@ pub(crate) struct Host {
     writers: HashMap<String, Writer>,
     pub(crate) out: Vec<u8>,
     pub(crate) err: Vec<u8>,
+    /// How many `drain` calls the stream took.
+    pub(crate) drains: usize,
 }
 
 fn text(value: &Json) -> String {
@@ -295,6 +297,7 @@ impl Host {
         loop {
             while stream.busy() {
                 stream.drain(&mut self.out).expect("drains");
+                self.drains += 1;
             }
             stream.take_stderr(&mut self.err);
             let mut data = Vec::new();

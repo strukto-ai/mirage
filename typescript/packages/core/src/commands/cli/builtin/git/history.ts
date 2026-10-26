@@ -162,6 +162,8 @@ export interface LogFlags {
   readonly boundary: boolean
   /** The repository-relative patterns the history is limited to, none for the whole tree. */
   readonly pathspecs: readonly string[]
+  /** The line's abort, which a long `--grep`, `--author` or `--committer` search stops at. */
+  readonly signal?: AbortSignal
   /**
    * Whether `-m` or `--diff-merges` asks for merges' diffs against their
    * parents. Only then does a path walk keep merges' whole history; the
@@ -287,9 +289,9 @@ function pattern(
 }
 
 /** Whether a `--grep`, `--author` or `--committer` pattern matches `text`. */
-function hits(pattern: LinePattern, text: string): boolean {
+async function hits(pattern: LinePattern, text: string, signal?: AbortSignal): Promise<boolean> {
   if (pattern instanceof RegExp) return pattern.test(text)
-  return pattern.search(byteView(text, pattern.utf8)) !== null
+  return (await pattern.search(byteView(text, pattern.utf8), 0, signal)) !== null
 }
 
 /**
@@ -379,6 +381,7 @@ function pickaxePattern(value: string, ignoreCase: boolean, utf8: boolean): Posi
 export function parseFlags(
   fl: FlagView,
   env: Readonly<Record<string, string>> | null = null,
+  signal?: AbortSignal,
 ): LogFlags {
   const oneline = fl.asBool('oneline')
   const pretty = prettyFormat(fl)
@@ -427,6 +430,7 @@ export function parseFlags(
       ignoreCase,
       forceText: fl.asBool('text'),
       every: fl.asBool('pickaxe_all'),
+      ...(signal === undefined ? {} : { signal }),
     }
   }
   const maxCount = fl.asInt('max_count') ?? null
@@ -458,6 +462,7 @@ export function parseFlags(
     boundary: fl.asBool('boundary'),
     mergeDiffs: fl.asBool('m') || PARENT_DIFFS.has(fl.asStr('diff_merges', 'off')),
     pathspecs: [],
+    ...(signal === undefined ? {} : { signal }),
   }
 }
 
@@ -1126,9 +1131,15 @@ function inWindow(commit: CommitFacts, flags: LogFlags): boolean {
  * line at a time, so `^` and `$` anchor to a line, and never the author or
  * committer header.
  */
-function messageMatches(message: string, greps: readonly LinePattern[]): boolean {
+async function messageMatches(
+  message: string,
+  greps: readonly LinePattern[],
+  signal?: AbortSignal,
+): Promise<boolean> {
   const lines = message.split('\n')
-  return greps.some((pattern) => lines.some((line) => hits(pattern, line)))
+  for (const pattern of greps)
+    for (const line of lines) if (await hits(pattern, line, signal)) return true
+  return false
 }
 
 /**
@@ -1136,7 +1147,7 @@ function messageMatches(message: string, greps: readonly LinePattern[]): boolean
  * kin. Several `--author`s or several `--grep`s are alternatives, while an
  * `--author` and a `--grep` must both match.
  */
-function filtersPass(commit: CommitFacts, flags: LogFlags): boolean {
+async function filtersPass(commit: CommitFacts, flags: LogFlags): Promise<boolean> {
   const mailmap = flags.useMailmap ? flags.mailmap : []
   // A commit whose text was not UTF-8 is matched as its bytes. The map is read
   // as text, so the identity is looked up the same way; one it leaves alone is
@@ -1150,9 +1161,17 @@ function filtersPass(commit: CommitFacts, flags: LogFlags): boolean {
     if (patterns.length === 0) continue
     const mapped = mappedIdentity(ident, mailmap)
     const subject = mapped === ident ? (exact ?? ident) : mapped
-    if (!patterns.some((re) => hits(re, subject))) return false
+    let hit = false
+    for (const re of patterns) {
+      hit = await hits(re, subject, flags.signal)
+      if (hit) break
+    }
+    if (!hit) return false
   }
-  if (flags.greps.length && !messageMatches(bytes?.message ?? commit.message, flags.greps))
+  if (
+    flags.greps.length &&
+    !(await messageMatches(bytes?.message ?? commit.message, flags.greps, flags.signal))
+  )
     return false
   if (flags.minParents !== null && commit.parents.length < flags.minParents) return false
   return !(
@@ -1294,13 +1313,13 @@ export async function walked(
     for (const commit of window) {
       if (simplify !== null && flags.graph && kept(commit))
         parents.set(commit.oid, simplify.rewritten(commit))
-      if (filtersPass(commit, flags) && kept(commit)) interesting.add(commit.oid)
+      if ((await filtersPass(commit, flags)) && kept(commit)) interesting.add(commit.oid)
     }
     source = sortCommits(window, flags.order, simplify?.followed ?? null)
   }
   let printed = 0
   for await (const commit of source) {
-    if (!inWindow(commit, flags) || !filtersPass(commit, flags) || !kept(commit)) continue
+    if (!inWindow(commit, flags) || !(await filtersPass(commit, flags)) || !kept(commit)) continue
     const shown = await shows(repo, commit, searched)
     steps.push({ commit, shown })
     if (shown) printed += 1

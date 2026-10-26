@@ -38,6 +38,8 @@ export interface Pickaxe {
   readonly forceText: boolean
   /** `--pickaxe-all`: one matching pair keeps every pair its comparison found. */
   readonly every: boolean
+  /** The line's abort, which a long pattern search stops at. */
+  readonly signal?: AbortSignal
 }
 
 /**
@@ -47,8 +49,8 @@ export interface Pickaxe {
  * one), and `^` never holds where it resumes. mirage-rs counts the whole blob
  * in one request.
  */
-export function contains(text: string, pattern: PosixRegex): number {
-  return pattern.contains(text)
+export function contains(text: string, pattern: PosixRegex, signal?: AbortSignal): Promise<number> {
+  return pattern.contains(text, signal)
 }
 
 /**
@@ -60,9 +62,10 @@ async function occurrences(
   entry: TreeEntry | null,
   needle: string | PosixRegex,
   ignoreCase: boolean,
+  signal?: AbortSignal,
 ): Promise<number> {
   const data = await blobData(repo, entry)
-  if (needle instanceof PosixRegex) return contains(byteView(data, needle.utf8), needle)
+  if (needle instanceof PosixRegex) return contains(byteView(data, needle.utf8), needle, signal)
   const text = ignoreCase ? foldAscii(decodeText(data)) : decodeText(data)
   if (needle === '') return 0
   let count = 0
@@ -85,6 +88,7 @@ async function greps(
   newEntry: TreeEntry | null,
   pattern: PosixRegex,
   forceText: boolean,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   const old = await blobData(repo, oldEntry)
   const now = await blobData(repo, newEntry)
@@ -96,7 +100,7 @@ async function greps(
     if (tag === DiffOpTag.EQUAL) continue
     for (const line of [...before.slice(i1, i2), ...after.slice(j1, j2)]) {
       const text = byteView(line.endsWith('\n') ? line.slice(0, -1) : line, pattern.utf8)
-      if (pattern.search(text) !== null) return true
+      if ((await pattern.search(text, 0, signal)) !== null) return true
     }
   }
   return false
@@ -125,12 +129,13 @@ export async function matches(
   old: TreeEntry | null,
   now: TreeEntry | null,
 ): Promise<boolean> {
-  if (pickaxe.changed !== null) return greps(repo, old, now, pickaxe.changed, pickaxe.forceText)
-  const { needle, ignoreCase } = pickaxe
+  const { needle, ignoreCase, signal } = pickaxe
+  if (pickaxe.changed !== null)
+    return greps(repo, old, now, pickaxe.changed, pickaxe.forceText, signal)
   if (needle === null) return true
   const wanted = ignoreCase && typeof needle === 'string' ? foldAscii(needle) : needle
   return (
-    (await occurrences(repo, old, wanted, ignoreCase)) !==
-    (await occurrences(repo, now, wanted, ignoreCase))
+    (await occurrences(repo, old, wanted, ignoreCase, signal)) !==
+    (await occurrences(repo, now, wanted, ignoreCase, signal))
   )
 }

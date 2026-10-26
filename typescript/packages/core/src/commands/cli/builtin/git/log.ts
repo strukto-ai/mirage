@@ -257,7 +257,7 @@ export async function log(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   checkOperands(ctx, texts)
-  const flags = parseFlags(fl, ctx.env)
+  const flags = parseFlags(fl, ctx.env, ctx.signal)
   const repo = await opened(ctx, fl)
   const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
   const [mailmap, mapped, decorate] = await displayed(repo, fl, flags.pretty)

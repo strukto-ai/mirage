@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::task::Poll;
 
-use crate::regex::posix::{Posix, Spans};
+use crate::regex::posix::{Posix, Spans, Walk};
+use crate::regex::{STEPS, Step};
 use crate::request::{Opening, Reply, Request, WriteMode, bytes};
 
 use super::io::{Failure, Feed, Input, Io, LIMIT, Line, LineReader, MAX_LEN, Notes, read_error};
@@ -195,6 +196,11 @@ pub(super) struct Machine {
     /// What the snapshots hold, in bytes.
     snapshotted: usize,
     replaced: bool,
+    /// An `s` whose search ran out of steps, to go on with.
+    rewrite: Rewrite,
+    /// The backtracking steps the regexes may take before `run` gives the
+    /// host its loop back.
+    regex_budget: u64,
     source: Option<usize>,
     last_regex: Option<usize>,
     quit: Option<i32>,
@@ -342,50 +348,64 @@ fn room(len: usize, more: usize) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// An `s` in progress: the matches it has walked and what it has built,
+/// so one whose search runs out of steps goes on where it stopped.
+#[derive(Default)]
+struct Rewrite {
+    walk: Walk,
+    seen: usize,
+    at: usize,
+    out: Vec<u8>,
+    replaced: bool,
+}
+
 /// The pattern space after `s`, None when nothing was replaced. Each
-/// match is replaced as it is found, so no list of them is held.
+/// match is replaced as it is found, so no list of them is held; out of
+/// steps, `Pending` keeps the work in `rewrite` for the next call.
 fn substitute(
     regex: &mut Posix,
     subst: &Subst,
     ps: &[u8],
     utf8: bool,
-) -> Result<Option<Vec<u8>>, Refusal> {
+    rewrite: &mut Rewrite,
+    budget: &mut u64,
+) -> Result<Poll<Option<Vec<u8>>>, Refusal> {
     let skip = usize::try_from(subst.occurrence - 1).unwrap_or(usize::MAX);
-    let (mut seen, mut at, mut replaced) = (0usize, 0, false);
-    let mut out = Vec::with_capacity(ps.len());
-    let mut failed = None;
-    let mut visit = |groups: Spans| {
-        seen += 1;
-        if seen <= skip {
-            return true;
+    let walks = subst.global || subst.occurrence > 1;
+    loop {
+        let found = if walks {
+            regex.next(ps, &mut rewrite.walk, budget)
+        } else if rewrite.seen == 0 {
+            regex.search(ps, 0, budget)
+        } else {
+            Step::Done(None)
+        };
+        let groups = match found {
+            Step::Done(Some(groups)) => groups,
+            Step::Done(None) => break,
+            Step::Paused => return Ok(Poll::Pending),
+        };
+        rewrite.seen += 1;
+        if rewrite.seen <= skip {
+            continue;
         }
-        let (start, end) = groups[0].unwrap_or((at, at));
-        let expanded = room(out.len(), start - at).and_then(|()| {
-            out.extend_from_slice(&ps[at..start]);
-            expand(&subst.parts, ps, &groups, utf8, &mut out)
-        });
-        if let Err(refusal) = expanded {
-            failed = Some(refusal);
-            return false;
+        let (start, end) = groups[0].unwrap_or((rewrite.at, rewrite.at));
+        room(rewrite.out.len(), start - rewrite.at)?;
+        rewrite.out.extend_from_slice(&ps[rewrite.at..start]);
+        expand(&subst.parts, ps, &groups, utf8, &mut rewrite.out)?;
+        rewrite.at = end;
+        rewrite.replaced = true;
+        if !subst.global {
+            break;
         }
-        at = end;
-        replaced = true;
-        subst.global
-    };
-    if subst.global || subst.occurrence > 1 {
-        regex.each(ps, &mut visit);
-    } else if let Some(groups) = regex.search(ps, 0) {
-        visit(groups);
     }
-    if let Some(refusal) = failed {
-        return Err(refusal);
+    if !rewrite.replaced {
+        return Ok(Poll::Ready(None));
     }
-    if !replaced {
-        return Ok(None);
-    }
-    room(out.len(), ps.len() - at)?;
-    out.extend_from_slice(&ps[at..]);
-    Ok(Some(out))
+    room(rewrite.out.len(), ps.len() - rewrite.at)?;
+    let mut out = std::mem::take(&mut rewrite.out);
+    out.extend_from_slice(&ps[rewrite.at..]);
+    Ok(Poll::Ready(Some(out)))
 }
 
 fn translate(table: &Translit, ps: &mut Vec<u8>, utf8: bool) -> Result<(), Refusal> {
@@ -547,6 +567,8 @@ impl Machine {
             snapshot_reader: None,
             snapshotted: 0,
             replaced: false,
+            rewrite: Rewrite::default(),
+            regex_budget: STEPS,
             source: None,
             last_regex: None,
             quit: None,
@@ -648,7 +670,13 @@ impl Machine {
     /// a window of output is ready, or at the end.
     pub(super) fn run(&mut self, budget: usize) {
         let mut steps = 0;
-        while self.io.idle() && steps < budget && self.out.len() < LIMIT && !self.done() {
+        self.regex_budget = STEPS;
+        while self.io.idle()
+            && steps < budget
+            && self.regex_budget > 0
+            && self.out.len() < LIMIT
+            && !self.done()
+        {
             steps += 1;
             if let Err(refusal) = self.step() {
                 self.fail(refusal);
@@ -976,7 +1004,10 @@ impl Machine {
             Address::Last => wait!(self.is_last()),
             Address::Regex(regex) => {
                 let index = pick(&mut self.last_regex, regex)?;
-                self.regexes[index].test(&self.ps)
+                match self.regexes[index].test(&self.ps, &mut self.regex_budget) {
+                    Step::Done(hit) => hit,
+                    Step::Paused => return Ok(Poll::Pending),
+                }
             }
             Address::Step(first, step) => line >= first && (line - first) % step == 0,
             Address::Plus(_) | Address::Multiple(_) => false,
@@ -1397,7 +1428,19 @@ impl Machine {
                         ));
                     }
                 }
-                if let Some(result) = substitute(regex, subst, &self.ps, self.opts.utf8)? {
+                let rewritten = substitute(
+                    regex,
+                    subst,
+                    &self.ps,
+                    self.opts.utf8,
+                    &mut self.rewrite,
+                    &mut self.regex_budget,
+                );
+                if let Ok(Poll::Pending) = rewritten {
+                    return Ok(Poll::Pending);
+                }
+                self.rewrite = Rewrite::default();
+                if let Poll::Ready(Some(result)) = rewritten? {
                     let (print, wfile) = (subst.print, subst.wfile);
                     self.ps = result;
                     self.replaced = true;

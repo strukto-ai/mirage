@@ -9,6 +9,7 @@ struct Run {
     err: String,
     status: i32,
     files: HashMap<String, Vec<u8>>,
+    drains: usize,
 }
 
 fn run_host(config: Json, mut host: Host) -> Run {
@@ -19,6 +20,7 @@ fn run_host(config: Json, mut host: Host) -> Run {
         err: String::from_utf8_lossy(&host.err).into_owned(),
         status,
         files: host.files,
+        drains: host.drains,
     }
 }
 
@@ -918,4 +920,15 @@ fn an_edit_opens_its_replacement_first_and_l_meets_the_cap() {
         (run.err.as_str(), run.status),
         ("sed: memory exhausted\n", 1)
     );
+}
+
+#[test]
+fn a_long_back_referenced_search_goes_on_across_drains() {
+    let line = "a".repeat(26);
+    let run = sed("s/^\\(a\\|aa\\)*\\1c$/x/", &format!("{line}b\n{line}c\n"));
+    assert_eq!(
+        (run.out, run.err.as_str(), run.status),
+        (format!("{line}b\nx\n"), "", 0)
+    );
+    assert!(run.drains > 2, "{}", run.drains);
 }
