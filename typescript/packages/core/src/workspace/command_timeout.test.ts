@@ -25,6 +25,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { programs } from './lookup/lookup.ts'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 
@@ -341,6 +342,20 @@ describe('background job kill', () => {
   }, 60_000)
 })
 
+const UNCAPPED = { '*': new Limit({ walkLimit: -1 }) }
+
+function wideRam(): RAMVFS {
+  const ram = new RAMVFS()
+  ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(20_000)))
+  ram.store.dirs.add('/wide')
+  for (let d = 0; d < 100; d++) {
+    ram.store.dirs.add(`/wide/d${String(d)}`)
+    for (let f = 0; f < 200; f++)
+      ram.store.files.set(`/wide/d${String(d)}/f${String(f)}`, new Uint8Array([120, 10]))
+  }
+  return ram
+}
+
 // CPU work must offer cancellation points even when every read is immediately ready.
 describe('large in-memory commands', () => {
   it.each([
@@ -383,14 +398,10 @@ describe('large in-memory commands', () => {
     'tar -cf /wide.tar /wide',
     'zip -qr /wide.zip /wide',
   ])('honors a caller abort during the walk of %s', async (command) => {
-    const ram = new RAMVFS({ walkLimit: -1 })
-    ram.store.dirs.add('/wide')
-    for (let d = 0; d < 100; d++) {
-      ram.store.dirs.add(`/wide/d${String(d)}`)
-      for (let f = 0; f < 200; f++)
-        ram.store.files.set(`/wide/d${String(d)}/f${String(f)}`, new Uint8Array([120, 10]))
-    }
-    const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, shellParser: parser })
+    const ws = new Workspace(
+      { '/': [wideRam(), MountMode.WRITE, UNCAPPED] },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
     const abort = new AbortController()
     const timer = setTimeout(() => {
       abort.abort()
@@ -445,3 +456,47 @@ describe('large in-memory commands', () => {
     }
   })
 })
+
+// Every program the shell resolves, given a big file and a wide directory,
+// ends on its own or within a second of the caller's abort. Each runs in a
+// subshell, so a `cd`, `set` or `exec` leaves the next one's shell as it was.
+it('every program settles soon after an abort', async () => {
+  const ws = new Workspace({ '/': [wideRam(), MountMode.READ, UNCAPPED] }, { shellParser: parser })
+  const internals = ws as unknown as {
+    callSession(): Parameters<typeof programs>[0]
+    registry: Parameters<typeof programs>[1]
+  }
+  const late: string[] = []
+  try {
+    for (const name of programs(internals.callSession(), internals.registry)) {
+      for (const operand of ['/big', '/wide']) {
+        const abort = new AbortController()
+        let fired = -1
+        const timer = setTimeout(() => {
+          fired = performance.now()
+          abort.abort()
+        }, 5)
+        let stuck: ReturnType<typeof setTimeout> | undefined
+        try {
+          await Promise.race([
+            ws.shell(`( ${name} ${operand} )`, { signal: abort.signal }).catch(() => null),
+            new Promise((resolve) => {
+              stuck = setTimeout(() => {
+                late.push(`${name} ${operand}: still running after 5s`)
+                resolve(null)
+              }, 5000)
+            }),
+          ])
+        } finally {
+          clearTimeout(timer)
+          clearTimeout(stuck)
+        }
+        if (fired >= 0 && performance.now() - fired > 1000)
+          late.push(`${name} ${operand}: ${((performance.now() - fired) / 1000).toFixed(2)}s late`)
+      }
+    }
+  } finally {
+    await ws.close()
+  }
+  expect(late).toEqual([])
+}, 300_000)

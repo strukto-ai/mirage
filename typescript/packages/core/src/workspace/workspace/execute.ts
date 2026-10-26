@@ -1295,7 +1295,7 @@ async function runParsedLine(
   // observer op events. The command event's exit_code says whether the
   // line that emitted them succeeded. Internal evals (record:false) have
   // an empty opRecords here: their ops were accounted by the line above.
-  env.records.push(...opRecords)
+  for (const record of opRecords) env.records.push(record)
   // bash adds a line to history only when it is non-empty
   // (anything before its newline): a blank line is skipped, while a
   // whitespace-only or comment-only line is kept.

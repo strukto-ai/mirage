@@ -561,6 +561,21 @@ async def test_large_ram_command_honors_caller_cancel(command):
 
 
 
+_UNCAPPED = {"*": Limit(walk_limit=-1)}
+
+
+def _wide_ram() -> RAMVFS:
+    ram = RAMVFS()
+    store = ram.accessor.store
+    store.files["/big"] = b"line\n" * 20_000
+    store.dirs.add("/wide")
+    for d in range(100):
+        store.dirs.add(f"/wide/d{d}")
+        for f in range(200):
+            store.files[f"/wide/d{d}/f{f}"] = b"x\n"
+    return ram
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "command",
@@ -583,14 +598,9 @@ async def test_ram_walk_honors_caller_cancel(command):
     # land.
     from mirage.utils.abort import MirageAbortError
 
-    ram = RAMVFS(walk_limit=-1)
-    store = ram.accessor.store
-    store.dirs.add("/wide")
-    for d in range(100):
-        store.dirs.add(f"/wide/d{d}")
-        for f in range(200):
-            store.files[f"/wide/d{d}/f{f}"] = b"x\n"
-    ws = Workspace({"/": ram}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/": (_wide_ram(), MountMode.WRITE, _UNCAPPED)}, mode=MountMode.WRITE
+    )
     cancel = asyncio.Event()
     loop = asyncio.get_running_loop()
     timer = loop.call_later(0.005, cancel.set)
@@ -600,3 +610,44 @@ async def test_ram_walk_honors_caller_cancel(command):
     finally:
         timer.cancel()
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_every_program_settles_soon_after_a_cancel():
+    # Every program the shell resolves, given a big file and a wide
+    # directory, ends on its own or within a second of the caller's
+    # cancel. Each runs in a subshell, so a `cd`, `set` or `exec` leaves
+    # the next one's shell as it was.
+    from mirage.utils.abort import MirageAbortError
+    from mirage.workspace.lookup.lookup import programs
+
+    ws = Workspace({"/": (_wide_ram(), MountMode.READ, _UNCAPPED)})
+    loop = asyncio.get_running_loop()
+    late: list[str] = []
+    for name in programs(ws._call_session(), ws._registry):
+        for operand in ("/big", "/wide"):
+            cancel = asyncio.Event()
+            fired: list[float] = []
+
+            def stop() -> None:
+                fired.append(loop.time())
+                cancel.set()
+
+            timer = loop.call_later(0.005, stop)
+            try:
+                await asyncio.wait_for(
+                    ws.shell(f"( {name} {operand} )", cancel=cancel), 5
+                )
+            except MirageAbortError:
+                pass
+            except TimeoutError:
+                late.append(f"{name} {operand}: still running after 5s")
+                continue
+            finally:
+                timer.cancel()
+            if fired and loop.time() - fired[0] > 1:
+                late.append(
+                    f"{name} {operand}: {loop.time() - fired[0]:.2f}s late"
+                )
+    await ws.close()
+    assert late == []
