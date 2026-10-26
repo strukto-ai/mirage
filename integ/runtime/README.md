@@ -53,7 +53,7 @@ differs.
 | monty                                              | `pydantic_monty`, file calls via OS callbacks | `@pydantic/monty`, file calls via OS callbacks |
 | wasi                                               | CPython built for WASI, in wasmtime           | not on this host                               |
 | pyodide                                            | not on this host                              | Pyodide, Emscripten FS with a journal          |
-| quickjs                                            | `qjs` from quickjs-ng built for WASI          | quickjs-emscripten with a `std`/`os` shim      |
+| quickjs                                            | `qjs` from quickjs-ng built for WASI          | the same, in a worker                          |
 | local                                              | the host's `python3`                          | the host's `python3`                           |
 | host                                               | the runner itself, inside `with ws:`          | the runner itself, under `patchNodeFs`         |
 | sandlock                                           | host `python3` and `node` under Landlock      | the same                                       |
