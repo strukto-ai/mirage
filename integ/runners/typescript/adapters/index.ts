@@ -603,9 +603,11 @@ async function openS3(target: Target, options?: OpenOptions): Promise<Open> {
   const resolved: [string, Mount][] = []
   for (const m of target.mounts) resolved.push([await bucketFor(m), m])
   const build = (): MountMap => {
-    const mounts: Record<string, S3VFS> = {}
+    const mounts: MountMap = {}
     for (const [bucket, m] of resolved) {
-      mounts[m.path] = objectStorageVfs(m.vfs, bucket, m.prefix)
+      const vfs = objectStorageVfs(m.vfs, bucket, m.prefix)
+      mounts[m.path] =
+        m.mode === 'read' ? [vfs, MountMode.READ] : m.mode === 'exec' ? [vfs, MountMode.EXEC] : vfs
     }
     return mounts
   }
@@ -1989,21 +1991,25 @@ async function openGws(target: Target, options?: OpenOptions): Promise<Open> {
   // then pure, so a shadow workspace gets its own instances over the same
   // world.
   const build = (): MountMap => {
-    const mounts: Record<
-      string,
-      GoogleDriveVFS | GDocsVFS | GSheetsVFS | GSlidesVFS | GmailVFS | RAMVFS
-    > = {}
+    const mounts: MountMap = {}
     for (const m of target.mounts) {
       if (m.vfs === 'ram') mounts[m.path] = new RAMVFS()
       else if (m.vfs !== 'gdrive') mounts[m.path] = gwsNativeVfs(m.vfs, base, m.config)
-      else
-        mounts[m.path] = new GoogleDriveVFS({
+      else {
+        const vfs = new GoogleDriveVFS({
           clientId: 'integ',
           clientSecret: 'integ',
           refreshToken: GWS_TOKEN,
           apiBase: base,
           folderId: folderIds[m.path] as string,
         })
+        mounts[m.path] =
+          m.mode === 'read'
+            ? [vfs, MountMode.READ]
+            : m.mode === 'exec'
+              ? [vfs, MountMode.EXEC]
+              : vfs
+      }
     }
     return mounts
   }

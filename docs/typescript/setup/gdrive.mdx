@@ -66,7 +66,7 @@ Fields marked secret are redacted in snapshots.
 
 ## Mount mode
 
-`read` and `write`. Under write mode the standard write commands (`tee`, `cp`, `mv`, `rm`, `mkdir`, `sed -i`, ...) work on regular files and folders; Google-native files (`.gdoc.json`, `.gsheet.json`, `.gslide.json`) are mutated through the `gws` commands instead.
+`read`, `write` and `exec`. Under write mode the standard write commands (`tee`, `cp`, `mv`, `rm`, `mkdir`, `sed -i`, ...) work on regular files and folders; Google-native files (`.gdoc.json`, `.gsheet.json`, `.gslide.json`) are mutated through the `gws` commands instead. Use `MountMode.EXEC` if `python3` or `js` should run scripts from the mount.
 
 A Shared Drive is writable on the same terms as My Drive: every Drive call carries `supportsAllDrives`, so what you may change is decided by your role on that drive rather than by the mount, and a role that forbids the change fails with `EACCES` on that operand.
 

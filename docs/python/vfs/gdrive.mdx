@@ -239,6 +239,9 @@ A write records the `md5Checksum` (else the `headRevisionId`) its upload
 reply names, so a `fresh` read right after a `tee` or `sed -i` downloads
 nothing.
 
+Use `MountMode.EXEC` if `python3` or `js` should run scripts from the
+mount.
+
 ### Writing inside a Shared Drive
 
 A Shared Drive is not a read-only corner of the mount. Every Drive call

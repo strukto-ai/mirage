@@ -52,7 +52,7 @@ Fields marked secret are redacted in snapshots.
 
 ## Mount mode
 
-`read`, `write`. Writes flush via SFTP put.
+`read`, `write`, `exec`. Writes flush via SFTP put. Use `MountMode.EXEC` if `python3` or `js` should run scripts from the mount.
 
 For the full set of supported shell commands see the [Python SSH docs](/python/vfs/ssh).
 

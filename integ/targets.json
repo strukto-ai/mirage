@@ -873,6 +873,23 @@
       }
     },
     {
+      "id": "s3-exec",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "s3",
+      "mounts": [
+        {
+          "path": "/data",
+          "vfs": "s3",
+          "backend": "s3",
+          "bucket": "exec",
+          "mode": "exec"
+        }
+      ]
+    },
+    {
       "id": "object-storage-prefix",
       "hosts": [
         "python",
@@ -2024,6 +2041,23 @@
           "backend": "gdrive",
           "root": "team/reports/res",
           "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "gdrive-exec",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "mounts": [
+        {
+          "path": "/data",
+          "vfs": "gdrive",
+          "backend": "gdrive",
+          "root": "exec",
+          "mode": "exec"
         }
       ]
     },
