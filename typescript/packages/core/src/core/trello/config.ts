@@ -14,8 +14,10 @@
 
 import { parseConfigWithSchema, redactConfigWithSchema, secretStr, z } from '../../vfs/secrets.ts'
 import type { ConfigOf, RedactedConfig } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 export const TrelloConfigSchema = z.object({
+  ...timeoutShape,
   apiKey: secretStr().describe('Trello API key.'),
   apiToken: secretStr().describe('Trello API token.'),
   workspaceId: z

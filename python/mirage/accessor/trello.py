@@ -31,6 +31,6 @@ class TrelloAccessor(SessionAccessor):
             settles its own once mounted; a listing then keeps each
             card's unsearched text for the search.
         """
-        super().__init__()
+        super().__init__(config.timeout)
         self.config = config
         self.capped = capped

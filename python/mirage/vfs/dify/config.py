@@ -1,5 +1,4 @@
 from pydantic import (
-    BaseModel,
     ConfigDict,
     PositiveFloat,
     PositiveInt,
@@ -7,8 +6,10 @@ from pydantic import (
     field_validator,
 )
 
+from mirage.core.api.config import TimeoutConfig
 
-class DifyConfig(BaseModel):
+
+class DifyConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     api_key: SecretStr
@@ -22,8 +23,6 @@ class DifyConfig(BaseModel):
     mount. A document without it is mounted under its document name."""
     max_concurrency: PositiveInt = 10
     """The most Dify API requests in flight at once."""
-    request_timeout: PositiveFloat = 30.0
-    """Seconds to wait for one HTTP request to Dify."""
     retry_attempts: PositiveInt = 4
     """Attempts per request, the first included. A 429, a 5xx or a
     transport error is retried."""

@@ -20,10 +20,12 @@ import {
   type RedactedConfig,
   secretStr,
 } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 /** Credentials and bounds for one Airtable account. */
 export const AirtableConfigSchema = z
   .object({
+    ...timeoutShape,
     token: secretStr().describe(
       'Personal access token (or OAuth access token), sent as `Authorization: Bearer`.',
     ),

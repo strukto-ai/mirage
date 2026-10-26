@@ -33,11 +33,14 @@ export abstract class TokenManager {
   private inflight: Promise<string> | null = null
   private readonly bufferSeconds: number
   clock: Clock
+  /** Seconds a call the manager signs may stall; absent is the client default. */
+  readonly timeout: number | undefined
   private readonly holders = new Set<unknown>()
 
-  constructor(bufferSeconds = 300, clock?: Clock) {
+  constructor(bufferSeconds = 300, clock?: Clock, timeout?: number) {
     this.bufferSeconds = bufferSeconds
     this.clock = clock ?? new SystemClock()
+    this.timeout = timeout
   }
 
   /**

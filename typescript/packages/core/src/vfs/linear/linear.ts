@@ -172,8 +172,11 @@ export class LinearVFS extends BaseVFS {
   constructor(config: LinearConfig) {
     super()
     this.config = config
-    const transportOpts: { apiKey: string; baseUrl?: string } = { apiKey: config.apiKey }
+    const transportOpts: { apiKey: string; baseUrl?: string; timeout?: number } = {
+      apiKey: config.apiKey,
+    }
     if (config.baseUrl !== undefined) transportOpts.baseUrl = config.baseUrl
+    if (config.timeout !== undefined) transportOpts.timeout = config.timeout
     const accessorOpts: { teamIds?: readonly string[]; capped: () => boolean } = {
       capped: () => this.walkLimit >= 0,
     }

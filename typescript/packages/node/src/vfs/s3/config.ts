@@ -21,7 +21,7 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
-import { type FieldNormalizer, secondsToMs } from '@struktoai/mirage-core/utils/normalize'
+import type { FieldNormalizer } from '@struktoai/mirage-core/utils/normalize'
 
 export interface S3Config extends S3CoreConfig {
   profile?: string
@@ -56,8 +56,7 @@ export function redactConfig(config: S3Config): S3ConfigRedacted {
 
 // Only the entries `snakeToCamel` would get wrong, shared by every
 // S3-compatible alias: python spells the profile `aws_profile`, the endpoint
-// `endpoint_url`, path style `path_style`, and states timeouts in seconds
-// where TypeScript uses milliseconds. Every other field maps by default, so
+// `endpoint_url` and path style `path_style`. Every other field maps by default, so
 // it does not belong here. One map rather than a copy per provider: oci and
 // supabase each lost `path_style` when theirs were hand-copied, and
 // `path_style: false` was honored on python and silently ignored here.
@@ -65,15 +64,9 @@ const S3_FAMILY_RENAME: Record<string, string> = {
   aws_profile: 'profile',
   endpoint_url: 'endpoint',
   path_style: 'forcePathStyle',
-  timeout: 'timeoutMs',
 }
 
-const S3_FAMILY_TRANSFORM = { timeout: secondsToMs }
-
-export const S3_FAMILY_NORMALIZER: FieldNormalizer = {
-  rename: S3_FAMILY_RENAME,
-  transform: S3_FAMILY_TRANSFORM,
-}
+export const S3_FAMILY_NORMALIZER: FieldNormalizer = { rename: S3_FAMILY_RENAME }
 
 // S3 proper also takes the credentials under boto3's `aws_` spellings.
 const S3_NORMALIZER: FieldNormalizer = {
@@ -83,7 +76,6 @@ const S3_NORMALIZER: FieldNormalizer = {
     aws_session_token: 'sessionToken',
     ...S3_FAMILY_RENAME,
   },
-  transform: S3_FAMILY_TRANSFORM,
 }
 
 /**

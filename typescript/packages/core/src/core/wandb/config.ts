@@ -6,9 +6,11 @@ import {
   type ConfigOf,
   type RedactedConfig,
 } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 export const WandbConfigSchema = z
   .object({
+    ...timeoutShape,
     entities: z
       .array(
         z

@@ -46,6 +46,7 @@ export class SlackVFS extends SlackVFSBase {
       new BrowserSlackTransport({
         proxyUrl: config.proxyUrl,
         ...(config.getHeaders !== undefined ? { getHeaders: config.getHeaders } : {}),
+        ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
       }),
       config,
     )

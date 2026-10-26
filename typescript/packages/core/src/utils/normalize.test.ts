@@ -60,17 +60,6 @@ describe('normalizeFields', () => {
     expect(out).toEqual({ accessKeyId: 'AKIA', endpoint: 'https://x' })
   })
 
-  it('applies value transforms', () => {
-    const out = normalizeFields(
-      { timeout: 30 },
-      {
-        rename: { timeout: 'timeoutMs' },
-        transform: { timeout: (v) => (typeof v === 'number' ? v * 1000 : v) },
-      },
-    )
-    expect(out).toEqual({ timeoutMs: 30_000 })
-  })
-
   it('drops listed keys', () => {
     const out = normalizeFields({ bucket: 'b', proxy: 'http://p' }, { drop: ['proxy'] })
     expect(out).toEqual({ bucket: 'b' })

@@ -15,27 +15,18 @@
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
 import { VFSName } from '@struktoai/mirage-core/types'
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
-import {
-  HF_ENDPOINT,
-  HF_TIMEOUT_MS,
-  type HfBucketsConfig,
-  type HfRepoConfig,
-} from '../vfs/hf_buckets/config.ts'
+import { HF_ENDPOINT, type HfBucketsConfig, type HfRepoConfig } from '../vfs/hf_buckets/config.ts'
 import { hfEndpoint, type HfConfig } from '../core/hf_hub/config.ts'
 import { DEFAULT_REVISION } from '../core/hf_hub/constants.ts'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 
 /**
- * One Hub account: credential, origin and the bound its requests run under.
- * The `hf` CLI's install accessor and the account a repository handle
+ * One Hub account: credential, origin and the timeout its requests run
+ * under. The `hf` CLI's install accessor and the account a repository handle
  * borrows; a mount builds its own with `accountOf`.
  */
 export class HfAccountAccessor extends Accessor {
-  constructor(
-    readonly config: HfConfig,
-    /** How long one Hub request may go without progress. */
-    readonly timeoutMs: number = HF_TIMEOUT_MS,
-  ) {
+  constructor(readonly config: HfConfig) {
     super()
   }
 
@@ -50,8 +41,12 @@ export class HfAccountAccessor extends Accessor {
 
 /** The account a repository or bucket mount builds and owns. */
 export function accountOf(config: HfRepoConfig | HfBucketsConfig): HfAccountAccessor {
-  const { token, endpoint = HF_ENDPOINT, timeoutMs } = config
-  return new HfAccountAccessor(token === undefined ? { endpoint } : { token, endpoint }, timeoutMs)
+  const { token, endpoint = HF_ENDPOINT, timeout } = config
+  return new HfAccountAccessor({
+    endpoint,
+    ...(token === undefined ? {} : { token }),
+    ...(timeout === undefined ? {} : { timeout }),
+  })
 }
 
 /**

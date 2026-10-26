@@ -1,4 +1,3 @@
-import aiohttp
 from pydantic import field_validator
 
 from mirage.accessor.base import SessionAccessor
@@ -33,7 +32,7 @@ class SharePointConfig(MsGraphConfig):
 
 class SharePointAccessor(SessionAccessor):
     def __init__(self, config: SharePointConfig) -> None:
-        super().__init__(timeout=aiohttp.ClientTimeout(total=config.timeout))
+        super().__init__(timeout=config.timeout)
         self.config = config
         # Name -> id lookups for the two namespace levels above a drive item,
         # so resolving a path does not call /sites and /drives on every op.

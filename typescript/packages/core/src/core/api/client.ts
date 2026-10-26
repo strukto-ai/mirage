@@ -32,13 +32,17 @@ export type ErrorOf = (response: Response, body: string) => Error
  * headers arrive and on every chunk, and stops while the caller is not
  * reading, once the body ends and when the caller cancels it, so a download
  * that keeps flowing is never cut off. A request that waits longer fails
- * with a `TimeoutError` DOMException. Python's twin is `stall_timeout`,
- * which aiohttp spells as sock_connect and sock_read; `seconds` of 0 is no
- * bound.
+ * with a `TimeoutError` DOMException. The body is relayed, locking the
+ * original only while a read is pending, so a body drained, failed or
+ * cancelled is left unlocked; the relay keeps the original's `url` and
+ * `redirected`. Python's twin is `stall_timeout`, which aiohttp spells as
+ * sock_connect and sock_read.
  */
-export function stallTimeout(seconds: number, fetchFn?: typeof fetch): typeof fetch {
+export function stallTimeout(
+  seconds: number = DEFAULT_TIMEOUT,
+  fetchFn?: typeof fetch,
+): typeof fetch {
   const send: typeof fetch = fetchFn ?? ((input, init) => fetch(input, init))
-  if (!(seconds > 0)) return send
   return async (input, init) => {
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -49,9 +53,7 @@ export function stallTimeout(seconds: number, fetchFn?: typeof fetch): typeof fe
       stop()
       timer = setTimeout(
         () => {
-          controller.abort(
-            new DOMException(`no progress for ${String(seconds)}s`, 'TimeoutError'),
-          )
+          controller.abort(new DOMException(`no progress for ${String(seconds)}s`, 'TimeoutError'))
         },
         Math.min(seconds * 1000, 2 ** 31 - 1),
       )
@@ -69,11 +71,14 @@ export function stallTimeout(seconds: number, fetchFn?: typeof fetch): typeof fe
     } finally {
       stop()
     }
-    if (response.body === null) return response
-    const reader = response.body.getReader()
+    const source = response.body
+    if (source == null) return response
+    let reading: ReadableStreamDefaultReader<Uint8Array> | undefined
     const body = new ReadableStream<Uint8Array>(
       {
         async pull(sink) {
+          const reader = source.getReader()
+          reading = reader
           arm()
           try {
             const result = await reader.read()
@@ -83,20 +88,27 @@ export function stallTimeout(seconds: number, fetchFn?: typeof fetch): typeof fe
             throw timedOut(err)
           } finally {
             stop()
+            reading = undefined
+            reader.releaseLock()
           }
         },
-        cancel(reason) {
+        async cancel(reason) {
           stop()
-          return reader.cancel(reason)
+          await (reading ?? source).cancel(reason)
         },
       },
       { highWaterMark: 0 },
     )
-    return new Response(body, {
+    const relayed = new Response(body, {
       status: response.status,
       statusText: response.statusText,
       headers: response.headers,
     })
+    Object.defineProperties(relayed, {
+      url: { value: response.url },
+      redirected: { value: response.redirected },
+    })
+    return relayed
   }
 }
 
@@ -120,7 +132,7 @@ export async function* apiStream(
 ): AsyncGenerator<Uint8Array, void> {
   const retry = options.retry ?? NO_RETRY
   const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000, options.signal))
-  const doFetch = stallTimeout(options.timeout ?? DEFAULT_TIMEOUT, options.fetchFn)
+  const doFetch = stallTimeout(options.timeout, options.fetchFn)
   for (let attempt = 0; ; attempt += 1) {
     const last = attempt >= retry.maxRetries
     let response: Response
@@ -329,8 +341,7 @@ export interface ApiRequestOptions {
    * prefixes do not count, and overflow fails rather than truncates. */
   maxBodyBytes?: number | undefined
   /** Seconds a request may wait to connect, or between two reads of its
-   * response, before it fails (`stallTimeout`); 0 is no bound, absent is
-   * `DEFAULT_TIMEOUT`. */
+   * response, before it fails (`stallTimeout`); absent is `DEFAULT_TIMEOUT`. */
   timeout?: number | undefined
   /** The fetch to use, so transports keep their injection seam. */
   fetchFn?: typeof fetch | undefined
@@ -447,7 +458,7 @@ export async function apiRequest(
   if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0) {
     throw new RangeError('max_body_bytes must be a non-negative safe integer')
   }
-  const doFetch = stallTimeout(options.timeout ?? DEFAULT_TIMEOUT, options.fetchFn)
+  const doFetch = stallTimeout(options.timeout, options.fetchFn)
   const target = new URL(url)
   for (const [name, value] of Object.entries(options.params ?? {})) {
     target.searchParams.set(name, String(value))

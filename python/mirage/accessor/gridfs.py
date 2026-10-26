@@ -18,5 +18,5 @@ from mirage.vfs.gridfs.config import GridFSConfig
 
 class GridFSAccessor(MongoClientAccessor):
     def __init__(self, config: GridFSConfig) -> None:
-        super().__init__(config.uri)
+        super().__init__(config.uri, config.timeout)
         self.config = config

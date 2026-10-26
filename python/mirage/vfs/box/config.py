@@ -14,10 +14,12 @@
 
 from collections.abc import Awaitable, Callable
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import ConfigDict, SecretStr
+
+from mirage.core.api.config import TimeoutConfig
 
 
-class BoxConfig(BaseModel):
+class BoxConfig(TimeoutConfig):
     model_config = ConfigDict(
         frozen=True, arbitrary_types_allowed=True, extra="forbid"
     )

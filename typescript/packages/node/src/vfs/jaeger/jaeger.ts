@@ -43,7 +43,7 @@ export class JaegerVFS extends JaegerVFSBase {
     this.config = config
     const transportOpts: { host?: string; timeout?: number } = {}
     if (config.host !== undefined) transportOpts.host = config.host
-    if (config.requestTimeout !== undefined) transportOpts.timeout = config.requestTimeout
+    if (config.timeout !== undefined) transportOpts.timeout = config.timeout
     const accessorConfig: {
       defaultTraceLimit?: number
       defaultFromTimestamp?: string

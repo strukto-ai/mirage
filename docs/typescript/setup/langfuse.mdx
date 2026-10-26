@@ -47,6 +47,7 @@ const lf = new LangfuseVFS({
 {/* generated: config-table langfuse start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>publicKey</code><br />required | Langfuse project public key. |
 | <code style={{ whiteSpace: 'nowrap' }}>secretKey</code><br />required, secret | Langfuse project secret key. |
 | <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'https://cloud.langfuse.com'` | Langfuse API host; override for a self-hosted or regional instance. |

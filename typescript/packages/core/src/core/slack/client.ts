@@ -90,6 +90,8 @@ export abstract class HttpSlackTransport implements SlackTransport {
   // Indirection so tests can inject a fake fetch without subclass plumbing.
   protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
 
+  constructor(protected readonly timeout?: number) {}
+
   protected abstract baseUrl(): string
   protected abstract authHeaders(
     endpoint?: string,
@@ -108,6 +110,7 @@ export abstract class HttpSlackTransport implements SlackTransport {
       ...(params === undefined ? {} : { params }),
       ...(body === undefined ? {} : { json: body }),
       fetchFn: this.fetch,
+      timeout: this.timeout,
     })
     const data = (raw ?? {}) as SlackResponse
     if (!data.ok) {
@@ -135,6 +138,7 @@ export abstract class HttpSlackTransport implements SlackTransport {
       read: 'bytes',
       ...(window === undefined ? {} : { window }),
       fetchFn: this.fetch,
+      timeout: this.timeout,
     })
     return data as Uint8Array
   }
@@ -145,6 +149,7 @@ export abstract class HttpSlackTransport implements SlackTransport {
         new Error(`slack: download failed (${String(response.status)}): ${url}`),
       headers: await this.authHeaders(),
       fetchFn: this.fetch,
+      timeout: this.timeout,
       ...(signal === undefined ? {} : { signal }),
     })
   }
@@ -155,8 +160,9 @@ export class NodeSlackTransport extends HttpSlackTransport {
     private readonly token: string,
     private readonly searchToken?: string,
     private readonly baseUrlOverride?: string,
+    timeout?: number,
   ) {
-    super()
+    super(timeout)
   }
   protected baseUrl(): string {
     return this.baseUrlOverride !== undefined && this.baseUrlOverride !== ''
@@ -178,6 +184,6 @@ export class NodeSlackTransport extends HttpSlackTransport {
   }
   searcher(): SlackTransport | null {
     if (this.searchToken === undefined || this.searchToken === '') return null
-    return new NodeSlackTransport(this.searchToken, undefined, this.baseUrlOverride)
+    return new NodeSlackTransport(this.searchToken, undefined, this.baseUrlOverride, this.timeout)
   }
 }

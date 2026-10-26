@@ -37,6 +37,7 @@ from mirage.core.api.client import (
     floored_delay,
     header_delay,
     resolve_session,
+    stall_timeout,
     status_error,
 )
 from mirage.core.api.errors import ResponseTooLargeError
@@ -664,7 +665,7 @@ async def test_stream_pulls_on_demand_and_releases_response(
     session.close = AsyncMock()
     monkeypatch.setattr(
         "mirage.core.api.client.resolve_session",
-        lambda value: (session, owned),
+        lambda value, timeout: (session, owned),
     )
     source = api_stream(TARGET, error_of=_error_of)
     assert await anext(source) == b"first"
@@ -747,7 +748,7 @@ async def test_stream_never_retries_once_a_chunk_reached_the_caller(
     session.get.return_value = response
     monkeypatch.setattr(
         "mirage.core.api.client.resolve_session",
-        lambda value: (session, False),
+        lambda value, timeout: (session, False),
     )
     retry = RetryPolicy(max_retries=2, retry_transport=True)
     source = api_stream(TARGET, error_of=_error_of, retry=retry)
@@ -1097,3 +1098,53 @@ async def test_binary_limit_keeps_http_errors_and_status_retries():
         )
         assert result == b"ok"
         assert len(mocked.requests[("GET", URL(TARGET))]) == 2
+
+
+def test_stall_timeout_bounds_progress_not_the_whole_request():
+    bound = stall_timeout(5)
+    assert (bound.total, bound.sock_connect, bound.sock_read) == (None, 5, 5)
+
+
+async def _serve_chunks(gaps: list[float]) -> asyncio.Server:
+    async def answer(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+        for gap in gaps:
+            await writer.drain()
+            await asyncio.sleep(gap)
+            writer.write(b"1\r\nx\r\n")
+        writer.write(b"0\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    return await asyncio.start_server(answer, "127.0.0.1", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_keeps_flowing_outlives_the_stall_bound():
+    async with await _serve_chunks([0.1] * 6) as server:
+        port = server.sockets[0].getsockname()[1]
+        body = b"".join(
+            [
+                c
+                async for c in api_stream(
+                    f"http://127.0.0.1:{port}/",
+                    error_of=_error_of,
+                    timeout=0.3,
+                )
+            ]
+        )
+    assert body == b"x" * 6
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_stops_flowing_fails_at_the_stall_bound():
+    async with await _serve_chunks([0, 5]) as server:
+        port = server.sockets[0].getsockname()[1]
+        with pytest.raises(asyncio.TimeoutError):
+            async for _ in api_stream(
+                f"http://127.0.0.1:{port}/", error_of=_error_of, timeout=0.3
+            ):
+                pass

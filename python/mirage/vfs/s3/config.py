@@ -14,11 +14,12 @@
 
 from pydantic import ConfigDict, SecretStr, field_validator
 
+from mirage.core.api.config import TimeoutConfig
 from mirage.secrets.config import AWSAuth
 from mirage.utils import key_prefix as kp
 
 
-class S3Config(AWSAuth):
+class S3Config(AWSAuth, TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     bucket: str
@@ -31,9 +32,6 @@ class S3Config(AWSAuth):
     path_style: bool = False
     """Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`)
     instead of as a subdomain of the endpoint."""
-    timeout: int = 30
-    """Seconds to wait to connect, and for each read of a response, before
-    the request fails."""
     proxy: SecretStr | None = None
     """Proxy URL for every HTTP and HTTPS request to the endpoint."""
     key_prefix: str | None = None

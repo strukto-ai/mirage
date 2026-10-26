@@ -45,6 +45,7 @@ it directly; a token in a page is visible to that page's user.
 {/* generated: config-table airtable start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Personal access token (or OAuth access token), sent as `Authorization: Bearer`. |
 | <code style={{ whiteSpace: 'nowrap' }}>baseIds</code> | Only these bases are listed or readable. Unset shows every base the token can reach. |
 | <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.airtable.com/v0'` | Airtable API root; override to point at a fake or proxy. |

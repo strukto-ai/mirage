@@ -24,11 +24,13 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 type HeaderProvider = () => Promise<Record<string, string>> | Record<string, string>
 
 const SlackConfigSchema = z
   .object({
+    ...timeoutShape,
     ...timeRangeShape,
     proxyUrl: z
       .string()

@@ -14,12 +14,12 @@
 
 import posixpath
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import ConfigDict, SecretStr, field_validator
 
-from mirage.vfs.constants import WALK_LIMIT
+from mirage.core.api.config import TimeoutConfig
 
 
-class TiDBFilesystemConfig(BaseModel):
+class TiDBFilesystemConfig(TimeoutConfig):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
@@ -35,12 +35,6 @@ class TiDBFilesystemConfig(BaseModel):
     root_path: str = "/"
     """Directory inside the file system that becomes the mount root, such
     as `/projects/a` for a token scoped to it; `..` segments are refused."""
-    timeout: int = Field(default=30, gt=0)
-    """Seconds one request may take before it fails."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""
 
     @field_validator("host")
     @classmethod

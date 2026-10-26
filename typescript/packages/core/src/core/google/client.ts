@@ -161,6 +161,7 @@ export async function refreshAccessToken(
     body.set('client_secret', config.clientSecret)
   }
   const data = (await apiRequest('POST', tokenUrl(config), {
+    timeout: config.timeout,
     errorOf: (r, text) =>
       new GoogleApiError(`Google token refresh → ${String(r.status)} ${text}`, r.status),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -180,7 +181,7 @@ export class TokenManager extends OAuthTokenManager {
   readonly config: GoogleConfig
 
   constructor(config: GoogleConfig, clock?: Clock) {
-    super(TOKEN_BUFFER_SECONDS, clock)
+    super(TOKEN_BUFFER_SECONDS, clock, config.timeout)
     this.config = config
   }
 
@@ -233,6 +234,7 @@ export async function googleRequest(
   const headers: Record<string, string> = { ...(await googleHeaders(tm)) }
   if (options.json !== undefined) headers['Content-Type'] = 'application/json'
   return apiRequest(method, url, {
+    timeout: tm.timeout,
     ...options,
     headers: { ...headers, ...options.headers },
     errorOf:
@@ -299,6 +301,7 @@ export async function* googleGetStream(
   url: string,
 ): AsyncGenerator<Uint8Array, void> {
   yield* apiStream(url, {
+    timeout: tm.timeout,
     errorOf: (r, text) =>
       new GoogleApiError(`Google GET ${url} → ${String(r.status)} ${text}`, r.status),
     headers: await googleHeaders(tm),

@@ -59,7 +59,7 @@ class TokenManager:
         clock (Clock | None): the clock expiry and retry waits are read
             on; None is the system clock.
         timeout (float): seconds a request through the pool may wait to
-            connect, or between two reads of its response; 0 is no bound.
+            connect, or between two reads of its response.
     """
 
     def __init__(

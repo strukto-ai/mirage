@@ -250,7 +250,7 @@ class TokenManager(OAuthTokenManager):
         # PUT and DELETE included, beneath any policy; READ_RETRY and
         # WRITE_RETRY decide alone, so an upload chunk or a values update
         # is never sent twice.
-        self.pool = SessionPool(retry_connection=False)
+        self.pool = SessionPool(config.timeout, retry_connection=False)
         self.config = config
 
     async def refresh_pair(self) -> tuple[str, int]:

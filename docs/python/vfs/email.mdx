@@ -35,6 +35,7 @@ ws = Workspace({"/email": vfs}, mode=MountMode.READ)
 {/* generated: config-table email start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>imap_host</code><br />required | IMAP server hostname. |
 | <code style={{ whiteSpace: 'nowrap' }}>imap_port</code><br />default `993` | IMAP server port. |
 | <code style={{ whiteSpace: 'nowrap' }}>smtp_host</code><br />required | SMTP server hostname `himalaya` sends mail through. |

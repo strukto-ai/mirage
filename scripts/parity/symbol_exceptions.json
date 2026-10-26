@@ -1,5 +1,5 @@
 {
-  "baseline": 2968,
+  "baseline": 2964,
  "modules": {
   "vfs/tidb_filesystem/config": {
    "typescript_only": {

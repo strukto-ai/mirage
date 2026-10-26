@@ -15,8 +15,10 @@
 import { z } from 'zod'
 import type { ConfigOf, RedactedConfig } from '../../vfs/secrets.ts'
 import { parseConfigWithSchema, redactConfigWithSchema, secretStr } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 const GitHubConfigSchema = z.object({
+  ...timeoutShape,
   token: secretStr().describe('GitHub personal access token.'),
   owner: z.string().describe('Repository owner, a user or an organization.'),
   repo: z.string().describe('Repository name.'),
@@ -45,6 +47,7 @@ export function normalizeGitHubConfig(input: Record<string, unknown>): GitHubCon
 }
 
 export const GhConfigSchema = z.object({
+  ...timeoutShape,
   token: secretStr(),
   baseUrl: z.string().optional(),
   repo: z.string().optional(),

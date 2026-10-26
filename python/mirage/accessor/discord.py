@@ -26,7 +26,7 @@ class DiscordAccessor(SessionAccessor):
     def __init__(
         self, config: DiscordConfig, time_range: TimeRange = TimeRange()
     ) -> None:
-        super().__init__()
+        super().__init__(config.timeout)
         self.config = config
         self.time_range = time_range
         self.listed_day = ResponseCache[

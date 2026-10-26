@@ -14,12 +14,13 @@
 
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import ConfigDict, SecretStr
 
+from mirage.core.api.config import TimeoutConfig
 from mirage.vfs.s3 import S3VFS, S3Config
 
 
-class S3AliasConfig(BaseModel):
+class S3AliasConfig(TimeoutConfig):
     """Shared shape for the S3-compatible providers.
 
     Every alias is the same handful of credentials plus one endpoint rule,
@@ -64,9 +65,6 @@ class S3AliasConfig(BaseModel):
     """Key prefix inside the bucket that the mount treats as its root; keys
     outside it are not visible. Leading slashes are dropped and a trailing
     `/` is added."""
-    timeout: int = 30
-    """Seconds to wait to connect, and for each read of a response, before
-    the request fails."""
     proxy: SecretStr | None = None
     """Proxy URL for every HTTP and HTTPS request to the endpoint."""
 

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
+import { DEFAULT_TIMEOUT } from '@struktoai/mirage-core/core/api/constants'
 import type * as Nodemailer from 'nodemailer'
 import { parseRfc822, type ParsedRfc822 } from '../../../../core/email/_parse.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
@@ -31,11 +32,15 @@ async function getTransporter(config: EmailConfig): Promise<Nodemailer.Transport
   // Port 465 speaks TLS from its first byte (RFC 8314's implicit TLS);
   // with secure false nodemailer connects in plaintext and upgrades when
   // the server advertises STARTTLS. Mirrors Python's send_raw.
+  const timeoutMs = (config.timeout ?? DEFAULT_TIMEOUT) * 1000
   const transporter = mod.createTransport({
     host: config.smtpHost,
     port: config.smtpPort,
     secure: config.smtpPort === IMPLICIT_TLS_PORT,
     auth: { user: config.username, pass: config.password },
+    connectionTimeout: timeoutMs,
+    greetingTimeout: timeoutMs,
+    socketTimeout: timeoutMs,
   })
   transporterCache.set(config, transporter)
   return transporter

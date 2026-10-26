@@ -136,7 +136,7 @@ class SessionAccessor(Accessor):
 
     Args:
         timeout (float): seconds a request may wait to connect, or between
-            two reads of its response; 0 is no bound.
+            two reads of its response.
         retry_connection (bool): allow aiohttp's automatic connection retry.
     """
 

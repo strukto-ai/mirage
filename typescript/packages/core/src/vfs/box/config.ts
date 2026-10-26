@@ -20,8 +20,10 @@ import {
   z,
 } from '../secrets.ts'
 import type { ConfigOf, RedactedConfig } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
 
 export interface BoxConfig {
+  timeout?: number
   // API origin override (e.g. an integ fake). Defaults to api.box.com.
   endpoint?: string
   // Box folder id to mount as the workspace root instead of the account
@@ -47,6 +49,7 @@ export interface BoxConfig {
 }
 
 const BoxConfigSchema = z.object({
+  ...timeoutShape,
   endpoint: z
     .string()
     .optional()

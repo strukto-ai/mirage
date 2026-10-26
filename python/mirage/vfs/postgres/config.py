@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import ConfigDict, SecretStr
+
+from mirage.core.api.config import TimeoutConfig
 
 
-class PostgresConfig(BaseModel):
+class PostgresConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     dsn: SecretStr

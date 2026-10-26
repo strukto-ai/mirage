@@ -19,11 +19,13 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 // Doubles as the himalaya CLI's configModel: parse applies the same
 // defaults buildEmailConfig fills in, and secretStr marks the password
 // for snapshot redaction.
 export const EmailConfigSchema = z.object({
+  ...timeoutShape,
   imapHost: z.string().describe('IMAP server hostname.'),
   imapPort: z.number().default(993).describe('IMAP server port.'),
   smtpHost: z.string().describe('SMTP server hostname `himalaya` sends mail through.'),
@@ -89,6 +91,7 @@ export function buildEmailConfig(input: EmailConfigInput): EmailConfig {
     maxMessages: input.maxMessages ?? 200,
     saveCopy: input.saveCopy ?? true,
     sentFolder: input.sentFolder ?? null,
+    ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
   }
 }
 

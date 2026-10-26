@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { HF_ENDPOINT, HF_TIMEOUT_MS } from '../vfs/hf_buckets/config.ts'
+import { HF_ENDPOINT } from '../vfs/hf_buckets/config.ts'
 import { HfBucketsAccessor } from './hf_buckets.ts'
 
 describe('HfBucketsAccessor', () => {
@@ -58,8 +58,8 @@ describe('HfBucketsAccessor', () => {
   })
 
   it("waits python's 30 seconds without progress unless configured", () => {
-    expect(new HfBucketsAccessor({ bucket: 'a/b' }).account.timeoutMs).toBe(HF_TIMEOUT_MS)
-    expect(new HfBucketsAccessor({ bucket: 'a/b', timeoutMs: 5000 }).account.timeoutMs).toBe(5000)
+    expect(new HfBucketsAccessor({ bucket: 'a/b' }).account.config.timeout).toBeUndefined()
+    expect(new HfBucketsAccessor({ bucket: 'a/b', timeout: 5 }).account.config.timeout).toBe(5)
   })
 
   it('reaches the Hub at the default endpoint unless one is configured', () => {

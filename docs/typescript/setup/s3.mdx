@@ -29,7 +29,7 @@ const s3 = new S3VFS({
   // Optional:
   // endpoint: 'http://localhost:9000',  // MinIO
   // forcePathStyle: true,               // For MinIO/R2
-  // timeoutMs: 30_000,
+  // timeout: 30,
   // proxy: 'http://proxy:8080',
 })
 
@@ -54,7 +54,7 @@ Under `write: conditional` a write carries the version of the file mirage read, 
 | <code style={{ whiteSpace: 'nowrap' }}>secretAccessKey</code><br />secret | Secret access key paired with `accessKeyId`. |
 | <code style={{ whiteSpace: 'nowrap' }}>sessionToken</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
 | <code style={{ whiteSpace: 'nowrap' }}>forcePathStyle</code> | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeoutMs</code> | Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. Applies to the AWS SDK client only: with `presignedUrlProvider` the signed-URL requests take no timeout. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials. |
 | <code style={{ whiteSpace: 'nowrap' }}>httpAgentProvider</code><br />secret | Function that returns the `httpAgent` and `httpsAgent` for one S3 client, called once per client. The node mount builds it from `proxy` when that is set. |
 | <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code> | `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default; a write through `presignedUrlProvider` sends `application/octet-stream`. |
@@ -75,12 +75,13 @@ The browser `S3VFS` never sees AWS credentials. You implement one function, `pre
 
 ### Config
 
-{/* generated: config-table browser/s3 omit=accessKeyId,secretAccessKey,sessionToken,forcePathStyle,timeoutMs,httpAgentProvider start */}
+{/* generated: config-table browser/s3 omit=accessKeyId,secretAccessKey,sessionToken,forcePathStyle,httpAgentProvider start */}
 | Field | Description |
 | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
 | <code style={{ whiteSpace: 'nowrap' }}>region</code> | AWS region requests are signed for and sent to. Unset leaves it to the AWS SDK's environment variables and profile. |
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL of an S3-compatible server. Unset, the node mount uses `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` when set, else AWS's endpoint for `region`; an endpoint set only in an AWS profile is not read. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials. |
 | <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code> | `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default; a write through `presignedUrlProvider` sends `application/octet-stream`. |
 | <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |

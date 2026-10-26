@@ -21,6 +21,7 @@ import {
   secretSchema,
   secretStr,
 } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 // A pre-minted token read on every request. This is how a caller that
 // already owns the OAuth dance (a service account, a host application's
@@ -54,6 +55,7 @@ function hasGoogleCredential(config: {
 
 export const GoogleConfigSchema = z
   .object({
+    ...timeoutShape,
     // Two ways to authenticate, the same two MsGraphConfig offers: a token
     // (or provider) supplied by the caller, or the refresh-token grant where
     // mirage mints and renews the access token itself through TokenManager.

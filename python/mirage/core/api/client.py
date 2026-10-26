@@ -117,7 +117,7 @@ def stall_timeout(seconds: float) -> aiohttp.ClientTimeout:
 
     The clock runs while connecting and waiting for the answer, and
     restarts on every chunk of the body, so a download that keeps flowing
-    is never cut off. Zero is no bound.
+    is never cut off.
 
     Args:
         seconds (float): the configured timeout.
@@ -125,8 +125,6 @@ def stall_timeout(seconds: float) -> aiohttp.ClientTimeout:
     Returns:
         aiohttp.ClientTimeout: the bound, for a session.
     """
-    if seconds <= 0:
-        return aiohttp.ClientTimeout(total=None)
     return aiohttp.ClientTimeout(
         total=None, sock_connect=seconds, sock_read=seconds
     )
@@ -143,7 +141,7 @@ class SessionPool:
 
     Args:
         timeout (float): seconds a request on the session may go without
-            progress (``stall_timeout``); 0 is no bound.
+            progress (``stall_timeout``).
         retry_connection (bool): allow aiohttp's automatic replay after
             a connection failure, independently of the API retry policy.
     """

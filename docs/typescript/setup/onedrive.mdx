@@ -31,7 +31,7 @@ Use `@struktoai/mirage-browser` for the same API in a browser. An access-token c
 | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>accessToken</code><br />required, secret | Microsoft Graph bearer token, or a function (sync or async) that returns one; it is called for each request and again after a `401`. |
 | <code style={{ whiteSpace: 'nowrap' }}>graphBaseUrl</code> | Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one Graph request may take; also how long a server-side copy is polled before it fails as unconfirmed. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a Graph request may wait to connect, or between two reads of its answer, before it fails; also how long a server-side copy is polled before it fails as unconfirmed. |
 | <code style={{ whiteSpace: 'nowrap' }}>maxRetries</code><br />default `5` | Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds. |
 | <code style={{ whiteSpace: 'nowrap' }}>driveId</code> | Graph drive ID of the drive to mount. Set at most one of `driveId`, `siteId`, `groupId` and `userId`; with none the mount uses the signed-in user's drive. |
 | <code style={{ whiteSpace: 'nowrap' }}>siteId</code> | Graph site ID whose default document library the mount uses. |

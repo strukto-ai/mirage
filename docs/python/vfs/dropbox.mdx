@@ -46,6 +46,7 @@ memory, refreshing ~5 minutes before expiry.
 {/* generated: config-table dropbox start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>client_id</code><br />required | Dropbox app key. |
 | <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />required, secret | Dropbox app secret. |
 | <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />required, secret | Long-lived OAuth refresh token; mirage mints short-lived access tokens from it. |

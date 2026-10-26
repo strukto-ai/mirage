@@ -27,6 +27,7 @@ ws = Workspace({"/trello": vfs}, mode=MountMode.READ)
 {/* generated: config-table trello start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />required, secret | Trello API key. |
 | <code style={{ whiteSpace: 'nowrap' }}>api_token</code><br />required, secret | Trello API token. |
 | <code style={{ whiteSpace: 'nowrap' }}>workspace_id</code> | Only this workspace and its boards are listed or readable. Unset shows every workspace of the token's member. |

@@ -40,7 +40,9 @@ export class SlackAccessor extends Accessor {
  */
 export function slackAccessor(config: unknown): SlackAccessor {
   const cfg = config as SlackConfig
-  return new SlackAccessor(new NodeSlackTransport(cfg.token, cfg.searchToken, cfg.baseUrl))
+  return new SlackAccessor(
+    new NodeSlackTransport(cfg.token, cfg.searchToken, cfg.baseUrl, cfg.timeout),
+  )
 }
 
 export interface SlackResourceLike extends BaseVFS {

@@ -18,6 +18,7 @@ import {
   NO_RETRY,
   apiRequest,
   apiStream,
+  stallTimeout,
   bodyDelay,
   buildUrl,
   flooredDelay,
@@ -281,18 +282,15 @@ describe('apiRequest', () => {
     expect(sentBody).toBe('a=1&b=2')
   })
 
-  it.each([30, 1.001, 0.0001])(
-    'timeoutSeconds %s arms a per-attempt signal',
-    async (timeoutSeconds) => {
-      let sentSignal: AbortSignal | null | undefined
-      const fakeFetch: typeof fetch = (_url, init) => {
-        sentSignal = init?.signal
-        return Promise.resolve(jsonResponse({}))
-      }
-      await apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, timeoutSeconds })
-      expect(sentSignal).toBeInstanceOf(AbortSignal)
-    },
-  )
+  it.each([30, 1.001, 0.0001])('timeout %s arms a per-attempt signal', async (timeout) => {
+    let sentSignal: AbortSignal | null | undefined
+    const fakeFetch: typeof fetch = (_url, init) => {
+      sentSignal = init?.signal
+      return Promise.resolve(jsonResponse({}))
+    }
+    await apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, timeout })
+    expect(sentSignal).toBeInstanceOf(AbortSignal)
+  })
 })
 
 describe('retry delays', () => {
@@ -1006,4 +1004,38 @@ describe('buffered binary limits', () => {
       expect(fakeFetch).not.toHaveBeenCalled()
     },
   )
+})
+
+describe('stallTimeout', () => {
+  // A body that drips one byte after each gap, and errors with the request's
+  // abort reason the way a real fetch body does.
+  function drip(gapsMs: readonly number[]): typeof fetch {
+    return (_input, init) => {
+      const signal = init?.signal
+      const body = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          signal?.addEventListener('abort', () => {
+            controller.error(signal.reason)
+          })
+          for (const gap of gapsMs) {
+            await new Promise((done) => setTimeout(done, gap))
+            if (signal?.aborted === true) return
+            controller.enqueue(new Uint8Array([120]))
+          }
+          controller.close()
+        },
+      })
+      return Promise.resolve(new Response(body))
+    }
+  }
+
+  it('lets a body that keeps flowing outlive the bound', async () => {
+    const response = await stallTimeout(0.05, drip([20, 20, 20, 20, 20]))(TARGET)
+    expect(await response.text()).toBe('xxxxx')
+  })
+
+  it('fails a body that stops flowing at the bound', async () => {
+    const response = await stallTimeout(0.05, drip([0, 500]))(TARGET)
+    await expect(response.text()).rejects.toMatchObject({ name: 'TimeoutError' })
+  })
 })

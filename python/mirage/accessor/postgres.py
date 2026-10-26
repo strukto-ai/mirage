@@ -67,6 +67,7 @@ class PostgresAccessor(Accessor):
                     init=read_as_text,
                     min_size=1,
                     max_size=4,
+                    timeout=self.config.timeout,
                 )
             return self._pool
 

@@ -20,8 +20,11 @@ import {
   type RedactedConfig,
   secretStr,
 } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
+import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 
 const LanceDBConfigSchema = z.object({
+  ...timeoutShape,
   uri: z
     .string()
     .describe(
@@ -92,6 +95,7 @@ export function normalizeLanceDBConfig(input: Record<string, unknown>): LanceDBC
 }
 
 export interface LanceDBConfigResolved {
+  timeout: number
   uri: string
   apiKey: string | null
   region: string
@@ -110,6 +114,7 @@ export interface LanceDBConfigResolved {
 
 export function resolveLanceDBConfig(config: LanceDBConfig): LanceDBConfigResolved {
   return {
+    timeout: config.timeout ?? DEFAULT_TIMEOUT,
     uri: config.uri,
     apiKey: config.apiKey ?? null,
     region: config.region ?? 'us-east-1',

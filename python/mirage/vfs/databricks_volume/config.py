@@ -16,12 +16,14 @@ import posixpath
 from collections.abc import Awaitable, Callable
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import ConfigDict, Field, SecretStr, field_validator
+
+from mirage.core.api.config import TimeoutConfig
 
 TokenProvider = Callable[[], str | SecretStr | Awaitable[str | SecretStr]]
 
 
-class DatabricksVolumeConfig(BaseModel):
+class DatabricksVolumeConfig(TimeoutConfig):
     model_config = ConfigDict(
         frozen=True,
         populate_by_name=True,
@@ -47,8 +49,6 @@ class DatabricksVolumeConfig(BaseModel):
     token: SecretStr | TokenProvider
     """Bearer token as a string, or a function, synchronous or
     asynchronous, that returns one for each request."""
-    timeout: int = Field(default=30, gt=0)
-    """Seconds one request may take before it fails."""
 
     @field_validator("catalog", "schema_name", "volume")
     @classmethod

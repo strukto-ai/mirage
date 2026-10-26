@@ -23,7 +23,7 @@ class SlackAccessor(SessionAccessor):
     def __init__(
         self, config: SlackConfig, time_range: TimeRange = TimeRange()
     ) -> None:
-        super().__init__()
+        super().__init__(config.timeout)
         self.config = config
         self.time_range = time_range
         # The words of the workspace's names and the channels search

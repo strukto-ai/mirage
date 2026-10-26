@@ -24,6 +24,7 @@ standard `fetch`. Browser access depends on the service's CORS configuration.
 {/* generated: config-table wandb start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>entities</code><br />required | W&B entities (users or teams) the mount shows as top-level directories; no other entity is reachable. |
 | <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />default `''`, secret | W&B API key, sent as HTTP Basic auth. Empty sends no credentials. |
 | <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.wandb.ai'` | W&B API root. Queries go to its `/graphql`, and only downloads from the same origin carry the key. |

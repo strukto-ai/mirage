@@ -20,6 +20,7 @@ import {
   type RedactedConfig,
   secretSchema,
 } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
 
 function validVolumePart(value: string): boolean {
   return value !== '' && !value.includes('/')
@@ -67,6 +68,7 @@ function validToken(value: string): boolean {
 }
 
 const DatabricksVolumeConfigSchema = z.object({
+  ...timeoutShape,
   catalog: z
     .string()
     .refine(validVolumePart, 'must be a non-empty path segment')
@@ -100,11 +102,6 @@ const DatabricksVolumeConfigSchema = z.object({
   ).describe(
     'Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request.',
   ),
-  timeout: z
-    .number()
-    .positive()
-    .default(30)
-    .describe('Seconds one request may take before it fails.'),
 })
 
 export type DatabricksVolumeConfig = ConfigOf<typeof DatabricksVolumeConfigSchema>

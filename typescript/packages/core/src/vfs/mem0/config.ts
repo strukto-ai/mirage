@@ -7,8 +7,11 @@ import {
   type RedactedConfig,
   secretStr,
 } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
+import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 
 export interface Mem0ConfigResolved {
+  timeout: number
   apiKey: string
   host: string
   userId: string | null
@@ -20,6 +23,7 @@ export interface Mem0ConfigResolved {
 }
 
 const Mem0ConfigSchema = z.object({
+  ...timeoutShape,
   apiKey: secretStr().describe('Mem0 Platform API key.'),
   host: z
     .string()
@@ -79,6 +83,7 @@ export function resolveMem0Config(config: Mem0Config): Mem0ConfigResolved {
     throw new Error('Mem0 scope id cannot be empty')
   }
   return {
+    timeout: config.timeout ?? DEFAULT_TIMEOUT,
     apiKey: config.apiKey,
     host: rstripSlash(config.host ?? 'https://api.mem0.ai'),
     userId: config.userId ?? null,

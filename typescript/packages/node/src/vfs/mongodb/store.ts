@@ -21,6 +21,7 @@ import type {
 import { EntityKind, NOT_A_REPLICA_SET } from '@struktoai/mirage-core/core/mongodb/types'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import { DEFAULT_TIMEOUT } from '@struktoai/mirage-core/core/api/constants'
 import { VERSION } from '../../version.ts'
 
 const DRIVER_INFO = { name: 'Mirage', version: VERSION }
@@ -80,16 +81,22 @@ interface MongoClientLike {
 interface MongoModule {
   MongoClient: new (
     uri: string,
-    options?: { driverInfo?: { name: string; version?: string } },
+    options?: {
+      driverInfo?: { name: string; version?: string }
+      connectTimeoutMS?: number
+      socketTimeoutMS?: number
+    },
   ) => MongoClientLike
 }
 
 export class MongoDBStore implements MongoDriver {
   readonly uri: string
+  private readonly timeoutMs: number
   private clientPromise: Promise<MongoClientLike> | null = null
 
-  constructor(uri: string) {
+  constructor(uri: string, timeout: number = DEFAULT_TIMEOUT) {
     this.uri = uri
+    this.timeoutMs = timeout * 1000
   }
 
   async listDatabases(): Promise<string[]> {
@@ -302,7 +309,11 @@ export class MongoDBStore implements MongoDriver {
       feature: 'MongoDBVFS',
       packageName: 'mongodb',
     })
-    const c = new mod.MongoClient(this.uri, { driverInfo: DRIVER_INFO })
+    const c = new mod.MongoClient(this.uri, {
+      driverInfo: DRIVER_INFO,
+      connectTimeoutMS: this.timeoutMs,
+      socketTimeoutMS: this.timeoutMs,
+    })
     await c.connect()
     return c
   }

@@ -34,14 +34,17 @@ import {
   hubStream,
   resolveUrl,
   revSegment,
-  stallTimeout,
 } from './client.ts'
+import { stallTimeout } from '@struktoai/mirage-core/core/api/client'
 import { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import { MAX_RETRIES } from './constants.ts'
 
-/** An anonymous account whose requests give up after `timeoutMs` without progress. */
-function anonymous(timeoutMs = 0): HfAccountAccessor {
-  return new HfAccountAccessor({ endpoint: 'https://huggingface.co' }, timeoutMs)
+/** An anonymous account whose requests give up after `timeout` seconds without progress. */
+function anonymous(timeout?: number): HfAccountAccessor {
+  return new HfAccountAccessor({
+    endpoint: 'https://huggingface.co',
+    ...(timeout === undefined ? {} : { timeout }),
+  })
 }
 
 describe('hubHeaders', () => {
@@ -309,38 +312,34 @@ describe('stallTimeout', () => {
   })
 
   it('lets a download that keeps flowing outlive the bound', async () => {
-    const response = await stallTimeout(STALL_MS)(`${base}/drip`)
+    const response = await stallTimeout(STALL_MS / 1000, hubFetch)(`${base}/drip`)
     expect(await response.text()).toBe('abcdefgh')
   })
 
   it('fails a download that stops flowing at the bound', async () => {
-    const response = await stallTimeout(STALL_MS)(`${base}/stall`)
+    const response = await stallTimeout(STALL_MS / 1000, hubFetch)(`${base}/stall`)
     await expect(response.text()).rejects.toMatchObject({ name: 'TimeoutError' })
   })
 
   it('fails a request whose answer never comes', async () => {
-    await expect(stallTimeout(STALL_MS)(`${base}/silent`)).rejects.toMatchObject({
+    await expect(stallTimeout(STALL_MS / 1000, hubFetch)(`${base}/silent`)).rejects.toMatchObject({
       name: 'TimeoutError',
     })
   })
 
-  it('reads a bound of zero or less as none', async () => {
-    expect(stallTimeout(0)).toBe(hubFetch)
-    expect(stallTimeout(-1)).toBe(hubFetch)
-    expect(await drain(hubStream(anonymous(0), `${base}/drip`))).toBe('abcdefgh')
-  })
-
   it('bounds a whole-file read', async () => {
-    const data = await hubBytes(anonymous(STALL_MS), `${base}/drip`)
+    const data = await hubBytes(anonymous(STALL_MS / 1000), `${base}/drip`)
     expect(new TextDecoder().decode(data)).toBe('abcdefgh')
-    await expect(hubBytes(anonymous(STALL_MS), `${base}/stall`)).rejects.toMatchObject({
+    await expect(hubBytes(anonymous(STALL_MS / 1000), `${base}/stall`)).rejects.toMatchObject({
       name: 'TimeoutError',
     })
   })
 
   it('bounds the streamed read', async () => {
-    expect(await drain(hubStream(anonymous(STALL_MS), `${base}/drip`))).toBe('abcdefgh')
-    await expect(drain(hubStream(anonymous(STALL_MS), `${base}/stall`))).rejects.toMatchObject({
+    expect(await drain(hubStream(anonymous(STALL_MS / 1000), `${base}/drip`))).toBe('abcdefgh')
+    await expect(
+      drain(hubStream(anonymous(STALL_MS / 1000), `${base}/stall`)),
+    ).rejects.toMatchObject({
       name: 'TimeoutError',
     })
   })
@@ -368,21 +367,21 @@ describe('a transport failure', () => {
     return settled
   }
 
-  async function drained(timeoutMs: number): Promise<void> {
-    for await (const chunk of hubStream(anonymous(timeoutMs), 'http://127.0.0.1:1/x')) {
+  async function drained(): Promise<void> {
+    for await (const chunk of hubStream(anonymous(), 'http://127.0.0.1:1/x')) {
       expect(chunk).toBeUndefined()
     }
   }
 
   it.each([
     ['hubGet', () => hubGet(anonymous(), 'http://127.0.0.1:1/x')],
-    ['hubGet with a bound', () => hubGet(anonymous(1000), 'http://127.0.0.1:1/x')],
+    ['hubGet with a bound', () => hubGet(anonymous(1), 'http://127.0.0.1:1/x')],
     ['hubPost', () => hubPost(anonymous(), 'http://127.0.0.1:1/x', {})],
     ['hubPostNdjson', () => hubPostNdjson(anonymous(), 'http://127.0.0.1:1/x', new Uint8Array())],
     ['hubBytes', () => hubBytes(anonymous(), 'http://127.0.0.1:1/x')],
     ['hubBytesTagged', () => hubBytesTagged(anonymous(), 'http://127.0.0.1:1/x')],
     ['hubRequest', () => hubRequest(anonymous(), 'DELETE', 'http://127.0.0.1:1/x', null)],
-    ['hubStream', () => drained(0)],
+    ['hubStream', () => drained()],
   ] as [string, () => Promise<unknown>][])('is a connection error from %s', async (_name, call) => {
     const err = await rejected(call)
     expect(err).toBeInstanceOf(HfHubConnectionError)

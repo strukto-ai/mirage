@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
+
+from mirage.core.api.config import TimeoutConfig
 
 
-class JaegerConfig(BaseModel):
+class JaegerConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     host: str = "http://localhost:16686"
@@ -33,5 +35,3 @@ class JaegerConfig(BaseModel):
     default_to_timestamp: str | None = None
     """Upper bound of trace listings, an ISO 8601 timestamp. Unset means
     now."""
-    request_timeout: int = 30
-    """Seconds to wait for one HTTP request to Jaeger."""

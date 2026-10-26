@@ -21,12 +21,15 @@ import {
   secretSchema,
   secretStr,
 } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
+import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 
 // What `search` vectorizes the query with when the caller brings a model:
 // the text in, its embedding out, in the space the collection was built in.
 export type EmbedFn = (text: string) => Promise<number[]>
 
 const QdrantConfigSchema = z.object({
+  ...timeoutShape,
   url: z
     .string()
     .optional()
@@ -129,6 +132,7 @@ export function normalizeQdrantConfig(input: Record<string, unknown>): QdrantCon
 }
 
 export interface QdrantConfigResolved {
+  timeout: number
   url: string | null
   host: string
   port: number
@@ -152,6 +156,7 @@ export interface QdrantConfigResolved {
 
 export function resolveQdrantConfig(config: QdrantConfig): QdrantConfigResolved {
   return {
+    timeout: config.timeout ?? DEFAULT_TIMEOUT,
     url: config.url ?? null,
     host: config.host ?? 'localhost',
     port: config.port ?? 6333,

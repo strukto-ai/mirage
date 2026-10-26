@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import ConfigDict, SecretStr
+
+from mirage.core.api.config import TimeoutConfig
 
 
-class GitHubConfig(BaseModel):
+class GitHubConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     token: SecretStr
@@ -38,7 +40,7 @@ class GitHubConfig(BaseModel):
     GitHub Enterprise."""
 
 
-class GhConfig(BaseModel):
+class GhConfig(TimeoutConfig):
     """What a `gh` install is configured with.
 
     `repo` is what real gh reads off the current git remote to answer a line

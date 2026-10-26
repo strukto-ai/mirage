@@ -53,6 +53,7 @@ console.log(res.stdoutText)
 {/* generated: config-table discord start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Discord bot token, sent as `Authorization: Bot <token>`. |
 | <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://discord.com/api/v10'` | Discord API root; override to point at a fake or proxy. |
 | <code style={{ whiteSpace: 'nowrap' }}>startTime</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
@@ -74,6 +75,7 @@ The browser package never sees the bot token. Instead, point it at a relative UR
 {/* generated: config-table browser/discord start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>startTime</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
 | <code style={{ whiteSpace: 'nowrap' }}>endTime</code> | End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open. |
 | <code style={{ whiteSpace: 'nowrap' }}>proxyUrl</code><br />required | URL of your backend proxy, which forwards to `https://discord.com/api/v10` and attaches the bot token. A path resolves against the page's origin; no query string or fragment. |

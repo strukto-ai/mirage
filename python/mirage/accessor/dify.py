@@ -1,5 +1,3 @@
-import aiohttp
-
 from mirage.accessor.base import SessionAccessor
 from mirage.concurrency import ConcurrencyLimiter
 from mirage.vfs.dify.config import DifyConfig
@@ -7,8 +5,6 @@ from mirage.vfs.dify.config import DifyConfig
 
 class DifyAccessor(SessionAccessor):
     def __init__(self, config: DifyConfig) -> None:
-        super().__init__(
-            timeout=aiohttp.ClientTimeout(total=config.request_timeout)
-        )
+        super().__init__(timeout=config.timeout)
         self.config = config
         self._request_limiter = ConcurrencyLimiter(config.max_concurrency)

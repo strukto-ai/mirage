@@ -20,8 +20,10 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 const GridFSConfigSchema = z.object({
+  ...timeoutShape,
   uri: secretStr().describe('MongoDB connection URI.'),
   database: z.string().describe('Database that holds the GridFS bucket.'),
   bucket: z.string().optional().meta({

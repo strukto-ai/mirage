@@ -20,10 +20,13 @@ import {
   type RedactedConfig,
   secretStr,
 } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
+import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 
 // `uri` is the credential, so it carries the secret marker the redactor
 // reads; the rest are the knobs python's `MongoDBConfig` declares.
 const MongoDBConfigSchema = z.object({
+  ...timeoutShape,
   uri: secretStr().describe(
     'MongoDB connection URI in Node; in the browser, the URL of a backend route that holds the connection URI.',
   ),
@@ -49,6 +52,7 @@ const MongoDBConfigSchema = z.object({
 export type MongoDBConfig = ConfigOf<typeof MongoDBConfigSchema>
 
 export interface MongoDBConfigResolved {
+  timeout: number
   uri: string
   databases: readonly string[] | null
   maxDocLimit: number
@@ -61,6 +65,7 @@ export function normalizeMongoDBConfig(input: Record<string, unknown>): MongoDBC
 
 export function resolveMongoDBConfig(config: MongoDBConfig): MongoDBConfigResolved {
   return {
+    timeout: config.timeout ?? DEFAULT_TIMEOUT,
     uri: config.uri,
     databases: config.databases ?? null,
     maxDocLimit: config.maxDocLimit ?? 5000,

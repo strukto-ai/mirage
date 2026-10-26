@@ -1,6 +1,8 @@
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import AfterValidator, ConfigDict, Field, SecretStr
+
+from mirage.core.api.config import TimeoutConfig
 
 
 def entity_name(value: str) -> str:
@@ -16,7 +18,7 @@ Name = Annotated[
 ]
 
 
-class WandbConfig(BaseModel):
+class WandbConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
     entities: list[Name] = Field(min_length=1)
     """W&B entities (users or teams) the mount shows as top-level

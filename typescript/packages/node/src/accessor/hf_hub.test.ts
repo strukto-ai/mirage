@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { HF_TIMEOUT_MS, type HfRepoConfig } from '../vfs/hf_buckets/config.ts'
+import type { HfRepoConfig } from '../vfs/hf_buckets/config.ts'
 import { accountOf, HfAccountAccessor, HfHubAccessor, HfModelsAccessor } from './hf_hub.ts'
 
 function models(config: HfRepoConfig): HfModelsAccessor {
@@ -22,8 +22,8 @@ function models(config: HfRepoConfig): HfModelsAccessor {
 
 describe('HfHubAccessor', () => {
   it("waits python's 30 seconds without progress unless configured", () => {
-    expect(models({ repoId: 'a/b' }).account.timeoutMs).toBe(HF_TIMEOUT_MS)
-    expect(models({ repoId: 'a/b', timeoutMs: 5000 }).account.timeoutMs).toBe(5000)
+    expect(models({ repoId: 'a/b' }).account.config.timeout).toBeUndefined()
+    expect(models({ repoId: 'a/b', timeout: 5 }).account.config.timeout).toBe(5)
   })
 
   it("rides the mount's own account for its credential and origin", () => {

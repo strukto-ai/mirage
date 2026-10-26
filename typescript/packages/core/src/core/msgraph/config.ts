@@ -15,6 +15,7 @@
 import { z } from 'zod'
 import { secretSchema } from '../../vfs/secrets.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { DEFAULT_TIMEOUT } from '../api/constants.ts'
 
 export type AccessTokenProvider = () => string | Promise<string>
 
@@ -46,8 +47,8 @@ export const MSGRAPH_CONFIG_SHAPE = {
     ),
   timeout: z.number().optional().meta({
     description:
-      'Seconds one Graph request may take; also how long a server-side copy is polled before it fails as unconfirmed.',
-    default: 30,
+      'Seconds a Graph request may wait to connect, or between two reads of its answer, before it fails; also how long a server-side copy is polled before it fails as unconfirmed.',
+    default: DEFAULT_TIMEOUT,
   }),
   maxRetries: z.number().optional().meta({
     description:
@@ -81,7 +82,7 @@ function optionalText(value: string | undefined): string | null {
 }
 
 export function resolveMsGraphConfig(config: MsGraphConfig): MsGraphConfigResolved {
-  const timeout = config.timeout ?? 30
+  const timeout = config.timeout ?? DEFAULT_TIMEOUT
   const maxRetries = config.maxRetries ?? 5
   if (!Number.isFinite(timeout) || timeout <= 0) throw new Error('timeout must be positive')
   if (!Number.isInteger(maxRetries) || maxRetries < 0) {

@@ -19,12 +19,9 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
-import { type FieldNormalizer, secondsToMs } from '@struktoai/mirage-core/utils/normalize'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 export const HF_ENDPOINT = 'https://huggingface.co'
-
-// python's `timeout: int = 30`, in the milliseconds this side stores.
-export const HF_TIMEOUT_MS = 30_000
 
 export function assertHfRepoId(value: string, field: string): string {
   const parts = value.split('/')
@@ -59,16 +56,8 @@ export interface HfBucketsConfig {
   bucket: string
   token?: string
   endpoint?: string
-  timeoutMs?: number
+  timeout?: number
   keyPrefix?: string
-}
-
-// Python states the timeout in seconds; the redactor fills `endpoint`
-// from HF_ENDPOINT, so it is optional on the wire exactly as python's
-// default makes it.
-const HF_NORMALIZER: FieldNormalizer = {
-  rename: { timeout: 'timeoutMs' },
-  transform: { timeout: secondsToMs },
 }
 
 const HfBucketsConfigSchema = z.object({
@@ -78,11 +67,7 @@ const HfBucketsConfigSchema = z.object({
     description: 'Hub origin requests go to, for a mirror or a self-hosted Hub.',
     default: 'https://huggingface.co',
   }),
-  timeoutMs: z.number().optional().meta({
-    description:
-      "Milliseconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off; a config's `timeout` key is read in seconds.",
-    default: 30_000,
-  }),
+  ...timeoutShape,
   keyPrefix: z
     .string()
     .optional()
@@ -106,7 +91,7 @@ export function redactHfBucketsConfig(config: HfBucketsConfig): HfBucketsConfigR
 }
 
 export function normalizeHfBucketsConfig(input: Record<string, unknown>): HfBucketsConfig {
-  const config = parseConfigWithSchema(HfBucketsConfigSchema, input, HF_NORMALIZER)
+  const config = parseConfigWithSchema(HfBucketsConfigSchema, input)
   assertHfRepoId(config.bucket, 'bucket')
   return config
 }
@@ -115,7 +100,7 @@ export interface HfRepoConfig {
   repoId: string
   token?: string
   endpoint?: string
-  timeoutMs?: number
+  timeout?: number
   keyPrefix?: string
   revision?: string
   // Whether the listing asks the Hub for each path's last commit, which
@@ -144,11 +129,7 @@ const HfRepoConfigSchema = z.object({
     description: 'Hub origin requests go to, for a mirror or a self-hosted Hub.',
     default: 'https://huggingface.co',
   }),
-  timeoutMs: z.number().optional().meta({
-    description:
-      "Milliseconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off; a config's `timeout` key is read in seconds.",
-    default: 30_000,
-  }),
+  ...timeoutShape,
   keyPrefix: z
     .string()
     .optional()
@@ -179,7 +160,7 @@ export function redactHfRepoConfig(config: HfRepoConfig): HfRepoConfigRedacted {
 }
 
 export function normalizeHfRepoConfig(input: Record<string, unknown>): HfRepoConfig {
-  const config = parseConfigWithSchema(HfRepoConfigSchema, input, HF_NORMALIZER)
+  const config = parseConfigWithSchema(HfRepoConfigSchema, input)
   assertHfRepoRef(config.repoId, 'repo_id')
   return config
 }

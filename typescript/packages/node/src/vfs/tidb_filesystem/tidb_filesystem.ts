@@ -22,7 +22,6 @@ import {
   type TiDBFilesystemConfig,
   type TiDBFilesystemConfigRedacted,
 } from './config.ts'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface TiDBFilesystemVFSState {
   type: string
@@ -38,11 +37,9 @@ export class TiDBFilesystemVFS extends TiDBFilesystemVFSBase {
   readonly config: TiDBFilesystemConfig
   override readonly accessor: TiDBFilesystemAccessor
 
-  override readonly walkLimit: number
   private constructor(config: TiDBFilesystemConfig, accessor: TiDBFilesystemAccessor) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = accessor
   }
 

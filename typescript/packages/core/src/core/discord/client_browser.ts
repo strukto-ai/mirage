@@ -18,11 +18,12 @@ import { rstripSlash } from '../../utils/slash.ts'
 export interface BrowserDiscordTransportOptions {
   proxyUrl: string
   getHeaders?: () => Promise<Record<string, string>> | Record<string, string>
+  timeout?: number
 }
 
 export class BrowserDiscordTransport extends HttpDiscordTransport {
   constructor(private readonly opts: BrowserDiscordTransportOptions) {
-    super()
+    super(opts.timeout)
     const probe = new URL(opts.proxyUrl, 'http://localhost')
     if (probe.search !== '' || probe.hash !== '') {
       throw new Error(

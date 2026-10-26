@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import ConfigDict, Field, SecretStr, field_validator
 
+from mirage.core.api.config import TimeoutConfig
 from mirage.utils import key_prefix as kp
 
 
-class GridFSConfig(BaseModel):
+class GridFSConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     uri: SecretStr

@@ -33,7 +33,6 @@ describe('config normalization', () => {
   it('accepts snake_case YAML keys and applies defaults', () => {
     const config = normalizeDatabricksVolumeConfig({ ...BASE_CONFIG, root_path: '/root/' })
     expect(config.rootPath).toBe('/root')
-    expect(config.timeout).toBe(30)
   })
 
   it.each([

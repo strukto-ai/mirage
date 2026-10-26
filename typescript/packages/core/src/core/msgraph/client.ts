@@ -15,7 +15,13 @@
 import { sleep } from '../../utils/abort.ts'
 import { graphApi, type MsGraphConfigResolved } from './config.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
-import { apiRequest, headerDelay, type ApiRequestOptions, type RetryPolicy } from '../api/client.ts'
+import {
+  apiRequest,
+  headerDelay,
+  stallTimeout,
+  type ApiRequestOptions,
+  type RetryPolicy,
+} from '../api/client.ts'
 import { MAX_BACKOFF, RETRY_STATUSES } from './constants.ts'
 
 // A drive-relative item path as a Graph URL path: each segment escaped on
@@ -117,7 +123,7 @@ async function graphRequest(
       retry: policy(config),
       read: read === 'json' ? 'text' : read,
       window: options.window,
-      timeoutSeconds: config.timeout,
+      timeout: config.timeout,
     }
     if (options.json !== undefined) opts.json = options.json
     else if (options.data !== undefined) opts.body = options.data as BodyInit
@@ -207,15 +213,7 @@ export async function* graphStream(
   let response: Response
   for (;;) {
     const headers = auth ? await graphHeaders(config) : {}
-    const controller = new AbortController()
-    const timer = setTimeout(() => {
-      controller.abort()
-    }, config.timeout * 1000)
-    try {
-      response = await fetch(url, { method: 'GET', headers, signal: controller.signal })
-    } finally {
-      clearTimeout(timer)
-    }
+    response = await stallTimeout(config.timeout)(url, { method: 'GET', headers })
     if (RETRY_STATUSES.has(response.status) && attempt < config.maxRetries) {
       await sleep(headerDelay(response, attempt, policy(config)) * 1000)
       attempt += 1

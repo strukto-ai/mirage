@@ -20,8 +20,10 @@ import {
   z,
 } from '../secrets.ts'
 import type { ConfigOf, RedactedConfig } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
 
 export interface DropboxConfig {
+  timeout?: number
   clientId: string
   clientSecret?: string
   refreshToken: string
@@ -31,6 +33,7 @@ export interface DropboxConfig {
 }
 
 const DropboxConfigSchema = z.object({
+  ...timeoutShape,
   clientId: z.string().describe('Dropbox app key.'),
   clientSecret: secretStr()
     .optional()

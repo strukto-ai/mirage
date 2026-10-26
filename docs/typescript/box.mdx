@@ -96,6 +96,7 @@ is in-memory only and a process restart needs a fresh refresh token.
 {/* generated: config-table box start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Base URL that replaces Box's API, upload and OAuth token hosts, such as a test server. Unset uses Box's hosts. |
 | <code style={{ whiteSpace: 'nowrap' }}>rootFolderId</code><br />default `'0'` | Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. `0` is the account root. |
 | <code style={{ whiteSpace: 'nowrap' }}>clientId</code> | Box app client ID. Required with `refreshToken` (OAuth) or with `clientSecret` and `enterpriseId` (client credentials). |

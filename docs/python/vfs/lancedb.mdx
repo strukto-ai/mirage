@@ -45,6 +45,7 @@ The mapping is config-driven; nothing about the dataset is hardcoded. Point
 {/* generated: config-table lancedb start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>uri</code><br />required | Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise. |
 | <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />secret | API key for LanceDB Cloud or Enterprise. |
 | <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'us-east-1'` | LanceDB Cloud region of a `db://` database; ignored for other URIs. |

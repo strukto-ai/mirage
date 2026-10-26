@@ -62,8 +62,8 @@ async function stamped(
 }
 
 describe('hf read', () => {
-  it('reads a file under a timeout of zero, which is no bound', async () => {
-    const accessor = new HfBucketsAccessor({ bucket: 'ns/model', timeoutMs: 0 })
+  it('reads a file', async () => {
+    const accessor = new HfBucketsAccessor({ bucket: 'ns/model' })
     await installFakeOperator(accessor, fakeHfOperator({ 'a.csv': SEED }))
     const data = await read(accessor, PathSpec.fromStrPath('/a.csv'))
     expect(Buffer.from(data).equals(SEED)).toBe(true)

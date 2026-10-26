@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 from pydantic import model_validator
 
 from mirage.accessor.base import SessionAccessor
@@ -57,7 +56,7 @@ class OneDriveConfig(MsGraphConfig):
 
 class OneDriveAccessor(SessionAccessor):
     def __init__(self, config: OneDriveConfig) -> None:
-        super().__init__(timeout=aiohttp.ClientTimeout(total=config.timeout))
+        super().__init__(timeout=config.timeout)
         self.config = config
         # The drive's Graph `driveType` (personal, business or
         # documentLibrary), asked once and kept: it decides whether the

@@ -29,6 +29,7 @@ ws = Workspace({"/slack": vfs}, mode=MountMode.READ)
 | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>start_time</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
 | <code style={{ whiteSpace: 'nowrap' }}>end_time</code> | End of the mount's time scope, exclusive, in the same format as `start_time`, which it must follow. Unset leaves the end open. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Slack token every API call sends: a bot token (`xoxb-`) or a user token (`xoxp-`). |
 | <code style={{ whiteSpace: 'nowrap' }}>search_token</code><br />secret | User token (`xoxp-`) with `search:read`, used only for Slack's `search.*` methods, which refuse a bot token. Unset searches with `token`. |
 | <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />default `'https://slack.com/api'` | Slack Web API root; override to point at a fake or proxy. |

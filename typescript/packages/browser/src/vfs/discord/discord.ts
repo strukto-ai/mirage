@@ -45,6 +45,7 @@ export class DiscordVFS extends DiscordVFSBase {
       new BrowserDiscordTransport({
         proxyUrl: config.proxyUrl,
         ...(config.getHeaders !== undefined ? { getHeaders: config.getHeaders } : {}),
+        ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
       }),
       config,
     )

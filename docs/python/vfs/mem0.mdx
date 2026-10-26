@@ -38,6 +38,7 @@ The VFS is read-only. A snapshot keeps its config, and a load needs the mount ha
 {/* generated: config-table mem0 start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />required, secret | Mem0 Platform API key. |
 | <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'https://api.mem0.ai'` | Mem0 API base URL. |
 | <code style={{ whiteSpace: 'nowrap' }}>user_id</code> | Mount this user's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |

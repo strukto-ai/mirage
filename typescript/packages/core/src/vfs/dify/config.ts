@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
+import { timeoutShape } from '../../core/api/config.ts'
+import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
   type ConfigOf,
@@ -36,10 +38,6 @@ const DifyConfigSchema = z.object({
     description: 'The most Dify API requests in flight at once.',
     default: 10,
   }),
-  requestTimeout: z.number().optional().meta({
-    description: 'Seconds to wait for one HTTP request to Dify.',
-    default: 30,
-  }),
   retryAttempts: z.number().optional().meta({
     description:
       'Attempts per request, the first included. A 429, a 5xx or a transport error is retried.',
@@ -49,6 +47,7 @@ const DifyConfigSchema = z.object({
     description: 'Longest wait in seconds before a retry, whether from backoff or `Retry-After`.',
     default: 30,
   }),
+  ...timeoutShape,
 })
 
 export type DifyConfig = ConfigOf<typeof DifyConfigSchema>
@@ -63,7 +62,7 @@ export interface DifyConfigResolved {
   datasetId: string
   slugMetadataName: string
   maxConcurrency: number
-  requestTimeout: number
+  timeout: number
   retryAttempts: number
   retryMaxDelay: number
 }
@@ -83,7 +82,7 @@ export function resolveDifyConfig(config: DifyConfig): DifyConfigResolved {
     datasetId: normalizeNonEmpty(config.datasetId, 'datasetId'),
     slugMetadataName: normalizeNonEmpty(config.slugMetadataName ?? 'slug', 'slugMetadataName'),
     maxConcurrency: normalizePositive(config.maxConcurrency, 10, 'maxConcurrency'),
-    requestTimeout: normalizePositive(config.requestTimeout, 30, 'requestTimeout'),
+    timeout: normalizePositive(config.timeout, DEFAULT_TIMEOUT, 'timeout'),
     retryAttempts: normalizePositive(config.retryAttempts, 4, 'retryAttempts'),
     retryMaxDelay: normalizePositive(config.retryMaxDelay, 30, 'retryMaxDelay'),
   }

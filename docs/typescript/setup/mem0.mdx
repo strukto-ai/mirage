@@ -29,6 +29,7 @@ Exactly one of `userId`, `agentId`, or `runId` is required.
 {/* generated: config-table mem0 start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />required, secret | Mem0 Platform API key. |
 | <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'https://api.mem0.ai'` | Mem0 API base URL. |
 | <code style={{ whiteSpace: 'nowrap' }}>userId</code> | Mount this user's memories. Set exactly one of `userId`, `agentId` and `runId`. |

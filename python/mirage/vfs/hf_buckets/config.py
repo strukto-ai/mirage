@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
+from pydantic import ConfigDict, SecretStr, field_validator
 
+from mirage.core.api.config import TimeoutConfig
 from mirage.utils import key_prefix as kp
 
 
-class HfBucketsConfig(BaseModel):
+class HfBucketsConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     bucket: str
@@ -26,10 +27,6 @@ class HfBucketsConfig(BaseModel):
     """Hugging Face access token."""
     endpoint: str = "https://huggingface.co"
     """Hub origin requests go to, for a mirror or a self-hosted Hub."""
-    timeout: int = 30
-    """Seconds one Hub request may go without progress: connecting, waiting
-    for the answer, or between two chunks of a download. `0` turns the bound
-    off."""
     key_prefix: str | None = None
     """Path inside the bucket that becomes the mount root; files outside it
     are not listed."""
@@ -50,7 +47,7 @@ class HfBucketsConfig(BaseModel):
         return kp.normalize(v) or None
 
 
-class HfRepoConfig(BaseModel):
+class HfRepoConfig(TimeoutConfig):
     """What a Hub repository mount is configured with.
 
     One shape for all three repo kinds, because the Hub's own API differs
@@ -69,10 +66,6 @@ class HfRepoConfig(BaseModel):
     reach public repositories only."""
     endpoint: str = "https://huggingface.co"
     """Hub origin requests go to, for a mirror or a self-hosted Hub."""
-    timeout: int = 30
-    """Seconds one Hub request may go without progress: connecting, waiting
-    for the answer, or between two chunks of a download. `0` turns the bound
-    off."""
     key_prefix: str | None = None
     """Path inside the repository that becomes the mount root; files outside
     it are not listed."""

@@ -14,12 +14,14 @@
 
 from collections.abc import Awaitable, Callable
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import ConfigDict, SecretStr
+
+from mirage.core.api.config import TimeoutConfig
 
 EmbedFn = Callable[[str], Awaitable[list[float]]]
 
 
-class QdrantConfig(BaseModel):
+class QdrantConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     url: str | None = None

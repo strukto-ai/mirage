@@ -20,8 +20,10 @@ import {
   type RedactedConfig,
   secretStr,
 } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 export const NotionConfigSchema = z.object({
+  ...timeoutShape,
   apiKey: secretStr().describe('Notion integration token.'),
   baseUrl: z.string().optional().meta({
     description: 'Notion API root; override to point at a fake or proxy.',

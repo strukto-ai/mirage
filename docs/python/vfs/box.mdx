@@ -74,6 +74,7 @@ The access token is cached in memory and refreshed ~5 minutes before expiry
 {/* generated: config-table box start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Base URL that replaces Box's API, upload and OAuth token hosts, such as a test server. Unset uses Box's hosts. |
 | <code style={{ whiteSpace: 'nowrap' }}>client_id</code> | Box app client ID. Required with `refresh_token` (OAuth) or with `client_secret` and `enterprise_id` (client credentials). |
 | <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />secret | Box app client secret. Required for client credentials; the OAuth refresh sends it when set, so a PKCE client can omit it. |

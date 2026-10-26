@@ -20,8 +20,10 @@ import {
   type RedactedConfig,
   secretStr,
 } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 export const LinearConfigSchema = z.object({
+  ...timeoutShape,
   apiKey: secretStr().describe('Linear personal API key.'),
   workspace: z.string().optional().describe('Accepted for compatibility; not read.'),
   teamIds: z

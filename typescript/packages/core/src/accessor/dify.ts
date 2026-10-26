@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
+import { stallTimeout } from '../core/api/client.ts'
 import { Accessor } from './base.ts'
 import type { DifyConfigResolved } from '../vfs/dify/config.ts'
 
@@ -57,13 +58,6 @@ export class DifyAccessor extends Accessor {
       headers['Content-Type'] = 'application/json'
       init.body = JSON.stringify(options.json)
     }
-    const controller = new AbortController()
-    init.signal = controller.signal
-    const timer = setTimeout(() => {
-      controller.abort()
-    }, this.config.requestTimeout * 1000)
-    return fetch(url, init).finally(() => {
-      clearTimeout(timer)
-    })
+    return stallTimeout(this.config.timeout)(url, init)
   }
 }

@@ -33,6 +33,7 @@ export function linearAccessor(config: unknown): LinearAccessor {
   const transport = new HttpLinearTransport({
     apiKey: cfg.apiKey,
     ...(cfg.baseUrl !== undefined && cfg.baseUrl !== '' ? { baseUrl: cfg.baseUrl } : {}),
+    ...(cfg.timeout !== undefined ? { timeout: cfg.timeout } : {}),
   })
   return new LinearAccessor(transport, {
     ...(cfg.teamIds !== undefined ? { teamIds: cfg.teamIds } : {}),

@@ -31,6 +31,6 @@ class LinearAccessor(SessionAccessor):
             settles its own once mounted; a listing then keeps each
             issue's unsearched text for the search.
         """
-        super().__init__()
+        super().__init__(config.timeout)
         self.config = config
         self.capped = capped

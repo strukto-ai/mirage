@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
+import { DEFAULT_TIMEOUT } from '@struktoai/mirage-core/core/api/constants'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type { ImapFlow } from 'imapflow'
 import type { EmailConfig } from '../core/email/config.ts'
@@ -44,12 +45,16 @@ export class EmailAccessor extends Accessor {
             }>,
           { feature: 'EmailAccessor', packageName: 'imapflow' },
         )
+        const timeoutMs = (this.config.timeout ?? DEFAULT_TIMEOUT) * 1000
         const client = new mod.ImapFlow({
           host: this.config.imapHost,
           port: this.config.imapPort,
           secure: this.config.useSsl,
           auth: { user: this.config.username, pass: this.config.password },
           logger: false,
+          connectionTimeout: timeoutMs,
+          greetingTimeout: timeoutMs,
+          socketTimeout: timeoutMs,
         })
         const drop = (): void => {
           if (this.clientPromise === pending) this.clientPromise = null

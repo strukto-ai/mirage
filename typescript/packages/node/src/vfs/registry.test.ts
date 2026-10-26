@@ -320,7 +320,7 @@ describe('node VFS registry', () => {
       profile: 'prod',
       endpoint: 'https://example.com',
       forcePathStyle: true,
-      timeoutMs: 30_000,
+      timeout: 30,
       proxy: 'http://proxy.example',
     })
   })
@@ -375,7 +375,7 @@ describe('node VFS registry', () => {
       bucket: 'b',
       accessKeyId: 'A',
       endpoint: 'https://x',
-      timeoutMs: 5_000,
+      timeout: 5,
       proxy: 'p',
     })
   })
@@ -399,11 +399,11 @@ describe('hf VFS in registry', () => {
     })
     expect(r.name).toBe('hf_models')
     const { config } = r as unknown as {
-      config: { repoId: string; keyPrefix?: string; timeoutMs?: number; revision?: string }
+      config: { repoId: string; keyPrefix?: string; timeout?: number; revision?: string }
     }
     expect(config.repoId).toBe('ns/model')
     expect(config.keyPrefix).toBe('sub/')
-    expect(config.timeoutMs).toBe(30000)
+    expect(config.timeout).toBe(30)
     expect(config.revision).toBe('main')
   })
 

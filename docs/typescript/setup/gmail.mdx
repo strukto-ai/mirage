@@ -52,6 +52,7 @@ For OAuth in a browser, prefer PKCE so secrets stay off the page; the [Google se
 {/* generated: config-table gmail omit=folderId start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>accessToken</code><br />secret | OAuth access token, or a function (sync or async) that returns one. Takes precedence over `clientId` and `refreshToken`. |
 | <code style={{ whiteSpace: 'nowrap' }}>clientId</code> | Google OAuth client ID. Required with `refreshToken` when `accessToken` is unset; mirage then mints and renews access tokens itself. |
 | <code style={{ whiteSpace: 'nowrap' }}>clientSecret</code><br />secret | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. |

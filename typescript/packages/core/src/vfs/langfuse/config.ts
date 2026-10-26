@@ -14,8 +14,10 @@
 
 import { parseConfigWithSchema, redactConfigWithSchema, secretStr, z } from '../secrets.ts'
 import type { ConfigOf, RedactedConfig } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
 
 const LangfuseConfigSchema = z.object({
+  ...timeoutShape,
   publicKey: z.string().describe('Langfuse project public key.'),
   secretKey: secretStr().describe('Langfuse project secret key.'),
   host: z.string().optional().meta({

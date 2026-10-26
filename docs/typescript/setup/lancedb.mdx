@@ -44,6 +44,7 @@ await ws.shell('search "red running shoes" /fashion')
 {/* generated: config-table lancedb start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>uri</code><br />required | Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise. |
 | <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />secret | API key for LanceDB Cloud or Enterprise. |
 | <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'us-east-1'` | LanceDB Cloud region of a `db://` database; ignored for other URIs. |

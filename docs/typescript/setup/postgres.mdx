@@ -63,6 +63,7 @@ try {
 {/* generated: config-table postgres start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>dsn</code><br />required, secret | Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string. |
 | <code style={{ whiteSpace: 'nowrap' }}>schemas</code> | Schemas to show in the tree; others are hidden. Unset shows every schema except `pg_catalog`, `information_schema` and `pg_*`. |
 | <code style={{ whiteSpace: 'nowrap' }}>defaultRowLimit</code><br />default `1000` | Rows a windowed read returns when it passes an offset but no limit, and the rows one page of a streamed `rows.jsonl` fetches. |

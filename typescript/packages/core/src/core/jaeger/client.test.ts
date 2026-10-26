@@ -97,7 +97,7 @@ describe('jaeger fetchTraces window', () => {
 describe('jaeger request deadline', () => {
   it('aborts a stalled request after the configured timeout', async () => {
     const transport = new StalledTransport({ timeout: 0.01 })
-    await expect(transport.request('/api/services')).rejects.toThrow('aborted by deadline')
+    await expect(transport.request('/api/services')).rejects.toMatchObject({ name: 'TimeoutError' })
     expect(transport.init?.signal).toBeInstanceOf(AbortSignal)
   })
 })

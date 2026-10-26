@@ -81,11 +81,17 @@ export class TrelloVFS extends BaseVFS {
   constructor(config: TrelloConfig) {
     super()
     this.config = config
-    const transportOpts: { apiKey: string; apiToken: string; baseUrl?: string } = {
+    const transportOpts: {
+      apiKey: string
+      apiToken: string
+      baseUrl?: string
+      timeout?: number
+    } = {
       apiKey: config.apiKey,
       apiToken: config.apiToken,
     }
     if (config.baseUrl !== undefined) transportOpts.baseUrl = config.baseUrl
+    if (config.timeout !== undefined) transportOpts.timeout = config.timeout
     const accessorOpts: {
       workspaceId?: string
       boardIds?: readonly string[]

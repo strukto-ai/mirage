@@ -170,7 +170,7 @@ describe('region-derived S3 aliases', () => {
     it(`${c.name}: toS3Config maps fields`, () => {
       const s3 = c.toS3({
         ...c.make(c.region),
-        timeoutMs: 5000,
+        timeout: 5,
         proxy: 'http://localhost:8080',
       } as never)
       expect(s3.bucket).toBe('b')
@@ -178,7 +178,7 @@ describe('region-derived S3 aliases', () => {
       expect(s3.endpoint).toBe(c.expectedEndpoint)
       expect(s3.accessKeyId).toBe('AKIA-LEAK')
       expect(s3.secretAccessKey).toBe('SECRET-LEAK')
-      expect(s3.timeoutMs).toBe(5000)
+      expect(s3.timeout).toBe(5)
       expect(s3.proxy).toBe('http://localhost:8080')
       expect(s3.forcePathStyle).toBeUndefined()
     })
@@ -200,7 +200,7 @@ describe('region-derived S3 aliases', () => {
       expect(norm.endpoint).toBe('https://custom.example.com')
       expect(norm.forcePathStyle).toBe(true)
       expect(norm.keyPrefix).toBe('team/reports')
-      expect(norm.timeoutMs).toBe(30000)
+      expect(norm.timeout).toBe(30)
       expect(norm.proxy).toBe('http://localhost:8080')
       expect(norm).not.toHaveProperty('access_key_id')
     })
@@ -258,7 +258,7 @@ describe('wasabi endpoint defaults', () => {
     expect(norm.accessKeyId).toBe('k')
     expect(norm.forcePathStyle).toBe(true)
     expect(norm.keyPrefix).toBe('team/reports')
-    expect(norm.timeoutMs).toBe(30000)
+    expect(norm.timeout).toBe(30)
     expect(norm.proxy).toBe('p')
   })
 
@@ -328,7 +328,7 @@ describe('endpoint-required S3 aliases (minio/ceph/seaweedfs)', () => {
       expect(norm.endpoint).toBe('http://localhost:9000')
       expect(norm.forcePathStyle).toBe(false)
       expect(norm.keyPrefix).toBe('team/reports')
-      expect(norm.timeoutMs).toBe(30000)
+      expect(norm.timeout).toBe(30)
       expect(norm.proxy).toBe('p')
     })
 
@@ -474,6 +474,6 @@ describe('oci and supabase path style', () => {
     expect(() => normalizeOciConfig({ bucket: 'b', namespace: 'ns', region: 1 })).toThrow(/region/)
     expect(() =>
       normalizeAliyunConfig({ bucket: 'b', region: 'cn-hangzhou', timeout: 'abc' }),
-    ).toThrow(/timeoutMs/)
+    ).toThrow(/timeout/)
   })
 })

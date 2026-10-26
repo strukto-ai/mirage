@@ -32,7 +32,7 @@ export interface WasabiConfig {
   endpoint?: string
   forcePathStyle?: boolean
   keyPrefix?: string
-  timeoutMs?: number
+  timeout?: number
   proxy?: string
 }
 
@@ -73,7 +73,7 @@ export function wasabiToS3Config(config: WasabiConfig): S3Config {
     ...(config.profile !== undefined ? { profile: config.profile } : {}),
     ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }

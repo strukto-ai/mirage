@@ -24,6 +24,7 @@ await ws.shell('ls /notion/pages/')
 {/* generated: config-table notion start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />required, secret | Notion integration token. |
 | <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.notion.com/v1'` | Notion API root; override to point at a fake or proxy. |
 | <code style={{ whiteSpace: 'nowrap' }}>apiVersion</code><br />default `'2025-09-03'` | `Notion-Version` header sent with every request; `ntn --notion-version` overrides it per line. |

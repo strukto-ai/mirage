@@ -43,7 +43,7 @@ export class SlackVFS extends SlackVFSBase {
     super()
     this.config = config
     this.accessor = new SlackAccessor(
-      new NodeSlackTransport(config.token, config.searchToken, config.baseUrl),
+      new NodeSlackTransport(config.token, config.searchToken, config.baseUrl, config.timeout),
       config,
     )
     this.vfsMd = VFS_MD + this.accessor.timeRange.vfsMd()

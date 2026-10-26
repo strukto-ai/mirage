@@ -20,11 +20,13 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 // Stricter than core's DropboxConfig on purpose: a server is a confidential
 // client and python requires the secret too, while the browser refreshes as a
 // PKCE public client that has none. The class in core takes either.
 export interface DropboxConfig {
+  timeout?: number
   clientId: string
   clientSecret: string
   refreshToken: string
@@ -34,6 +36,7 @@ export interface DropboxConfig {
 }
 
 const DropboxConfigSchema = z.object({
+  ...timeoutShape,
   clientId: z.string().describe('Dropbox app key.'),
   clientSecret: secretStr().describe('Dropbox app secret.'),
   refreshToken: secretStr().describe(

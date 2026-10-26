@@ -75,7 +75,7 @@ describe('S3VFS credential redaction', () => {
     const res = new S3VFS({
       bucket: 'b',
       proxy: 'http://proxy-user:proxy-secret@localhost:8080',
-      timeoutMs: 1234,
+      timeout: 5,
     })
     const provider = res.accessor.config.httpAgentProvider
     expect(provider).toBeTypeOf('function')

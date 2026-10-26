@@ -33,7 +33,7 @@ export interface R2Config {
   profile?: string
   forcePathStyle?: boolean
   keyPrefix?: string
-  timeoutMs?: number
+  timeout?: number
   proxy?: string
 }
 
@@ -81,7 +81,7 @@ export function r2ToS3Config(config: R2Config): S3Config {
     ...(config.profile !== undefined ? { profile: config.profile } : {}),
     ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }

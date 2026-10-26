@@ -1,4 +1,4 @@
-import { apiRequest } from '../api/client.ts'
+import { apiRequest, stallTimeout } from '../api/client.ts'
 import { eacces, enoent } from '../../errors/fs.ts'
 import { WandbAPIError } from './errors.ts'
 import type { WandbConfig } from './config.ts'
@@ -22,6 +22,7 @@ export class WandbClient {
   }
   async request<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     const result = (await apiRequest('POST', this.config.baseUrl.replace(/\/$/, '') + '/graphql', {
+      timeout: this.config.timeout,
       errorOf: responseError,
       headers: { ...this.headers(), 'Content-Type': 'application/json' },
       json: { query, variables },
@@ -120,7 +121,7 @@ export class WandbClient {
     if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password)
       throw new WandbAPIError('W&B invalid download URL')
     const headers = target.origin === new URL(this.config.baseUrl).origin ? this.headers() : {}
-    const response = await fetch(target, { headers })
+    const response = await stallTimeout(this.config.timeout)(target, { headers })
     if (!response.ok) throw responseError(response)
     if (!response.body) throw new WandbAPIError('W&B download has no body')
     const reader = response.body.getReader()

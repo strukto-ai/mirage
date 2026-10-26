@@ -41,11 +41,10 @@ console.log(res.stdoutText)
 {/* generated: config-table tidb_filesystem start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | The file system's endpoint, such as `https://aws-us-east-1.drive9.ai` for its region, or the origin of a self-hosted drive9 server. |
 | <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | The file system token, sent as a bearer token. |
 | <code style={{ whiteSpace: 'nowrap' }}>rootPath</code><br />default `'/'` | Directory inside the file system that becomes the mount root, such as `/projects/a` for a token scoped to it; `..` segments are refused. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one request may take before it fails. |
-| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table tidb_filesystem end */}

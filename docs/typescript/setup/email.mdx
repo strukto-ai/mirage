@@ -35,6 +35,7 @@ await ws.shell('ls /mail/INBOX/')
 {/* generated: config-table email start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>imapHost</code><br />required | IMAP server hostname. |
 | <code style={{ whiteSpace: 'nowrap' }}>imapPort</code><br />default `993` | IMAP server port. |
 | <code style={{ whiteSpace: 'nowrap' }}>smtpHost</code><br />required | SMTP server hostname `himalaya` sends mail through. |

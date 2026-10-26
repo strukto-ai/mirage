@@ -51,6 +51,7 @@ export interface LinearTransport {
 export interface HttpLinearTransportOptions {
   apiKey: string
   baseUrl?: string
+  timeout?: number
 }
 
 interface GraphQLResponse {
@@ -79,10 +80,12 @@ export class HttpLinearTransport implements LinearTransport {
   protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
   private readonly apiKey: string
   private readonly baseUrl: string
+  private readonly timeout: number | undefined
 
   constructor(opts: HttpLinearTransportOptions) {
     this.apiKey = opts.apiKey
     this.baseUrl = opts.baseUrl ?? 'https://api.linear.app/graphql'
+    this.timeout = opts.timeout
   }
 
   async graphql(
@@ -91,6 +94,7 @@ export class HttpLinearTransport implements LinearTransport {
   ): Promise<Record<string, unknown>> {
     const data = ((await apiRequest('POST', this.baseUrl, {
       fetchFn: this.fetch,
+      timeout: this.timeout,
       headers: { Authorization: this.apiKey, 'Content-Type': 'application/json' },
       json: { query, variables },
       errorOf: linearError,

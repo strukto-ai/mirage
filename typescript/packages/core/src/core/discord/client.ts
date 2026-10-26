@@ -63,6 +63,8 @@ export interface DiscordTransport {
 
 export abstract class HttpDiscordTransport implements DiscordTransport {
   protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
+
+  constructor(protected readonly timeout?: number) {}
   protected abstract baseUrl(): string
   protected abstract authHeaders(): Promise<Record<string, string>> | Record<string, string>
 
@@ -78,6 +80,7 @@ export abstract class HttpDiscordTransport implements DiscordTransport {
     if (body !== undefined) headers['content-type'] = 'application/json'
     return apiRequest(method, base + endpoint, {
       fetchFn: this.fetch,
+      timeout: this.timeout,
       headers,
       ...(params !== undefined ? { params } : {}),
       ...(body !== undefined ? { json: body } : {}),
@@ -91,8 +94,9 @@ export class NodeDiscordTransport extends HttpDiscordTransport {
   constructor(
     private readonly token: string,
     private readonly base?: string,
+    timeout?: number,
   ) {
-    super()
+    super(timeout)
   }
   // base exists so the integ fake can stand in for discord.com; every
   // request must go through it, not the module constant.

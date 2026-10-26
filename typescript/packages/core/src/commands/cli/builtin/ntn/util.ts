@@ -28,11 +28,17 @@ const CHECKED = '✓'
 // An ntn install's accessor; `ntn api` sends raw REST, so it holds the HTTP transport.
 export type NtnAccessor = NotionAccessor<HttpNotionTransport>
 
-function httpTransport({ apiKey, baseUrl, apiVersion }: NotionConfig): HttpNotionTransport {
+function httpTransport({
+  apiKey,
+  baseUrl,
+  apiVersion,
+  timeout,
+}: NotionConfig): HttpNotionTransport {
   return new HttpNotionTransport({
     apiKey,
     ...(baseUrl !== undefined && baseUrl !== '' ? { baseUrl } : {}),
     ...(apiVersion !== undefined && apiVersion !== '' ? { apiVersion } : {}),
+    ...(timeout !== undefined ? { timeout } : {}),
   })
 }
 

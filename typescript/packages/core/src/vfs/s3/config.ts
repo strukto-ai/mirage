@@ -21,6 +21,7 @@ import {
   secretStr,
 } from '../secrets.ts'
 import * as kp from '../../utils/key_prefix.ts'
+import { timeoutShape } from '../../core/api/config.ts'
 
 export type S3BrowserOperation = 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
 
@@ -81,12 +82,7 @@ export const S3ConfigSchema = z.object({
     .describe(
       'Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.',
     ),
-  timeoutMs: z
-    .number()
-    .optional()
-    .describe(
-      "Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. Applies to the AWS SDK client only: with `presignedUrlProvider` the signed-URL requests take no timeout.",
-    ),
+  ...timeoutShape,
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),
   )
@@ -124,7 +120,7 @@ export interface S3Config {
   sessionToken?: string
   profile?: string
   forcePathStyle?: boolean
-  timeoutMs?: number
+  timeout?: number
   presignedUrlProvider?: S3BrowserPresignedUrlProvider
   httpAgentProvider?: S3HttpAgentProvider
   defaultContentType?: string

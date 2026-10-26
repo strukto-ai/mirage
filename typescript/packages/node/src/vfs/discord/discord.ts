@@ -45,7 +45,7 @@ export class DiscordVFS extends DiscordVFSBase {
     super()
     this.config = config
     this.accessor = new DiscordAccessor(
-      new NodeDiscordTransport(config.token, config.baseUrl),
+      new NodeDiscordTransport(config.token, config.baseUrl, config.timeout),
       config,
     )
     this.vfsMd = VFS_MD + this.accessor.timeRange.vfsMd()

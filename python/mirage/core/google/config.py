@@ -14,10 +14,12 @@
 
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict, SecretStr, model_validator
+from pydantic import ConfigDict, SecretStr, model_validator
+
+from mirage.core.api.config import TimeoutConfig
 
 
-class GoogleConfig(BaseModel):
+class GoogleConfig(TimeoutConfig):
     model_config = ConfigDict(
         arbitrary_types_allowed=True, frozen=True, extra="forbid"
     )

@@ -33,7 +33,7 @@ export interface OCIConfig {
   endpoint?: string
   forcePathStyle?: boolean
   keyPrefix?: string
-  timeoutMs?: number
+  timeout?: number
   proxy?: string
 }
 
@@ -79,7 +79,7 @@ export function ociToS3Config(config: OCIConfig): S3Config {
     ...(config.profile !== undefined ? { profile: config.profile } : {}),
     forcePathStyle: config.forcePathStyle ?? true,
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
   }
 }

@@ -167,7 +167,7 @@ class BoxTokenManager(OAuthTokenManager):
     """Manages Box access-token lifecycle across the three auth modes."""
 
     def __init__(self, config: BoxConfig) -> None:
-        super().__init__(TOKEN_BUFFER_SECONDS)
+        super().__init__(TOKEN_BUFFER_SECONDS, timeout=config.timeout)
         self._config = config
         # API and upload bases for every non-token call; api.py reads these
         # instead of the constants so a config endpoint override reaches

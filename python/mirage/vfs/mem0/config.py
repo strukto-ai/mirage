@@ -13,15 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from pydantic import (
-    BaseModel,
     ConfigDict,
     PositiveInt,
     SecretStr,
     model_validator,
 )
 
+from mirage.core.api.config import TimeoutConfig
 
-class Mem0Config(BaseModel):
+
+class Mem0Config(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     api_key: SecretStr

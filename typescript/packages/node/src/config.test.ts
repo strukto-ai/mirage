@@ -468,7 +468,7 @@ describe('configToWorkspaceArgs', () => {
       secretAccessKey: 'secret',
       endpoint: 'http://localhost:9000',
       forcePathStyle: true,
-      timeoutMs: 5000,
+      timeout: 5,
       keyPrefix: 'mirage/',
     })
   })

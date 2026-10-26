@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import ConfigDict, Field, SecretStr
+
+from mirage.core.api.config import TimeoutConfig
 
 
-class AirtableConfig(BaseModel):
+class AirtableConfig(TimeoutConfig):
     """Credentials and bounds for one Airtable account."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")

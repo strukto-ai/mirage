@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 from pydantic import SecretStr
 
 from mirage.accessor.base import Accessor, SessionAccessor
@@ -22,26 +21,6 @@ from mirage.utils import key_prefix as kp
 from mirage.vfs.hf_buckets.config import HfBucketsConfig, HfRepoConfig
 
 
-def stall_timeout(seconds: float) -> aiohttp.ClientTimeout:
-    """How long a Hub request may go without progress.
-
-    The clock restarts on every body chunk, so a download that keeps
-    flowing is never cut off. Zero or less is no bound: a negative read
-    bound would fire at once.
-
-    Args:
-        seconds (float): the configured timeout.
-
-    Returns:
-        aiohttp.ClientTimeout: the bound, for the account's pool.
-    """
-    if seconds <= 0:
-        return aiohttp.ClientTimeout(total=None)
-    return aiohttp.ClientTimeout(
-        total=None, sock_connect=seconds, sock_read=seconds
-    )
-
-
 class HfAccountAccessor(SessionAccessor):
     """One Hub account: credential, origin and the pool its calls ride.
 
@@ -49,16 +28,13 @@ class HfAccountAccessor(SessionAccessor):
     borrows; a mount builds its own with `account_of`.
 
     Args:
-        config (HfConfig): the token and the Hub origin.
-        timeout (float): seconds one request may go without progress.
+        config (HfConfig): the token, the Hub origin and the timeout.
     """
 
-    def __init__(self, config: HfConfig, timeout: float = 30) -> None:
+    def __init__(self, config: HfConfig) -> None:
         # aiohttp's own replay of a dropped PUT or DELETE would run beneath
         # RETRY and WRITE_RETRY; the policies decide every resend.
-        super().__init__(
-            timeout=stall_timeout(timeout), retry_connection=False
-        )
+        super().__init__(config.timeout, retry_connection=False)
         self.config = config
 
     @property
@@ -80,8 +56,11 @@ def account_of(config: HfRepoConfig | HfBucketsConfig) -> HfAccountAccessor:
         HfAccountAccessor: an account no other handle shares.
     """
     return HfAccountAccessor(
-        HfConfig(token=config.token, endpoint=config.endpoint),
-        timeout=config.timeout,
+        HfConfig(
+            token=config.token,
+            endpoint=config.endpoint,
+            timeout=config.timeout,
+        )
     )
 
 

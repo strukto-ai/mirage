@@ -59,11 +59,13 @@ export class LangfuseVFS extends BaseVFS {
   constructor(config: LangfuseConfig) {
     super()
     this.config = config
-    const transportOpts: { publicKey: string; secretKey: string; host?: string } = {
-      publicKey: config.publicKey,
-      secretKey: config.secretKey,
-    }
+    const transportOpts: { publicKey: string; secretKey: string; host?: string; timeout?: number } =
+      {
+        publicKey: config.publicKey,
+        secretKey: config.secretKey,
+      }
     if (config.host !== undefined) transportOpts.host = config.host
+    if (config.timeout !== undefined) transportOpts.timeout = config.timeout
     const accessorConfig: {
       defaultTraceLimit?: number
       defaultFromTimestamp?: string

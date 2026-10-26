@@ -46,6 +46,7 @@ The mapping is config-driven; nothing about the dataset is hardcoded. Point
 {/* generated: config-table qdrant start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>url</code> | Full URL of the Qdrant server, such as a Qdrant Cloud cluster URL; when set, `host`, `port` and `https` are ignored. |
 | <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'localhost'` | Host name of the Qdrant server when `url` is unset. |
 | <code style={{ whiteSpace: 'nowrap' }}>port</code><br />default `6333` | Port of the Qdrant server when `url` is unset. |
