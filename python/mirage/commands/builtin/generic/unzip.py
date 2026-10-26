@@ -142,7 +142,7 @@ async def unzip_generic(
         "archive": byte_view(archive.raw_path),
         "members": [byte_view(member) for member in members],
         "excludes": [byte_view(pattern) for pattern in excludes],
-        "base": byte_view(extract_dest(dest, ctx.cwd, True).rstrip("/")),
+        "base": byte_view(extract_dest(dest, ctx.cwd).rstrip("/")),
         "q": parsed.quiet,
         **letters,
     }

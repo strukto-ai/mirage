@@ -12,12 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { createTarDecoder, createTarPacker } from 'modern-tar'
-import {
-  readTar as unpackEntries,
-  writeTar as packEntries,
-  type TarEntry,
-} from '../../commands/builtin/tar_helper.ts'
+import { createTarDecoder, createTarPacker, packTar, unpackTar } from 'modern-tar'
 import { VFSName } from '../../types.ts'
 import { gzip, gunzip } from '../../utils/compress.ts'
 import {
@@ -50,16 +45,17 @@ export async function writeSnapshotTar(
   blobs: Record<string, Uint8Array | string>,
   compress: CompressMode = null,
 ): Promise<Uint8Array> {
-  const manifestBytes = ENC.encode(JSON.stringify(manifest, null, 2))
-  const entries: TarEntry[] = [{ name: MANIFEST_NAME, data: manifestBytes, isFile: true }]
-  for (const [path, data] of Object.entries(blobs)) {
-    entries.push({
-      name: path,
-      data: typeof data === 'string' ? await readRegular(data) : data,
-      isFile: true,
-    })
-  }
-  const tarBytes = await packEntries(entries)
+  const entries = [[MANIFEST_NAME, ENC.encode(JSON.stringify(manifest, null, 2))] as const]
+  const files = [...entries, ...Object.entries(blobs)]
+  const tarBytes = await packTar(
+    await Promise.all(
+      files.map(async ([name, data]) => {
+        const body = typeof data === 'string' ? await readRegular(data) : data
+        const header = { name, size: body.byteLength, type: 'file' as const, mode: 0o644, mtime: new Date(0) }
+        return { header, body }
+      }),
+    ),
+  )
   if (compress === 'gz') return gzip(tarBytes)
   return tarBytes
 }
@@ -69,9 +65,8 @@ export async function readSnapshotTar(
   compress: CompressMode = null,
 ): Promise<unknown> {
   const tarBytes = compress === 'gz' ? await gunzip(data) : data
-  const entries = await unpackEntries(tarBytes)
   const byName = new Map<string, Uint8Array>()
-  for (const e of entries) byName.set(e.name, e.data)
+  for (const e of await unpackTar(tarBytes)) byName.set(e.header.name, e.data ?? new Uint8Array())
   const manifestRaw = byName.get(MANIFEST_NAME)
   if (manifestRaw === undefined) {
     throw new Error(`${MANIFEST_NAME} missing or unreadable`)

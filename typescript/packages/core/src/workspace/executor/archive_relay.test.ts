@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { writeTar } from '../../commands/builtin/tar_helper.ts'
+import { packTar } from 'modern-tar'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { gzip } from '../../utils/compress.ts'
@@ -28,22 +28,12 @@ import { Workspace } from '../workspace/workspace.ts'
 const ENC = new TextEncoder()
 
 async function tgzBytes(): Promise<Uint8Array> {
-  const raw = await writeTar([
-    {
-      name: './memory/memory.json',
-      data: ENC.encode('content:./memory/memory.json\n'),
-      isFile: true,
-      isDir: false,
-      linkname: '',
-    },
-    {
-      name: './other.txt',
-      data: ENC.encode('content:./other.txt\n'),
-      isFile: true,
-      isDir: false,
-      linkname: '',
-    },
-  ])
+  const raw = await packTar(
+    ['./memory/memory.json', './other.txt'].map((name) => {
+      const body = ENC.encode(`content:${name}\n`)
+      return { header: { name, size: body.byteLength, type: 'file' as const }, body }
+    }),
+  )
   return gzip(raw)
 }
 

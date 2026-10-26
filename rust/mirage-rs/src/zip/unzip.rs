@@ -7,12 +7,9 @@ use std::collections::HashSet;
 use serde::Deserialize;
 
 use super::listing::{self, Letters, Rows};
-use super::{
-    Decoded, Decoder, Directory, Entry, Fault, Spool, WINDOW, failed, failure_text, padded, say,
-    wildcard,
-};
-use crate::request::{Opening, Reply, Request, WriteMode, bytes};
-use crate::task::Host;
+use super::{Decoded, Decoder, Directory, Entry, Fault, Spool, WINDOW, padded, say, wildcard};
+use crate::request::{Opening, Reply, Request, bytes, failed, failure_text};
+use crate::task::{File, Host};
 
 const NO_END: &str = "  End-of-central-directory signature not found.  Either this file is not
   a zipfile, or it constitutes one disk of a multi-part archive.  In the
@@ -415,54 +412,9 @@ impl Sink for Print {
     }
 }
 
-/// An extracted file: its first window held, so a file of one window is
-/// written whole by one request, a longer one streamed a window at a time;
-/// the failure that stopped it.
-struct File {
-    path: Vec<u8>,
-    held: Option<Vec<u8>>,
-    created: bool,
-    failed: Option<Vec<u8>>,
-}
-
-impl File {
-    async fn ask(&mut self, host: &Host, request: Request) -> bool {
-        let (reply, _) = host.ask(request).await;
-        if failed(&reply) {
-            self.failed = Some(failure_text(&reply));
-        }
-        self.failed.is_none()
-    }
-
-    async fn send(&mut self, host: &Host, mode: WriteMode, data: Vec<u8>) -> bool {
-        let path = self.path.clone();
-        self.ask(host, Request::Write { path, mode, data }).await
-    }
-
-    /// Write what is held, the file whole when nothing was sent, and commit
-    /// it.
-    async fn close(&mut self, host: &Host) {
-        let held = self.held.take().unwrap_or_default();
-        if !self.created {
-            self.send(host, WriteMode::Whole, held).await;
-        } else if self.send(host, WriteMode::Append, held).await {
-            let path = Some(self.path.clone());
-            self.ask(host, Request::Flush { path }).await;
-        }
-    }
-}
-
 impl Sink for File {
     async fn take(&mut self, host: &Host, window: &[u8]) -> bool {
-        let Some(held) = self.held.replace(window.to_vec()) else {
-            return true;
-        };
-        let mode = if std::mem::replace(&mut self.created, true) {
-            WriteMode::Append
-        } else {
-            WriteMode::Create
-        };
-        self.send(host, mode, held).await
+        File::take(self, host, window).await
     }
 }
 
@@ -869,37 +821,6 @@ struct Extract {
     code: i32,
 }
 
-async fn stat(host: &Host, path: &[u8]) -> Option<String> {
-    let path = path.to_vec();
-    host.ask(Request::Stat { path }).await.0.kind
-}
-
-/// Make a directory's chain top-down, each level once a run, skipping
-/// what stands; the level that failed and why.
-async fn ensure(
-    host: &Host,
-    made: &mut HashSet<Vec<u8>>,
-    dir: &[u8],
-) -> Result<(), (Vec<u8>, Vec<u8>)> {
-    let mut level = Vec::new();
-    for part in dir.split(|&b| b == b'/').filter(|p| !p.is_empty()) {
-        level.push(b'/');
-        level.extend_from_slice(part);
-        if made.contains(&level) {
-            continue;
-        }
-        if stat(host, &level).await.as_deref() != Some("dir") {
-            let path = level.clone();
-            let (reply, _) = host.ask(Request::Mkdir { path }).await;
-            if failed(&reply) {
-                return Err((level, failure_text(&reply)));
-            }
-        }
-        made.insert(level.clone());
-    }
-    Ok(())
-}
-
 impl Extract {
     fn raise(&mut self, status: i32) {
         self.code = self.code.max(status);
@@ -947,7 +868,7 @@ impl Extract {
             // Two members can map to one path, so what this run wrote counts
             // as there without a stat.
             if self.replace_all
-                || (!self.written.contains(&path) && stat(host, &path).await.is_none())
+                || (!self.written.contains(&path) && host.stat(&path).await.is_none())
             {
                 return Some(path);
             }
@@ -1023,7 +944,7 @@ impl Extract {
         {
             level.push(b'/');
             level.extend_from_slice(part);
-            match stat(host, &level).await.as_deref() {
+            match host.stat(&level).await.as_deref() {
                 Some("dir") => continue,
                 Some(_) => blocker = Some(level),
                 None => {}
@@ -1072,7 +993,7 @@ async fn extract(
     host.print(opened);
     if config.dest.is_some() {
         let base = state.base.clone();
-        if let Err((_, text)) = ensure(host, &mut state.made, &base).await {
+        if let Err((_, text)) = host.ensure(&mut state.made, &base).await {
             let line = "checkdir:  cannot create extraction directory: {}\n           {}\n";
             host.warn(&say(line, &[&state.typed, &text]));
             return CHECKDIR_EXIT;
@@ -1117,9 +1038,9 @@ async fn extract(
             parent(&out_path).to_vec()
         };
         // A directory entry is the only record an empty directory leaves.
-        let existed = is_dir && stat(host, &out_path).await.is_some();
+        let existed = is_dir && host.stat(&out_path).await.is_some();
         if !chain.is_empty() {
-            if let Err(failure) = ensure(host, &mut state.made, &chain).await {
+            if let Err(failure) = host.ensure(&mut state.made, &chain).await {
                 state.checkdir(host, &chain, failure, &entry.name).await;
                 continue;
             }
@@ -1139,19 +1060,14 @@ async fn extract(
         };
         let renamed_dir = parent(&target).to_vec();
         if target != out_path && renamed_dir != chain {
-            if let Err(failure) = ensure(host, &mut state.made, &renamed_dir).await {
+            if let Err(failure) = host.ensure(&mut state.made, &renamed_dir).await {
                 state
                     .checkdir(host, &renamed_dir, failure, &entry.name)
                     .await;
                 continue;
             }
         }
-        let mut file = File {
-            path: target.clone(),
-            held: None,
-            created: false,
-            failed: None,
-        };
+        let mut file = File::new(target.clone());
         let warning = run.sized(entry);
         host.warn(&warning);
         let verdict = run.decode(entry, &mut file).await;
@@ -1162,7 +1078,7 @@ async fn extract(
         if let Some(text) = &file.failed {
             // -o unlinks a file already there before it writes, so a refusal
             // of that is its own verb.
-            let verb: &[u8] = if stat(host, &target).await.is_some() {
+            let verb: &[u8] = if host.stat(&target).await.is_some() {
                 b"delete old"
             } else {
                 b"create"

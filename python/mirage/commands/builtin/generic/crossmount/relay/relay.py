@@ -148,7 +148,7 @@ async def run_relay(
         )
     if cmd_name == Cmd.TAR:
         return await run_tar(
-            scopes, text_args, flag_kwargs, dispatch, vfs, stdin
+            scopes, text_args, flag_kwargs, dispatch, vfs, cwd, stdin
         )
     if cmd_name == Cmd.TEE:
         return await run_tee(scopes, flag_kwargs, dispatch, stdin, storage_key)

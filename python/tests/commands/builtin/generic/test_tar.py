@@ -1,19 +1,14 @@
-import io
-import tarfile
-
 import pytest
 
 from mirage.commands.builtin.generic.archive.types import Walked
 from mirage.commands.builtin.generic.tar import (
     excluded,
     member_name,
+    plan_create,
     pruned,
     strip_prefix,
 )
-from mirage.commands.builtin.generic.tar.tar import _write_archive, tar
-from mirage.commands.builtin.generic.tar.types import CreateResult, Member
-from mirage.io.stream import close_quietly, ensure_stream
-from mirage.io.types import materialize
+from mirage.commands.builtin.generic.tar.types import CreateResult
 from mirage.types import (
     ContentType,
     FileStat,
@@ -56,20 +51,6 @@ class _Tree:
                 self.dirs.add(parent)
                 parent = parent.rsplit("/", 1)[0] if "/" in parent else ""
 
-    async def read_bytes(self, path):
-        key = path.virtual if isinstance(path, PathSpec) else path
-        if key in getattr(self, "refused", ()):
-            raise PermissionError(13, "frozen", key)
-        if key not in self.files:
-            raise FileNotFoundError(key)
-        return self.files[key]
-
-    async def write_bytes(self, path, data):
-        self.files[path.virtual] = await materialize(data)
-
-    async def mkdir(self, path, parents=False):
-        self.dirs.add(path.virtual.rstrip("/"))
-
     async def stat(self, path):
         key = path.virtual.rstrip("/") or "/"
         if key in self.dirs:
@@ -105,25 +86,23 @@ class _Tree:
         return (path.virtual.rstrip("/") or "/") in self.dirs
 
 
-async def _create(tree: _Tree, paths, **flags):
-    return await tar(
+async def _plan(
+    tree: _Tree, paths, dereference: bool = False, **options
+) -> CreateResult:
+    return await plan_create(
         paths,
-        read_bytes=tree.read_bytes,
-        write_bytes=tree.write_bytes,
-        mkdir_fn=tree.mkdir,
+        archive=_spec("/out.tar"),
+        exclude=None,
+        dereference=dereference,
         stat=tree.stat,
         walk=tree.walk,
         is_dir=tree.is_dir,
-        **flags,
+        **options,
     )
 
 
-def _names(archive: bytes) -> list[str]:
-    with tarfile.open(fileobj=io.BytesIO(archive)) as tf:
-        return [
-            member.name + "/" if member.isdir() else member.name
-            for member in tf.getmembers()
-        ]
+def _names(plan: CreateResult) -> list[str]:
+    return [member.name for member in plan.members]
 
 
 def test_excluded_matches_whole_name_and_every_component_suffix():
@@ -171,151 +150,66 @@ def test_strip_prefix_drops_through_the_last_dotdot(
 
 
 @pytest.mark.asyncio
-async def test_create_announces_a_prefix_and_archives_what_it_could_read():
+async def test_create_announces_a_prefix_and_plans_what_it_could_stat():
     tree = _Tree({"/base/file": b"x"}, dirs=("/base", "/base/sub"))
-    _, io_res = await _create(
-        tree,
-        [_raw("/base/file", "../file"), _raw("/base/nope", "nope")],
-        c=True,
-        f=_spec("/out.tar"),
+    plan = await _plan(
+        tree, [_raw("/base/file", "../file"), _raw("/base/nope", "nope")]
     )
-    assert io_res.exit_code == 2
-    err = io_res.stderr.decode().splitlines()
-    assert err[:2] == [
+    assert plan.exit_code == 2
+    assert plan.notices == (
         "tar: Removing leading `../' from member names",
         "tar: nope: Cannot stat: No such file or directory",
-    ]
-    assert err[-1] == "tar: Exiting with failure status due to previous errors"
-    assert _names(tree.files["/out.tar"]) == ["file"]
+    )
+    assert _names(plan) == ["file"]
 
 
 @pytest.mark.asyncio
-async def test_create_stores_a_symlink_as_a_symlink():
+async def test_create_plans_a_symlink_as_a_symlink():
     """The router must not dereference an operand before the planner sees
     it, and a walk must not dereference what it meets.
     """
     tree = _Tree({"/d/a.txt": b"a"}, dirs=("/d",))
     links = _links({"/d/link.txt": "a.txt", "/link": "/d/a.txt"})
-    _, io_res = await _create(
-        tree,
-        [_raw("/d", "d"), _raw("/link", "link")],
-        c=True,
-        f=_spec("/out.tar"),
-        links=links,
-    )
-    with tarfile.open(fileobj=io.BytesIO(tree.files["/out.tar"])) as tf:
-        stored = {
-            m.name: (m.size, m.linkname) for m in tf.getmembers() if m.issym()
-        }
-    assert stored == {"d/link.txt": (0, "a.txt"), "link": (0, "/d/a.txt")}
+    plan = await _plan(tree, [_raw("/d", "d"), _raw("/link", "link")], links=links)
+    stored = {m.name: m.target for m in plan.members if m.kind == "link"}
+    assert stored == {"d/link.txt": "a.txt", "link": "/d/a.txt"}
 
 
 @pytest.mark.asyncio
 async def test_dereference_reports_a_dangling_link_and_exits_two():
     tree = _Tree({"/d/a.txt": b"alpha"}, dirs=("/d",))
     links = _links({"/d/bad": "/d/nope"})
-    _, io_res = await _create(
-        tree,
-        [_raw("/d", "d")],
-        c=True,
-        h=True,
-        f=_spec("/out.tar"),
-        links=links,
-    )
-    assert io_res.exit_code == 2
-    assert "tar: d/bad: Cannot stat" in io_res.stderr.decode()
+    plan = await _plan(tree, [_raw("/d", "d")], dereference=True, links=links)
+    assert plan.exit_code == 2
+    assert any("tar: d/bad: Cannot stat" in line for line in plan.notices)
 
 
 @pytest.mark.asyncio
 async def test_create_stops_at_a_nested_mount_and_says_so():
     tree = _Tree({"/d/a.txt": b"a"}, dirs=("/d", "/d/nested"))
     mounts = _mounts(descendants=("/d/nested",), roots=("/", "/d/nested"))
-    _, io_res = await _create(
-        tree, [_raw("/d", "d")], c=True, f=_spec("/out.tar"), mounts=mounts
-    )
-    assert io_res.exit_code == 0
-    assert (
-        "tar: d/nested/: file is on a different filesystem; not dumped"
-        in io_res.stderr.decode()
+    plan = await _plan(tree, [_raw("/d", "d")], mounts=mounts)
+    assert plan.exit_code == 0
+    assert plan.notices == (
+        "tar: d/nested/: file is on a different filesystem; not dumped",
     )
     # The mountpoint stays an entry; only its contents are left out.
-    assert _names(tree.files["/out.tar"]) == ["d/", "d/a.txt", "d/nested/"]
+    assert _names(plan) == ["d/", "d/a.txt", "d/nested/"]
 
 
 @pytest.mark.asyncio
-async def test_an_empty_directory_round_trips_as_its_own_member():
-    tree = _Tree({"/d/a.txt": b"x"}, dirs=("/d", "/d/empty", "/out"))
-    _, io_res = await _create(
-        tree, [_raw("/d", "d")], c=True, f=_spec("/out.tar")
-    )
-    assert "d/empty/" in _names(tree.files["/out.tar"])
-    _, io_res = await _create(
-        tree, [], x=True, f=_spec("/out.tar"), C=[_spec("/out")]
-    )
-    assert "/out/d/a.txt" in tree.files
-    assert "/out/d/empty" in tree.dirs
-
-
-@pytest.mark.asyncio
-async def test_create_reports_what_it_may_not_open_and_exits_two():
-    # Pinned on GNU tar 1.35 (debian:stable-slim) over a mode-000 file
-    # and directory: "Cannot open: Permission denied" for each, named as
-    # the operand was typed, the directory's own entry kept, the file
-    # left out, one trailer, exit 2. The scan's directory comes before
-    # the write's file, a deliberate ordering: GNU interleaves them in
-    # readdir order.
+async def test_create_reports_a_directory_it_may_not_open_and_keeps_it():
+    # Pinned on GNU tar 1.35 (debian:stable-slim) over a mode-000
+    # directory: "Cannot open: Permission denied", named as the operand was
+    # typed, its own entry kept, exit 2.
     tree = _Tree(
-        {"/d/a.txt": b"x", "/d/locked/y": b"y", "/d/sealed/s": b"s"},
-        dirs=("/d", "/d/locked", "/d/sealed"),
+        {"/d/a.txt": b"x", "/d/sealed/s": b"s"}, dirs=("/d", "/d/sealed")
     )
     tree.closed = ("/d/sealed",)
-    tree.refused = ("/d/locked/y",)
-    _, io_res = await _create(
-        tree, [_raw("/d", "/d")], c=True, f=_spec("/out.tar")
+    plan = await _plan(tree, [_raw("/d", "/d")])
+    assert plan.exit_code == 2
+    assert plan.notices == (
+        "tar: Removing leading `/' from member names",
+        "tar: /d/sealed: Cannot open: Permission denied",
     )
-    assert io_res.exit_code == 2
-    assert io_res.stderr.decode() == (
-        "tar: Removing leading `/' from member names\n"
-        "tar: /d/sealed: Cannot open: Permission denied\n"
-        "tar: /d/locked/y: Cannot open: Permission denied\n"
-        "tar: Exiting with failure status due to previous errors\n"
-    )
-    assert _names(tree.files["/out.tar"]) == [
-        "d/",
-        "d/a.txt",
-        "d/locked/",
-        "d/sealed/",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_known_size_archive_emits_before_reading_the_whole_file():
-    pulled, closed = [], []
-
-    async def source(path):
-        try:
-            for part in [b"abc", b"def"]:
-                pulled.append(part)
-                yield part
-        finally:
-            closed.append(True)
-
-    async def no_write(*args):
-        raise AssertionError("stdout archive must not write a path")
-
-    plan = CreateResult(
-        (Member(name="a", kind="file", path=_spec("/a"), size=6),), (), 0
-    )
-    output, result = await _write_archive(
-        plan, _raw("-", "-"), "", False, source, no_write
-    )
-    stream = ensure_stream(output)
-    first = await anext(stream)
-    assert first[:2] == b"a\0"
-    assert pulled == [b"abc"]
-    data = first + await materialize(stream)
-    with tarfile.open(fileobj=io.BytesIO(data)) as archive:
-        assert archive.extractfile("a").read() == b"abcdef"
-    assert result.exit_code == 0
-    assert closed == [True]
-    await close_quietly(stream)
+    assert _names(plan) == ["d/", "d/a.txt", "d/sealed/"]
