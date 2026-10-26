@@ -14,10 +14,11 @@
 
 from mirage.observe.store import ObserverStore
 from mirage.vfs.s3.config import S3Config
-from mirage.workspace.mount.namespace import NamespaceStore
+from mirage.workspace.mount.namespace.store import (
+    NamespaceStore,
+    RecordNamespaceStore,
+)
 from mirage.workspace.record.s3 import S3RecordClient
-from mirage.workspace.session.s3 import S3SessionStore
-from mirage.workspace.session.store import SessionStore
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
 
 
@@ -45,7 +46,7 @@ class S3WorkspaceStateStore(WorkspaceStateStore):
         self._config = config
         self._prefix = config.key_prefix or ""
         self._meta = S3RecordClient(config, f"{self._prefix}workspaces/")
-        self._sessions: dict[str, S3SessionStore] = {}
+        self._sessions: dict[str, RecordNamespaceStore] = {}
 
     def _make_namespace(self, workspace_id: str) -> NamespaceStore:
         raise RuntimeError(
@@ -61,12 +62,13 @@ class S3WorkspaceStateStore(WorkspaceStateStore):
             "the 'workspace' group override."
         )
 
-    def _make_sessions(self, workspace_id: str) -> SessionStore:
+    def _make_sessions(self, workspace_id: str) -> NamespaceStore:
         if workspace_id not in self._sessions:
-            scoped = self._config.model_copy(
-                update={"key_prefix": f"{self._prefix}{workspace_id}/"}
+            self._sessions[workspace_id] = RecordNamespaceStore(
+                S3RecordClient(
+                    self._config, f"{self._prefix}{workspace_id}/sessions/"
+                )
             )
-            self._sessions[workspace_id] = S3SessionStore(scoped)
         return self._sessions[workspace_id]
 
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:

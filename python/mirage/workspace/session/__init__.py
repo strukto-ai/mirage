@@ -25,9 +25,6 @@ if TYPE_CHECKING:
     )
     from mirage.workspace.session.errors import ReadonlyVariableError
     from mirage.workspace.session.manager import SessionManager
-    from mirage.workspace.session.ram import RAMSessionStore
-    from mirage.workspace.session.redis import RedisSessionStore
-    from mirage.workspace.session.s3 import S3SessionStore
     from mirage.workspace.session.session import SessionState
     from mirage.workspace.session.state import (
         ensure_var_visible,
@@ -35,10 +32,6 @@ if TYPE_CHECKING:
         session_view,
         visible_arrays,
         visible_env,
-    )
-    from mirage.workspace.session.store import (
-        SessionFields,
-        SessionStore,
     )
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
@@ -50,9 +43,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     ),
     "mirage.workspace.session.errors": ("ReadonlyVariableError",),
     "mirage.workspace.session.manager": ("SessionManager",),
-    "mirage.workspace.session.ram": ("RAMSessionStore",),
-    "mirage.workspace.session.redis": ("RedisSessionStore",),
-    "mirage.workspace.session.s3": ("S3SessionStore",),
     "mirage.workspace.session.session": ("SessionState",),
     "mirage.workspace.session.state": (
         "ensure_var_visible",
@@ -61,21 +51,12 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "visible_arrays",
         "visible_env",
     ),
-    "mirage.workspace.session.store": (
-        "SessionFields",
-        "SessionStore",
-    ),
 }
 
 __all__ = [
-    "RAMSessionStore",
     "ReadonlyVariableError",
-    "RedisSessionStore",
-    "S3SessionStore",
-    "SessionFields",
     "SessionManager",
     "SessionState",
-    "SessionStore",
     "ensure_var_visible",
     "env_snapshot",
     "get_current_session",

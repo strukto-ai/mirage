@@ -17,9 +17,10 @@ import { SessionOwner } from '../../context/session_context.ts'
 import { ownRecord, SessionState, varsFromEntries, varsFromEnv } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
-import { RAMSessionStore } from './ram.ts'
+import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
+import type { NamespaceStore } from '../mount/namespace/store.ts'
 import { applyProfile, narrow } from './resolve.ts'
-import { CAS_MAX_RETRIES, generationOf, type SessionFields, type SessionStore } from './store.ts'
+import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/types.ts'
 import type { AdmissionRules, Decision, ProfileScripts } from '../../policy/types.ts'
 import type { EnvEntries } from '../../secrets/config.ts'
 import type { ShellVar } from '../../shell/variable.ts'
@@ -53,19 +54,20 @@ function mergeSeedVars(session: SessionState, seedVars: Record<string, ShellVar>
 }
 
 /**
- * Owns the live session table over a storage-agnostic SessionStore.
+ * Owns the live session table over a storage-agnostic NamespaceStore.
  *
- * Mirrors the Namespace/NamespaceStore split: sessions are worked on in
- * memory (creation stays synchronous), the store hydrates once at the
- * first async entry point, and durable fields flush back at async
- * boundaries (end of execute, snapshot, explicit persist). `close`
+ * The same store type the Namespace keeps its nodes in, one table each per
+ * workspace: sessions are worked on in memory (creation stays synchronous),
+ * the store hydrates once at the first async entry point, and durable fields
+ * flush back at async boundaries (end of execute, snapshot, explicit
+ * persist). `close`
  * deletes from the store — closing a session revokes it everywhere —
  * while process shutdown leaves stored sessions in place.
  */
 export class SessionManager extends SessionOwner {
   private readonly sessions = new Map<string, SessionState>()
   private readonly persistLock = new KeyLock()
-  private readonly sessionStore: SessionStore
+  private readonly sessionStore: NamespaceStore
   private defaultIdInternal: string
   private loaded = false
   private loadPromise: Promise<void> | null = null
@@ -95,7 +97,7 @@ export class SessionManager extends SessionOwner {
    */
   constructor(
     defaultSessionId: string,
-    store?: SessionStore,
+    store?: NamespaceStore,
     seedVars?: Record<string, ShellVar>,
     clock?: Clock,
     ids?: IdSource,
@@ -104,7 +106,7 @@ export class SessionManager extends SessionOwner {
     this.clock = clock ?? new SystemClock()
     this.ids = ids ?? new SystemIdSource()
     this.defaultIdInternal = defaultSessionId
-    this.sessionStore = store ?? new RAMSessionStore()
+    this.sessionStore = store ?? new RAMNamespaceStore()
     this.seedVarsInternal = ownRecord(seedVars)
     this.hasManaged = Object.values(this.seedVarsInternal).some((v) => v.managed !== undefined)
     const dflt = new SessionState({
@@ -233,7 +235,7 @@ export class SessionManager extends SessionOwner {
     this.get(sessionId).decisions = records
   }
 
-  get store(): SessionStore {
+  get store(): NamespaceStore {
     return this.sessionStore
   }
 
@@ -373,7 +375,7 @@ export class SessionManager extends SessionOwner {
     for (let attempt = 0; attempt < CAS_MAX_RETRIES; attempt++) {
       const expected = session.generation
       session.generation = expected + 1
-      const fields = session.toDict() as SessionFields
+      const fields = session.toDict() as RecordFields
       if (await this.sessionStore.casSet(sid, fields, expected)) {
         this.persisted.set(sid, JSON.stringify(fields))
         return
@@ -397,10 +399,10 @@ export class SessionManager extends SessionOwner {
   async replaceFromSnapshot(sessions: readonly SessionState[]): Promise<void> {
     this.loaded = true
     this.loadPromise = Promise.resolve()
-    const entries = new Map<string, SessionFields>()
-    for (const s of this.sessions.values()) entries.set(s.sessionId, s.toDict() as SessionFields)
+    const entries = new Map<string, RecordFields>()
+    for (const s of this.sessions.values()) entries.set(s.sessionId, s.toDict() as RecordFields)
     for (const s of sessions) {
-      entries.set(s.sessionId, s.toDict() as SessionFields)
+      entries.set(s.sessionId, s.toDict() as RecordFields)
       this.hasManaged = this.hasManaged || holdsManaged(s)
     }
     await this.sessionStore.replaceAll(entries)

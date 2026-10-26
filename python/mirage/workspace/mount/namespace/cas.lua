@@ -1,4 +1,4 @@
--- Compare-and-set one session record: write ARGV[2] under field ARGV[1]
+-- Compare-and-set one hash-field record: write ARGV[2] under field ARGV[1]
 -- only if the stored record's generation equals ARGV[3] (missing = 0).
 local raw = redis.call('HGET', KEYS[1], ARGV[1])
 local current = 0

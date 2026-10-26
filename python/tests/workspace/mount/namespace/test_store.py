@@ -18,18 +18,28 @@ import os
 import sys
 
 import pytest
+import pytest_asyncio
 
-from mirage.workspace.session.disk import DiskSessionStore
+from mirage.vfs.s3.config import S3Config
+from mirage.workspace.mount.namespace.store import RecordNamespaceStore
+from mirage.workspace.record.disk import DiskRecordClient
+from mirage.workspace.record.s3 import S3RecordClient
+from tests.workspace.s3_fake import FakeConditionalS3Client, patch_record_s3
+
+BUCKET = "state-bucket"
+
+S3_PREFIX = "mirage/ws1/sessions/"
 
 CHILD_SCRIPT = """
 import asyncio
 import sys
 
-from mirage.workspace.session.disk import DiskSessionStore
+from mirage.workspace.mount.namespace.store import RecordNamespaceStore
+from mirage.workspace.record.disk import DiskRecordClient
 
 
 async def main(root, worker):
-    store = DiskSessionStore(root)
+    store = RecordNamespaceStore(DiskRecordClient(root, "sessions/"))
     for _ in range(5):
         for _ in range(500):
             record = (await store.load()).get("hot", {
@@ -54,18 +64,40 @@ asyncio.run(main(sys.argv[1], sys.argv[2]))
 """
 
 
+def _s3_config() -> S3Config:
+    return S3Config(
+        bucket=BUCKET,
+        region="us-east-1",
+        aws_access_key_id="fake",
+        aws_secret_access_key="fake",
+    )
+
+
+def _disk_store(root) -> RecordNamespaceStore:
+    return RecordNamespaceStore(DiskRecordClient(str(root), "sessions/"))
+
+
+@pytest_asyncio.fixture(params=["disk", "s3"])
+async def store(request, tmp_path):
+    if request.param == "disk":
+        s = _disk_store(tmp_path)
+        yield s
+        await s.close()
+        return
+    with patch_record_s3(FakeConditionalS3Client()):
+        s = RecordNamespaceStore(S3RecordClient(_s3_config(), S3_PREFIX))
+        yield s
+        await s.close()
+
+
 async def cas_increment(
-    store: DiskSessionStore, worker: str, rounds: int
+    store: RecordNamespaceStore, worker: str, rounds: int
 ) -> None:
     """Read-modify-CAS one counter, retrying until each round lands."""
     for _ in range(rounds):
         for _ in range(200):
             record = (await store.load()).get(
-                "hot",
-                {
-                    "session_id": "hot",
-                    "env": {},
-                },
+                "hot", {"session_id": "hot", "env": {}}
             )
             env = dict(record.get("env", {}))
             env[worker] = str(int(env.get(worker, "0")) + 1)
@@ -81,8 +113,7 @@ async def cas_increment(
 
 
 @pytest.mark.asyncio
-async def test_set_load_roundtrip(tmp_path):
-    store = DiskSessionStore(str(tmp_path))
+async def test_set_load_roundtrip(store):
     await store.set("s1", {"session_id": "s1", "cwd": "/a", "env": {}})
     await store.set(
         "s2",
@@ -94,15 +125,12 @@ async def test_set_load_roundtrip(tmp_path):
         },
     )
     entries = await store.load()
-    await store.close()
     assert entries["s1"]["cwd"] == "/a"
     assert entries["s2"]["mount_modes"] == {"/data": "read"}
-    assert (tmp_path / "sessions" / "s1.json").is_file()
 
 
 @pytest.mark.asyncio
-async def test_delete_and_replace_all(tmp_path):
-    store = DiskSessionStore(str(tmp_path))
+async def test_delete_and_replace_all(store):
     await store.set("a", {"session_id": "a"})
     await store.set("b", {"session_id": "b"})
     await store.delete(["a", "missing"])
@@ -111,26 +139,21 @@ async def test_delete_and_replace_all(tmp_path):
     assert set(await store.load()) == {"c"}
     await store.clear()
     assert await store.load() == {}
-    await store.close()
 
 
 @pytest.mark.asyncio
-async def test_cas_create_only_once(tmp_path):
-    store = DiskSessionStore(str(tmp_path))
+async def test_cas_create_only_once(store):
     first = {"session_id": "s", "generation": 1}
     assert await store.cas_set("s", first, 0) is True
     assert (
         await store.cas_set("s", {"session_id": "s", "generation": 1}, 0)
         is False
     )
-    await store.close()
-    stored = json.loads((tmp_path / "sessions" / "s.json").read_bytes())
-    assert stored == first
+    assert (await store.load())["s"] == first
 
 
 @pytest.mark.asyncio
-async def test_cas_stale_generation_rejected(tmp_path):
-    store = DiskSessionStore(str(tmp_path))
+async def test_cas_stale_generation_rejected(store):
     await store.set("s", {"session_id": "s", "generation": 2})
     assert (
         await store.cas_set("s", {"session_id": "s", "generation": 2}, 1)
@@ -142,25 +165,32 @@ async def test_cas_stale_generation_rejected(tmp_path):
         )
         is True
     )
-    entries = await store.load()
-    await store.close()
-    assert entries["s"]["cwd"] == "/x"
+    assert (await store.load())["s"]["cwd"] == "/x"
 
 
 @pytest.mark.asyncio
-async def test_cas_legacy_record_counts_as_generation_zero(tmp_path):
-    store = DiskSessionStore(str(tmp_path))
+async def test_cas_legacy_record_counts_as_generation_zero(store):
     await store.set("s", {"session_id": "s"})
     assert (
         await store.cas_set("s", {"session_id": "s", "generation": 1}, 0)
         is True
     )
-    await store.close()
 
 
 @pytest.mark.asyncio
-async def test_cas_lock_held_by_live_writer_loses(tmp_path):
-    store = DiskSessionStore(str(tmp_path))
+async def test_concurrent_cas_writers_lose_nothing(store):
+    workers = [f"w{i}" for i in range(5)]
+    await asyncio.gather(
+        *(cas_increment(store, worker, 5) for worker in workers)
+    )
+    record = (await store.load())["hot"]
+    assert record["generation"] == 25
+    assert all(record["env"][worker] == "5" for worker in workers)
+
+
+@pytest.mark.asyncio
+async def test_disk_lock_held_by_live_writer_loses(tmp_path):
+    store = _disk_store(tmp_path)
     await store.set("s", {"session_id": "s", "generation": 1})
     lock = tmp_path / "sessions" / "s.json.lock"
     lock.write_bytes(b"9999999")
@@ -177,8 +207,8 @@ async def test_cas_lock_held_by_live_writer_loses(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cas_stale_lock_reclaimed(tmp_path):
-    store = DiskSessionStore(str(tmp_path))
+async def test_disk_stale_lock_reclaimed(tmp_path):
+    store = _disk_store(tmp_path)
     await store.set("s", {"session_id": "s", "generation": 1})
     lock = tmp_path / "sessions" / "s.json.lock"
     lock.write_bytes(b"424242")
@@ -195,47 +225,21 @@ async def test_cas_stale_lock_reclaimed(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_session_id_with_slash_stays_one_file(tmp_path):
-    store = DiskSessionStore(str(tmp_path))
-    await store.set("a/b", {"session_id": "a/b"})
-    assert set(await store.load()) == {"a/b"}
-    files = [p.name for p in (tmp_path / "sessions").iterdir()]
-    assert files == ["a%2Fb.json"]
-    await store.close()
-
-
-@pytest.mark.asyncio
-async def test_no_tmp_or_lock_leftovers(tmp_path):
-    store = DiskSessionStore(str(tmp_path))
+async def test_disk_writes_one_file_and_no_leftovers(tmp_path):
+    store = _disk_store(tmp_path)
     await store.set("s", {"session_id": "s"})
     assert await store.cas_set("s", {"session_id": "s", "generation": 1}, 0)
     assert not await store.cas_set(
         "s", {"session_id": "s", "generation": 1}, 0
     )
     await store.close()
-    leftovers = [
-        p.name
-        for p in (tmp_path / "sessions").iterdir()
-        if not p.name.endswith(".json")
-    ]
-    assert leftovers == []
+    stored = json.loads((tmp_path / "sessions" / "s.json").read_bytes())
+    assert stored == {"session_id": "s", "generation": 1}
+    assert [p.name for p in (tmp_path / "sessions").iterdir()] == ["s.json"]
 
 
 @pytest.mark.asyncio
-async def test_concurrent_cas_writers_lose_nothing(tmp_path):
-    store = DiskSessionStore(str(tmp_path))
-    workers = [f"w{i}" for i in range(5)]
-    await asyncio.gather(
-        *(cas_increment(store, worker, 5) for worker in workers)
-    )
-    record = (await store.load())["hot"]
-    await store.close()
-    assert record["generation"] == 25
-    assert all(record["env"][worker] == "5" for worker in workers)
-
-
-@pytest.mark.asyncio
-async def test_cross_process_cas_writers_lose_nothing(tmp_path):
+async def test_disk_cross_process_cas_writers_lose_nothing(tmp_path):
     """The lockfile protocol's whole point: separate OS processes CAS
     the same record without losing an update."""
     procs = [
@@ -246,8 +250,45 @@ async def test_cross_process_cas_writers_lose_nothing(tmp_path):
     ]
     codes = await asyncio.gather(*(p.wait() for p in procs))
     assert codes == [0, 0, 0]
-    store = DiskSessionStore(str(tmp_path))
+    store = _disk_store(tmp_path)
     record = (await store.load())["hot"]
     await store.close()
     assert record["generation"] == 15
     assert all(record["env"][f"p{i}"] == "5" for i in range(3))
+
+
+class RaceOnceClient(FakeConditionalS3Client):
+    """Move the stored record between a CAS's compare-read and its
+    conditional write, exactly once."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.raced = False
+
+    async def get_object(self, Bucket: str, Key: str) -> dict:
+        response = await super().get_object(Bucket, Key)
+        if not self.raced:
+            self.raced = True
+            self.objects[(Bucket, Key)] = json.dumps(
+                {"session_id": "s", "cwd": "/winner", "generation": 2}
+            ).encode()
+        return response
+
+
+@pytest.mark.asyncio
+async def test_s3_cas_write_race_detected_by_conditional_put():
+    client = RaceOnceClient()
+    with patch_record_s3(client):
+        store = RecordNamespaceStore(S3RecordClient(_s3_config(), S3_PREFIX))
+        await store.set("s", {"session_id": "s", "generation": 1})
+        client.raced = False
+        assert (
+            await store.cas_set(
+                "s", {"session_id": "s", "cwd": "/loser", "generation": 2}, 1
+            )
+            is False
+        )
+        entries = await store.load()
+        await store.close()
+    assert entries["s"]["cwd"] == "/winner"
+    assert (BUCKET, f"{S3_PREFIX}s.json") in client.objects

@@ -16,7 +16,7 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { runWithSession } from '../../context/session_context.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { RAMSessionStore } from '../session/ram.ts'
+import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
 import { MountMode } from '../../types.ts'
 import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
@@ -85,7 +85,7 @@ describe('Session', () => {
     // table, recreate a persisted session bare, and hand the next
     // flush a record that overwrote the stored profile. The entry point
     // hydrates first, so the stored session is adopted as is.
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const build = (): Workspace => {
       const ws = new Workspace(
         { '/repo': [new RAMVFS(), MountMode.WRITE] as const },

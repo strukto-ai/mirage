@@ -30,7 +30,7 @@ from mirage.runtime.python import LocalRuntime
 from mirage.shell.console import Channel
 from mirage.types import Limit, OnExceed
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.session.ram import RAMSessionStore
+from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 
 
 @pytest.fixture
@@ -123,7 +123,7 @@ async def test_mount_override_beats_command_default():
     assert resolved.timeout_seconds == 999.0
 
 
-class _SuspendingStore(RAMSessionStore):
+class _SuspendingStore(RAMNamespaceStore):
     """A session store whose write suspends, as a persistent one does."""
 
     async def cas_set(self, session_id, fields, expected_generation):

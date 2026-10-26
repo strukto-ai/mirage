@@ -91,6 +91,12 @@ function config(
   }
 }
 
+function reply(stream: OpenStream): Reply {
+  let out = decoder.decode(stream.finish())
+  while (stream.busy()) out += decoder.decode(stream.drain())
+  return JSON.parse(out) as Reply
+}
+
 function text(result: readonly number[]): string {
   return result.map((unit) => String.fromCodePoint(unit)).join('')
 }
@@ -128,9 +134,7 @@ export class Glob {
 
   private run(name: string, operation: Operation): Reply {
     if (!this.prepare(name, operation)) this.stream.feed(encoded(name, true))
-    let out = decoder.decode(this.stream.finish())
-    while (this.stream.busy()) out += decoder.decode(this.stream.drain())
-    return JSON.parse(out) as Reply
+    return reply(this.stream)
   }
 
   private async runAsync(name: string, operation: Operation): Promise<Reply> {
@@ -188,15 +192,25 @@ export class Glob {
   }
 }
 
-/** One compiled pattern asked whether whole names match, one Wasm call per name. Mirrors Python's GlobMatcher. */
+/**
+ * One compiled pattern asked whether whole names match, one Wasm call per name,
+ * or none where the grammar reads the pattern as plain text and the name is
+ * compared with it here. Mirrors Python's GlobMatcher.
+ */
 export class GlobMatcher {
   private readonly stream: MovableStream
+  private readonly literal: string | null
 
   constructor(pattern: string, extglob = false, period = false, dialect: Dialect = 'shell') {
     this.stream = new MovableStream('glob', config(pattern, extglob, period, dialect))
+    const stream = this.stream.live
+    stream.begin({ kind: 'literal' })
+    const literal = units.nullable().parse(reply(stream))
+    this.literal = literal === null ? null : text(literal)
   }
 
   matches(name: string): boolean {
+    if (this.literal !== null) return name === this.literal
     return this.stream.live.test(encoded(name, true))
   }
 }

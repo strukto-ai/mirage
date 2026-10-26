@@ -56,6 +56,18 @@ impl Flat {
         Some(Self(tokens))
     }
 
+    /// The one subject the pattern matches, when every token is a literal:
+    /// a host compares names against it without a call.
+    pub(super) fn literal(&self) -> Option<Vec<u32>> {
+        self.0
+            .iter()
+            .map(|token| match token {
+                Token::Literal(unit) => Some(*unit),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Whether `subject` matches whole; `period` keeps every wildcard off
     /// its first character.
     pub(super) fn matches(&self, subject: &[u32], period: bool) -> bool {

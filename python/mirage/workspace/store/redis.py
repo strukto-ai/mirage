@@ -19,10 +19,11 @@ import redis.asyncio as aioredis
 
 from mirage.observe.redis_store import RedisObserverStore
 from mirage.observe.store import ObserverStore
-from mirage.workspace.mount.namespace.redis import RedisNamespaceStore
+from mirage.workspace.mount.namespace.redis import (
+    CAS_SCRIPT,
+    RedisNamespaceStore,
+)
 from mirage.workspace.mount.namespace.store import NamespaceStore
-from mirage.workspace.session.redis import CAS_SCRIPT, RedisSessionStore
-from mirage.workspace.session.store import SessionStore
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
 
 
@@ -32,7 +33,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
     Key layout under one prefix, everything scoped by workspace id:
 
     - ``{prefix}workspaces`` — hash, workspace id -> metadata JSON
-    - ``{prefix}{ws}:namespace:nodes`` (+ ``:user``) — namespace plane
+    - ``{prefix}{ws}:namespace:nodes`` — node table
     - ``{prefix}{ws}:observer:*`` — observer plane
     - ``{prefix}{ws}:sessions`` — session table
 
@@ -58,12 +59,12 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         self._prefix = key_prefix
         self._meta_client = aioredis.from_url(url)
         self._meta_key = f"{key_prefix}workspaces"
-        # Same generic hash-field CAS the session store uses: the meta
+        # Same generic hash-field CAS the session table uses: the meta
         # hash is keyed by workspace id instead of session id.
         self._meta_cas = self._meta_client.register_script(CAS_SCRIPT)
         self._namespaces: dict[str, RedisNamespaceStore] = {}
         self._observers: dict[str, RedisObserverStore] = {}
-        self._sessions: dict[str, RedisSessionStore] = {}
+        self._sessions: dict[str, RedisNamespaceStore] = {}
 
     def _make_namespace(self, workspace_id: str) -> NamespaceStore:
         if workspace_id not in self._namespaces:
@@ -81,10 +82,12 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
             )
         return self._observers[workspace_id]
 
-    def _make_sessions(self, workspace_id: str) -> SessionStore:
+    def _make_sessions(self, workspace_id: str) -> NamespaceStore:
         if workspace_id not in self._sessions:
-            self._sessions[workspace_id] = RedisSessionStore(
-                url=self._url, key_prefix=f"{self._prefix}{workspace_id}:"
+            self._sessions[workspace_id] = RedisNamespaceStore(
+                url=self._url,
+                key_prefix=f"{self._prefix}{workspace_id}:",
+                table="sessions",
             )
         return self._sessions[workspace_id]
 
