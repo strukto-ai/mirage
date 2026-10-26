@@ -180,6 +180,29 @@ describe('Terminal', () => {
     expect(dec(tty.take())).toEqual(['job\n', ''])
   })
 
+  it('a hand-over puts what is left ahead on the next terminal', async () => {
+    const tty = new Terminal()
+    const to = new Terminal()
+    await tty.jobs.emit(Channel.STDOUT, enc('left\n'))
+    await to.jobs.emit(Channel.STDOUT, enc('meanwhile\n'))
+    tty.handOver(to)
+    expect(tty.chunks).toEqual([])
+    await tty.jobs.emit(Channel.STDOUT, enc('after\n'))
+    expect(dec(to.take())).toEqual(['left\nmeanwhile\nafter\n', ''])
+  })
+
+  it('an attached reader takes what was handed back first', async () => {
+    const tty = new Terminal()
+    const to = new Terminal()
+    const reader = new JobConsole()
+    await to.attach(reader)
+    await tty.jobs.emit(Channel.STDOUT, enc('saved\n'))
+    tty.handOver(to)
+    await to.emit(Channel.STDOUT, enc('newer\n'))
+    expect(new TextDecoder().decode(await reader.snapshot(Channel.STDOUT))).toBe('saved\nnewer\n')
+    expect(to.reader).toBe(reader)
+  })
+
   it('bounded output goes back ahead of later output', async () => {
     const tty = new Terminal()
     await tty.emit(Channel.STDOUT, enc('long line\n'))

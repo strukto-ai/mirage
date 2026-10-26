@@ -45,6 +45,18 @@ class _Stalled(JobConsole):
         await asyncio.Event().wait()
 
 
+class _Held(JobConsole):
+    def __init__(self, reached: asyncio.Event) -> None:
+        super().__init__()
+        self.reached = reached
+        self.release = asyncio.Event()
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        self.reached.set()
+        await self.release.wait()
+        await super().emit(channel, data)
+
+
 def _make_ws():
     vfs = RAMVFS()
     store = vfs._store
@@ -271,6 +283,59 @@ async def test_a_job_that_outlives_its_line_writes_to_the_next():
         await asyncio.sleep(0.01)
     io = await ws.shell("echo next", cwd="/ram")
     assert (await io.stdout_str()) == "late\nnext\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_per_call_line_leaves_a_running_lines_output_to_it():
+    ws = _make_ws()
+    await ws.shell(
+        "{ sleep 0.05; echo late1; echo late2; touch /ram/done; } &"
+    )
+    while not await ws.vfs.exists("/ram/done"):
+        await asyncio.sleep(0.01)
+    reached = asyncio.Event()
+    reader = _Held(reached)
+    typed = asyncio.create_task(ws.shell("echo typed", sink=reader))
+    await asyncio.wait_for(reached.wait(), 5)
+    fast = await asyncio.wait_for(ws.shell("echo fast", cwd="/ram"), 5)
+    reader.release.set()
+    await asyncio.wait_for(typed, 5)
+    assert (await fast.stdout_str()) == "fast\n"
+    assert await reader.snapshot(Channel.STDOUT) == b"late1\nlate2\ntyped\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_per_call_line_hands_its_jobs_output_on_unheld():
+    ws = _make_ws()
+    await ws.shell(
+        "{ sleep 0.05; echo w1; echo w2; touch /ram/j1;"
+        " while [ ! -f /ram/go ]; do sleep 0.01; done;"
+        " echo w3; touch /ram/j2; } &"
+    )
+    while not await ws.vfs.exists("/ram/j1"):
+        await asyncio.sleep(0.01)
+    own_reached, cancel = asyncio.Event(), asyncio.Event()
+    own = _Held(own_reached)
+    call = asyncio.create_task(
+        ws.shell("echo c", cwd="/ram", sink=own, cancel=cancel)
+    )
+    await asyncio.wait_for(own_reached.wait(), 5)
+    await ws.vfs.write("/ram/go", b"")
+    while not await ws.vfs.exists("/ram/j2"):
+        await asyncio.sleep(0.01)
+    reached = asyncio.Event()
+    reader = _Held(reached)
+    typed = asyncio.create_task(ws.shell("echo typed", sink=reader))
+    await asyncio.wait_for(reached.wait(), 5)
+    cancel.set()
+    with pytest.raises(MirageAbortError):
+        await asyncio.wait_for(call, 5)
+    reader.release.set()
+    own.release.set()
+    await asyncio.wait_for(typed, 5)
+    assert await reader.snapshot(Channel.STDOUT) == b"w3\nw2\ntyped\n"
     await ws.close()
 
 
