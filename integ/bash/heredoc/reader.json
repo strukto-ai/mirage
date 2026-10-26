@@ -2626,7 +2626,7 @@
     },
     {
       "id": "heredoc_reader_pending_across_an_array_takes_its_last_body",
-      "command": "cat <<EOF; x=(1\nbody\nEOF\n2)\nfi",
+      "command": "(cat <<EOF; x=(1\nbody\nEOF\n2))\nfi",
       "expect": {
         "exit": 0,
         "stdout": "fi\n",
