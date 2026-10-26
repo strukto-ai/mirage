@@ -83,6 +83,7 @@ from mirage.workspace.node.occurrence import (
     claimant_for,
     evaluated_from,
 )
+from mirage.workspace.node.program import refused_row
 from mirage.workspace.node.run_tree import run_command_tree
 from mirage.workspace.session import (
     SessionState,
@@ -744,8 +745,14 @@ async def run_prepared_line(
         )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
-        # consulted about it.
-        unreadable = syntax_refusal(ast) if argv is None else None
+        # consulted about it. A refusal on a later line leaves the lines
+        # before it to run first (``refused_row``), as bash reads its
+        # input a line at a time.
+        unreadable = (
+            syntax_refusal(ast)
+            if argv is None and refused_row(ast) is None
+            else None
+        )
         if unreadable is not None:
             if call_stack is not None and unreadable.exit_code == 127:
                 # A substitution bash cannot parse ends the shell, from

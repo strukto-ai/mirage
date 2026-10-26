@@ -1469,6 +1469,76 @@
         "stdout": "works\na\nc\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "alias_reserved_name_on_a_later_line_is_read_with_it",
+      "seq": 940164,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'shopt -s expand_aliases\nalias fi='\"'\"'echo F'\"'\"'\nfi; alias then='\"'\"'echo T'\"'\"'\nthen x'",
+      "expect": {
+        "exit": 0,
+        "stdout": "F\nT x\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_reserved_name_defined_on_an_earlier_line_closes_no_block",
+      "seq": 940165,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'shopt -s expand_aliases\nalias fi='\"'\"'echo F'\"'\"'\nif true; then echo in; fi'; echo \"st=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=2\n",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      }
     }
   ]
 }

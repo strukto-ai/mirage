@@ -28,6 +28,7 @@ import { singleQuote } from '../utils/quote.ts'
 
 const INDENT = '    '
 const CONTINUATION = /\\\n[ \t]*/g
+const FIRST_WORD = /\S+/
 // A name bash would read as a reserved word is printed after `function`.
 const RESERVED: ReadonlySet<string> = new Set([
   ...BASH_KEYWORDS,
@@ -45,15 +46,14 @@ export function storedFunctionText(
   name: string,
   source: string,
   parser?: ParseScope,
-  aliases: ReadonlySet<string> = new Set(),
+  aliases: ReadonlyMap<string, string> = new Map(),
 ): string {
   if (parser === undefined) throw new Error('function rendering requires a parse scope')
   const scope = parser.fork()
+  const names = new Set(aliases.keys())
+  const parse = (line: string): TSNodeLike => scope.parse(line, names)
   try {
-    return functionText(
-      name,
-      parseFunction(source, (line) => scope.parse(line, aliases)),
-    )
+    return functionText(name, parseFunction(source, parse), new Aliases(aliases, parse))
   } finally {
     scope.release()
   }
@@ -65,11 +65,59 @@ export function storedFunctionText(
  * body of statements one per line with four-space indents,
  * `;` between them, `elif` as an `if` nested in `else`, redirects respelled
  * after the words (`>&2` is `1>&2`), `$'...'` decoded into single quotes,
- * and every substitution's command printed the same way. Mirrors Python's
- * function_text.
+ * every substitution's command printed the same way, and each alias it read
+ * the definition with expanded. Mirrors Python's function_text.
  */
-export function functionText(name: string, body: readonly TSNodeLike[]): string {
-  return new Printer(true).definition(name, definitionOf(body), '')
+export function functionText(
+  name: string,
+  body: readonly TSNodeLike[],
+  aliases: Aliases | null = null,
+): string {
+  return new Printer(true, aliases).definition(name, definitionOf(body), '')
+}
+
+/** The aliases a body was read with, and the parser that reads an expansion again. */
+class Aliases {
+  constructor(
+    readonly values: ReadonlyMap<string, string>,
+    readonly parse: (line: string) => TSNodeLike,
+  ) {}
+}
+
+/**
+ * A command with its alias words replaced, as bash reads it, and the aliases
+ * it expanded: a value ending in a blank checks the next word too, and no
+ * alias expands inside its own text. Mirrors Python's _alias_rewrite.
+ */
+function aliasRewrite(
+  node: TSNodeLike,
+  head: TSNodeLike,
+  values: ReadonlyMap<string, string>,
+  blocked: ReadonlySet<string>,
+): [string, ReadonlySet<string>] | null {
+  if (node.startIndex === undefined || head.startIndex === undefined || head.endIndex === undefined)
+    return null
+  const source = node.text
+  let at = head.startIndex - node.startIndex
+  let end = head.endIndex - node.startIndex
+  let name = head.text
+  const used = new Set<string>()
+  let out = ''
+  let cursor = 0
+  for (let value = values.get(name); value !== undefined; value = values.get(name)) {
+    if (used.has(name) || blocked.has(name)) break
+    used.add(name)
+    out += source.slice(cursor, at) + value
+    cursor = end
+    if (!value.endsWith(' ') && !value.endsWith('\t')) break
+    const match = FIRST_WORD.exec(source.slice(cursor))
+    if (match === null) break
+    name = match[0]
+    at = cursor + match.index
+    end = at + name.length
+  }
+  if (used.size === 0) return null
+  return [out + source.slice(cursor), used]
 }
 
 function definitionOf(body: readonly TSNodeLike[]): TSNodeLike {
@@ -100,7 +148,25 @@ function stripContinuations(text: string): string {
  */
 class Printer {
   deferred: string[] = []
-  constructor(readonly inFunction: boolean) {}
+  constructor(
+    readonly inFunction: boolean,
+    readonly aliases: Aliases | null = null,
+    readonly blocked: ReadonlySet<string> = new Set(),
+  ) {}
+
+  /** A command named by an alias, printed as what bash read it as. Mirrors Python's _expanded. */
+  private expanded(node: TSNodeLike, indent: string): string | null {
+    if (this.aliases === null) return null
+    const head = node.childForFieldName?.('name')?.namedChildren[0]
+    if (head?.type !== NT.WORD) return null
+    const rewrite = aliasRewrite(node, head, this.aliases.values, this.blocked)
+    if (rewrite === null) return null
+    const [text, used] = rewrite
+    const printer = new Printer(this.inFunction, this.aliases, new Set([...this.blocked, ...used]))
+    const out = printer.statements(this.aliases.parse(text).children, indent, false)
+    this.deferred.push(...printer.deferred)
+    return out
+  }
 
   definition(name: string, node: TSNodeLike, indent: string): string {
     const body = node.childForFieldName?.('body') ?? null
@@ -173,6 +239,8 @@ class Printer {
       return this.command(body, indent) + this.redirects(redirects)
     }
     if (kind === NT.COMMAND) {
+      const expanded = this.expanded(node, indent)
+      if (expanded !== null) return expanded
       const words = named.filter((c) => !REDIRECT_NODE_TYPES.has(c.type)).map((c) => this.word(c))
       return words.join(' ') + this.redirects(named.filter((c) => REDIRECT_NODE_TYPES.has(c.type)))
     }
@@ -202,10 +270,10 @@ class Printer {
       kind === 'declaration_command' ||
       kind === 'unset_command'
     ) {
-      const words = named.map((c) => this.word(c))
-      const first = node.children[0]
-      if (first !== undefined && first.isNamed !== true) words.unshift(getText(first))
-      return words.join(' ')
+      const words = named.filter((c) => !REDIRECT_NODE_TYPES.has(c.type)).map((c) => this.word(c))
+      const keyword = node.children.find((c) => c.isNamed !== true)
+      if (keyword !== undefined) words.unshift(getText(keyword))
+      return words.join(' ') + this.redirects(named.filter((c) => REDIRECT_NODE_TYPES.has(c.type)))
     }
     return this.word(node)
   }

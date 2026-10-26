@@ -169,15 +169,23 @@ export function expandingAliases(session: SessionState): ReadonlySet<string> {
 }
 
 /**
- * The alias names a stored function's body is read with: the ones its
- * definition saw, or the session's own for a definition that kept none (one
- * restored from a stored session). Mirrors Python's body_aliases.
+ * The alias names a stored function's body is read with
+ * (`bodyAliasValues`). Mirrors Python's body_aliases.
  */
 export function bodyAliases(session: SessionState, name: string): ReadonlySet<string> {
+  return new Set(bodyAliasValues(session, name).keys())
+}
+
+/**
+ * The aliases a stored function's body is read with, by name: the ones its
+ * definition saw, or the session's own for a definition that kept none (one
+ * restored from a stored session). Mirrors Python's body_alias_values.
+ */
+export function bodyAliasValues(session: SessionState, name: string): Map<string, string> {
   const site = session.functionSites.get(name)
   if (site !== undefined && site.source === session.functions[name] && site.aliases != null)
-    return new Set(Object.keys(site.aliases))
-  return new Set(aliasesOn(session) ? Object.keys(session.aliases) : [])
+    return new Map(Object.entries(site.aliases))
+  return new Map(aliasesOn(session) ? Object.entries(session.aliases) : [])
 }
 
 /**

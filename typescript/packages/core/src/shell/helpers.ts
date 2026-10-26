@@ -702,7 +702,7 @@ export function getCaseItems(node: TSNodeLike): [TSNodeLike[], TSNodeLike[], str
 }
 
 export function getDeclarationKeyword(node: TSNodeLike): string {
-  return node.children[0]?.type ?? ''
+  return node.children.find((c) => !REDIRECT_NODE_TYPES.has(c.type))?.type ?? ''
 }
 
 /**
@@ -759,11 +759,11 @@ function shellSplit(text: string): string[] | null {
 /**
  * Get every operand word of an unset_command, keeping `-f`/`-v`/`-n` and
  * keeping a subscript target (`unset arr[1]`, quoted or not) as one word.
- * A redirect among the words is no operand. Mirrors Python's
+ * A redirect among or before the words is no operand. Mirrors Python's
  * `get_unset_args`.
  */
 export function getUnsetArgs(node: TSNodeLike): string[] {
-  const operands = node.children.slice(1).filter((c) => !REDIRECT_NODE_TYPES.has(c.type))
+  const operands = node.children.filter((c) => !REDIRECT_NODE_TYPES.has(c.type)).slice(1)
   const first = operands[0]
   if (first === undefined) return []
   if (first.startIndex !== undefined && node.startIndex !== undefined) {

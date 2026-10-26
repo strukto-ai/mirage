@@ -85,6 +85,30 @@ fn a_redirect_wraps_everything_before_it() {
 }
 
 #[test]
+fn bash_reads_these_as_it_reads_its_words() {
+    // A `$` before a backtick is a literal `$`, the token before the
+    // substitution.
+    assert_eq!(
+        read("echo $`echo hi`"),
+        "(program (command name: (command_name (word=echo)) argument: (concatenation \
+         (command_substitution (command name: (command_name (word=echo)) argument: (word=hi))))))"
+    );
+    assert!(read("echo \"$`echo q`\"").contains("(string (command_substitution"));
+    // A redirect before a declaration builtin leaves it a declaration.
+    assert_eq!(
+        read("> f declare a=1"),
+        "(program (redirected_statement body: (declaration_command redirect: (file_redirect \
+         destination: (word=f)) (variable_assignment name: (variable_name=a) value: (number=1)))))"
+    );
+    // `[` is a command: a `<` or `>` among its words redirects.
+    assert_eq!(
+        read("[ -n a > f ]"),
+        "(program (command name: (command_name (word=[)) argument: (word=-n) argument: (word=a) \
+         redirect: (file_redirect destination: (word=f)) argument: (word=])))"
+    );
+}
+
+#[test]
 fn a_redirect_takes_one_word() {
     // The words after it are the command's; redirects that end it wrap it.
     assert_eq!(

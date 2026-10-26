@@ -29,12 +29,12 @@ interface DeclarationParts {
 }
 
 function declarationParts(node: TSNodeLike): DeclarationParts {
-  const first = node.children[0]
+  const words = node.children.filter((c) => !c.type.endsWith('_redirect'))
+  const first = words[0]
   const head = first !== undefined ? first.text : ''
   const flags: string[] = []
   const operands: TSNodeLike[] = []
-  for (const child of node.children.slice(1)) {
-    if (child.type.endsWith('_redirect')) continue
+  for (const child of words.slice(1)) {
     if (child.type === 'word') {
       if (child.text.startsWith('-')) flags.push(child.text)
       else operands.push(child)

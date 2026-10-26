@@ -198,6 +198,8 @@ export async function applyBinary(
   const rt = scopePath(right)
   if (op === '=' || op === '==') return lt === rt
   if (op === '!=') return lt !== rt
+  if (op === '<') return lt < rt
+  if (op === '>') return lt > rt
   const compare = INT_COMPARATORS.get(op)
   if (compare !== undefined) {
     return compare(toInt(ctx, lt), toInt(ctx, rt))

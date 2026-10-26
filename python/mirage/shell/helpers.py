@@ -847,8 +847,11 @@ def get_case_items(
 
 
 def get_declaration_keyword(node: TSNodeLike) -> str:
-    """Get keyword (export/local/declare) from declaration."""
-    return node.children[0].type
+    """Get keyword (export/local/declare) from declaration, past the
+    redirects written before it."""
+    return next(
+        c.type for c in node.children if c.type not in REDIRECT_NODE_TYPES
+    )
 
 
 def get_unset_args(node: TSNodeLike) -> list[str]:
@@ -858,11 +861,10 @@ def get_unset_args(node: TSNodeLike) -> list[str]:
     function unset (``unset -f``) from a variable unset, and the operand
     span is split the way the shell does so a subscript target
     (``unset arr[1]``, quoted or not) stays one word. A redirect among
-    the words is no operand.
+    or before the words is no operand.
     """
-    operands = [
-        c for c in node.children[1:] if c.type not in REDIRECT_NODE_TYPES
-    ]
+    words = [c for c in node.children if c.type not in REDIRECT_NODE_TYPES]
+    operands = words[1:]
     if not operands:
         return []
     text = bytearray(node.text or b"")

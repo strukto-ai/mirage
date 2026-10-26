@@ -1156,10 +1156,16 @@ impl Parser<'_> {
         }
         if self.peek() == b'[' && is_space(self.at(1)) {
             // `[` is a command: one whose words the grammar cannot read
-            // as a test, or that has no `]`, still runs, and so does one
-            // with words after a redirect that follows its `]`.
+            // as a test, or that has no `]`, still runs, and so do one
+            // with a redirect among its words and one with words after a
+            // redirect that follows its `]`.
             let mark = self.mark();
-            if let Ok(node) = self.test_command(false) {
+            let tested = if self.redirect_in_brackets() {
+                None
+            } else {
+                self.test_command(false).ok()
+            };
+            if let Some(node) = tested {
                 let after = self.mark();
                 self.skip_blank();
                 if !((self.at_redirect() || self.at_herestring())
@@ -1192,18 +1198,8 @@ impl Parser<'_> {
                 return self.fail(at);
             }
         }
-        for (word, kind) in [
-            ("declare", "declaration_command"),
-            ("typeset", "declaration_command"),
-            ("export", "declaration_command"),
-            ("readonly", "declaration_command"),
-            ("local", "declaration_command"),
-            ("unset", "unset_command"),
-            ("unsetenv", "unset_command"),
-        ] {
-            if self.at_word(word.as_bytes()) {
-                return self.declaration(word, kind);
-            }
+        if let Some((word, kind)) = self.at_declaration() {
+            return self.declaration(Vec::new(), word, kind);
         }
         if !self.at_assignment() {
             if let Some(definition) = self.try_function()? {
@@ -1211,6 +1207,21 @@ impl Parser<'_> {
             }
         }
         self.command()
+    }
+
+    /// The declaration builtin named here, and the node it reads as.
+    pub(super) fn at_declaration(&self) -> Option<(&'static str, &'static str)> {
+        [
+            ("declare", "declaration_command"),
+            ("typeset", "declaration_command"),
+            ("export", "declaration_command"),
+            ("readonly", "declaration_command"),
+            ("local", "declaration_command"),
+            ("unset", "unset_command"),
+            ("unsetenv", "unset_command"),
+        ]
+        .into_iter()
+        .find(|(word, _)| self.at_word(word.as_bytes()))
     }
 
     /// A keyword token at the cursor, consumed. A header's `in` is read

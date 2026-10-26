@@ -258,6 +258,10 @@ async def apply_binary(
         return lt == rt
     if op == "!=":
         return lt != rt
+    if op == "<":
+        return lt < rt
+    if op == ">":
+        return lt > rt
     compare = INT_COMPARATORS.get(op)
     if compare is not None:
         return compare(to_int(ctx, lt), to_int(ctx, rt))

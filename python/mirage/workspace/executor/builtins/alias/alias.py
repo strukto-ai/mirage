@@ -257,9 +257,20 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
 
 
 def body_aliases(session: SessionState, name: str) -> frozenset[str]:
-    """The alias names a stored function's body is read with: the ones
-    its definition saw, or the session's own for a definition that kept
-    none (one restored from a stored session).
+    """The alias names a stored function's body is read with
+    (``body_alias_values``).
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the function's name.
+    """
+    return frozenset(body_alias_values(session, name))
+
+
+def body_alias_values(session: SessionState, name: str) -> dict[str, str]:
+    """The aliases a stored function's body is read with, by name: the
+    ones its definition saw, or the session's own for a definition that
+    kept none (one restored from a stored session).
 
     Args:
         session (SessionState): shell session state.
@@ -271,12 +282,12 @@ def body_aliases(session: SessionState, name: str) -> frozenset[str]:
         and site.source == session.functions.get(name)
         and site.aliases is not None
     ):
-        return frozenset(site.aliases)
+        return dict(site.aliases)
     if not session.shopts.get(
         "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
     ):
-        return frozenset()
-    return frozenset(session.aliases)
+        return {}
+    return dict(session.aliases)
 
 
 def alias_view(

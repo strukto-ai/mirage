@@ -368,7 +368,6 @@ impl Parser<'_> {
             b'(' if self.at(2) == b'(' => self.arithmetic_or_substitution().map(Some),
             b'(' => self.command_substitution().map(Some),
             b'[' => self.bracket_arithmetic().map(Some),
-            b'`' => self.backtick().map(Some),
             byte if is_name(byte) || SPECIAL.contains(&byte) => Ok(self.simple_expansion()),
             _ => Ok(None),
         }
@@ -489,7 +488,7 @@ impl Parser<'_> {
         self.statements(close, None, false)
     }
 
-    /// `` `...` `` or `` $`...` ``.
+    /// `` `...` ``; a `$` before one is a literal `$`.
     /// bash reads a backtick substitution's text when it runs it: what
     /// the grammar cannot read here, or a body that reads the body of a
     /// heredoc opened before it or leaves one open, is one raw word.
@@ -498,14 +497,13 @@ impl Parser<'_> {
             return self.fail(self.i);
         }
         self.enter()?;
-        let open = if self.peek() == b'$' { "$`" } else { "`" };
-        let at = self.i + open.len() - 1;
+        let at = self.i;
         let Some(end) = super::lex::quote_end(self.s, at, b'`') else {
             return Err(self.matching(at, '`'));
         };
         let mark = self.mark();
         let (pending, reads) = (self.pending.len(), self.taken.len());
-        let open = self.expect(open)?;
+        let open = self.expect("`")?;
         let mut children = vec![open];
         self.in_backtick = true;
         let body = self.statements(Close::Backtick, None, false);
