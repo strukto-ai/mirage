@@ -18,6 +18,7 @@ import { posix } from 'node:path'
 import { linkView, mountView } from '@struktoai/mirage-core/commands/builtin/utils/links'
 import { WalkBudget } from '@struktoai/mirage-core/commands/builtin/utils/tree'
 import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
+import { JobOutput } from '@struktoai/mirage-core/shell/console/terminal'
 import { PathSpec, type JsonValue } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { MountCore, type MountAttrs } from '@struktoai/mirage-node'
@@ -673,11 +674,15 @@ class CodexChannel {
       // the session's variables and records into its history, keeps what it
       // changes to itself, and waits on no other line, so Codex's processes
       // run side by side: `nvidia-smi` answers while `python3 train.py` still
-      // runs.
+      // runs. Like `bash -c`, it has jobs of its own, which its `wait` waits
+      // on and whose output it reports.
       const ws = this.entry.runner.ws
+      const session = ws.getSession(this.sessionId).fork()
+      session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
       const execution = await ws.shell(line, {
         sessionId: this.sessionId,
-        session: ws.getSession(this.sessionId).fork(),
+        session,
+        jobTable: ws.jobTable.child(),
         stdin: proc.stdin ?? new Uint8Array(0),
         signal: controller.signal,
         cwd,

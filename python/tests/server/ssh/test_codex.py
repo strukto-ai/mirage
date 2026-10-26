@@ -595,6 +595,40 @@ async def test_a_process_keeps_what_it_sets_to_itself(ssh):
 
 
 @pytest.mark.asyncio
+async def test_wait_sees_only_the_jobs_its_process_started(ssh):
+    async with codex(ssh) as client:
+        await client.start("a", "sleep 30 & echo started; wait")
+        await client.note("process/output", "a")
+        done = await asyncio.wait_for(client.run("b", "wait; echo done"), 5)
+    assert done == (b"done\n", b"", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_job_writes_to_the_process_that_started_it(ssh):
+    async with codex(ssh) as client:
+        await client.start("a", "{ sleep 1; echo from-a; } & wait")
+        await client.start("b", "read x; echo got:$x", pipeStdin=True)
+        await client.note("process/exited", "a")
+        await client.result(
+            "process/write",
+            {"processId": "b", "writeId": "w", "chunk": b64(b"go\n")},
+        )
+        await client.note("process/exited", "b")
+        a = await client.result(
+            "process/read", {"processId": "a", "afterSeq": 0}
+        )
+        b = await client.result(
+            "process/read", {"processId": "b", "afterSeq": 0}
+        )
+    assert b"".join(base64.b64decode(c["chunk"]) for c in a["chunks"]) == (
+        b"from-a\n"
+    )
+    assert b"".join(base64.b64decode(c["chunk"]) for c in b["chunks"]) == (
+        b"got:go\n"
+    )
+
+
+@pytest.mark.asyncio
 async def test_interrupt_and_terminate_stop_a_process(ssh):
     async with codex(ssh) as client:
         await client.start("i", "sleep 30")

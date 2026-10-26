@@ -66,6 +66,7 @@ from mirage.server.ssh.stream import (
     deliver,
     encode,
 )
+from mirage.shell.console.terminal import JobOutput
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.abort import MirageAbortError
 
@@ -522,9 +523,10 @@ async def run_process(
     history, keeps what it changes to itself, and waits on no other
     line, so Codex's commands run side by side, as on its own
     exec-server: ``nvidia-smi`` answers while ``python3 train.py``
-    still runs. Runs on the workspace's loop. The status is read once
-    the output has ended, because a streaming command settles it only
-    then.
+    still runs. Like ``bash -c``, it has jobs of its own, which its
+    ``wait`` waits on and whose output it reports. Runs on the
+    workspace's loop. The status is read once the output has ended,
+    because a streaming command settles it only then.
 
     Args:
         ws (Workspace): the workspace.
@@ -539,6 +541,8 @@ async def run_process(
     Returns:
         int: the line's exit status.
     """
+    session = ws.get_session(session_id).fork()
+    session.job_output = JobOutput(session.job_output or session.tty.jobs)
     async with await ws.shell(
         line,
         session_id=session_id,
@@ -546,7 +550,8 @@ async def run_process(
         cwd=cwd,
         env=env or None,
         stream=True,
-        session=ws.get_session(session_id).fork(),
+        session=session,
+        job_table=ws.job_table.child(),
     ) as execution:
         io = await deliver(execution, send)
     return io.exit_code

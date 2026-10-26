@@ -573,6 +573,29 @@ describe('codex-exec', () => {
     expect(out).toBe('demo unset\n')
   })
 
+  it('waits only on the jobs its own process started', async () => {
+    const client = await codex(await startHarness())
+    await client.start('a', 'sleep 30 & echo started; wait')
+    await client.noteAny('a', 'process/output')
+    const done = await client.run('b', 'wait; echo done')
+    expect(done).toEqual(['done\n', '', 0])
+  })
+
+  it('reports the output of a job under the process that started it', async () => {
+    const client = await codex(await startHarness())
+    await client.start('a', '{ sleep 1; echo from-a; } & wait')
+    await client.start('b', 'read x; echo got:$x', { pipeStdin: true })
+    await client.noteAny('a', 'process/exited')
+    await client.result('process/write', { processId: 'b', writeId: 'w', chunk: b64('go\n') })
+    await client.noteAny('b', 'process/exited')
+    const a = await client.result('process/read', { processId: 'a', afterSeq: 0 })
+    const b = await client.result('process/read', { processId: 'b', afterSeq: 0 })
+    const text = (read: Message): string =>
+      (read.chunks as Message[]).map((c) => unb64(c.chunk as string)).join('')
+    expect(text(a)).toBe('from-a\n')
+    expect(text(b)).toBe('got:go\n')
+  })
+
   it('stops a process on interrupt and terminate', async () => {
     const client = await codex(await startHarness())
     await client.start('i', 'sleep 30')
