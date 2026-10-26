@@ -157,9 +157,14 @@ class NoInterpreters implements Policy {
   }
 }
 
-/** A RAM mount whose stat of `sec/k` waits, once armed, until opened. */
+/**
+ * A RAM mount whose stat of `slow` waits, once armed, until opened, counting
+ * the stats that start once `cancelled` is set.
+ */
 class StallingStat extends RAMVFS {
   armed = false
+  cancelled = false
+  late = 0
   open = (): void => undefined
   reached: Promise<void>
   private reach = (): void => undefined
@@ -176,7 +181,8 @@ class StallingStat extends RAMVFS {
   }
 
   override async stat(path: PathSpec): Promise<FileStat> {
-    if (this.armed && path.virtual.endsWith('/sec/k')) {
+    if (this.cancelled) this.late += 1
+    if (this.armed && path.virtual.endsWith('/slow')) {
       this.reach()
       await this.gate
     }
@@ -379,20 +385,23 @@ describe('Policies', () => {
 
   it('cancels a refused cp whose operand stat stalls', async () => {
     // The wording's stats run while the line is judged, before the tree's
-    // cancellation guard, so one still waiting gives up when the line stops.
+    // cancellation guard, so one still waiting ends the line when it stops,
+    // and no other operand is read.
     const ram = new StallingStat()
     const ws = new Workspace({ '/data/': ram }, { mode: MountMode.WRITE })
     const rule = { reason: 'sealed', paths: ['/data/sec/*'] }
     ws.createSession('agent', { profile: { commands: { deny: [rule] } } })
     try {
-      await ws.shell('mkdir -p /data/sec /data/out; echo k > /data/sec/k')
+      await ws.shell('mkdir -p /data/sec/sub; echo s > /data/slow; echo b > /data/b')
       ram.armed = true
-      const line = ws.shell('cp /data/sec/k /data/out/', { sessionId: 'agent' })
+      const line = ws.shell('cp -r /data/slow /data/b /data/sec/sub', { sessionId: 'agent' })
       void line.catch(() => undefined)
       await ram.reached
+      ram.cancelled = true
       const late = new Promise((resolve) => setTimeout(resolve, 2000, 'still waiting'))
       expect(await Promise.race([ws.cancel('agent'), late])).toBe(1)
       await expect(line).rejects.toMatchObject({ name: 'AbortError' })
+      expect(ram.late).toBe(0)
     } finally {
       ram.open()
       await ws.close()

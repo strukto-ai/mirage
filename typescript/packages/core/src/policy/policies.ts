@@ -58,7 +58,7 @@ import {
   type SessionResultContext,
   type VfsExplanation,
 } from './types.ts'
-import { abortable, makeAbortError } from '../utils/abort.ts'
+import { abortable, hasAborted, makeAbortError } from '../utils/abort.ts'
 import type { VfsCall } from '../vfs/types.ts'
 import type { RouteContext } from './types.ts'
 import type { SessionState } from '../workspace/session/session.ts'
@@ -126,8 +126,9 @@ export async function renderCommandDeny(
  * more than one source or that is a directory takes each source by its base
  * name, unless `-T`. A source named `.` or `..`, or a link cp copies as a
  * link, keeps `renderDeny`'s line: GNU's there depends on what the directory
- * or the link holds. A stat still waiting when the line stops gives up, so a
- * cancel never waits on the wording.
+ * or the link holds. A stat still waiting when the line stops ends the
+ * wording with the line's abort, so a cancel neither waits on it nor starts
+ * another stat.
  */
 async function transferLines(
   subject: string,
@@ -219,9 +220,11 @@ async function fileType(
   nofollow = false,
 ): Promise<FileType | null> {
   if (ctx.vfs === undefined) return null
+  const signal = callerSignal()
   try {
-    return (await abortable(ctx.vfs.stat(operand, undefined, { nofollow }), callerSignal())).type
+    return (await abortable(ctx.vfs.stat(operand, undefined, { nofollow }), signal)).type
   } catch (err) {
+    if (hasAborted(signal)) throw err
     logger.debug?.(`no stat for refused operand ${operand.virtual}: ${String(err)}`)
     return null
   }

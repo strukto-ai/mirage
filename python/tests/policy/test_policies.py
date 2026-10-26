@@ -310,16 +310,21 @@ async def test_a_refused_cp_or_mv_operand_reads_as_gnu_reports_it():
 
 
 class StallingStat(RAMVFS):
-    """A RAM mount whose stat of ``sec/k`` waits, once armed, until opened."""
+    """A RAM mount whose stat of ``slow`` waits, once armed, until opened,
+    counting the stats that start once ``cancelled`` is set."""
 
     def __init__(self) -> None:
         super().__init__()
         self.armed = False
+        self.cancelled = False
+        self.late = 0
         self.reached = asyncio.Event()
         self.gate = asyncio.Event()
 
     async def stat(self, path: PathSpec) -> FileStat:
-        if self.armed and path.virtual.endswith("/sec/k"):
+        if self.cancelled:
+            self.late += 1
+        if self.armed and path.virtual.endswith("/slow"):
             self.reached.set()
             await self.gate.wait()
         return await super().stat(path)
@@ -328,21 +333,27 @@ class StallingStat(RAMVFS):
 @pytest.mark.asyncio
 async def test_a_cancel_stops_a_refused_cp_whose_operand_stat_stalls():
     # The wording's stats run while the line is judged; a cancel ends
-    # one still waiting there.
+    # one still waiting there, and no other operand is read.
     ram = StallingStat()
     ws = Workspace({"/data/": ram}, mode=MountMode.WRITE)
     rule = {"reason": "sealed", "paths": ["/data/sec/*"]}
     ws.create_session("agent", profile={"commands": {"deny": [rule]}})
     try:
-        await ws.shell("mkdir -p /data/sec /data/out; echo k > /data/sec/k")
+        await ws.shell(
+            "mkdir -p /data/sec/sub; echo s > /data/slow; echo b > /data/b"
+        )
         ram.armed = True
         line = asyncio.create_task(
-            ws.shell("cp /data/sec/k /data/out/", session_id="agent")
+            ws.shell(
+                "cp -r /data/slow /data/b /data/sec/sub", session_id="agent"
+            )
         )
         await asyncio.wait_for(ram.reached.wait(), 5)
+        ram.cancelled = True
         assert await asyncio.wait_for(ws.cancel("agent"), 2) == 1
         with pytest.raises(MirageAbortError):
             await line
+        assert ram.late == 0
     finally:
         ram.gate.set()
         await ws.close()
