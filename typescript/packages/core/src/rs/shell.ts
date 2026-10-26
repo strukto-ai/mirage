@@ -126,44 +126,44 @@ export class ShellTree {
   inlined(index: number): string | undefined {
     return this.extras.inlined.get(index)
   }
-}
 
-/**
- * The line as typed under nodes `start` to `end`, less the line continuations
- * the parser dropped: those no unit of the nodes came from, outside the
- * heredocs it folded. Mirrors the parser's `Tree::typed`.
- */
-function typed(tree: ShellTree, start: number, end: number): string {
-  const { offsets, original } = tree
-  const to = Math.min((offsets[end - 1] ?? 0) + 1, original.length)
-  const from = Math.min(offsets[start] ?? 0, to)
-  const kept = new Uint8Array(to - from)
-  const keep = (a: number, b: number): void => {
-    for (let at = Math.max(a, from); at < Math.min(b, to); at++) kept[at - from] = 1
-  }
-  for (let index = start; index < end; index++) {
-    const at = offsets[index] ?? 0
-    keep(at, at + 1)
-  }
-  for (const heredoc of tree.heredocs) {
-    keep(heredoc.operatorStart, heredoc.wordEnd)
-    keep(heredoc.bodyStart, heredoc.end)
-  }
-  let out = ''
-  let chunk = from
-  for (let at = from; at < to - 1; at++) {
-    if (
-      original[at] === '\\' &&
-      original[at + 1] === '\n' &&
-      kept[at - from] === 0 &&
-      kept[at + 1 - from] === 0
-    ) {
-      out += original.slice(chunk, at)
-      chunk = at + 2
-      at++
+  /**
+   * The line as typed under nodes `start` to `end`, less the line continuations
+   * the parser dropped: those no unit of the nodes came from, outside the
+   * heredocs it folded. Mirrors the parser's `Tree::typed`.
+   */
+  typed(start: number, end: number): string {
+    const { offsets, original } = this
+    const to = Math.min((offsets[end - 1] ?? 0) + 1, original.length)
+    const from = Math.min(offsets[start] ?? 0, to)
+    const kept = new Uint8Array(to - from)
+    const keep = (a: number, b: number): void => {
+      for (let at = Math.max(a, from); at < Math.min(b, to); at++) kept[at - from] = 1
     }
+    for (let index = start; index < end; index++) {
+      const at = offsets[index] ?? 0
+      keep(at, at + 1)
+    }
+    for (const heredoc of this.heredocs) {
+      keep(heredoc.operatorStart, heredoc.wordEnd)
+      keep(heredoc.bodyStart, heredoc.end)
+    }
+    let out = ''
+    let chunk = from
+    for (let at = from; at < to - 1; at++) {
+      if (
+        original[at] === '\\' &&
+        original[at + 1] === '\n' &&
+        kept[at - from] === 0 &&
+        kept[at + 1 - from] === 0
+      ) {
+        out += original.slice(chunk, at)
+        chunk = at + 2
+        at++
+      }
+    }
+    return out + original.slice(chunk, to)
   }
-  return out + original.slice(chunk, to)
 }
 
 /**
@@ -282,7 +282,7 @@ export class ShellTreeNode implements ShellNode {
     if (this.parent === null) return tree.original
     if (!tree.heredocs.some((heredoc) => start <= heredoc.at && heredoc.at < end)) return this.text
     if (end <= start) return ''
-    return typed(tree, start, end)
+    return tree.typed(start, end)
   }
 
   /** The node's text with the heredoc bodies the line reads after a substitution in it moved inside it. */
