@@ -7,7 +7,7 @@ import { newExecutionId } from '../execution/context.ts'
 import type { IdSource } from '../utils/ids.ts'
 
 /** Workspace-owned live runners; exited handles retain their own results. */
-export class ProcessSupervisor {
+export class ProcessTable {
   private nextPid = 1
   private readonly runners = new Map<number, { generation: number; handle: ProcessHandle }>()
   private readonly generations = new Map<string, number>()
@@ -57,7 +57,7 @@ export class ProcessSupervisor {
     executionId?: string
     started?: (info: ProcessInfo) => void
   }): ProcessHandle {
-    if (this.stopped) throw new Error('process supervisor is stopped')
+    if (this.stopped) throw new Error('process table is stopped')
     if (
       init.limit != null &&
       [...this.runners.values()].filter(({ handle }) => handle.info.sessionId === init.sessionId)

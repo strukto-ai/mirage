@@ -93,7 +93,7 @@ import type { SpawnRequest } from '../../process/types.ts'
 import type { ProcessView } from '../../process/view.ts'
 import { literalTree } from '../../shell/literal.ts'
 import { shellJoin } from '../../shell/join.ts'
-import { ProcessSupervisor } from '../../process/supervisor.ts'
+import { ProcessTable } from '../../process/table.ts'
 import {
   WorkspaceBinding,
   captureBinding,
@@ -195,7 +195,7 @@ export class Workspace {
   private readonly readDefault: ReadSpec
   /** The write policy a mount added without one takes. */
   readonly writeDefault: WritePolicy
-  readonly processes: ProcessSupervisor
+  readonly processes: ProcessTable
   readonly jobTable: JobTable
   readonly cache: FileCache & BaseVFS
   /** The clock this workspace reads time and waits on; a rebuild that shares its mounts runs on it too. */
@@ -287,7 +287,7 @@ export class Workspace {
     // the same order on both hosts.
     this.wsId = options.workspaceId ?? this.ids.uuid7()
     const sessionId = options.sessionId ?? this.ids.uuid7()
-    this.processes = new ProcessSupervisor(runWithExecution, this.ids)
+    this.processes = new ProcessTable(runWithExecution, this.ids)
     this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock, this.wsId)
     const normalized = normalizeMounts(mounts, this.readDefault, index, {
       mode: options.mode ?? MountMode.READ,

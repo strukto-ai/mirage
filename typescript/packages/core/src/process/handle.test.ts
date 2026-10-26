@@ -160,7 +160,7 @@ describe('ProcessHandle', () => {
   })
 
   // An eager start runs the runner up to its first wait before start
-  // returns, so a caller's setup must come first: the supervisor's
+  // returns, so a caller's setup must come first: the process table's
   // `started` hook.
   it('an eager start runs the runner before start returns', () => {
     const order: string[] = []
