@@ -79,7 +79,7 @@ async def test_cancel_cat_releases_stalled_attachment(
     session.close = AsyncMock()
     monkeypatch.setattr(
         "mirage.core.api.client.resolve_session",
-        lambda value: (session, False),
+        lambda value, timeout: (session, False),
     )
     ws = Workspace({"/chat": DiscordVFS(config)})
     path = (
