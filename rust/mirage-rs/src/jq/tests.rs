@@ -1823,11 +1823,7 @@ fn regex_fallback_is_decided_at_compile_time() {
             "{program}"
         );
     }
-    for program in [
-        r#"test($ok)"#,
-        r#"test(["a+", "x"])"#,
-        r#"test("a"; null)"#,
-    ] {
+    for program in [r#"test($ok)"#, r#"test(["a+", "x"])"#, r#"test("a"; null)"#] {
         assert!(compile(program, &globals).is_ok(), "{program}");
     }
 }
@@ -1844,14 +1840,8 @@ fn regex_edge_cases_match_as_oniguruma_does() {
         outputs(r#"match("(?=a\\K)") | [.offset, .length]"#, r#""a""#),
         vec!["[0,0]"]
     );
-    assert_eq!(
-        outputs(r#"test("(.*)x\\1")"#, r#""axbb""#),
-        vec!["true"]
-    );
-    assert_eq!(
-        outputs(r#"test("^(.*)\\1$")"#, r#""abab""#),
-        vec!["true"]
-    );
+    assert_eq!(outputs(r#"test("(.*)x\\1")"#, r#""axbb""#), vec!["true"]);
+    assert_eq!(outputs(r#"test("^(.*)\\1$")"#, r#""abab""#), vec!["true"]);
 }
 
 #[test]
