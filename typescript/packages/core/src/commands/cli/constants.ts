@@ -16,6 +16,10 @@
 // keep the GNU exit-2 machinery they already ride.
 export const USAGE_EXIT = 129
 
+// git exits 0 when `-h` asks for a verb's usage block, which it prints on
+// stdout; the same block printed as a refusal keeps USAGE_EXIT (git 2.56).
+export const HELP_EXIT = 0
+
 // The environment variable carrying an install's config to a script CLI
 // (JSON). Deliberately not MIRAGE_CONFIG: that one already names the
 // workspace config file for the server and mcp entry points, and a
@@ -31,13 +35,13 @@ export const CLAP_EXIT = 2
 
 // git's own long options for each parse-options verb mirage implements, in
 // git's table order and its `--[no-]` notation, captured from
-// `git <verb> --help-all` (config's legacy table from its usage listing) on
-// git 2.50.1. Under git's usage style a leaf resolves an abbreviated long
-// option against its verb's table the way parse-options does, so a prefix git
-// finds ambiguous is refused even where mirage declares only one of the
-// options it could be. A git verb with no table (log, show, diff, rev-list,
-// diff-tree: the revision walkers) takes whole words only, as git's revision
-// parser does.
+// `git <verb> --help-all` on git 2.56.0 (config's legacy table from its usage
+// listing, on git 2.50.1). Under git's usage style a leaf resolves an
+// abbreviated long option against its verb's table the way parse-options
+// does, so a prefix git finds ambiguous is refused even where mirage declares
+// only one of the options it could be. A git verb with no table (log, show,
+// diff, rev-list, diff-tree: the revision walkers) takes whole words only, as
+// git's revision parser does.
 export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map([
   [
     'fsck',
@@ -126,10 +130,14 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
       '[no-]verbose',
       '[no-]interactive',
       '[no-]patch',
+      '[no-]auto-advance',
+      'unified',
+      'inter-hunk-context',
       '[no-]edit',
       '[no-]force',
       '[no-]update',
       '[no-]renormalize',
+      '[no-]resolved',
       '[no-]intent-to-add',
       '[no-]all',
       '[no-]ignore-removal',
@@ -168,9 +176,12 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
       '[no-]show-current',
       '[no-]create-reflog',
       '[no-]edit-description',
+      'delete-merged',
+      '[no-]dry-run',
       '[no-]force',
       'merged',
       'no-merged',
+      'forked',
       '[no-]column',
       '[no-]sort',
       '[no-]points-at',
@@ -184,6 +195,7 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
     [
       '[no-]guess',
       '[no-]overlay',
+      '[no-]auto-advance',
       '[no-]quiet',
       '[no-]recurse-submodules',
       '[no-]progress',
@@ -198,6 +210,8 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
       'ours',
       'theirs',
       '[no-]patch',
+      'unified',
+      'inter-hunk-context',
       '[no-]ignore-skip-worktree-bits',
       '[no-]pathspec-from-file',
       '[no-]pathspec-file-nul',
@@ -217,7 +231,7 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
       '[no-]fixup',
       '[no-]squash',
       '[no-]reset-author',
-      'trailer',
+      '[no-]trailer',
       '[no-]signoff',
       '[no-]template',
       '[no-]edit',
@@ -228,6 +242,8 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
       '[no-]include',
       '[no-]interactive',
       '[no-]patch',
+      'unified',
+      'inter-hunk-context',
       '[no-]only',
       'no-verify',
       'verify',
@@ -299,6 +315,7 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
       '[no-]omit-empty',
       '[no-]count',
       '[no-]format',
+      '[no-]start-after',
       '[no-]color',
       '[no-]exclude',
       '[no-]sort',
@@ -328,6 +345,9 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
       'keep',
       '[no-]recurse-submodules',
       '[no-]patch',
+      '[no-]auto-advance',
+      'unified',
+      'inter-hunk-context',
       '[no-]intent-to-add',
       '[no-]pathspec-from-file',
       '[no-]pathspec-file-nul',
@@ -349,6 +369,8 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
       'ours',
       'theirs',
       '[no-]patch',
+      'unified',
+      'inter-hunk-context',
       '[no-]ignore-skip-worktree-bits',
       '[no-]pathspec-from-file',
       '[no-]pathspec-file-nul',
@@ -433,7 +455,7 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
       '[no-]annotate',
       'message',
       '[no-]file',
-      'trailer',
+      '[no-]trailer',
       '[no-]edit',
       '[no-]sign',
       '[no-]cleanup',
@@ -460,9 +482,10 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
 
 // The synopsis lines git's usage block opens with, keyed like
 // GIT_LONG_OPTIONS ('' is the bare `git`). git's own lines, pinned on git
-// 2.47.3, cut down to the forms mirage implements; the option rows under
-// them are rendered from each leaf's spec, so the block never lists what
-// mirage would refuse. A line holding a newline is one git wraps itself.
+// 2.47.3 (branch's on 2.56.0), cut down to the forms mirage implements; the
+// option rows under them are rendered from each leaf's spec, so the block
+// never lists what mirage would refuse. A line holding a newline is one git
+// wraps itself.
 export const GIT_SYNOPSES: ReadonlyMap<string, readonly string[]> = new Map([
   [
     '',
@@ -487,12 +510,13 @@ export const GIT_SYNOPSES: ReadonlyMap<string, readonly string[]> = new Map([
   [
     'branch',
     [
-      'git branch [<options>] [-r | -a] [--merged] [--no-merged]',
+      'git branch [<options>] [-r | -a] [--merged] [--no-merged] [(--forked <branch>)...]',
       'git branch [<options>] <branch-name> [<start-point>]',
       'git branch [<options>] [-l] [<pattern>...]',
       'git branch [<options>] [-r] (-d | -D) <branch-name>...',
       'git branch [<options>] [-r | -a] [--points-at]',
       'git branch [<options>] [-r | -a] [--format]',
+      'git branch [<options>] (--delete-merged <pattern>)... [<branch-pattern>...]',
     ],
   ],
   [

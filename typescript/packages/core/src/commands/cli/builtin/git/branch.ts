@@ -18,6 +18,7 @@ import git from 'isomorphic-git'
 import { HEAD } from './constants.ts'
 import { dateClock } from './dates.ts'
 import { configValues } from './fs.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -47,8 +48,11 @@ import {
   blockingRef,
   deleteRef,
   loadRefs,
+  mapped,
+  parseRefspec,
   readHead,
   REMOTE_PREFIX,
+  SYMREF_PREFIX,
   validBranchName,
   writeRef,
 } from './refs.ts'
@@ -65,11 +69,17 @@ import {
 import {
   configuredSort,
   headDescription,
+  knownNames,
   listingResult,
+  matchAsPath,
   matchShort,
   reached,
   refListing,
+  resolveRef,
+  rootNames,
   sortKeys,
+  trackingRef,
+  worktreeHeads,
 } from './ref_list.ts'
 import { configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
@@ -92,6 +102,7 @@ import {
   type RefField,
   type RefItem,
   type RefSortKey,
+  type RefUpstream,
   type Upstream,
 } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
@@ -114,6 +125,17 @@ const TRACK_WORDS: ReadonlyMap<string, Track> = new Map([
   ['simple', Track.SIMPLE],
   ['inherit', Track.INHERIT],
 ])
+const LOCAL_REMOTE = '.'
+const GLOB_CHARS = ['*', '?', '[']
+const UPSTREAM_KEYS: ReadonlySet<string> = new Set(['remote', 'merge'])
+// The order git 2.56.0's --delete-merged deletes in, as pinned on up to 60
+// branches: names fall in FNV-1 buckets by their hash, 64 at first and four
+// times as many once more than 80% are taken, the latest at each one's head.
+const FNV_BASIS = 0x811c9dc5
+const FNV_PRIME = 0x01000193
+const HASH_BUCKETS = 64
+const HASH_GROWTH = 4
+const HASH_LOAD = 80
 
 /**
  * Refuse a start point two refs answer to, as git's branch creation does while
@@ -353,15 +375,219 @@ async function remove(
   if (!force && !(await merged(repo, sha, headCommit(refs, head)))) {
     throw new UnmergedBranchError(name)
   }
-  await deleteRef(vfs, repo.location.commondir, ref)
-  const path = repo.location.commondir.join('config')
-  const data = await readOptional(vfs, path)
-  if (data !== null) {
-    const text = DEC.decode(data)
-    const dropped = withoutSection(text, 'branch', name)
-    if (dropped !== text) await writeFile(vfs, path, ENC.encode(dropped))
-  }
+  await drop(repo, name)
   return `Deleted branch ${name} (was ${short(sha, repo.abbrev)}).\n`
+}
+
+/** Remove a branch's ref and its settings. */
+async function drop(repo: Repo, name: string): Promise<void> {
+  await deleteRef(repo.vfs, repo.location.commondir, `${BRANCH_PREFIX}${name}`)
+  await rewriteConfig(repo, name, null)
+}
+
+/**
+ * Take a branch's settings out of the config, all of them or the variables
+ * `keys` names, lowercase.
+ */
+async function rewriteConfig(
+  repo: Repo,
+  name: string,
+  keys: ReadonlySet<string> | null,
+): Promise<void> {
+  const path = repo.location.commondir.join('config')
+  const data = await readOptional(repo.vfs, path)
+  if (data === null) return
+  const text = DEC.decode(data)
+  const dropped = withoutSection(text, 'branch', name, keys)
+  if (dropped !== text) await writeFile(repo.vfs, path, ENC.encode(dropped))
+}
+
+/**
+ * What `--forked` and `--delete-merged` patterns select, resolved: each
+ * pattern, a glob or the full ref it names, and whether it is a glob.
+ *
+ * A pattern holding a glob character stays a glob, matched as a path (`*`
+ * stops at a `/`) against an upstream's short name, case and `--ignore-case`
+ * notwithstanding; any other names a branch by git's rev-parse rules, its
+ * symbolic refs followed, so `origin` reads `refs/remotes/origin/HEAD` and
+ * `HEAD` the current branch. Pinned against git 2.56.0.
+ *
+ * @throws GitError a pattern names no branch
+ */
+export function upstreamPatterns(
+  table: ReadonlyMap<string, string>,
+  known: ReadonlySet<string>,
+  patterns: readonly string[],
+): [string, boolean][] {
+  return patterns.map((pattern): [string, boolean] => {
+    if (GLOB_CHARS.some((ch) => pattern.includes(ch))) return [pattern, true]
+    let named: string | undefined = refsNamed(known, pattern === '@' ? HEAD : pattern)[0]
+    const seen = new Set<string>()
+    while (named !== undefined && !seen.has(named)) {
+      seen.add(named)
+      const raw = table.get(named) ?? ''
+      if (!raw.startsWith(SYMREF_PREFIX)) break
+      named = raw.slice(SYMREF_PREFIX.length).trim()
+    }
+    if (
+      named === undefined ||
+      !(named.startsWith(BRANCH_PREFIX) || named.startsWith(REMOTE_PREFIX))
+    )
+      throw new GitError(`'${pattern}' is not a valid branch or pattern`)
+    return [named, false]
+  })
+}
+
+/** Whether resolved patterns select an upstream ref, given in full. */
+export function selects(selected: readonly [string, boolean][], upstream: string): boolean {
+  const prefix = [BRANCH_PREFIX, REMOTE_PREFIX].find((p) => upstream.startsWith(p))
+  const name = prefix === undefined ? upstream : upstream.slice(prefix.length)
+  return selected.some(([text, glob]) => (glob ? matchAsPath(name, [text]) : text === upstream))
+}
+
+/**
+ * Whether pushing a branch to its remote would move its upstream.
+ *
+ * The first of the remote's push refspecs naming the branch in full with a
+ * destination decides where it lands, the branch's own name when the remote
+ * has none, and nowhere when none matches; the fetch refspecs then map that to
+ * a local ref (git 2.56.0).
+ */
+export async function pushesUpstream(
+  repo: Repo,
+  branch: string,
+  upstream: RefUpstream,
+): Promise<boolean> {
+  const values = (key: string): Promise<string[]> =>
+    configValues(repo.vfs, repo.location, `remote.${upstream.remote}.${key}`)
+  const source = `${BRANCH_PREFIX}${branch}`
+  const pushed = (await values('push')).map((text) => parseRefspec(text))
+  let target: string | null = source
+  if (pushed.length) {
+    target = null
+    for (const spec of pushed) {
+      if (!spec.dst || spec.src.startsWith('^')) continue
+      const found = mapped(spec, source)
+      if (found) {
+        target = found
+        break
+      }
+    }
+  }
+  if (target === null) return false
+  for (const text of await values('fetch')) {
+    const spec = parseRefspec(text)
+    if (spec.src.startsWith('^')) continue
+    const landed = mapped(spec, target)
+    if (landed) return landed === upstream.ref
+  }
+  return false
+}
+
+/** The order --delete-merged deletes the names in, given in turn. */
+export function hashOrder(names: readonly string[]): string[] {
+  let size = HASH_BUCKETS
+  let buckets: string[][] = Array.from({ length: size }, () => [])
+  names.forEach((name, index) => {
+    buckets[fnv1(name) & (size - 1)]?.unshift(name)
+    if (index + 1 > Math.floor((size * HASH_LOAD) / 100)) {
+      size *= HASH_GROWTH
+      const grown: string[][] = Array.from({ length: size }, () => [])
+      for (const each of buckets.flat()) grown[fnv1(each) & (size - 1)]?.unshift(each)
+      buckets = grown
+    }
+  })
+  return buckets.flat()
+}
+
+function fnv1(name: string): number {
+  let value = FNV_BASIS
+  for (const byte of ENC.encode(name)) value = (Math.imul(value, FNV_PRIME) ^ byte) >>> 0
+  return value
+}
+
+/**
+ * Delete the branches already merged into the upstream they track.
+ *
+ * A local branch goes when its upstream matches a pattern, exists and holds the
+ * branch's tip, unless it is checked out in a worktree, pushing it would move
+ * that very upstream, or `branch.<name>.deleteMerged` is false, which is said
+ * on stderr. A branch another one not going tracks through `.` stays, judged
+ * against the first choice, and a branch that tracked one that went loses its
+ * upstream. Operands narrow the branches looked at, by their short names and
+ * case. Pinned against git 2.56.0.
+ */
+async function deleteMerged(
+  repo: Repo,
+  patterns: readonly string[],
+  operands: readonly string[],
+  dryRun: boolean,
+  quiet: boolean,
+): Promise<CommandFnResult> {
+  const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
+  const known = knownNames(table, await rootNames(repo))
+  const selected = upstreamPatterns(table, known, patterns)
+  const checked = await worktreeHeads(repo)
+  const branches = [...table.keys()]
+    .filter((name) => name.startsWith(BRANCH_PREFIX))
+    .sort(compareCodePoints)
+  const ups = new Map<string, RefUpstream | null>()
+  for (const ref of branches)
+    ups.set(ref, await trackingRef(repo, ref.slice(BRANCH_PREFIX.length), known))
+  let skipped = ''
+  const chosen: string[] = []
+  for (const ref of branches) {
+    const name = ref.slice(BRANCH_PREFIX.length)
+    const up = ups.get(ref) ?? null
+    const [tip] = resolveRef(table, ref)
+    if (
+      tip === null ||
+      up === null ||
+      checked.has(ref) ||
+      !matchShort(ref, operands) ||
+      !selects(selected, up.ref)
+    )
+      continue
+    const [there] = resolveRef(table, up.ref)
+    if (there === null || (await pushesUpstream(repo, name, up))) continue
+    if (!(await merged(repo, tip, there))) continue
+    const values = await configValues(repo.vfs, repo.location, `branch.${name}.deletemerged`)
+    if (!gitBool(values, `branch.${name}.deletemerged`, true)) {
+      skipped += `Skipping '${name}' (branch.${name}.deleteMerged is false)\n`
+      continue
+    }
+    chosen.push(ref)
+  }
+  const held = new Set<string>()
+  for (const [ref, up] of ups)
+    if (up !== null && up.remote === LOCAL_REMOTE && !chosen.includes(ref)) held.add(up.ref)
+  const going = chosen.filter((ref) => !held.has(ref))
+  let out = ''
+  for (const name of hashOrder(going.map((ref) => ref.slice(BRANCH_PREFIX.length)))) {
+    const [tip, target] = resolveRef(table, `${BRANCH_PREFIX}${name}`)
+    const was = target ?? short(tip ?? '', repo.abbrev)
+    if (dryRun) {
+      out += `Would delete branch ${name} (was ${was}).\n`
+      continue
+    }
+    await drop(repo, name)
+    out += `Deleted branch ${name} (was ${was}).\n`
+  }
+  if (!dryRun) {
+    for (const [ref, up] of ups)
+      if (
+        up !== null &&
+        up.remote === LOCAL_REMOTE &&
+        going.includes(up.ref) &&
+        !going.includes(ref)
+      )
+        await rewriteConfig(repo, ref.slice(BRANCH_PREFIX.length), UPSTREAM_KEYS)
+  }
+  if (quiet) return [null, new IOResult()]
+  return [
+    out === '' ? null : ENC.encode(out),
+    new IOResult({ stderr: skipped === '' ? null : ENC.encode(skipped) }),
+  ]
 }
 
 // What a listing row reads when the line gives no --format.
@@ -502,7 +728,8 @@ export function branchRows(
  * A branch listing, through git's ref-filter as git prints one: the local
  * branches (`-r` the remote-tracking ones instead, `-a` both) and a detached
  * HEAD, which leads whatever the sort keys say, each printed through `--format`
- * or as `branchRows` lays rows out.
+ * or as `branchRows` lays rows out. `--forked` keeps the local branches whose
+ * upstream it selects (see `upstreamPatterns`).
  */
 async function listBranches(
   ctx: Context,
@@ -513,7 +740,21 @@ async function listBranches(
   filter: RefFilter | null,
   remotesOnly: boolean,
   includeRemotes: boolean,
+  forked: readonly string[],
 ): Promise<CommandFnResult> {
+  let followers: ReadonlySet<string> | null = null
+  if (forked.length) {
+    const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
+    const known = knownNames(table, await rootNames(repo))
+    const selected = upstreamPatterns(table, known, forked)
+    const kept = new Set<string>()
+    for (const ref of table.keys()) {
+      if (!ref.startsWith(BRANCH_PREFIX)) continue
+      const up = await trackingRef(repo, ref.slice(BRANCH_PREFIX.length), known)
+      if (up !== null && selects(selected, up.ref)) kept.add(ref)
+    }
+    followers = kept
+  }
   const keys = sortKeys(fl, await configuredSort(repo, 'branch'))
   const icase = fl.asBool('ignore_case')
   const verbose = fl.asInt('verbose') ?? 0
@@ -524,7 +765,8 @@ async function listBranches(
     ((name === HEAD && detached) ||
       (!remotesOnly && name.startsWith(BRANCH_PREFIX)) ||
       (includeRemotes && name.startsWith(REMOTE_PREFIX))) &&
-    matchShort(name, patterns, icase)
+    matchShort(name, patterns, icase) &&
+    (followers === null || followers.has(name))
   const fmt = template !== undefined ? listingFormat(template) : null
   const [items, found, errors] = await refListing(
     repo,
@@ -564,7 +806,9 @@ async function listBranches(
  * negations) make the line a listing whose operands are name patterns, so
  * `git branch --contains side topic` lists `topic` if it holds `side` rather
  * than creating anything, and a line that also deletes names two modes, which
- * git answers with its usage.
+ * git answers with its usage. `--forked` lists too, and `--delete-merged` is a
+ * mode of its own whose operands narrow the branches it looks at; `--dry-run`
+ * belongs to it alone.
  */
 export async function branch(
   _accessor: NOOPAccessor,
@@ -577,17 +821,28 @@ export async function branch(
   const fl = new FlagView(ctx.flags)
   const remotesOnly = fl.asBool('r')
   const includeRemotes = remotesOnly || fl.asBool('a')
-  const listing = words.length > 0 || fl.asBool('list')
+  const forked = fl.asList('forked')
+  const cleanup = fl.asList('delete_merged')
+  const dryRun = fl.typedOrder('dry_run', 'no_dry_run').at(-1) === 'dry_run'
+  const listing = words.length > 0 || fl.asBool('list') || forked.length > 0
   const vfs = requireVfs(ctx)
   checkSwitches(ctx, operands)
   const repo = await opened(ctx, fl)
+  if (dryRun && !cleanup.length) throw new GitError('--dry-run requires --delete-merged')
+  if (cleanup.length) {
+    if (listing || fl.asBool('delete') || fl.asBool('D') || fl.asBool('show_current'))
+      throw new UsageError('', verbUsage(ctx))
+    return await deleteMerged(repo, cleanup, operands, dryRun, fl.asBool('quiet'))
+  }
   const mode = await trackMode(repo)
   const filter = await refFilter(repo, words)
   const refs = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
   const head = await readHead(vfs, repo.location.gitdir)
-  if (fl.asBool('show_current'))
-    return [ENC.encode(head.branch ? head.branch + '\n' : ''), new IOResult()]
   const force = fl.asBool('D')
+  if (fl.asBool('show_current')) {
+    if (listing || force || fl.asBool('delete')) throw new UsageError('', verbUsage(ctx))
+    return [ENC.encode(head.branch ? head.branch + '\n' : ''), new IOResult()]
+  }
   if (fl.asBool('delete') || force) {
     if (listing) throw new UsageError('', verbUsage(ctx))
     if (operands.length === 0) throw new BranchNameRequiredError()
@@ -613,6 +868,7 @@ export async function branch(
     filter,
     remotesOnly,
     includeRemotes,
+    forked,
   )
 }
 

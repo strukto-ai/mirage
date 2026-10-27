@@ -153,6 +153,16 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_log_graph_indents_roots",
+      "seq": 17400115,
+      "command": "(export GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com && git init -q -b main /repo/roots && cd /repo/roots && git commit -q --allow-empty -m snap && t=$(git rev-parse 'HEAD^{tree}') && c() { s=$1 w=$2; shift 2; { printf 'tree %s\\n' $t; for p in \"$@\"; do printf 'parent %s\\n' $p; done; printf 'author A <a@example.com> %s +0000\\ncommitter A <a@example.com> %s +0000\\n\\n%s\\n' $w $w \"$s\"; } | git hash-object -w -t commit --stdin; } && e0=$(c e0 1700000100) && e1=$(c e1 1700000200 $e0) && sc=$(c C 1700000300) && sb=$(c B 1700000400) && sa=$(c A 1700000500) && m0=$(c M0 1700000600) && b1=$(c B1 1700000700 $m0) && n1=$(c N1 1700000800 $m0) && r=$(c R 1700000900) && b2=$(c B2 1700001000 $b1) && rc=$(c RC 1700001100 $r) && m1=$(c M1 1700001200 $m0) && x=$(c X 1700001300) && tt=$(c T 1700001400) && rr=$(c R2 1700001500) && a=$(c A2 1700001600 $x) && mm=$(c M2 1700001700 $a $rr) && printf '%s\\n' $e1 > .git/refs/heads/e && printf '%s\\n' $sc > .git/refs/heads/c && printf '%s\\n' $sb > .git/refs/heads/b && printf '%s\\n' $sa > .git/refs/heads/a && git log --graph --format=%s a b c e && git log --graph --format=%s --date-order $m1 $b2 $rc $n1 && git log --graph --format=format:%s%n%h%n --date-order $m1 $b2 $rc $n1 && git log --graph --format=%s --date-order $mm $tt; cd /; rm -rf /repo/roots)",
+      "expect": {
+        "exit": 0,
+        "stdout": "* A\n  * B\n    * C\n* e1\n* e0\n* M1\n| * RC\n| | * B2\n|  \\ | \n|   * | R\n|  /    \n| | * N1\n| |/  \n|/|   \n| * B1\n|/  \n* M0\n* M1\n| 5748276\n|   \n| * RC\n| | cc2462a\n| |   \n| | * B2\n| | | dcf45d0\n|  \\ | \n|   * | R\n|  /    aeb5b79\n| |   \n| | * N1\n| |/  cca2496\n|/|   \n| | \n| * B1\n|/  5afa072\n| \n* M0\n  62bfc94\n*   M2\n|\\  \n* | A2\n| * R2\n| * T\n* X\n",
+        "stderr": ""
+      }
     }
   ]
 }

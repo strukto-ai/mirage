@@ -97,6 +97,20 @@ it.each([
 ])('keeps a named commit header: %s', async (form, stdout) => {
   expect(await run(form)).toEqual([0, stdout, ''])
 })
+// A commit with no parent in the walk is drawn a column apart from the
+// commit below it (git 2.56 in CI; Apple's git 2.54 does not, so these stay
+// out of the native list).
+it.each([
+  ['log --graph --oneline --merges --all', '  * f72a17f evil merge\n* d07b9b4 merge side\n'],
+  [
+    'log --graph --oneline --no-merges -6 --all',
+    '* 9e9a1bb élan aA\n \\ \n  * 0bddf6b ÉLAN Aa\n* a0c4dcf docs: FIX typo\n' +
+      '* eab4670 fix: Remove_Caching_Layer flag\n \\ \n  * c90354f Add caching layer\n' +
+      '* 6f45eae by Bob\n',
+  ],
+])('stands a root apart: %s', async (form, stdout) => {
+  expect(await run(form)).toEqual([0, stdout, ''])
+})
 it.each(['--version', 'version', '-v'])('version without repository: %s', async (form) => {
   const r = await ws.shell('git ' + form)
   expect(r.exitCode).toBe(0)

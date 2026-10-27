@@ -17,6 +17,8 @@ import type { CommitFacts } from './format.ts'
 export const SKIPPED = '...'
 // The cell a `--boundary` commit is drawn with, in place of `*`.
 export const BOUNDARY = 'o'
+// The roots a run climbs through before it starts again in its own column.
+const CLIMB = 4
 
 /**
  * One line of the graph: the edge from a printed commit to the commit it
@@ -54,7 +56,12 @@ interface Parents {
  * it; how its parents reach them; the columns after it, before lines leading
  * to the same commit join; the parents an octopus draws past a merge's two;
  * whether it is an octopus with lines to its right, which it moves right
- * before its own row; and the width of its rows. Mirrors _Shape in graph.py.
+ * before its own row; the width of its rows; whether no parent of it is in
+ * the walk, under `--first-parent` too, and no merge drew it as a later
+ * parent; whether it is a root climbing the run of roots before it; the blank
+ * cells a root is drawn right of its column by, so the commit drawn next is
+ * not taken for its parent; and whether the line leading to it bends right on
+ * a row of its own first. Mirrors _Shape in graph.py.
  */
 interface Shape {
   readonly col: number
@@ -64,6 +71,10 @@ interface Shape {
   readonly extra: number
   readonly spreads: boolean
   readonly width: number
+  readonly root: boolean
+  readonly stairs: boolean
+  readonly shift: number
+  readonly bends: boolean
 }
 
 function line(sha: string, at: number, goal: number): Line {
@@ -78,12 +89,28 @@ function line(sha: string, at: number, goal: number): Line {
  * a run of standing columns with `_`; a printed commit owes the rows its
  * lines need to settle. A `--boundary` commit is drawn with `o`; a line leads
  * on from it only to a parent the graph draws too. A path-limited walk hands
- * over the parents it drew its history with. Mirrors CommitGraph in graph.py.
+ * over the parents it drew its history with.
+ *
+ * A root, a commit none of whose parents is in the walk and that no merge drew
+ * as a later parent, stands a column right of its own when the commit walked
+ * next has no line leading to it, unless that one is a root too with more
+ * walked after it. Each root after a root, but the last commit walked, climbs
+ * a column further right, back to its own column every fourth; one a line
+ * leads to joins a run already climbing. A line leading to a root a column
+ * right bends on a row of its own, which is the separator a format puts before
+ * the commit, or none after a `...` row. Pinned against git 2.56.0. `order`
+ * is every commit the graph is walked through, in order. Mirrors CommitGraph
+ * in graph.py.
  */
 export class CommitGraph {
   private lines: Line[] = []
   private pending: CommitFacts | null = null
+  private walked = 0
   private skipped = false
+  private resumed = false
+  private afterRoot = false
+  private stairs = 0
+  private readonly fanned = new Set<string>()
   private owed: string[] = []
   private ahead: string[] = []
   private width = 0
@@ -92,6 +119,7 @@ export class CommitGraph {
   constructor(
     private readonly interesting: (oid: string) => boolean,
     private readonly firstParent: boolean,
+    private readonly order: readonly CommitFacts[],
     private readonly boundary: ReadonlySet<string> = new Set(),
     private readonly parents: ReadonlyMap<string, readonly string[]> | null = null,
   ) {}
@@ -107,6 +135,7 @@ export class CommitGraph {
       this.skipped = true
     }
     this.pending = commit
+    this.walked += 1
   }
 
   /**
@@ -141,18 +170,18 @@ export class CommitGraph {
   /**
    * The cells in front of a line once the commit's rows are out. Before a
    * walked commit yet to be drawn it is the `...` row when commits were
-   * skipped, the commit's first row when it spreads the lines to its right,
-   * and otherwise a row as wide as the commit's where the lines stop. Before a
-   * commit leaving with a lead and two or more parents besides, the lines
-   * right of it stand a cell over, and the row widens by the octopus's dashes
-   * and a cell.
+   * skipped, the commit's first row when it spreads the lines to its right or
+   * bends the line leading to it, and otherwise a row as wide as the commit's
+   * where the lines stop. Before a commit leaving with a lead and two or more
+   * parents besides, the lines right of it stand a cell over, and the row
+   * widens by the octopus's dashes and a cell.
    */
   filler(): string {
     const commit = this.pending
     if (commit === null) return this.rest(this.width)
     if (this.skipped) return this.skipRow(commit)
     const shape = this.shape(commit)
-    if (shape.spreads) {
+    if (shape.spreads || shape.bends) {
       this.ahead = [...this.place(commit)]
       return this.ahead.shift() ?? ''
     }
@@ -186,6 +215,7 @@ export class CommitGraph {
     const width = this.shape(commit).width
     this.rest(width, true)
     this.skipped = false
+    this.resumed = true
     return SKIPPED.padEnd(Math.max(SKIPPED.length, width))
   }
 
@@ -194,10 +224,22 @@ export class CommitGraph {
     return [...new Set(order.map((each) => each.sha))]
   }
 
-  private parentsOf(commit: CommitFacts, columns: string[], col: number): Parents {
-    const own = this.parents?.get(commit.oid) ?? commit.parents
+  private ownParents(commit: CommitFacts): readonly string[] {
+    return this.parents?.get(commit.oid) ?? commit.parents
+  }
+
+  private isRoot(commit: CommitFacts): boolean {
+    return !this.fanned.has(commit.oid) && !this.ownParents(commit).some((p) => this.interesting(p))
+  }
+
+  private followed(commit: CommitFacts): string[] {
+    const own = this.ownParents(commit)
     const followed = this.firstParent ? own.slice(0, 1) : own
-    const parents = [...new Set(followed.filter((p) => this.interesting(p)))]
+    return [...new Set(followed.filter((p) => this.interesting(p)))]
+  }
+
+  private parentsOf(commit: CommitFacts, columns: string[], col: number): Parents {
+    const parents = this.followed(commit)
     const where = new Map(columns.map((sha, i) => [sha, i]))
     const opened: string[] = []
     let lead: string | null = null
@@ -237,7 +279,30 @@ export class CommitGraph {
     const width =
       2 *
       Math.max(columns.length + (known ? 0 : 1), after.length, spreads ? columns.length + extra : 0)
-    return { col, columns: columns.length, parents, after, extra, spreads, width }
+    const root = this.isRoot(commit)
+    const upcoming = this.order.slice(this.walked, this.walked + 2)
+    const stairs = root && this.afterRoot && upcoming.length > 0 && (!known || this.stairs > 0)
+    const climb = stairs ? (this.stairs + 1) % CLIMB : 0
+    const follows = upcoming[0]
+    const lifted =
+      root &&
+      follows !== undefined &&
+      !columns.includes(follows.oid) &&
+      !(upcoming.length > 1 && this.isRoot(follows))
+    const shift = 2 * Math.max(climb, lifted ? 1 : 0)
+    return {
+      col,
+      columns: columns.length,
+      parents,
+      after,
+      extra,
+      spreads,
+      width,
+      root,
+      stairs,
+      shift,
+      bends: known && climb === 0 && lifted,
+    }
   }
 
   /**
@@ -248,10 +313,19 @@ export class CommitGraph {
     const shape = this.shape(commit)
     const { parents, width, extra } = shape
     const here = 2 * shape.col
+    const resumed = this.resumed
+    this.resumed = false
+    if (shape.bends && !resumed) {
+      const row = this.rest(width + 1, true, here - 1)
+      yield row.slice(0, here + 1) + '\\' + row.slice(here + 2)
+    }
     const final = [...new Set(shape.after)]
     const goalOf = new Map(final.map((sha, i) => [sha, 2 * i]))
     const goal = (sha: string): number => goalOf.get(sha) ?? 0
-    this.width = width
+    this.width = width + shape.shift
+    this.stairs = shape.stairs ? this.stairs + 1 : 0
+    this.afterRoot = shape.root
+    for (const parent of this.followed(commit).slice(1)) this.fanned.add(parent)
     const opened = parents.opened.length
     const spread = 2 * Math.max(opened - 1, 0)
     const others = this.lines.filter((each) => each.sha !== commit.oid)
@@ -260,8 +334,11 @@ export class CommitGraph {
     for (const each of right) base.set(each, each.at + (each.at % 2 ? each.heading : 0))
     const lift = shape.spreads ? 2 * extra : 0
     if (lift) yield* this.spreadRows(others, right, base, here, width, lift)
-    const row = this.commitRow(others, right, base, here, width, lift, spread, goal, extra)
-    yield this.boundary.has(commit.oid) ? row.slice(0, here) + BOUNDARY + row.slice(here + 1) : row
+    const drawn = this.commitRow(others, right, base, here, width, lift, spread, goal, extra)
+    const row = this.boundary.has(commit.oid)
+      ? drawn.slice(0, here) + BOUNDARY + drawn.slice(here + 1)
+      : drawn
+    yield row.slice(0, here) + ' '.repeat(shape.shift) + row.slice(here)
     const born = parents.opened.map((sha) => line(sha, here, goal(sha)))
     const led = parents.lead === null ? [] : [line(parents.lead, here, goal(parents.lead))]
     for (const each of others) each.goal = goal(each.sha)
@@ -277,7 +354,7 @@ export class CommitGraph {
     this.lines = [...others, ...born, ...led, ...reached]
     this.join()
     this.mergedAt = merging && this.settled() ? here : null
-    while (!this.settled()) yield this.collapseRow(width)
+    while (!this.settled()) yield this.collapseRow(this.width)
   }
 
   private *spreadRows(

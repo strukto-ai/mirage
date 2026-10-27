@@ -63,7 +63,7 @@ def _log(
     """
     ids = {commit.id for commit in walked}
     printed = set(shown.encode().split()) if shown is not None else ids
-    graph = CommitGraph(ids.__contains__, first_parent)
+    graph = CommitGraph(ids.__contains__, first_parent, walked)
     out = ""
     for commit in walked:
         graph.walk(commit)
@@ -209,7 +209,7 @@ def test_skip_row_stands_for_the_separator():
 def test_pads_a_further_header_of_a_drawn_commit():
     walked = _walk("M: C B\nB: A\nC: A\nA:")
     ids = {commit.id for commit in walked}
-    graph = CommitGraph(ids.__contains__, False)
+    graph = CommitGraph(ids.__contains__, False, walked)
     graph.walk(walked[0])
     out = graph.lead_in() + graph.around("M\n")
     out += graph.filler() + "\n" + graph.filler() + "A\tM.txt\n"
@@ -366,7 +366,7 @@ def test_a_skipped_commit_holds_one_row_at_a_time():
     ]
     walked += [_Commit(p, [b"Z"]) for p in parents] + [_Commit(b"Z")]
     ids = {commit.id for commit in walked}
-    graph = CommitGraph(ids.__contains__, False)
+    graph = CommitGraph(ids.__contains__, False, walked)
     graph.walk(walked[0])
     graph.lead_in()
     graph.around("K\n")
@@ -390,7 +390,7 @@ def test_a_skip_row_is_as_wide_as_the_merge_it_stands_before():
 def test_draws_a_boundary_commit_with_an_o():
     walked = _walk("M: A B\nB: A\nA:")
     ids = {commit.id for commit in walked}
-    graph = CommitGraph(ids.__contains__, False, frozenset({b"A"}))
+    graph = CommitGraph(ids.__contains__, False, walked, frozenset({b"A"}))
     out = ""
     for commit in walked:
         graph.walk(commit)
@@ -401,9 +401,79 @@ def test_draws_a_boundary_commit_with_an_o():
 def test_draws_the_parents_a_path_limited_walk_hands_over():
     walked = _walk("X: Y\nA:")
     ids = {commit.id for commit in walked}
-    graph = CommitGraph(ids.__contains__, False, parents={b"X": (b"A",)})
+    graph = CommitGraph(
+        ids.__contains__, False, walked, parents={b"X": (b"A",)}
+    )
     out = ""
     for commit in walked:
         graph.walk(commit)
         out += graph.lead_in() + graph.around(f"{commit.id.decode()}\n")
     assert out.split("\n")[:-1] == ["* X", "* A"]
+
+
+# The root rule below is git 2.56.0's, pinned on the same histories.
+def test_a_root_with_a_new_commit_next_stands_a_column_right():
+    walked = _walk("s2: s1\ns1: base\nbase:\nC1: R\nR:")
+    assert _log(walked) == ["* s2", "* s1", " \\ ", "  * base", "* C1", "* R"]
+
+
+def test_a_root_bends_the_lines_right_of_it_over_too():
+    walked = _walk("M1: M0\nRC: R\nB2: B1\nR:\nN1: M0\nB1: M0\nM0:")
+    assert _log(walked) == [
+        "* M1",
+        "| * RC",
+        "| | * B2",
+        "|  \\ | ",
+        "|   * | R",
+        "|  /    ",
+        "| | * N1",
+        "| |/  ",
+        "|/|   ",
+        "| * B1",
+        "|/  ",
+        "* M0",
+    ]
+
+
+def test_a_run_of_roots_climbs_and_comes_back_every_fourth():
+    names = [f"R{n:02d}" for n in range(10, 0, -1)]
+    assert _log(_walk("\n".join(f"{name}:" for name in names))) == [
+        "* R10",
+        "  * R09",
+        "    * R08",
+        "      * R07",
+        "* R06",
+        "  * R05",
+        "    * R04",
+        "      * R03",
+        "  * R02",
+        "* R01",
+    ]
+
+
+def test_a_root_a_line_leads_to_joins_a_run_already_climbing():
+    walked = _walk("CC: C\nP0:\nP1:\nC:\nQ:\nX:")
+    assert _log(walked) == [
+        "* CC",
+        "| * P0",
+        "|   * P1",
+        "    * C",
+        "      * Q",
+        "* X",
+    ]
+
+
+def test_a_merge_s_later_parent_is_no_root():
+    walked = _walk("M: A R\nA: X\nR:\nT:\nX:")
+    assert _log(walked) == ["*   M", "|\\  ", "* | A", "| * R", "| * T", "* X"]
+
+
+def test_a_root_after_a_skip_row_moves_over_without_bending():
+    walked = _walk("M1: M0\nRC: R\nB2: B1\nR:\nN1: M0\nB1: M0\nM0:")
+    assert _log(walked, shown="RC R") == [
+        "... ",
+        "| * RC",
+        "...   ",
+        "|   * | R",
+        "|  /    ",
+    ]

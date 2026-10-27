@@ -114,8 +114,8 @@ describe('gitOptionRefusal', () => {
 
 describe('leafRefusal', () => {
   // parse-options names the last two options an abbreviation matched, each
-  // with the `no-` it was matched under, puts the usage on stdout and exits
-  // 129 (git 2.50.1).
+  // with the `no-` it was matched under, puts the usage after it on stderr
+  // and exits 129 (git 2.56.0; 2.50.1 put the usage on stdout).
   it('words an ambiguous abbreviation the way git does', () => {
     const [msg, code, shown] = leafRefusal(
       UsageStyle.GIT,
@@ -127,11 +127,23 @@ describe('leafRefusal', () => {
       'rm',
       SPEC,
     )
-    expect(DEC.decode(msg)).toBe(
-      'error: ambiguous option: no-m=x (could be --no-merged or --no-move)\n',
+    expect([DEC.decode(msg), code, shown]).toEqual([
+      'error: ambiguous option: no-m=x (could be --no-merged or --no-move)\n' + USAGE,
+      129,
+      null,
+    ])
+  })
+
+  // The usage `-h` asks for is help: stdout and exit 0 (git 2.56.0).
+  it('answers -h with the usage and exit 0', () => {
+    const [msg, code, shown] = leafRefusal(
+      UsageStyle.GIT,
+      ARGPARSE_MESSAGE,
+      refused({ invalidOptions: ['-h'], optionErrorKinds: ['invalid'] }),
+      'rm',
+      SPEC,
     )
-    expect(code).toBe(129)
-    expect(DEC.decode(shown ?? new Uint8Array())).toBe(USAGE)
+    expect([DEC.decode(msg), code, DEC.decode(shown ?? new Uint8Array())]).toEqual(['', 0, USAGE])
   })
 
   it('names a short cluster letter the parser reports bare', () => {

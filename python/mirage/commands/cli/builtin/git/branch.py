@@ -15,6 +15,7 @@
 import asyncio
 import posixpath
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from io import BytesIO
 
@@ -65,11 +66,18 @@ from mirage.commands.cli.builtin.git.ref_format import (
 from mirage.commands.cli.builtin.git.ref_list import (
     configured_sort,
     head_description,
+    known_names,
     listing_result,
+    match_as_path,
     match_short,
     reached,
     ref_listing,
+    ref_table,
+    resolve_ref,
+    root_names,
     sort_keys,
+    tracking_ref,
+    worktree_heads,
 )
 from mirage.commands.cli.builtin.git.reflog import (
     IDENTITY,
@@ -81,8 +89,11 @@ from mirage.commands.cli.builtin.git.reflog import (
 from mirage.commands.cli.builtin.git.refs import (
     BRANCH_PREFIX,
     REMOTE_PREFIX,
+    SYMREF_PREFIX,
     blocking_ref,
     delete_ref,
+    mapped,
+    parse_refspec,
     read_head,
     valid_branch_name,
     write_ref,
@@ -107,6 +118,7 @@ from mirage.commands.cli.builtin.git.types import (
     RefItem,
     RefKind,
     RefSortKey,
+    RefUpstream,
     RepoLocation,
     Track,
     Upstream,
@@ -129,6 +141,17 @@ from mirage.types import PathSpec
 REMOTE = "remotes/"
 AUTO_SETUP_MERGE = "branch.autosetupmerge"
 TRACK_WORDS = (Track.ALWAYS, Track.SIMPLE, Track.INHERIT)
+LOCAL_REMOTE = "."
+GLOB_CHARS = ("*", "?", "[")
+UPSTREAM_KEYS = frozenset({b"remote", b"merge"})
+# The order git 2.56.0's --delete-merged deletes in, as pinned on up to 60
+# branches: names fall in FNV-1 buckets by their hash, 64 at first and four
+# times as many once more than 80% are taken, the latest at each one's head.
+FNV_BASIS = 0x811C9DC5
+FNV_PRIME = 0x01000193
+HASH_BUCKETS = 64
+HASH_GROWTH = 4
+HASH_LOAD = 80
 
 
 async def refuse_ambiguous(repo: Repo, name: str, warned: bool) -> None:
@@ -481,17 +504,279 @@ async def _delete(
         _merged, repo, sha, head_commit(repo, head)
     ):
         raise UnmergedBranchError(name)
-    vfs, location = repo.dispatch, repo.location
-    await delete_ref(vfs, location.commondir, ref.decode())
-    path = location.commondir.join("config")
-    data = await read_optional(vfs, path)
-    if data is not None:
-        dropped = without_section(data, "branch", name)
-        if dropped != data:
-            await write_file(vfs, path, dropped)
+    await _drop(repo, name)
     return (
         f"Deleted branch {name} (was {short(sha, abbrev_for(repo))}).\n"
     ).encode()
+
+
+async def _drop(repo: Repo, name: str) -> None:
+    """Remove a branch's ref and its settings.
+
+    Args:
+        repo (Repo): the opened repository.
+        name (str): the branch name.
+    """
+    vfs, location = repo.dispatch, repo.location
+    await delete_ref(vfs, location.commondir, f"{BRANCH_PREFIX}{name}")
+    await _rewrite_config(repo, name, None)
+
+
+async def _rewrite_config(
+    repo: Repo, name: str, keys: frozenset[bytes] | None
+) -> None:
+    """Take a branch's settings out of the config, all or some of them.
+
+    Args:
+        repo (Repo): the opened repository.
+        name (str): the branch name.
+        keys (frozenset[bytes] | None): the variables to take out,
+            lowercase; None takes the whole block.
+    """
+    path = repo.location.commondir.join("config")
+    data = await read_optional(repo.dispatch, path)
+    if data is not None:
+        dropped = without_section(data, "branch", name, keys)
+        if dropped != data:
+            await write_file(repo.dispatch, path, dropped)
+
+
+def upstream_patterns(
+    table: Mapping[str, str], known: frozenset[str], patterns: Sequence[str]
+) -> list[tuple[str, bool]]:
+    """What ``--forked`` and ``--delete-merged`` patterns select, resolved.
+
+    A pattern holding a glob character stays a glob, matched as a path
+    (``*`` stops at a ``/``) against an upstream's short name, case and
+    ``--ignore-case`` notwithstanding; any other names a branch by git's
+    rev-parse rules, its symbolic refs followed, so ``origin`` reads
+    ``refs/remotes/origin/HEAD`` and ``HEAD`` the current branch.
+    Pinned against git 2.56.0.
+
+    Args:
+        table (Mapping[str, str]): each ref's raw value.
+        known (frozenset[str]): every name that resolves.
+        patterns (Sequence[str]): the patterns as typed.
+
+    Returns:
+        list[tuple[str, bool]]: each pattern, a glob or the full ref it
+        names, and whether it is a glob.
+
+    Raises:
+        GitError: a pattern names no branch.
+    """
+    selected: list[tuple[str, bool]] = []
+    for pattern in patterns:
+        if any(ch in pattern for ch in GLOB_CHARS):
+            selected.append((pattern, True))
+            continue
+        named = next(
+            iter(refs_named(known, HEAD if pattern == "@" else pattern)), None
+        )
+        seen: set[str] = set()
+        while named is not None and named not in seen:
+            seen.add(named)
+            raw = table.get(named, "")
+            if not raw.startswith(SYMREF_PREFIX):
+                break
+            named = raw[len(SYMREF_PREFIX) :].strip()
+        if named is None or not named.startswith(
+            (BRANCH_PREFIX, REMOTE_PREFIX)
+        ):
+            raise GitError(f"'{pattern}' is not a valid branch or pattern")
+        selected.append((named, False))
+    return selected
+
+
+def selects(selected: Sequence[tuple[str, bool]], upstream: str) -> bool:
+    """Whether resolved patterns select an upstream ref.
+
+    Args:
+        selected (Sequence[tuple[str, bool]]): from ``upstream_patterns``.
+        upstream (str): the full upstream ref.
+    """
+    name = upstream
+    for prefix in (BRANCH_PREFIX, REMOTE_PREFIX):
+        if name.startswith(prefix):
+            name = name[len(prefix) :]
+            break
+    return any(
+        match_as_path(name, [text]) if glob else text == upstream
+        for text, glob in selected
+    )
+
+
+def pushes_upstream(
+    cfg: ConfigFile, branch: str, upstream: RefUpstream
+) -> bool:
+    """Whether pushing a branch to its remote would move its upstream.
+
+    The first of the remote's push refspecs naming the branch in full
+    with a destination decides where it lands, the branch's own name
+    when the remote has none, and nowhere when none matches; the fetch
+    refspecs then map that to a local ref (git 2.56.0).
+
+    Args:
+        cfg (ConfigFile): the repository's config.
+        branch (str): the branch's short name.
+        upstream (RefUpstream): its upstream.
+    """
+    section = (b"remote", upstream.remote.encode())
+    source = f"{BRANCH_PREFIX}{branch}"
+    pushed = [
+        parse_refspec(v.decode()) for v in multivar(cfg, section, b"push")
+    ]
+    target: str | None = source
+    if pushed:
+        target = next(
+            (
+                found
+                for spec in pushed
+                if spec.dst and not spec.src.startswith("^")
+                for found in (mapped(spec, source),)
+                if found
+            ),
+            None,
+        )
+    if target is None:
+        return False
+    for text in multivar(cfg, section, b"fetch"):
+        spec = parse_refspec(text.decode())
+        if spec.src.startswith("^"):
+            continue
+        landed = mapped(spec, target)
+        if landed:
+            return landed == upstream.ref
+    return False
+
+
+def hash_order(names: Sequence[str]) -> list[str]:
+    """The order --delete-merged deletes the names in, given in turn.
+
+    Args:
+        names (Sequence[str]): the names, in the order they went in.
+    """
+    size = HASH_BUCKETS
+    buckets: list[list[str]] = [[] for _ in range(size)]
+    for count, name in enumerate(names, start=1):
+        buckets[_fnv1(name) & (size - 1)].insert(0, name)
+        if count > size * HASH_LOAD // 100:
+            size *= HASH_GROWTH
+            grown: list[list[str]] = [[] for _ in range(size)]
+            for each in (n for bucket in buckets for n in bucket):
+                grown[_fnv1(each) & (size - 1)].insert(0, each)
+            buckets = grown
+    return [name for bucket in buckets for name in bucket]
+
+
+def _fnv1(name: str) -> int:
+    value = FNV_BASIS
+    for byte in name.encode():
+        value = (value * FNV_PRIME) & 0xFFFFFFFF
+        value ^= byte
+    return value
+
+
+async def _delete_merged(
+    repo: Repo,
+    patterns: tuple[str, ...],
+    operands: tuple[str, ...],
+    dry_run: bool,
+    quiet: bool,
+) -> tuple[ByteSource | None, IOResult]:
+    """Delete the branches already merged into the upstream they track.
+
+    A local branch goes when its upstream matches a pattern, exists and
+    holds the branch's tip, unless it is checked out in a worktree,
+    pushing it would move that very upstream, or
+    ``branch.<name>.deleteMerged`` is false, which is said on stderr. A
+    branch another one not going tracks through ``.`` stays, judged
+    against the first choice, and a branch that tracked one that went
+    loses its upstream. Operands narrow the branches looked at, by
+    their short names and case. Pinned against git 2.56.0.
+
+    Args:
+        repo (Repo): the opened repository.
+        patterns (tuple[str, ...]): the ``--delete-merged`` patterns.
+        operands (tuple[str, ...]): the branch patterns.
+        dry_run (bool): ``--dry-run``, which only says what would go.
+        quiet (bool): ``-q``.
+    """
+    cfg = await read_config(repo.dispatch, repo.location)
+    table = ref_table(repo)
+    known = known_names(table, await root_names(repo))
+    selected = upstream_patterns(table, known, patterns)
+    checked = await worktree_heads(repo)
+    branches = sorted(name for name in table if name.startswith(BRANCH_PREFIX))
+    ups = {
+        ref: tracking_ref(cfg, ref[len(BRANCH_PREFIX) :], known)
+        for ref in branches
+    }
+    skipped = ""
+    chosen: list[str] = []
+    for ref in branches:
+        name, up = ref[len(BRANCH_PREFIX) :], ups[ref]
+        tip, _ = resolve_ref(table, ref)
+        if (
+            tip is None
+            or up is None
+            or ref in checked
+            or not match_short(ref, operands)
+            or not selects(selected, up.ref)
+        ):
+            continue
+        there, _ = resolve_ref(table, up.ref)
+        if there is None or pushes_upstream(cfg, name, up):
+            continue
+        if not await asyncio.to_thread(
+            _merged, repo, tip.encode(), there.encode()
+        ):
+            continue
+        wanted = git_bool(
+            multivar(cfg, (b"branch", name.encode()), b"deletemerged"),
+            f"branch.{name}.deletemerged",
+            True,
+        )
+        if not wanted:
+            skipped += (
+                f"Skipping '{name}' (branch.{name}.deleteMerged is false)\n"
+            )
+            continue
+        chosen.append(ref)
+    held = {
+        up.ref
+        for ref, up in ups.items()
+        if up is not None and up.remote == LOCAL_REMOTE and ref not in chosen
+    }
+    going = [ref for ref in chosen if ref not in held]
+    out = ""
+    width = abbrev_for(repo)
+    for name in hash_order([ref[len(BRANCH_PREFIX) :] for ref in going]):
+        tip, target = resolve_ref(table, f"{BRANCH_PREFIX}{name}")
+        was = (
+            target
+            if target is not None
+            else short((tip or "").encode(), width)
+        )
+        if dry_run:
+            out += f"Would delete branch {name} (was {was}).\n"
+            continue
+        await _drop(repo, name)
+        out += f"Deleted branch {name} (was {was}).\n"
+    if not dry_run:
+        for ref, up in ups.items():
+            if (
+                up is not None
+                and up.remote == LOCAL_REMOTE
+                and up.ref in going
+                and ref not in going
+            ):
+                await _rewrite_config(
+                    repo, ref[len(BRANCH_PREFIX) :], UPSTREAM_KEYS
+                )
+    if quiet:
+        return None, IOResult()
+    return out.encode() or None, IOResult(stderr=skipped.encode() or None)
 
 
 # What a listing row reads when the line gives no --format.
@@ -650,13 +935,15 @@ async def _list_branches(
     filt: RefFilter | None,
     remotes_only: bool,
     include_remotes: bool,
+    forked: tuple[str, ...],
 ) -> tuple[ByteSource | None, IOResult]:
     """A branch listing, through git's ref-filter as git prints one.
 
     The local branches (``-r`` the remote-tracking ones instead, ``-a``
     both) and a detached HEAD, which leads whatever the sort keys say,
     each printed through ``--format`` or as ``branch_rows`` lays rows
-    out.
+    out. ``--forked`` keeps the local branches whose upstream it
+    selects (see ``upstream_patterns``).
 
     Args:
         ctx (Context): the line's context, for its env.
@@ -667,8 +954,21 @@ async def _list_branches(
         filt (RefFilter | None): the resolved ref filter.
         remotes_only (bool): ``-r``.
         include_remotes (bool): ``-r`` or ``-a``.
+        forked (tuple[str, ...]): the ``--forked`` patterns.
     """
     cfg = await read_config(repo.dispatch, repo.location)
+    followers: frozenset[str] | None = None
+    if forked:
+        table = ref_table(repo)
+        known = known_names(table, await root_names(repo))
+        selected = upstream_patterns(table, known, forked)
+        followers = frozenset(
+            ref
+            for ref in table
+            if ref.startswith(BRANCH_PREFIX)
+            for up in (tracking_ref(cfg, ref[len(BRANCH_PREFIX) :], known),)
+            if up is not None and selects(selected, up.ref)
+        )
     keys = sort_keys(fl, configured_sort(cfg, b"branch"))
     icase = fl.as_bool("ignore_case")
     verbose = fl.as_int("verbose") or 0
@@ -682,7 +982,11 @@ async def _list_branches(
             or (not remotes_only and name.startswith(BRANCH_PREFIX))
             or (include_remotes and name.startswith(REMOTE_PREFIX))
         )
-        return kind and match_short(name, patterns, icase)
+        return (
+            kind
+            and match_short(name, patterns, icase)
+            and (followers is None or name in followers)
+        )
 
     fmt = listing_format(template) if template is not None else None
     items, ref_ctx, errors = await ref_listing(
@@ -736,7 +1040,9 @@ async def branch(
     operands are name patterns, so ``git branch --contains side topic``
     lists ``topic`` if it holds ``side`` rather than creating anything,
     and a line that also deletes names two modes, which git answers
-    with its usage.
+    with its usage. ``--forked`` lists too, and ``--delete-merged`` is
+    a mode of its own whose operands narrow the branches it looks at;
+    ``--dry-run`` belongs to it alone.
 
     Args:
         accessor (Accessor): git reaches no service.
@@ -752,17 +1058,35 @@ async def branch(
     fl = FlagView(flags)
     remotes_only = fl.as_bool("r")
     include_remotes = remotes_only or fl.as_bool("a")
-    listing = bool(words) or fl.as_bool("list")
+    forked = tuple(fl.as_list("forked"))
+    merged = tuple(fl.as_list("delete_merged"))
+    dry_run = fl.typed_order("dry_run", "no_dry_run")[-1:] == ["dry_run"]
+    listing = bool(words) or fl.as_bool("list") or bool(forked)
     check_switches(ctx, operands)
     repo, location = await opened(ctx, fl)
+    if dry_run and not merged:
+        raise GitError("--dry-run requires --delete-merged")
+    if merged:
+        if (
+            listing
+            or fl.as_bool("delete")
+            or fl.as_bool("D")
+            or fl.as_bool("show_current")
+        ):
+            raise UsageError("", verb_usage(ctx))
+        return await _delete_merged(
+            repo, merged, tuple(operands), dry_run, fl.as_bool("quiet")
+        )
     mode = await track_mode(repo)
     filt = await asyncio.to_thread(ref_filter, repo, words)
     head = await read_head(vfs, location.gitdir)
+    force = fl.as_bool("D")
     if fl.as_bool("show_current"):
+        if listing or force or fl.as_bool("delete"):
+            raise UsageError("", verb_usage(ctx))
         return (
             (head.branch + "\n").encode() if head.branch else b""
         ), IOResult()
-    force = fl.as_bool("D")
     if fl.as_bool("delete") or force:
         if listing:
             raise UsageError("", verb_usage(ctx))
@@ -797,6 +1121,7 @@ async def branch(
         filt,
         remotes_only,
         include_remotes,
+        forked,
     )
 
 

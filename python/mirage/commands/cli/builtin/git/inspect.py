@@ -52,12 +52,11 @@ from mirage.commands.cli.builtin.git.revparse import (
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
-    STDERR,
-    STDOUT,
     check_operands,
     check_switches,
     escaped,
     fatal,
+    lone_help,
     multivar,
     offending,
     option_operand,
@@ -67,7 +66,6 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.cli.constants import GIT_LONG_OPTIONS
 from mirage.commands.cli.refusal import (
-    HELP_SWITCH,
     git_option_refusal,
     git_usage,
     leaf_refusal,
@@ -452,8 +450,7 @@ async def rev_list(
     accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    sole = ctx.argv[-2:] == ("rev-list", HELP_SWITCH)
-    if option_operand(ctx, texts, STDOUT if sole else STDERR):
+    if option_operand(ctx, texts, lone_help(ctx)):
         raise UsageError("", verb_usage(ctx))
     repo, location = await opened(ctx, fl)
     flags = parse_flags(fl)
@@ -649,7 +646,7 @@ async def rev_parse(
         revisions = tuple(
             text for text in texts if text != GIT_DIR_OPTION or text in marked
         )
-        check_operands(ctx, revisions)
+        check_operands(ctx, revisions, lone_help(ctx))
         verb = ctx.argv.index("rev-parse") if "rev-parse" in ctx.argv else -1
         words = ctx.argv[verb + 1 :]
         end = words.index("--") if "--" in words else -1

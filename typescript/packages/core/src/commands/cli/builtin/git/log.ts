@@ -143,9 +143,11 @@ async function graphed(
   sides: ReadonlyMap<string, readonly Side[]>,
 ): Promise<string> {
   const width = repo.abbrev
+  const steps = [...walk.steps, ...walk.boundary.map((commit) => ({ commit, shown: true }))]
   const graph = new CommitGraph(
     (oid) => walk.interesting.has(oid),
     flags.firstParent,
+    steps.map((step) => step.commit),
     new Set(walk.boundary.map((commit) => commit.oid)),
     walk.parents.size ? walk.parents : null,
   )
@@ -158,10 +160,7 @@ async function graphed(
   let out = ''
   let shownOne = false
   let missingNewline = false
-  for (const { commit, shown } of [
-    ...walk.steps,
-    ...walk.boundary.map((commit) => ({ commit, shown: true })),
-  ]) {
+  for (const { commit, shown } of steps) {
     graph.walk(commit)
     if (!shown) continue
     const bodies =

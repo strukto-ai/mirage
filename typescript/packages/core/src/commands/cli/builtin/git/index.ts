@@ -502,11 +502,26 @@ const BRANCH_OPTIONS = [
   new Argument('-r', { action: 'store_true', help: 'List remote-tracking branches' }),
   new Argument(['-d', '--delete'], { action: 'store_true', help: 'Delete a fully merged branch' }),
   new Argument('-D', { action: 'store_true', help: 'Delete a branch even if not merged' }),
+  new Argument('--delete-merged', {
+    action: 'append',
+    metavar: 'pattern',
+    help: 'Delete merged branches whose upstream matches (repeatable)',
+  }),
+  new Argument('--dry-run', {
+    action: 'store_true',
+    help: 'With --delete-merged, only print what would be deleted',
+  }),
+  new Argument('--no-dry-run', { action: 'store_true' }),
   new Argument(['-l', '--list'], {
     action: 'store_true',
     help: 'List branches matching the patterns',
   }),
   ...REF_FILTER_OPTIONS,
+  new Argument('--forked', {
+    action: 'append',
+    metavar: 'branch',
+    help: 'List branches whose upstream matches (repeatable)',
+  }),
   ...SORT_OPTIONS,
   FORMAT_OPTION_REF,
   OMIT_EMPTY_OPTION,

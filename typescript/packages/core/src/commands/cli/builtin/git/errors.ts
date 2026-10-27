@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { HELP_EXIT } from '../../constants.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import type { FsCondition } from '../../../../errors/types.ts'
 
@@ -929,11 +930,12 @@ export class UnmergedPathError extends GitError {
  * Already worded, the verb's usage block included where git prints one: after
  * an unknown option on stderr, or alone, on stdout when `-h` asked for it and
  * on stderr where it stands for the refusal itself (`rev-list --nosuch`,
- * `symbolic-ref` with no operand).
+ * `symbolic-ref` with no operand). The usage block `-h` asked for is help, not
+ * a refusal, and exits 0 (git 2.56).
  */
 export class UsageError extends GitError {
   override readonly prefix = null
-  override readonly code = OPTION_EXIT
+  override readonly code: number
   override readonly stream: 'stdout' | 'stderr'
 
   /**
@@ -943,6 +945,7 @@ export class UsageError extends GitError {
   constructor(shown: string, refused: string) {
     super((refused !== '' ? refused : shown).replace(/\n$/, ''))
     this.stream = refused !== '' ? 'stderr' : 'stdout'
+    this.code = refused !== '' ? OPTION_EXIT : HELP_EXIT
   }
 }
 

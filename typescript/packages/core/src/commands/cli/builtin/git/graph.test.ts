@@ -58,7 +58,7 @@ interface LogOptions {
 function log(walked: CommitFacts[], options: LogOptions = {}): string[] {
   const ids = new Set(walked.map((each) => each.oid))
   const printed = options.shown === undefined ? ids : new Set(options.shown.split(' '))
-  const graph = new CommitGraph((oid) => ids.has(oid), options.firstParent ?? false)
+  const graph = new CommitGraph((oid) => ids.has(oid), options.firstParent ?? false, walked)
   let out = ''
   for (const each of walked) {
     graph.walk(each)
@@ -193,7 +193,7 @@ it('lets the skip row stand for the separator', () => {
 it('pads a further header of a drawn commit', () => {
   const walked = walk('M: C B\nB: A\nC: A\nA:')
   const ids = new Set(walked.map((each) => each.oid))
-  const graph = new CommitGraph((oid) => ids.has(oid), false)
+  const graph = new CommitGraph((oid) => ids.has(oid), false, walked)
   const [merge] = walked
   if (merge === undefined) throw new Error('missing merge')
   graph.walk(merge)
@@ -336,7 +336,7 @@ it('pads a skip row to the merge it stands before', () => {
 it('draws a boundary commit with an o', () => {
   const walked = walk('M: A B\nB: A\nA:')
   const ids = new Set(walked.map((each) => each.oid))
-  const graph = new CommitGraph((oid) => ids.has(oid), false, new Set(['A']))
+  const graph = new CommitGraph((oid) => ids.has(oid), false, walked, new Set(['A']))
   let out = ''
   for (const each of walked) {
     graph.walk(each)
@@ -348,11 +348,94 @@ it('draws a boundary commit with an o', () => {
 it('draws the parents a path-limited walk hands over', () => {
   const walked = walk('X: Y\nA:')
   const ids = new Set(walked.map((each) => each.oid))
-  const graph = new CommitGraph((oid) => ids.has(oid), false, new Set(), new Map([['X', ['A']]]))
+  const graph = new CommitGraph(
+    (oid) => ids.has(oid),
+    false,
+    walked,
+    new Set(),
+    new Map([['X', ['A']]]),
+  )
   let out = ''
   for (const each of walked) {
     graph.walk(each)
     out += graph.leadIn() + graph.around(`${each.oid}\n`)
   }
   expect(out.split('\n').slice(0, -1)).toEqual(['* X', '* A'])
+})
+
+// The root rule below is git 2.56.0's, pinned on the same histories.
+it('stands a root a column right when a new commit is next', () => {
+  expect(log(walk('s2: s1\ns1: base\nbase:\nC1: R\nR:'))).toEqual([
+    '* s2',
+    '* s1',
+    ' \\ ',
+    '  * base',
+    '* C1',
+    '* R',
+  ])
+})
+
+it('bends the lines right of a root over too', () => {
+  expect(log(walk('M1: M0\nRC: R\nB2: B1\nR:\nN1: M0\nB1: M0\nM0:'))).toEqual([
+    '* M1',
+    '| * RC',
+    '| | * B2',
+    '|  \\ | ',
+    '|   * | R',
+    '|  /    ',
+    '| | * N1',
+    '| |/  ',
+    '|/|   ',
+    '| * B1',
+    '|/  ',
+    '* M0',
+  ])
+})
+
+it('climbs a run of roots and comes back every fourth', () => {
+  const names = Array.from({ length: 10 }, (_, i) => `R${String(10 - i).padStart(2, '0')}`)
+  expect(log(walk(names.map((name) => `${name}:`).join('\n')))).toEqual([
+    '* R10',
+    '  * R09',
+    '    * R08',
+    '      * R07',
+    '* R06',
+    '  * R05',
+    '    * R04',
+    '      * R03',
+    '  * R02',
+    '* R01',
+  ])
+})
+
+it('lets a root a line leads to join a run already climbing', () => {
+  expect(log(walk('CC: C\nP0:\nP1:\nC:\nQ:\nX:'))).toEqual([
+    '* CC',
+    '| * P0',
+    '|   * P1',
+    '    * C',
+    '      * Q',
+    '* X',
+  ])
+})
+
+it("takes no merge's later parent for a root", () => {
+  expect(log(walk('M: A R\nA: X\nR:\nT:\nX:'))).toEqual([
+    '*   M',
+    '|\\  ',
+    '* | A',
+    '| * R',
+    '| * T',
+    '* X',
+  ])
+})
+
+it('moves a root over without bending after a skip row', () => {
+  expect(log(walk('M1: M0\nRC: R\nB2: B1\nR:\nN1: M0\nB1: M0\nM0:'), { shown: 'RC R' })).toEqual([
+    '... ',
+    '| * RC',
+    '...   ',
+    '|   * | R',
+    '|  /    ',
+  ])
 })

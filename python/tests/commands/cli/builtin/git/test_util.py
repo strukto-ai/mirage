@@ -334,3 +334,21 @@ def test_without_section_follows_a_value_continued_onto_a_bracket_line():
 )
 def test_maybe_bool_reads_words_and_numbers(value: bytes, parsed: bool | None):
     assert maybe_bool(value) is parsed
+
+
+def test_without_section_takes_named_variables_and_an_emptied_block():
+    data = (
+        b'[branch "y"]\n\tremote = .\n\tmerge = refs/heads/z\n\trebase = true\n'
+        b'[branch "x"]\n\tremote = .\n\tmerge = refs/heads/y\n'
+        b'[branch "w"]\n\tRemote = o\n\tmerge = m \\\n  [still m\n'
+    )
+    keys = frozenset({b"remote", b"merge"})
+    assert without_section(data, "branch", "y", keys) == (
+        b'[branch "y"]\n\trebase = true\n'
+        b'[branch "x"]\n\tremote = .\n\tmerge = refs/heads/y\n'
+        b'[branch "w"]\n\tRemote = o\n\tmerge = m \\\n  [still m\n'
+    )
+    assert without_section(data, "branch", "x", keys).count(b"[branch") == 2
+    assert without_section(data, "branch", "w", keys).endswith(
+        b"merge = refs/heads/y\n"
+    )

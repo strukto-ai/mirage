@@ -164,3 +164,21 @@ it.each([
 ])('maybeBool reads words and numbers: %s', (value, parsed) => {
   expect(maybeBool(value)).toBe(parsed)
 })
+
+describe('withoutSection with keys', () => {
+  const text =
+    '[branch "y"]\n\tremote = .\n\tmerge = refs/heads/z\n\trebase = true\n' +
+    '[branch "x"]\n\tremote = .\n\tmerge = refs/heads/y\n' +
+    '[branch "w"]\n\tRemote = o\n\tmerge = m \\\n  [still m\n'
+  const keys = new Set(['remote', 'merge'])
+
+  it('takes the named variables and a block they leave empty', () => {
+    expect(withoutSection(text, 'branch', 'y', keys)).toBe(
+      '[branch "y"]\n\trebase = true\n' +
+        '[branch "x"]\n\tremote = .\n\tmerge = refs/heads/y\n' +
+        '[branch "w"]\n\tRemote = o\n\tmerge = m \\\n  [still m\n',
+    )
+    expect(withoutSection(text, 'branch', 'x', keys).split('[branch').length).toBe(3)
+    expect(withoutSection(text, 'branch', 'w', keys).endsWith('merge = refs/heads/y\n')).toBe(true)
+  })
+})
