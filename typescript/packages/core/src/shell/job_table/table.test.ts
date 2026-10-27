@@ -1657,6 +1657,44 @@ describe('JobTable process plane', () => {
     await b.close()
   })
 
+  // A start reaps the lapsed owners on the store, and once more a lease
+  // later: an owner that still held its lease at the start, as one that died
+  // just before it would, is reaped once it lapsed.
+  it('reaps lapsed owners as it starts', async () => {
+    const store = new RAMJobStore(0.5)
+    for (const owner of ['dead', 'dying']) {
+      const run = { runtime: 'docker', tag: owner, command: 'x' }
+      await store.publish(owner, { '2': { pid: 2, session: 's', runs: [run] } })
+    }
+    await store.renew('dying')
+    const reaped: unknown[] = []
+    const b = new JobTable(store)
+    b.reaper = (runs) => {
+      reaped.push(...runs.map((run) => run.tag))
+      return Promise.resolve([])
+    }
+    b.reapLapsed()
+    await until(() => Promise.resolve(reaped.length > 0))
+    expect(reaped).toEqual(['dead'])
+    await until(async () => Object.keys(await store.processes()).length === 0)
+    expect(reaped).toEqual(['dead', 'dying'])
+    await b.close()
+  })
+
+  // Teardown ends a start's sweep that waits for a lease to pass.
+  it('ends the sweep at teardown', async () => {
+    const store = new RAMJobStore(30)
+    await store.renew('live')
+    await store.publish('live', { '2': { pid: 2, session: 's', runs: [] } })
+    const b = new JobTable(store)
+    b.reapLapsed()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const started = Date.now()
+    await b.killAll()
+    expect(Date.now() - started).toBeLessThan(5000)
+    await b.close()
+  })
+
   // The lease goes ahead of the record it vouches for, so no workspace ever
   // reads a record whose owner it takes for lapsed, even for a process that
   // is no job (a line, a spawned child) and so renewed nothing first; and

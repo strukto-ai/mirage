@@ -1509,6 +1509,55 @@ async def test_teardown_stops_the_reaping():
     await b.close()
 
 
+# A start reaps the lapsed owners on the store, and once more a lease
+# later: an owner that still held its lease at the start, as one that died
+# just before it would, is reaped once it lapsed.
+@pytest.mark.asyncio
+async def test_a_start_reaps_lapsed_owners():
+    store = RAMJobStore(lease_seconds=0.5)
+    for owner in ("dead", "dying"):
+        run = {"runtime": "docker", "tag": owner, "command": "x"}
+        await store.publish(
+            owner, {"2": {"pid": 2, "session": "s", "runs": [run]}}
+        )
+    await store.renew("dying")
+    reaped: list[str] = []
+
+    async def reaper(runs: list, signum: int) -> list:
+        reaped.extend(run["tag"] for run in runs)
+        return []
+
+    b = JobTable(store)
+    b.reaper = reaper
+    b.reap_lapsed()
+    async with asyncio.timeout(5):
+        while not reaped:
+            await asyncio.sleep(0.01)
+    assert reaped == ["dead"]
+    async with asyncio.timeout(5):
+        while b._reaping:
+            await asyncio.sleep(0.01)
+    assert reaped == ["dead", "dying"]
+    assert await store.processes() == {}
+    await b.close()
+
+
+# Teardown ends a start's sweep that waits for a lease to pass.
+@pytest.mark.asyncio
+async def test_teardown_ends_the_sweep():
+    store = RAMJobStore(lease_seconds=30.0)
+    await store.renew("live")
+    await store.publish("live", {"2": {"pid": 2, "session": "s", "runs": []}})
+    b = JobTable(store)
+    b.reap_lapsed()
+    await asyncio.sleep(0.05)
+    assert b._reaping
+    async with asyncio.timeout(5):
+        await b.kill_all()
+    assert not b._reaping
+    await b.close()
+
+
 # A stop that fails to apply leaves the others it came with to be applied.
 @pytest.mark.asyncio
 async def test_one_failed_stop_leaves_the_others(monkeypatch):

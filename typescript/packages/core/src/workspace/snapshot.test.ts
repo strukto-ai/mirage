@@ -129,6 +129,24 @@ it.each(['redis://localhost:6379/2', 'redis://user:secret@localhost:6379/2'])(
   },
 )
 
+// A Redis index that names no prefix keeps none through a snapshot, so the
+// restored workspace's keys stay its own.
+it('keeps a Redis index without a prefix its own', async () => {
+  const config: RedisIndexConfig = {
+    type: IndexType.REDIS,
+    url: 'redis://localhost:6379/2',
+    ttl: 91,
+  }
+  const ws = new Workspace({ '/data': new Mount(new RAMVFS(), { index: config }) }, {})
+  try {
+    const state = await toStateDict(ws)
+    expect(state.mounts.find((m) => m.prefix === '/data/')?.index_config?.key_prefix).toBeNull()
+    expect(buildMountArgs(state).mountArgs['/data/']?.options.index).toEqual(config)
+  } finally {
+    await ws.close()
+  }
+})
+
 function buildWorkspace(): Workspace {
   const ram = new RAMVFS()
   return new Workspace({ '/data': ram }, { mode: MountMode.WRITE })

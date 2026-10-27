@@ -25,6 +25,7 @@ import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.t
 import type { ExecuteOptions, SessionExecuteOptions } from './types.ts'
 import { Session, Workspace } from './workspace.ts'
 import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
+import { RAMJobStore } from '../../shell/job_table/ram.ts'
 import type { RunResult } from '../../runtime/types.ts'
 
 const DEC = new TextDecoder()
@@ -440,6 +441,26 @@ it('reaps the runs its runtimes reach', async () => {
       ['t3', 15],
       ['broken', 15],
     ])
+  } finally {
+    await ws.close()
+  }
+})
+
+// A workspace stops what a lapsed instance left as it starts, before anything
+// lists processes.
+it('reaps a lapsed instance as it starts', async () => {
+  const box = new ReapedBox(['t1'])
+  const ws = new Workspace({}, { runtimes: [box] })
+  try {
+    const store = new RAMJobStore(30)
+    ws.jobTable.store = store
+    const run = { runtime: 'reapbox', tag: 't1', command: 'x' }
+    await store.publish('dead', { '2': { pid: 2, session: 's', runs: [run] } })
+    await ws.shell('true')
+    await vi.waitFor(async () => {
+      expect('dead' in (await store.processes())).toBe(false)
+    })
+    expect(box.reaped).toEqual([['t1', 15]])
   } finally {
     await ws.close()
   }

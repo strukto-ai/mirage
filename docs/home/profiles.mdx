@@ -42,8 +42,9 @@ profiles:
         - {script: ./guard.py, runtime: monty}
 ```
 
-`processes.list` and `processes.kill` take `session`, the default, or
-`workspace`, for the processes other workspaces on a shared store run as well.
+`processes.list` and `processes.kill` take `session`, the default, for the
+session's own processes, or `workspace`, for every session's. Both reach
+every [instance](/home/core/shell#jobs-across-instances) of the workspace.
 `kill` cannot reach past `list`, and a bare scope such as
 `processes: workspace` sets both. Starting a process past `max` fails with
 `Resource temporarily unavailable`.

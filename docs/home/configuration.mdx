@@ -133,7 +133,7 @@ defaults `url` to `redis://localhost:6379/0`.
 | --- | --- | --- |
 | `limit` | `512MB` | Cache size, in bytes or as a size string. |
 | `max_drain_bytes` | 8 MiB or `limit`, whichever is smaller | Largest file a streamed read copies into the cache. Cannot exceed `limit`. |
-| `url`, `key_prefix` | `mirage:cache:` | Redis only. |
+| `url`, `key_prefix` | the workspace's own keys | Redis only. Name one `key_prefix` in several workspaces to share their cache. |
 
 `index` holds directory listings and file metadata. `type` is `ram` (default)
 or `redis`. A mount's own `index` replaces this block.
@@ -141,7 +141,7 @@ or `redis`. A mount's own `index` replaces this block.
 | Key | Default | Purpose |
 | --- | --- | --- |
 | `ttl` | `600` | Seconds a listing stays cached. |
-| `url`, `key_prefix` | `mirage:index:` | Redis only. |
+| `url`, `key_prefix` | the workspace's own keys | Redis only. Name one `key_prefix` in several workspaces to share their index. |
 
 `store` holds workspace state: symlinks and file attributes, command history,
 sessions, and background jobs with their output. `type` is `ram` (default),
@@ -155,7 +155,7 @@ moves one part to a backend of its own.
 | `namespace` | unset | A separate store block for symlinks and file attributes. |
 | `observer` | unset | A separate store block for command history. |
 | `workspace` | unset | A separate store block for sessions and workspace metadata. |
-| `jobs` | unset | A separate store block for background jobs: each session's job list and each job's output, and the processes each workspace runs. |
+| `jobs` | unset | A separate store block for background jobs: each session's job list and each job's output, and the processes each instance of the workspace runs. |
 
 A group block takes the same keys with `type` `ram`, `disk` or `redis`. Only
 `workspace` also accepts `s3`, which takes the [S3 config fields](/home/setup/s3)
@@ -163,9 +163,11 @@ with `key_prefix` defaulting to `mirage/`. `jobs` takes `ram` or `redis` only,
 and a `disk` store keeps its jobs in memory. Redis keeps a job's output for a
 day after its last write.
 
-Workspaces that share a store share each session's background jobs and list
-each other's processes, as described in
-[Shell](/home/core/shell#jobs-across-workspaces).
+Processes that build one workspace on a shared store are instances of it:
+they share each session's background jobs and list each other's processes, as
+described in [Shell](/home/core/shell#jobs-across-instances).
+[Infrastructure](/home/infrastructure) shows each block in YAML, Python and
+TypeScript.
 
 ```yaml
 store:

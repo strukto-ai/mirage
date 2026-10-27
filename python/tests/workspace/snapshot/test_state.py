@@ -139,6 +139,23 @@ async def test_snapshot_preserves_redis_index_with_credential_override(url):
         await ws.close()
 
 
+# A Redis index that names no prefix keeps none through a snapshot, so the
+# restored workspace's keys stay its own.
+@pytest.mark.asyncio
+async def test_snapshot_keeps_a_redis_index_without_a_prefix_its_own():
+    config = RedisIndexConfig(url="redis://localhost:6379/2", ttl=91)
+    ws = Workspace({"/data": Mount(RAMVFS(), index=config)})
+    try:
+        state = await to_state_dict(ws)
+        saved = next(
+            m for m in state[StateKey.MOUNTS] if m[MountKey.PREFIX] == "/data/"
+        )
+        assert saved[MountKey.INDEX_CONFIG]["key_prefix"] is None
+        assert build_mount_args(state).mount_args["/data/"].index == config
+    finally:
+        await ws.close()
+
+
 class FakeConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

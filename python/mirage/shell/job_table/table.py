@@ -340,6 +340,7 @@ class JobTable:
         # teardown stopped the reaping, which its runtimes are closing for.
         self._reaped: set[str] = set()
         self._reaping_stopped = False
+        self._swept = False
         # The table whose store and owner the process plane is read and
         # written through: this one, or for a child shell's table the
         # workspace's, since a child shell keeps only its job list private.
@@ -1470,6 +1471,31 @@ class JobTable:
             if handle.info.pid == pid:
                 handle.terminate(signal)
                 return
+
+    def reap_lapsed(self) -> None:
+        """Stop what the lapsed instances on the store left running,
+        without waiting: the workspace calls it as it starts, so what a
+        crashed instance ran stops before anything lists it. Once per
+        table."""
+        if self._swept or self._reaping_stopped:
+            return
+        self._swept = True
+        task = asyncio.ensure_future(self._sweep())
+        self._reaping.add(task)
+        task.add_done_callback(self._reaping.discard)
+
+    async def _sweep(self) -> None:
+        """Reap the lapsed owners on the store, and once more a lease
+        later while any other owner still held one: an instance that died
+        just before this one started still holds its lease until then."""
+        try:
+            live = await self.remote_processes()
+            lease = self.store.lease_seconds
+            if live and lease is not None:
+                await asyncio.sleep(lease)
+                await self.remote_processes()
+        except Exception as exc:
+            logger.debug("lapsed owners not swept: %s", exc)
 
     def _reap_later(self, owner: str) -> None:
         """Stop the native runs a lapsed owner left, without waiting.

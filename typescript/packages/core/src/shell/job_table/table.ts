@@ -250,6 +250,10 @@ export class JobTable {
   // stopped the reaping, which its runtimes are closing for.
   private reaped = new Set<string>()
   private reapingStopped = false
+  private swept = false
+  // The startup sweep's pending wait for a lease to pass, which a teardown
+  // ends at once.
+  private sweepTick: { timer: ReturnType<typeof setTimeout>; wake: () => void } | null = null
   // The table whose store and owner the process plane is read and written
   // through: this one, or for a child shell's table the workspace's, since
   // a child shell keeps only its job list private.
@@ -634,6 +638,10 @@ export class JobTable {
    * is waited for, bounded as a reap is. */
   async killAll(): Promise<Job[]> {
     this.reapingStopped = true
+    if (this.sweepTick !== null) {
+      clearTimeout(this.sweepTick.timer)
+      this.sweepTick.wake()
+    }
     await Promise.allSettled([...this.reaping])
     const running = this.allRunningJobs().filter((j) => j.process !== null)
     for (const job of [...running, ...this.disowned])
@@ -655,9 +663,10 @@ export class JobTable {
     this.lease = null
     this.checking = null
     this.closed = true
-    if (this.publishTick !== null) {
-      clearTimeout(this.publishTick.timer)
-      this.publishTick.wake()
+    for (const tick of [this.publishTick, this.sweepTick]) {
+      if (tick === null) continue
+      clearTimeout(tick.timer)
+      tick.wake()
     }
     await this.publishing
     try {
@@ -1289,6 +1298,42 @@ export class JobTable {
         handle.terminate(signal)
         return
       }
+    }
+  }
+
+  /**
+   * Stop what the lapsed instances on the store left running, without
+   * waiting: the workspace calls it as it starts, so what a crashed instance
+   * ran stops before anything lists it. Once per table.
+   */
+  reapLapsed(): void {
+    if (this.swept || this.reapingStopped) return
+    this.swept = true
+    const sweeping = this.sweep().finally(() => {
+      this.reaping.delete(sweeping)
+    })
+    this.reaping.add(sweeping)
+  }
+
+  /**
+   * Reap the lapsed owners on the store, and once more a lease later while
+   * any other owner still held one: an instance that died just before this
+   * one started still holds its lease until then.
+   */
+  private async sweep(): Promise<void> {
+    try {
+      const live = await this.remoteProcesses()
+      const lease = this.store.leaseSeconds
+      if (Object.keys(live).length === 0 || lease === null) return
+      await new Promise<void>((wake) => {
+        const timer = setTimeout(wake, lease * 1000)
+        ;(timer as { unref?: () => void }).unref?.()
+        this.sweepTick = { timer, wake }
+      })
+      this.sweepTick = null
+      if (!this.reapingStopped && !this.closed) await this.remoteProcesses()
+    } catch (err) {
+      console.debug('lapsed owners not swept:', err)
     }
   }
 
