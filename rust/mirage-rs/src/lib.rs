@@ -24,6 +24,7 @@ mod nl;
 mod numfmt;
 mod od;
 mod paste;
+mod patch;
 mod pcre;
 mod policy;
 mod printf;
@@ -354,6 +355,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "numfmt" => numfmt::open(config),
         "od" => od::open(config),
         "paste" => paste::open(config),
+        "patch" => patch::open(config),
         "policy" => policy::stream::open(config),
         "printf" => printf::open(config),
         "regex" => regex::stream::open(config),

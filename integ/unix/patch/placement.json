@@ -209,6 +209,41 @@
         "stdout": "patching file pn.txt\nHunk #2 FAILED at 10.\n1 out of 2 hunks FAILED -- saving rejects to file pn.txt.rej\nrc=1\n--- a\n+++ b\n@@ -10,3 +12,3 @@\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "patch_insertion_past_a_32_bit_line",
+      "seq": 9941411,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941411 && touch /data/patch_9941411/.keep; cd /data/patch_9941411 || exit 1; printf 'a\\nb\\n' > g.txt && printf -- '--- g\\n+++ g\\n@@ -4294967296,0 +4294967297 @@\\n+x\\n' | patch g.txt; echo rc=$?; cat g.txt; cd /; rm -r /data/patch_9941411",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file g.txt\nrc=0\na\nb\nx\n",
+        "stderr": ""
+      }
     }
   ]
 }
