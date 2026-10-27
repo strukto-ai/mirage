@@ -676,8 +676,9 @@ async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
 
 # A run whose leader exited before the program it started is stopped too,
 # its group outliving the leader, while a member started by the time the
-# group was last known to be the run's: a group that took the id since,
-# or one never known, is left alone.
+# group was last known to be the run's; a group none of whose members
+# proves that, which may have taken the id since, is left alone and out of
+# reach, so its record stays.
 @pytest.mark.asyncio
 async def test_a_left_host_run_whose_leader_exited_is_reaped(tmp_path):
     pid_file = tmp_path / "pid"
@@ -692,8 +693,8 @@ async def test_a_left_host_run_whose_leader_exited_is_reaped(tmp_path):
     exited = {**run, "exited_at": time.time()}
     survivor = await _wait_for_pid(pid_file)
     try:
-        assert await reap_host_run(run, 15)
-        assert await reap_host_run(
+        assert not await reap_host_run(run, 15)
+        assert not await reap_host_run(
             {**run, "seen_at": float(run["started_at"]) - 60}, 15
         )
         assert await _running(survivor)
@@ -702,6 +703,17 @@ async def test_a_left_host_run_whose_leader_exited_is_reaped(tmp_path):
     finally:
         if await _running(survivor):
             os.kill(survivor, 9)
+
+
+# A host whose ps fails before it lists every process reaches nothing: a
+# group missing from a cut-short list is not taken for gone.
+@pytest.mark.asyncio
+async def test_a_host_run_is_out_of_reach_when_ps_fails(tmp_path, monkeypatch):
+    fake = tmp_path / "ps"
+    fake.write_text('#!/bin/sh\ncase "$1" in -A) kill -9 $$ ;; esac\nexit 1\n')
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    assert not await reap_host_run(host_run(2**22 + 7, ["x"]), 15)
 
 
 def _denied(group: int, signum: int) -> None:

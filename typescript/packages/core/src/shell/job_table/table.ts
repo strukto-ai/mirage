@@ -1215,7 +1215,8 @@ export class JobTable {
    * again every third of the lease, so it outlives its store's expiry and
    * comes back should a workspace have taken this one for lapsed. Each
    * record carries `seen_at`, when its processes were read, the last time
-   * this workspace vouched for them and their native runs. A failed
+   * this workspace vouched for them and their native runs, on the host's
+   * clock, which a host reap compares with `ps`. A failed
    * round is logged and tried again the next one, and a stop that fails
    * leaves the others it came with to be applied; the sleep between rounds
    * keeps no host alive on its own.
@@ -1227,7 +1228,7 @@ export class JobTable {
     let renewed = lease === null
     let rounds = 0
     for (;;) {
-      const seen = this.clock.now()
+      const seen = Date.now() / 1000
       const records = this.records()
       const text = JSON.stringify(records)
       try {

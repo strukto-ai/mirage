@@ -246,16 +246,25 @@ export function hostRun(pid: number, argv: readonly string[]): Record<string, Js
   return { host: hostname(), pid, started_at: Date.now() / 1000, command: shellJoin(argv) }
 }
 
-/** What `ps` prints given `args`, in the C locale; rejects when the host has no `ps`. */
+/**
+ * What `ps` prints given `args`, in the C locale, however long. Rejects when
+ * the host has no `ps`, or it ended on a signal before it printed everything;
+ * an exit status is its answer, as for a PID no process has.
+ */
 function ps(args: readonly string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('ps', [...args], { env: { ...process.env, LC_ALL: 'C' } }, (error, stdout) => {
-      if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
-        reject(error as Error)
-        return
-      }
-      resolve(stdout)
-    })
+    execFile(
+      'ps',
+      [...args],
+      { env: { ...process.env, LC_ALL: 'C' }, maxBuffer: Infinity },
+      (error, stdout) => {
+        if (error !== null && typeof (error as NodeJS.ErrnoException).code !== 'number') {
+          reject(error as Error)
+          return
+        }
+        resolve(stdout)
+      },
+    )
   })
 }
 
@@ -309,8 +318,10 @@ async function groupStarted(group: number): Promise<number[]> {
  * run (`seen_at`), with the leader still unreaped. The host gives no new
  * process the id of a group that has members, and hands a number out again
  * only after a full round of the others, so a group that took the id later
- * has only members started since. A group this workspace may not signal is
- * not reached while its leader still runs
+ * has only members started since. One none of whose members proves it is not
+ * reached: its members may all have started since, the run's descendants, so
+ * its record stays. A group this workspace may not signal is not reached
+ * while its leader still runs
  * (macOS answers EPERM for one that only exited unreaped). Answers true once
  * the run is stopped or gone, false when this workspace cannot reach it.
  * Mirrors Python's `reap_host_run`.
@@ -340,12 +351,13 @@ export async function reapHostRun(
   if (started !== null) {
     if (Math.abs(started - recorded) > HOST_START_SLACK_SECONDS) return true
   } else {
+    if (members.length === 0) return true
     const known = run.exited_at ?? run.seen_at
     if (
       typeof known !== 'number' ||
       !members.some((start) => start <= known + HOST_START_SLACK_SECONDS)
     )
-      return true
+      return false
   }
   try {
     process.kill(-pid, signum)

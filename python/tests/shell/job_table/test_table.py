@@ -1217,13 +1217,16 @@ async def _until(check: Callable[[], Awaitable[bool]]) -> None:
 
 
 # A table on a shared store publishes the processes it runs while it runs
-# any, each stamped with when it read them, and its record goes once it
-# runs none; another table lists them.
+# any, each stamped with when it read them on the host's clock, whatever
+# clock the table keeps, and its record goes once it runs none; another
+# table lists them.
 @pytest.mark.asyncio
 async def test_a_table_publishes_its_processes_while_it_runs_any(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
     store = RAMJobStore(lease_seconds=30.0)
-    a, b = _publishing(store), _publishing(store)
+    processes = ProcessTable(changed=lambda: a.processes_changed())
+    a = JobTable(store, processes, None, ManualClock())
+    b = _publishing(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
 
     async def listed() -> bool:

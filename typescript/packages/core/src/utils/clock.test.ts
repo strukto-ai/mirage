@@ -66,6 +66,10 @@ const KEPT_ON_SYSTEM_CLOCK: Record<string, string> = {
   'shell/job_table/table.ts sleep':
     'paces the retry of a failed watch, which reads the store on real time; a ' +
     "manual clock's sleep returns at once and would spin the retry",
+  'shell/job_table/table.ts Date.now':
+    'stamps seen_at on the process records, which a host reap compares with the start ' +
+    "times ps prints, on the host's wall clock; a manual clock's time would prove " +
+    "nothing about the host's processes",
   'shell/job_table/ram.ts performance.now':
     "an owner's lease is compared by every table sharing the store, and those " +
     'tables may hold different clocks, so it stays on the process monotonic ' +

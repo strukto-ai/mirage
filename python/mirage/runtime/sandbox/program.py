@@ -239,7 +239,8 @@ async def _ps(*args: str) -> str:
         *args (str): its options.
 
     Raises:
-        OSError: the host has no ``ps``.
+        OSError: the host has no ``ps``, or it ended on a signal before
+            it printed everything.
     """
     ps = await asyncio.create_subprocess_exec(
         "ps",
@@ -249,6 +250,8 @@ async def _ps(*args: str) -> str:
         env={**os.environ, "LC_ALL": "C"},
     )
     out, _ = await ps.communicate()
+    if ps.returncode is not None and ps.returncode < 0:
+        raise OSError(f"ps ended on signal {-ps.returncode}")
     return out.decode()
 
 
@@ -310,9 +313,12 @@ async def reap_host_run(run: Mapping[str, JsonValue], signum: int) -> bool:
     vouched for the run (``seen_at``), with the leader still unreaped.
     The host gives no new process the id of a group that has members,
     and hands a number out again only after a full round of the others,
-    so a group that took the id later has only members started since. A
-    group this workspace may not signal is not reached while its leader
-    still runs (macOS answers EPERM for one that only exited unreaped).
+    so a group that took the id later has only members started since.
+    One none of whose members proves it is not reached: its members may
+    all have started since, the run's descendants, so its record stays.
+    A group this workspace may not signal is not reached while its
+    leader still runs (macOS answers EPERM for one that only exited
+    unreaped).
 
     Args:
         run (Mapping[str, JsonValue]): the run as ``host_run`` keeps it.
@@ -340,11 +346,13 @@ async def reap_host_run(run: Mapping[str, JsonValue], signum: int) -> bool:
         if abs(started - recorded) > HOST_START_SLACK_SECONDS:
             return True
     else:
+        if not members:
+            return True
         known = run.get("exited_at", run.get("seen_at"))
         if not isinstance(known, (int, float)) or not any(
             start <= known + HOST_START_SLACK_SECONDS for start in members
         ):
-            return True
+            return False
     try:
         os.killpg(pid, signum)
         async with asyncio.timeout(STOP_GRACE_SECONDS):

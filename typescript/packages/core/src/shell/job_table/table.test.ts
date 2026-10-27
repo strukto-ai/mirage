@@ -1514,11 +1514,16 @@ async function until(check: () => Promise<boolean>): Promise<void> {
 
 describe('JobTable process plane', () => {
   // A table on a shared store publishes the processes it runs while it runs
-  // any, each stamped with when it read them, and its record goes once it
-  // runs none; another table lists them.
+  // any, each stamped with when it read them on the host's clock, whatever
+  // clock the table keeps, and its record goes once it runs none; another
+  // table lists them.
   it('publishes its processes while it runs any', async () => {
     const store = new RAMJobStore(30)
-    const [a, b] = [publishing(store), publishing(store)]
+    const processes: ProcessTable = new ProcessTable(undefined, undefined, () => {
+      a.processesChanged()
+    })
+    const a: JobTable = new JobTable(store, processes, null, new ManualClock())
+    const b = publishing(store)
     const abort = new AbortController()
     const job = await a.submit({
       command: 'sleep 30',

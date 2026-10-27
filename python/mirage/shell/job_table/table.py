@@ -16,6 +16,7 @@ import asyncio
 import errno
 import logging
 import secrets
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -1402,7 +1403,8 @@ class JobTable:
         of the lease, so it outlives its store's expiry and comes back
         should a workspace have taken this one for lapsed. Each record
         carries ``seen_at``, when its processes were read, the last time
-        this workspace vouched for them and their native runs. A failed
+        this workspace vouched for them and their native runs, on the
+        host's clock, which a host reap compares with ``ps``. A failed
         round is logged and tried again the next one, and a stop that
         fails leaves the others it came with to be applied.
         """
@@ -1416,7 +1418,7 @@ class JobTable:
         renewed = lease is None
         rounds = 0
         while True:
-            seen = self.clock.now()
+            seen = time.time()
             records = self._records()
             try:
                 if not renewed:

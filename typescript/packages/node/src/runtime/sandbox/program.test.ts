@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -637,8 +637,9 @@ describe('host runs', () => {
 
   // A run whose leader exited before the program it started is stopped too,
   // its group outliving the leader, while a member started by the time the
-  // group was last known to be the run's: a group that took the id since,
-  // or one never known, is left alone.
+  // group was last known to be the run's; a group none of whose members
+  // proves that, which may have taken the id since, is left alone and out of
+  // reach, so its record stays.
   it('reaps a left host run whose leader exited', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
@@ -651,13 +652,31 @@ describe('host runs', () => {
     const exited = { ...run, exited_at: Date.now() / 1000 }
     const survivor = await escapedPid(pidFile)
     try {
-      expect(await reapHostRun(run, 15)).toBe(true)
-      expect(await reapHostRun({ ...run, seen_at: (run.started_at as number) - 60 }, 15)).toBe(true)
+      expect(await reapHostRun(run, 15)).toBe(false)
+      expect(await reapHostRun({ ...run, seen_at: (run.started_at as number) - 60 }, 15)).toBe(
+        false,
+      )
       expect(running(survivor)).toBe(true)
       expect(await reapHostRun(exited, 15)).toBe(true)
       expect(await ended(survivor)).toBe(true)
     } finally {
       if (running(survivor)) process.kill(survivor, 'SIGKILL')
+    }
+  })
+
+  // A host whose ps fails before it lists every process reaches nothing: a
+  // group missing from a cut-short list is not taken for gone.
+  it('leaves a host run out of reach when ps fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    writeFileSync(join(dir, 'ps'), '#!/bin/sh\ncase "$1" in -A) kill -9 $$ ;; esac\nexit 1\n', {
+      mode: 0o755,
+    })
+    const path = process.env.PATH
+    process.env.PATH = `${dir}:${path ?? ''}`
+    try {
+      expect(await reapHostRun(hostRun(2 ** 22 + 7, ['x']), 15)).toBe(false)
+    } finally {
+      process.env.PATH = path
     }
   })
 
