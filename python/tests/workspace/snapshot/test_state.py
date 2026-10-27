@@ -2100,3 +2100,17 @@ async def test_an_override_index_serves_every_prefix_of_its_vfs(named):
         state, {named: Mount(vfs=RAMVFS(), index=fresh)}, None
     )
     assert args.mount_args["/a/"].index == fresh
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("order", [("/a/", "/b/"), ("/b/", "/a/")])
+async def test_the_first_saved_prefix_override_index_wins(order):
+    shared = RAMVFS()
+    state = await _saved_state({"/a": shared, "/b": shared})
+    live = RAMVFS()
+    given = {
+        "/a/": Mount(vfs=live, index=IndexConfig(ttl=600)),
+        "/b/": Mount(vfs=live, index=IndexConfig(ttl=1)),
+    }
+    args = build_mount_args(state, {p: given[p] for p in order}, None)
+    assert args.mount_args["/a/"].index == IndexConfig(ttl=600)
