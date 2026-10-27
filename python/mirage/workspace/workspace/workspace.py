@@ -1838,7 +1838,8 @@ class Workspace:
             source (str | Path | BinaryIO): filesystem path OR a readable
                 file-like object; with ``s3``, the object key.
             mounts: {prefix: VFS} overrides for mounts saved
-                with redacted creds.
+                with redacted creds; one for a prefix of a VFS saved at
+                several prefixes also serves those with none of their own.
             clis: {name: config} overrides for CLIs saved with
                 redacted config secrets; a (spec, config) tuple also
                 carries a live spec (how copy() shares directly
@@ -1932,7 +1933,8 @@ class Workspace:
         Args:
             state: a state dict from ``to_state_dict`` or a version.
             mounts: {prefix: VFS} overrides for mounts saved
-                with redacted creds.
+                with redacted creds; one for a prefix of a VFS saved at
+                several prefixes also serves those with none of their own.
             clis: {name: config} overrides for CLIs saved with
                 redacted config secrets; a (spec, config) tuple also
                 carries a live spec (how copy() shares directly
@@ -2018,7 +2020,7 @@ class Workspace:
         state = await to_state_dict(self)
         for mount in self._registry.mounts():
             for saved in state["mounts"]:
-                if saved["prefix"] == mount.prefix:
+                if saved["prefix"] == mount.prefix and saved["index_config"]:
                     saved["index_config"] = index_config_dump(
                         mount.index_config, reveal=True
                     )
@@ -2066,12 +2068,12 @@ class Workspace:
         # narrowing it gives them, as a checkout's do.
         built_for_state = profiles is None and profile is None
         # No read= here: each restored Mount carries its own spec, and
-        # its own mode, so `mode` reaches only the scratch root the
-        # workspace adds again.
+        # its own mode, so `mode` reaches only a scratch root the
+        # workspace adds, for a state that saved none.
         ws = cls(
             args.mount_args,
             io=args.io,
-            mode=args.anchor_mode or MountMode.READ,
+            mode=MountMode.READ,
             write=args.write_default,
             session_id=args.default_session_id,
             clis=args.clis,
@@ -2085,6 +2087,9 @@ class Workspace:
             clock=clock,
             ids=ids,
         )
+        if args.anchored:
+            ws._implicit_root = True
+            ws._registry.anchor_root(ws._registry.mount_for_prefix("/"))
         if mounts:
             ws._shared_mounts = {
                 id(r.vfs if isinstance(r, Mount) else r)

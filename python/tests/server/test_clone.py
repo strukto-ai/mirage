@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import pytest
 from pydantic import BaseModel, ConfigDict
 
@@ -30,6 +32,8 @@ from mirage.vfs.gdrive.config import GoogleDriveConfig
 from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.slack import SlackConfig, SlackVFS
+from mirage.workspace.snapshot import to_state_dict
+from mirage.workspace.snapshot.keys import VFSStateKey
 
 
 class AccountConfig(BaseModel):
@@ -310,6 +314,141 @@ async def test_a_clone_runs_on_the_source_clock():
         try:
             assert cloned.clock is clock
             assert vfs.accessor.token_manager.clock is clock
+        finally:
+            await cloned.close()
+    finally:
+        await src.close()
+
+
+@pytest.mark.asyncio
+async def test_an_override_for_one_prefix_moves_its_whole_store():
+    shared = SlackVFS(SlackConfig(token="xoxb-secret"))
+    src = Workspace(
+        {
+            "/a": Mount(vfs=shared, vfs_ref="slack"),
+            "/b": Mount(vfs=shared, vfs_ref="slack"),
+        }
+    )
+    try:
+        cloned = await clone_workspace_with_override(
+            src, {"mounts": {"/b": {"vfs": "ram"}}}
+        )
+        try:
+            assert cloned.mount("/a").vfs is cloned.mount("/b").vfs
+            assert isinstance(cloned.mount("/a").vfs, RAMVFS)
+            assert cloned.mount("/a").vfs_ref == "ram"
+            again = await cloned.copy()
+            await again.close()
+        finally:
+            await cloned.close()
+    finally:
+        await src.close()
+
+
+@pytest.mark.asyncio
+async def test_an_override_for_a_prefix_the_source_lacks_moves_nothing():
+    shared = SlackVFS(SlackConfig(token="xoxb-secret"))
+    src = Workspace({"/a": shared, "/b": shared})
+    try:
+        cloned = await clone_workspace_with_override(
+            src, {"mounts": {"/new": {"vfs": "ram"}}}
+        )
+        try:
+            assert cloned.mount("/a").vfs is shared
+            assert cloned.mount("/b").vfs is shared
+        finally:
+            await cloned.close()
+    finally:
+        await src.close()
+
+
+class LiveRAM(RAMVFS):
+    """A RAM VFS that asks to be handed back live."""
+
+    def get_state(self) -> dict[str, Any]:
+        return {**super().get_state(), VFSStateKey.NEEDS_OVERRIDE: True}
+
+
+async def _root_on_live(live: type[RAMVFS] = LiveRAM) -> Workspace:
+    ws = Workspace({"/a": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        ws.add_mount("/x", ws.mount("/").vfs, mode=MountMode.WRITE)
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    return await Workspace.from_state(state, mounts={"/x": live()})
+
+
+@pytest.mark.asyncio
+async def test_a_clone_keeps_a_shared_scratch_root_the_scratch_root():
+    src = await _root_on_live()
+    try:
+        cloned = await clone_workspace_with_override(src, None)
+        try:
+            assert cloned.mount("/").vfs is src.mount("/x").vfs
+            assert not cloned.vfs.is_mounted("/tmp/x")
+        finally:
+            await cloned.close()
+    finally:
+        await src.close()
+
+
+class ConfigOnlyRAM(RAMVFS):
+    """A live VFS whose state, like S3's, carries no content."""
+
+    def get_state(self) -> dict[str, Any]:
+        return {VFSStateKey.TYPE: "ram", VFSStateKey.NEEDS_OVERRIDE: True}
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("live", [LiveRAM, ConfigOnlyRAM])
+async def test_a_clone_shares_a_scratch_root_left_alone_on_a_live_vfs(live):
+    src = await _root_on_live(live)
+    try:
+        assert (await src.shell("echo hi > /x/f")).exit_code == 0
+        await src.unmount("/x")
+        cloned = await clone_workspace_with_override(src, None)
+        try:
+            assert cloned.mount("/").vfs is src.mount("/").vfs
+            assert await (await cloned.shell("cat /f")).stdout_str() == "hi\n"
+            assert not cloned.vfs.is_mounted("/tmp/x")
+        finally:
+            await cloned.close()
+    finally:
+        await src.close()
+
+
+@pytest.mark.asyncio
+async def test_a_clone_rebuilds_a_vfs_whose_later_label_is_unresolvable():
+    shared = RAMVFS()
+    src = Workspace(
+        {"/a": shared, "/b": Mount(vfs=shared, vfs_ref="nosuch:Thing")}
+    )
+    try:
+        cloned = await clone_workspace_with_override(src, None)
+        try:
+            assert cloned.mount("/a").vfs is cloned.mount("/b").vfs
+            assert cloned.mount("/a").vfs is not shared
+        finally:
+            await cloned.close()
+    finally:
+        await src.close()
+
+
+@pytest.mark.asyncio
+async def test_a_clone_override_for_the_scratch_root_keeps_it_the_root():
+    src = Workspace({"/a": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        assert (await src.shell("echo hi > /f")).exit_code == 0
+        cloned = await clone_workspace_with_override(
+            src, {"mounts": {"/": {"vfs": "ram"}}}
+        )
+        try:
+            assert await (await cloned.shell("cat /f")).stdout_str() == "hi\n"
+            assert not cloned.vfs.is_mounted("/tmp/x")
         finally:
             await cloned.close()
     finally:

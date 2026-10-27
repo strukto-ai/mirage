@@ -37,8 +37,8 @@ class MountRow:
         sizes_always_known (bool): mirrors ``BaseVFS.sizes_always_known``;
             read by the fskit mount guard, which cannot serve a VFS that
             sizes files only on read.
-        anchor (bool): the scratch root the workspace adds when no mount
-            claims ``/``, which nobody mounted.
+        anchor (bool): the scratch root: the one the workspace adds when
+            no mount claims ``/``, or one a restore marks as such.
         visible (Callable[[str | None], bool] | None): whether the
             session a call through a facade of the given session id runs
             as (None: the default facade) is told of the mount at all,

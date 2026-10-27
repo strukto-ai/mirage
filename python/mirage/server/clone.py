@@ -26,6 +26,7 @@ from mirage.vfs.registry import build_vfs
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.mount.write_policy import coerce_write_policy
 from mirage.workspace.snapshot import requires_vfs_override, to_state_dict
+from mirage.workspace.snapshot.state import vfs_groups, vfs_leaders
 
 
 async def build_override_mounts(
@@ -100,12 +101,20 @@ def _existing_redacted_mounts(
         for m in ws._registry.mounts()
         if m.prefix not in auto_prefixes
     }
+    # An override moves every prefix of the VFS it replaces, as a load's
+    # does, so none of them keeps the source's.
+    groups = vfs_groups(state)
+    leaders = vfs_leaders(state)
+    moved = {groups[p] for p in skip if p in groups}
     out: dict[str, Any] = {}
     for m in state["mounts"]:
         prefix = m["prefix"]
-        if norm_dir(prefix) in skip:
+        if groups[norm_dir(prefix)] in moved:
             continue
-        if requires_vfs_override(m) and prefix in prefix_to_vfs:
+        if (
+            requires_vfs_override(leaders[norm_dir(prefix)])
+            and prefix in prefix_to_vfs
+        ):
             out[prefix] = prefix_to_vfs[prefix]
     return out
 
@@ -123,7 +132,8 @@ async def clone_workspace_with_override(
           -- they share connection pools and bucket data.
         * If ``override`` supplies a fresh VFS for a prefix, that
           VFS replaces the reused one -- e.g. point the clone at
-          a different S3 bucket.
+          a different S3 bucket. A VFS the source mounts at several
+          prefixes is replaced at all of them.
 
     Args:
         src_ws (Workspace): the source workspace.

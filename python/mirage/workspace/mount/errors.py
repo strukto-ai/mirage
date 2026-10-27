@@ -17,6 +17,10 @@ class WritePolicyError(ValueError):
     """A write policy a mount or snapshot cannot take, refused at load."""
 
 
+class MountOverrideError(ValueError):
+    """Overrides hand one saved VFS different VFSs, leaving a prefix without one."""
+
+
 class MountCommandAmbiguous(ValueError):
     """A pathless write has more than one eligible mount."""
 

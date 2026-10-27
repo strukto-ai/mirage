@@ -23,6 +23,8 @@ import type { SecretEntries } from '@struktoai/mirage-core/secrets/config'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import { buildOverrideMounts, cloneWorkspaceWithOverride } from './clone.ts'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
+import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
+import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { ALL_COMMANDS } from '@struktoai/mirage-core/policy/builtin/output_cap'
 
 const AccountConfig = z.strictObject({ account: z.string().default('default') })
@@ -38,6 +40,38 @@ function brokenBootstrap(source: string): SecretEntries {
   return {
     prod: { source, config: { account: { from: 'dotenv', ref: '/no/such/file', key: 'ACCOUNT' } } },
   }
+}
+
+/** A RAM VFS that asks to be handed back live. */
+class LiveRAM extends RAMVFS {
+  override getState(): ReturnType<RAMVFS['getState']> {
+    // Through a variable: the literal fails RAMVFSState's excess-property check.
+    const state = { ...super.getState(), needs_override: true }
+    return state
+  }
+}
+
+/** A live VFS whose state, like S3's, carries no content. */
+class ConfigOnlyRAM extends RAMVFS {
+  override getState(): ReturnType<RAMVFS['getState']> {
+    return { type: 'ram', needs_override: true } as unknown as ReturnType<RAMVFS['getState']>
+  }
+
+  override loadState(): void {
+    return
+  }
+}
+
+async function rootOnLive(live: RAMVFS = new LiveRAM()): Promise<Workspace> {
+  const ws = new Workspace({ '/a': new RAMVFS() }, { mode: MountMode.WRITE })
+  let state: WorkspaceStateDict
+  try {
+    ws.addMount('/x', ws.mount('/').vfs, MountMode.WRITE)
+    state = await toStateDict(ws)
+  } finally {
+    await ws.close()
+  }
+  return Workspace.fromState(state, {}, { '/x': live })
 }
 
 function capped(): Mount {
@@ -208,5 +242,94 @@ describe('cloneWorkspaceWithOverride', () => {
       }),
     ).rejects.toThrow('secrets.prod.config.account')
     await src.close()
+  })
+
+  it('moves every prefix of the store an override replaces', async () => {
+    const shared = (await buildVfs('slack', { token: 'xoxb-secret' })) as SlackVFS
+    const src = new Workspace({
+      '/a': new Mount(shared, { vfsRef: 'slack' }),
+      '/b': new Mount(shared, { vfsRef: 'slack' }),
+    })
+    try {
+      const cloned = await cloneWorkspaceWithOverride(src, { mounts: { '/b': { vfs: 'ram' } } })
+      try {
+        expect(cloned.mount('/a/').vfs).toBe(cloned.mount('/b/').vfs)
+        expect(cloned.mount('/a/').vfs).toBeInstanceOf(RAMVFS)
+        expect(cloned.mount('/a/').vfsRef).toBe('ram')
+        await (await cloned.copy()).close()
+      } finally {
+        await cloned.close()
+      }
+    } finally {
+      await src.close()
+    }
+  })
+
+  it('moves nothing for an override of a prefix the source lacks', async () => {
+    const shared = (await buildVfs('slack', { token: 'xoxb-secret' })) as SlackVFS
+    const src = new Workspace({ '/a': shared, '/b': shared })
+    try {
+      const cloned = await cloneWorkspaceWithOverride(src, { mounts: { '/new': { vfs: 'ram' } } })
+      try {
+        expect(cloned.mount('/a/').vfs).toBe(shared)
+        expect(cloned.mount('/b/').vfs).toBe(shared)
+      } finally {
+        await cloned.close()
+      }
+    } finally {
+      await src.close()
+    }
+  })
+
+  it('keeps a shared scratch root the scratch root through a clone', async () => {
+    const src = await rootOnLive()
+    try {
+      const cloned = await cloneWorkspaceWithOverride(src, null)
+      try {
+        expect(cloned.mount('/').vfs).toBe(src.mount('/x/').vfs)
+        expect(cloned.syntheticRoot).toBe(true)
+      } finally {
+        await cloned.close()
+      }
+    } finally {
+      await src.close()
+    }
+  })
+
+  it.each([
+    ['LiveRAM', () => new LiveRAM()],
+    ['ConfigOnlyRAM', () => new ConfigOnlyRAM()],
+  ])('shares a scratch root left alone on a live VFS through a clone (%s)', async (_n, live) => {
+    const src = await rootOnLive(live())
+    try {
+      expect((await src.shell('echo hi > /x/f')).exitCode).toBe(0)
+      await src.unmount('/x')
+      const cloned = await cloneWorkspaceWithOverride(src, null)
+      try {
+        expect(cloned.mount('/').vfs).toBe(src.mount('/').vfs)
+        expect((await cloned.shell('cat /f')).stdoutText).toBe('hi\n')
+        expect(cloned.syntheticRoot).toBe(true)
+      } finally {
+        await cloned.close()
+      }
+    } finally {
+      await src.close()
+    }
+  })
+
+  it('keeps the scratch root the scratch root under a clone override for it', async () => {
+    const src = new Workspace({ '/a': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      expect((await src.shell('echo hi > /f')).exitCode).toBe(0)
+      const cloned = await cloneWorkspaceWithOverride(src, { mounts: { '/': { vfs: 'ram' } } })
+      try {
+        expect((await cloned.shell('cat /f')).stdoutText).toBe('hi\n')
+        expect(cloned.syntheticRoot).toBe(true)
+      } finally {
+        await cloned.close()
+      }
+    } finally {
+      await src.close()
+    }
   })
 })

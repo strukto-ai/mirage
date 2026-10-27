@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { vfsStateRequiresOverride } from '@struktoai/mirage-core/vfs/secrets'
-import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
+import { toStateDict, vfsGroups } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { normDir } from '@struktoai/mirage-core/utils/slash'
 import type { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -82,10 +82,14 @@ function existingRedactedMounts(
   for (const m of src.mounts()) {
     prefixToVfs[normDir(m.prefix)] = m.vfs
   }
+  // An override moves every prefix of the VFS it replaces, as a load's
+  // does, so none of them keeps the source's.
+  const groups = vfsGroups(state)
+  const moved = new Set([...skip].map((p) => groups.get(normDir(p)) ?? normDir(p)))
   const out: Record<string, BaseVFS> = {}
   for (const m of state.mounts) {
     const prefix = normDir(m.prefix)
-    if (skip.has(prefix)) continue
+    if (moved.has(groups.get(prefix) ?? prefix)) continue
     const vfs = prefixToVfs[prefix]
     if (vfs !== undefined && vfsStateRequiresOverride(m.vfs_state)) {
       out[prefix] = vfs

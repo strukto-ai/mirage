@@ -20,6 +20,14 @@ export class WritePolicyError extends Error {
   }
 }
 
+/** Overrides hand one saved VFS different VFSs, leaving a prefix without one. Mirrors Python's `MountOverrideError`. */
+export class MountOverrideError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'MountOverrideError'
+  }
+}
+
 /** A pathless write could reach more than one writable mount. */
 export class MountCommandAmbiguous extends Error {
   constructor(cmdName: string, prefixes: readonly string[]) {

@@ -17,6 +17,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '@struktoai/mirage-node'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { MountMode } from '@struktoai/mirage-core/types'
 import { buildApp } from '../app.ts'
 import type * as multipart from '../multipart.ts'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
@@ -563,6 +565,30 @@ describe('workspaces router', () => {
       await app.close()
       rmSync(root, { recursive: true, force: true })
     }
+  })
+
+  it('POST /v1/workspaces/:id/clone 400s for two VFSs given one saved VFS', async () => {
+    const app = buildApp()
+    const shared = new RAMVFS()
+    const src = new Workspace(
+      { '/a': shared, '/b': shared, '/c': shared },
+      { mode: MountMode.WRITE },
+    )
+    let tar: Uint8Array
+    try {
+      tar = await src.snapshot()
+    } finally {
+      await src.close()
+    }
+    expect((await upload(app, tar, { id: 'src-same' })).statusCode).toBe(201)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/src-same/clone',
+      payload: { override: { mounts: { '/a': { vfs: 'ram' }, '/b': { vfs: 'ram' } } } },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json<{ detail: string }>().detail).toContain('override /c/ too')
+    await app.close()
   })
 
   it('POST /v1/workspaces/:id/clone 400s for an unknown mount config key', async () => {
