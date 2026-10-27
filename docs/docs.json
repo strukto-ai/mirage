@@ -303,8 +303,7 @@
               "home/infrastructure/history",
               "home/infrastructure/jobs",
               "home/infrastructure/file-cache",
-              "home/infrastructure/file-index",
-              "home/infrastructure/server"
+              "home/infrastructure/file-index"
             ]
           },
           {
