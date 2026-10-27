@@ -248,7 +248,7 @@ curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/profiles/reader \
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/clone`
 
 <ParamField body="id" type="string">The new workspace's id.</ParamField>
-<ParamField body="override" type="object">A config whose mounts replace the source's.</ParamField>
+<ParamField body="override" type="object">A config whose mounts replace the source's. A mount the source has at several prefixes is replaced at all of them by an override for one; overriding more than one of those prefixes but not all answers `400`, and overriding all of them gives each its own mount. The scratch root stays the scratch root, an override for it included.</ParamField>
 
 Answers `201` and the new workspace.
 
@@ -270,7 +270,7 @@ Upload the tar as `multipart/form-data`: a `request` part holding the JSON field
 
 <ParamField body="key" type="string">The tar's key in the snapshot store; leave it out when uploading.</ParamField>
 <ParamField body="id" type="string">The new workspace's id.</ParamField>
-<ParamField body="override" type="object">A config that re-supplies the redacted credentials.</ParamField>
+<ParamField body="override" type="object">A config that re-supplies the redacted credentials. A mount the snapshot saved at several prefixes takes one override for all of them; overriding more than one of those prefixes but not all answers `400`, and overriding all of them gives each its own mount. The scratch root stays the scratch root, an override for it included.</ParamField>
 
 Answers `201` and the new workspace.
 
