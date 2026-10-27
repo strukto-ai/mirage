@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { closeChildren, openProgramPipe, runProgram } from './program.ts'
+import { closeChildren, hostRun, openProgramPipe, reapHostRun, runProgram } from './program.ts'
 import { ProcessTable } from '@struktoai/mirage-core/process/table'
 import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
@@ -40,6 +40,14 @@ async function ended(pid: number): Promise<boolean> {
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
   return false
+}
+
+// Whether `pid` runs: present, and no zombie.
+function running(pid: number): boolean {
+  const state = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+    encoding: 'utf8',
+  }).stdout.trim()
+  return state !== '' && !state.startsWith('Z')
 }
 
 // A child that starts a sleep in a session of its own, so killing the
@@ -533,5 +541,167 @@ describe('openProgramPipe', () => {
     await delay(500)
     const stopped = pipe.stop().then(() => 'stopped')
     expect(await Promise.race([stopped, delay(5000, 'stuck', { ref: false })])).toBe('stopped')
+  })
+})
+
+describe('host runs', () => {
+  // A host program a runtime keeps as its child is one of the runner's
+  // native runs while it runs: this host, its PID and when it started, so a
+  // workspace that outlives this one can stop it; it goes once it ended.
+  it("keeps a kept child as one of its runner's native runs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const children = new Set<ChildProcess>()
+    const runner = new ProcessTable(runWithExecution).start({
+      sessionId: 's',
+      command: 'sh',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      run: async () =>
+        (
+          await runProgram('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.3`], null, {
+            children,
+          })
+        ).exitCode,
+    })
+    const pid = await escapedPid(pidFile)
+    const run = runner.runs[`host:${String(pid)}`]
+    expect([run?.host, run?.pid, run?.command]).toEqual([
+      hostname(),
+      pid,
+      `sh -c 'echo $$ > ${pidFile}; sleep 0.3'`,
+    ])
+    expect(Math.abs((run?.started_at as number) - Date.now() / 1000)).toBeLessThan(5)
+    expect((await runner.join()).exitCode).toBe(0)
+    expect(runner.runs).toEqual({})
+  })
+
+  // A kept child that exits while what it started holds its output open
+  // marks its run with when it exited, the last time its group was known.
+  it('marks the run of a kept child that exits first', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const children = new Set<ChildProcess>()
+    const runner = new ProcessTable(runWithExecution).start({
+      sessionId: 's',
+      command: 'sh',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      run: async () =>
+        (
+          await runProgram('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.5 &`], null, {
+            children,
+          })
+        ).exitCode,
+    })
+    const key = `host:${String(await escapedPid(pidFile))}`
+    const deadline = Date.now() + 5000
+    while (runner.runs[key]?.exited_at === undefined && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    const exited = runner.runs[key]?.exited_at
+    expect(typeof exited === 'number' && Math.abs(exited - Date.now() / 1000) < 5).toBe(true)
+    expect((await runner.join()).exitCode).toBe(0)
+    expect(runner.runs).toEqual({})
+  })
+
+  // A run a lapsed workspace left on this host is stopped, its whole group,
+  // while its PID still names the process it started; a PID that names a
+  // later process, or a run of another host, is left alone.
+  it('reaps a left host run only while it is the same', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const child = spawn(
+      'sh',
+      ['-c', `trap '' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`],
+      { detached: true, stdio: 'ignore' },
+    )
+    const exited = new Promise<string | null>((resolve) => {
+      child.once('exit', (_code, signal) => {
+        resolve(signal)
+      })
+    })
+    const pid = await escapedPid(pidFile)
+    const run = hostRun(pid, ['sh'])
+    try {
+      expect(await reapHostRun({ ...run, host: 'elsewhere' }, 15)).toBe(false)
+      expect(await reapHostRun({ ...run, started_at: null }, 15)).toBe(false)
+      expect(await reapHostRun({ ...run, started_at: 0 }, 15)).toBe(true)
+      expect(child.exitCode === null && child.signalCode === null).toBe(true)
+      expect(await reapHostRun(run, 15)).toBe(true)
+      expect(await exited).toBe('SIGKILL')
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) process.kill(-pid, 'SIGKILL')
+    }
+  })
+
+  // A run whose leader exited before the program it started is stopped too,
+  // its group outliving the leader, while a member started by the time the
+  // group was last known to be the run's; a group none of whose members
+  // proves that, which may have taken the id since, is left alone and out of
+  // reach, so its record stays.
+  it('reaps a left host run whose leader exited', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const child = spawn('sh', ['-c', `sleep 30 & echo $! > ${pidFile}`], {
+      detached: true,
+      stdio: 'ignore',
+    })
+    const run = hostRun(child.pid ?? 0, ['sh'])
+    await new Promise((resolve) => child.once('exit', resolve))
+    const exited = { ...run, exited_at: Date.now() / 1000 }
+    const survivor = await escapedPid(pidFile)
+    try {
+      expect(await reapHostRun(run, 15)).toBe(false)
+      expect(await reapHostRun({ ...run, seen_at: (run.started_at as number) - 60 }, 15)).toBe(
+        false,
+      )
+      expect(running(survivor)).toBe(true)
+      expect(await reapHostRun(exited, 15)).toBe(true)
+      expect(await ended(survivor)).toBe(true)
+    } finally {
+      if (running(survivor)) process.kill(survivor, 'SIGKILL')
+    }
+  })
+
+  // A host whose ps fails before it lists every process reaches nothing: a
+  // group missing from a cut-short list is not taken for gone.
+  it('leaves a host run out of reach when ps fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    writeFileSync(join(dir, 'ps'), '#!/bin/sh\ncase "$1" in -A) kill -9 $$ ;; esac\nexit 1\n', {
+      mode: 0o755,
+    })
+    const path = process.env.PATH
+    process.env.PATH = `${dir}:${path ?? ''}`
+    try {
+      expect(await reapHostRun(hostRun(2 ** 22 + 7, ['x']), 15)).toBe(false)
+    } finally {
+      process.env.PATH = path
+    }
+  })
+
+  // A group this workspace may not signal is out of its reach while its
+  // leader still runs, so a workspace with the rights can stop it later.
+  it('leaves a host run it may not signal out of reach', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const child = spawn('sh', ['-c', `echo $$ > ${pidFile}; while :; do sleep 0.05; done`], {
+      detached: true,
+      stdio: 'ignore',
+    })
+    const pid = await escapedPid(pidFile)
+    const kill = process.kill.bind(process)
+    const spy = vi.spyOn(process, 'kill').mockImplementation((target, signal) => {
+      if (target === -pid)
+        throw Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })
+      return kill(target, signal)
+    })
+    try {
+      expect(await reapHostRun(hostRun(pid, ['sh']), 15)).toBe(false)
+    } finally {
+      spy.mockRestore()
+      process.kill(-pid, 'SIGKILL')
+      child.unref()
+    }
   })
 })

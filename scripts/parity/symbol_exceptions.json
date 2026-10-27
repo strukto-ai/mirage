@@ -234,6 +234,7 @@
   "runtime/sandbox/program": {
    "python_only": {
     "STREAM_LIMIT": "Python's stream readers take a buffer size, the subprocess protocol's and the ssh channel's reads; Node's streams size their own.",
+    "_ExitWatch": "asyncio's Process.wait answers only once every pipe closed, so run_program reads the child's exit from its stream protocol; Node's child emits 'exit' at the exit itself.",
     "_drop": "end_tree drains a stopping child's output with a reader task per asyncio StreamReader; Node drops a stream's data by resuming it with no listener.",
     "_spawn": "run_program and open_program_pipe share one loop.subprocess_exec spawn that keeps the transport stop_tree closes; Node's spawn hands back a ChildProcess whose streams close themselves."
    },

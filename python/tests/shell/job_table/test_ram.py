@@ -87,6 +87,31 @@ async def test_an_owner_lives_while_its_lease_holds():
     assert not await store.alive("o")
 
 
+@pytest.mark.asyncio
+async def test_an_owners_processes_are_published_and_dropped():
+    store = RAMJobStore()
+    record = {"pid": 2, "command": "sleep 30", "runs": []}
+    await store.publish("a", {"2": record})
+    await store.publish("b", {"5": {"pid": 5, "runs": []}})
+    found = await store.processes()
+    assert found == {"a": {"2": record}, "b": {"5": {"pid": 5, "runs": []}}}
+    found["a"]["2"]["pid"] = 9
+    assert (await store.processes())["a"]["2"]["pid"] == 2
+    await store.publish("a", {})
+    assert list(await store.processes()) == ["b"]
+
+
+@pytest.mark.asyncio
+async def test_stops_asked_of_an_owner_are_taken_once():
+    store = RAMJobStore()
+    await store.request_stop("a", 2, 15)
+    await store.request_stop("a", 3, 9)
+    await store.request_stop("b", 4, 9)
+    assert await store.take_stops("a") == [(2, 15), (3, 9)]
+    assert await store.take_stops("a") == []
+    assert await store.take_stops("b") == [(4, 9)]
+
+
 def test_lists_written_from_many_threads_lose_no_write():
     store = RAMJobStore()
 

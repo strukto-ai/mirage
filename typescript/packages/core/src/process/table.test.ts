@@ -273,11 +273,13 @@ it('a workspace list grants no kill', async () => {
   expect(() => view.terminate(child.info.pid, 15)).toThrow(
     expect.objectContaining({ code: 'EPERM' }),
   )
+  expect(view.permissions()).toEqual({ list: 'workspace', kill: 'session', max: null })
   processes.revokeSession('observer')
   expect(() => {
     view.checkSpawn()
   }).toThrow('not permitted')
   expect(view.list()).toEqual([])
+  expect(view.permissions()).toBeNull()
   release.release()
   await child.join()
 })
@@ -420,4 +422,24 @@ it('runs started before the runner with the process live', async () => {
   })
   await handle.join()
   expect(order).toEqual(['started 1', 'run [1]'])
+})
+
+// A table that publishes the live runners learns each one that started,
+// once it is live, so the next publish lists it.
+it('tells the publisher of each runner it started', async () => {
+  const live: number[] = []
+  const processes: ProcessTable = new ProcessTable(undefined, undefined, () => {
+    live.push(processes.live().length)
+  })
+  for (let i = 0; i < 2; i++) {
+    const handle = processes.start({
+      sessionId: 's',
+      command: 'true',
+      cwd: PathSpec.fromStrPath('/'),
+      run: () => Promise.resolve(0),
+      cancel: () => undefined,
+    })
+    await handle.join()
+  }
+  expect(live).toEqual([1, 1])
 })

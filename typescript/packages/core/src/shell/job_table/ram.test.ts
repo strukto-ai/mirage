@@ -63,6 +63,32 @@ describe('RAMJobStore', () => {
     expect(chunks.map((c) => dec(c.data))).toEqual(['kept'])
   })
 
+  it("publishes an owner's processes and drops them", async () => {
+    const store = new RAMJobStore()
+    const record = { pid: 2, command: 'sleep 30', runs: [] }
+    await store.publish('a', { '2': record })
+    await store.publish('b', { '5': { pid: 5, runs: [] } })
+    const found = await store.processes()
+    expect(found).toEqual({ a: { '2': record }, b: { '5': { pid: 5, runs: [] } } })
+    ;(found.a?.['2'] as { pid: number }).pid = 9
+    expect((await store.processes()).a?.['2']?.pid).toBe(2)
+    await store.publish('a', {})
+    expect(Object.keys(await store.processes())).toEqual(['b'])
+  })
+
+  it('takes the stops asked of an owner once', async () => {
+    const store = new RAMJobStore()
+    await store.requestStop('a', 2, 15)
+    await store.requestStop('a', 3, 9)
+    await store.requestStop('b', 4, 9)
+    expect(await store.takeStops('a')).toEqual([
+      [2, 15],
+      [3, 9],
+    ])
+    expect(await store.takeStops('a')).toEqual([])
+    expect(await store.takeStops('b')).toEqual([[4, 9]])
+  })
+
   it('never lapses an owner without a lease', async () => {
     expect(await new RAMJobStore().alive('never-renewed')).toBe(true)
   })

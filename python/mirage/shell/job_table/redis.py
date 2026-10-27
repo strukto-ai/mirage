@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from typing import cast
 
 import redis.asyncio as aioredis
@@ -39,6 +39,10 @@ class RedisJobStore(JobStore):
       (``RedisConsoleStore``), expiring a day after its last write or
       its owner's last renewal
     - ``{prefix}owner:{id}``: an owner's lease, a key that expires
+    - ``{prefix}processes:{id}``: the processes an owner runs, as JSON,
+      kept a day after its last publish so a lapsed owner's runs can
+      still be found
+    - ``{prefix}stops:{id}``: a list of the stops asked of an owner
 
     One client serves the lists, the leases and every console, so a
     workspace holds one connection pool however many jobs it follows.
@@ -111,6 +115,44 @@ class RedisJobStore(JobStore):
         if self.lease_seconds is None:
             return True
         return bool(await self._client.exists(f"{self._prefix}owner:{owner}"))
+
+    async def publish(
+        self, owner: str, processes: Mapping[str, RecordFields]
+    ) -> None:
+        key = f"{self._prefix}processes:{owner}"
+        if not processes:
+            await self._client.delete(key, f"{self._prefix}stops:{owner}")
+            return
+        await self._client.set(
+            key, json.dumps(dict(processes)), ex=CONSOLE_TTL_SECONDS
+        )
+
+    async def processes(self) -> dict[str, dict[str, RecordFields]]:
+        head = f"{self._prefix}processes:"
+        keys = [key async for key in self._client.scan_iter(f"{head}*")]
+        if not keys:
+            return {}
+        values = await self._client.mget(keys)
+        return {
+            key.decode()[len(head) :]: json.loads(value)
+            for key, value in zip(keys, values)
+            if value is not None
+        }
+
+    async def request_stop(self, owner: str, pid: int, signal: int) -> None:
+        key = f"{self._prefix}stops:{owner}"
+        pipe = self._client.pipeline(transaction=False)
+        pipe.rpush(key, json.dumps([pid, signal]))
+        pipe.expire(key, CONSOLE_TTL_SECONDS)
+        await pipe.execute()
+
+    async def take_stops(self, owner: str) -> list[tuple[int, int]]:
+        key = f"{self._prefix}stops:{owner}"
+        pipe = self._client.pipeline(transaction=True)
+        pipe.lrange(key, 0, -1)
+        pipe.delete(key)
+        raw, _ = await pipe.execute()
+        return [(int(pid), int(sig)) for pid, sig in map(json.loads, raw)]
 
     async def clear(self) -> None:
         keys = [

@@ -28,13 +28,14 @@ import type { RuntimeOptions } from '../config.ts'
 import { abortable } from '../../utils/abort.ts'
 import { currentCaller } from '../../context/session_context.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { shellJoin } from '../../shell/join.ts'
 import {
   BASE_CONFIG_KEYS,
   checkMountType,
   type NormalizedSandboxConfig,
   type SandboxConfig,
 } from './config.ts'
-import { EXEC_ID, REAP_WAIT_SECONDS, reapLine } from './constants.ts'
+import { EXEC_ID, REAP_ABSENT, REAP_WAIT_SECONDS, reapLine } from './constants.ts'
 import { isPipeTransport } from './mixin.ts'
 import { SandboxMounts } from './mounts.ts'
 
@@ -171,6 +172,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     if (refusal !== null) return refusal
     const execId = crypto.randomUUID().replaceAll('-', '')
     const runner = currentCaller().process
+    runner?.addRun(`box:${execId}`, { runtime: this.name, tag: execId, command: shellJoin(argv) })
     try {
       return await this.execArgv(
         argv,
@@ -182,9 +184,29 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
         ctx.signal,
       )
     } catch (error) {
-      if (ctx.signal?.aborted === true) await this.reap(execId, runner?.signal ?? 15)
+      if (ctx.signal?.aborted === true) await this.reapRun(execId, runner?.signal ?? 15)
       throw error
+    } finally {
+      runner?.dropRun(`box:${execId}`)
     }
+  }
+
+  /**
+   * Stop a run a lapsed workspace left in the box: every process its
+   * `EXEC_ID` tag marks gets `signum`, then KILL a second later. Connecting
+   * is bounded as the stop is (`REAP_WAIT_SECONDS`). Answers true once the
+   * box held the run's processes and they were stopped, false when it holds
+   * none of them, as a box other than the run's does; throws when the box
+   * could not be reached or the stop failed.
+   *
+   * @param tag the run's `EXEC_ID`, as its process record has it.
+   * @param signum the first signal.
+   */
+  async reap(tag: string, signum: number): Promise<boolean> {
+    await this.ensureConnected(AbortSignal.timeout(REAP_WAIT_SECONDS * 1000))
+    const code = await this.reapRun(tag, signum)
+    if (code !== 0 && code !== REAP_ABSENT) throw new Error(`${this.name}: run ${tag} not stopped`)
+    return code === 0
   }
 
   /**
@@ -194,8 +216,10 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    *
    * @param execId the run's id.
    * @param signum the signal the run is stopped with first.
+   * @returns the stop line's status (`reapLine`); null when the box did not
+   *   answer.
    */
-  private async reap(execId: string, signum: number): Promise<void> {
+  private async reapRun(execId: string, signum: number): Promise<number | null> {
     const signal = AbortSignal.timeout(REAP_WAIT_SECONDS * 1000)
     try {
       const done = await abortable(
@@ -210,11 +234,13 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
         ),
         signal,
       )
-      if (done.exitCode !== 0) {
+      if (done.exitCode !== 0 && done.exitCode !== REAP_ABSENT) {
         console.debug(`${this.name}: run ${execId} not stopped: exit ${String(done.exitCode)}`)
       }
+      return done.exitCode
     } catch (error) {
       console.debug(`${this.name}: run ${execId} not stopped: ${String(error)}`)
+      return null
     }
   }
 

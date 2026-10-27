@@ -349,6 +349,68 @@ async function jobsPeer(prefix: string): Promise<void> {
   await store.close()
 }
 
+const PROCESS_ROW = /^([0-9a-f]{6}:[0-9]+)\tsleep 30$/gm
+
+/**
+ * Run a job the other language's peer finds in ps by its owner:pid, kills
+ * by that name and waits on. Stays up until the peer has reaped it, since a
+ * process dies with its owner.
+ */
+async function processesOwn(prefix: string): Promise<void> {
+  const { ws, store } = makeJobsWorkspace(prefix)
+  const plane = store.jobs(JOBS_WORKSPACE_ID)
+  const reaped = async (): Promise<boolean> => {
+    const listed = await plane.load(JOBS_SESSION)
+    return listed !== null && Object.keys(listed.jobs ?? {}).length === 0
+  }
+  const sleep = await ws.shell('sleep 30 &', { sessionId: JOBS_SESSION })
+  check('ts own: sleep started', sleep.exitCode === 0)
+  const job = ws.jobTable.get(1, JOBS_SESSION)
+  await Promise.race([
+    job?.process?.join(),
+    new Promise((resolve) => setTimeout(resolve, 20_000).unref()),
+  ])
+  check(
+    "ts own: the peer's kill owner:pid stopped it by TERM",
+    job?.status === JobStatus.KILLED && job.exitCode === 143,
+    `got ${String(job?.status)} ${String(job?.exitCode)}`,
+  )
+  check("ts own: the peer's wait reaped it", await until(reaped))
+  await plane.clear()
+  await ws.close()
+  await store.close()
+}
+
+/** Find the other language's process in ps, kill it by owner:pid and wait on its job. */
+async function processesPeer(prefix: string): Promise<void> {
+  const { ws, store } = makeJobsWorkspace(prefix)
+  let names: string[] = []
+  const listed = async (): Promise<boolean> => {
+    const ps = await ws.shell('ps', { sessionId: JOBS_SESSION })
+    names = [...ps.stdoutText.matchAll(PROCESS_ROW)].map((match) => match[1] ?? '')
+    return names.length === 1
+  }
+  check("ts peer: ps lists the owner's process", await until(listed))
+  const name = names[0] ?? 'none:0'
+  const picked = await ws.shell(`ps -p ${name} -o pid=,comm=`, { sessionId: JOBS_SESSION })
+  check(
+    'ts peer: ps -p selects it with its ids tagged',
+    JSON.stringify(picked.stdoutText.split(/\s+/).filter((w) => w !== '')) ===
+      JSON.stringify([name, 'sleep']),
+    JSON.stringify(picked.stdoutText),
+  )
+  const kill = await ws.shell(`kill ${name}`, { sessionId: JOBS_SESSION })
+  check(`ts peer: kill ${name}`, kill.exitCode === 0, kill.stderrText)
+  const term = await ws.shell('wait %1; echo $?', { sessionId: JOBS_SESSION })
+  check(
+    "ts peer: wait answers TERM's status",
+    term.stdoutText === '143\n',
+    JSON.stringify(term.stdoutText),
+  )
+  await ws.close()
+  await store.close()
+}
+
 async function main(): Promise<void> {
   const role = process.argv[2]
   const prefix = process.argv[3]
@@ -358,6 +420,8 @@ async function main(): Promise<void> {
   else if (role === 'cas-verify') await casVerify(prefix, Number(process.argv[4]))
   else if (role === 'jobs-own') await jobsOwn(prefix)
   else if (role === 'jobs-peer') await jobsPeer(prefix)
+  else if (role === 'processes-own') await processesOwn(prefix)
+  else if (role === 'processes-peer') await processesPeer(prefix)
   else throw new Error(`unknown role: ${role}`)
   if (fail !== 0) process.exit(1)
 }

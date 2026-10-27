@@ -27,6 +27,7 @@ from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
+    REAP_ABSENT,
     REAP_WAIT_SECONDS,
     reap_line,
 )
@@ -37,6 +38,7 @@ from mirage.runtime.types import (
     RunResult,
     RuntimeReach,
 )
+from mirage.shell.join import shell_join
 from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
@@ -186,6 +188,16 @@ class RemoteSandbox(
             if refusal is not None:
                 return refusal
         exec_id = uuid.uuid4().hex
+        runner = current_caller().process
+        if runner is not None:
+            runner.add_run(
+                f"box:{exec_id}",
+                {
+                    "runtime": self.name,
+                    "tag": exec_id,
+                    "command": shell_join(argv),
+                },
+            )
         try:
             return await self._exec_argv(
                 argv,
@@ -196,12 +208,40 @@ class RemoteSandbox(
                 errors,
             )
         except asyncio.CancelledError:
-            runner = current_caller().process
             signum = runner.signal if runner is not None else None
             await asyncio.shield(self._reap(exec_id, signum or 15))
             raise
+        finally:
+            if runner is not None:
+                runner.drop_run(f"box:{exec_id}")
 
-    async def _reap(self, exec_id: str, signum: int) -> None:
+    async def reap(self, tag: str, signum: int) -> bool:
+        """Stop a run a lapsed workspace left in the box: every process
+        its ``EXEC_ID`` tag marks gets ``signum``, then KILL a second
+        later. Connecting is bounded as the stop is
+        (``REAP_WAIT_SECONDS``).
+
+        Args:
+            tag (str): the run's ``EXEC_ID``, as its process record has it.
+            signum (int): the first signal.
+
+        Returns:
+            bool: True once the box held the run's processes and they
+            were stopped; False when it holds none of them, as a box
+            other than the run's does.
+
+        Raises:
+            RuntimeError: the box could not be reached, or the stop
+                failed.
+        """
+        async with asyncio.timeout(REAP_WAIT_SECONDS):
+            await self._ensure_connected()
+        code = await self._reap(tag, signum)
+        if code not in (0, REAP_ABSENT):
+            raise RuntimeError(f"{self.name}: run {tag} not stopped")
+        return code == 0
+
+    async def _reap(self, exec_id: str, signum: int) -> int | None:
         """Stop what a cancelled run left in the box (``EXEC_ID``), for
         at most ``REAP_WAIT_SECONDS``: a box that stopped answering would
         otherwise hold the cancel.
@@ -209,6 +249,10 @@ class RemoteSandbox(
         Args:
             exec_id (str): the run's id.
             signum (int): the signal the run is stopped with first.
+
+        Returns:
+            int | None: the stop line's status (``reap_line``); None when
+            the box did not answer.
         """
         try:
             async with asyncio.timeout(REAP_WAIT_SECONDS):
@@ -224,14 +268,15 @@ class RemoteSandbox(
             logger.debug(
                 "%s: run %s not stopped", self.name, exec_id, exc_info=True
             )
-            return
-        if done.exit_code != 0:
+            return None
+        if done.exit_code not in (0, REAP_ABSENT):
             logger.debug(
                 "%s: run %s not stopped: exit %d",
                 self.name,
                 exec_id,
                 done.exit_code,
             )
+        return done.exit_code
 
     async def _setup(self, line: str) -> RunResult:
         return await self.exec_line(line, None, dict(self.config.env), "/")

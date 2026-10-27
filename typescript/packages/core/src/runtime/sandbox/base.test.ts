@@ -20,12 +20,13 @@ import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { materialize, type ByteSource } from '../../io/types.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { RemoteSandbox } from './base.ts'
-import { EXEC_ID, REAP_WAIT_SECONDS, reapLine } from './constants.ts'
+import { EXEC_ID, REAP_ABSENT, REAP_WAIT_SECONDS, reapLine } from './constants.ts'
 import { LanguageRuntime } from '../language.ts'
 import { isLineExecutor } from '../mixin.ts'
 import type { RunResult } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
 import { ProcessTable } from '../../process/table.ts'
+import type { ProcessHandle } from '../../process/handle.ts'
 import { runWithExecution } from '../../context/session_context.ts'
 
 const ENC = new TextEncoder()
@@ -306,6 +307,74 @@ describe('RemoteSandbox', () => {
     expect((await runner.join()).exitCode).toBe(130)
     const execId = box.execs[0]?.[2][EXEC_ID] ?? ''
     expect(box.execs.map(([line]) => line)).toEqual(['yes', reapLine(execId, 2)])
+  })
+
+  // A run in the box is one its runner has going, by its runtime and tag,
+  // so the process plane lists it and a workspace that outlives this one
+  // stops it; it goes once the run ends.
+  it('keeps a run in the box on its runner while it runs', async () => {
+    const seen: Record<string, unknown>[] = []
+    let runner: ProcessHandle | null = null
+    class WatchedBox extends RecordingSandbox {
+      override execLine(
+        line: string,
+        stdin: Uint8Array | null,
+        env: Record<string, string>,
+        cwd: string,
+      ): Promise<RunResult> {
+        seen.push({ ...runner?.runs })
+        return super.execLine(line, stdin, env, cwd)
+      }
+    }
+    const box = new WatchedBox({ captures: ['yes'] })
+    const ctx = { stdin: null, flags: { c: 'yes' }, env: {}, cwd: PathSpec.fromStrPath('/') }
+    runner = new ProcessTable(runWithExecution).start({
+      sessionId: 's',
+      command: 'yes',
+      cwd: ctx.cwd,
+      cancel: () => undefined,
+      run: async () => (await box.runLine(undefined, [], [], ctx)).exitCode,
+    })
+    expect((await runner.join()).exitCode).toBe(0)
+    const tag = box.execs[0]?.[2][EXEC_ID] ?? ''
+    expect(seen).toEqual([
+      { [`box:${tag}`]: { runtime: 'recbox', tag, command: '/bin/sh -c yes' } },
+    ])
+    expect(runner.runs).toEqual({})
+  })
+
+  // A run another workspace left is stopped by its tag, the box reached
+  // first if this runtime never was. The reap says whether the box held the
+  // run: a box that holds none of it answers so, and a stop that failed
+  // throws, so neither counts as having stopped it.
+  it.each([
+    [0, true],
+    [REAP_ABSENT, false],
+  ])('reaps a left run by its tag (box answers %i)', async (code, held) => {
+    class AnsweringBox extends RecordingSandbox {
+      override async execLine(
+        line: string,
+        stdin: Uint8Array | null,
+        env: Record<string, string>,
+        cwd: string,
+      ): Promise<RunResult> {
+        await super.execLine(line, stdin, env, cwd)
+        return { stdout: new Uint8Array(), stderr: null, exitCode: code }
+      }
+    }
+    const box = new AnsweringBox({ captures: ['yes'] })
+    expect(await box.reap('t1', 15)).toBe(held)
+    expect(box.connectedCount).toBe(1)
+    expect(box.execs.map(([line]) => line)).toEqual([reapLine('t1', 15)])
+  })
+
+  it('throws for a reap that failed', async () => {
+    class FailingBox extends RecordingSandbox {
+      override execLine(): Promise<RunResult> {
+        return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 127 })
+      }
+    }
+    await expect(new FailingBox({ captures: ['yes'] }).reap('t1', 15)).rejects.toThrow()
   })
 
   it('holds a cancel only so long when the box stops answering', async () => {

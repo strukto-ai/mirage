@@ -17,6 +17,7 @@ import errno
 import os
 import shlex
 import signal
+import socket
 import sys
 import time
 from collections.abc import AsyncIterator
@@ -29,7 +30,9 @@ from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
 from mirage.runtime.sandbox.program import (
     Children,
     close_children,
+    host_run,
     open_program_pipe,
+    reap_host_run,
     run_program,
 )
 from mirage.types import PathSpec
@@ -72,6 +75,20 @@ async def _ended(pid: int) -> bool:
             return True
         await asyncio.sleep(0.01)
     return False
+
+
+async def _running(pid: int) -> bool:
+    """Whether ``pid`` runs: present, and no zombie.
+
+    Args:
+        pid (int): the process to look for.
+    """
+    ps = await asyncio.create_subprocess_exec(
+        "ps", "-o", "stat=", "-p", str(pid), stdout=asyncio.subprocess.PIPE
+    )
+    out, _ = await ps.communicate()
+    state = out.decode().strip()
+    return bool(state) and not state.startswith("Z")
 
 
 @pytest.mark.asyncio
@@ -563,3 +580,166 @@ async def test_stopping_a_pipe_does_not_wait_on_output_nobody_read(script):
     await asyncio.sleep(0.5)
     async with asyncio.timeout(5):
         await pipe.stop()
+
+
+# A host program a runtime keeps as its child is one of the runner's
+# native runs while it runs: this host, its PID and when it started, so a
+# workspace that outlives this one can stop it; it goes once it ended.
+@pytest.mark.asyncio
+async def test_a_kept_child_is_a_native_run_of_its_runner(tmp_path):
+    pid_file = tmp_path / "pid"
+    children: Children = {}
+
+    async def run() -> int:
+        ran = await run_program(
+            "sh",
+            None,
+            ["-c", f"echo $$ > {pid_file}; sleep 0.3"],
+            None,
+            children=children,
+        )
+        return ran.exit_code
+
+    runner = ProcessTable(bind=run_with_execution).start(
+        session_id="s", command="sh", cwd=PathSpec.from_str_path("/"), run=run
+    )
+    pid = await _wait_for_pid(pid_file)
+    run = runner.runs[f"host:{pid}"]
+    assert (run["host"], run["pid"], run["command"]) == (
+        socket.gethostname(),
+        pid,
+        f"sh -c 'echo $$ > {pid_file}; sleep 0.3'",
+    )
+    assert abs(float(run["started_at"]) - time.time()) < 5
+    assert (await runner.join()).exit_code == 0
+    assert runner.runs == {}
+
+
+# A kept child that exits while what it started holds its output open
+# marks its run with when it exited, the last time its group was known.
+@pytest.mark.asyncio
+async def test_a_kept_child_that_exits_first_marks_its_run(tmp_path):
+    pid_file = tmp_path / "pid"
+    children: Children = {}
+
+    async def run() -> int:
+        ran = await run_program(
+            "sh",
+            None,
+            ["-c", f"echo $$ > {pid_file}; sleep 0.5 &"],
+            None,
+            children=children,
+        )
+        return ran.exit_code
+
+    runner = ProcessTable(bind=run_with_execution).start(
+        session_id="s", command="sh", cwd=PathSpec.from_str_path("/"), run=run
+    )
+    key = f"host:{await _wait_for_pid(pid_file)}"
+    async with asyncio.timeout(5):
+        while "exited_at" not in runner.runs.get(key, {}):
+            await asyncio.sleep(0.01)
+    exited = runner.runs[key]["exited_at"]
+    assert isinstance(exited, float) and abs(exited - time.time()) < 5
+    assert (await runner.join()).exit_code == 0
+    assert runner.runs == {}
+
+
+# A run a lapsed workspace left on this host is stopped, its whole group,
+# while its PID still names the process it started; a PID that names a
+# later process, or a run of another host, is left alone.
+@pytest.mark.asyncio
+async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
+    pid_file = tmp_path / "pid"
+    child = await asyncio.create_subprocess_exec(
+        "sh",
+        "-c",
+        f"trap '' TERM; echo $$ > {pid_file}; while :; do sleep 0.05; done",
+        start_new_session=True,
+    )
+    pid = await _wait_for_pid(pid_file)
+    run = host_run(pid, ["sh"])
+    try:
+        assert not await reap_host_run({**run, "host": "elsewhere"}, 15)
+        assert not await reap_host_run({**run, "started_at": None}, 15)
+        assert await reap_host_run({**run, "started_at": 0.0}, 15)
+        assert child.returncode is None
+        async with asyncio.timeout(5):
+            assert await reap_host_run(run, 15)
+            await child.wait()
+        assert child.returncode == -9
+    finally:
+        if child.returncode is None:
+            child.kill()
+            await child.wait()
+
+
+# A run whose leader exited before the program it started is stopped too,
+# its group outliving the leader, while a member started by the time the
+# group was last known to be the run's; a group none of whose members
+# proves that, which may have taken the id since, is left alone and out of
+# reach, so its record stays.
+@pytest.mark.asyncio
+async def test_a_left_host_run_whose_leader_exited_is_reaped(tmp_path):
+    pid_file = tmp_path / "pid"
+    child = await asyncio.create_subprocess_exec(
+        "sh",
+        "-c",
+        f"sleep 30 & echo $! > {pid_file}",
+        start_new_session=True,
+    )
+    run = host_run(child.pid, ["sh"])
+    await child.wait()
+    exited = {**run, "exited_at": time.time()}
+    survivor = await _wait_for_pid(pid_file)
+    try:
+        assert not await reap_host_run(run, 15)
+        assert not await reap_host_run(
+            {**run, "seen_at": float(run["started_at"]) - 60}, 15
+        )
+        assert await _running(survivor)
+        assert await reap_host_run(exited, 15)
+        assert await _ended(survivor)
+    finally:
+        if await _running(survivor):
+            os.kill(survivor, 9)
+
+
+# A host whose ps fails before it lists every process reaches nothing: a
+# group missing from a cut-short list is not taken for gone.
+@pytest.mark.asyncio
+async def test_a_host_run_is_out_of_reach_when_ps_fails(tmp_path, monkeypatch):
+    fake = tmp_path / "ps"
+    fake.write_text('#!/bin/sh\ncase "$1" in -A) kill -9 $$ ;; esac\nexit 1\n')
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    assert not await reap_host_run(host_run(2**22 + 7, ["x"]), 15)
+
+
+def _denied(group: int, signum: int) -> None:
+    raise PermissionError(errno.EPERM, "Operation not permitted")
+
+
+# A group this workspace may not signal is out of its reach while its
+# leader still runs, so a workspace with the rights can stop it later; a
+# group whose leader is gone was stopped already.
+@pytest.mark.asyncio
+async def test_a_host_run_it_may_not_signal_is_out_of_reach(
+    tmp_path, monkeypatch
+):
+    pid_file = tmp_path / "pid"
+    child = await asyncio.create_subprocess_exec(
+        "sh",
+        "-c",
+        f"echo $$ > {pid_file}; while :; do sleep 0.05; done",
+        start_new_session=True,
+    )
+    pid = await _wait_for_pid(pid_file)
+    run = host_run(pid, ["sh"])
+    monkeypatch.setattr(os, "killpg", _denied)
+    try:
+        assert not await reap_host_run(run, 15)
+    finally:
+        monkeypatch.undo()
+        child.kill()
+        await child.wait()

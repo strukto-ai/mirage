@@ -28,6 +28,11 @@ WATCH_RETRY_SECONDS = 1.0
 # could read.
 LIST_CHECK_SECONDS = 10.0
 
+# How often a workspace on a shared store publishes the processes it
+# runs, and takes the stops other workspaces asked of it, while it runs
+# any.
+PUBLISH_SECONDS = 1.0
+
 # How long an owner's lease lasts on a store other processes share. The
 # owner renews it at a third of that while it runs jobs, so a workspace
 # that dies is seen as gone at most this long after its last renewal.

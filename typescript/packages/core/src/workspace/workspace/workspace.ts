@@ -67,7 +67,7 @@ import { classifyBarePath } from '../expand/classify/path.ts'
 import { resolveGlobs } from '../expand/globs.ts'
 import { QUIESCE_SECONDS } from '../snapshot/utils.ts'
 import type { WorkspaceStateDict, MountSnapshot } from '../snapshot/types.ts'
-import type { FileEvent, Visibility } from '../../types.ts'
+import type { FileEvent, JsonValue, Visibility } from '../../types.ts'
 import {
   type ReadSpec,
   DEFAULT_READ_SPEC,
@@ -87,6 +87,7 @@ import { WritePolicyError } from '../mount/errors.ts'
 import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { PrefixResolver } from '../../runtime/resolver.ts'
+import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
 import { wholeLineRuntime } from '../../runtime/table.ts'
 import { ChildProcess } from '../../process/child.ts'
 import { ProcessInput, ProcessOutput } from '../../process/stdio.ts'
@@ -288,7 +289,9 @@ export class Workspace {
     // the same order on both hosts.
     this.wsId = options.workspaceId ?? this.ids.uuid7()
     const sessionId = options.sessionId ?? this.ids.uuid7()
-    this.processes = new ProcessTable(runWithExecution, this.ids)
+    this.processes = new ProcessTable(runWithExecution, this.ids, () => {
+      this.jobTable.processesChanged()
+    })
     this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock, this.wsId)
     const normalized = normalizeMounts(mounts, this.readDefault, index, {
       mode: options.mode ?? MountMode.READ,
@@ -319,6 +322,7 @@ export class Workspace {
     this.registry.fillEnv = (session, names) => this.fillTreeEnv(session, names)
     const stores = resolveControlStores(this.wsId, options)
     this.jobTable = new JobTable(stores.jobs, this.processes, null, this.clock)
+    this.jobTable.reaper = (runs, signum) => this.reapRuns(runs, signum)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
     // The env block, translated once: a literal entry becomes an
@@ -625,6 +629,48 @@ export class Workspace {
   /** The ordered runtime world, first capturer first. */
   runtimes(): readonly Runtime[] {
     return this.runtimeWorld.entries
+  }
+
+  /**
+   * Stop native runs a lapsed workspace left, answering the ones this
+   * workspace cannot reach: a host run through `reapHostRun`, a sandbox run
+   * through every runtime of its name here, each of which stops what its
+   * tag marks in the box it reaches. A run counts as reached only once a box
+   * held it and it was stopped: a box of the same name that holds none of
+   * it, or one that could not be reached, leaves it to a workspace that
+   * reaches its own. Mirrors Python's `Workspace._reap_runs`.
+   */
+  private async reapRuns(
+    runs: Record<string, JsonValue>[],
+    signum: number,
+  ): Promise<Record<string, JsonValue>[]> {
+    const left: Record<string, JsonValue>[] = []
+    for (const run of runs) {
+      if ('host' in run) {
+        if (!(await this.reapHostRun(run, signum))) left.push(run)
+        continue
+      }
+      let reached = false
+      for (const runtime of this.runtimes()) {
+        if (!(runtime instanceof RemoteSandbox) || runtime.name !== run.runtime) continue
+        try {
+          reached = (await runtime.reap(run.tag as string, signum)) || reached
+        } catch (err) {
+          console.debug(`${runtime.name}: run not reaped:`, err)
+        }
+      }
+      if (!reached) left.push(run)
+    }
+    return left
+  }
+
+  /**
+   * Stop a host run a lapsed workspace left on this host, answering whether
+   * it is stopped or gone. A host whose processes this package cannot reach
+   * (a browser) reaches none; Node's workspace does.
+   */
+  protected reapHostRun(_run: Record<string, JsonValue>, _signum: number): Promise<boolean> {
+    return Promise.resolve(false)
   }
 
   /** Append a runtime entry to the workspace's ordered world (last, first capturer still wins). */

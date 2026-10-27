@@ -97,6 +97,11 @@ KEPT_ON_SYSTEM_CLOCK = {
         "time in the store, and the retry of a failed watch; a manual "
         "clock's sleep returns at once and would spin both"
     ),
+    ("shell/job_table/table.py", "time.time"): (
+        "stamps seen_at on the process records, which a host reap compares "
+        "with the start times ps prints, on the host's wall clock; a manual "
+        "clock's time would prove nothing about the host's processes"
+    ),
     ("shell/job_table/ram.py", "time.monotonic"): (
         "an owner's lease is compared by every table sharing the store, "
         "and those tables may hold different clocks, so it stays on the "

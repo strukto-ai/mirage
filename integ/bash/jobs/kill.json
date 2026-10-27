@@ -598,6 +598,42 @@
         "stdout": "rc=1\nrc=1\nrc=2\nrc=1\nrc=143\n",
         "stderr": "bash: kill: -s: option requires an argument\nbash: kill: -n: option requires an argument\nkill: usage: kill [-s sigspec | -n signum | -sigspec] pid | jobspec ... or kill -l [sigspec]\nbash: kill: `': not a pid or valid job spec\n"
       }
+    },
+    {
+      "id": "job_kill_owner_pid_nobody_runs",
+      "seq": 502427,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "kill ab12:3; kill ab12:x; ps -p ab12:3; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "bash: kill: (ab12:3) - No such process\nbash: kill: ab12:x: arguments must be process or job IDs\n"
+      },
+      "note": "mirage's own operand: owner:pid names a process another workspace on a shared store runs, as ps lists it, where bash refuses any non-numeric operand as not a process or job ID. One no live workspace runs is no such process, and ps -p of it selects nothing."
     }
   ]
 }

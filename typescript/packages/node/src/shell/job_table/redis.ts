@@ -40,6 +40,9 @@ export interface RedisJobStoreOptions {
  *   (`RedisConsoleStore`), expiring a day after its last write or its
  *   owner's last renewal
  * - `{prefix}owner:{id}`: an owner's lease, a key that expires
+ * - `{prefix}processes:{id}`: the processes an owner runs, as JSON, kept a
+ *   day after its last publish so a lapsed owner's runs can still be found
+ * - `{prefix}stops:{id}`: a list of the stops asked of an owner
  *
  * One connection serves the lists, the leases and every console, so a
  * workspace holds one client however many jobs it follows. Mirrors
@@ -115,6 +118,51 @@ export class RedisJobStore extends JobStore {
     if (this.leaseSeconds === null) return true
     const c = await this.redis.client()
     return (await c.exists(`${this.prefix}owner:${owner}`)) > 0
+  }
+
+  async publish(owner: string, processes: Readonly<Record<string, RecordFields>>): Promise<void> {
+    const c = await this.redis.client()
+    const key = `${this.prefix}processes:${owner}`
+    if (Object.keys(processes).length === 0) {
+      await c.del([key, `${this.prefix}stops:${owner}`])
+      return
+    }
+    await c.set(key, JSON.stringify(processes), { EX: CONSOLE_TTL_SECONDS })
+  }
+
+  async processes(): Promise<Record<string, Record<string, RecordFields>>> {
+    const c = await this.redis.client()
+    const head = `${this.prefix}processes:`
+    const keys: string[] = []
+    for await (const k of c.scanIterator({ MATCH: `${head}*` })) {
+      keys.push(...(Array.isArray(k) ? k : [k]))
+    }
+    if (keys.length === 0) return {}
+    const values = await c.mGet(keys)
+    const found: Record<string, Record<string, RecordFields>> = {}
+    keys.forEach((key, at) => {
+      const value = values[at]
+      if (value != null)
+        found[key.slice(head.length)] = JSON.parse(value) as Record<string, RecordFields>
+    })
+    return found
+  }
+
+  async requestStop(owner: string, pid: number, signal: number): Promise<void> {
+    const c = await this.redis.client()
+    const key = `${this.prefix}stops:${owner}`
+    await c
+      .multi()
+      .rPush(key, JSON.stringify([pid, signal]))
+      .expire(key, CONSOLE_TTL_SECONDS)
+      .exec()
+  }
+
+  async takeStops(owner: string): Promise<[number, number][]> {
+    const c = await this.redis.client()
+    const key = `${this.prefix}stops:${owner}`
+    const [raw] = (await c.multi().lRange(key, 0, -1).del(key).exec()) as unknown as [string[]]
+    return raw.map((item) => JSON.parse(item) as [number, number])
   }
 
   async clear(): Promise<void> {

@@ -114,6 +114,11 @@ export const REAP_WAIT_SECONDS = 5
 // KILL, for its handlers to clean up: the stop line's same second.
 export const STOP_GRACE_SECONDS = 1
 
+// How far a host process's start, as `ps` prints it to the second, may be
+// from when a run recorded starting it and still be that run's: past it the
+// PID names another process, which a reap leaves alone.
+export const HOST_START_SLACK_SECONDS = 2
+
 // How often a stop in its grace checks whether the signalled group ended.
 export const STOP_POLL_SECONDS = 0.02
 
@@ -150,14 +155,19 @@ export function wrapLine(
   return parts.join(' ')
 }
 
+// What the stop line exits with when no process carries the run's id: the
+// box it ran in holds nothing of the run.
+export const REAP_ABSENT = 3
+
 /**
  * The shell line that stops every process of the run `execId`.
  *
  * Each process whose environment holds the run's id, found through
  * `/proc`, gets `signum`, and what still runs a second later gets KILL,
- * so a program that ignores it stops too. The line looks grep up on its
- * own PATH (`REAP_PATH`) and exits 127 without it, so it needs only a
- * POSIX shell, grep and `/proc`.
+ * so a program that ignores it stops too. The line exits 0 once it stopped
+ * them and `REAP_ABSENT` when there were none. It looks grep up on its own
+ * PATH (`REAP_PATH`) and exits 127 without it, so it needs only a POSIX
+ * shell, grep and `/proc`.
  *
  * @param execId the run's id, as `EXEC_ID` carries it.
  * @param signum the first signal, TERM (15) unless a `kill` named another.
@@ -170,7 +180,7 @@ export function reapLine(execId: string, signum = 15): string {
     'left() { l=; for p in /proc/[0-9]*; do ' +
     'grep -qs "$m" "$p/environ" && l="$l ${p#/proc/}"; done; ' +
     '[ -n "$l" ]; }; ' +
-    `left || exit 0; kill -${String(signum)} $l 2>/dev/null; ` +
+    `left || exit ${String(REAP_ABSENT)}; kill -${String(signum)} $l 2>/dev/null; ` +
     'for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; ' +
     'kill -KILL $l 2>/dev/null; true'
   )

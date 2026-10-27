@@ -22,10 +22,13 @@ export class ProcessTable {
    * @param bind runs a process's body under its execution id.
    * @param ids where a process's execution id is drawn when its caller names
    *   none; omitted means the system source.
+   * @param changed called once a runner is started, so whoever publishes the
+   *   live runners knows to.
    */
   constructor(
     private readonly bind: ExecutionBind = (_id, run) => run(),
     private readonly ids?: IdSource,
+    private readonly changed?: () => void,
   ) {}
 
   /** Whether a runner that was started has yet to begin. */
@@ -105,6 +108,7 @@ export class ProcessTable {
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
     init.started?.(handle.info)
     handle.start(eager)
+    this.changed?.()
     return handle
   }
 
@@ -161,6 +165,7 @@ export class ProcessTable {
       },
       probe: (pid: number) => signalTarget(pid) !== null,
       terminate: (pid: number, signal: number) => signalTarget(pid)?.terminate(signal) ?? false,
+      permissions: () => (valid() ? permissions() : null),
     })
   }
 

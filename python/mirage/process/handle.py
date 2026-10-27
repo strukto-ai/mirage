@@ -10,6 +10,7 @@ from typing import Protocol, cast
 
 from mirage.concurrency.limiter import owned_task
 from mirage.process.types import ProcessInfo, ProcessRunner, ProcessState
+from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class ProcessHandle:
         self._cancel_children = cancel_children
         self._signal: int | None = None
         self._program_code: int | None = None
+        self._runs: dict[str, dict[str, JsonValue]] = {}
         self._completion: Future[ProcessInfo] = Future()
         self.begun = False
 
@@ -101,6 +103,33 @@ class ProcessHandle:
         own after the stop signal, None unless one did."""
         with self._lock:
             return self._program_code
+
+    @property
+    def runs(self) -> dict[str, dict[str, JsonValue]]:
+        """The native runs this runner has going, each under a key of
+        its own: a host program it started, a sandbox's run."""
+        with self._lock:
+            return dict(self._runs)
+
+    def add_run(self, key: str, run: dict[str, JsonValue]) -> None:
+        """Record a native run this runner started, which the process
+        plane publishes and a workspace that outlives this one stops.
+
+        Args:
+            key (str): the run's key, unique among the runner's.
+            run (dict[str, JsonValue]): how another workspace reaches it.
+        """
+        with self._lock:
+            self._runs[key] = run
+
+    def drop_run(self, key: str) -> None:
+        """Forget a native run once it ended.
+
+        Args:
+            key (str): the key it was recorded under.
+        """
+        with self._lock:
+            self._runs.pop(key, None)
 
     def program_exited(self, code: int) -> None:
         """Record that a program the runner started handled the stop

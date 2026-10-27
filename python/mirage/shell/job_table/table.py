@@ -13,10 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import logging
 import secrets
+import time
 import uuid
+from collections.abc import Awaitable, Callable
 
+from mirage.process.config import ProcessPermissions
 from mirage.process.handle import ProcessHandle
 from mirage.process.table import ProcessTable
 from mirage.shell.bytes import encode_text
@@ -33,13 +37,14 @@ from mirage.shell.job_table.constants import (
     KILLED_EXIT_CODE,
     LIST_CHECK_SECONDS,
     LIST_MAX_RETRIES,
+    PUBLISH_SECONDS,
     STOP_WAIT_SECONDS,
     WATCH_RETRY_SECONDS,
 )
 from mirage.shell.job_table.ram import RAMJobStore
 from mirage.shell.job_table.store import JobStore
 from mirage.shell.job_table.types import Job, JobRunner, JobStatus
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 from mirage.utils.clock import Clock, SystemClock
 from mirage.workspace.record.types import RecordFields, generation_of
 
@@ -328,6 +333,32 @@ class JobTable:
         self._disowned: list[Job] = []
         self._lease: asyncio.Task[None] | None = None
         self._checking: asyncio.Task[None] | None = None
+        self._publishing: asyncio.Task[None] | None = None
+        self._reaping: set[asyncio.Task[None]] = set()
+        # Lapsed owners this table already set about reaping, so a listing
+        # that finds one again does not stop its runs again; and whether
+        # teardown stopped the reaping, which its runtimes are closing for.
+        self._reaped: set[str] = set()
+        self._reaping_stopped = False
+        # The table whose store and owner the process plane is read and
+        # written through: this one, or for a child shell's table the
+        # workspace's, since a child shell keeps only its job list private.
+        self._plane = self
+        # The table that holds each running job, by its runner's PID, kept
+        # on the plane: a child shell's jobs are in its own table, where a
+        # stop another workspace asks for has to find them.
+        self._job_tables: dict[int, JobTable] = {}
+        # Stops the native runs a lapsed owner left, given them and the
+        # first signal, and answers the ones this workspace cannot reach;
+        # the workspace sets it, since it holds the runtimes that reach
+        # them.
+        self.reaper: (
+            Callable[
+                [list[dict[str, JsonValue]], int],
+                Awaitable[list[dict[str, JsonValue]]],
+            ]
+            | None
+        ) = None
         # The bounds on killed jobs' stops (``_end_killed``), each with
         # its job.
         self._stopping: dict[asyncio.Task[None], Job] = {}
@@ -338,11 +369,16 @@ class JobTable:
         memory, since a child shell's jobs end with it on this workspace
         and no other one lists them.
 
+        It lists and stops other workspaces' processes through this
+        table, on the workspace's store.
+
         Args:
             parent (JobTable | None): the table a ``$( )`` still lists
                 in ``jobs``.
         """
-        return JobTable(None, self.processes, parent, self.clock)
+        table = JobTable(None, self.processes, parent, self.clock)
+        table._plane = self._plane
+        return table
 
     async def submit(
         self,
@@ -445,6 +481,11 @@ class JobTable:
             raise
         job.process = process
         self._jobs.setdefault(session_id, {})[job_id] = job
+        plane, pid = self._plane, process.info.pid
+        plane._job_tables[pid] = self
+        process.task.add_done_callback(
+            lambda _: plane._job_tables.pop(pid, None)
+        )
         self._keep_lease()
         self._keep_checking()
         return job
@@ -637,6 +678,8 @@ class JobTable:
         if job.process is not None:
             await self._stop_runner(job, job.process, signal)
             return True
+        if not await self.store.alive(job.owner):
+            await self._reap_owner(job.owner)
         await _mark_killed(job.console, 128 + signal)
         await self._refresh(job)
         return job.status == JobStatus.KILLED
@@ -707,7 +750,14 @@ class JobTable:
         Disowned jobs are stopped too: the shell forgot them, the
         workspace did not, and a teardown that left them running would
         leak their tasks. Another workspace's jobs are its own to stop.
+        The reaping of lapsed owners' runs stops here as well, before the
+        runtimes it reaches them through close.
         """
+        self._reaping_stopped = True
+        reaping = list(self._reaping)
+        for task in reaping:
+            task.cancel()
+        await asyncio.gather(*reaping, return_exceptions=True)
         running = [j for j in self.all_running_jobs() if j.process is not None]
         for job in [*running, *self._disowned]:
             if job.status == JobStatus.RUNNING and job.process is not None:
@@ -724,10 +774,16 @@ class JobTable:
         now rather than at its bound. The store itself belongs to the
         workspace's state store.
         """
-        for task in (self._lease, self._checking):
+        for task in (self._lease, self._checking, self._publishing):
             if task is not None:
                 task.cancel()
-        self._lease = self._checking = None
+        self._lease = self._checking = self._publishing = None
+        for task in list(self._reaping):
+            task.cancel()
+        try:
+            await self.store.publish(self.owner, {})
+        except Exception as exc:
+            logger.debug("process record not dropped: %s", exc)
         stopping = dict(self._stopping)
         for task in stopping:
             task.cancel()
@@ -833,6 +889,103 @@ class JobTable:
         if completed:
             await self._remove(session_id, {j.console_name for j in completed})
         return completed
+
+    def processes_changed(self) -> None:
+        """Publish the processes this table's workspace runs, now that
+        one started: the publishing goes on while any runs
+        (``_publish``)."""
+        if self._publishing is not None and not self._publishing.done():
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._publishing = asyncio.ensure_future(self._publish())
+
+    async def remote_processes(self) -> dict[str, dict[str, RecordFields]]:
+        """The processes other workspaces on the store run, owner to PID
+        to process, as each last published them.
+
+        A lapsed owner's are left out: whatever it ran was lost with it,
+        and the native runs it left are stopped meanwhile.
+        """
+        if self._plane is not self:
+            return await self._plane.remote_processes()
+        found: dict[str, dict[str, RecordFields]] = {}
+        for owner, records in (await self.store.processes()).items():
+            if owner == self.owner or not records:
+                continue
+            if await self.store.alive(owner):
+                found[owner] = records
+            else:
+                self._reap_later(owner)
+        return found
+
+    async def signal_remote(
+        self,
+        owner: str,
+        pid: int,
+        signal: int,
+        session_id: str,
+        permissions: Callable[[], ProcessPermissions | None],
+    ) -> bool:
+        """Signal a process another workspace runs, named by a prefix of
+        its owner's id and the owner's PID: its owner stops it once it
+        takes the stop, within ``PUBLISH_SECONDS``.
+
+        Signal 0 only probes. A lapsed owner's process is gone, and the
+        native runs it left are stopped instead. The grants are read once
+        the store has answered, just before anything is stopped, so a
+        profile replaced meanwhile stops nothing under the old one.
+
+        Args:
+            owner (str): a prefix of the owner's id, as ``ps`` shows it.
+            pid (int): the process, by the owner's PID.
+            signal (int): the signal, 0 to probe.
+            session_id (str): the calling session.
+            permissions (Callable[[], ProcessPermissions | None]): whose
+                processes it may see and stop, None once the caller's
+                view is revoked.
+
+        Returns:
+            bool: whether one live process was signalled.
+
+        Raises:
+            PermissionError: the process is one the session sees but
+                may not stop.
+        """
+        if self._plane is not self:
+            return await self._plane.signal_remote(
+                owner, pid, signal, session_id, permissions
+            )
+        records = await self.store.processes()
+        owners = [
+            found
+            for found, processes in records.items()
+            if found != self.owner
+            and found.startswith(owner)
+            and str(pid) in processes
+        ]
+        if len(owners) > 1:
+            owners = [
+                found for found in owners if await self.store.alive(found)
+            ]
+        if len(owners) != 1:
+            return False
+        record = records[owners[0]][str(pid)]
+        own = record.get("session") == session_id
+        lapsed = not await self.store.alive(owners[0])
+        granted = permissions()
+        if granted is None or (granted.list == "session" and not own):
+            return False
+        if lapsed:
+            await self._reap_owner(owners[0])
+            return False
+        if granted.kill == "session" and not own:
+            raise PermissionError(errno.EPERM, "Operation not permitted")
+        if signal != 0:
+            await self.store.request_stop(owners[0], pid, signal)
+        return True
 
     def _remote(
         self, job_id: int, session_id: str, entry: RecordFields
@@ -965,6 +1118,7 @@ class JobTable:
         if outcome is None:
             if await self.store.alive(job.owner):
                 return
+            self._reap_later(job.owner)
             await _mark_killed(job.console, HANGUP_EXIT_CODE)
             outcome = await job.console.outcome()
             if outcome is None:
@@ -1146,11 +1300,21 @@ class JobTable:
 
     def _drop_lease(self) -> None:
         """Stop renewing once every job this table runs has ended its
-        console: a killed one still stopping keeps the lease, or other
-        workspaces would end it as hung up."""
-        if self._lease is None or any(
-            j.process is not None and not j.console.finished
-            for j in [*self.all_jobs(), *self._disowned]
+        console and no process it publishes runs: a killed one still
+        stopping keeps the lease, or other workspaces would end it as
+        hung up, and a published process keeps it, or they would take
+        its record for lapsed; the publishing drops it as it stops."""
+        if (
+            self._lease is None
+            or (
+                self._publishing is not None
+                and not self._publishing.done()
+                and self.processes.live()
+            )
+            or any(
+                j.process is not None and not j.console.finished
+                for j in [*self.all_jobs(), *self._disowned]
+            )
         ):
             return
         self._lease.cancel()
@@ -1205,6 +1369,155 @@ class JobTable:
                             await self._stop_runner(job, job.process, 9)
                 except Exception as exc:
                     logger.debug("job list check failed: %s", exc)
+
+    def _records(self) -> dict[str, RecordFields]:
+        """The live processes this workspace runs, as its record keeps
+        them, each with the native runs it has going."""
+        records: dict[str, RecordFields] = {}
+        for handle in self.processes.live():
+            info = handle.info
+            records[str(info.pid)] = {
+                "pid": info.pid,
+                "parent": info.parent_pid,
+                "group": info.group_id,
+                "session": info.session_id,
+                "command": info.command,
+                "cwd": info.cwd.virtual,
+                "started_at": info.started_at,
+                "state": info.state.value,
+                "execution": info.execution_id,
+                "runs": list(handle.runs.values()),
+            }
+        return records
+
+    async def _publish(self) -> None:
+        """Publish the processes this workspace runs every
+        ``PUBLISH_SECONDS`` while it runs any, and stop those other
+        workspaces asked it to stop. Once it runs none, its record goes
+        and the publishing stops.
+
+        The owner's lease is renewed once ahead of the first record it
+        vouches for, then kept by the table's lease renewal
+        (``_keep_lease``) while any process runs, on its own timer
+        whatever a round costs. The record is written again every third
+        of the lease, so it outlives its store's expiry and comes back
+        should a workspace have taken this one for lapsed. Each record
+        carries ``seen_at``, when its processes were read, the last time
+        this workspace vouched for them and their native runs, on the
+        host's clock, which a host reap compares with ``ps``. A failed
+        round is logged and tried again the next one, and a stop that
+        fails leaves the others it came with to be applied.
+        """
+        published: dict[str, RecordFields] | None = None
+        lease = self.store.lease_seconds
+        rewrite = (
+            max(1, int(lease / 3 / PUBLISH_SECONDS))
+            if lease is not None
+            else 0
+        )
+        renewed = lease is None
+        rounds = 0
+        while True:
+            seen = time.time()
+            records = self._records()
+            try:
+                if not renewed:
+                    await self.store.renew(self.owner)
+                    renewed = True
+                    self._keep_lease()
+                if records != published or (rewrite and rounds % rewrite == 0):
+                    await self.store.publish(
+                        self.owner,
+                        {
+                            pid: {**record, "seen_at": seen}
+                            for pid, record in records.items()
+                        },
+                    )
+                    published = records
+                for pid, signal in await self.store.take_stops(self.owner):
+                    try:
+                        await self._stop_asked(pid, signal)
+                    except Exception as exc:
+                        logger.debug("stop of %d not applied: %s", pid, exc)
+            except Exception as exc:
+                logger.debug("process publish failed: %s", exc)
+            if published == {} and not self._records():
+                self._drop_lease()
+                return
+            rounds += 1
+            await asyncio.sleep(PUBLISH_SECONDS)
+
+    async def _stop_asked(self, pid: int, signal: int) -> None:
+        """Stop one of this workspace's processes another workspace
+        asked to stop: a job's runner the way ``kill`` stops a job,
+        through the table that holds it, a child shell's included; any
+        other runner directly.
+
+        Args:
+            pid (int): the process.
+            signal (int): the signal it is stopped with.
+        """
+        table = self._job_tables.get(pid, self)
+        for job in table.all_jobs():
+            if (
+                job.process is not None
+                and job.pid == pid
+                and job.status == JobStatus.RUNNING
+            ):
+                await table.kill(job.id, job.session_id, signal)
+                return
+        for handle in self.processes.live():
+            if handle.info.pid == pid:
+                handle.terminate(signal)
+                return
+
+    def _reap_later(self, owner: str) -> None:
+        """Stop the native runs a lapsed owner left, without waiting.
+
+        Args:
+            owner (str): the lapsed owner.
+        """
+        if self._reaping_stopped or owner in self._reaped:
+            return
+        self._reaped.add(owner)
+        task = asyncio.ensure_future(self._reap_owner(owner))
+        self._reaping.add(task)
+        task.add_done_callback(self._reaping.discard)
+
+    async def _reap_owner(self, owner: str) -> None:
+        """Stop the native runs a lapsed owner left, those this
+        workspace reaches, and keep its record holding only the rest, for
+        a workspace that reaches them. The owner's lease is checked again
+        before each run is stopped, so one that renewed meanwhile keeps
+        its runs, and its record as it is. Each run goes to the reaper
+        with its record's ``seen_at``.
+
+        Args:
+            owner (str): the lapsed owner.
+        """
+        try:
+            records = (await self.store.processes()).get(owner, {})
+            left: list[dict[str, JsonValue]] = []
+            for record in records.values():
+                for run in record["runs"]:
+                    if await self.store.alive(owner):
+                        return
+                    if self.reaper is None or await self.reaper(
+                        [{**run, "seen_at": record.get("seen_at")}], 15
+                    ):
+                        left.append(run)
+            kept = {
+                pid: {
+                    **record,
+                    "runs": [r for r in record["runs"] if r in left],
+                }
+                for pid, record in records.items()
+                if any(run in left for run in record["runs"])
+            }
+            if not await self.store.alive(owner):
+                await self.store.publish(owner, kept)
+        except Exception as exc:
+            logger.debug("lapsed owner %s not reaped: %s", owner, exc)
 
     async def _renew(self, interval: float) -> None:
         """Renew this table's lease every ``interval`` seconds, with the

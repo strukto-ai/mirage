@@ -17,7 +17,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { EXEC_ID, reapLine, wrapLine } from './constants.ts'
+import { EXEC_ID, REAP_ABSENT, reapLine, wrapLine } from './constants.ts'
 
 const PRELUDE = `/bin/sh -c 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"' sh `
 
@@ -97,4 +97,13 @@ describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
     },
     15_000,
   )
+
+  // A box that holds no process of the run says so, apart from one whose
+  // processes it stopped.
+  it('answers a run it does not hold', () => {
+    const done = spawnSync('/bin/sh', ['-c', reapLine(crypto.randomUUID().replaceAll('-', ''))], {
+      timeout: 10_000,
+    })
+    expect(done.status).toBe(REAP_ABSENT)
+  })
 })

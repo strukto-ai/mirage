@@ -16,8 +16,10 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import sys
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
 from contextvars import Context
 
 import aiofiles.os
@@ -28,6 +30,7 @@ from mirage.io.types import ByteSource
 from mirage.process.handle import ProcessHandle
 from mirage.runtime.sandbox.constants import (
     EXEC_PRELUDE,
+    HOST_START_SLACK_SECONDS,
     PIPE_DIAGNOSTIC_BYTES,
     PIPE_DIAGNOSTIC_WAIT_SECONDS,
     STOP_GRACE_SECONDS,
@@ -35,6 +38,8 @@ from mirage.runtime.sandbox.constants import (
     stop_signal,
 )
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
+from mirage.shell.join import shell_join
+from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -100,12 +105,20 @@ async def run_program(
         RuntimeError: the executable is missing and ``hint`` names it.
     """
     loop = asyncio.get_running_loop()
+    runner = current_caller().process
+    run: dict[str, JsonValue] | None = None
+
+    def exited() -> None:
+        if run is not None and runner is not None and run_key in runner.runs:
+            runner.add_run(run_key, {**run, "exited_at": time.time()})
+
     try:
         process, transport = await _spawn(
             executable,
             args,
             cwd=cwd,
             env=env,
+            exited=exited,
             stdin=(
                 asyncio.subprocess.PIPE
                 if stdin is not None
@@ -117,8 +130,14 @@ async def run_program(
         if hint is None:
             raise
         raise RuntimeError(hint) from None
+    run_key = f"host:{process.pid}"
     if children is not None:
         children[process] = (transport, loop)
+        if runner is not None:
+            run = host_run(process.pid, [executable, *args])
+            runner.add_run(run_key, run)
+            if process.returncode is not None:
+                exited()
     assert process.stdout is not None and process.stderr is not None
 
     writer = process.stdin
@@ -149,7 +168,6 @@ async def run_program(
             reading, erring, feeding, waiting
         )
     except BaseException:
-        runner = current_caller().process
         signum = stop_signal(runner)
         try:
             # The input ends first, as a pipe whose writer went away
@@ -185,12 +203,175 @@ async def run_program(
         await close_quietly(stdin)
         if children is not None:
             children.pop(process, None)
+            if runner is not None:
+                runner.drop_run(run_key)
     code = process.returncode if process.returncode is not None else 1
     return RunResult(
         stdout=stdout,
         stderr=stderr or None,
         exit_code=128 - code if code < 0 else code,
     )
+
+
+def host_run(pid: int, argv: Sequence[str]) -> dict[str, JsonValue]:
+    """How another workspace on this host reaches a child ``run_program``
+    started, which leads its own process group: the host, the PID, and
+    when it started, so a PID the host reused is never taken for it.
+    ``run_program`` adds ``exited_at`` once the child exits while what
+    it started may run on. Mirrors TypeScript's ``hostRun``.
+
+    Args:
+        pid (int): the child's PID.
+        argv (Sequence[str]): what it runs.
+    """
+    return {
+        "host": socket.gethostname(),
+        "pid": pid,
+        "started_at": time.time(),
+        "command": shell_join(argv),
+    }
+
+
+async def _ps(*args: str) -> str:
+    """What ``ps`` prints given ``args``, in the C locale.
+
+    Args:
+        *args (str): its options.
+
+    Raises:
+        OSError: the host has no ``ps``, or it ended on a signal before
+            it printed everything.
+    """
+    ps = await asyncio.create_subprocess_exec(
+        "ps",
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        env={**os.environ, "LC_ALL": "C"},
+    )
+    out, _ = await ps.communicate()
+    if ps.returncode is not None and ps.returncode < 0:
+        raise OSError(f"ps ended on signal {-ps.returncode}")
+    return out.decode()
+
+
+def _lstart(text: str) -> float:
+    """A start time as ``ps -o lstart`` prints it, in epoch seconds.
+
+    Args:
+        text (str): the printed time.
+
+    Raises:
+        ValueError: the text is not such a time.
+    """
+    return time.mktime(time.strptime(text, "%a %b %d %H:%M:%S %Y"))
+
+
+async def _started_at(pid: int) -> float | None:
+    """When a host process started, in epoch seconds; None once no
+    process has the PID.
+
+    Args:
+        pid (int): the process.
+
+    Raises:
+        OSError: the host has no ``ps``.
+    """
+    text = (await _ps("-o", "lstart=", "-p", str(pid))).strip()
+    return _lstart(text) if text else None
+
+
+async def _group_started(group: int) -> list[float]:
+    """When each process of a process group started, in epoch seconds.
+
+    Args:
+        group (int): the group's id.
+
+    Raises:
+        OSError: the host has no ``ps``.
+    """
+    starts: list[float] = []
+    for line in (await _ps("-A", "-o", "pgid=,lstart=")).splitlines():
+        found, _, start = line.strip().partition(" ")
+        if found == str(group):
+            starts.append(_lstart(start.strip()))
+    return starts
+
+
+async def reap_host_run(run: Mapping[str, JsonValue], signum: int) -> bool:
+    """Stop a host run a lapsed workspace left: its process group gets
+    ``signum``, then KILL after ``STOP_GRACE_SECONDS``. Mirrors
+    TypeScript's ``reapHostRun``.
+
+    Only a run of this host is reached, and only while its PID still
+    names a process started when the run did, to the second ``ps``
+    shows, so a PID the host reused is left alone. A PID that names no
+    process may still name the run's group, whose leader exited before
+    the programs it started. That group is the run's while one of its
+    members started by the last time the group was known to be: when
+    the leader exited (``exited_at``), else when its workspace last
+    vouched for the run (``seen_at``), with the leader still unreaped.
+    The host gives no new process the id of a group that has members,
+    and hands a number out again only after a full round of the others,
+    so a group that took the id later has only members started since.
+    One none of whose members proves it is not reached: its members may
+    all have started since, the run's descendants, so its record stays.
+    A group this workspace may not signal is not reached while its
+    leader still runs (macOS answers EPERM for one that only exited
+    unreaped).
+
+    Args:
+        run (Mapping[str, JsonValue]): the run as ``host_run`` keeps it.
+        signum (int): the first signal.
+
+    Returns:
+        bool: True once the run is stopped or gone; False when this
+        workspace cannot reach it.
+    """
+    pid, recorded = run.get("pid"), run.get("started_at")
+    if (
+        sys.platform == "win32"
+        or run.get("host") != socket.gethostname()
+        or not isinstance(pid, int)
+        or not isinstance(recorded, (int, float))
+    ):
+        return False
+    try:
+        started = await _started_at(pid)
+        members = await _group_started(pid) if started is None else []
+    except (OSError, ValueError) as exc:
+        logger.debug("process %d not checked: %s", pid, exc)
+        return False
+    if started is not None:
+        if abs(started - recorded) > HOST_START_SLACK_SECONDS:
+            return True
+    else:
+        if not members:
+            return True
+        known = run.get("exited_at", run.get("seen_at"))
+        if not isinstance(known, (int, float)) or not any(
+            start <= known + HOST_START_SLACK_SECONDS for start in members
+        ):
+            return False
+    try:
+        os.killpg(pid, signum)
+        async with asyncio.timeout(STOP_GRACE_SECONDS):
+            while True:
+                await asyncio.sleep(STOP_POLL_SECONDS)
+                os.killpg(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return await _started_at(pid) is None
+    except TimeoutError:
+        logger.debug("process group %d outlived signal %d", pid, signum)
+    try:
+        os.killpg(pid, 9)
+    except ProcessLookupError:
+        logger.debug("process group %d has already exited", pid)
+    except PermissionError:
+        return await _started_at(pid) is None
+    return True
 
 
 async def read_into(
@@ -213,6 +394,32 @@ async def read_into(
     return b"".join(parts)
 
 
+class _ExitWatch(asyncio.subprocess.SubprocessStreamProtocol):
+    """A child's stream protocol that also says when the child exits:
+    ``Process.wait`` answers only once every pipe closed, which a program
+    the child started may hold open long after.
+
+    Args:
+        exited (Callable[[], None] | None): called once the child exits.
+        limit (int): what each pipe's reader buffers.
+        loop (asyncio.AbstractEventLoop): the child's loop.
+    """
+
+    def __init__(
+        self,
+        exited: Callable[[], None] | None,
+        limit: int,
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        super().__init__(limit=limit, loop=loop)
+        self._exited = exited
+
+    def process_exited(self) -> None:
+        super().process_exited()
+        if self._exited is not None:
+            self._exited()
+
+
 async def _spawn(
     executable: str,
     args: list[str],
@@ -221,6 +428,7 @@ async def _spawn(
     stderr: int,
     cwd: str | None = None,
     env: dict[str, str] | None = None,
+    exited: Callable[[], None] | None = None,
 ) -> tuple[asyncio.subprocess.Process, asyncio.SubprocessTransport]:
     """Start a child leading a process group of its own, keeping the
     transport that closes our ends of its pipes (``stop_tree``).
@@ -234,12 +442,12 @@ async def _spawn(
             process's.
         env (dict[str, str] | None): the whole environment; None
             inherits this process's.
+        exited (Callable[[], None] | None): called the moment the child
+            exits, which ``wait`` answers only once its pipes closed.
     """
     loop = asyncio.get_running_loop()
     transport, protocol = await loop.subprocess_exec(
-        lambda: asyncio.subprocess.SubprocessStreamProtocol(
-            limit=STREAM_LIMIT, loop=loop
-        ),
+        lambda: _ExitWatch(exited, limit=STREAM_LIMIT, loop=loop),
         executable,
         *args,
         cwd=cwd,

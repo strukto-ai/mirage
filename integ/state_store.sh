@@ -70,6 +70,24 @@ run_jobs() {
   wait "$owner_pid" || fail=1
 }
 
+run_processes() {
+  local backend="$1" owner_name="$2" peer_name="$3"
+  local prefix="mirage-integ-xstore-${RUN_ID}-${backend}-processes-${owner_name}:"
+  local owner_pid
+  echo
+  echo "===== [$backend] $owner_name process owner -> $peer_name lists and kills by owner:pid ====="
+  if [ "$owner_name" == "py" ]; then
+    "$PY" "$HERE/state_store.py" processes-own "$prefix" &
+    owner_pid=$!
+    (cd "$HERE" && pnpm exec tsx state_store.ts processes-peer "$prefix") || fail=1
+  else
+    (cd "$HERE" && pnpm exec tsx state_store.ts processes-own "$prefix") &
+    owner_pid=$!
+    "$PY" "$HERE/state_store.py" processes-peer "$prefix" || fail=1
+  fi
+  wait "$owner_pid" || fail=1
+}
+
 run_battery() {
   local backend="$1"
   export STORE_BACKEND="$backend"
@@ -78,6 +96,8 @@ run_battery() {
   run_concurrent "$backend"
   run_jobs "$backend" "py" "ts"
   run_jobs "$backend" "ts" "py"
+  run_processes "$backend" "py" "ts"
+  run_processes "$backend" "ts" "py"
 }
 
 run_battery "redis"

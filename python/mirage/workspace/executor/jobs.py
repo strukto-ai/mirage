@@ -61,7 +61,7 @@ from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
-from mirage.types import Refusal
+from mirage.types import JsonValue, PathSpec, Refusal
 from mirage.utils.timezone import zone_from_env
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
@@ -75,6 +75,7 @@ from mirage.workspace.executor.statement import (
 from mirage.workspace.executor.traps import inherit_traps
 from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS, SHELL_NAMES
 from mirage.workspace.node.occurrence import occurrence_of
+from mirage.workspace.record.types import RecordFields
 from mirage.workspace.session import (
     SessionState,
 )
@@ -1060,7 +1061,9 @@ async def handle_kill(
     operand is tried and each failure is named in bash's words; the
     status is 0 when any operand was signalled, as bash's is. A job
     spec is ``%N``; a negative number is a process group, which no
-    managed runner leads.
+    managed runner leads. ``owner:pid`` names another workspace's
+    runner, as ``ps`` lists it: its owner stops it once it takes the
+    stop.
 
     Args:
         job_table (JobTable): the session's jobs.
@@ -1110,6 +1113,28 @@ async def handle_kill(
     signalled = False
     await job_table.sync(sid)
     for operand in words:
+        owner, colon, local = operand.partition(":")
+        if colon and not operand.startswith("%"):
+            if not owner or not local.isascii() or not local.isdigit():
+                errors.append(
+                    f"{voice}kill: {operand}: arguments must be process "
+                    "or job IDs"
+                )
+                continue
+            try:
+                found = await job_table.signal_remote(
+                    owner, int(local), signal, sid, processes.permissions
+                )
+            except PermissionError:
+                errors.append(
+                    f"{voice}kill: ({operand}) - Operation not permitted"
+                )
+                continue
+            if not found:
+                errors.append(f"{voice}kill: ({operand}) - No such process")
+                continue
+            signalled = True
+            continue
         jobs = job_table.list_jobs(sid)
         pid, refusal = _kill_pid(jobs, operand)
         if pid is None:
@@ -1384,17 +1409,21 @@ class _PsOptions:
 
     Args:
         pids (frozenset[int]): ``-p`` selection, empty for none.
+        remote (frozenset[tuple[str, int]]): ``-p`` selection of other
+            workspaces' processes, ``owner:pid``, by owner prefix.
         all (bool): a letter that selects every process was given.
         columns (tuple[tuple[str, str], ...]): ``-o`` keys and headers.
     """
 
     pids: frozenset[int]
+    remote: frozenset[tuple[str, int]]
     all: bool
     columns: tuple[tuple[str, str], ...]
 
 
-def _ps_pids(value: str, option: str) -> set[int]:
-    """One ``-p`` list, refused in procps's words.
+def _ps_pids(value: str, option: str) -> tuple[set[int], set[tuple[str, int]]]:
+    """One ``-p`` list, refused in procps's words: this workspace's
+    PIDs, and other workspaces' as ``owner:pid``.
 
     Args:
         value (str): the list, comma or blank separated.
@@ -1404,7 +1433,14 @@ def _ps_pids(value: str, option: str) -> set[int]:
     if not tokens:
         raise ValueError(f"list of process IDs must follow {option}")
     pids: set[int] = set()
+    remote: set[tuple[str, int]] = set()
     for token in tokens:
+        owner, colon, local = token.partition(":")
+        if colon:
+            if not owner or not local.isascii() or not local.isdigit():
+                raise ValueError("process ID list syntax error")
+            remote.add((owner, int(local)))
+            continue
         body = token[1:] if token[:1] in "+-" else token
         if not body.isascii() or not body.isdigit():
             raise ValueError("process ID list syntax error")
@@ -1412,7 +1448,7 @@ def _ps_pids(value: str, option: str) -> set[int]:
         if number <= 0 or number > _MAX_PID_OPERAND:
             raise ValueError("process ID out of range")
         pids.add(number)
-    return pids
+    return pids, remote
 
 
 def _ps_columns(value: str, option: str) -> list[tuple[str, str]]:
@@ -1450,6 +1486,7 @@ def _parse_ps(words: list[str]) -> _PsOptions:
         words (list[str]): arguments after ps.
     """
     pids: set[int] = set()
+    remote: set[tuple[str, int]] = set()
     columns: list[tuple[str, str]] = []
     select_all = False
     at = 0
@@ -1464,7 +1501,9 @@ def _parse_ps(words: list[str]) -> _PsOptions:
                 attached = words[at] if at < len(words) else ""
                 at += 1
             if option == "--pid":
-                pids |= _ps_pids(attached, option)
+                local, others = _ps_pids(attached, option)
+                pids |= local
+                remote |= others
             else:
                 columns += _ps_columns(attached, option)
             continue
@@ -1488,10 +1527,14 @@ def _parse_ps(words: list[str]) -> _PsOptions:
                 value = words[at] if at < len(words) else ""
                 at += 1
             if flag == "p":
-                pids |= _ps_pids(value, "-p")
+                local, others = _ps_pids(value, "-p")
+                pids |= local
+                remote |= others
             else:
                 columns += _ps_columns(value, "-o")
-    return _PsOptions(frozenset(pids), select_all, tuple(columns))
+    return _PsOptions(
+        frozenset(pids), frozenset(remote), select_all, tuple(columns)
+    )
 
 
 def _ps_row(keys: list[str], cells: list[str]) -> str:
@@ -1575,7 +1618,9 @@ def _started(fact: str, info: ProcessInfo, ctx: _PsContext) -> str:
     return gnu_strftime(start, "%H:%M")
 
 
-def _ps_cell(key: str, info: ProcessInfo, ctx: _PsContext) -> str:
+def _ps_cell(
+    key: str, info: ProcessInfo, ctx: _PsContext, owner: str = ""
+) -> str:
     """One -o cell for a managed runner.
 
     The owner columns print the workspace user and the session's
@@ -1583,28 +1628,35 @@ def _ps_cell(key: str, info: ProcessInfo, ctx: _PsContext) -> str:
     where nobody claimed one or the runner is another session's, whose
     profile this one cannot name. A runner of the calling session belongs
     to the session ``$$`` leads; another session's to its own group.
+    Another workspace's runner prints its ids as ``owner:id``, and leads
+    or joins a group of that workspace.
 
     Args:
         key (str): the column key.
         info (ProcessInfo): the runner.
         ctx (_PsContext): the line's shared facts.
+        owner (str): the owner prefix of another workspace's runner;
+            empty for this workspace's.
     """
     fact = _PS_COLUMNS[key][3]
     if fact in _PS_FIXED:
         return _PS_FIXED[fact]
+    tag = f"{owner}:" if owner else ""
     session = (
         ctx.shell_pid
-        if info.session_id == ctx.session_id and ctx.shell_pid is not None
+        if not owner
+        and info.session_id == ctx.session_id
+        and ctx.shell_pid is not None
         else info.group_id or info.pid
     )
     if fact == "pid":
-        return str(info.pid)
+        return f"{tag}{info.pid}"
     if fact == "ppid":
-        return str(info.parent_pid or 0)
+        return f"{tag}{info.parent_pid}" if info.parent_pid else "0"
     if fact == "pgid":
-        return str(info.group_id or info.pid)
+        return f"{tag}{info.group_id or info.pid}"
     if fact == "sid":
-        return str(session)
+        return f"{tag}{session}"
     if fact in ("stat", "state"):
         state = _PS_STATES[info.state]
         return state + ("s" if fact == "stat" and info.pid == session else "")
@@ -1624,6 +1676,56 @@ def _ps_cell(key: str, info: ProcessInfo, ctx: _PsContext) -> str:
     return info.command
 
 
+def _remote_info(record: RecordFields) -> ProcessInfo:
+    """Another workspace's runner as its process record keeps it.
+
+    Args:
+        record (RecordFields): the record.
+    """
+    return ProcessInfo(
+        pid=record["pid"],
+        session_id=record["session"],
+        command=record["command"],
+        cwd=PathSpec.from_str_path(record["cwd"]),
+        started_at=record["started_at"],
+        execution_id=record["execution"],
+        state=ProcessState(record["state"]),
+        parent_pid=record["parent"],
+        group_id=record["group"],
+    )
+
+
+def _owner_tags(owners: list[str]) -> dict[str, str]:
+    """The shortest start of each owner's id, six characters at least,
+    that no other owner's begins with, as ``ps`` names their processes.
+
+    Args:
+        owners (list[str]): the owners' ids.
+    """
+    tags: dict[str, str] = {}
+    for owner in owners:
+        size = 6
+        while size < len(owner) and any(
+            other != owner and other.startswith(owner[:size])
+            for other in owners
+        ):
+            size += 1
+        tags[owner] = owner[:size]
+    return tags
+
+
+def _run_where(run: dict[str, JsonValue]) -> str:
+    """Where a native run goes on, as ``ps`` names it: ``host PID`` for a
+    host program, the runtime and the start of its tag for a sandbox's.
+
+    Args:
+        run (dict[str, JsonValue]): the run, as its process record keeps it.
+    """
+    if "host" in run:
+        return f"host {run['pid']}"
+    return f"{run['runtime']} {str(run['tag'])[:12]}"
+
+
 async def handle_ps(
     job_table: JobTable,
     parts: list[str],
@@ -1640,6 +1742,13 @@ async def handle_ps(
     exits 1, as procps does, and an option error is procps's message and
     usage.
 
+    The runners other workspaces on a shared store run follow this
+    workspace's, as ``owner:pid`` with the owner's id shortened as far as
+    it stays unique, within the same view. In the compact rows each
+    runner is followed by the native runs it has going, a host program
+    by its host PID and a sandbox's by its runtime and tag, each as
+    ``-<TAB>└ where: command``.
+
     Args:
         job_table (JobTable): the workspace's job table.
         parts (list[str]): the command words, `ps` first.
@@ -1651,29 +1760,59 @@ async def handle_ps(
         options = _parse_ps(parts[1:])
     except ValueError as exc:
         return _job_result(cmd_str, f"error: {exc}\n{_PS_USAGE}", 1)
-    processes = [
-        info
-        for info in _process_view(job_table, session).list()
-        if options.all or not options.pids or info.pid in options.pids
+    sid = _session_of(session)
+    processes = _process_view(job_table, session)
+    every = options.all or not (options.pids or options.remote)
+    runs = {
+        handle.info.pid: list(handle.runs.values())
+        for handle in job_table.processes.live()
+    }
+    rows: list[tuple[str, ProcessInfo, list[dict[str, JsonValue]]]] = [
+        ("", info, runs.get(info.pid, []))
+        for info in processes.list()
+        if every or info.pid in options.pids
     ]
+    remote = await job_table.remote_processes()
+    granted = processes.permissions()
+    tags = _owner_tags(list(remote))
+    for owner, records in remote.items():
+        for record in records.values():
+            if granted is None or (
+                granted.list == "session" and record["session"] != sid
+            ):
+                continue
+            if every or any(
+                owner.startswith(prefix) and record["pid"] == pid
+                for prefix, pid in options.remote
+            ):
+                rows.append(
+                    (tags[owner], _remote_info(record), record["runs"])
+                )
     if options.columns:
         keys = [key for key, _ in options.columns]
         ctx = _PsContext(
             now=time.time(),
             zone=zone_from_env(session.env) if session is not None else None,
             group=session.profile if session is not None else None,
-            session_id=_session_of(session),
+            session_id=sid,
             shell_pid=session.shell_pid if session is not None else None,
         )
         lines = [
-            _ps_row(keys, [_ps_cell(key, info, ctx) for key in keys])
-            for info in processes
+            _ps_row(keys, [_ps_cell(key, info, ctx, owner) for key in keys])
+            for owner, info, _ in rows
         ]
         if any(header for _, header in options.columns):
             lines.insert(0, _ps_row(keys, [h for _, h in options.columns]))
     else:
-        lines = [f"{info.pid}\t{info.command}" for info in processes]
-    code = 0 if processes else 1
+        lines = []
+        for owner, info, native in rows:
+            lines.append(
+                f"{owner + ':' if owner else ''}{info.pid}\t{info.command}"
+            )
+            lines += [
+                f"-\t└ {_run_where(run)}: {run['command']}" for run in native
+            ]
+    code = 0 if rows else 1
     out = encode_text("\n".join(lines) + "\n") if lines else b""
     return (
         out,

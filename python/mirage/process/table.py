@@ -24,13 +24,19 @@ class ProcessTable:
             when its caller names none; None means the system source.
         bind (ExecutionBind | None): runs each process under its host's
             execution context; None runs its body as supplied.
+        changed (Callable[[], None] | None): called once a runner is
+            started, so whoever publishes the live runners knows to.
     """
 
     def __init__(
-        self, ids: IdSource | None = None, bind: ExecutionBind | None = None
+        self,
+        ids: IdSource | None = None,
+        bind: ExecutionBind | None = None,
+        changed: Callable[[], None] | None = None,
     ) -> None:
         self._ids = ids
         self._bind = bind
+        self._changed = changed
         self._next_pid = 1
         self._live: dict[int, tuple[int, ProcessHandle]] = {}
         self._generations: dict[str, int] = {}
@@ -124,6 +130,8 @@ class ProcessTable:
         if started is not None:
             started(handle.info)
         handle.start(eager=eager)
+        if self._changed is not None:
+            self._changed()
         return handle
 
     def terminate_children(self, pid: int, signal: int = 9) -> None:
@@ -202,11 +210,15 @@ class ProcessTable:
                 handle = signal_target(pid)
                 return handle is not None and handle.terminate(signal)
 
+        def granted() -> ProcessPermissions | None:
+            return permissions() if valid() else None
+
         return ProcessView(
             list=list_visible,
             check_spawn=check_spawn,
             probe=probe,
             terminate=terminate,
+            permissions=granted,
         )
 
     def revoke_session(self, session_id: str) -> None:

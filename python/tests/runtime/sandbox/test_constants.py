@@ -18,7 +18,12 @@ import uuid
 
 import pytest
 
-from mirage.runtime.sandbox.constants import EXEC_ID, reap_line, wrap_line
+from mirage.runtime.sandbox.constants import (
+    EXEC_ID,
+    REAP_ABSENT,
+    reap_line,
+    wrap_line,
+)
 
 PRELUDE = '/bin/sh -c \'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"\' sh '
 
@@ -67,6 +72,16 @@ def test_a_path_without_sh_still_runs_the_line(tmp_path):
         ["/bin/sh", "-c", wrapped], capture_output=True, check=False
     )
     assert (done.returncode, done.stdout) == (0, b"ok\n")
+
+
+# A box that holds no process of the run says so, apart from one whose
+# processes it stopped.
+@pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="needs /proc")
+def test_the_stop_line_answers_a_run_it_does_not_hold():
+    done = subprocess.run(
+        ["/bin/sh", "-c", reap_line(uuid.uuid4().hex)], check=False, timeout=10
+    )
+    assert done.returncode == REAP_ABSENT
 
 
 # A run's program may ignore TERM, and the config may set a PATH that

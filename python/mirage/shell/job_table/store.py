@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from mirage.shell.console import ConsoleStore
 from mirage.workspace.record.types import RecordFields
@@ -21,7 +21,8 @@ from mirage.workspace.record.types import RecordFields
 
 class JobStore(ABC):
     """Storage seam for the job plane: each session's job list, each
-    job's console, and which owners still run their jobs.
+    job's console, which owners still run their jobs, and the processes
+    each owner runs.
 
     A session's list is one record, {"next": n, "jobs": {id: job}},
     written under a generation CAS the way the session table is, so two
@@ -29,7 +30,10 @@ class JobStore(ABC):
     the same number. A job's console is a stream the record names; any
     workspace on the same store attaches to it by that name, follows it,
     and ends it to kill the job. A lease says an owner is still alive: a
-    job whose owner's lease lapsed with no ending was lost with it.
+    job whose owner's lease lapsed with no ending was lost with it. Each
+    owner publishes the processes it runs, so every workspace on the
+    store lists them and asks the owner to stop one; another workspace
+    stops a lapsed owner's native runs itself.
 
     Subclasses are infra adapters (RAM, Redis); everything above (job
     numbers, waits, kills, hangups) is the table's, mirroring the
@@ -125,8 +129,49 @@ class JobStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def publish(
+        self, owner: str, processes: Mapping[str, RecordFields]
+    ) -> None:
+        """Replace the processes an owner runs; none drops its record.
+
+        A record outlives its owner's lease, so a workspace that finds
+        the owner lapsed still reads what it left running.
+
+        Args:
+            owner (str): the owning job table's id.
+            processes (Mapping[str, RecordFields]): PID to process.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def processes(self) -> dict[str, dict[str, RecordFields]]:
+        """Every owner's published processes: owner to PID to process."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def request_stop(self, owner: str, pid: int, signal: int) -> None:
+        """Ask an owner to stop one of its processes.
+
+        Args:
+            owner (str): the owning job table's id.
+            pid (int): the process, by the owner's PID.
+            signal (int): the signal it is stopped with.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def take_stops(self, owner: str) -> list[tuple[int, int]]:
+        """The stops asked of an owner since it last took them, as
+        (PID, signal) pairs; taking them clears them.
+
+        Args:
+            owner (str): the owning job table's id.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def clear(self) -> None:
-        """Delete every job list, console and lease."""
+        """Delete every job list, console, lease and process record."""
         raise NotImplementedError
 
     @abstractmethod

@@ -294,10 +294,12 @@ async def test_workspace_list_does_not_grant_kill():
     with pytest.raises(PermissionError) as denied:
         view.terminate(child.info.pid, 15)
     assert denied.value.errno == errno.EPERM
+    assert view.permissions() == grants
     processes.revoke_session("observer")
     with pytest.raises(PermissionError):
         view.check_spawn()
     assert view.list() == ()
+    assert view.permissions() is None
     release.set()
     await child.join()
 
@@ -466,3 +468,26 @@ async def test_started_runs_before_the_runner_with_the_process_live():
     )
     await handle.join()
     assert order == ["started 1", "run [1]"]
+
+
+async def _exits_0() -> int:
+    return 0
+
+
+# A table that publishes the live runners learns each one that started,
+# once it is live, so the next publish lists it.
+@pytest.mark.asyncio
+async def test_a_started_runner_tells_the_publisher():
+    live: list[int] = []
+    processes = ProcessTable(
+        changed=lambda: live.append(len(processes.live()))
+    )
+    for _ in range(2):
+        handle = processes.start(
+            session_id="s",
+            command="true",
+            cwd=PathSpec.from_str_path("/"),
+            run=_exits_0,
+        )
+        await handle.join()
+    assert live == [1, 1]

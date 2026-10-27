@@ -17,7 +17,8 @@ import type { RecordFields } from '../../workspace/record/types.ts'
 
 /**
  * Storage seam for the job plane: each session's job list, each job's
- * console, and which owners still run their jobs.
+ * console, which owners still run their jobs, and the processes each owner
+ * runs.
  *
  * A session's list is one record, `{"next": n, "jobs": {id: job}}`,
  * written under a generation CAS the way the session table is, so two
@@ -25,7 +26,10 @@ import type { RecordFields } from '../../workspace/record/types.ts'
  * same number. A job's console is a stream the record names; any workspace
  * on the same store attaches to it by that name, follows it, and ends it
  * to kill the job. A lease says an owner is still alive: a job whose
- * owner's lease lapsed with no ending was lost with it.
+ * owner's lease lapsed with no ending was lost with it. Each owner
+ * publishes the processes it runs, so every workspace on the store lists
+ * them and asks the owner to stop one; another workspace stops a lapsed
+ * owner's native runs itself.
  *
  * Subclasses are infra adapters (RAM, Redis); everything above (job
  * numbers, waits, kills, hangups) is the table's, mirroring the
@@ -79,7 +83,26 @@ export abstract class JobStore {
   /** Whether an owner's lease still holds. */
   abstract alive(owner: string): Promise<boolean>
 
-  /** Delete every job list, console and lease. */
+  /**
+   * Replace the processes an owner runs (PID to process); none drops its
+   * record. A record outlives its owner's lease, so a workspace that finds
+   * the owner lapsed still reads what it left running.
+   */
+  abstract publish(owner: string, processes: Readonly<Record<string, RecordFields>>): Promise<void>
+
+  /** Every owner's published processes: owner to PID to process. */
+  abstract processes(): Promise<Record<string, Record<string, RecordFields>>>
+
+  /** Ask an owner to stop one of its processes, by its PID, with `signal`. */
+  abstract requestStop(owner: string, pid: number, signal: number): Promise<void>
+
+  /**
+   * The stops asked of an owner since it last took them, as [PID, signal]
+   * pairs; taking them clears them.
+   */
+  abstract takeStops(owner: string): Promise<[number, number][]>
+
+  /** Delete every job list, console, lease and process record. */
   abstract clear(): Promise<void>
 
   /** Release any held connections. */

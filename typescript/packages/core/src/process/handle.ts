@@ -1,3 +1,4 @@
+import type { JsonValue } from '../types.ts'
 import type { ProcessInfo, ProcessRunner } from './types.ts'
 
 /**
@@ -27,6 +28,7 @@ export class ProcessHandle {
   private current: ProcessInfo
   private stopSignal: number | null = null
   private exitedCode: number | null = null
+  private readonly nativeRuns = new Map<string, Record<string, JsonValue>>()
   private completion!: Promise<ProcessInfo>
 
   constructor(
@@ -80,6 +82,30 @@ export class ProcessHandle {
   /** The status a program the runner started exited with on its own after the stop signal, null unless one did. */
   get programCode(): number | null {
     return this.exitedCode
+  }
+
+  /**
+   * The native runs this runner has going, each under a key of its own: a
+   * host program it started, a sandbox's run.
+   */
+  get runs(): Record<string, Record<string, JsonValue>> {
+    return Object.fromEntries(this.nativeRuns)
+  }
+
+  /**
+   * Record a native run this runner started, which the process plane
+   * publishes and a workspace that outlives this one stops.
+   *
+   * @param key the run's key, unique among the runner's.
+   * @param run how another workspace reaches it.
+   */
+  addRun(key: string, run: Record<string, JsonValue>): void {
+    this.nativeRuns.set(key, run)
+  }
+
+  /** Forget a native run once it ended, by the key it was recorded under. */
+  dropRun(key: string): void {
+    this.nativeRuns.delete(key)
   }
 
   /**
