@@ -189,7 +189,8 @@ def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
     Nothing (or ``null``) is no opinion. Anything else is one JSON
     answer (``Answer``): ``{"kind": "deny", "reason": ...}``,
     ``{"kind": "ask", "reason": ...}``, or at ``pre_execute``
-    ``{"kind": "route", "runtime": ...}``. A deny or an ask without a
+    ``{"kind": "route", "runtime": ..., "reason": ...}``, its reason
+    optional. A deny or an ask without a
     reason carries the document's default one.
 
     Args:
@@ -218,7 +219,7 @@ def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
     if answer.kind == Ask.kind:
         return Ask(answer.reason or DEFAULT_ASK_REASON)
     assert answer.runtime is not None
-    return Route(answer.runtime)
+    return Route(answer.runtime, answer.reason or "")
 
 
 class ScriptPolicy(Policy, SessionScopedMixin):

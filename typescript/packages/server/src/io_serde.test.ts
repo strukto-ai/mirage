@@ -14,15 +14,30 @@
 
 import { MountMode } from '@struktoai/mirage-core/types'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
+import type { Policy } from '@struktoai/mirage-core/policy/base'
+import type { Route } from '@struktoai/mirage-core/policy/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Workspace } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
-import { CallArgsError, answered, checked, failureToDict, ioResultToDict } from './io_serde.ts'
+import {
+  CallArgsError,
+  answered,
+  checked,
+  explanationToDict,
+  failureToDict,
+  ioResultToDict,
+} from './io_serde.ts'
 import { VFS_CALL_BY_NAME, type VfsCall } from './vfs_calls.ts'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
+
+class OnMonty implements Policy {
+  preExecute(): Promise<Route> {
+    return Promise.resolve({ kind: 'route', runtime: 'monty', reason: 'plain arithmetic' })
+  }
+}
 
 describe('failureToDict', () => {
   it.each([
@@ -115,6 +130,25 @@ describe('checked and answered', () => {
     expect(said).toMatchObject({ call: 'unlink', outcome: 'allow' })
     expect(await session.vfs.exists('/a')).toBe(true)
     await ws.close()
+  })
+
+  it('carries the reason an explained route gives', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        runtimes: ['monty', 'workspace'],
+        policies: [new OnMonty()],
+      },
+    )
+    try {
+      const said = explanationToDict(await ws.explain("python3 -c 'print(1)'"))
+      expect(said.answers).toEqual([
+        { kind: 'route', runtime: 'monty', reason: 'plain arithmetic', policy: 'OnMonty' },
+      ])
+    } finally {
+      await ws.close()
+    }
   })
 
   it('refuses arguments outside the schema', async () => {

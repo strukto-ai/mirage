@@ -141,6 +141,7 @@ describe('mirage workspace explain', () => {
       line: 'ls | wc -l && echo $(cat /data/keys/a)',
       outcome: 'deny',
       reason: 'sealed',
+      answers: [],
       exit_code: 1,
       node: {
         type: 'line',
@@ -170,6 +171,30 @@ describe('mirage workspace explain', () => {
       '    echo $(cat /data/keys/a)  [allow]',
       '      substitution: cat /data/keys/a',
       '        cat /data/keys/a  [deny, exit 1: sealed]  top',
+    ])
+  })
+
+  it('prints why a route places the line', () => {
+    const python3 = { ...command("python3 -c 'import sqlite3'", 'allow'), runtime: 'local' }
+    const said = {
+      line: "python3 -c 'import sqlite3'",
+      outcome: 'allow',
+      reason: '',
+      answers: [
+        {
+          kind: 'route',
+          runtime: 'local',
+          reason: 'monty has no sqlite3',
+          policy: 'RoutePolicy',
+        },
+      ],
+      exit_code: 0,
+      node: { type: 'line', text: "python3 -c 'import sqlite3'", children: [python3] },
+    }
+    expect(formatExplanation(said).split('\n')).toEqual([
+      "python3 -c 'import sqlite3'  [allow, exit 0]",
+      '  on local: monty has no sqlite3',
+      "  python3 -c 'import sqlite3'  [allow]  on local",
     ])
   })
 })

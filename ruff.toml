@@ -41,3 +41,5 @@ max-line-length = 88
 # Ruff measures E501 in display columns, so East Asian characters count as two.
 # These CJK prose fixtures passed flake8's character-based measurement.
 "python/tests/utils/test_sanitize.py" = ["E501"]
+# A policy program on monty: it awaits the host's functions at the top level.
+"examples/python/policy/llm_routing/route.py" = ["F704", "F821"]

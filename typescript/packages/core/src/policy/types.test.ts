@@ -22,12 +22,16 @@ describe('Answer', () => {
     expect(Answer.parse({ kind: 'deny', reason: 'no' })).toEqual({ kind: 'deny', reason: 'no' })
     expect(Answer.parse({ kind: 'ask' }).reason).toBeUndefined()
     expect(Answer.parse({ kind: 'route', runtime: 'docker' }).runtime).toBe('docker')
+    expect(Answer.parse({ kind: 'route', runtime: 'docker', reason: 'x' })).toEqual({
+      kind: 'route',
+      runtime: 'docker',
+      reason: 'x',
+    })
   })
 
   it.each([
     { kind: 'allow' },
     { kind: 'route' },
-    { kind: 'route', runtime: 'docker', reason: 'x' },
     { kind: 'deny', runtime: 'docker' },
     { kind: 'ask', policy: 'Mine' },
     { deny: 'x' },

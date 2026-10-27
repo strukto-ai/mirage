@@ -96,7 +96,12 @@ export function ioResultToDict(result: unknown): ResultDict & JsonValue {
 /** One policy's answer as the server's entry points carry it. Mirrors Python's `answer_to_dict`. */
 function answerToDict(action: Deny | Ask | Route): Record<string, JsonValue> {
   if (action.kind === 'route') {
-    return { kind: 'route', runtime: action.runtime, policy: action.policy ?? '' }
+    return {
+      kind: 'route',
+      runtime: action.runtime,
+      reason: action.reason ?? '',
+      policy: action.policy ?? '',
+    }
   }
   return { kind: action.kind, reason: action.reason, policy: action.policy ?? '' }
 }

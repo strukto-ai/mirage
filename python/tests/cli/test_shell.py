@@ -131,6 +131,7 @@ def test_explain_prints_the_line_as_its_tree():
         "line": "ls | wc -l && echo $(cat /data/keys/a)",
         "outcome": "deny",
         "reason": "sealed",
+        "answers": [],
         "exit_code": 1,
         "node": {
             "type": "line",
@@ -163,6 +164,35 @@ def test_explain_prints_the_line_as_its_tree():
         "    echo $(cat /data/keys/a)  [allow]",
         "      substitution: cat /data/keys/a",
         "        cat /data/keys/a  [deny, exit 1: sealed]  top",
+    ]
+
+
+def test_explain_prints_why_a_route_places_the_line():
+    python3 = _command("python3 -c 'import sqlite3'", "allow")
+    python3["runtime"] = "local"
+    said = {
+        "line": "python3 -c 'import sqlite3'",
+        "outcome": "allow",
+        "reason": "",
+        "answers": [
+            {
+                "kind": "route",
+                "runtime": "local",
+                "reason": "monty has no sqlite3",
+                "policy": "RoutePolicy",
+            }
+        ],
+        "exit_code": 0,
+        "node": {
+            "type": "line",
+            "text": "python3 -c 'import sqlite3'",
+            "children": [python3],
+        },
+    }
+    assert shell._format_explanation(said).splitlines() == [
+        "python3 -c 'import sqlite3'  [allow, exit 0]",
+        "  on local: monty has no sqlite3",
+        "  python3 -c 'import sqlite3'  [allow]  on local",
     ]
 
 

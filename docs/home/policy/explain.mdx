@@ -111,7 +111,7 @@ With a profile that denies `/data/keys/*`:
 | `outcome` | `allow`, `deny` or `ask` |
 | `reason` | the deciding answer's reason, or empty |
 | `source` | where the profile writes the rule (`top`, `mounts./runbook`, `commands.allow`); empty for a coded policy |
-| `answers` | every policy that answered, in order |
+| `answers` | every policy that answered, in order; a route names its `runtime` and its `reason`, empty when it gave none |
 | `refusal` | the record the agent would get, or `null` |
 | `error` | a VFS call only: the error it would raise (`EACCES`, `EROFS`), or empty |
 

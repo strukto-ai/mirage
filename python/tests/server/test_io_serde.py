@@ -4,11 +4,13 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.io import IOResult
+from mirage.policy import Policy, Route, RouteContext
 from mirage.policy.errors import PolicyDenied
 from mirage.server.io_serde import (
     CallArgsError,
     answered,
     checked,
+    explanation_to_dict,
     failure_to_dict,
     io_result_to_dict,
 )
@@ -101,6 +103,33 @@ async def test_a_vfs_call_runs_or_explains_as_json():
     explained = await answered(session, unlink, {"path": "/a"}, True)
     assert (explained["call"], explained["outcome"]) == ("unlink", "allow")
     assert await session.vfs.exists("/a")
+
+
+class _OnMonty(Policy):
+    async def pre_execute(self, ctx: RouteContext) -> Route:
+        return Route("monty", "plain arithmetic")
+
+
+@pytest.mark.asyncio
+async def test_an_explained_route_carries_its_reason():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=["monty", "workspace"],
+        policies=[_OnMonty()],
+    )
+    try:
+        said = explanation_to_dict(await ws.explain("python3 -c 'print(1)'"))
+    finally:
+        await ws.close()
+    assert said["answers"] == [
+        {
+            "kind": "route",
+            "runtime": "monty",
+            "reason": "plain arithmetic",
+            "policy": "_OnMonty",
+        }
+    ]
 
 
 def test_arguments_outside_the_schema_are_refused():

@@ -86,7 +86,7 @@ from mirage.policy import (
     SessionProfile,
     ShellExplanation,
 )
-from mirage.policy.builtin import PlacementPolicy
+from mirage.policy.builtin import RoutePolicy
 from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.policy.types import DryRun, PolicyCaller, policy_caller
 from mirage.process.child import ChildProcess
@@ -103,7 +103,7 @@ from mirage.runtime.binding import (
     restricted_mounts_for,
 )
 from mirage.runtime.resolver import PrefixResolver
-from mirage.runtime.routing import RoutePolicy
+from mirage.runtime.routing import RouteRule
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.program import reap_host_run
 from mirage.runtime.table import whole_line_runtime
@@ -269,7 +269,7 @@ class Workspace:
         namespace_store: NamespaceStore | None = None,
         session_store: NamespaceStore | None = None,
         runtimes: list[Runtime[Any] | str] | None = None,
-        route_policy: RoutePolicy | None = None,
+        route_policy: RouteRule | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
         profile: str | None = None,
@@ -615,7 +615,7 @@ class Workspace:
         )
         if route_policy is not None:
             self._registry.policies.place(
-                PlacementPolicy(route_policy, self._script_policy)
+                RoutePolicy(route_policy, self._script_policy)
             )
 
         # Installed CLIs, fully separate from mounts: the YAML `clis:`

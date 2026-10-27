@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { RouteError } from '../../runtime/routing/errors.ts'
-import type { RoutePolicy, RouteVerdict } from '../../runtime/routing/types.ts'
+import type { RouteRule, RouteVerdict } from '../../runtime/routing/types.ts'
 import type { Policy } from '../base.ts'
 import { compileProgram, parseProgram } from '../profile.ts'
 import type { ScriptPolicy } from '../script.ts'
@@ -29,12 +29,12 @@ import type { Action, ProfileScript, RouteContext } from '../types.ts'
  * answer, a program that fails) throws `RouteError` to the caller rather
  * than failing closed, since a misconfigured route policy is the
  * deployment's to fix and not a refusal to show an agent.
- * Mirrors the Python `PlacementPolicy`.
+ * Mirrors the Python `RoutePolicy`.
  *
  * @throws Error - the route is a string (a path is the workspace yaml's),
  * or the program is not `{script, runtime}`, or its script is still a path.
  */
-export class PlacementPolicy implements Policy {
+export class RoutePolicy implements Policy {
   private readonly call: ((ctx: RouteContext) => RouteVerdict | Promise<RouteVerdict>) | null
   private readonly program: ProfileScript | null
 
@@ -43,7 +43,7 @@ export class PlacementPolicy implements Policy {
    * @param programs the workspace's program runner, which a program runs on.
    */
   constructor(
-    route: RoutePolicy,
+    route: RouteRule,
     private readonly programs: ScriptPolicy,
   ) {
     if (typeof route === 'string') {

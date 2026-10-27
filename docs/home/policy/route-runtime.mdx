@@ -48,6 +48,7 @@ the session. It prints its answer:
 | Prints | Effect |
 | --- | --- |
 | `{"kind": "route", "runtime": "docker"}` | that runtime serves every command it captures |
+| `{"kind": "route", "runtime": "docker", "reason": "..."}` | the same, with why for `ws.explain(line)` to show |
 | `{"kind": "route", "runtime": "workspace"}` | the line runs in Mirage: no whole-line runtime (an `@line` capture) takes it |
 | nothing | the first capturer in `runtimes` order serves each command |
 | `{"kind": "deny", "reason": "..."}` | the line is refused, as by any `pre_execute` program |
@@ -92,3 +93,80 @@ policies naming different runtimes refuse the line. Nested lines (`$( )`,
 `eval`, `source`, `xargs`) keep the outer line's placement.
 `ws.explain(line)` shows each placement answer and each command's
 runtime. The caller's `runtime=` argument places the line itself.
+
+## Ask a model
+
+A routing program can ask an LLM where a line runs. A program on monty has
+no network of its own, so the call to the model is a
+[host function](/home/policy/scripts#host-functions) you write, with
+structured output limiting the answer to your runtimes. The program keeps
+the prompt:
+
+```yaml workspace.yaml
+runtimes: [monty, local, workspace]
+route_policy:
+  script: ./route.py
+  runtime: monty
+  env:
+    MODEL: gpt-6-luna
+```
+
+```python route.py
+import json
+import os
+
+PROMPT = (
+    "Pick the runtime that can run this shell line, monty when it can, "
+    "and say why in one sentence.\n"
+    "monty: Mirage's sandboxed Python: a subset of the language and part of "
+    "the standard library, with no packages, network or processes\n"
+    "local: the host's full Python: the whole language and standard library "
+    "and any installed package, with the host's files and network"
+)
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+if any(c["command"] == "python3" for c in ctx["commands"]):
+    choice = await parse_runtime(os.environ["MODEL"], PROMPT, ctx["line"])
+    print(json.dumps({"kind": "route", **choice}))
+```
+
+```python config.py
+class RuntimeChoice(BaseModel):
+    runtime: Literal["monty", "local"]
+    reason: str
+```
+
+```python utils.py
+async def parse_runtime(model: str, prompt: str, line: str) -> dict[str, str]:
+    done = await AsyncOpenAI().responses.parse(
+        model=model, instructions=prompt, input=line, text_format=RuntimeChoice
+    )
+    return done.output_parsed.model_dump()
+```
+
+```python main.py
+ws = Workspace(**config.to_workspace_kwargs(), policy_functions={"parse_runtime": parse_runtime})
+```
+
+`ws.shell(line)` runs each line where the model sends it. `ws.explain(line)`
+previews the choice and its reason without running anything. `main.py`
+prints the plan, then runs the line:
+
+```
+$ python3 -c "print(sum(range(1, 101)))"
+  plan: allow
+    route monty: Monty supports Python's built-in `range`, `sum`, and `print`, so it can run this line.
+      by RoutePolicy
+  output: 5050
+$ python3 -c "import sqlite3; print(sqlite3.sqlite_version)"
+  plan: allow
+    route local: This command requires the sqlite3 module, which is not available in Monty's limited standard-library subset.
+      by RoutePolicy
+  output: 3.50.4
+```
+
+The model's answer counts against the program's 10 seconds. The full
+example:
+[Python](https://github.com/strukto-ai/mirage/tree/main/examples/python/policy/llm_routing)
+and
+[TypeScript](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/policy/llm_routing).

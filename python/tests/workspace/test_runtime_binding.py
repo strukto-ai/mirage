@@ -468,7 +468,7 @@ async def test_two_placements_that_disagree_refuse_the_line():
         assert io.refusal is not None
         assert io.refusal.reason == (
             "policies place the line on different runtimes: "
-            "PlacementPolicy on alpha, HeavyOnBeta on beta"
+            "RoutePolicy on alpha, HeavyOnBeta on beta"
         )
         io = await ws.shell("python3 -c 'light'")
         assert await materialize(io.stdout) == b"ran-alpha\n"
@@ -522,7 +522,7 @@ async def test_explain_names_the_policy_that_placed_the_line():
     )
     try:
         heavy = await ws.explain("python3 -c 'heavy'")
-        assert heavy.answers == (Route("beta", policy="PlacementPolicy"),)
+        assert heavy.answers == (Route("beta", policy="RoutePolicy"),)
         assert (_runtimes(heavy), heavy.exit_code) == (["beta"], 0)
         light = await ws.explain("python3 -c 'light'")
         assert (light.answers, _runtimes(light)) == ((), ["alpha"])

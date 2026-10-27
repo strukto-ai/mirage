@@ -89,6 +89,8 @@ export interface Route {
   kind: 'route'
   /** The runtime entry's name. */
   runtime: string
+  /** Why the line goes there, for `explain` to show; absent when the policy gives none. */
+  reason?: string
   /** The policy that placed the line; the chain fills it in. */
   policy?: string
 }
@@ -476,7 +478,7 @@ export interface SessionScriptsQuery {
  * policy program prints, and what the server's entry points send
  * (`answerToDict`, which adds the policy that spoke). A deny or an ask
  * may leave the reason out for the default one; a route names its
- * runtime. Mirrors the Python `Answer`.
+ * runtime and may say why. Mirrors the Python `Answer`.
  */
 export const Answer = z
   .strictObject({
@@ -486,8 +488,8 @@ export const Answer = z
   })
   .superRefine((answer, check) => {
     if (answer.kind === 'route') {
-      if (!answer.runtime || (answer.reason ?? null) !== null) {
-        check.addIssue({ code: 'custom', message: 'a route names its runtime and nothing else' })
+      if (!answer.runtime) {
+        check.addIssue({ code: 'custom', message: 'a route names its runtime' })
       }
     } else if ((answer.runtime ?? null) !== null) {
       check.addIssue({ code: 'custom', message: `a ${answer.kind} carries no runtime` })

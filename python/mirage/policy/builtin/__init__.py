@@ -25,7 +25,7 @@ if TYPE_CHECKING:
         resolve_producer,
     )
     from mirage.policy.builtin.permissions import PermissionsPolicy
-    from mirage.policy.builtin.placement import PlacementPolicy
+    from mirage.policy.builtin.route import RoutePolicy
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.policy.builtin.mount_root": ("MountRootPolicy",),
@@ -36,7 +36,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "resolve_producer",
     ),
     "mirage.policy.builtin.permissions": ("PermissionsPolicy",),
-    "mirage.policy.builtin.placement": ("PlacementPolicy",),
+    "mirage.policy.builtin.route": ("RoutePolicy",),
 }
 
 __all__ = [
@@ -44,7 +44,7 @@ __all__ = [
     "DEFAULT_COMMAND_LIMITS",
     "MountRootPolicy",
     "PermissionsPolicy",
-    "PlacementPolicy",
+    "RoutePolicy",
     "resolve_producer",
     "resolve_limit",
 ]

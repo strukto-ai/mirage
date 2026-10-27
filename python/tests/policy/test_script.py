@@ -296,6 +296,13 @@ def test_a_route_places_the_line_at_pre_execute_only():
         script_action(printed, "pre_command")
 
 
+def test_a_route_carries_the_reason_it_gives():
+    printed = _answer(kind="route", runtime="docker", reason="needs a GPU")
+    assert script_action(printed, "pre_execute") == Route(
+        "docker", "needs a GPU"
+    )
+
+
 @pytest.mark.parametrize(
     "printed",
     [
@@ -966,6 +973,29 @@ async def test_a_monty_program_calls_the_hosts_functions():
     try:
         assert await policy.pre_command(_ctx(command="rm")) == (
             Deny("admin may not rm"),
+        )
+    finally:
+        await policy.close()
+
+
+async def _describe(value):
+    return json.dumps(value, separators=(",", ":"))
+
+
+@pytest.mark.asyncio
+async def test_a_function_gets_the_dicts_a_program_passes_as_dicts():
+    source = """
+import json
+said = await describe({"user": {"name": "root"}, "tags": [{"a": 1}]})
+print(json.dumps({"kind": "deny", "reason": said}))
+"""
+    policy = ScriptPolicy(
+        Programs({"pre_command": (_entry(source=source),)}),
+        external_lookup={"describe": _describe},
+    )
+    try:
+        assert await policy.pre_command(_ctx()) == (
+            Deny('{"user":{"name":"root"},"tags":[{"a":1}]}'),
         )
     finally:
         await policy.close()

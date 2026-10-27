@@ -176,6 +176,9 @@ def _format_explanation(data: dict[str, Any]) -> str:
     if data["reason"]:
         verdict += f": {data['reason']}"
     out = [f"{data['line']}  [{verdict}]"]
+    for said in data["answers"]:
+        if said["kind"] == "route" and said["reason"]:
+            out.append(f"  on {said['runtime']}: {said['reason']}")
     for child in data["node"]["children"]:
         _explained_lines(child, 1, out)
     return "\n".join(out)
