@@ -944,4 +944,19 @@ describe('a VFS mounted at several prefixes', () => {
       await loaded.close()
     }
   })
+
+  it.each([[['/a/', '/b/']], [['/b/', '/a/']]])(
+    "takes the first saved prefix's override index (%j)",
+    async (order) => {
+      const shared = new RAMVFS()
+      const state = await savedState({ '/a': shared, '/b': shared })
+      const live = new RAMVFS()
+      const given: Record<string, Mount> = {
+        '/a/': new Mount(live, { index: { type: 'ram', ttl: 600 } }),
+        '/b/': new Mount(live, { index: { type: 'ram', ttl: 1 } }),
+      }
+      const overrides = Object.fromEntries(order.map((p) => [p, given[p]!]))
+      expect(buildMountArgs(state, overrides).mountArgs['/a/']?.options.index?.ttl).toBe(600)
+    },
+  )
 })

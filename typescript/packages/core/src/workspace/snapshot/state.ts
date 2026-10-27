@@ -455,7 +455,8 @@ export function buildMountArgs(
   // A VFS runs one index, its first prefix's (the registry aliases the
   // rest): an override's index if one came with it, else the saved one.
   const givenIndex = new Map<BaseVFS, IndexConfig>()
-  for (const override of Object.values(normalized)) {
+  for (const m of state.mounts) {
+    const override = normalized[normDir(m.prefix)]
     if (override instanceof Mount && override.options.index !== undefined) {
       if (!givenIndex.has(override.vfs)) givenIndex.set(override.vfs, override.options.index)
     }

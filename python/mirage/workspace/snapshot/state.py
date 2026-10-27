@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from mirage.cache.file.entry import CacheEntry
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.cache.index.config import IndexConfig
 from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
 from mirage.concurrency.limiter import run_blocking
@@ -579,11 +580,11 @@ def build_mount_args(
     built: dict[str, tuple[BaseVFS, str | None]] = {}
     # A VFS runs one index, its first prefix's (the registry aliases the
     # rest): an override's index if one came with it, else the saved one.
-    given_index = {
-        id(override.vfs): override.index
-        for override in overrides.values()
-        if isinstance(override, Mount) and override.index is not None
-    }
+    given_index: dict[int, IndexConfig] = {}
+    for prefix in rows:
+        override = overrides.get(prefix)
+        if isinstance(override, Mount) and override.index is not None:
+            given_index.setdefault(id(override.vfs), override.index)
     indexed: set[int] = set()
     anchored = False
     for prefix, m in rows.items():
