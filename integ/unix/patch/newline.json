@@ -69,6 +69,41 @@
         "stdout": "patching file nf.txt\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file nf.txt.rej\nrc=1\n   a  \\n   b\npatching file nr.txt\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file nr.txt.rej\nrc=1\n   -   -   -       a  \\n   +   +   +       b  \\n   @   @       -\n   1   ,   2       +   1   ,   2       @   @  \\n       a  \\n   -\n   b   +   c\npatching file nc.txt\nHunk #1 succeeded at 1 with fuzz 1.\nrc=0\n   A  \\n   b  \\n   c\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "patch_unterminated_line_gains_a_newline_before_more",
+      "seq": 9941414,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941414 && touch /data/patch_9941414/.keep; cd /data/patch_9941414 || exit 1; printf 'a\\nb' > na.txt && printf -- '--- a\\n+++ b\\n@@ -2,0 +3 @@\\n+x\\n' | patch na.txt; echo rc=$?; od -An -c na.txt; printf 'a\\nb' > nb.txt && printf -- '--- a\\n+++ b\\n@@ -2,0 +3 @@\\n+x\\n\\\\ No newline at end of file\\n' | patch nb.txt; echo rc=$?; od -An -c nb.txt; printf 'a\\nb' > nc.txt && printf -- '--- a\\n+++ b\\n@@ -2 +2,2 @@\\n b\\n+x\\n' | patch nc.txt; echo rc=$?; od -An -c nc.txt; cd /; rm -r /data/patch_9941414",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file na.txt\nrc=0\n   a  \\n   b  \\n   x  \\n\npatching file nb.txt\nrc=0\n   a  \\n   b  \\n   x\npatching file nc.txt\nHunk #1 succeeded at 2 with fuzz 1.\nrc=0\n   a  \\n   b  \\n   x  \\n\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -190,7 +190,7 @@ async fn patch_file(
             }
         }
         if original.is_some() || outcome.rejected.len() < section.hunks.len() {
-            if !files.write(name.to_vec(), patched.concat()).await {
+            if !files.write(name.to_vec(), apply::text(patched)).await {
                 return None;
             }
             done.written.insert(name.to_vec());

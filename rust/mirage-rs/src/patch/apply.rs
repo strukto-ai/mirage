@@ -341,6 +341,19 @@ fn window<'s, 'a>(lines: &'s [&'a [u8]], from: i64, to: i64) -> &'s [&'a [u8]] {
     &lines[clamp(from)..clamp(to).max(clamp(from))]
 }
 
+/// The patched file's text: a line the file or the patch left without a
+/// newline gains one when another line follows it, as GNU writes it.
+pub(super) fn text(lines: &[&[u8]]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(lines.iter().map(|line| line.len() + 1).sum());
+    for (index, line) in lines.iter().enumerate() {
+        out.extend_from_slice(line);
+        if index + 1 < lines.len() && !line.ends_with(b"\n") {
+            out.push(b'\n');
+        }
+    }
+    out
+}
+
 fn span(start: i64, count: i64) -> String {
     if count == 1 {
         start.to_string()
