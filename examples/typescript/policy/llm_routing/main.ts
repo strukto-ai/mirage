@@ -29,6 +29,8 @@ async function main(): Promise<void> {
       }
       const res = await ws.shell(line)
       console.log(`  output: ${new TextDecoder().decode(res.stdout ?? new Uint8Array()).trim()}`)
+      if (res.exitCode !== 0)
+        console.log(`  exit ${res.exitCode}: ${new TextDecoder().decode(res.stderr).trim()}`)
     }
   } finally {
     await ws.close()
