@@ -3,7 +3,9 @@
 
 import dataclasses
 import json
+import os
 import re
+import time
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -140,6 +142,29 @@ SHORT_USAGE = (
     "\t}\n\n"
     "For listing the command options, use jq --help."
 )
+
+
+def local_zone() -> str | None:
+    """The time zone libjq reads, as a POSIX `TZ` rule, for jq_eval.
+
+    The `TZ` of the process when it sets one, else a zone that is UTC under
+    its own name; None for any other, which jq_eval does not carry the
+    database of, so a program that needs local time runs in libjq.
+    """
+    zone = os.environ.get("TZ")
+    if zone is not None:
+        return zone
+    if (
+        not time.daylight
+        and not time.timezone
+        and time.tzname[0]
+        in (
+            "UTC",
+            "GMT",
+        )
+    ):
+        return time.tzname[0]
+    return None
 
 
 def _pair_args(values: Sequence[Any]) -> list[tuple[str, Any]]:
@@ -621,6 +646,8 @@ class Engine:
                     "named": dict(opts.named_args),
                     "args": args,
                     "env": env,
+                    "now": time.time(),
+                    "zone": local_zone(),
                 },
             )
         except StreamRefusal:
@@ -647,7 +674,7 @@ class Engine:
                 `stderr` write, in order.
         """
         stream = self._stream
-        stream.begin(reader_position(reader))
+        stream.begin({**reader_position(reader), "now": time.time()})
         outputs: list[str] = []
         messages: list[tuple[int, str]] = []
         try:

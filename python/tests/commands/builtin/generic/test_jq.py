@@ -772,9 +772,32 @@ async def test_a_program_that_never_ends_is_cancelled_on_this_thread(
 
 
 @pytest.mark.asyncio
-async def test_a_program_jq_eval_refuses_runs_in_libjqs_worker():
-    out, io = await _run([], "now | type", null_input=True)
-    assert (out, io.exit_code) == (b'"number"\n', 0)
+async def test_a_program_jq_eval_refuses_runs_in_libjqs_worker(monkeypatch):
+    monkeypatch.setenv("TZ", "America/New_York")
+    out, io = await _run([], "0 | localtime | .[3]", null_input=True)
+    assert (out, io.exit_code) == (b"19\n", 0)
+
+
+@pytest.mark.asyncio
+async def test_dates_and_the_clock_stay_on_the_loops_thread(monkeypatch):
+    monkeypatch.setattr(jq_module, "Worker", _NoWorker)
+    monkeypatch.setenv("TZ", "EST5EDT,M3.2.0,M11.1.0")
+    out, io = await _run(
+        [],
+        "1425599507 | todate, (localtime | .[3]), (now | type)",
+        null_input=True,
+    )
+    assert (out, io.exit_code) == (
+        b'"2015-03-05T23:51:47Z"\n18\n"number"\n',
+        0,
+    )
+
+
+def test_local_zone_is_the_process_tz_or_a_zone_that_is_utc(monkeypatch):
+    monkeypatch.setenv("TZ", "EST5EDT")
+    assert jq_module.local_zone() == "EST5EDT"
+    monkeypatch.delenv("TZ")
+    assert jq_module.local_zone() in (None, "UTC", "GMT")
 
 
 @pytest.mark.asyncio

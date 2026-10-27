@@ -187,6 +187,13 @@ cfuncs! {
     Scalb = "scalb" / 2,
     Scalbln = "scalbln" / 2,
     Fma = "fma" / 3,
+    Now = "now" / 0,
+    Mktime = "mktime" / 0,
+    Gmtime = "gmtime" / 0,
+    Localtime = "localtime" / 0,
+    Strftime = "strftime" / 1,
+    StrfLocaltime = "strflocaltime" / 1,
+    Strptime = "strptime" / 1,
 }
 
 /// Steps a call is charged beyond its dispatch: one per 16 elements or
@@ -503,6 +510,13 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
             let c = args.get(3).unwrap_or(&Value::Null);
             Ok(Value::number(num(a)?.mul_add(num(b)?, num(c)?)))
         }
+        Cfunc::Now
+        | Cfunc::Mktime
+        | Cfunc::Gmtime
+        | Cfunc::Localtime
+        | Cfunc::Strftime
+        | Cfunc::StrfLocaltime
+        | Cfunc::Strptime => unreachable!("the VM runs the time builtins with its clock"),
     }
 }
 

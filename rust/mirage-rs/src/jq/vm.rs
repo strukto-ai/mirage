@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use super::builtin::{self, Cfunc, Fault};
 use super::host::{self, Answer, Host};
+use super::time::{self, Clock};
 use super::value::{Object, Value, shed};
 
 #[derive(Clone, Copy, Debug)]
@@ -233,6 +234,7 @@ pub(crate) struct Vm {
     initial: bool,
     limits: Limits,
     teardown: Vec<Vec<Value>>,
+    clock: Clock,
     pub(crate) steps: u64,
     pub(crate) host: Host,
 }
@@ -258,6 +260,7 @@ impl Vm {
             initial: true,
             limits,
             teardown: Vec::new(),
+            clock: Clock::default(),
             steps: 0,
             host: Host::default(),
         };
@@ -275,6 +278,11 @@ impl Vm {
         vm.push(input);
         vm.save(0, (vm.stk_top, vm.curr_frame));
         vm
+    }
+
+    /// Hand the run the host's clock and time zone.
+    pub(crate) fn set_clock(&mut self, clock: Clock) {
+        self.clock = clock;
     }
 
     #[cfg(test)]
@@ -736,10 +744,16 @@ impl Vm {
                     args.push(self.pop());
                 }
                 *budget = budget.saturating_sub(builtin::cost(&args));
-                let result = if matches!(f, Cfunc::GetPath) {
-                    self.getpath(args)
-                } else {
-                    builtin::call(*f, args, self.limits)
+                let result = match f {
+                    Cfunc::GetPath => self.getpath(args),
+                    Cfunc::Now
+                    | Cfunc::Mktime
+                    | Cfunc::Gmtime
+                    | Cfunc::Localtime
+                    | Cfunc::Strftime
+                    | Cfunc::StrfLocaltime
+                    | Cfunc::Strptime => time::call(*f, &args, &self.clock),
+                    _ => builtin::call(*f, args, self.limits),
                 };
                 match result {
                     Ok(value) => self.push(value),

@@ -7,6 +7,7 @@ mod parse;
 mod syntax;
 #[cfg(test)]
 mod tests;
+mod time;
 mod unicode;
 mod value;
 mod vm;

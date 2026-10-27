@@ -150,6 +150,19 @@ export function optionRefusal(word: string): UsageError {
 }
 
 /** Read a pair option's flattened values back as [name, value]. */
+/**
+ * The time zone libjq reads, as a `TZ` rule, for jq_eval: the process's own
+ * `TZ` when it sets one, else the zone the runtime resolves. jq_eval
+ * carries no zone database, so a program that needs local time in a zone it
+ * cannot read runs in libjq.
+ */
+export function localZone(): string | undefined {
+  const host = globalThis as {
+    process?: { env?: Record<string, string | undefined> }
+  }
+  return host.process?.env?.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
 function pairArgs(values: readonly string[]): [string, string][] {
   const pairs: [string, string][] = []
   for (let i = 0; i + 1 < values.length; i += 2) {
@@ -518,6 +531,8 @@ class Engine {
         named: Object.fromEntries(opts.namedArgs),
         args,
         env,
+        now: Date.now() / 1000,
+        zone: localZone() ?? null,
       })
     } catch (error) {
       if (!(error instanceof StreamRefusal)) throw error
@@ -541,7 +556,7 @@ class Engine {
     report: (line: string) => void,
   ): Promise<JqRun<string> | null> {
     const stream = this.stream
-    stream.begin(readerPosition(reader))
+    stream.begin({ ...readerPosition(reader), now: Date.now() / 1000 })
     const outputs: string[] = []
     const messages: [number, string][] = []
     let stop: JqError | JqHalt | null
