@@ -1597,12 +1597,16 @@ fn loc_object(source: &str, loc: Loc) -> Ast {
 
 /// gen_binop's constant folding: two constants fold into their result,
 /// unless that is an error, which is raised where the expression runs.
-/// Repeating a string is left to run time, whose limits bound it.
+/// Repeating a string and subtracting arrays are left to run time, whose
+/// limits and step budget bound them.
 fn fold(op: BinOp, a: Ast, b: Ast) -> Ast {
     let constants = match (&a, &b) {
         (Ast::Literal(x), Ast::Literal(y))
             if !(op == BinOp::Multiply
-                && (matches!(x, Value::String(_)) || matches!(y, Value::String(_)))) =>
+                && (matches!(x, Value::String(_)) || matches!(y, Value::String(_)))
+                || op == BinOp::Minus
+                    && matches!(x, Value::Array(_))
+                    && matches!(y, Value::Array(_))) =>
         {
             Some((x, y))
         }

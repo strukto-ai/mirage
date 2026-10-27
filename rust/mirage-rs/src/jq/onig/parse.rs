@@ -133,6 +133,9 @@ struct Parser {
     /// The highest group a reference or condition names, checked once
     /// every group is known.
     referenced: usize,
+    /// Whether a caseless literal or class holds a character that folds
+    /// to several, which this matcher does not fold as Oniguruma does.
+    multi_fold: bool,
 }
 
 pub(super) fn parse(pattern: &str, flags: Flags) -> Result<Parsed, String> {
@@ -144,10 +147,14 @@ pub(super) fn parse(pattern: &str, flags: Flags) -> Result<Parsed, String> {
         names: Vec::new(),
         depth: 0,
         referenced: 0,
+        multi_fold: false,
     };
     let node = parser.alts(false)?;
     if parser.referenced > parser.groups {
         return Err(INVALID_BACKREF.into());
+    }
+    if parser.multi_fold {
+        return Err(unsupported("case folding to several characters"));
     }
     Ok(Parsed {
         node,
@@ -367,8 +374,9 @@ impl Parser {
         }
     }
 
-    fn literal(&self, c: char) -> Node {
+    fn literal(&mut self, c: char) -> Node {
         if self.flags.ignore_case {
+            self.multi_fold |= class::folds_to_several(c);
             let set = class::fold(class::single(c));
             if class::size(&set) > 1 {
                 return Node::Set(Box::new(set));
@@ -377,7 +385,7 @@ impl Parser {
         Node::Char(c)
     }
 
-    fn code_point(&self, code: u32) -> Node {
+    fn code_point(&mut self, code: u32) -> Node {
         match char::from_u32(code) {
             Some(c) => self.literal(c),
             None => Node::Set(Box::new(Set::empty())),
@@ -1091,6 +1099,7 @@ impl Parser {
             add(&mut set, prev, prev);
         }
         if self.flags.ignore_case {
+            self.multi_fold |= !negate && class::holds_multi_fold(&set);
             set = class::fold(set);
         }
         if negate {

@@ -12,6 +12,7 @@ use self::exec::{Best, Machine, Mode};
 use self::parse::{Anchor, Flags};
 use crate::regex::Step;
 
+pub(crate) use self::class::folds_to_several;
 pub(crate) use self::exec::Region;
 
 /// The ONIG_OPTION_* bits jq's modifier letters set.

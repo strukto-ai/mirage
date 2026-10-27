@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::builtin::{self, Cfunc, Fault};
+use super::builtin::{self, Cfunc, Fault, Subtracting};
 use super::host::{self, Answer, Host};
 use super::regex::Matching;
 use super::time::{self, Clock};
@@ -243,6 +243,8 @@ pub(crate) struct Vm {
     /// A regex search that ran out of steps, resumed when its call runs
     /// again.
     matching: Option<Box<Matching>>,
+    /// An array subtraction that ran out of steps, resumed the same way.
+    subtracting: Option<Box<Subtracting>>,
 }
 
 impl Vm {
@@ -270,6 +272,7 @@ impl Vm {
             steps: 0,
             host: Host::default(),
             matching: None,
+            subtracting: None,
         };
         vm.curr_frame = vm.arena.push(
             0,
@@ -738,7 +741,12 @@ impl Vm {
                 let input = self.pop();
                 *budget = budget.saturating_sub(builtin::cost(std::slice::from_ref(&input)));
                 match self.host.call(*f, input) {
-                    Answer::Value(value) => self.push(value),
+                    Answer::Value(value) => {
+                        self.push(value);
+                        if self.host.queued >= crate::PIECE {
+                            *budget = 0;
+                        }
+                    }
                     Answer::Raise(message) => return Flow::Raise(Raise::Error(message)),
                     Answer::Wait(input) => {
                         self.push(input);
@@ -752,7 +760,7 @@ impl Vm {
                 for _ in 0..*nargs {
                     args.push(self.pop());
                 }
-                if self.matching.is_none() {
+                if self.matching.is_none() && self.subtracting.is_none() {
                     *budget = budget.saturating_sub(builtin::cost(&args));
                 }
                 let result = match f {
@@ -764,6 +772,16 @@ impl Vm {
                     | Cfunc::StrfLocaltime
                     | Cfunc::Strptime => time::call(*f, &args, &self.clock),
                     Cfunc::MatchImpl => match self.matching(&args, budget) {
+                        Some(result) => result,
+                        None => {
+                            for arg in args.into_iter().rev() {
+                                self.push(arg);
+                            }
+                            self.pc = pc;
+                            return Flow::Pause;
+                        }
+                    },
+                    Cfunc::Minus => match self.subtracting(&args, budget) {
                         Some(result) => result,
                         None => {
                             for arg in args.into_iter().rev() {
@@ -932,6 +950,24 @@ impl Vm {
         let result = matching.run(budget, self.limits);
         if result.is_none() {
             self.matching = Some(matching);
+        }
+        result
+    }
+
+    /// `_minus`: an array subtraction starts its scan, or resumes the one
+    /// that paused; None when it paused again. Other operands subtract at
+    /// once.
+    fn subtracting(&mut self, args: &[Value], budget: &mut u64) -> Option<Result<Value, Fault>> {
+        let mut subtracting = match self.subtracting.take() {
+            Some(subtracting) => subtracting,
+            None => match Subtracting::begin(args) {
+                Some(subtracting) => Box::new(subtracting),
+                None => return Some(builtin::call(Cfunc::Minus, args.to_vec(), self.limits)),
+            },
+        };
+        let result = subtracting.run(budget);
+        if result.is_none() {
+            self.subtracting = Some(subtracting);
         }
         result
     }

@@ -184,14 +184,11 @@ fn place(host: &mut Host, position: Position) {
 fn message_frames(host: &mut Host, out: &mut Vec<u8>) {
     for message in host.messages.drain(..) {
         match message {
-            Message::Debug(value) => {
-                let line = Value::array(vec![Value::string("DEBUG:"), value]);
-                frame(DEBUG, line.dump().as_bytes(), out);
-            }
-            Message::Stderr(Value::String(text)) => frame(STDERR, text.as_bytes(), out),
-            Message::Stderr(value) => frame(STDERR, value.dump().as_bytes(), out),
+            Message::Debug(line) => frame(DEBUG, line.as_bytes(), out),
+            Message::Stderr(text) => frame(STDERR, text.as_bytes(), out),
         }
     }
+    host.queued = 0;
 }
 
 /// A program that reads the local time zone runs here only when the host
@@ -305,13 +302,14 @@ impl Stream for Eval {
             State::Running(_) if self.asking != Asking::No => {}
             State::Running(vm) => {
                 let mut budget = self.steps;
+                let start = out.len();
                 loop {
                     let next = vm.next(&mut budget);
                     message_frames(&mut vm.host, out);
                     match next {
                         Next::Output(value) => {
                             frame(OUTPUT, value.dump().as_bytes(), out);
-                            if budget == 0 {
+                            if budget == 0 || out.len() - start >= crate::PIECE {
                                 return Ok(());
                             }
                         }

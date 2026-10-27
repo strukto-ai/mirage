@@ -84,6 +84,33 @@ pub(super) fn fold(mut set: Set) -> Set {
     set
 }
 
+/// Whether `c` folds, or is the case of something that folds, to several
+/// characters: Unicode's full case folding and case mappings agree on
+/// these but for capital sharp s.
+pub(crate) fn folds_to_several(c: char) -> bool {
+    c == '\u{1E9E}' || c.to_uppercase().nth(1).is_some() || c.to_lowercase().nth(1).is_some()
+}
+
+/// Whether `set` holds a character that folds to several, which a
+/// caseless class matches as Oniguruma does only with their folds as
+/// alternatives. Every cased character lies in Unicode's first two
+/// planes, so the table is read from those.
+pub(super) fn holds_multi_fold(set: &Set) -> bool {
+    static SEVERAL: OnceLock<Set> = OnceLock::new();
+    let several = SEVERAL.get_or_init(|| {
+        Set::new(
+            (0..=0x1FFFF)
+                .filter_map(char::from_u32)
+                .filter(|c| folds_to_several(*c))
+                .map(|c| ClassUnicodeRange::new(c, c)),
+        )
+    });
+    several
+        .ranges()
+        .iter()
+        .any(|r| (r.start() as u32..=r.end() as u32).any(|code| contains(set, code)))
+}
+
 /// Whether two codes match each other ignoring case.
 pub(super) fn fold_eq(a: u32, b: u32) -> bool {
     char::from_u32(a).is_some_and(|c| contains(&fold(single(c)), b))

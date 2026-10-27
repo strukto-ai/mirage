@@ -11,10 +11,10 @@ pub(crate) enum Reply {
     Error(String),
 }
 
-/// A line `debug` or `stderr` writes to the host's stderr.
+/// A line `debug` or `stderr` writes to the host's stderr, as text.
 pub(crate) enum Message {
-    Debug(Value),
-    Stderr(Value),
+    Debug(String),
+    Stderr(String),
 }
 
 /// What a host builtin answers: a value, an error, or a pause until the
@@ -28,7 +28,7 @@ pub(crate) enum Answer {
 /// What jq's host keeps for a run behind its callbacks (main.c, util.c):
 /// the environment `env` reads, where the input reader stands, the reply
 /// `input` waits on, and what `debug` and `stderr` wrote since the host
-/// last took it.
+/// last took it, with its length in bytes.
 pub(crate) struct Host {
     pub(crate) env: Value,
     pub(crate) filename: Value,
@@ -37,6 +37,7 @@ pub(crate) struct Host {
     pub(crate) now: Option<f64>,
     pub(crate) asking: Option<&'static str>,
     pub(crate) messages: Vec<Message>,
+    pub(crate) queued: usize,
 }
 
 impl Default for Host {
@@ -49,6 +50,7 @@ impl Default for Host {
             now: None,
             asking: None,
             messages: Vec::new(),
+            queued: 0,
         }
     }
 }
@@ -91,11 +93,18 @@ impl Host {
                 Some(Reply::Error(message)) => Answer::Raise(Value::string(message)),
             },
             Cfunc::Debug => {
-                self.messages.push(Message::Debug(input.clone()));
+                let line = Value::array(vec![Value::string("DEBUG:"), input.clone()]).dump();
+                self.queued += line.len();
+                self.messages.push(Message::Debug(line));
                 Answer::Value(input)
             }
             Cfunc::Stderr => {
-                self.messages.push(Message::Stderr(input.clone()));
+                let text = match &input {
+                    Value::String(text) => text.to_string(),
+                    other => other.dump(),
+                };
+                self.queued += text.len();
+                self.messages.push(Message::Stderr(text));
                 Answer::Value(input)
             }
             Cfunc::Env => Answer::Value(self.env.clone()),
