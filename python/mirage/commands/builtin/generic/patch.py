@@ -179,7 +179,7 @@ class _PatchFiles:
             )
         except IsADirectoryError:
             return Served({"errno": "EISDIR"})
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, NotADirectoryError) as exc:
             logger.debug("nothing to patch yet at %r: %s", path, exc)
             return Served({"errno": "ENOENT"})
 

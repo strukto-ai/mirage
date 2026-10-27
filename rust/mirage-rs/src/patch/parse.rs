@@ -64,14 +64,14 @@ impl<'a> Hunk<'a> {
 
 /// How reading a section's hunks ended: at a line that is no hunk's, at a
 /// last line the patch left without a newline right after them (GNU reads
-/// it twice, and says so each time), or at a line no hunk can hold, which
-/// ends the run (the line's number and text, and whether the patch ended
-/// in the middle of a line first).
+/// it twice, and says so each time), or at a patch no hunk can be read
+/// from, which ends the run (GNU's words for why, and whether the patch
+/// ended in the middle of a line first).
 #[derive(Clone, PartialEq, Debug)]
 pub(super) enum End {
     Done,
     Cut,
-    Malformed(usize, Vec<u8>, bool),
+    Fatal(Vec<u8>, bool),
 }
 
 /// One file's part of a patch: what its reject file's `---` and `+++`
@@ -127,26 +127,31 @@ pub(super) fn lines(text: &[u8]) -> Vec<&[u8]> {
 }
 
 /// The patch with GNU's CRs stripped, and the lines whose `+++` header
-/// asked for it. A section whose `+++` line ends in CRLF is read with the
-/// CR taken off every line that ends so, up to the next `+++` line that
-/// does not.
-pub(super) fn strip_crs(patch: &[u8]) -> (Cow<'_, [u8]>, HashSet<usize>) {
+/// asked for it. A section whose `+++` header ends in CRLF is read with
+/// the CR taken off every line of it that ends so, up to the next
+/// section; the sections are those a first reading finds, so a hunk line
+/// that only reads like a header changes nothing.
+pub(super) fn strip_crs(patch: &[u8], strip: Option<usize>) -> (Cow<'_, [u8]>, HashSet<usize>) {
     let mut crlf = HashSet::new();
+    let lines = lines(patch);
     let asks = |line: &&[u8]| line.starts_with(b"+++ ") && line.ends_with(b"\r\n");
-    if !lines(patch).iter().any(asks) {
+    if !lines.iter().any(asks) {
         return (Cow::Borrowed(patch), crlf);
     }
-    let mut stripping = false;
-    let mut out = Vec::with_capacity(patch.len());
-    for (index, line) in lines(patch).into_iter().enumerate() {
-        if line.starts_with(b"+++ ") {
-            stripping = line.ends_with(b"\r\n");
-            if stripping {
-                crlf.insert(index);
-            }
+    let first = sections(&lines, strip, &crlf);
+    let mut stripped = vec![false; lines.len()];
+    for (at, section) in first.sections.iter().enumerate() {
+        if section.crlf {
+            let next = first.sections.get(at + 1);
+            let end = next.map_or(lines.len(), |next| next.leading.start);
+            stripped[section.at - 2..end].fill(true);
+            crlf.insert(section.at - 2);
         }
+    }
+    let mut out = Vec::with_capacity(patch.len());
+    for (line, strip) in lines.into_iter().zip(stripped) {
         match line.strip_suffix(b"\r\n") {
-            Some(body) if stripping => {
+            Some(body) if strip => {
                 out.extend_from_slice(body);
                 out.push(b'\n');
             }
@@ -273,15 +278,26 @@ fn unterminate(body: &mut [Line<'_>]) {
     }
 }
 
+fn malformed(line: usize, text: &[u8], cut: bool) -> End {
+    let at = format!("malformed patch at line {line}: ");
+    End::Fatal([at.as_bytes(), text].concat(), cut)
+}
+
 /// The hunks that start at `lines[index]`, the index after them, and how
 /// they ended. A hunk ends when its header's line counts are used up, as
 /// GNU reads it, so a removed line that reads `-- x` is never taken for
-/// the next file's header. Where the patch ends first, the lines a hunk
-/// still wants are blank context when both its sides want as many, and
-/// the patch is malformed otherwise; a line no hunk holds in the middle of
-/// one is malformed too. `cut` is whether a last line without a newline was
-/// left off the end of `lines`.
-fn hunks<'a>(lines: &[&'a [u8]], mut index: usize, cut: bool) -> (Vec<Hunk<'a>>, usize, End) {
+/// the next file's header, and a line past a side's count is malformed.
+/// Where the patch ends first, a hunk still wanting more than three new
+/// lines is cut off; otherwise one with a change whose sides want as many
+/// is filled with blank context, and any other is malformed. `cut` is
+/// whether a last line without a newline was left off the end of `lines`,
+/// and `crlf` whether a CRLF line is still to be read as its LF.
+fn hunks<'a>(
+    lines: &[&'a [u8]],
+    mut index: usize,
+    cut: bool,
+    crlf: bool,
+) -> (Vec<Hunk<'a>>, usize, End) {
     let mut hunks = Vec::new();
     while let Some(&line) = lines.get(index) {
         let Some((old_start, mut old_left, new_start, mut new_left, note)) = header(line) else {
@@ -298,8 +314,12 @@ fn hunks<'a>(lines: &[&'a [u8]], mut index: usize, cut: bool) -> (Vec<Hunk<'a>>,
         index += 1;
         while old_left > 0 || new_left > 0 {
             let Some(&line) = lines.get(index) else {
-                if hunk.body.is_empty() || old_left != new_left {
-                    return (hunks, index, End::Malformed(last, BLANK.to_vec(), cut));
+                if new_left > 3 {
+                    let end = End::Fatal(b"unexpected end of file in patch".to_vec(), cut);
+                    return (hunks, index, end);
+                }
+                if old_left != new_left || hunk.body.iter().all(|line| line.kind == b' ') {
+                    return (hunks, index, malformed(last, BLANK, cut));
                 }
                 hunk.cut = cut;
                 for _ in 0..old_left {
@@ -311,27 +331,26 @@ fn hunks<'a>(lines: &[&'a [u8]], mut index: usize, cut: bool) -> (Vec<Hunk<'a>>,
                 hunks.push(hunk);
                 return (hunks, index, End::Done);
             };
-            match line[0] {
-                b' ' | b'\n' => {
+            let kind = if crlf && line == b"\r\n" {
+                b'\n'
+            } else {
+                line[0]
+            };
+            match kind {
+                b' ' | b'\n' if old_left > 0 && new_left > 0 => {
                     old_left -= 1;
                     new_left -= 1;
                 }
-                b'-' => old_left -= 1,
-                b'+' => new_left -= 1,
+                b'-' if old_left > 0 => old_left -= 1,
+                b'+' if new_left > 0 => new_left -= 1,
                 b'\\' if !hunk.body.is_empty() => {
                     unterminate(&mut hunk.body);
                     index += 1;
                     continue;
                 }
-                _ => {
-                    return (
-                        hunks,
-                        index,
-                        End::Malformed(index + 1, line.to_vec(), false),
-                    );
-                }
+                _ => return (hunks, index, malformed(index + 1, line, false)),
             }
-            let (kind, text) = match line[0] {
+            let (kind, text) = match kind {
                 b'\n' => (b' ', line),
                 kind => (kind, &line[1..]),
             };
@@ -385,21 +404,21 @@ pub(super) fn sections<'a>(
             continue;
         }
         let new = Side::read(line, strip);
-        let plus = index - 1;
-        let (hunks, next, end) = hunks(lines, index, cut);
+        let asked = crlf.contains(&(index - 1)) || line.ends_with(b"\r\n");
+        let (hunks, next, end) = hunks(lines, index, cut, asked);
         let first = index;
         index = next;
         read = read || matches!(end, End::Cut) || hunks.last().is_some_and(|hunk| hunk.cut);
         let old = std::mem::replace(&mut old, Side::none());
         let index_name = index_name.take();
-        if hunks.is_empty() && !matches!(end, End::Malformed(..)) {
+        let fatal = matches!(end, End::Fatal(..));
+        if hunks.is_empty() && !fatal {
             continue;
         }
         let mut names: Vec<Vec<u8>> = old.name.into_iter().chain(new.name).collect();
         if names.is_empty() {
             names.extend(index_name);
         }
-        let malformed = matches!(end, End::Malformed(..));
         sections.push(Section {
             old_label: old.label,
             new_label: new.label,
@@ -408,12 +427,12 @@ pub(super) fn sections<'a>(
             new_null: new.null,
             leading: since..first,
             at: first + 1,
-            crlf: crlf.contains(&plus),
+            crlf: asked,
             hunks,
             end,
         });
         since = index;
-        if malformed {
+        if fatal {
             return Patch {
                 sections,
                 cut: false,

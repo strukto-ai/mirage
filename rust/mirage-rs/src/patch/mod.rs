@@ -108,17 +108,24 @@ impl Files {
     }
 
     /// The directories above a name that do not stand yet, outermost
-    /// first.
-    async fn missing(&self, name: &[u8]) -> Vec<Vec<u8>> {
+    /// first; none when one of them stands as a file.
+    async fn missing(&self, name: &[u8]) -> Option<Vec<Vec<u8>>> {
         let mut missing = Vec::new();
         for (at, _) in name.iter().enumerate().filter(|&(_, &b)| b == b'/') {
             let dir = &name[..at];
-            if !dir.ends_with(b"/") && (!missing.is_empty() || self.host.stat(dir).await.is_none())
-            {
-                missing.push(dir.to_vec());
+            if dir.ends_with(b"/") {
+                continue;
             }
+            if missing.is_empty() {
+                match self.host.stat(dir).await.as_deref() {
+                    Some("dir") => continue,
+                    Some(_) => return None,
+                    None => {}
+                }
+            }
+            missing.push(dir.to_vec());
         }
-        missing
+        Some(missing)
     }
 }
 
@@ -144,7 +151,7 @@ async fn run(host: Host, config: Config) -> i32 {
             return 2;
         }
     };
-    let (patch, crlf) = parse::strip_crs(&raw);
+    let (patch, crlf) = parse::strip_crs(&raw, config.strip);
     let lines = parse::lines(&patch);
     let parsed = parse::sections(&lines, config.strip, &crlf);
     if parsed.sections.is_empty() && !patch.is_empty() {
@@ -207,7 +214,10 @@ async fn pick(files: &Files, section: &Section<'_>, fresh: bool, deletes: bool) 
         let mut fewest = Vec::new();
         let mut least = usize::MAX;
         for name in &section.names {
-            let missing = files.missing(name).await.len();
+            let missing = files
+                .missing(name)
+                .await
+                .map_or(usize::MAX, |dirs| dirs.len());
             if missing < least {
                 least = missing;
                 fewest.clear();
@@ -247,12 +257,11 @@ fn ask(files: &Files, config: &Config, lines: &[&[u8]], section: &Section<'_>) {
         rule,
         b"\nFile to patch: \nSkip this patch? [y] \nSkipping patch.",
     ]);
-    ignored(files, section.hunks.len());
 }
 
 /// GNU's refusal of a patch that would create a file that holds lines
 /// already, or delete one that is not there.
-fn refuse(files: &Files, config: &Config, section: &Section<'_>, name: &[u8], creates: bool) {
+fn refuse(files: &Files, config: &Config, name: &[u8], creates: bool) {
     let (verb, why) = if creates {
         (&b"create"[..], &b"already exists"[..])
     } else {
@@ -277,19 +286,29 @@ fn refuse(files: &Files, config: &Config, section: &Section<'_>, name: &[u8], cr
     for line in after {
         files.say(&[line.as_bytes()]);
     }
-    ignored(files, section.hunks.len());
 }
 
-fn malformed(files: &Files, end: &End) -> Option<i32> {
-    let End::Malformed(line, text, cut) = end else {
-        return None;
+/// Stop the run where the patch could not be read, as GNU does, even past
+/// a section it skipped: status 2.
+fn fatal(files: &Files, end: &End) -> Result<(), i32> {
+    let End::Fatal(why, cut) = end else {
+        return Ok(());
     };
     if *cut {
         files.say(&[CUT.as_bytes()]);
     }
-    let at = format!("patch: **** malformed patch at line {line}: ");
-    files.host.warn(&[at.as_bytes(), text, b"\n"].concat());
-    Some(2)
+    files
+        .host
+        .warn(&[b"patch: **** ", &why[..], b"\n"].concat());
+    Err(2)
+}
+
+/// A section GNU skips whole: its hunks counted as ignored, unless the
+/// patch turned out unreadable while they were read.
+fn skip(files: &Files, section: &Section<'_>) -> Result<bool, i32> {
+    fatal(files, &section.end)?;
+    ignored(files, section.hunks.len());
+    Ok(true)
 }
 
 /// Apply one section to its file, GNU patch's way: whether a hunk of it
@@ -323,7 +342,7 @@ async fn patch_file(
     };
     let Some(name) = picked else {
         ask(files, config, lines, section);
-        return malformed(files, &section.end).map_or(Ok(true), Err);
+        return skip(files, section);
     };
     let original = match files.whole(&name, Opening::File).await {
         Ok(original) => Some(original),
@@ -333,6 +352,7 @@ async fn patch_file(
                 &name,
                 b" is not a regular file -- refusing to patch",
             ]);
+            fatal(files, &section.end)?;
             let rejected = apply::as_tried(&section.hunks, config.reverse);
             return save_rejects(files, config, section, &rejected, "ignored", &name, done)
                 .await
@@ -344,39 +364,51 @@ async fn patch_file(
     if (creates && original.as_ref().is_some_and(|text| !text.is_empty()))
         || (deletes && original.is_none())
     {
-        refuse(files, config, section, &name, creates);
-        return Ok(true);
+        refuse(files, config, &name, creates);
+        return skip(files, section);
     }
+    let made = match original {
+        Some(_) => Vec::new(),
+        None => match files.missing(&name).await {
+            Some(made) => made,
+            None => {
+                files.say(&[b"Invalid file name ", &name, b" -- skipping patch"]);
+                fatal(files, &section.end)?;
+                return Ok(true);
+            }
+        },
+    };
     files.say(&[b"patching file ", &name]);
     let text = parse::lines(original.as_deref().unwrap_or_default());
     let outcome = apply::section(&text, &section.hunks, config.reverse, config.forward);
     for note in &outcome.notes {
         files.say(&[note.as_bytes()]);
     }
-    if let Some(stop) = malformed(files, &section.end) {
-        return Err(stop);
-    }
+    fatal(files, &section.end)?;
     let mut refused = false;
     if let Some(patched) = &outcome.lines {
         let patched = apply::text(patched);
-        if deletes && patched.is_empty() {
-            remove(files, &name, config.file.is_none()).await?;
-        } else {
-            if !outcome.exact && !done.written.contains(&name) {
-                match &original {
-                    None => files.say(&[b"Cannot stat file ", &name, b", skipping backup"]),
-                    Some(original) => {
-                        let backup = [&name[..], b".orig"].concat();
-                        if !files.write(backup, original.clone()).await {
-                            return Err(1);
-                        }
+        if !outcome.exact && !done.written.contains(&name) {
+            match &original {
+                None => files.say(&[b"Cannot stat file ", &name, b", skipping backup"]),
+                Some(original) => {
+                    let backup = [&name[..], b".orig"].concat();
+                    if !files.write(backup, original.clone()).await {
+                        return Err(1);
                     }
                 }
             }
+        }
+        if deletes && patched.is_empty() {
+            remove(files, &name, config.file.is_none()).await?;
+        } else {
             if original.is_some() || outcome.rejected.len() < section.hunks.len() {
-                if original.is_none() {
-                    for dir in files.missing(&name).await {
-                        files.host.ask(Request::Mkdir { path: dir }).await;
+                for dir in made {
+                    if !files
+                        .change(Request::Mkdir { path: dir.clone() }, &dir)
+                        .await
+                    {
+                        return Err(1);
                     }
                 }
                 if !files.write(name.clone(), patched).await {
