@@ -28,7 +28,7 @@ RouteVerdict = str | None
 # callable (sync or async) on the RouteContext returning a
 # RouteVerdict. Or a program, ``{script, runtime}``, run as a profile's
 # policy programs run: it reads the context as JSON and prints its
-# answer. Mirrors the TS RoutePolicy.
+# answer. Mirrors the TS RouteRule.
 #
 #     def policy(ctx: RouteContext) -> str | None:
 #         names = [c.command for c in ctx.commands]
@@ -38,7 +38,7 @@ RouteVerdict = str | None
 #
 #     # workspace yaml: route.py next to the config file
 #     route_policy: {script: route.py, runtime: monty}
-RoutePolicy = (
+RouteRule = (
     Callable[[RouteContext], RouteVerdict | Awaitable[RouteVerdict]]
     | ProfilePolicy
     | Mapping[str, Any]

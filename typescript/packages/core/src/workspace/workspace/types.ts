@@ -32,7 +32,7 @@ import type { Clock } from '../../utils/clock.ts'
 import type { IdSource } from '../../utils/ids.ts'
 import type { Limit, DriftPolicy, MountMode, ReadSpec, Refusal, WritePolicy } from '../../types.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
-import type { RoutePolicy } from '../../runtime/routing/index.ts'
+import type { RouteRule } from '../../runtime/routing/index.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
 import type { RuntimeEntry } from '../../runtime/base.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
@@ -128,7 +128,7 @@ export interface WorkspaceOptions {
    * capturer; or a program, `{script, runtime}`, that prints the same
    * answer. Ladder: the runtime argument > route policy > first capturer.
    */
-  routePolicy?: RoutePolicy
+  routePolicy?: RouteRule
   /**
    * The profiles (`profiles:` in YAML). A profile is the whole permission
    * document a session runs under, so there is no workspace-wide block

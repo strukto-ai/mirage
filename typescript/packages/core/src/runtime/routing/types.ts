@@ -28,7 +28,7 @@ export type RouteVerdict = string | null
  * function (sync or async) on the RouteContext returning a
  * RouteVerdict. Or a program, `{script, runtime}`, run as a profile's
  * policy programs run: it reads the context as JSON and prints its
- * answer. Mirrors the python RoutePolicy.
+ * answer. Mirrors the python RouteRule.
  *
  * ```
  * routePolicy: (ctx) => (ctx.commands.some((c) => c.command === 'python3') ? 'monty' : null)
@@ -37,6 +37,6 @@ export type RouteVerdict = string | null
  * // route_policy: {script: route.py, runtime: monty}
  * ```
  */
-export type RoutePolicy =
+export type RouteRule =
   | ((ctx: RouteContext) => RouteVerdict | Promise<RouteVerdict>)
   | ProfilePolicySpec

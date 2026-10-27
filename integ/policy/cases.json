@@ -363,9 +363,9 @@
    "steps": [
     {"op": "register_policy", "id": "route", "pre_execute": {"heavy": {"route": "monty"}}},
     {"op": "register_policy", "id": "deny", "pre_execute": {"secret": {"deny": "secrets stay put"}}},
-    {"op": "explain", "command": "python3 -c \"print('heavy')\"", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [{"kind": "route", "policy": "RulePolicy", "runtime": "monty"}], "refusal": null, "exit_code": 0, "stderr": "", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "runtime": "monty"}]}}},
+    {"op": "explain", "command": "python3 -c \"print('heavy')\"", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [{"kind": "route", "policy": "RulePolicy", "reason": "", "runtime": "monty"}], "refusal": null, "exit_code": 0, "stderr": "", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "runtime": "monty"}]}}},
     {"op": "exec", "command": "python3 -c \"print('heavy')\"", "expect": {"value": {"exit_code": 0, "stdout": "heavy\n", "stderr": "", "refusal": null}}},
-    {"op": "explain", "command": "python3 -c \"print('heavy secret')\"", "expect": {"value": {"outcome": "deny", "reason": "secrets stay put", "answers": [{"kind": "route", "policy": "RulePolicy", "runtime": "monty"}, {"kind": "deny", "policy": "RulePolicy", "reason": "secrets stay put"}], "refusal": "deny", "exit_code": 126, "stderr": "python3: Permission denied\n", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "runtime": ""}]}}},
+    {"op": "explain", "command": "python3 -c \"print('heavy secret')\"", "expect": {"value": {"outcome": "deny", "reason": "secrets stay put", "answers": [{"kind": "route", "policy": "RulePolicy", "reason": "", "runtime": "monty"}, {"kind": "deny", "policy": "RulePolicy", "reason": "secrets stay put"}], "refusal": "deny", "exit_code": 126, "stderr": "python3: Permission denied\n", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "runtime": ""}]}}},
     {"op": "exec", "command": "python3 -c \"print('heavy secret')\"", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "python3: Permission denied\n", "refusal": "secrets stay put"}}}
    ]
   },
@@ -377,6 +377,15 @@
     {"op": "exec", "session": "agent", "command": "python3 -c \"import sys; print(sys.platform != 'monty')\"", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "python3: Permission denied\n", "refusal": "line needs a nod"}}},
     {"op": "asks", "session": "agent", "expect": {"value": [{"command": "", "paths": [], "reason": "line needs a nod"}]}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "agent", "command": "python3 -c \"import sys; print(sys.platform != 'monty')\"", "expect": {"value": {"exit_code": 0, "stdout": "True\n", "stderr": "", "refusal": null}}}
+   ]
+  },
+  {
+   "id": "a_policy_programs_route_says_why_and_explain_shows_it",
+   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "local", "workspace"]},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "print('{\"kind\": \"route\", \"runtime\": \"local\", \"reason\": \"monty has no sqlite3\"}')\n", "language": "python"}, "runtime": "monty"}]}}},
+    {"op": "explain", "session": "agent", "command": "python3 -c \"import sqlite3\"", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [{"kind": "route", "policy": "ScriptPolicy", "reason": "monty has no sqlite3", "runtime": "local"}], "refusal": null, "exit_code": 0, "stderr": "", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "runtime": "local"}]}}},
     {"op": "exec", "session": "agent", "command": "python3 -c \"import sys; print(sys.platform != 'monty')\"", "expect": {"value": {"exit_code": 0, "stdout": "True\n", "stderr": "", "refusal": null}}}
    ]
   },

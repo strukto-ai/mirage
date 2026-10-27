@@ -29,12 +29,12 @@ def test_timeout_reports_124_with_the_timeout_message():
 
 
 def test_a_placement_deny_reports_126_named_by_the_command():
-    deny = Deny("no writes", policy="PlacementPolicy")
+    deny = Deny("no writes", policy="RoutePolicy")
     io = placement_refused(deny, "rm -rf /data")
     assert io.exit_code == 126
     assert io.stderr == b"rm: Permission denied\n"
     assert io.refusal == Refusal(
-        kind="deny", reason="no writes", policy="PlacementPolicy"
+        kind="deny", reason="no writes", policy="RoutePolicy"
     )
 
 

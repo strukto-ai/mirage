@@ -33,6 +33,7 @@ export interface ExplanationRecord {
   line: string
   outcome: string
   reason: string
+  answers: { kind: string; runtime?: string; reason?: string | null }[]
   exit_code: number
   node: ExplainedNode
 }
@@ -42,6 +43,11 @@ export function formatExplanation(data: ExplanationRecord): string {
   let verdict = `${data.outcome}, exit ${String(data.exit_code)}`
   if (data.reason !== '') verdict += `: ${data.reason}`
   const out = [`${data.line}  [${verdict}]`]
+  for (const answer of data.answers) {
+    if (answer.kind === 'route' && answer.reason) {
+      out.push(`  on ${answer.runtime ?? ''}: ${answer.reason}`)
+    }
+  }
   for (const child of data.node.children) explainedLines(child, 1, out)
   return out.join('\n')
 }

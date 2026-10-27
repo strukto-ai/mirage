@@ -13,18 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { RoutePolicy } from '../../runtime/routing/types.ts'
+import type { RouteRule } from '../../runtime/routing/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import { ScriptPolicy } from '../script.ts'
 import type { RouteContext } from '../types.ts'
-import { PlacementPolicy } from './placement.ts'
+import { RoutePolicy } from './route.ts'
 
 function line(text: string): RouteContext {
   return { line: text, commands: [], sessionId: '' }
 }
 
-function placement(route: RoutePolicy): PlacementPolicy {
-  return new PlacementPolicy(route, new ScriptPolicy({ scriptsOf: () => ({}) }))
+function routePolicy(route: RouteRule): RoutePolicy {
+  return new RoutePolicy(route, new ScriptPolicy({ scriptsOf: () => ({}) }))
 }
 
 const ROUTE_HEAVY = [
@@ -37,9 +37,9 @@ const ROUTE_HEAVY = [
   '',
 ].join('\n')
 
-describe('PlacementPolicy', () => {
+describe('RoutePolicy', () => {
   it('places the line on a runtime name and says nothing on null', async () => {
-    const policy = placement((ctx) => (ctx.line.includes('heavy') ? 'beta' : null))
+    const policy = routePolicy((ctx) => (ctx.line.includes('heavy') ? 'beta' : null))
     expect(await policy.preExecute(line('python3 heavy'))).toEqual({
       kind: 'route',
       runtime: 'beta',
@@ -58,12 +58,15 @@ describe('PlacementPolicy', () => {
     // Refusing a line is a policy's answer, not the router's; a route
     // policy that answers anything else is misconfigured, not a refusal.
     await expect(
-      placement((() => verdict) as unknown as RoutePolicy).preExecute(line('echo hi')),
+      routePolicy((() => verdict) as unknown as RouteRule).preExecute(line('echo hi')),
     ).rejects.toThrow(/a runtime name or None/)
   })
 
   it('runs a program that prints its route or nothing', async () => {
-    const policy = placement({ script: new ScriptSource(ROUTE_HEAVY, 'python'), runtime: 'monty' })
+    const policy = routePolicy({
+      script: new ScriptSource(ROUTE_HEAVY, 'python'),
+      runtime: 'monty',
+    })
     expect(await policy.preExecute(line('python3 heavy'))).toEqual({
       kind: 'route',
       runtime: 'beta',
@@ -75,15 +78,15 @@ describe('PlacementPolicy', () => {
     ['1 / 0', /route_policy exited 1/],
     ["print('beta')", /route_policy must print a JSON answer/],
   ])("treats a failing program as the deployment's mistake: %s", async (source, refusal) => {
-    const policy = placement({ script: new ScriptSource(source, 'python'), runtime: 'monty' })
+    const policy = routePolicy({ script: new ScriptSource(source, 'python'), runtime: 'monty' })
     await expect(policy.preExecute(line('echo hi'))).rejects.toThrow(refusal)
   })
 
   it('leaves a path to the workspace yaml', () => {
-    expect(() => placement('route.py' as unknown as RoutePolicy)).toThrow(
+    expect(() => routePolicy('route.py' as unknown as RouteRule)).toThrow(
       /a path is the workspace yaml's/,
     )
-    expect(() => placement({ script: 'route.py', runtime: 'monty' })).toThrow(
+    expect(() => routePolicy({ script: 'route.py', runtime: 'monty' })).toThrow(
       /routePolicy names a policy by path/,
     )
   })

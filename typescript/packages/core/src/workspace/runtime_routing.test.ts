@@ -461,7 +461,7 @@ describe('the placement stage', () => {
       expect(refused.exitCode).toBe(126)
       expect(refused.refusal?.reason).toBe(
         'policies place the line on different runtimes: ' +
-          'PlacementPolicy on alpha, HeavyOnBeta on beta',
+          'RoutePolicy on alpha, HeavyOnBeta on beta',
       )
       expect(DEC.decode((await ws.shell('python3 -c "light"')).stdout)).toBe('ran-alpha\n')
     } finally {
@@ -476,7 +476,7 @@ describe('the placement stage', () => {
     })
     try {
       const heavy = await ws.explain('python3 -c "heavy"')
-      expect(heavy.answers).toEqual([{ kind: 'route', runtime: 'beta', policy: 'PlacementPolicy' }])
+      expect(heavy.answers).toEqual([{ kind: 'route', runtime: 'beta', policy: 'RoutePolicy' }])
       expect([runtimes(heavy), heavy.exitCode]).toEqual([['beta'], 0])
       const light = await ws.explain('python3 -c "light"')
       expect([light.answers, runtimes(light)]).toEqual([[], ['alpha']])

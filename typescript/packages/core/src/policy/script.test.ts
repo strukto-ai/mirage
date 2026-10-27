@@ -313,6 +313,15 @@ describe('scriptAction', () => {
     expect(() => scriptAction(printed, 'preCommand')).toThrow('cannot answer route at pre_command')
   })
 
+  it('carries the reason a route gives', () => {
+    const printed = bytes(answer({ kind: 'route', runtime: 'docker', reason: 'needs a GPU' }))
+    expect(scriptAction(printed, 'preExecute')).toEqual({
+      kind: 'route',
+      runtime: 'docker',
+      reason: 'needs a GPU',
+    })
+  })
+
   it.each([
     'deny',
     '"deny"',
@@ -956,6 +965,22 @@ describe('ScriptPolicy env and external functions', () => {
     )
     expect(await policy.preCommand(ctx('rm'))).toEqual([
       { kind: 'deny', reason: 'admin may not rm' },
+    ])
+  }, 60_000)
+
+  it('hands a function the dicts a program passes as plain objects', async () => {
+    const source = [
+      'import json',
+      'said = await describe({"user": {"name": "root"}, "tags": [{"a": 1}]})',
+      'print(json.dumps({"kind": "deny", "reason": said}))',
+    ].join('\n')
+    const policy = track(
+      new ScriptPolicy(scripts({ preCommand: [entry('monty', source)] }), null, {
+        externalLookup: { describe: (value: unknown) => Promise.resolve(JSON.stringify(value)) },
+      }),
+    )
+    expect(await policy.preCommand(ctx())).toEqual([
+      { kind: 'deny', reason: '{"user":{"name":"root"},"tags":[{"a":1}]}' },
     ])
   }, 60_000)
 

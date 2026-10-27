@@ -294,17 +294,14 @@ class RulePolicy(Policy):
 
 
 def answered(answers: tuple[Deny | Ask | Route, ...]) -> list[dict[str, Any]]:
-    """Each policy answer as a case pins it: its kind, who gave it, and
-    its reason or the runtime it names."""
+    """Each policy answer as a case pins it: its kind, who gave it, its
+    reason and the runtime a route names."""
     return [
         {
             "kind": a.kind,
             "policy": a.policy,
-            **(
-                {"runtime": a.runtime}
-                if isinstance(a, Route)
-                else {"reason": a.reason}
-            ),
+            "reason": a.reason,
+            **({"runtime": a.runtime} if isinstance(a, Route) else {}),
         }
         for a in answers
     ]

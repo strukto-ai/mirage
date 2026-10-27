@@ -106,7 +106,8 @@ it:
 | `{"kind": "ask", "reason": "..."}` | [asks the host](/home/policy/policies#asks) |
 | `{"kind": "route", "runtime": "docker"}` | at `pre_execute`: runs the line on that runtime |
 
-A deny or an ask without a `reason` gets the default one. Anything else on
+A deny or an ask without a `reason` gets the default one. A route may give
+one too, which `explain` shows. Anything else on
 stdout, such as a debug line, fails the program; write those to stderr.
 
 ## Variables

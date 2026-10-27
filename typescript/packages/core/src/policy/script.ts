@@ -194,7 +194,9 @@ export function scriptAction(output: Uint8Array, method: ScriptMethod): Deny | A
   const said = reason ?? ''
   if (kind === 'deny') return { kind, reason: said === '' ? DEFAULT_DENY_REASON : said }
   if (kind === 'ask') return { kind, reason: said === '' ? DEFAULT_ASK_REASON : said }
-  return { kind, runtime: runtime ?? '' }
+  return said === ''
+    ? { kind, runtime: runtime ?? '' }
+    : { kind, runtime: runtime ?? '', reason: said }
 }
 
 /**
@@ -259,7 +261,8 @@ export interface ScriptWiring {
  * on two runtimes go at once.
  *
  * A program on monty may also call the host's `externalLookup` functions
- * by name, sync or async, with plain data in and out; one that throws
+ * by name, sync or async, with plain data in and out (a dict arrives as
+ * an object, as the Python host's arrives as a dict); one that throws
  * raises in the program. Its runs go at once: monty runs each on a worker
  * of its own, and a function may be slow or reach the workspace again. No
  * other runtime sees them. `secretSources` is the workspace's declared
@@ -294,7 +297,18 @@ export class ScriptPolicy implements Policy, SessionScoped {
   ) {
     this.sessions = sessions
     this.wiring = wiring
-    this.externalLookup = { ...options.externalLookup }
+    const plain = (value: unknown): unknown =>
+      value instanceof Map
+        ? Object.fromEntries([...value].map(([key, item]) => [String(key), plain(item)]))
+        : Array.isArray(value)
+          ? value.map(plain)
+          : value
+    this.externalLookup = Object.fromEntries(
+      Object.entries(options.externalLookup ?? {}).map(([name, fn]) => [
+        name,
+        (...args: unknown[]) => fn(...(args.map(plain) as never[])),
+      ]),
+    )
     this.secretSources = options.secretSources
   }
 

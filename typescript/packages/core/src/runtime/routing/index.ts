@@ -14,5 +14,5 @@
 
 export { runtimeForLanguage } from './decide.ts'
 export { RouteError } from './errors.ts'
-export type { RoutePolicy } from './types.ts'
+export type { RouteRule } from './types.ts'
 export type { RouteDecision } from '../types.ts'

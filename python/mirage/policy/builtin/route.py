@@ -20,10 +20,10 @@ from mirage.policy.profile import ProfilePolicy, compile_program
 from mirage.policy.script import ScriptPolicy
 from mirage.policy.types import Action, ProfileScript, Route, RouteContext
 from mirage.runtime.routing.errors import RouteError
-from mirage.runtime.routing.types import RoutePolicy, RouteVerdict
+from mirage.runtime.routing.types import RouteRule, RouteVerdict
 
 
-class PlacementPolicy(Policy):
+class RoutePolicy(Policy):
     """The workspace's ``route_policy``, answering at ``pre_execute``.
 
     The workspace compiles the configured callable or program into this
@@ -37,7 +37,7 @@ class PlacementPolicy(Policy):
     deployment's to fix and not a refusal to show an agent.
 
     Args:
-        route (RoutePolicy): the configured callable or program.
+        route (RouteRule): the configured callable or program.
         programs (ScriptPolicy): the workspace's program runner, which a
             program runs on.
 
@@ -48,7 +48,7 @@ class PlacementPolicy(Policy):
             script is still a path.
     """
 
-    def __init__(self, route: RoutePolicy, programs: ScriptPolicy) -> None:
+    def __init__(self, route: RouteRule, programs: ScriptPolicy) -> None:
         if isinstance(route, str):
             raise TypeError(
                 "route_policy must be a callable taking the RouteContext "

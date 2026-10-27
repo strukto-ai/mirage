@@ -1,0 +1,16 @@
+mode: exec
+
+mounts:
+  /data:
+    vfs: ram
+
+runtimes:
+  - monty
+  - local
+  - workspace
+
+route_policy:
+  script: route.py
+  runtime: monty
+  env:
+    MODEL: gpt-6-luna

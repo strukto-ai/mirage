@@ -47,7 +47,7 @@ import { cliSpecFor } from '../../commands/cli/specs.ts'
 import type { CLI } from '../../commands/cli/types.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
-import { PlacementPolicy } from '../../policy/builtin/placement.ts'
+import { RoutePolicy } from '../../policy/builtin/route.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { Decisions } from '../../policy/decisions.ts'
 import { Terminal } from '../../shell/console/terminal.ts'
@@ -592,7 +592,7 @@ export class Workspace {
     this.closers.push(() => this.registry.clis.close())
     this.router = new Router(this.registry, this.runtimeWorld)
     if (options.routePolicy !== undefined) {
-      this.registry.policies.place(new PlacementPolicy(options.routePolicy, this.scriptPolicy))
+      this.registry.policies.place(new RoutePolicy(options.routePolicy, this.scriptPolicy))
     }
     this.registry.bindClocks()
   }

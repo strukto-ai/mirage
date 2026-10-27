@@ -106,6 +106,8 @@ class Route:
 
     Args:
         runtime (str): the runtime entry's name.
+        reason (str): why the line goes there, for ``explain`` to show;
+            empty when the policy gives none.
         policy (str): the policy that placed the line; the chain fills
             it in.
     """
@@ -113,6 +115,7 @@ class Route:
     kind: ClassVar[str] = "route"
 
     runtime: str
+    reason: str = ""
     policy: str = ""
 
 
@@ -270,11 +273,11 @@ class Answer(BaseModel):
     What a policy program prints, and what the server's entry points
     send (``answer_to_dict``, which adds the policy that spoke). A deny
     or an ask may leave the reason out for the default one; a route
-    names its runtime.
+    names its runtime and may say why.
 
     Args:
         kind (Literal["deny", "ask", "route"]): which answer.
-        reason (str | None): why, for a deny or an ask.
+        reason (str | None): why.
         runtime (str | None): the runtime a route places the line on.
     """
 
@@ -287,8 +290,8 @@ class Answer(BaseModel):
     @model_validator(mode="after")
     def _v_fields(self) -> "Answer":
         if self.kind == Route.kind:
-            if not self.runtime or self.reason is not None:
-                raise ValueError("a route names its runtime and nothing else")
+            if not self.runtime:
+                raise ValueError("a route names its runtime")
         elif self.runtime is not None:
             raise ValueError(f"a {self.kind} carries no runtime")
         return self

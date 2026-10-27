@@ -179,6 +179,7 @@ def answer_to_dict(action: Deny | Ask | Route) -> dict[str, JsonValue]:
         return {
             "kind": "route",
             "runtime": action.runtime,
+            "reason": action.reason,
             "policy": action.policy,
         }
     return {

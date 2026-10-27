@@ -466,12 +466,13 @@ for (const register of [registerNodeVfs, registerBrowserVfs]) {
   })
 }
 
-/** Each policy answer as a case pins it: its kind, who gave it, and its reason or runtime. */
+/** Each policy answer as a case pins it: its kind, who gave it, its reason and the runtime a route names. */
 function answered(answers: readonly (Deny | Ask | Route)[]): Record<string, string>[] {
   return answers.map((a) => ({
     kind: a.kind,
     policy: a.policy ?? '',
-    ...(a.kind === 'route' ? { runtime: a.runtime } : { reason: a.reason }),
+    reason: a.reason ?? '',
+    ...(a.kind === 'route' ? { runtime: a.runtime } : {}),
   }))
 }
 
