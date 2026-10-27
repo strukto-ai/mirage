@@ -206,3 +206,14 @@ async def test_config_writes_are_explicitly_refused(git_ws, repo_path, form):
     assert result.stdout in (None, b"")
     assert b"git config is read-only in Mirage" in result.stderr
     assert config.read_bytes() == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("verb", ["rev-parse", "rev-list"])
+async def test_dash_h_is_help_only_as_the_verbs_one_word(git_ws, verb):
+    alone = await git_ws.shell(f"git -C /repo {verb} -h")
+    assert alone.exit_code == 0
+    assert (alone.stdout or b"").startswith(b"usage: git " + verb.encode())
+    repeated = await git_ws.shell(f"git -C /repo {verb} HEAD {verb} -h")
+    assert repeated.exit_code != 0
+    assert b"usage:" not in (repeated.stdout or b"")

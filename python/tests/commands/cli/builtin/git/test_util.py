@@ -319,6 +319,21 @@ def test_without_section_follows_a_value_continued_onto_a_bracket_line():
     assert without_section(data, "branch", "c4").endswith(b"# see \\\n")
 
 
+# What git 2.56.0's --delete-merged leaves of a block whose header line
+# carries one of the variables it clears.
+def test_without_section_keeps_a_header_its_inline_variable_left():
+    keys = frozenset({b"remote", b"merge"})
+    data = (
+        b'[branch "y"] remote = .\n\tmerge = refs/heads/x\n\trebase = true\n'
+        b"[core]\n\tbare = false\n"
+    )
+    assert without_section(data, "branch", "y", keys) == (
+        b'[branch "y"]\n\trebase = true\n[core]\n\tbare = false\n'
+    )
+    emptied = b'[branch "y"] remote = .\n\tmerge = refs/heads/x\n[core]\n'
+    assert without_section(emptied, "branch", "y", keys) == b"[core]\n"
+
+
 @pytest.mark.parametrize(
     ("value", "parsed"),
     [

@@ -108,6 +108,20 @@ it.each([
       '* eab4670 fix: Remove_Caching_Layer flag\n \\ \n  * c90354f Add caching layer\n' +
       '* 6f45eae by Bob\n',
   ],
+  [
+    'log --graph --oneline --since=2025-01-01 --all',
+    '* 9e9a1bb élan aA\n* 0bddf6b ÉLAN Aa\n| * a0c4dcf docs: FIX typo\n' +
+      '| * eab4670 fix: Remove_Caching_Layer flag\n| * c90354f Add caching layer\n|/  \n' +
+      '| * 6f45eae by Bob\n|/  \n| * c10668b skew hidden\n' +
+      '| * 780b730 skew early\n| | * e0ebe82 skew shown\n| |/  \n' +
+      '| * fdcb9cd skew shared\n|/  \n| * 7283b74 quoted change\n' +
+      '| * fbcfad2 quoted base\n|/  \n| * eaca0d8 odd name\n' +
+      '|/  \n| *   f72a17f evil merge\n| |\\  \n' +
+      '| | * e1f041d evil side\n| * | 8b36756 evil main\n| |/  \n' +
+      '| * 3aeb987 evil base\n|/  \n*   d07b9b4 merge side\n' +
+      '|\\  \n| * cbab995 add feature\n \\ \n' +
+      '  * c9d68db add app\n* 3653a0f rename with edits and binary addition\n',
+  ],
 ])('stands a root apart: %s', async (form, stdout) => {
   expect(await run(form)).toEqual([0, stdout, ''])
 })

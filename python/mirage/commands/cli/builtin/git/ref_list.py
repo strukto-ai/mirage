@@ -485,7 +485,9 @@ async def worktree_heads(repo: Repo) -> dict[str, str]:
 
     The main worktree is the one this repository was found in or the
     one around its common directory; a linked one is named by the
-    ``gitdir`` file git keeps for it, less its ``/.git``.
+    ``gitdir`` file git keeps for it, less its ``/.git``. A branch is
+    checked out even where its worktree's path is unknown (a common
+    directory not named ``.git``), with an empty path.
 
     Args:
         repo (Repo): the opened repository.
@@ -496,7 +498,7 @@ async def worktree_heads(repo: Repo) -> dict[str, str]:
     async def note(gitdir: PathSpec, path: str) -> None:
         data = await read_optional(vfs, gitdir.join(f"{HEAD_FILE}"))
         text = (data or b"").decode("utf-8", "replace").strip()
-        if text.startswith(SYMREF_PREFIX) and path:
+        if text.startswith(SYMREF_PREFIX):
             heads.setdefault(text[len(SYMREF_PREFIX) :].strip(), path)
 
     common = location.commondir

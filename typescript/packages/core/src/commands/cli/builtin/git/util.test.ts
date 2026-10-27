@@ -131,6 +131,19 @@ describe('withoutSection', () => {
   })
 })
 
+// What git 2.56.0's --delete-merged leaves of a block whose header line carries
+// one of the variables it clears. Mirrors test_util.py.
+it('keeps a header its inline variable left', () => {
+  const keys = new Set(['remote', 'merge'])
+  const text =
+    '[branch "y"] remote = .\n\tmerge = refs/heads/x\n\trebase = true\n[core]\n\tbare = false\n'
+  expect(withoutSection(text, 'branch', 'y', keys)).toBe(
+    '[branch "y"]\n\trebase = true\n[core]\n\tbare = false\n',
+  )
+  const emptied = '[branch "y"] remote = .\n\tmerge = refs/heads/x\n[core]\n'
+  expect(withoutSection(emptied, 'branch', 'y', keys)).toBe('[core]\n')
+})
+
 describe('withoutSection over continued values', () => {
   const text =
     '[core]\n\tbare = false\n[branch "c1"]\n\tdescription = one \\\n' +

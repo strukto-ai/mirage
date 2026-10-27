@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -322,3 +324,49 @@ def test_an_upstream_pattern_names_a_branch_or_globs_one(
 def test_an_upstream_pattern_must_name_a_branch(pattern):
     with pytest.raises(GitError, match="is not a valid branch or pattern"):
         upstream_patterns(TABLE, KNOWN, [pattern])
+
+
+@pytest.mark.asyncio
+async def test_delete_merged_keeps_a_branch_checked_out_elsewhere(tmp_path):
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_AUTHOR_NAME": "Ada",
+        "GIT_AUTHOR_EMAIL": "ada@example.com",
+        "GIT_COMMITTER_NAME": "Ada",
+        "GIT_COMMITTER_EMAIL": "ada@example.com",
+    }
+
+    def git(*args: str, cwd: Path = tmp_path / "work") -> str:
+        return subprocess.run(
+            ["git", *args], cwd=cwd, env=env, check=True, capture_output=True
+        ).stdout.decode()
+
+    (tmp_path / "meta").mkdir()
+    git(
+        "init",
+        "-q",
+        "-b",
+        "main",
+        "--separate-git-dir",
+        str(tmp_path / "meta" / "repo"),
+        str(tmp_path / "work"),
+        cwd=tmp_path,
+    )
+    git("commit", "-q", "--allow-empty", "-m", "A")
+    git("branch", "trunk")
+    git("branch", "gone")
+    for name in ("main", "gone"):
+        git("branch", "-q", "--set-upstream-to=trunk", name)
+    git("worktree", "add", "-q", "--relative-paths", "-b", "other", "../wt")
+    tip = git("rev-parse", "--short", "gone").strip()
+    with mounted(tmp_path) as ws:
+        ws.register_cli("git", GIT)
+        got = await ws.shell(
+            "git -C /repo/wt branch --dry-run --delete-merged trunk"
+        )
+    assert (got.exit_code, got.stdout) == (
+        0,
+        f"Would delete branch gone (was {tip}).\n".encode(),
+    )

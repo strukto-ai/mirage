@@ -450,7 +450,7 @@ async def rev_list(
     accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    if option_operand(ctx, texts, lone_help(ctx)):
+    if option_operand(ctx, texts, lone_help(ctx, texts)):
         raise UsageError("", verb_usage(ctx))
     repo, location = await opened(ctx, fl)
     flags = parse_flags(fl)
@@ -646,7 +646,7 @@ async def rev_parse(
         revisions = tuple(
             text for text in texts if text != GIT_DIR_OPTION or text in marked
         )
-        check_operands(ctx, revisions, lone_help(ctx))
+        check_operands(ctx, revisions, lone_help(ctx, revisions))
         verb = ctx.argv.index("rev-parse") if "rev-parse" in ctx.argv else -1
         words = ctx.argv[verb + 1 :]
         end = words.index("--") if "--" in words else -1

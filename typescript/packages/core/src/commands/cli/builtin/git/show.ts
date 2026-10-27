@@ -264,7 +264,7 @@ export async function diffTree(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  if (optionOperand(ctx, texts, loneHelp(ctx)) !== null) {
+  if (optionOperand(ctx, texts, loneHelp(ctx, texts)) !== null) {
     throw new UsageError('', verbUsage(ctx))
   }
   const repo = await opened(ctx, fl)
