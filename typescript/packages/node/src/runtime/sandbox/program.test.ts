@@ -598,6 +598,38 @@ describe('host runs', () => {
     }
   })
 
+  // A run whose leader exited before the program it started is stopped too:
+  // its group outlives the leader, and no new process takes its id meanwhile.
+  it('reaps a left host run whose leader exited', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const child = spawn('sh', ['-c', `sleep 30 & echo $! > ${pidFile}`], {
+      detached: true,
+      stdio: 'ignore',
+    })
+    const run = hostRun(child.pid ?? 0, ['sh'])
+    await new Promise((resolve) => child.once('exit', resolve))
+    const survivor = await escapedPid(pidFile)
+    const alive = (): boolean => {
+      try {
+        process.kill(survivor, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    try {
+      expect(await reapHostRun(run, 15)).toBe(true)
+      const deadline = Date.now() + 5000
+      while (alive() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      expect(alive()).toBe(false)
+    } finally {
+      if (alive()) process.kill(survivor, 'SIGKILL')
+    }
+  })
+
   // A group this workspace may not signal is out of its reach while its
   // leader still runs, so a workspace with the rights can stop it later.
   it('leaves a host run it may not signal out of reach', async () => {

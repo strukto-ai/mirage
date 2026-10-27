@@ -254,6 +254,10 @@ export class JobTable {
   // through: this one, or for a child shell's table the workspace's, since
   // a child shell keeps only its job list private.
   private plane: JobTable = this
+  // The table that holds each running job, by its runner's PID, kept on the
+  // plane: a child shell's jobs are in its own table, where a stop another
+  // workspace asks for has to find them.
+  private jobTables = new Map<number, JobTable>()
   /**
    * Stops the native runs a lapsed owner left, given them and the first
    * signal, and answers the ones this workspace cannot reach; the workspace
@@ -390,6 +394,10 @@ export class JobTable {
     }
     job.process = process
     this.sessionJobs(sessionId).set(job.id, job)
+    const plane = this.plane
+    const pid = process.info.pid
+    plane.jobTables.set(pid, this)
+    void process.join().then(() => plane.jobTables.delete(pid))
     // An abort from elsewhere stops the runner; one the runner's own stop
     // sent is that stop, which a KILL here would cut short.
     const onAbort = () => {
@@ -799,22 +807,25 @@ export class JobTable {
    * Signal a process another workspace runs, named by a prefix of its
    * owner's id and the owner's PID: its owner stops it once it takes the
    * stop, within `PUBLISH_SECONDS`. Signal 0 only probes. A lapsed owner's
-   * process is gone, and the native runs it left are stopped instead.
-   * Answers whether one live process was signalled; throws EPERM for one
-   * the session sees but may not stop.
+   * process is gone, and the native runs it left are stopped instead. The
+   * grants are read once the store has answered, just before anything is
+   * stopped, so a profile replaced meanwhile stops nothing under the old
+   * one. Answers whether one live process was signalled; throws EPERM for
+   * one the session sees but may not stop.
    *
    * @param owner a prefix of the owner's id, as `ps` shows it.
    * @param pid the process, by the owner's PID.
    * @param signal the signal, 0 to probe.
    * @param sessionId the calling session.
-   * @param permissions whose processes it may see and stop.
+   * @param permissions whose processes it may see and stop, null once the
+   *   caller's view is revoked.
    */
   async signalRemote(
     owner: string,
     pid: number,
     signal: number,
     sessionId: string,
-    permissions: ProcessPermissions,
+    permissions: () => ProcessPermissions | null,
   ): Promise<boolean> {
     if (this.plane !== this)
       return this.plane.signalRemote(owner, pid, signal, sessionId, permissions)
@@ -833,12 +844,14 @@ export class JobTable {
     if (owners.length !== 1 || found === undefined) return false
     const record = records[found]?.[String(pid)] ?? {}
     const own = record.session === sessionId
-    if (permissions.list === 'session' && !own) return false
-    if (!(await this.store.alive(found))) {
+    const lapsed = !(await this.store.alive(found))
+    const granted = permissions()
+    if (granted === null || (granted.list === 'session' && !own)) return false
+    if (lapsed) {
       await this.reapOwner(found)
       return false
     }
-    if (permissions.kill === 'session' && !own)
+    if (granted.kill === 'session' && !own)
       throw Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })
     if (signal !== 0) await this.store.requestStop(found, pid, signal)
     return true
@@ -1251,13 +1264,14 @@ export class JobTable {
 
   /**
    * Stop one of this workspace's processes another workspace asked to
-   * stop: a job's runner the way `kill` stops a job, any other runner
-   * directly.
+   * stop: a job's runner the way `kill` stops a job, through the table
+   * that holds it, a child shell's included; any other runner directly.
    */
   private async stopAsked(pid: number, signal: number): Promise<void> {
-    for (const job of this.allJobs()) {
+    const table = this.jobTables.get(pid) ?? this
+    for (const job of table.allJobs()) {
       if (job.process !== null && job.pid === pid && job.status === JobStatus.RUNNING) {
-        await this.kill(job.id, job.sessionId, signal)
+        await table.kill(job.id, job.sessionId, signal)
         return
       }
     }

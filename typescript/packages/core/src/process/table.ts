@@ -165,6 +165,7 @@ export class ProcessTable {
       },
       probe: (pid: number) => signalTarget(pid) !== null,
       terminate: (pid: number, signal: number) => signalTarget(pid)?.terminate(signal) ?? false,
+      permissions: () => (valid() ? permissions() : null),
     })
   }
 

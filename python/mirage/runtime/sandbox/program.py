@@ -255,9 +255,12 @@ async def reap_host_run(run: Mapping[str, JsonValue], signum: int) -> bool:
 
     Only a run of this host is reached, and only while its PID still
     names a process started when the run did, to the second ``ps``
-    shows, so a PID the host reused is left alone. A group this
-    workspace may not signal is not reached while its leader still
-    runs (macOS answers EPERM for one that only exited unreaped).
+    shows, so a PID the host reused is left alone. A PID that names no
+    process may still name the run's group, whose leader exited before
+    the programs it started: the host gives no new process the id of a
+    group that still has members, so that group gets the signal too. A
+    group this workspace may not signal is not reached while its leader
+    still runs (macOS answers EPERM for one that only exited unreaped).
 
     Args:
         run (Mapping[str, JsonValue]): the run as ``host_run`` keeps it.
@@ -280,7 +283,10 @@ async def reap_host_run(run: Mapping[str, JsonValue], signum: int) -> bool:
     except OSError as exc:
         logger.debug("process %d not checked: %s", pid, exc)
         return False
-    if started is None or abs(started - recorded) > HOST_START_SLACK_SECONDS:
+    if (
+        started is not None
+        and abs(started - recorded) > HOST_START_SLACK_SECONDS
+    ):
         return True
     try:
         os.killpg(pid, signum)

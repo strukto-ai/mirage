@@ -42,7 +42,6 @@ import type { SessionView } from '../../view/types.ts'
 import { type Decisions, isPending } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import { PathSpec, type JsonValue, type Refusal } from '../../types.ts'
-import { DEFAULT_PROCESS_PERMISSIONS } from '../../process/config.ts'
 import type { RecordFields } from '../record/types.ts'
 import type { ProcessInfo, ProcessState } from '../../process/types.ts'
 import type { ProcessView } from '../../process/view.ts'
@@ -931,7 +930,6 @@ export async function handleKill(
   const errors: string[] = []
   let signalled = false
   await jobTable.sync(sid)
-  const permissions = session?.processes ?? DEFAULT_PROCESS_PERMISSIONS
   for (const operand of words) {
     const colon = operand.indexOf(':')
     if (colon >= 0 && !operand.startsWith('%')) {
@@ -943,7 +941,13 @@ export async function handleKill(
       }
       let found: boolean
       try {
-        found = await jobTable.signalRemote(owner, Number(owned), signal, sid, permissions)
+        found = await jobTable.signalRemote(
+          owner,
+          Number(owned),
+          signal,
+          sid,
+          processes.permissions,
+        )
       } catch (err) {
         if ((err as { code?: unknown }).code !== 'EPERM') throw err
         errors.push(`${voice}kill: (${operand}) - Operation not permitted`)
@@ -1486,20 +1490,21 @@ export async function handlePs(
     return jobResult(cmdStr, `error: ${(err as Error).message}\n${PS_USAGE}`, 1)
   }
   const sid = sessionOf(session)
-  const permissions = session?.processes ?? DEFAULT_PROCESS_PERMISSIONS
+  const processes = processView(jobTable, session)
   const every = options.all || (options.pids.size === 0 && options.remote.length === 0)
   const runs = new Map(
     jobTable.processes.live().map((handle) => [handle.info.pid, Object.values(handle.runs)]),
   )
-  const rows: [string, ProcessInfo, Record<string, JsonValue>[]][] = processView(jobTable, session)
+  const rows: [string, ProcessInfo, Record<string, JsonValue>[]][] = processes
     .list()
     .filter((info) => every || options.pids.has(info.pid))
     .map((info) => ['', info, runs.get(info.pid) ?? []])
   const remote = await jobTable.remoteProcesses()
+  const granted = processes.permissions()
   const tags = ownerTags(Object.keys(remote))
   for (const [owner, records] of Object.entries(remote)) {
     for (const record of Object.values(records)) {
-      if (permissions.list === 'session' && record.session !== sid) continue
+      if (granted === null || (granted.list === 'session' && record.session !== sid)) continue
       if (
         every ||
         options.remote.some(([prefix, pid]) => owner.startsWith(prefix) && record.pid === pid)

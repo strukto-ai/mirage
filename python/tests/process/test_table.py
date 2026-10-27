@@ -294,10 +294,12 @@ async def test_workspace_list_does_not_grant_kill():
     with pytest.raises(PermissionError) as denied:
         view.terminate(child.info.pid, 15)
     assert denied.value.errno == errno.EPERM
+    assert view.permissions() == grants
     processes.revoke_session("observer")
     with pytest.raises(PermissionError):
         view.check_spawn()
     assert view.list() == ()
+    assert view.permissions() is None
     release.set()
     await child.join()
 

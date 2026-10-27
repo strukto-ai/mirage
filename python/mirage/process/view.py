@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from mirage.process.child import ChildProcess
+from mirage.process.config import ProcessPermissions
 from mirage.process.types import ProcessInfo, SpawnRequest
 
 
@@ -26,12 +27,15 @@ class ProcessView:
     An absent or invisible PID is not found. Seeing a process grants no
     output access; stopping one the view sees but may not stop raises
     PermissionError (EPERM). The view carries no reference to mutable
-    tasks.
+    tasks. ``permissions`` answers the profile's process grants while
+    the view stands and None once it is revoked, for the processes of
+    other workspaces, which only the store lists.
     """
 
     list: Callable[[], tuple[ProcessInfo, ...]]
     check_spawn: Callable[[], None]
     probe: Callable[[int], bool]
     terminate: Callable[[int, int], bool]
+    permissions: Callable[[], ProcessPermissions | None]
     depth: int = 0
     spawn: Callable[[SpawnRequest], ChildProcess] | None = None

@@ -210,11 +210,15 @@ class ProcessTable:
                 handle = signal_target(pid)
                 return handle is not None and handle.terminate(signal)
 
+        def granted() -> ProcessPermissions | None:
+            return permissions() if valid() else None
+
         return ProcessView(
             list=list_visible,
             check_spawn=check_spawn,
             probe=probe,
             terminate=terminate,
+            permissions=granted,
         )
 
     def revoke_session(self, session_id: str) -> None:

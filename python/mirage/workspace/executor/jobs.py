@@ -36,7 +36,6 @@ from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.policy.decisions import Decisions, is_pending
 from mirage.policy.types import HandOff
-from mirage.process.config import ProcessPermissions
 from mirage.process.types import ProcessInfo, ProcessState
 from mirage.process.view import ProcessView
 from mirage.shell.bytes import encode_text
@@ -1113,9 +1112,6 @@ async def handle_kill(
     errors: list[str] = []
     signalled = False
     await job_table.sync(sid)
-    permissions = (
-        session.processes if session is not None else ProcessPermissions()
-    )
     for operand in words:
         owner, colon, local = operand.partition(":")
         if colon and not operand.startswith("%"):
@@ -1127,7 +1123,7 @@ async def handle_kill(
                 continue
             try:
                 found = await job_table.signal_remote(
-                    owner, int(local), signal, sid, permissions
+                    owner, int(local), signal, sid, processes.permissions
                 )
             except PermissionError:
                 errors.append(
@@ -1765,9 +1761,7 @@ async def handle_ps(
     except ValueError as exc:
         return _job_result(cmd_str, f"error: {exc}\n{_PS_USAGE}", 1)
     sid = _session_of(session)
-    permissions = (
-        session.processes if session is not None else ProcessPermissions()
-    )
+    processes = _process_view(job_table, session)
     every = options.all or not (options.pids or options.remote)
     runs = {
         handle.info.pid: list(handle.runs.values())
@@ -1775,14 +1769,17 @@ async def handle_ps(
     }
     rows: list[tuple[str, ProcessInfo, list[dict[str, JsonValue]]]] = [
         ("", info, runs.get(info.pid, []))
-        for info in _process_view(job_table, session).list()
+        for info in processes.list()
         if every or info.pid in options.pids
     ]
     remote = await job_table.remote_processes()
+    granted = processes.permissions()
     tags = _owner_tags(list(remote))
     for owner, records in remote.items():
         for record in records.values():
-            if permissions.list == "session" and record["session"] != sid:
+            if granted is None or (
+                granted.list == "session" and record["session"] != sid
+            ):
                 continue
             if every or any(
                 owner.startswith(prefix) and record["pid"] == pid

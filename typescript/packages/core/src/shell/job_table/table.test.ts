@@ -1551,12 +1551,12 @@ describe('JobTable process plane', () => {
     })
     await until(async () => a.owner in (await b.remoteProcesses()))
     const every = { list: 'workspace', kill: 'workspace', max: null } as const
-    expect(await b.signalRemote(a.owner.slice(0, 6), job.pid, 0, 't', every)).toBe(true)
+    expect(await b.signalRemote(a.owner.slice(0, 6), job.pid, 0, 't', () => every)).toBe(true)
     expect(job.status).toBe(JobStatus.RUNNING)
-    expect(await b.signalRemote(a.owner.slice(0, 6), job.pid, 15, 't', every)).toBe(true)
+    expect(await b.signalRemote(a.owner.slice(0, 6), job.pid, 15, 't', () => every)).toBe(true)
     await job.process?.join()
     expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
-    expect(await b.signalRemote('ffffffff', job.pid, 15, 't', every)).toBe(false)
+    expect(await b.signalRemote('ffffffff', job.pid, 15, 't', () => every)).toBe(false)
     await a.close()
     await b.close()
   })
@@ -1577,11 +1577,44 @@ describe('JobTable process plane', () => {
     await until(async () => a.owner in (await b.remoteProcesses()))
     const own = { list: 'session', kill: 'session', max: null } as const
     const seen = { list: 'workspace', kill: 'session', max: null } as const
-    expect(await b.signalRemote(a.owner, job.pid, 15, 't', own)).toBe(false)
-    await expect(b.signalRemote(a.owner, job.pid, 15, 't', seen)).rejects.toMatchObject({
+    expect(await b.signalRemote(a.owner, job.pid, 15, 't', () => own)).toBe(false)
+    await expect(b.signalRemote(a.owner, job.pid, 15, 't', () => seen)).rejects.toMatchObject({
       code: 'EPERM',
     })
-    expect(await b.signalRemote(a.owner, job.pid, 15, 's', own)).toBe(true)
+    expect(await b.signalRemote(a.owner, job.pid, 15, 's', () => own)).toBe(true)
+    await a.close()
+    await b.close()
+  })
+
+  // The grants are read once the store has answered: a view revoked while
+  // it answered stops nothing under the grants it had before.
+  it('reads the grants of a remote signal after the store', async () => {
+    const store = new RAMJobStore(30)
+    const [a, b] = [publishing(store), publishing(store)]
+    const abort = new AbortController()
+    const job = await a.submit({
+      command: 'sleep 30',
+      run: pending(abort),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    await until(async () => a.owner in (await b.remoteProcesses()))
+    const every = { list: 'workspace', kill: 'workspace', max: null } as const
+    const view = b.processes.view('t', () => every)
+    const listing = store.processes.bind(store)
+    const spy = vi.spyOn(store, 'processes').mockImplementation(() => {
+      b.processes.revokeSession('t')
+      return listing()
+    })
+    try {
+      expect(await b.signalRemote(a.owner, job.pid, 15, 't', view.permissions)).toBe(false)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await store.takeStops(a.owner)).toEqual([])
+    expect(job.status).toBe(JobStatus.RUNNING)
+    abort.abort()
     await a.close()
     await b.close()
   })
@@ -1754,7 +1787,40 @@ describe('JobTable process plane', () => {
     const child = b.child().child()
     await until(async () => a.owner in (await child.remoteProcesses()))
     const every = { list: 'workspace', kill: 'workspace', max: null } as const
-    expect(await child.signalRemote(a.owner, job.pid, 15, 's', every)).toBe(true)
+    expect(await child.signalRemote(a.owner, job.pid, 15, 's', () => every)).toBe(true)
+    await job.process?.join()
+    await a.close()
+    await b.close()
+  })
+
+  // A stop another workspace asks for reaches a child shell's job through
+  // the child's table, as its own kill would: the job answers killed at
+  // once, though its runner ignores the stop.
+  it("reaches a child shell's job with a stop asked elsewhere", async () => {
+    const store = new RAMJobStore(30)
+    const [a, b] = [publishing(store), publishing(store)]
+    const child = a.child()
+    let release = (): void => undefined
+    const run: JobRunner = () =>
+      new Promise<JobResult>((resolve) => {
+        release = () => {
+          resolve([new IOResult(), new ExecutionNode()])
+        }
+      })
+    const job = await child.submit({
+      command: 'deaf',
+      run,
+      abort: new AbortController(),
+      cwd: '/',
+      sessionId: 's',
+      simple: true,
+    })
+    await until(async () => a.owner in (await b.remoteProcesses()))
+    const every = { list: 'workspace', kill: 'workspace', max: null } as const
+    expect(await b.signalRemote(a.owner, job.pid, 15, 't', () => every)).toBe(true)
+    await until(() => Promise.resolve(job.status === JobStatus.KILLED))
+    expect(job.exitCode).toBe(143)
+    release()
     await job.process?.join()
     await a.close()
     await b.close()

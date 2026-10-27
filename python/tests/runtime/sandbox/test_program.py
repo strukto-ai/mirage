@@ -630,6 +630,36 @@ async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
             await child.wait()
 
 
+# A run whose leader exited before the program it started is stopped too:
+# its group outlives the leader, and no new process takes its id meanwhile.
+@pytest.mark.asyncio
+async def test_a_left_host_run_whose_leader_exited_is_reaped(tmp_path):
+    pid_file = tmp_path / "pid"
+    child = await asyncio.create_subprocess_exec(
+        "sh",
+        "-c",
+        f"sleep 30 & echo $! > {pid_file}",
+        start_new_session=True,
+    )
+    run = host_run(child.pid, ["sh"])
+    await child.wait()
+    survivor = await _wait_for_pid(pid_file)
+    try:
+        assert await reap_host_run(run, 15)
+        async with asyncio.timeout(5):
+            while True:
+                try:
+                    os.kill(survivor, 0)
+                except ProcessLookupError:
+                    break
+                await asyncio.sleep(0.05)
+    finally:
+        try:
+            os.kill(survivor, 9)
+        except ProcessLookupError:
+            pass
+
+
 def _denied(group: int, signum: int) -> None:
     raise PermissionError(errno.EPERM, "Operation not permitted")
 

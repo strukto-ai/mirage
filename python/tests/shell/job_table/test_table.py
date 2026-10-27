@@ -1259,14 +1259,16 @@ async def test_a_stop_asked_elsewhere_stops_the_owners_job(monkeypatch):
 
     await _until(listed)
     every = ProcessPermissions(list="workspace", kill="workspace")
-    assert await b.signal_remote(a.owner[:6], job.pid, 0, "t", every)
+    assert await b.signal_remote(a.owner[:6], job.pid, 0, "t", lambda: every)
     assert job.status == JobStatus.RUNNING
-    assert await b.signal_remote(a.owner[:6], job.pid, 15, "t", every)
+    assert await b.signal_remote(a.owner[:6], job.pid, 15, "t", lambda: every)
     assert job.process is not None
     async with asyncio.timeout(5):
         await job.process.join()
     assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
-    assert not await b.signal_remote("ffffffff", job.pid, 15, "t", every)
+    assert not await b.signal_remote(
+        "ffffffff", job.pid, 15, "t", lambda: every
+    )
     await a.close()
     await b.close()
 
@@ -1286,10 +1288,41 @@ async def test_a_remote_signal_keeps_to_the_sessions_view(monkeypatch):
     await _until(listed)
     own = ProcessPermissions()
     seen = ProcessPermissions(list="workspace", kill="session")
-    assert not await b.signal_remote(a.owner, job.pid, 15, "t", own)
+    assert not await b.signal_remote(a.owner, job.pid, 15, "t", lambda: own)
     with pytest.raises(PermissionError):
-        await b.signal_remote(a.owner, job.pid, 15, "t", seen)
-    assert await b.signal_remote(a.owner, job.pid, 15, "s", own)
+        await b.signal_remote(a.owner, job.pid, 15, "t", lambda: seen)
+    assert await b.signal_remote(a.owner, job.pid, 15, "s", lambda: own)
+    await a.close()
+    await b.close()
+
+
+# The grants are read once the store has answered: a view revoked while
+# it answered stops nothing under the grants it had before.
+@pytest.mark.asyncio
+async def test_a_remote_signal_reads_the_grants_after_the_store(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMJobStore(lease_seconds=30.0)
+    a, b = _publishing(store), _publishing(store)
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+
+    async def listed() -> bool:
+        return a.owner in await b.remote_processes()
+
+    await _until(listed)
+    every = ProcessPermissions(list="workspace", kill="workspace")
+    view = b.processes.view("t", lambda: every)
+    listing = store.processes
+
+    async def revoking() -> dict[str, dict[str, RecordFields]]:
+        b.processes.revoke_session("t")
+        return await listing()
+
+    monkeypatch.setattr(store, "processes", revoking)
+    assert not await b.signal_remote(
+        a.owner, job.pid, 15, "t", view.permissions
+    )
+    assert await store.take_stops(a.owner) == []
+    assert job.status == JobStatus.RUNNING
     await a.close()
     await b.close()
 
@@ -1508,10 +1541,48 @@ async def test_a_child_shells_table_reaches_the_process_plane(monkeypatch):
 
     await _until(listed)
     every = ProcessPermissions(list="workspace", kill="workspace")
-    assert await child.signal_remote(a.owner, job.pid, 15, "s", every)
+    assert await child.signal_remote(a.owner, job.pid, 15, "s", lambda: every)
     assert job.process is not None
     async with asyncio.timeout(5):
         await job.process.join()
+    await a.close()
+    await b.close()
+
+
+# A stop another workspace asks for reaches a child shell's job through
+# the child's table, as its own kill would: the child's wait answers the
+# kill once a runner that ignores it outlasts the bound.
+@pytest.mark.asyncio
+async def test_a_stop_asked_elsewhere_reaches_a_child_shells_job(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    monkeypatch.setattr(table_module, "STOP_WAIT_SECONDS", 0.05)
+    store = RAMJobStore(lease_seconds=30.0)
+    a, b = _publishing(store), _publishing(store)
+    child = a.child()
+    release = asyncio.Event()
+
+    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.shield(release.wait())
+        return IOResult(), ExecutionNode()
+
+    job = await child.submit("deaf", run, "/", session_id="s", simple=True)
+
+    async def listed() -> bool:
+        return a.owner in await b.remote_processes()
+
+    await _until(listed)
+    every = ProcessPermissions(list="workspace", kill="workspace")
+    assert await b.signal_remote(a.owner, job.pid, 15, "t", lambda: every)
+    async with asyncio.timeout(2):
+        assert (await child.wait(job.id, "s")).exit_code == 143
+    release.set()
+    assert job.process is not None
+    await job.process.join()
+    await asyncio.sleep(0)
+    assert a._job_tables == {}
     await a.close()
     await b.close()
 

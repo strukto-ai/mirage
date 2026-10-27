@@ -343,6 +343,10 @@ class JobTable:
         # written through: this one, or for a child shell's table the
         # workspace's, since a child shell keeps only its job list private.
         self._plane = self
+        # The table that holds each running job, by its runner's PID, kept
+        # on the plane: a child shell's jobs are in its own table, where a
+        # stop another workspace asks for has to find them.
+        self._job_tables: dict[int, JobTable] = {}
         # Stops the native runs a lapsed owner left, given them and the
         # first signal, and answers the ones this workspace cannot reach;
         # the workspace sets it, since it holds the runtimes that reach
@@ -476,6 +480,11 @@ class JobTable:
             raise
         job.process = process
         self._jobs.setdefault(session_id, {})[job_id] = job
+        plane, pid = self._plane, process.info.pid
+        plane._job_tables[pid] = self
+        process.task.add_done_callback(
+            lambda _: plane._job_tables.pop(pid, None)
+        )
         self._keep_lease()
         self._keep_checking()
         return job
@@ -917,22 +926,25 @@ class JobTable:
         pid: int,
         signal: int,
         session_id: str,
-        permissions: ProcessPermissions,
+        permissions: Callable[[], ProcessPermissions | None],
     ) -> bool:
         """Signal a process another workspace runs, named by a prefix of
         its owner's id and the owner's PID: its owner stops it once it
         takes the stop, within ``PUBLISH_SECONDS``.
 
         Signal 0 only probes. A lapsed owner's process is gone, and the
-        native runs it left are stopped instead.
+        native runs it left are stopped instead. The grants are read once
+        the store has answered, just before anything is stopped, so a
+        profile replaced meanwhile stops nothing under the old one.
 
         Args:
             owner (str): a prefix of the owner's id, as ``ps`` shows it.
             pid (int): the process, by the owner's PID.
             signal (int): the signal, 0 to probe.
             session_id (str): the calling session.
-            permissions (ProcessPermissions): whose processes it may see
-                and stop.
+            permissions (Callable[[], ProcessPermissions | None]): whose
+                processes it may see and stop, None once the caller's
+                view is revoked.
 
         Returns:
             bool: whether one live process was signalled.
@@ -961,12 +973,14 @@ class JobTable:
             return False
         record = records[owners[0]][str(pid)]
         own = record.get("session") == session_id
-        if permissions.list == "session" and not own:
+        lapsed = not await self.store.alive(owners[0])
+        granted = permissions()
+        if granted is None or (granted.list == "session" and not own):
             return False
-        if not await self.store.alive(owners[0]):
+        if lapsed:
             await self._reap_owner(owners[0])
             return False
-        if permissions.kill == "session" and not own:
+        if granted.kill == "session" and not own:
             raise PermissionError(errno.EPERM, "Operation not permitted")
         if signal != 0:
             await self.store.request_stop(owners[0], pid, signal)
@@ -1424,20 +1438,22 @@ class JobTable:
 
     async def _stop_asked(self, pid: int, signal: int) -> None:
         """Stop one of this workspace's processes another workspace
-        asked to stop: a job's runner the way ``kill`` stops a job, any
+        asked to stop: a job's runner the way ``kill`` stops a job,
+        through the table that holds it, a child shell's included; any
         other runner directly.
 
         Args:
             pid (int): the process.
             signal (int): the signal it is stopped with.
         """
-        for job in self.all_jobs():
+        table = self._job_tables.get(pid, self)
+        for job in table.all_jobs():
             if (
                 job.process is not None
                 and job.pid == pid
                 and job.status == JobStatus.RUNNING
             ):
-                await self.kill(job.id, job.session_id, signal)
+                await table.kill(job.id, job.session_id, signal)
                 return
         for handle in self.processes.live():
             if handle.info.pid == pid:

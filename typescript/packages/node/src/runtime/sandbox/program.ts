@@ -282,7 +282,10 @@ function startedAt(pid: number): Promise<number | null> {
  * Stop a host run a lapsed workspace left: its process group gets `signum`,
  * then KILL after `STOP_GRACE_SECONDS`. Only a run of this host is reached,
  * and only while its PID still names a process started when the run did, to
- * the second `ps` shows, so a PID the host reused is left alone. A group
+ * the second `ps` shows, so a PID the host reused is left alone. A PID that
+ * names no process may still name the run's group, whose leader exited
+ * before the programs it started: the host gives no new process the id of a
+ * group that still has members, so that group gets the signal too. A group
  * this workspace may not signal is not reached while its leader still runs
  * (macOS answers EPERM for one that only exited unreaped). Answers true once
  * the run is stopped or gone, false when this workspace cannot reach it.
@@ -308,7 +311,7 @@ export async function reapHostRun(
     debuglog('mirage')('process %d not checked: %s', pid, err)
     return false
   }
-  if (started === null || Math.abs(started - recorded) > HOST_START_SLACK_SECONDS) return true
+  if (started !== null && Math.abs(started - recorded) > HOST_START_SLACK_SECONDS) return true
   try {
     process.kill(-pid, signum)
     const deadline = Date.now() + STOP_GRACE_SECONDS * 1000

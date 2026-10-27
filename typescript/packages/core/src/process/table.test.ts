@@ -273,11 +273,13 @@ it('a workspace list grants no kill', async () => {
   expect(() => view.terminate(child.info.pid, 15)).toThrow(
     expect.objectContaining({ code: 'EPERM' }),
   )
+  expect(view.permissions()).toEqual({ list: 'workspace', kill: 'session', max: null })
   processes.revokeSession('observer')
   expect(() => {
     view.checkSpawn()
   }).toThrow('not permitted')
   expect(view.list()).toEqual([])
+  expect(view.permissions()).toBeNull()
   release.release()
   await child.join()
 })
