@@ -28,6 +28,7 @@ import {
   indentWidth,
   inputName,
   jqGeneric,
+  localZone,
   optionRefusal,
   parseFlags,
   positionalValue,
@@ -816,7 +817,44 @@ describe('jq_eval', () => {
   })
 
   it('runs a program jq_eval refuses in the worker', async () => {
-    const result = await ranOver([], 'now | type', { null_input: true })
-    expect(result).toEqual({ stdout: '"number"\n', stderr: '', exitCode: 0 })
+    const saved = process.env.TZ
+    process.env.TZ = 'America/New_York'
+    try {
+      const result = await ranOver([], '0 | localtime | .[3]', { null_input: true })
+      expect(result).toEqual({ stdout: '19\n', stderr: '', exitCode: 0 })
+    } finally {
+      if (saved === undefined) delete process.env.TZ
+      else process.env.TZ = saved
+    }
+  })
+
+  it('runs dates, the clock and a rule zone in jq_eval', async () => {
+    const saved = process.env.TZ
+    process.env.TZ = 'EST5EDT,M3.2.0,M11.1.0'
+    try {
+      const result = await ranOver([], '1425599507 | todate, (localtime | .[3]), (now | type)', {
+        null_input: true,
+      })
+      expect(result).toEqual({
+        stdout: '"2015-03-05T23:51:47Z"\n18\n"number"\n',
+        stderr: '',
+        exitCode: 0,
+      })
+    } finally {
+      if (saved === undefined) delete process.env.TZ
+      else process.env.TZ = saved
+    }
+  })
+
+  it('reads the zone from the process TZ or the runtime', () => {
+    const saved = process.env.TZ
+    process.env.TZ = 'EST5EDT'
+    try {
+      expect(localZone()).toBe('EST5EDT')
+      delete process.env.TZ
+      expect(typeof localZone()).toBe('string')
+    } finally {
+      if (saved !== undefined) process.env.TZ = saved
+    }
   })
 })

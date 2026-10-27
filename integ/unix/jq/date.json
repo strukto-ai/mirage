@@ -1,0 +1,767 @@
+{
+  "cases": [
+    {
+      "id": "jq_todate_formats_epoch_seconds_as_iso_8601",
+      "seq": 18710000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '1425599507 | todate'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"2015-03-05T23:51:47Z\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_fromdate_parses_iso_8601_to_epoch_seconds",
+      "seq": 18710001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '\"2015-03-05T23:51:47Z\" | fromdate'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1425599507\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_todate_drops_the_fraction_and_rounds_toward_zero",
+      "seq": 18710002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[1425599507.9, -1.5, 0] | map(todate)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"2015-03-05T23:51:47Z\",\"1969-12-31T23:59:59Z\",\"1970-01-01T00:00:00Z\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_gmtime_keeps_the_fraction_in_the_seconds",
+      "seq": 18710003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '1425599507.25 | gmtime'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2015,2,5,23,51,47.25,4,63]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_gmtime_counts_before_the_epoch_from_the_second_below",
+      "seq": 18710004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '-1.5 | gmtime'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1969,11,31,23,59,59.5,3,364]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_gmtime_names_the_day_of_the_week_and_the_year",
+      "seq": 18710005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[0, 951782400, 1709164800] | map(gmtime | .[6:])'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[4,0],[2,59],[4,59]]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_mktime_carries_out_of_range_fields",
+      "seq": 18710006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[[2024,12,32,25,61,61], [2024,-1,0,-1,-1,-1], [1970,0], [1970,0,1,0,0,0.9]] | map(mktime)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1738461721,1701298739,-86400,0]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_mktime_inverts_gmtime_and_drops_the_fraction",
+      "seq": 18710007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '1425599507.75 | gmtime | mktime'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1425599507\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_mktime_answers_for_the_second_before_the_epoch_with_an_error",
+      "seq": 18710008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[[1969,11,31,23,59,59], [1969,11,31,23,59,58]] | map(try mktime catch .)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"invalid gmtime representation\",\"mktime not supported on this platform\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_mktime_refuses_what_is_not_an_array_of_numbers",
+      "seq": 18710009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[1, \"a\", {}, [\"a\",1,2,3,4,5,6,7]] | map(try mktime catch .)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"mktime requires array inputs\",\"mktime requires array inputs\",\"mktime requires array inputs\",\"mktime requires parsed datetime inputs\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_gmtime_refuses_what_is_not_a_number",
+      "seq": 18710010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[null, \"a\", [1]] | map(try gmtime catch .)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"gmtime() requires numeric inputs\",\"gmtime() requires numeric inputs\",\"gmtime() requires numeric inputs\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_gmtime_refuses_seconds_beyond_the_years_it_holds",
+      "seq": 18710011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '1e17 | gmtime'",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "jq: error (at <unknown>): error converting number of seconds since epoch to datetime\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_strftime_formats_a_number_or_a_broken_down_time",
+      "seq": 18710012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[1425599507, [2015,2,5,23,51,47,4,63]] | map(strftime(\"%A, %B %d, %Y %H:%M:%S\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"Thursday, March 05, 2015 23:51:47\",\"Thursday, March 05, 2015 23:51:47\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strftime_names_every_part_of_the_date",
+      "seq": 18710013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '1425599507 | strftime(\"%a %A %b %B %c %C %d %D %e %F %g %G\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"Thu Thursday Mar March Thu Mar  5 23:51:47 2015 20 05 03/05/15  5 2015-03-05 15 2015\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_strftime_names_every_part_of_the_time",
+      "seq": 18710014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '1425599507 | strftime(\"%h %H %I %j %k %l %m %M %p %r %R %s %S %T\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"Mar 23 11 064 23 11 03 51 PM 11:51:47 PM 23:51 1425599507 47 23:51:47\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_strftime_numbers_the_weeks_and_the_zone",
+      "seq": 18710015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '1425599507 | strftime(\"%u %U %V %v %w %W %x %X %y %Y %z %Z %% %+\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"4 09 10  5-Mar-2015 4 09 03/05/15 23:51:47 15 2015 +0000 UTC % Thu Mar  5 23:51:47 UTC 2015\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_strftime_normalises_the_fields_it_is_given",
+      "seq": 18710016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '[2024,12,32,25,61,61,9,999] | strftime(\"%c %a %j\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"Sun Feb  2 02:02:01 2025 Sun 033\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_strftime_flags_pad_or_strip_the_numbers",
+      "seq": 18710017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '[1970,0,3,4,5,6] | strftime(\"%-e|%_e|%0e|%-k|%0k|%_k|%-l|%_I|%-j|%_j|%-m|%_M|%-p\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"3| 3|03|4|04| 4|4| 4|3|  3|1| 5|AM\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_strftime_prints_an_unknown_conversion_as_its_letter",
+      "seq": 18710018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '[1970,0,3,4,5,6] | strftime(\"%f%q|%3d|%^a|%-|%\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"fq|3d|^a||%\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_strftime_numbers_iso_weeks_across_new_year",
+      "seq": 18710019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[[2020,11,31],[2021,0,1],[2021,0,3],[2019,11,30]] | map(strftime(\"%G-W%V-%u %U %W\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"2020-W53-4 52 52\",\"2020-W53-5 00 00\",\"2020-W53-7 01 00\",\"2020-W01-1 52 52\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strftime_fails_when_the_text_outgrows_its_buffer",
+      "seq": 18710020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '[1970,0,1] | strftime(\"%c%c%c%c%c\")'",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "jq: error (at <unknown>): strftime/1: unknown system failure\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_strftime_refuses_a_non_string_format_and_a_non_time",
+      "seq": 18710021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[[1970] | try strftime(1) catch ., \"x\" | try strftime(\"%Y\") catch .]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"strftime/1 requires parsed datetime inputs\",\"strftime/1 requires parsed datetime inputs\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_reads_a_date_with_names",
+      "seq": 18710022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"Thursday, March 05, 2015\"' | jq -c 'strptime(\"%A, %B %d, %Y\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2015,2,5,0,0,0,4,63]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_reads_abbreviated_names_in_any_case",
+      "seq": 18710023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"thu, mar 5, 2015\"' | jq -c 'strptime(\"%a, %b %e, %Y\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2015,2,5,0,0,0,4,63]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_without_a_date_counts_from_year_1900",
+      "seq": 18710024,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"10:20\"' | jq -c 'strptime(\"%H:%M\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1900,0,0,10,20,0,6,-1]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_resolves_the_day_of_the_year",
+      "seq": 18710025,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"2015 064\"' | jq -c '[strptime(\"%Y %j\")] | map(.[:8])'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[2015,2,5,0,0,0,4,63]]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_reads_the_twelve_hour_clock",
+      "seq": 18710026,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[ \"12 AM\", \"12 PM\", \"11 PM\", \"22 PM\" ] | map(try strptime(\"%I %p\")[3] catch \"no\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[0,12,23,\"no\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_maps_two_digit_years_around_1969",
+      "seq": 18710027,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[\"68\",\"69\",\"99\",\"00\"] | map(strptime(\"%y\")[0])'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2068,1969,1999,2000]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_applies_a_numeric_zone_offset",
+      "seq": 18710028,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"2015-03-05T23:51:47-0530\"' | jq -c 'strptime(\"%Y-%m-%dT%H:%M:%S%z\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2015,2,6,5,21,47,5,64]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_reads_epoch_seconds",
+      "seq": 18710029,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"1425599507\"' | jq -c 'strptime(\"%s\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2015,2,5,23,51,47,4,63]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_derives_the_date_from_a_week_number",
+      "seq": 18710030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"2015 10 4\"' | jq -c '[strptime(\"%Y %U %w\"), strptime(\"%Y %W %w\")]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[2015,2,12,0,0,0,4,70],[2015,2,12,0,0,0,4,70]]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_returns_trailing_whitespace_as_a_ninth_element",
+      "seq": 18710031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"2015-03-05  \"' | jq -c 'strptime(\"%Y-%m-%d\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2015,2,5,0,0,0,4,63,\"  \"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_refuses_trailing_text",
+      "seq": 18710032,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"2015-03-05x\"' | jq 'strptime(\"%Y-%m-%d\")'",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "jq: error (at <stdin>:0): date \"2015-03-05x\" does not match format \"%Y-%m-%d\"\n"
+      }
+    },
+    {
+      "id": "jq_strptime_refuses_a_non_string",
+      "seq": 18710033,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"x\"' | jq 'strptime(1)'",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "jq: error (at <stdin>:0): strptime/1 requires string inputs and arguments\n"
+      }
+    },
+    {
+      "id": "jq_strptime_refuses_an_out_of_range_field",
+      "seq": 18710034,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"2015-13-01\"' | jq 'strptime(\"%Y-%m-%d\")'",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "jq: error (at <stdin>:0): date \"2015-13-01\" does not match format \"%Y-%m-%d\"\n"
+      }
+    },
+    {
+      "id": "jq_fromdate_refuses_other_text_with_the_date_and_format",
+      "seq": 18710035,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"x\"' | jq fromdate",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "jq: error (at <stdin>:0): date \"x\" does not match format \"%Y-%m-%dT%H:%M:%SZ\"\n"
+      }
+    },
+    {
+      "id": "jq_fromdate_answers_the_second_before_the_epoch_with_an_error",
+      "seq": 18710036,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '\"1969-12-31T23:59:59Z\" | fromdate'",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "jq: error (at <unknown>): invalid gmtime representation\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_fromdate_reads_each_document_it_is_run_over",
+      "seq": 18710037,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s '\"2015-03-05T23:51:47Z\" \"2016-01-01T00:00:00Z\" \"1970-01-01T00:00:01Z\"' | jq -c fromdate",
+      "expect": {
+        "exit": 0,
+        "stdout": "1425599507\n1451606400\n1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_now_is_a_number_after_2023",
+      "seq": 18710038,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n 'now | type, (. > 1700000000)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"number\"\ntrue\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_dates_round_trip_through_the_range_of_a_few_days",
+      "seq": 18710039,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[range(0; 86400*3; 36000) | strftime(\"%FT%T\") | strptime(\"%FT%T\") | mktime]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[0,36000,72000,108000,144000,180000,216000,252000]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    }
+  ]
+}
