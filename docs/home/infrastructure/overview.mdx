@@ -1,0 +1,167 @@
+---
+title: Overview
+description: The stores a workspace keeps, the infrastructure each one can live on, and where you set it.
+icon: network-wired
+---
+
+A workspace needs no services. Out of the box it keeps everything in memory.
+Each store below can move onto infrastructure you run, on its own or together
+with the others.
+
+| Store | Holds | Backends | Key |
+| --- | --- | --- | --- |
+| [Namespace](/home/infrastructure/namespace) | Symlinks and file attributes | `ram`, `disk`, `redis` | `store.namespace` |
+| [Sessions](/home/infrastructure/sessions) | Each session's working directory, variables and functions | `ram`, `disk`, `redis`, `s3` | `store.workspace` |
+| [History](/home/infrastructure/history) | Command history | `ram`, `disk`, `redis` | `store.observer` |
+| [Jobs](/home/infrastructure/jobs) | Background jobs, their output and the processes each instance runs | `ram`, `redis` | `store.jobs` |
+| [File cache](/home/infrastructure/file-cache) | File content Mirage has read | `ram`, `redis` | `cache` |
+| [Index](/home/infrastructure/file-index) | Directory listings and file metadata | `ram`, `redis` | `index`, or a mount's `index` |
+
+The rest has pages of its own: [runtimes](/home/setup/runtime/overview) run
+programs inside Mirage, on the host or in a sandbox;
+[host folders](/home/setup/fuse) show a mount through FUSE, FSKit or NFS;
+[credentials](/home/authentication) come from the environment, a dotenv file,
+AWS Secrets Manager or 1Password; and the [server](/home/infrastructure/server)
+settings apply to every workspace a server holds.
+
+## One store or several
+
+`store.type` places the namespace, sessions, history and jobs together. A
+group key (`namespace`, `workspace`, `observer`, `jobs`) moves one of them to
+a backend of its own. Here symlinks and jobs live on Redis, history on disk
+and sessions in a bucket:
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    workspace_id: agent
+    store:
+      type: redis
+      url: redis://redis.internal:6379/0
+      observer:
+        type: disk
+        root: /var/lib/mirage
+      workspace:
+        type: s3
+        bucket: agent-state
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.vfs.s3 import S3Config
+    from mirage.workspace.store import (
+        DiskWorkspaceStateStore,
+        RedisWorkspaceStateStore,
+        S3WorkspaceStateStore,
+    )
+
+    store = RedisWorkspaceStateStore(
+        url="redis://redis.internal:6379/0",
+        observer=DiskWorkspaceStateStore(root="/var/lib/mirage"),
+        workspace=S3WorkspaceStateStore(S3Config(bucket="agent-state")),
+    )
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        workspace_id="agent",
+        store=store,
+        owns_store=True,
+    )
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import {
+      DiskWorkspaceStateStore,
+      MountMode,
+      RAMVFS,
+      RedisWorkspaceStateStore,
+      S3WorkspaceStateStore,
+      Workspace,
+    } from '@struktoai/mirage-node'
+
+    const store = new RedisWorkspaceStateStore({
+      url: 'redis://redis.internal:6379/0',
+      observer: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
+      workspace: new S3WorkspaceStateStore({ bucket: 'agent-state' }),
+    })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, workspaceId: 'agent', store, ownsStore: true },
+    )
+    ```
+  </Tab>
+</Tabs>
+
+Every store keeps its state by `workspace_id`. Give the workspace a fixed id
+whenever its state should be found again, after a restart or by another
+process. Closing the workspace closes a store it owns, group stores included.
+
+| `type` | Survives a restart | Shared with |
+| --- | --- | --- |
+| `ram` | No | Workspaces in the same process given the same store object |
+| `disk` | Yes | Processes on the same machine. Jobs stay in each process's memory. |
+| `redis` | Yes | Every process on that Redis, on any machine |
+| `s3` | Yes | Every process that reaches the bucket. Sessions only. |
+
+[stores.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/configuration/stores.py)
+and
+[stores.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/configuration/stores.ts)
+place one store at a time on disk, build the workspace again and print what
+came back.
+
+A workspace built in code keeps its state in memory. One the server builds,
+through `mirage workspace create` or `POST /v1/workspaces`, keeps it on disk
+under `~/.mirage/state`. A `store` block replaces either default.
+
+## Where you set it
+
+One config describes a workspace, the same [YAML](/home/configuration) on
+every surface. Python and TypeScript also take each store as a constructor
+argument, as each store's page shows.
+
+| Surface | Takes the config as |
+| --- | --- |
+| [CLI](/home/access/cli) | A YAML or JSON file: `mirage workspace create workspace.yaml` |
+| [HTTP](/home/access/http) | JSON under `config` in `POST /v1/workspaces` |
+| Python | `load_config("workspace.yaml")` |
+| TypeScript | `loadWorkspaceConfigFile("workspace.yaml")` |
+
+<Tabs>
+  <Tab title="CLI" icon="terminal">
+    ```bash
+    mirage workspace create workspace.yaml --id agent
+    ```
+  </Tab>
+  <Tab title="HTTP" icon="globe">
+    ```bash
+    curl http://127.0.0.1:8765/v1/workspaces \
+      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d '{"id":"agent","config":{"store":{"type":"redis","url":"redis://redis.internal:6379/0"},"mounts":{"/data":{"vfs":"ram"}}}}'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.config import load_config
+
+    ws = Workspace(**load_config("workspace.yaml").to_workspace_kwargs())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
+
+    const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
+    const ws = new Workspace(mounts, options)
+    ```
+  </Tab>
+</Tabs>
+
+Every key is listed in
+[Workspace configuration](/home/configuration#cache-index-and-store).

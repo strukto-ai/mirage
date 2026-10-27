@@ -1,0 +1,140 @@
+---
+title: Jobs
+description: Where a workspace keeps background jobs and processes, and how several instances of one workspace share them.
+icon: list-check
+---
+
+The jobs store keeps:
+
+- Each session's background jobs, the ones `cmd &` starts, and each job's
+  output.
+- The processes each instance of the workspace runs, which `ps` lists.
+- When each instance was last seen, so the others can tell it is gone.
+
+| `type` | Keeps them | Keys |
+| --- | --- | --- |
+| `ram` | In the process's memory. Jobs end with the process. | |
+| `redis` | On Redis, under `key_prefix` and the workspace id. A job's output stays a day after its last write. | `url`, `key_prefix`, default `mirage:` |
+
+The group key is `store.jobs`. A job's output is a stream other processes
+follow, so `disk` is refused here, and a `disk` store keeps its jobs in
+memory.
+
+## On Redis
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    workspace_id: agent
+    store:
+      type: disk
+      root: /var/lib/mirage
+      jobs:
+        type: redis
+        url: redis://redis.internal:6379/0
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.workspace.store import DiskWorkspaceStateStore, RedisWorkspaceStateStore
+
+    store = DiskWorkspaceStateStore(
+        root="/var/lib/mirage",
+        jobs=RedisWorkspaceStateStore(url="redis://redis.internal:6379/0"),
+    )
+    ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { DiskWorkspaceStateStore, RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+
+    const store = new DiskWorkspaceStateStore({
+      root: '/var/lib/mirage',
+      jobs: new RedisWorkspaceStateStore({ url: 'redis://redis.internal:6379/0' }),
+    })
+    const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
+    ```
+  </Tab>
+</Tabs>
+
+Here the rest of the state stays on the machine's disk, and every process on
+the machine that builds the workspace sees the same jobs.
+
+## Run several instances of one workspace
+
+Every process that builds the workspace under the same id on one Redis is an
+instance of it, on one machine or several, behind a load balancer or as
+replicas of one agent.
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    workspace_id: agent
+    store:
+      type: redis
+      url: redis://redis.internal:6379/0
+    mounts:
+      /data:
+        vfs: s3
+        config:
+          bucket: agent-data
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import MountMode, Workspace
+    from mirage.vfs.s3 import S3VFS, S3Config
+    from mirage.workspace.store import RedisWorkspaceStateStore
+
+    ws = Workspace(
+        {"/data": S3VFS(S3Config(bucket="agent-data"))},
+        mode=MountMode.WRITE,
+        workspace_id="agent",
+        store=RedisWorkspaceStateStore(url="redis://redis.internal:6379/0"),
+        owns_store=True,
+    )
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RedisWorkspaceStateStore, S3VFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/data': new S3VFS({ bucket: 'agent-data' }) },
+      {
+        mode: MountMode.WRITE,
+        workspaceId: 'agent',
+        store: new RedisWorkspaceStateStore({ url: 'redis://redis.internal:6379/0' }),
+        ownsStore: true,
+      },
+    )
+    ```
+  </Tab>
+  <Tab title="Servers" icon="server">
+    ```bash
+    for server in http://mirage-a:8765 http://mirage-b:8765; do
+      curl "$server/v1/workspaces" \
+        -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+        -H 'Content-Type: application/json' \
+        --data-binary @workspace.json
+    done
+    ```
+  </Tab>
+</Tabs>
+
+On the servers, `workspace.json` holds `{"id": "agent", "config": {...}}`
+with the same config on each. The instances then share:
+
+- Each session's background jobs: `jobs`, `wait`, `kill %N` and `fg %N`
+  work on any instance, whichever started the job.
+- Processes: `ps` lists the other instances' as `owner:pid`, and
+  `kill owner:pid` stops one.
+- Cleanup: an instance counts as gone 30 seconds after it was last seen, and
+  the next one to start stops the programs it left running.
+- Sessions, history and symlinks, since the whole store is on Redis.
+
+A session sees only its own processes, on every instance; a profile with
+[`processes: workspace`](/home/profiles) widens that to every session's.
+[Shell](/home/core/shell#jobs-across-instances) describes the details.
