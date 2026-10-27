@@ -195,6 +195,18 @@
         "S3_ENDPOINT"
       ]
     },
+    "s3-denied": {
+      "python": [
+        "S3_DENIED_ENDPOINT",
+        "S3_DENIED_BUCKET",
+        "S3_DENIED_ACCESS_KEY_ID"
+      ],
+      "typescript": [
+        "S3_DENIED_ENDPOINT",
+        "S3_DENIED_BUCKET",
+        "S3_DENIED_ACCESS_KEY_ID"
+      ]
+    },
     "sharepoint": {
       "python": [
         "ONEDRIVE_URL"
@@ -835,6 +847,21 @@
           }
         }
       }
+    },
+    {
+      "id": "s3-denied",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "s3-denied",
+      "mounts": [
+        {
+          "path": "/data",
+          "vfs": "s3",
+          "backend": "s3"
+        }
+      ]
     },
     {
       "id": "s3-prefix",

@@ -224,7 +224,10 @@ is `vfs/gridfs/trash.json` in the battery.
 Stores the fakes do not own are namespaced per run by the runner's adapters
 and torn down after: S3 buckets `mirage-integ-<run>-...` (moto in-process by
 default), a Mongo database `mirage_integ_<run>`, redis key prefixes, and temp
-dirs for ssh.
+dirs for ssh. The s3-denied target's bucket is the exception: its fake,
+`server/s3_denied.py`, seeds it and then enforces IAM on a moto of its own, so
+the runner reads it with the restricted credentials the fake prints and never
+creates or removes it.
 
 ## What a pull request runs
 
@@ -527,6 +530,8 @@ The core facet also needs redis and mongo on their default ports (CI uses a
 `mongo:7.0` service container; `docker run -d -p 27017:27017 mongo:7.0` matches
 it) and `MIRAGE_WASI_HOME` pointing at the CPython WASI build for the
 scripted target. If a pinned port is taken locally, copy `ci/fakes.json` and
-move that one entry.
+move that one entry. The s3-denied target needs its own fake: run
+`./python/.venv/bin/python integ/server/s3_denied.py --port 5002` and export
+the `S3_DENIED_*` lines it prints, or add `s3-denied` to `--allow-skip`.
 
 Generated-document cases live in `session/documents.json`. The shared runner applies `session_profiles` (create or update) and `documents` (kind, exact path, optional session) before the shell command. The cases run on RAM, disk, S3, S3 with a prefix, Redis, and registered Git and Airtable CLIs. The `session_admin` suite in `access/cases.json` checks the in-app, HTTP and CLI getters and bindings and a live profile change on both hosts. FUSE core and kernel probes hold an open document handle across profile changes, check rendered sizes and read-only behavior, and read session-scoped skills.

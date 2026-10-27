@@ -582,7 +582,39 @@ function objectStorageVfs(name: string, bucket: string, keyPrefix: string | unde
   throw new Error(`unknown object storage VFS: ${name}`)
 }
 
+function deniedEnv(name: string): string {
+  const value = process.env[name]
+  if (!value) throw new Error(`s3-denied target requires ${name}`)
+  return value
+}
+
+// The bucket integ/server/s3_denied.py seeds, read as its reader: it lists
+// every key but is refused GetObject on one. The fake owns the bucket and
+// checks no signature, so any secret stands in for the reader's.
+function openS3Denied(target: Target, options?: OpenOptions): Open {
+  const build = (): MountMap => {
+    const mounts: MountMap = {}
+    for (const m of target.mounts) {
+      const vfs = new S3VFS({
+        bucket: deniedEnv('S3_DENIED_BUCKET'),
+        region: S3_REGION,
+        endpoint: deniedEnv('S3_DENIED_ENDPOINT'),
+        accessKeyId: deniedEnv('S3_DENIED_ACCESS_KEY_ID'),
+        secretAccessKey: S3_SECRET,
+        forcePathStyle: true,
+        ...(m.prefix !== undefined ? { keyPrefix: m.prefix } : {}),
+      })
+      mounts[m.path] =
+        m.mode === 'read' ? [vfs, MountMode.READ] : m.mode === 'exec' ? [vfs, MountMode.EXEC] : vfs
+    }
+    return mounts
+  }
+  const opened = openWorkspaces(build, options)
+  return { ws: opened.ws, shadow: opened.shadow, cleanup: () => opened.closeAll() }
+}
+
 async function openS3(target: Target, options?: OpenOptions): Promise<Open> {
+  if (target.service === 's3-denied') return openS3Denied(target, options)
   if (!S3_ENDPOINT) throw new Error('s3 target requires S3_ENDPOINT')
   const id = runId()
   const client = new S3Client({

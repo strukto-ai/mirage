@@ -90,6 +90,17 @@ runs:
         echo "S3_REGION=us-east-1" >> "$GITHUB_ENV"
         echo "AWS_ACCESS_KEY_ID=testing" >> "$GITHUB_ENV"
         echo "AWS_SECRET_ACCESS_KEY=testing" >> "$GITHUB_ENV"
+    # Its own moto: the fake enforces IAM, which the shared one must not.
+    - name: Start the S3 fake that refuses one key
+      if: ${{ inputs.start-services == 'true' }}
+      shell: bash
+      run: |
+        nohup ./python/.venv/bin/python integ/server/s3_denied.py --port 5002 > /tmp/s3denied.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "^S3_DENIED_ACCESS_KEY_ID=" /tmp/s3denied.log && break
+          sleep 1
+        done
+        grep "^S3_DENIED_" /tmp/s3denied.log >> "$GITHUB_ENV" || { cat /tmp/s3denied.log; exit 1; }
     - name: Start sftp server
       if: ${{ inputs.start-services == 'true' }}
       shell: bash
