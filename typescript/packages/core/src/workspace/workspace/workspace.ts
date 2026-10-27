@@ -261,7 +261,7 @@ export class Workspace {
   private readonly profilesInternal = Object.create(null) as Record<string, SessionProfile>
   /** The profile table's default. */
   readonly defaultProfileName: string | null
-  // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
+  // True when `/` is an anchor the workspace added or a restore mounted (see syntheticRoot).
   // The anchor is internal and is not forwarded into the Pyodide filesystem.
   private syntheticRootAnchor = false
   // Drift check state populated by Workspace.load. Empty during normal
@@ -1463,8 +1463,8 @@ export class Workspace {
   }
 
   /**
-   * True when the `/` mount is an empty anchor the workspace added itself
-   * (no user `/` mount). Consumers that distinguish "genuinely mounted" from
+   * True when the `/` mount is an anchor the workspace added itself (no user
+   * `/` mount), or one a restore mounted from a saved scratch root. Consumers that distinguish "genuinely mounted" from
    * "merely caught by the root anchor" (e.g. the node fs monkey-patch) check
    * this before treating a root-matched path as backed by a real mount.
    */
@@ -2187,6 +2187,11 @@ export class Workspace {
     // The Mounts ride through whole; flattening them to [vfs, mode]
     // here is what would drop the restored read policy.
     const mounts: Record<string, MountSpec> = { ...args.mountArgs }
+    // A caller's mode reaches a restored scratch root, as it does one the workspace adds.
+    const root = args.mountArgs['/']
+    if (args.anchored === true && root !== undefined && options.mode !== undefined) {
+      mounts['/'] = new Mount(root.vfs, { ...root.options, mode: options.mode })
+    }
     // The saved write default wins; an option naming another is refused.
     const asked = options.write !== undefined ? coerceWritePolicy(options.write) : undefined
     if (asked !== undefined && asked !== args.writeDefault) {
@@ -2199,9 +2204,6 @@ export class Workspace {
       io: args.io,
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
-      // Each restored Mount carries its own mode, so this reaches only the
-      // scratch root the workspace adds again.
-      ...(args.anchorMode !== undefined ? { mode: args.anchorMode } : {}),
       commandLimits: args.commandLimits,
       // The state's profile table and its default; a caller's own table
       // brings its own default.
@@ -2210,6 +2212,7 @@ export class Workspace {
       write: args.writeDefault,
     }
     const ws = new this(mounts, mergedOptions) as InstanceType<T>
+    if (args.anchored === true) ws.syntheticRootAnchor = true
     for (const override of Object.values(overrides)) {
       ws.sharedMounts.add(override instanceof Mount ? override.vfs : override)
     }
@@ -2240,7 +2243,7 @@ export class Workspace {
     const state = await toStateDict(this)
     for (const mount of this.registry.allMounts()) {
       const saved = state.mounts.find((entry) => entry.prefix === mount.prefix)
-      if (saved !== undefined) saved.index_config = indexConfigDump(mount.indexConfig, true)
+      if (saved?.index_config != null) saved.index_config = indexConfigDump(mount.indexConfig, true)
     }
     const opts: WorkspaceOptions = {
       // Every restored mount keeps its saved mode, the scratch root

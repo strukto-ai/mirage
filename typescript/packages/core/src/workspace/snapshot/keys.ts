@@ -46,6 +46,7 @@ export const MountKey = Object.freeze({
   VFS_STATE: 'vfs_state',
   ANCHOR: 'anchor',
   COMMAND_LIMITS: 'command_limits',
+  SAME_VFS_AS: 'same_vfs_as',
 } as const)
 
 export const CacheKey = Object.freeze({

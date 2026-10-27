@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import importlib
+import json
 import logging
 import tempfile
 from contextlib import AbstractAsyncContextManager
@@ -78,7 +79,7 @@ from mirage.vfs.secrets import (
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.documentation.documents import Documents
 from mirage.workspace.files import WorkspaceFiles
-from mirage.workspace.mount.errors import WritePolicyError
+from mirage.workspace.mount.errors import MountOverrideError, WritePolicyError
 from mirage.workspace.mount.namespace import Namespace, NodeMeta
 from mirage.workspace.mount.read_policy import resolve_read_spec
 from mirage.workspace.mount.registry import MountRegistry
@@ -273,6 +274,7 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
     for mount in mounted:
         await mount.ensure_ready()
     mounts_state = []
+    first_prefix: dict[int, str] = {}
     for idx, m in enumerate(
         mt
         for mt in mounted
@@ -299,14 +301,17 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
             MountKey.VFS_STATE: vfs_state,
         }
         # The scratch root nobody mounted keeps its files across the
-        # round trip, and stays the anchor: a load leaves it out of the
-        # mounts and lets the new workspace add its own.
+        # round trip, and a load marks it the scratch root again.
         if ws._implicit_root and m.prefix == "/":
             row[MountKey.ANCHOR] = True
         if m.command_limits:
             row[MountKey.COMMAND_LIMITS] = command_limits_to_json(
                 m.command_limits
             )
+        # Each later prefix on one VFS names the first, so a load builds it once.
+        leader = first_prefix.setdefault(id(m.vfs), m.prefix)
+        if leader != m.prefix:
+            row[MountKey.SAME_VFS_AS] = leader
         mounts_state.append(row)
 
     # Only a RAM cache holds entries the snapshot can carry; a Redis
@@ -426,6 +431,59 @@ def check_format_version(state: dict[str, Any]) -> None:
         )
 
 
+def vfs_groups(state: dict[str, Any]) -> dict[str, str]:
+    """Each saved prefix mapped to the first prefix of the VFS it shares.
+
+    A row with no ``same_vfs_as`` leads its own group; a snapshot written
+    before the key existed is all leaders, and loads as it always did.
+
+    Args:
+        state (dict[str, Any]): the snapshot state.
+
+    Raises:
+        ValueError: a row names a prefix that is not an earlier row
+            leading its own group.
+    """
+    groups: dict[str, str] = {}
+    for m in state[StateKey.MOUNTS]:
+        prefix = norm_dir(m[MountKey.PREFIX])
+        named = m.get(MountKey.SAME_VFS_AS)
+        if named is None:
+            groups[prefix] = prefix
+            continue
+        leader = norm_dir(named) if isinstance(named, str) else None
+        if leader is None or (
+            leader != prefix and groups.get(leader) != leader
+        ):
+            shown = (
+                named
+                if isinstance(named, str)
+                else json.dumps(
+                    named, separators=(",", ":"), ensure_ascii=False
+                )
+            )
+            raise ValueError(
+                f"Workspace.load: mount '{m[MountKey.PREFIX]}' shares the "
+                f"VFS of '{shown}', which no earlier mount leads; "
+                "regenerate the snapshot"
+            )
+        groups[prefix] = leader
+    return groups
+
+
+def vfs_leaders(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Each saved prefix mapped to the first saved row of the VFS it shares.
+
+    Args:
+        state (dict[str, Any]): the snapshot state.
+
+    Raises:
+        ValueError: a row names no earlier mount as the VFS it shares.
+    """
+    rows = {norm_dir(m[MountKey.PREFIX]): m for m in state[StateKey.MOUNTS]}
+    return {prefix: rows[lead] for prefix, lead in vfs_groups(state).items()}
+
+
 def build_mount_args(
     state: dict[str, Any],
     mounts: dict[str, Any] | None = None,
@@ -435,22 +493,65 @@ def build_mount_args(
 
     Validates that every mount with redacted secrets has a VFS
     override, and every CLI installed with a redacted config has a
-    fresh config override.
+    fresh config override. A VFS saved at several prefixes is built
+    once and mounted at all of them; an override for any of those
+    prefixes supplies it at every prefix with no override of its own.
     Does NOT construct a Workspace — that's the caller's job.
 
+    Args:
+        state (dict[str, Any]): the snapshot state.
+        mounts (dict[str, Any] | None): ``{prefix: VFS | Mount}``
+            overrides.
+        clis (CLIOverrides | None): per-name CLI overrides.
+
     Raises:
-        ValueError: if any redacted mount or CLI lacks an override, or
-            if the snapshot is from an unsupported format version.
+        MountOverrideError: overrides hand one saved VFS different VFSs
+            and leave a prefix of it without one.
+        ValueError: if any redacted mount or CLI lacks an override, a
+            row names no earlier mount as the VFS it shares, or the
+            snapshot is from an unsupported format version.
     """
     check_format_version(state)
 
     overrides = {norm_dir(k): v for k, v in (mounts or {}).items()}
+    groups = vfs_groups(state)
+    rows = {norm_dir(m[MountKey.PREFIX]): m for m in state[StateKey.MOUNTS]}
+    # An override supplies its group's VFS and label, else the first row does.
+    placed_at = {
+        prefix: _placed_vfs(overrides[prefix], m)
+        for prefix, m in rows.items()
+        if prefix in overrides
+    }
+    supplied: dict[str, list[tuple[BaseVFS, str | None]]] = {}
+    for prefix, placed in placed_at.items():
+        held = supplied.setdefault(groups[prefix], [])
+        if all(vfs is not placed[0] for vfs, _ in held):
+            held.append(placed)
+    split = {group for group, held in supplied.items() if len(held) > 1}
+    ambiguous = [
+        m[MountKey.PREFIX]
+        for prefix, m in rows.items()
+        if prefix not in overrides and groups[prefix] in split
+    ]
+    if ambiguous:
+        given = [
+            m[MountKey.PREFIX]
+            for prefix, m in rows.items()
+            if prefix in overrides and groups[prefix] in split
+        ]
+        raise MountOverrideError(
+            f"Workspace.load: mounts= gives different VFSs for {given}, "
+            f"which were saved as one VFS; override {ambiguous} too, or "
+            "give them all one VFS"
+        )
 
+    # Named once per saved VFS: an override at any of its prefixes serves all.
     missing = [
         m[MountKey.PREFIX]
-        for m in state[StateKey.MOUNTS]
-        if requires_vfs_override(m)
-        and norm_dir(m[MountKey.PREFIX]) not in overrides
+        for prefix, m in rows.items()
+        if groups[prefix] == prefix
+        and prefix not in supplied
+        and requires_vfs_override(m)
     ]
     if missing:
         raise ValueError(
@@ -477,22 +578,28 @@ def build_mount_args(
         )
 
     mount_args: dict[str, Mount] = {}
-    anchor_mode: MountMode | None = None
-    for m in state[StateKey.MOUNTS]:
-        prefix = norm_dir(m[MountKey.PREFIX])
+    built: dict[str, tuple[BaseVFS, str | None]] = {}
+    anchored = False
+    for prefix, m in rows.items():
+        group = groups[prefix]
         override = overrides.get(prefix)
-        if m.get(MountKey.ANCHOR) and override is None:
-            anchor_mode = MountMode(m[MountKey.MODE])
-            continue
-        # A live override placed as a ``Mount`` names the entry point it came
-        # through; a bare VFS, or a rebuilt one, keeps the saved
-        # reference so a second round trip rebuilds through the same
-        # entry point.
-        if isinstance(override, Mount):
-            prov, ref = override.vfs, override.vfs_ref
+        # The saved scratch root is restored like any prefix, then marked.
+        root = prefix == "/" and m.get(MountKey.ANCHOR) is True
+        anchored = anchored or root
+        # A prefix carries the label of what supplied its VFS, so a
+        # second round trip rebuilds through the same entry point.
+        if override is not None:
+            prov, ref = placed_at[prefix]
+        elif group in supplied:
+            prov, ref = supplied[group][0]
         else:
-            prov = override if override is not None else _construct_vfs(m)
-            ref = m.get(MountKey.VFS_REF)
+            if group not in built:
+                leader = rows[group]
+                built[group] = (
+                    _construct_vfs(leader),
+                    leader.get(MountKey.VFS_REF),
+                )
+            prov, ref = built[group]
         # Named, never `.get(default)` and never a bare subscript: a
         # dict labelled v4 with the key missing would silently install a
         # default on a mount that was saved otherwise, which is the
@@ -515,8 +622,9 @@ def build_mount_args(
         # carrying `fresh` onto one that cannot revalidate would refuse a
         # restore that used to succeed. The override keeps its own
         # policy, else the default; TypeScript applies the same rule to
-        # its stand-in.
-        if override is not None:
+        # its stand-in. A prefix sharing an overridden VFS sits on that
+        # backend too.
+        if group in supplied:
             read = (
                 override.read
                 if isinstance(override, Mount) and override.read is not None
@@ -592,7 +700,7 @@ def build_mount_args(
         default_session_id=state[StateKey.DEFAULT_SESSION_ID],
         clis=cli_args or None,
         write_default=coerce_write_policy(str(saved_default)),
-        anchor_mode=anchor_mode,
+        anchored=anchored,
         io=IOConfig.model_validate(state.get(StateKey.IO, {})),
         command_limits={
             name: Limit.model_validate(limit)
@@ -647,10 +755,11 @@ async def apply_state_dict(
             running workspace keeps its own sessions' narrowing and
             decisions, and a table's mount caps only narrow them.
         shared (frozenset[str]): the prefixes whose mount a copy shares
-            with its origin. Their content is already there, so no
-            state is loaded into them.
+            with its origin. Their VFS's content is already there, so no
+            state is loaded into it at any prefix.
     """
     check_format_version(state)
+    groups = vfs_groups(state)
     sessions, seed_vars = await _gate_restored_state(
         ws, state, built_for_state
     )
@@ -660,14 +769,21 @@ async def apply_state_dict(
     await ws._documents.clear()
     if replace_cache:
         await ws.cache.clear()
-    # load_state runs for ALL mounts (overridden too), so disk content
+    # load_state runs for every saved VFS (overridden too), so disk content
     # is written into the new root, redis content into the new URL, etc.
     # Cred-only mounts (S3 et al.) define load_state as no-op. Only a
     # mount a copy shares is left as it is: replaying the captured bytes
     # would undo what another writer did to it since. Every state is
     # prepared before any mount loads, so a captured disk file that is
-    # gone or now a link fails the load with no mount changed.
+    # gone or now a link fails the load with no mount changed. A VFS
+    # saved at several prefixes loads once, and a shared one never.
     loads = []
+    shared_vfs = {
+        id(mount.vfs)
+        for mount in ws.registry.mounts()
+        if mount.prefix in shared
+    }
+    loaded: set[tuple[int, str]] = set()
     for m in state[StateKey.MOUNTS]:
         mount = ws.registry.try_mount_for_prefix(m[MountKey.PREFIX])
         if mount is None:
@@ -681,8 +797,10 @@ async def apply_state_dict(
                 m[MountKey.PREFIX],
             )
             continue
-        if mount.prefix in shared:
+        key = (id(mount.vfs), groups[norm_dir(m[MountKey.PREFIX])])
+        if id(mount.vfs) in shared_vfs or key in loaded:
             continue
+        loaded.add(key)
         vfs_state = m[MountKey.VFS_STATE]
         # A disk state loaded into another mount that keeps content (one
         # overriding load_state, as RAM and redis do, under any name)
@@ -711,6 +829,28 @@ async def apply_state_dict(
     await _restore_history(ws, state)
     await _restore_jobs(ws, state)
     await _restore_nodes(ws, state)
+
+
+def _placed_vfs(
+    override: BaseVFS | Mount, mount_state: dict[str, Any]
+) -> tuple[BaseVFS, str | None]:
+    """The VFS an override places at a saved mount, with its label.
+
+    A ``Mount`` names the entry point it came through. A bare VFS of the
+    saved class keeps the saved reference; one of another class has
+    none, since the saved one names a backend it is not.
+
+    Args:
+        override (BaseVFS | Mount): what ``mounts=`` hands the prefix.
+        mount_state (dict[str, Any]): the saved ``mounts`` entry.
+    """
+    if isinstance(override, Mount):
+        return override.vfs, override.vfs_ref
+    cls = type(override)
+    same = (
+        f"{cls.__module__}.{cls.__name__}" == mount_state[MountKey.VFS_CLASS]
+    )
+    return override, mount_state.get(MountKey.VFS_REF) if same else None
 
 
 def _disk_state_as_ram(vfs_state: dict[str, Any]) -> dict[str, Any]:
@@ -1095,10 +1235,12 @@ def reusable_mounts(
         for m in mounts
         if m.prefix not in auto
     }
+    leaders = vfs_leaders(state)
     return {
         m[MountKey.PREFIX]: live[m[MountKey.PREFIX]]
         for m in state[StateKey.MOUNTS]
-        if requires_vfs_override(m) and m[MountKey.PREFIX] in live
+        if m[MountKey.PREFIX] in live
+        and requires_vfs_override(leaders[norm_dir(m[MountKey.PREFIX])])
     }
 
 

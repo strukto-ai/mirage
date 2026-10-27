@@ -15,6 +15,7 @@
 import asyncio
 import logging
 import os
+import re
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,8 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs, register_vfs
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.secrets import REDACTED_SECRET
+from mirage.vfs.slack import SlackConfig, SlackVFS
+from mirage.workspace.mount.errors import MountOverrideError
 from mirage.workspace.snapshot.keys import (
     CacheKey,
     JobKey,
@@ -1584,3 +1587,493 @@ async def test_a_snapshot_leaves_out_a_killed_job_still_stopping():
     finally:
         release.set()
         await ws.close()
+
+
+def _redacted_minio() -> MinIOVFS:
+    return MinIOVFS(
+        MinIOConfig(
+            bucket="b",
+            endpoint_url="http://localhost:9000",
+            access_key_id="k",
+            secret_access_key="s",
+        )
+    )
+
+
+# One VFS mounted at two prefixes stays one store through a copy or a
+# load: a write through one shows at the other.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "disk"])
+@pytest.mark.parametrize("route", ["copy", "load"])
+async def test_a_store_mounted_twice_stays_one_store(backend, route, tmp_path):
+    vfs = RAMVFS() if backend == "ram" else DiskVFS(root=str(tmp_path / "d"))
+    ws = Workspace({"/a": vfs, "/b": vfs}, mode=MountMode.WRITE)
+    try:
+        assert (await ws.shell("echo old > /a/x")).exit_code == 0
+        if route == "copy":
+            restored = await ws.copy()
+        else:
+            await ws.snapshot(tmp_path / "s.tar")
+            restored = await Workspace.load(tmp_path / "s.tar")
+    finally:
+        await ws.close()
+    try:
+        assert restored.mount("/a").vfs is restored.mount("/b").vfs
+        assert (await restored.shell("echo hi > /b/x")).exit_code == 0
+        assert await (await restored.shell("cat /a/x")).stdout_str() == "hi\n"
+    finally:
+        await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_a_follower_row_names_the_first_prefix_of_its_store():
+    shared = RAMVFS()
+    state = await _saved_state({"/a": shared, "/b": shared, "/c": RAMVFS()})
+    rows = {m[MountKey.PREFIX]: m for m in state[StateKey.MOUNTS]}
+    assert MountKey.SAME_VFS_AS not in rows["/a/"]
+    assert rows["/b/"][MountKey.SAME_VFS_AS] == "/a/"
+    assert MountKey.SAME_VFS_AS not in rows["/c/"]
+
+
+# An override for one prefix supplies the store for every prefix of the
+# group with none of its own, and that prefix then sits on the override's
+# backend, so it takes the default read policy as the overridden one does.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("named", "other"), [("/a/", "/b/"), ("/b/", "/a/")])
+async def test_an_override_for_one_prefix_supplies_its_whole_store(
+    named, other
+):
+    minio = _redacted_minio()
+    ws = Workspace(
+        {"/a": minio, "/b": minio},
+        mode=MountMode.WRITE,
+        read=ReadSpec(policy=ReadPolicy.FRESH),
+    )
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    stand_in = RAMVFS()
+    limits = {"cat": Limit(max_lines=1)}
+    restored = await Workspace.from_state(
+        state, mounts={named: Mount(vfs=stand_in, command_limits=limits)}
+    )
+    try:
+        assert restored.mount(other).vfs is stand_in
+        assert restored.mount(named).read == ReadSpec()
+        assert restored.mount(other).read == ReadSpec()
+        assert restored.mount(named).command_limits == limits
+        assert restored.mount(other).command_limits == {}
+    finally:
+        await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_two_overrides_for_one_store_leave_the_rest_ambiguous():
+    shared = RAMVFS()
+    state = await _saved_state({"/a": shared, "/b": shared, "/c": shared})
+    with pytest.raises(MountOverrideError) as exc:
+        build_mount_args(state, {"/a": RAMVFS(), "/b": RAMVFS()}, None)
+    assert str(exc.value) == (
+        "Workspace.load: mounts= gives different VFSs for ['/a/', '/b/'], "
+        "which were saved as one VFS; override ['/c/'] too, or give them "
+        "all one VFS"
+    )
+    same = RAMVFS()
+    one = build_mount_args(state, {"/a": same, "/b": same}, None)
+    assert one.mount_args["/c/"].vfs is same
+    split = build_mount_args(
+        state, {"/a": RAMVFS(), "/b": RAMVFS(), "/c": RAMVFS()}, None
+    )
+    prefixes = ("/a/", "/b/", "/c/")
+    assert len({id(split.mount_args[p].vfs) for p in prefixes}) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("target", "shown"),
+    [("/nope/", "/nope/"), ("/b/", "/b/"), (["/a/"], '["/a/"]')],
+)
+async def test_a_follower_naming_no_leader_is_refused(target, shown):
+    shared = RAMVFS()
+    state = await _saved_state({"/a": shared, "/b": shared, "/c": shared})
+    rows = {m[MountKey.PREFIX]: m for m in state[StateKey.MOUNTS]}
+    rows["/c/"][MountKey.SAME_VFS_AS] = target
+    with pytest.raises(ValueError) as exc:
+        build_mount_args(state, None, None)
+    assert str(exc.value) == (
+        f"Workspace.load: mount '/c/' shares the VFS of '{shown}', which no "
+        "earlier mount leads; regenerate the snapshot"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_number_naming_a_mount_is_still_refused():
+    shared = RAMVFS()
+    state = await _saved_state({"/5": shared, "/b": shared})
+    rows = {m[MountKey.PREFIX]: m for m in state[StateKey.MOUNTS]}
+    rows["/b/"][MountKey.SAME_VFS_AS] = 5
+    with pytest.raises(ValueError, match="shares the VFS of '5'"):
+        build_mount_args(state, None, None)
+
+
+# A checkout loads every saved row into the mount at its prefix, so two
+# separate live mounts each take the saved VFS's state.
+@pytest.mark.asyncio
+async def test_a_checkout_into_split_mounts_still_loads_each():
+    shared = RAMVFS()
+    source = Workspace({"/a": shared, "/b": shared}, mode=MountMode.WRITE)
+    try:
+        assert (await source.shell("echo hi > /a/x")).exit_code == 0
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    target = Workspace({"/a": RAMVFS(), "/b": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await apply_state_dict(target, state)
+        for prefix in ("/a", "/b"):
+            out = await (await target.shell(f"cat {prefix}/x")).stdout_str()
+            assert out == "hi\n"
+    finally:
+        await target.close()
+
+
+# The first saved row of a VFS decides how the load builds it, and every
+# prefix on one VFS carries the label of what supplied it, so the result
+# copies and loads again.
+@pytest.mark.asyncio
+async def test_a_bare_override_of_another_class_carries_no_saved_label():
+    slack = SlackVFS(SlackConfig(token="xoxb-secret"))
+    state = await _saved_state(
+        {
+            "/a": Mount(vfs=slack, vfs_ref="slack"),
+            "/b": Mount(vfs=slack, vfs_ref="slack"),
+        }
+    )
+    restored = await Workspace.from_state(state, mounts={"/b/": RAMVFS()})
+    try:
+        assert [restored.mount(p).vfs_ref for p in ("/a", "/b")] == [
+            None,
+            None,
+        ]
+        again = await restored.copy()
+        await again.close()
+    finally:
+        await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_the_first_row_decides_a_vfs_saved_under_two_labels():
+    register_vfs("seeded", SeededRAM)
+    seeded = build_vfs("seeded")
+    state = await _saved_state(
+        {"/a": seeded, "/b": Mount(vfs=seeded, vfs_ref="seeded")}
+    )
+    restored = await Workspace.from_state(state)
+    try:
+        assert restored.mount("/a").vfs is restored.mount("/b").vfs
+        assert [restored.mount(p).vfs_ref for p in ("/a", "/b")] == [
+            None,
+            None,
+        ]
+    finally:
+        await restored.close()
+
+
+# A later label this process cannot resolve does not decide the VFS: its
+# first row rebuilds it, so a copy never shares the origin's store.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["load", "copy"])
+async def test_the_first_row_decides_over_a_later_unresolvable_label(route):
+    shared = RAMVFS()
+    ws = Workspace(
+        {"/a": shared, "/b": Mount(vfs=shared, vfs_ref="nosuch:Thing")},
+        mode=MountMode.WRITE,
+    )
+    try:
+        if route == "copy":
+            restored = await ws.copy()
+        else:
+            restored = await Workspace.from_state(await to_state_dict(ws))
+    finally:
+        await ws.close()
+    try:
+        assert restored.mount("/a").vfs is restored.mount("/b").vfs
+        assert restored.mount("/a").vfs is not shared
+    finally:
+        await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_a_bare_override_of_the_saved_class_keeps_its_label():
+    register_vfs("seeded", SeededRAM)
+    state = await _saved_state(
+        {"/a": Mount(vfs=build_vfs("seeded"), vfs_ref="seeded")}
+    )
+    restored = await Workspace.from_state(state, mounts={"/a": SeededRAM()})
+    try:
+        assert restored.mount("/a").vfs_ref == "seeded"
+    finally:
+        await restored.close()
+
+
+# The scratch root nobody mounted stays the anchor; a second prefix on its
+# VFS comes back on the root the load mounts, not on a store of its own.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["copy", "load"])
+async def test_a_second_prefix_on_the_scratch_root_stays_one_store(
+    route, tmp_path
+):
+    ws = Workspace({"/a": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        ws.add_mount("/x", ws.mount("/").vfs, mode=MountMode.WRITE)
+        assert (await ws.shell("echo hi > /x/f")).exit_code == 0
+        if route == "copy":
+            restored = await ws.copy()
+        else:
+            await ws.snapshot(tmp_path / "s.tar")
+            restored = await Workspace.load(tmp_path / "s.tar")
+    finally:
+        await ws.close()
+    try:
+        assert restored.mount("/x").vfs is restored.mount("/").vfs
+        assert await (await restored.shell("cat /f")).stdout_str() == "hi\n"
+        rows = {
+            m[MountKey.PREFIX]: m
+            for m in (await to_state_dict(restored))[StateKey.MOUNTS]
+        }
+        assert rows["/"].get(MountKey.ANCHOR) is True
+        assert not restored.vfs.is_mounted("/tmp/x")
+    finally:
+        await restored.close()
+
+
+class CountingRAM(RAMVFS):
+    """Counts the states loaded into it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.loads = 0
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        self.loads += 1
+        super().load_state(state)
+
+
+@pytest.mark.asyncio
+async def test_a_vfs_saved_at_two_prefixes_loads_its_state_once():
+    shared = RAMVFS()
+    state = await _saved_state({"/a": shared, "/b": shared})
+    counting = CountingRAM()
+    restored = await Workspace.from_state(state, mounts={"/a": counting})
+    try:
+        assert counting.loads == 1
+    finally:
+        await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_a_checkout_refuses_a_bad_row_before_it_drops_the_cache():
+    shared = RAMVFS()
+    state = await _saved_state({"/a": shared, "/b": shared})
+    rows = {m[MountKey.PREFIX]: m for m in state[StateKey.MOUNTS]}
+    rows["/b/"][MountKey.SAME_VFS_AS] = "/nope/"
+    target = Workspace({"/a": RAMVFS(), "/b": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await target.cache.set("/a/kept", b"kept")
+        await target.vfs_md("/a/VFS.md")
+        with pytest.raises(ValueError, match="/nope/"):
+            await apply_state_dict(target, state, replace_cache=True)
+        assert await target.cache.get("/a/kept") == b"kept"
+        assert (await target.shell("cat /a/VFS.md")).exit_code == 0
+    finally:
+        await target.close()
+
+
+@pytest.mark.asyncio
+async def test_a_newer_format_is_refused_before_its_rows_are_read():
+    shared = RAMVFS()
+    state = await _saved_state({"/a": shared, "/b": shared})
+    state[StateKey.VERSION] = 999
+    state[StateKey.MOUNTS][1][MountKey.SAME_VFS_AS] = "/nope/"
+    with pytest.raises(ValueError, match="snapshot format v999"):
+        await Workspace.from_state(state)
+
+
+class LiveRAM(RAMVFS):
+    """A RAM VFS that asks to be handed back live."""
+
+    def get_state(self) -> dict[str, Any]:
+        return {**super().get_state(), VFSStateKey.NEEDS_OVERRIDE: True}
+
+
+async def _root_on_live(live: type[RAMVFS] = LiveRAM) -> Workspace:
+    ws = Workspace({"/a": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        ws.add_mount("/x", ws.mount("/").vfs, mode=MountMode.WRITE)
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    return await Workspace.from_state(state, mounts={"/x": live()})
+
+
+# A copy hands back the live VFSs it shares, the scratch root's among them,
+# and the root stays the scratch root.
+@pytest.mark.asyncio
+async def test_a_copy_keeps_a_shared_scratch_root_the_scratch_root():
+    loaded = await _root_on_live()
+    try:
+        copied = await loaded.copy()
+        try:
+            assert copied.mount("/").vfs is loaded.mount("/x").vfs
+            assert not copied.vfs.is_mounted("/tmp/x")
+            rows = {
+                m[MountKey.PREFIX]: m
+                for m in (await to_state_dict(copied))[StateKey.MOUNTS]
+            }
+            assert rows["/"].get(MountKey.ANCHOR) is True
+        finally:
+            await copied.close()
+    finally:
+        await loaded.close()
+
+
+@pytest.mark.asyncio
+async def test_a_vfs_rebuilt_through_its_label_keeps_the_label():
+    register_vfs("notes", Notes)
+    seeded = SeededRAM()
+    state = await _saved_state(
+        {
+            "/a": Mount(vfs=seeded, vfs_ref="notes"),
+            "/b": Mount(vfs=seeded, vfs_ref="notes"),
+        }
+    )
+    restored = await Workspace.from_state(state)
+    try:
+        assert isinstance(restored.mount("/a").vfs, Notes)
+        assert [restored.mount(p).vfs_ref for p in ("/a", "/b")] == [
+            "notes",
+            "notes",
+        ]
+    finally:
+        await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_a_missing_override_names_each_saved_vfs_once():
+    slack = SlackVFS(SlackConfig(token="xoxb-secret"))
+    state = await _saved_state({"/a": slack, "/b": slack})
+    with pytest.raises(ValueError, match=re.escape("for: ['/a/']. ")):
+        build_mount_args(state, None, None)
+
+
+@pytest.mark.asyncio
+async def test_two_saved_vfss_on_one_live_vfs_each_load():
+    first, second = RAMVFS(), RAMVFS()
+    source = Workspace({"/a": first, "/b": second}, mode=MountMode.WRITE)
+    try:
+        assert (await source.shell("echo one > /a/f")).exit_code == 0
+        assert (await source.shell("echo two > /b/f")).exit_code == 0
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    counting = CountingRAM()
+    restored = await Workspace.from_state(
+        state, mounts={"/a": counting, "/b": counting}
+    )
+    try:
+        assert counting.loads == 2
+        assert await (await restored.shell("cat /a/f")).stdout_str() == "two\n"
+    finally:
+        await restored.close()
+
+
+class ConfigOnlyRAM(RAMVFS):
+    """A live VFS whose state, like S3's, carries no content."""
+
+    def get_state(self) -> dict[str, Any]:
+        return {VFSStateKey.TYPE: "ram", VFSStateKey.NEEDS_OVERRIDE: True}
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        return None
+
+
+# The scratch root is restored like any other prefix: a copy hands back
+# the live VFS it sits on, alone or not, and it stays the scratch root.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("live", [LiveRAM, ConfigOnlyRAM])
+async def test_a_copy_shares_a_scratch_root_left_alone_on_a_live_vfs(live):
+    loaded = await _root_on_live(live)
+    try:
+        assert (await loaded.shell("echo hi > /x/f")).exit_code == 0
+        await loaded.unmount("/x")
+        copied = await loaded.copy()
+        try:
+            assert copied.mount("/").vfs is loaded.mount("/").vfs
+            assert await (await copied.shell("cat /f")).stdout_str() == "hi\n"
+            assert not copied.vfs.is_mounted("/tmp/x")
+        finally:
+            await copied.close()
+    finally:
+        await loaded.close()
+
+
+@pytest.mark.asyncio
+async def test_a_load_asks_for_a_scratch_root_left_alone_on_a_live_vfs():
+    loaded = await _root_on_live()
+    try:
+        await loaded.unmount("/x")
+        state = await to_state_dict(loaded)
+    finally:
+        await loaded.close()
+    with pytest.raises(ValueError, match=re.escape("for: ['/']. ")):
+        await Workspace.from_state(state)
+
+
+@pytest.mark.asyncio
+async def test_an_override_for_the_scratch_root_keeps_it_the_scratch_root():
+    state = await _saved_state({"/a": RAMVFS()})
+    root = RAMVFS()
+    restored = await Workspace.from_state(state, mounts={"/": root})
+    try:
+        assert restored.mount("/").vfs is root
+        assert not restored.vfs.is_mounted("/tmp/x")
+        rows = {
+            m[MountKey.PREFIX]: m
+            for m in (await to_state_dict(restored))[StateKey.MOUNTS]
+        }
+        assert rows["/"].get(MountKey.ANCHOR) is True
+    finally:
+        await restored.close()
+
+
+# The scratch root keeps an index of its own across round trips; one it
+# only inherits from the workspace is not saved, so it is never asked for.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["copy", "load"])
+async def test_the_scratch_roots_own_index_survives_a_round_trip(route):
+    state = await _saved_state({"/a": RAMVFS()})
+    index = IndexConfig(ttl=41)
+    loaded = await Workspace.from_state(
+        state, mounts={"/": Mount(vfs=RAMVFS(), index=index)}
+    )
+    try:
+        if route == "copy":
+            restored = await loaded.copy()
+        else:
+            restored = await Workspace.from_state(await to_state_dict(loaded))
+    finally:
+        await loaded.close()
+    try:
+        assert restored.mount("/").index_config == index
+    finally:
+        await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_a_scratch_root_marker_off_the_root_is_ignored():
+    state = await _saved_state({"/data": RAMVFS()})
+    rows = {m[MountKey.PREFIX]: m for m in state[StateKey.MOUNTS]}
+    rows["/data/"][MountKey.ANCHOR] = True
+    del rows["/"][MountKey.ANCHOR]
+    assert not build_mount_args(state, None, None).anchored

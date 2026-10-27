@@ -33,10 +33,12 @@ export interface MountSnapshot {
   vfs_ref: string | null
   index_config?: IndexConfigSnapshot | null
   vfs_state: VFSState
-  // Set on the scratch root the workspace added because no mount claims `/`.
+  // Set on the scratch root: one the workspace added because no mount claims `/`, or restored.
   anchor?: true
   // The mount's own command limits, its "@all" walk_limit among them.
   command_limits?: Record<string, unknown>
+  // The first prefix mounting the same VFS, on every later one.
+  same_vfs_as?: string
 }
 
 export interface CacheEntrySnapshot {

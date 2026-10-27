@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import io
 import json
 import os
 import time
@@ -26,7 +27,7 @@ from httpx import ASGITransport, AsyncClient, Response
 from moto.server import ThreadedMotoServer
 from pydantic import BaseModel
 
-from mirage import Workspace
+from mirage import MountMode, Workspace
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
@@ -35,6 +36,7 @@ from mirage.server.auth.config import AuthConfig, JWTConfig
 from mirage.server.env import ENV_HOME
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.routers import workspaces as workspaces_router
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3.config import S3Config
 
 
@@ -1078,6 +1080,36 @@ async def test_clone_with_a_bad_secrets_override_is_a_bad_request():
                 json={"override": {"secrets": bad}},
             )
             assert r.status_code == 400, r.text
+
+
+@pytest.mark.asyncio
+async def test_clone_giving_one_saved_vfs_two_vfss_is_a_bad_request():
+    shared = RAMVFS()
+    src = Workspace(
+        {"/a": shared, "/b": shared, "/c": shared}, mode=MountMode.WRITE
+    )
+    tar = io.BytesIO()
+    try:
+        await src.snapshot(tar)
+    finally:
+        await src.close()
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        r = await _upload(client, tar.getvalue(), {"id": "src-same"})
+        assert r.status_code == 201, r.text
+        r = await client.post(
+            "/v1/workspaces/src-same/clone",
+            json={
+                "override": {
+                    "mounts": {"/a": {"vfs": "ram"}, "/b": {"vfs": "ram"}}
+                }
+            },
+        )
+        assert r.status_code == 400, r.text
+        assert "override ['/c/'] too" in r.json()["detail"]
 
 
 @pytest.mark.asyncio

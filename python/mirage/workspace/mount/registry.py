@@ -1074,7 +1074,8 @@ class MountRegistry:
 
         Args:
             entry (MountEntry): the scratch root ``install_mounts`` made
-                because no mount claims ``/``.
+                because no mount claims ``/``, or the one a restore mounts
+                from a saved scratch root.
         """
         self._anchor = entry
         self._rows = None

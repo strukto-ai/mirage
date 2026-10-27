@@ -672,6 +672,11 @@ export class MountRegistry {
     return this.visibleMounts().map((m) => m.prefix)
   }
 
+  /** The index a mount placed without its own takes. */
+  get workspaceIndex(): IndexConfig | undefined {
+    return this.indexConfig
+  }
+
   get rootMount(): MountEntry | null {
     return this.rootRef
   }

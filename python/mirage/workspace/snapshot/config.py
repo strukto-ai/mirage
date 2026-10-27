@@ -20,7 +20,7 @@ from mirage.cache.index.config import IndexConfig, IndexType, RedisIndexConfig
 from mirage.commands.cli.types import CLI
 from mirage.io.config import IOConfig
 from mirage.policy.profile import SessionProfile
-from mirage.types import Limit, MountMode, WritePolicy
+from mirage.types import Limit, WritePolicy
 from mirage.vfs.secrets import REDACTED_SECRET, has_redacted_secret
 
 
@@ -36,8 +36,8 @@ class MountArgs:
     default_session_id: str
     clis: dict[str, tuple[str | CLI, dict[str, Any] | None]] | None = None
     write_default: WritePolicy = WritePolicy.UNCONDITIONAL
-    # The saved scratch root's mode, for the one the new workspace adds.
-    anchor_mode: MountMode | None = None
+    # The saved scratch root is among the mounts, to be marked once built.
+    anchored: bool = False
     io: IOConfig = field(default_factory=IOConfig)
     command_limits: dict[str, Limit] = field(default_factory=dict)
     # The profile table every session ran under, and its default.
