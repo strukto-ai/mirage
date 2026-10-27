@@ -381,6 +381,7 @@ export class MountRegistry {
             index,
             vfsRef,
             indexConfig: placements.indexes?.[rawPrefix] ?? this.indexConfig,
+            inheritsIndex: placements.indexes?.[rawPrefix] === undefined,
             ids: this.ids,
           },
           list,
@@ -404,7 +405,9 @@ export class MountRegistry {
   private static place(init: MountInit, siblings: readonly MountEntry[]): MountEntry {
     const alias = siblings.find((existing) => existing.vfs === init.vfs)
     const m = new MountEntry(
-      alias === undefined ? init : { ...init, indexConfig: alias.indexConfig },
+      alias === undefined
+        ? init
+        : { ...init, indexConfig: alias.indexConfig, inheritsIndex: alias.inheritsIndex },
     )
     if (alias !== undefined) {
       m.activity = alias.activity
@@ -503,6 +506,7 @@ export class MountRegistry {
           index,
           vfsRef,
           indexConfig: placement.index ?? this.indexConfig,
+          inheritsIndex: placement.index === undefined,
           ids: this.ids,
         },
         this.mountList,
@@ -670,11 +674,6 @@ export class MountRegistry {
 
   mountPrefixes(): string[] {
     return this.visibleMounts().map((m) => m.prefix)
-  }
-
-  /** The index a mount placed without its own takes. */
-  get workspaceIndex(): IndexConfig | undefined {
-    return this.indexConfig
   }
 
   get rootMount(): MountEntry | null {

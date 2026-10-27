@@ -328,6 +328,8 @@ export interface MountInit {
   // a RAM store at the driver's TTL.
   index?: IndexCacheStore
   indexConfig?: IndexConfig | undefined
+  // Whether indexConfig is the workspace's, not one given to this mount.
+  inheritsIndex?: boolean
   // The `vfs:` value the driver was built from, recorded for snapshots;
   // null for one constructed in code.
   vfsRef?: string | null
@@ -415,6 +417,7 @@ export class MountEntry {
   // what ops and commands receive.
   readonly indexStore: IndexCacheStore
   readonly indexConfig: IndexConfig | undefined
+  readonly inheritsIndex: boolean
   readonly vfsRef: string | null
   activity = new Activity()
   retiring = false
@@ -514,6 +517,7 @@ export class MountEntry {
     this.write = coerceWritePolicy(init.write)
     this.indexStore = init.index ?? buildIndex(undefined, init.vfs.indexTtl)
     this.indexConfig = init.indexConfig === undefined ? undefined : { ...init.indexConfig }
+    this.inheritsIndex = init.inheritsIndex ?? false
     this.vfsRef = init.vfsRef ?? null
   }
 

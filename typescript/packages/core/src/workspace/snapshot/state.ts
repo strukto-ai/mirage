@@ -14,6 +14,7 @@
 import { CommandSpec } from '../../commands/spec/types.ts'
 
 import { indexConfigDump, restoreIndexConfig } from './config.ts'
+import type { IndexConfig } from '../../cache/index/config.ts'
 import { tokenOrNull } from '../../cache/file/utils.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheEntry } from '../../cache/file/entry.ts'
@@ -131,7 +132,6 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   const mounts = mounted.filter((m) => !skip.has(m.prefix) && m.vfs.name !== 'document')
   const mountSnapshots: MountSnapshot[] = []
   const firstPrefix = new Map<BaseVFS, string>()
-  const workspaceIndex = JSON.stringify(indexConfigDump(ws.registry.workspaceIndex))
   for (let i = 0; i < mounts.length; i++) {
     const m = mounts[i]
     if (m === undefined) continue
@@ -154,10 +154,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
       vfs_class: m.vfs.name,
       vfs_ref: m.vfsRef,
       // A scratch root saves only an index of its own, as Python's does.
-      index_config:
-        ws.syntheticRoot && m.prefix === '/' && JSON.stringify(dumped) === workspaceIndex
-          ? null
-          : dumped,
+      index_config: ws.syntheticRoot && m.prefix === '/' && m.inheritsIndex ? null : dumped,
       vfs_state: state,
       // The scratch root nobody mounted keeps its files across the round
       // trip, and a load marks it the scratch root again. Mirrors python.
@@ -354,13 +351,13 @@ export function vfsGroups(state: WorkspaceStateDict): Map<string, string> {
   for (const m of state.mounts) {
     const prefix = normDir(m.prefix)
     // Widened deliberately: a file can carry anything under the key.
-    const raw = (m as { same_vfs_as?: unknown }).same_vfs_as
-    if (raw === undefined || raw === null) {
+    if (!('same_vfs_as' in m)) {
       groups.set(prefix, prefix)
       continue
     }
+    const raw = (m as { same_vfs_as?: unknown }).same_vfs_as
     const leader = typeof raw === 'string' ? normDir(raw) : null
-    if (leader === null || (leader !== prefix && groups.get(leader) !== leader)) {
+    if (leader === null || leader === prefix || groups.get(leader) !== leader) {
       const named = typeof raw === 'string' ? raw : JSON.stringify(raw)
       throw new Error(
         `Workspace.load: mount '${m.prefix}' shares the VFS of '${named}', which no earlier ` +
@@ -455,6 +452,15 @@ export function buildMountArgs(
   }
   const mountArgs: Record<string, Mount> = {}
   const built = new Map<string, [BaseVFS, string | null]>()
+  // A VFS runs one index, its first prefix's (the registry aliases the
+  // rest): an override's index if one came with it, else the saved one.
+  const givenIndex = new Map<BaseVFS, IndexConfig>()
+  for (const override of Object.values(normalized)) {
+    if (override instanceof Mount && override.options.index !== undefined) {
+      if (!givenIndex.has(override.vfs)) givenIndex.set(override.vfs, override.options.index)
+    }
+  }
+  const indexed = new Set<BaseVFS>()
   let anchored = false
   const foreign = new Set([...userPrefixes].map((p) => groups.get(normDir(p)) ?? normDir(p)))
   for (const m of state.mounts) {
@@ -517,7 +523,6 @@ export function buildMountArgs(
           `the override asks write: ${asked}`,
       )
     }
-    const index = restoreIndexConfig(m.index_config, placed?.options.index, m.prefix)
     // The mount's own limits, its "@all" walk_limit among them, come back as
     // saved unless the override names its own. Mirrors python.
     // An override that names no limits keeps the saved ones, as Python's,
@@ -535,6 +540,10 @@ export function buildMountArgs(
       built.set(group, source)
     }
     const [vfs, vfsRef] = source
+    const index = indexed.has(vfs)
+      ? undefined
+      : restoreIndexConfig(m.index_config, givenIndex.get(vfs), m.prefix)
+    indexed.add(vfs)
     mountArgs[m.prefix] = new Mount(vfs, {
       mode: m.mode as MountMode,
       read,
