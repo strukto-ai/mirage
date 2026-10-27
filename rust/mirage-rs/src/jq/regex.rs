@@ -8,6 +8,76 @@ use super::value::{Object, Value};
 use super::vm::Limits;
 use crate::regex::Step;
 
+/// Oniguruma folds some characters to several (`ß` to `ss`), which this
+/// matcher does not; a case-insensitive search that could meet one fails
+/// rather than answer differently from jq.
+const MULTI_FOLD: &str = "Regex failure: case folding to several characters is not supported";
+
+/// Whether `c` folds, or is the case of something that folds, to several
+/// characters: Unicode's full case folding and case mappings agree on
+/// these but for capital sharp s.
+fn folds_to_several(c: char) -> bool {
+    c == '\u{1E9E}' || c.to_uppercase().nth(1).is_some() || c.to_lowercase().nth(1).is_some()
+}
+
+fn multi_fold(text: &str) -> bool {
+    text.chars().any(folds_to_several)
+}
+
+/// Whether an inline option group (`(?i)`, `(?mi:`) turns case
+/// folding on somewhere in `pattern`.
+fn inline_ignore_case(pattern: &str) -> bool {
+    let bytes = pattern.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'\\' => at += 2,
+            b'(' if bytes.get(at + 1) == Some(&b'?') => {
+                at += 2;
+                while let Some(c) = bytes.get(at) {
+                    match c {
+                        b'i' => return true,
+                        b'a'..=b'z' => at += 1,
+                        _ => break,
+                    }
+                }
+            }
+            _ => at += 1,
+        }
+    }
+    false
+}
+
+/// For a regex builtin called with a literal pattern (and literal or no
+/// modifiers), the reason this matcher cannot run it, if it cannot: the
+/// compiler then refuses the program, which the host runs on libjq.
+/// Patterns jq itself rejects are left to fail at run time as jq's do.
+pub(crate) fn unsupported(pattern: &str, modifiers: Option<&str>) -> Option<String> {
+    let mut options = Options::default();
+    for letter in modifiers.unwrap_or("").chars() {
+        match letter {
+            'i' => options.ignore_case = true,
+            'x' => options.extend = true,
+            'm' | 's' | 'p' => options.dotall |= letter != 's',
+            'l' => options.longest = true,
+            'n' => options.not_empty = true,
+            'g' => {}
+            _ => return None,
+        }
+    }
+    if (options.ignore_case || inline_ignore_case(pattern)) && multi_fold(pattern) {
+        return Some(MULTI_FOLD.into());
+    }
+    match Regex::new(pattern, options) {
+        Err(message)
+            if message.ends_with(" is not supported") || message == "parse depth limit over" =>
+        {
+            Some(message)
+        }
+        _ => None,
+    }
+}
+
 /// One `_match_impl` call in progress: jq's f_match, whose search can stop
 /// when the step budget runs out and go on at the next drain.
 pub(crate) struct Matching {
@@ -123,6 +193,11 @@ impl Matching {
             }
             Value::Null => {}
             _ => return Err(type_error(modifiers, "is not a string")),
+        }
+        if (options.ignore_case || inline_ignore_case(pattern))
+            && (multi_fold(pattern) || multi_fold(text))
+        {
+            return Err(Fault::Error(Value::string(MULTI_FOLD)));
         }
         let regex = Regex::new(pattern, options)
             .map_err(|message| Fault::Error(Value::string(format!("Regex failure: {message}"))))?;

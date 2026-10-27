@@ -1700,3 +1700,27 @@ fn now_is_the_clock_each_document_began_with() {
         vec![Frame::Out("1.5".into()), Frame::Out("2.5".into())]
     );
 }
+
+#[test]
+fn regex_the_matcher_cannot_run_exactly_never_answers_wrong() {
+    assert_eq!(
+        outputs(r#"try test("STRASSE"; "i") catch ."#, r#""Straße""#),
+        vec![r#""Regex failure: case folding to several characters is not supported""#]
+    );
+    assert_eq!(
+        outputs(
+            r#"[test("strasse"; "i"), test("(?i)STRASSE")]"#,
+            r#""Strasse""#
+        ),
+        vec!["[true,true]"]
+    );
+    for program in [
+        r#"test("ß"; "i")"#,
+        r#"test("(?i)ß")"#,
+        r#"test("(?~ab)")"#,
+        r#"sub("\\X"; "y")"#,
+    ] {
+        assert!(compile(program, &HashMap::new()).is_err(), "{program}");
+    }
+    assert!(compile(r#"test("ß")"#, &HashMap::new()).is_ok());
+}
