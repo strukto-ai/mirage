@@ -45,7 +45,7 @@ impl Number {
     /// dropped.
     pub(crate) fn negate(&self) -> Self {
         let literal = self.literal.as_ref().map(|text| {
-            if self.value == 0.0 {
+            if normalize(text).1.is_empty() {
                 Arc::from(text.trim_start_matches('-'))
             } else if let Some(rest) = text.strip_prefix('-') {
                 Arc::from(rest)
@@ -59,17 +59,16 @@ impl Number {
         }
     }
 
-    /// decNumber equality for two literals whose doubles tie: the same
-    /// sign, digits and exponent once trailing zeros are dropped.
-    pub(crate) fn same(&self, other: &Number) -> bool {
-        if self.value != other.value {
-            return false;
+    /// jq's number order: the doubles, and when those tie between two
+    /// literals, the decimals they spell, as decNumber compares them.
+    pub(crate) fn cmp_exact(&self, other: &Number) -> Ordering {
+        let order = compare_numbers(self.value, other.value);
+        if order != Ordering::Equal || self.value.is_nan() {
+            return order;
         }
         match (&self.literal, &other.literal) {
-            (Some(a), Some(b)) if self.value.is_finite() || a.contains('E') => {
-                normalize(a) == normalize(b)
-            }
-            _ => true,
+            (Some(a), Some(b)) => compare_decimal(&normalize(a), &normalize(b)),
+            _ => Ordering::Equal,
         }
     }
 
@@ -81,6 +80,34 @@ impl Number {
     }
 }
 
+/// Two normalized decimals (see `normalize`) in numeric order.
+fn compare_decimal(a: &(bool, String, i64), b: &(bool, String, i64)) -> Ordering {
+    let sign = |d: &(bool, String, i64)| match (d.1.is_empty(), d.0) {
+        (true, _) => 0,
+        (false, true) => -1,
+        (false, false) => 1,
+    };
+    let order = sign(a).cmp(&sign(b));
+    if order != Ordering::Equal || sign(a) == 0 {
+        return order;
+    }
+    let adjusted = |d: &(bool, String, i64)| d.2.saturating_add(d.1.len() as i64);
+    let magnitude = adjusted(a).cmp(&adjusted(b)).then_with(|| {
+        let (x, y) = (a.1.as_bytes(), b.1.as_bytes());
+        (0..x.len().max(y.len()))
+            .map(|i| {
+                let p = x.get(i).copied().unwrap_or(b'0');
+                let q = y.get(i).copied().unwrap_or(b'0');
+                p.cmp(&q)
+            })
+            .find(|o| *o != Ordering::Equal)
+            .unwrap_or(Ordering::Equal)
+    });
+    if a.0 { magnitude.reverse() } else { magnitude }
+}
+
+/// A literal as sign, significant digits and exponent, trailing zeros
+/// folded into the exponent; zero is (false, "", 0).
 fn normalize(text: &str) -> (bool, String, i64) {
     let (negative, rest) = match text.strip_prefix('-') {
         Some(rest) => (true, rest),
@@ -242,6 +269,26 @@ impl Drop for Object {
     }
 }
 
+/// Take a value apart one level: the children its last reference held,
+/// so a caller can free a deep or wide value a bounded number of nodes at
+/// a time.
+pub(crate) fn shed(value: Value) -> Vec<Value> {
+    match value {
+        Value::Array(items) => match Arc::try_unwrap(items) {
+            Ok(mut list) => std::mem::take(&mut list.0),
+            Err(_) => Vec::new(),
+        },
+        Value::Object(fields) => match Arc::try_unwrap(fields) {
+            Ok(mut object) => {
+                object.index.clear();
+                object.entries.drain(..).map(|(_, v)| v).collect()
+            }
+            Err(_) => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
+
 fn teardown(mut stack: Vec<Value>) {
     while let Some(value) = stack.pop() {
         match value {
@@ -393,7 +440,9 @@ impl Value {
 
     pub(crate) fn try_equals(&self, other: &Value) -> Result<bool, TooDeep> {
         match (self, other) {
-            (Self::Number(a), Self::Number(b)) => Ok(a.same(b)),
+            (Self::Number(a), Self::Number(b)) => {
+                Ok(a.value() == b.value() && a.cmp_exact(b) == Ordering::Equal)
+            }
             _ if self.identical(other) => Ok(true),
             _ => Ok(try_compare(self, other)? == Ordering::Equal),
         }
@@ -537,7 +586,7 @@ pub(crate) fn try_compare(a: &Value, b: &Value) -> Result<Ordering, TooDeep> {
         }
         match (x, y) {
             (Value::Number(p), Value::Number(q)) => {
-                let order = compare_numbers(p.value(), q.value());
+                let order = p.cmp_exact(q);
                 if order != Ordering::Equal {
                     return Ok(order);
                 }
@@ -605,6 +654,7 @@ pub(crate) fn parse_json(text: &str) -> Result<Value, String> {
     let bytes = text.as_bytes();
     let mut at = 0;
     let mut stack: Vec<Open> = Vec::new();
+    let mut after_comma = false;
     let skip = |at: &mut usize| {
         while *at < bytes.len() && matches!(bytes[*at], b' ' | b'\t' | b'\n' | b'\r') {
             *at += 1;
@@ -614,6 +664,12 @@ pub(crate) fn parse_json(text: &str) -> Result<Value, String> {
         skip(&mut at);
         if let Some(Open::Object(_, None)) = stack.last() {
             if bytes.get(at) == Some(&b'}') {
+                if after_comma {
+                    return Err(format!(
+                        "Expected another key-value pair{}",
+                        place(bytes, at)
+                    ));
+                }
                 at += 1;
                 let Some(Open::Object(object, _)) = stack.pop() else {
                     unreachable!()
@@ -621,6 +677,7 @@ pub(crate) fn parse_json(text: &str) -> Result<Value, String> {
                 if let Some(value) = close(&mut stack, Value::object(object), bytes, &mut at)? {
                     return finish(value, bytes, at);
                 }
+                after_comma = true;
                 continue;
             }
             if bytes.get(at) != Some(&b'"') {
@@ -634,6 +691,7 @@ pub(crate) fn parse_json(text: &str) -> Result<Value, String> {
                 ));
             }
             at += 1;
+            after_comma = false;
             if let Some(Open::Object(_, slot)) = stack.last_mut() {
                 *slot = Some(key.into());
             }
@@ -641,7 +699,14 @@ pub(crate) fn parse_json(text: &str) -> Result<Value, String> {
         }
         let value = match bytes.get(at) {
             None => return Err("Unfinished JSON term".into()),
+            Some(b']') if after_comma => {
+                return Err(format!(
+                    "Expected another array element{}",
+                    place(bytes, at)
+                ));
+            }
             Some(b'[') => {
+                after_comma = false;
                 at += 1;
                 skip(&mut at);
                 if stack.len() >= MAX_DEPTH {
@@ -660,6 +725,7 @@ pub(crate) fn parse_json(text: &str) -> Result<Value, String> {
                     return Err("Exceeds depth limit for parsing".into());
                 }
                 at += 1;
+                after_comma = false;
                 stack.push(Open::Object(Object::default(), None));
                 continue;
             }
@@ -704,6 +770,7 @@ pub(crate) fn parse_json(text: &str) -> Result<Value, String> {
         if let Some(value) = close(&mut stack, value, bytes, &mut at)? {
             return finish(value, bytes, at);
         }
+        after_comma = true;
     }
 
     fn close(
@@ -794,15 +861,38 @@ fn number_token(token: &str) -> Option<Value> {
     valid.then(|| Value::Number(Number::literal(token)))
 }
 
+/// " at line L, column C" for byte `at`, as jv_parse places an error.
+fn place(bytes: &[u8], at: usize) -> String {
+    let before = &bytes[..at.min(bytes.len())];
+    let line = before.iter().filter(|b| **b == b'\n').count() + 1;
+    let start = before
+        .iter()
+        .rposition(|b| *b == b'\n')
+        .map_or(0, |p| p + 1);
+    format!(" at line {line}, column {}", at - start + 1)
+}
+
+/// One string token. Like jv_parse, a raw control character or an
+/// unpaired high surrogate escape fails the token, reported where it ends.
 fn parse_string(bytes: &[u8], at: &mut usize) -> Result<String, String> {
     *at += 1;
     let mut out: Vec<u8> = Vec::new();
+    let mut fault: Option<&str> = None;
     loop {
         match bytes.get(*at) {
             None => return Err("Unfinished string".into()),
             Some(b'"') => {
+                if let Some(fault) = fault {
+                    return Err(format!("{fault}{}", place(bytes, *at)));
+                }
                 *at += 1;
                 return Ok(String::from_utf8_lossy(&out).into_owned());
+            }
+            Some(byte) if *byte < 0x20 => {
+                fault.get_or_insert(
+                    "Invalid string: control characters from U+0000 through U+001F must be escaped",
+                );
+                *at += 1;
             }
             Some(b'\\') => {
                 let escape = bytes.get(*at + 1).copied();
@@ -828,8 +918,12 @@ fn parse_string(bytes: &[u8], at: &mut usize) -> Result<String, String> {
                                 *at += 6;
                                 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00)
                             } else {
+                                fault.get_or_insert("Invalid \\uXXXX\\uXXXX surrogate pair escape");
                                 0xFFFD
                             }
+                        } else if (0xD800..0xDC00).contains(&unit) {
+                            fault.get_or_insert("Invalid \\uXXXX\\uXXXX surrogate pair escape");
+                            0xFFFD
                         } else {
                             unit
                         };

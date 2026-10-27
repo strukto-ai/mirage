@@ -6,7 +6,6 @@ use std::sync::Arc;
 use super::value::{MAX_DEPTH, Number, Object, TooDeep, Value, parse_json, try_compare};
 use super::vm::Limits;
 
-const DEPTH: usize = 512;
 const PATH_DEPTH: usize = 10000;
 const INDEX_MAX: f64 = (i32::MAX >> 2) as f64;
 
@@ -242,7 +241,7 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
         Cfunc::Plus => plus(a, b, limits),
         Cfunc::Minus => minus(a, b),
         Cfunc::Multiply => multiply(a, b, limits),
-        Cfunc::Divide => divide(a, b),
+        Cfunc::Divide => divide(a, b, limits),
         Cfunc::Mod => modulo(a, b),
         Cfunc::Equal => Ok(Value::bool(a.try_equals(b).map_err(deep_equal)?)),
         Cfunc::NotEqual => Ok(Value::bool(!a.try_equals(b).map_err(deep_equal)?)),
@@ -301,13 +300,14 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
             _ => Err(fail("endswith() requires string inputs")),
         },
         Cfunc::Split => match (input, a) {
-            (Value::String(s), Value::String(sep)) => Ok(split(s, sep)),
+            (Value::String(s), Value::String(sep)) => split(s, sep, limits),
             _ => Err(fail("split input and separator must be strings")),
         },
         Cfunc::Explode => match input {
-            Value::String(s) => Ok(Value::array(
+            Value::String(s) => array_limit(
                 s.chars().map(|c| Value::number(c as u32 as f64)).collect(),
-            )),
+                limits,
+            ),
             _ => Err(fail("explode input must be a string")),
         },
         Cfunc::Implode => implode(input, limits),
@@ -334,13 +334,13 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
             }
             _ => Err(fail("trim input must be a string")),
         },
-        Cfunc::SetPath => setpath(input.clone(), a, b.clone()),
+        Cfunc::SetPath => setpath(input.clone(), a, b.clone(), limits),
         Cfunc::GetPath => getpath(input, a),
-        Cfunc::DelPaths => delpaths(input.clone(), a),
+        Cfunc::DelPaths => delpaths(input.clone(), a, limits),
         Cfunc::Has => has(input, a),
         Cfunc::Contains => {
             if input.kind() == a.kind() && (input.rank_kind() == a.rank_kind()) {
-                Ok(Value::bool(contains(input, a, 0)?))
+                Ok(Value::bool(contains(input, a)?))
             } else {
                 Err(type_error2(
                     input,
@@ -488,9 +488,7 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
         Cfunc::Fdim => math2(a, b, |x, y| if x > y { x - y } else { 0.0 }),
         Cfunc::Hypot => math2(a, b, f64::hypot),
         Cfunc::Copysign => math2(a, b, f64::copysign),
-        Cfunc::Ldexp | Cfunc::Scalb | Cfunc::Scalbln => {
-            math2(a, b, |x, e| x * 2f64.powf(e.trunc()))
-        }
+        Cfunc::Ldexp | Cfunc::Scalb | Cfunc::Scalbln => math2(a, b, scale),
         Cfunc::Fma => {
             let c = args.get(3).unwrap_or(&Value::Null);
             Ok(Value::number(num(a)?.mul_add(num(b)?, num(c)?)))
@@ -672,7 +670,7 @@ fn merge_deep(a: &Value, b: &Value) -> Answer {
     }
 }
 
-fn divide(a: &Value, b: &Value) -> Answer {
+fn divide(a: &Value, b: &Value, limits: Limits) -> Answer {
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => {
             if y.value() == 0.0 {
@@ -684,7 +682,7 @@ fn divide(a: &Value, b: &Value) -> Answer {
             }
             Ok(Value::number(x.value() / y.value()))
         }
-        (Value::String(s), Value::String(sep)) => Ok(split(s, sep)),
+        (Value::String(s), Value::String(sep)) => split(s, sep, limits),
         _ => Err(type_error2(a, b, "cannot be divided")),
     }
 }
@@ -724,16 +722,25 @@ fn modulo(a: &Value, b: &Value) -> Answer {
     }
 }
 
-fn split(s: &str, sep: &str) -> Value {
+fn split(s: &str, sep: &str, limits: Limits) -> Answer {
     if s.is_empty() {
-        return Value::array(Vec::new());
+        return Ok(Value::array(Vec::new()));
     }
     let parts: Vec<Value> = if sep.is_empty() {
         s.chars().map(|c| Value::string(c.to_string())).collect()
     } else {
         s.split(sep).map(Value::string).collect()
     };
-    Value::array(parts)
+    array_limit(parts, limits)
+}
+
+/// ldexp: `x` times two to the `e`, scaled in two halves so an
+/// intermediate power of two neither overflows nor underflows when the
+/// answer does not.
+fn scale(x: f64, e: f64) -> f64 {
+    let e = e.trunc().clamp(-2200.0, 2200.0) as i32;
+    let half = e / 2;
+    x * 2f64.powi(half) * 2f64.powi(e - half)
 }
 
 fn indices(s: &str, needle: &str) -> Vec<Value> {
@@ -741,11 +748,14 @@ fn indices(s: &str, needle: &str) -> Vec<Value> {
         return Vec::new();
     }
     let mut out = Vec::new();
-    let mut from = 0;
+    let (mut from, mut chars) = (0, 0);
     while let Some(at) = s[from..].find(needle) {
         let byte = from + at;
-        out.push(Value::number(s[..byte].chars().count() as f64));
-        from = byte + s[byte..].chars().next().map_or(1, char::len_utf8);
+        chars += s[from..byte].chars().count();
+        out.push(Value::number(chars as f64));
+        let step = s[byte..].chars().next().map_or(1, char::len_utf8);
+        from = byte + step;
+        chars += 1;
     }
     out
 }
@@ -789,38 +799,90 @@ fn has(t: &Value, k: &Value) -> Answer {
     }
 }
 
-fn contains(a: &Value, b: &Value, depth: usize) -> Result<bool, Fault> {
-    if depth > DEPTH {
-        return Err(fail("Containment check too deep"));
+/// jv_contains, walked with a stack, refused past jq's depth limit.
+fn contains(a: &Value, b: &Value) -> Result<bool, Fault> {
+    enum Frame<'a> {
+        Object(&'a Object, &'a Object, usize),
+        Array(&'a [Value], &'a [Value], usize, usize),
     }
-    Ok(match (a, b) {
-        (Value::Object(x), Value::Object(y)) => {
-            for (k, v) in y.iter() {
-                match x.get(k) {
-                    Some(u) if u.kind() == v.kind() && contains(u, v, depth + 1)? => {}
-                    _ => return Ok(false),
+    fn same_kind(a: &Value, b: &Value) -> bool {
+        a.kind() == b.kind() && a.rank_kind() == b.rank_kind()
+    }
+    fn enter<'a>(a: &'a Value, b: &'a Value, stack: &mut Vec<Frame<'a>>) -> Option<bool> {
+        match (a, b) {
+            (Value::Object(x), Value::Object(y)) => {
+                stack.push(Frame::Object(x, y, 0));
+                None
+            }
+            (Value::Array(x), Value::Array(y)) => {
+                stack.push(Frame::Array(x, y, 0, 0));
+                None
+            }
+            (Value::String(x), Value::String(y)) => Some(x.contains(&**y)),
+            _ => Some(a.equals(b)),
+        }
+    }
+    let mut stack: Vec<Frame> = Vec::new();
+    let mut answer = enter(a, b, &mut stack);
+    loop {
+        if stack.len() > MAX_DEPTH {
+            return Err(fail("Containment check too deep"));
+        }
+        let next = match stack.last_mut() {
+            None => return Ok(answer.unwrap_or(true)),
+            Some(Frame::Object(x, y, at)) => {
+                if let Some(found) = answer.take() {
+                    if !found {
+                        stack.pop();
+                        answer = Some(false);
+                        continue;
+                    }
+                    *at += 1;
+                }
+                match y.entry(*at) {
+                    None => None,
+                    Some((k, v)) => match x.get(k) {
+                        Some(u) if same_kind(u, v) => Some((u, v)),
+                        _ => {
+                            stack.pop();
+                            answer = Some(false);
+                            continue;
+                        }
+                    },
                 }
             }
-            true
-        }
-        (Value::Array(x), Value::Array(y)) => {
-            for v in y.iter() {
-                let mut found = false;
-                for u in x.iter() {
-                    if u.kind() == v.kind() && contains(u, v, depth + 1)? {
-                        found = true;
-                        break;
+            Some(Frame::Array(x, y, i, j)) => {
+                if let Some(found) = answer.take() {
+                    if found {
+                        *i += 1;
+                        *j = 0;
+                    } else {
+                        *j += 1;
                     }
                 }
-                if !found {
-                    return Ok(false);
+                if *i >= y.len() {
+                    None
+                } else {
+                    while *j < x.len() && !same_kind(&x[*j], &y[*i]) {
+                        *j += 1;
+                    }
+                    if *j >= x.len() {
+                        stack.pop();
+                        answer = Some(false);
+                        continue;
+                    }
+                    Some((&x[*j], &y[*i]))
                 }
             }
-            true
+        };
+        match next {
+            Some((u, v)) => answer = enter(u, v, &mut stack),
+            None => {
+                stack.pop();
+                answer = Some(true);
+            }
         }
-        (Value::String(x), Value::String(y)) => x.contains(&**y),
-        _ => a.equals(b),
-    })
+    }
 }
 
 fn keyed(values: &Value, keys: &Value, message: &str) -> Result<Vec<(Value, Value)>, Fault> {
@@ -1148,7 +1210,7 @@ fn parse_slice(len: usize, slice: &Object) -> Result<(usize, usize), Value> {
     Ok((s, e))
 }
 
-fn set(t: Value, k: &Value, v: Value) -> Answer {
+fn set(t: Value, k: &Value, v: Value, limits: Limits) -> Answer {
     match (t, k) {
         (Value::Object(mut fields), Value::String(key)) => {
             Arc::make_mut(&mut fields).insert(Arc::clone(key), v);
@@ -1180,6 +1242,12 @@ fn set(t: Value, k: &Value, v: Value) -> Answer {
                 return Err(fail("Array index too large"));
             }
             let idx = idx as usize;
+            if idx >= limits.items {
+                return Err(fail(format!(
+                    "jq array limit of {} elements exceeded",
+                    limits.items
+                )));
+            }
             if idx >= list.len() {
                 list.resize(idx + 1, Value::Null);
             }
@@ -1199,7 +1267,7 @@ fn set(t: Value, k: &Value, v: Value) -> Answer {
             };
             let mut out = items;
             out.splice(start..end, insert.iter().cloned());
-            Ok(Value::array(out))
+            array_limit(out, limits)
         }
         (Value::String(_), Value::Object(_)) => Err(fail("Cannot update string slices")),
         (t, k) => Err(fail(format!(
@@ -1225,7 +1293,7 @@ pub(crate) fn getpath(root: &Value, path: &Value) -> Answer {
 }
 
 /// jv_setpath, walked with a stack of the values it descends through.
-fn setpath(root: Value, path: &Value, value: Value) -> Answer {
+fn setpath(root: Value, path: &Value, value: Value, limits: Limits) -> Answer {
     let Value::Array(keys) = path else {
         return Err(fail("Path must be specified as an array"));
     };
@@ -1237,14 +1305,14 @@ fn setpath(root: Value, path: &Value, value: Value) -> Answer {
     for key in keys.iter() {
         let child = get(&curr, key).map_err(Fault::Error)?;
         if !matches!(key, Value::Object(_)) {
-            curr = set(curr, key, Value::Null)?;
+            curr = set(curr, key, Value::Null, limits)?;
         }
         parents.push(curr);
         curr = child;
     }
     let mut built = value;
     for (key, parent) in keys.iter().zip(parents).rev() {
-        built = set(parent, key, built)?;
+        built = set(parent, key, built, limits)?;
     }
     drop(curr);
     Ok(built)
@@ -1313,7 +1381,13 @@ fn dels(t: Value, keys: Vec<Value>) -> Answer {
     }
 }
 
-fn delpaths_sorted(object: Value, paths: &[Vec<Value>], start: usize, depth: usize) -> Answer {
+fn delpaths_sorted(
+    object: Value,
+    paths: &[Vec<Value>],
+    start: usize,
+    depth: usize,
+    limits: Limits,
+) -> Answer {
     if depth > PATH_DEPTH {
         return Err(fail("Path too deep"));
     }
@@ -1337,8 +1411,8 @@ fn delpaths_sorted(object: Value, paths: &[Vec<Value>], start: usize, depth: usi
                     .filter(|p| p.len() > start + 1)
                     .cloned()
                     .collect();
-                let newsub = delpaths_sorted(sub, &rest, start + 1, depth + 1)?;
-                object = set(object, &key, newsub)?;
+                let newsub = delpaths_sorted(sub, &rest, start + 1, depth + 1, limits)?;
+                object = set(object, &key, newsub, limits)?;
             }
         }
         i = j;
@@ -1346,7 +1420,7 @@ fn delpaths_sorted(object: Value, paths: &[Vec<Value>], start: usize, depth: usi
     dels(object, delkeys)
 }
 
-fn delpaths(object: Value, paths: &Value) -> Answer {
+fn delpaths(object: Value, paths: &Value, limits: Limits) -> Answer {
     let Value::Array(list) = paths else {
         return Err(fail("Paths must be specified as an array"));
     };
@@ -1371,5 +1445,5 @@ fn delpaths(object: Value, paths: &Value) -> Answer {
     if keys[0].is_empty() {
         return Ok(Value::Null);
     }
-    delpaths_sorted(object, &keys, 0, 0)
+    delpaths_sorted(object, &keys, 0, 0, limits)
 }
