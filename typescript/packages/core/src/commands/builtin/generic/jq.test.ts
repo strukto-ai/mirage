@@ -857,4 +857,34 @@ describe('jq_eval', () => {
       if (saved !== undefined) process.env.TZ = saved
     }
   })
+
+  it('reports a program jq refuses as jq does', async () => {
+    expect(await ranOver([], '  $x | nosuch(1) +', { null_input: true })).toEqual({
+      stdout: '',
+      stderr:
+        'jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 18:\n' +
+        '      $x | nosuch(1) +\n' +
+        '                     ^\n' +
+        'jq: 1 compile error\n',
+      exitCode: 3,
+    })
+    expect((await ranOver([], '$x | nosuch(1)', { null_input: true })).stderr).toBe(
+      'jq: error: $x is not defined at <top-level>, line 1, column 1:\n' +
+        '    $x | nosuch(1)\n' +
+        '    ^^\n' +
+        'jq: error: nosuch/1 is not defined at <top-level>, line 1, column 6:\n' +
+        '    $x | nosuch(1)\n' +
+        '         ^^^^^^\n' +
+        'jq: 2 compile errors\n',
+    )
+  })
+})
+
+describe('jq_eval clock', () => {
+  it('reads the clock at each call of now', async () => {
+    const result = await ranOver([], 'now as $s | until(now > $s; .) | "done"', {
+      null_input: true,
+    })
+    expect(result).toEqual({ stdout: '"done"\n', stderr: '', exitCode: 0 })
+  })
 })

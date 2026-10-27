@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::{Stream, StreamError};
 
 use super::builtin::Cfunc;
-use super::compile;
+use super::compile::{self, Refusal};
 use super::host::{Host, Message, Reply};
 use super::time::{Clock, Zone};
 use super::value::{Object, Value, parse_json};
@@ -40,8 +40,6 @@ struct Config {
     items: usize,
     #[serde(default = "bytes")]
     bytes: usize,
-    #[serde(default)]
-    now: Option<f64>,
     #[serde(default)]
     zone: Option<String>,
 }
@@ -82,14 +80,12 @@ enum Asking {
 /// Where jq's input reader stands: the input it reads (null before it
 /// opens one) and the lines read of it, which `input_filename` and
 /// `input_line_number` answer. `begin` carries it for the main loop's
-/// document, with the clock for its run, and each reply for the document
-/// `input` took.
+/// document, and each reply for the document `input` took.
 #[derive(Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Position {
     filename: Option<String>,
     line: f64,
-    now: Option<f64>,
 }
 
 /// The host's answer to `input`: `value` with the document's JSON text,
@@ -102,6 +98,8 @@ struct InputReply {
     filename: Option<String>,
     #[serde(default)]
     line: f64,
+    #[serde(default)]
+    now: f64,
 }
 
 /// One jq program run over documents one at a time, on the host's own
@@ -132,6 +130,9 @@ struct Eval {
     state: State,
 }
 
+/// Compile the configured program. A program jq itself refuses is
+/// refused with jq's report, whose last line is its `jq: N compile
+/// error(s)` count; any other refusal names what jq_eval cannot run yet.
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = serde_json::from_slice(config)
         .map_err(|e| StreamError::new(format!("bad jq_eval config: {e}")))?;
@@ -150,9 +151,11 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     };
     // jq binds `$ENV` to the environment over an `--arg ENV` (compile.c).
     globals.insert("ENV".to_string(), env.clone());
-    let program = compile::compile(&config.program, &globals).map_err(StreamError::new)?;
+    let program = compile::compile(&config.program, &globals).map_err(|refusal| match refusal {
+        Refusal::Invalid(report) => StreamError::new(report),
+        Refusal::Unsupported(why) => StreamError::new(format!("jq_eval: {why}")),
+    })?;
     let clock = Clock {
-        now: config.now,
         zone: config.zone.as_deref().and_then(Zone::parse).map(Arc::new),
     };
     needs_host(&program, &clock)?;
@@ -191,9 +194,10 @@ fn message_frames(host: &mut Host, out: &mut Vec<u8>) {
     }
 }
 
-/// A program that asks for the time or the local time zone runs here only
-/// when the host gave one; otherwise it is refused, as an unknown builtin
-/// is, and the host runs it elsewhere.
+/// A program that reads the local time zone runs here only when the host
+/// gave one this engine reads; otherwise it is refused, as an unknown
+/// builtin is, and the host runs it elsewhere. `strptime` counts, as its
+/// `%s` reads the zone.
 fn needs_host(program: &Program, clock: &Clock) -> Result<(), StreamError> {
     let calls = |wanted: &[Cfunc]| {
         program
@@ -202,10 +206,7 @@ fn needs_host(program: &Program, clock: &Clock) -> Result<(), StreamError> {
             .flat_map(|bytecode| &bytecode.ops)
             .any(|op| matches!(op, Op::CallBuiltin(f, _) if wanted.contains(f)))
     };
-    if clock.now.is_none() && calls(&[Cfunc::Now]) {
-        return Err(StreamError::new("jq_eval: no clock for now"));
-    }
-    if clock.zone.is_none() && calls(&[Cfunc::Localtime, Cfunc::StrfLocaltime]) {
+    if clock.zone.is_none() && calls(&[Cfunc::Localtime, Cfunc::StrfLocaltime, Cfunc::Strptime]) {
         return Err(StreamError::new("jq_eval: no time zone for local time"));
     }
     Ok(())
@@ -358,11 +359,7 @@ impl Stream for Eval {
         if matches!(self.state, State::Running(_) | State::Retiring(_)) {
             return Err(StreamError::new("jq_eval: the run has not ended"));
         }
-        let position: Position = crate::parse_config(config)?;
-        if position.now.is_some() {
-            self.clock.now = position.now;
-        }
-        self.position = position;
+        self.position = crate::parse_config(config)?;
         self.pending.clear();
         self.state = State::Feeding;
         Ok(())
@@ -373,8 +370,12 @@ impl Stream for Eval {
         if self.asking != Asking::Pending {
             return None;
         }
+        let State::Running(vm) = &mut self.state else {
+            return None;
+        };
+        let op = vm.host.asking.take().unwrap_or("input");
         self.asking = Asking::Taken;
-        Some(br#"{"op":"input"}"#.to_vec())
+        Some(format!(r#"{{"op":"{op}"}}"#).into_bytes())
     }
 
     fn respond(&mut self, reply: &[u8], data: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
@@ -386,6 +387,11 @@ impl Stream for Eval {
             return Err(StreamError::new("jq_eval: the host answered no request"));
         }
         let reply: InputReply = crate::parse_config(reply)?;
+        if reply.kind == "now" {
+            vm.host.now = Some(reply.now);
+            self.asking = Asking::No;
+            return Ok(());
+        }
         let text = std::str::from_utf8(data)
             .map_err(|_| StreamError::new("jq_eval: document is not UTF-8"))?;
         vm.host.reply = Some(match reply.kind.as_str() {
@@ -399,7 +405,6 @@ impl Stream for Eval {
             Position {
                 filename: reply.filename,
                 line: reply.line,
-                now: None,
             },
         );
         self.asking = Asking::No;

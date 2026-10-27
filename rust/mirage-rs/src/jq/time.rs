@@ -53,11 +53,10 @@ fn fail(message: impl Into<String>) -> Fault {
     Fault::Error(Value::string(message.into()))
 }
 
-/// What the host gives a run: the time `now` answers and the local time
-/// zone, which only `localtime` and `strflocaltime` consult.
+/// What the host gives a run: the local time zone, which `localtime`,
+/// `strflocaltime` and `strptime`'s `%s` consult. `now` asks the host.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Clock {
-    pub(crate) now: Option<f64>,
     pub(crate) zone: Option<Arc<Zone>>,
 }
 
@@ -1170,10 +1169,6 @@ pub(crate) fn call(f: Cfunc, args: &[Value], clock: &Clock) -> Answer {
     let a = args.get(1).unwrap_or(&Value::Null);
     let zone = clock.zone.as_deref();
     match f {
-        Cfunc::Now => clock
-            .now
-            .map(Value::number)
-            .ok_or_else(|| fail("now is not available")),
         Cfunc::Mktime => mktime(input),
         Cfunc::Gmtime => gmtime(input, None, "gmtime"),
         Cfunc::Localtime => match zone {

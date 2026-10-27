@@ -3,7 +3,8 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
 
-use super::value::{MAX_DEPTH, Number, Object, TooDeep, Value, parse_json, try_compare};
+use super::parse::parse_value;
+use super::value::{MAX_DEPTH, Number, Object, TooDeep, Value, try_compare};
 use super::vm::Limits;
 
 const PATH_DEPTH: usize = 10000;
@@ -29,18 +30,49 @@ fn order(a: &Value, b: &Value) -> Result<Ordering, Fault> {
     try_compare(a, b).map_err(deep_compare)
 }
 
-/// Sort stably by `key`, failing when a comparison went too deep.
-fn sort_by_key<T>(items: &mut [T], key: impl Fn(&T) -> &Value) -> Result<(), Fault> {
+/// Sort stably by `key`, failing when a comparison went too deep. A
+/// merge sort of our own: jq's number order is not total (a literal and
+/// a computed number compare by different rules, Number::cmp_exact), and
+/// the standard library's sort may panic on such an order.
+fn sort_by_key<T>(items: &mut Vec<T>, key: impl Fn(&T) -> &Value) -> Result<(), Fault> {
+    let n = items.len();
     let mut deep = false;
-    items.sort_by(|x, y| {
-        try_compare(key(x), key(y)).unwrap_or_else(|_| {
-            deep = true;
-            Ordering::Equal
-        })
-    });
+    let mut order: Vec<usize> = (0..n).collect();
+    let mut merged = vec![0; n];
+    let mut width = 1;
+    while width < n {
+        let mut start = 0;
+        while start < n {
+            let mid = (start + width).min(n);
+            let end = (start + 2 * width).min(n);
+            let (mut i, mut j) = (start, mid);
+            for slot in &mut merged[start..end] {
+                let left = i < mid
+                    && (j >= end
+                        || try_compare(key(&items[order[i]]), key(&items[order[j]]))
+                            .unwrap_or_else(|_| {
+                                deep = true;
+                                Ordering::Equal
+                            })
+                            != Ordering::Greater);
+                if left {
+                    *slot = order[i];
+                    i += 1;
+                } else {
+                    *slot = order[j];
+                    j += 1;
+                }
+            }
+            start = end;
+        }
+        std::mem::swap(&mut order, &mut merged);
+        width *= 2;
+    }
     if deep {
         return Err(fail("Comparison too deep"));
     }
+    let mut slots: Vec<Option<T>> = items.drain(..).map(Some).collect();
+    items.extend(order.into_iter().filter_map(|at| slots[at].take()));
     Ok(())
 }
 
@@ -264,8 +296,7 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
         Cfunc::GreaterEq => Ok(Value::bool(order(a, b)? != Ordering::Less)),
         Cfunc::ToJson => string_limit(input.dump(), limits),
         Cfunc::FromJson => match input {
-            Value::String(text) => parse_json(text)
-                .map_err(|message| fail(format!("{message} (while parsing '{text}')"))),
+            Value::String(text) => parse_value(text.as_bytes()).map_err(fail),
             _ => Err(type_error(input, "only strings can be parsed")),
         },
         Cfunc::ToNumber => match input {
@@ -830,30 +861,38 @@ fn has(t: &Value, k: &Value) -> Answer {
     }
 }
 
+/// A level of `contains` in progress: an object's keys checked so far, or
+/// an array's wanted item and the candidate it is being matched against.
+enum Containment<'a> {
+    Object(&'a Object, &'a Object, usize),
+    Array(&'a [Value], &'a [Value], usize, usize),
+}
+
+/// jv_get_kind's equality, which tells `true` from `false`.
+fn same_kind(a: &Value, b: &Value) -> bool {
+    a.kind() == b.kind() && a.rank_kind() == b.rank_kind()
+}
+
+/// Start checking that `a` contains `b`: the answer for scalars, or a
+/// level pushed for containers.
+fn enter<'a>(a: &'a Value, b: &'a Value, stack: &mut Vec<Containment<'a>>) -> Option<bool> {
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            stack.push(Containment::Object(x, y, 0));
+            None
+        }
+        (Value::Array(x), Value::Array(y)) => {
+            stack.push(Containment::Array(x, y, 0, 0));
+            None
+        }
+        (Value::String(x), Value::String(y)) => Some(x.contains(&**y)),
+        _ => Some(a.equals(b)),
+    }
+}
+
 /// jv_contains, walked with a stack, refused past jq's depth limit.
 fn contains(a: &Value, b: &Value) -> Result<bool, Fault> {
-    enum Frame<'a> {
-        Object(&'a Object, &'a Object, usize),
-        Array(&'a [Value], &'a [Value], usize, usize),
-    }
-    fn same_kind(a: &Value, b: &Value) -> bool {
-        a.kind() == b.kind() && a.rank_kind() == b.rank_kind()
-    }
-    fn enter<'a>(a: &'a Value, b: &'a Value, stack: &mut Vec<Frame<'a>>) -> Option<bool> {
-        match (a, b) {
-            (Value::Object(x), Value::Object(y)) => {
-                stack.push(Frame::Object(x, y, 0));
-                None
-            }
-            (Value::Array(x), Value::Array(y)) => {
-                stack.push(Frame::Array(x, y, 0, 0));
-                None
-            }
-            (Value::String(x), Value::String(y)) => Some(x.contains(&**y)),
-            _ => Some(a.equals(b)),
-        }
-    }
-    let mut stack: Vec<Frame> = Vec::new();
+    let mut stack: Vec<Containment> = Vec::new();
     let mut answer = enter(a, b, &mut stack);
     loop {
         if stack.len() > MAX_DEPTH {
@@ -861,7 +900,7 @@ fn contains(a: &Value, b: &Value) -> Result<bool, Fault> {
         }
         let next = match stack.last_mut() {
             None => return Ok(answer.unwrap_or(true)),
-            Some(Frame::Object(x, y, at)) => {
+            Some(Containment::Object(x, y, at)) => {
                 if let Some(found) = answer.take() {
                     if !found {
                         stack.pop();
@@ -882,7 +921,7 @@ fn contains(a: &Value, b: &Value) -> Result<bool, Fault> {
                     },
                 }
             }
-            Some(Frame::Array(x, y, i, j)) => {
+            Some(Containment::Array(x, y, i, j)) => {
                 if let Some(found) = answer.take() {
                     if found {
                         *i += 1;

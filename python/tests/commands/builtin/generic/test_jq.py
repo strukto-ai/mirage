@@ -24,6 +24,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
 from mirage.core.jq import InputReader, JqError, JqHalt, JqOptions, JqRun
+from mirage.core.jq.errors import JqCompileError
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
@@ -915,3 +916,41 @@ async def test_env_reads_the_sessions_exported_environment(program, out):
     assert await materialize(source) == out
     out, _ = await _run([], "$ENV", null_input=True)
     assert out == b"{}\n"
+
+
+def _no_libjq(*args: object) -> None:
+    raise AssertionError("jq_eval should word the refusal itself")
+
+
+@pytest.mark.asyncio
+async def test_jq_eval_reports_a_refused_program_as_jq_does(monkeypatch):
+    monkeypatch.setattr(jq_module, "jq_check", _no_libjq)
+    out, io = await _run([], "  $x | nosuch(1) +", null_input=True)
+    assert (out, io.exit_code) == (b"", 3)
+    assert await materialize(io.stderr) == (
+        b"jq: error: syntax error, unexpected end of file at <top-level>,"
+        b" line 1, column 18:\n      $x | nosuch(1) +\n"
+        b"                     ^\njq: 1 compile error\n"
+    )
+    _, io = await _run([], "$x | nosuch(1)", null_input=True)
+    assert await materialize(io.stderr) == (
+        b"jq: error: $x is not defined at <top-level>, line 1, column 1:\n"
+        b"    $x | nosuch(1)\n    ^^\n"
+        b"jq: error: nosuch/1 is not defined at <top-level>, line 1,"
+        b" column 6:\n    $x | nosuch(1)\n         ^^^^^^\n"
+        b"jq: 2 compile errors\n"
+    )
+
+
+def test_engine_tells_a_refused_program_from_one_it_leaves_to_libjq():
+    with pytest.raises(JqCompileError, match=r"\njq: 1 compile error\Z"):
+        Engine.open("if", JqOptions(), None, "{}")
+    assert Engine.open('import "a" as a; .', JqOptions(), None, "{}") is None
+
+
+@pytest.mark.asyncio
+async def test_now_reads_the_clock_at_each_call():
+    out, io = await _run(
+        [], 'now as $s | until(now > $s; .) | "done"', null_input=True
+    )
+    assert (out, io.exit_code) == (b'"done"\n', 0)

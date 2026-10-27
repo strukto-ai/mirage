@@ -5,7 +5,8 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 
 use super::builtin::{self, Cfunc, Fault};
-use super::syntax::{self, Ast, BinOp, Def, Pattern, PatternKey, Update};
+use super::check;
+use super::syntax::{self, Ast, BinOp, Def, Loc, Parsed, Pattern, PatternKey, Update};
 use super::value::{Object, Value};
 use super::vm::{Bytecode, ClosureRef, Limits, Op, Program, Target, Var};
 
@@ -109,19 +110,39 @@ struct Compiler<'a> {
     storevn: Option<usize>,
 }
 
+/// Why a program does not compile here.
+#[derive(Debug)]
+pub(crate) enum Refusal {
+    /// jq refuses it too: its report, as jq prints it.
+    Invalid(String),
+    /// jq runs it, but this engine cannot yet: what it lacks.
+    Unsupported(String),
+}
+
 /// Compile `source` against jq's builtin library. `globals` are the
 /// `$name` bindings jq's command line makes (`--arg`, `--argjson`,
-/// `$ARGS`). An error names what this engine cannot run.
-pub(crate) fn compile(source: &str, globals: &HashMap<String, Value>) -> Result<Program, String> {
-    let ast = syntax::parse(source)?;
+/// `$ARGS`). A program jq refuses is reported in jq's words, before
+/// anything this engine lacks is.
+pub(crate) fn compile(source: &str, globals: &HashMap<String, Value>) -> Result<Program, Refusal> {
+    let ast = match syntax::parse(source) {
+        Parsed::Program(ast) => ast,
+        Parsed::Invalid(messages) => return Err(Refusal::Invalid(syntax::report(&messages))),
+        Parsed::Unsupported(why) => return Err(Refusal::Unsupported(why.into())),
+    };
+    let errors = check::check(&ast, globals, source);
+    if !errors.is_empty() {
+        return Err(Refusal::Invalid(syntax::report(&errors)));
+    }
     let mut compiler = Compiler {
         bcs: vec![Builder::default()],
         globals,
-        library: library()?,
+        library: library().map_err(Refusal::Unsupported)?,
         linked: HashMap::new(),
         storevn: None,
     };
-    compiler.code(0, &ast, &None)?;
+    compiler
+        .code(0, &ast, &None)
+        .map_err(Refusal::Unsupported)?;
     compiler.emit(0, Op::Ret);
     Ok(compiler.finish())
 }
@@ -391,7 +412,7 @@ impl Compiler<'_> {
                             index: tmp,
                         },
                     );
-                    let value = Box::new(Ast::Var("*tmp".into()));
+                    let value = Box::new(Ast::Var("*tmp".into(), Loc::default()));
                     let update = match kind {
                         Update::Arith(op) => Ast::Binop(*op, Box::new(Ast::Identity), value),
                         _ => Ast::Alternative(Box::new(Ast::Identity), value),
@@ -489,14 +510,18 @@ impl Compiler<'_> {
                     Box::new(Ast::Binop(
                         BinOp::Equal,
                         Box::new(Ast::Identity),
-                        Box::new(Ast::Var(label)),
+                        Box::new(Ast::Var(label, Loc::default())),
                     )),
-                    Box::new(Ast::Call("empty".into(), Vec::new())),
-                    Some(Box::new(Ast::Call("error".into(), Vec::new()))),
+                    Box::new(Ast::Call("empty".into(), Vec::new(), Loc::default())),
+                    Some(Box::new(Ast::Call(
+                        "error".into(),
+                        Vec::new(),
+                        Loc::default(),
+                    ))),
                 );
                 self.code(bc, &Ast::Try(body.clone(), Some(Box::new(handler))), &inner)?;
             }
-            Ast::Break(name) => {
+            Ast::Break(name, _) => {
                 let Some((owner, index)) = find_var(env, &format!("*label-{name}")) else {
                     return Err(format!("$*label-{name} is not defined"));
                 };
@@ -508,8 +533,8 @@ impl Compiler<'_> {
                 let inner = self.define(bc, def, env)?;
                 self.code(bc, rest, &inner)?;
             }
-            Ast::Call(name, args) => self.call(bc, name, args, env)?,
-            Ast::Var(name) => match find_var(env, name) {
+            Ast::Call(name, args, _) => self.call(bc, name, args, env)?,
+            Ast::Var(name, _) => match find_var(env, name) {
                 Some((owner, index)) => {
                     let var = self.var(bc, owner, index);
                     self.emit(bc, Op::LoadV(var));
@@ -580,9 +605,11 @@ impl Compiler<'_> {
             !(op == BinOp::Multiply
                 && (matches!(x, Value::String(_)) || matches!(y, Value::String(_))))
         };
-        if let (Some(x), Some(y)) = (constant(a), constant(b))
-            && folds(&x, &y)
-        {
+        let constants = match (constant(a), constant(b)) {
+            (Some(x), Some(y)) if folds(&x, &y) => Some((x, y)),
+            _ => None,
+        };
+        if let Some((x, y)) = constants {
             let limits = Limits {
                 blocks: usize::MAX,
                 items: usize::MAX,
@@ -763,7 +790,7 @@ impl Compiler<'_> {
         for (name, is_var) in def.params.iter().rev() {
             if *is_var {
                 body = Ast::Bind(
-                    Box::new(Ast::Call(name.clone(), Vec::new())),
+                    Box::new(Ast::Call(name.clone(), Vec::new(), Loc::default())),
                     vec![Pattern::Var(name.clone())],
                     Box::new(body),
                 );
@@ -825,7 +852,7 @@ impl Compiler<'_> {
     }
 
     fn closure(&mut self, bc: usize, arg: &Ast, env: &Env) -> Result<ClosureRef, String> {
-        if let Ast::Call(name, args) = arg {
+        if let Ast::Call(name, args, _) = arg {
             if args.is_empty() {
                 if let Some((owner, target @ Target::Param(_))) = find_func(env, name, 0) {
                     return Ok(ClosureRef {

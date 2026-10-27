@@ -736,6 +736,7 @@ impl Vm {
             }
             Op::CallBuiltin(f, _) if host::is_host(*f) => {
                 let input = self.pop();
+                *budget = budget.saturating_sub(builtin::cost(std::slice::from_ref(&input)));
                 match self.host.call(*f, input) {
                     Answer::Value(value) => self.push(value),
                     Answer::Raise(message) => return Flow::Raise(Raise::Error(message)),
@@ -756,8 +757,7 @@ impl Vm {
                 }
                 let result = match f {
                     Cfunc::GetPath => self.getpath(args),
-                    Cfunc::Now
-                    | Cfunc::Mktime
+                    Cfunc::Mktime
                     | Cfunc::Gmtime
                     | Cfunc::Localtime
                     | Cfunc::Strftime
