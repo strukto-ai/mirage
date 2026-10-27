@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from collections.abc import Mapping
 
 SURROGATE_BASE = 0xDC00
+RAW_BYTE = re.compile("[\udc80-\udcff]")
 ASCII_MAX = 0x80
 BYTE_MASK = 0xFF
 LOCALE_VARS = ("LC_ALL", "LC_CTYPE", "LANG")
@@ -68,6 +70,21 @@ def decode_text(data: bytes) -> str:
         data (bytes): the bytes to read as text.
     """
     return data.decode("utf-8", "surrogateescape")
+
+
+def join_bytes(text: str) -> str:
+    """Text whose raw bytes read as the characters they spell together.
+
+    A word joined from pieces can hold byte stand-ins that only spell a
+    character side by side: ``$'\\xc3'$'\\xa9'`` is the two bytes of
+    ``é``, each escaped alone. bash holds the word as bytes, so it is
+    ``é``, the same word ``$'\\xc3\\xa9'`` gives, to compare, measure
+    and name a file by.
+
+    Args:
+        text (str): the joined text.
+    """
+    return decode_text(encode_text(text)) if RAW_BYTE.search(text) else text
 
 
 def utf8_locale(env: Mapping[str, str] | None) -> bool:

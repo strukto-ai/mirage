@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { joinBytes } from '../../shell/bytes.ts'
 import { IFS_DEFAULT } from '../../shell/constants.ts'
 import { markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { type Chunk, type Piece, fieldBreak, piece } from './types.ts'
@@ -51,7 +52,7 @@ export function splatChunks(elements: readonly string[], joiner: string, quoted:
 export function joinChunks(chunks: Iterable<Chunk>): string {
   let out = ''
   for (const c of chunks) out += c.kind === 'piece' ? c.text : c.joiner
-  return out
+  return joinBytes(out)
 }
 
 /** The literal text of a word's pieces, glob marks removed. */
@@ -113,5 +114,5 @@ export function splitFields(chunks: Iterable<Chunk>, ifs: string | null): string
     }
   }
   if (started) fields.push(current)
-  return fields
+  return fields.map(joinBytes)
 }
