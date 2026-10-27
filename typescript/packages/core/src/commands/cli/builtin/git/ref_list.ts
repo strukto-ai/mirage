@@ -338,7 +338,8 @@ export async function rootNames(repo: Repo): Promise<string[]> {
  * The branch each worktree has checked out, and where that worktree is. The
  * main worktree is the one this repository was found in or the one around its
  * common directory; a linked one is named by the `gitdir` file git keeps for
- * it, less its `/.git`.
+ * it, less its `/.git`. A branch is checked out even where its worktree's path
+ * is unknown (a common directory not named `.git`), with an empty path.
  */
 export async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
   const heads = new Map<string, string>()
@@ -346,7 +347,7 @@ export async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
   const note = async (dir: PathSpec, path: string): Promise<void> => {
     const data = await readOptional(repo.vfs, dir.join(HEAD_FILE))
     const text = DEC.decode(data ?? new Uint8Array()).trim()
-    if (text.startsWith(SYMREF_PREFIX) && path) {
+    if (text.startsWith(SYMREF_PREFIX)) {
       const ref = text.slice(SYMREF_PREFIX.length).trim()
       if (!heads.has(ref)) heads.set(ref, path)
     }

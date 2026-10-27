@@ -245,7 +245,7 @@ def option_operand(
     return word
 
 
-def lone_help(ctx: Context) -> str:
+def lone_help(ctx: Context, texts: Sequence[str]) -> str:
     """Where ``-h`` puts the usage block for a verb that takes it as help
     only alone.
 
@@ -255,9 +255,11 @@ def lone_help(ctx: Context) -> str:
 
     Args:
         ctx (Context): the line's context, carrying its leaf.
+        texts (Sequence[str]): the verb's positional text operands.
     """
     verb = (ctx.spec or CommandSpec()).name
-    return STDOUT if tuple(ctx.argv[-2:]) == (verb, HELP_SWITCH) else STDERR
+    alone = tuple(ctx.argv[-2:]) == (verb, HELP_SWITCH)
+    return STDOUT if alone and list(texts) == [HELP_SWITCH] else STDERR
 
 
 def check_operands(
@@ -461,7 +463,8 @@ def without_section(
 
     With ``keys`` only those variables leave the blocks, and a block
     they leave holding no variable leaves with them, header and all, as
-    ``git branch --delete-merged`` clears an upstream (git 2.56.0).
+    ``git branch --delete-merged`` clears an upstream (git 2.56.0). A
+    variable sharing its header's line leaves the header behind.
 
     A value continued onto the next line by a trailing backslash is
     followed, so a continuation that opens with ``[`` is still part of
@@ -483,6 +486,7 @@ def without_section(
     want = (section.encode(), name.encode())
     for line in data.splitlines(keepends=True):
         value = line
+        head = b""
         if not continued:
             rest = line
             if line.lstrip().startswith(b"["):
@@ -497,7 +501,9 @@ def without_section(
                     == want
                 ) or (dotted is not None and dotted.groups() == want)
                 header = quoted or dotted
-                rest = line[header.end() if header else line.find(b"]") + 1 :]
+                end = header.end() if header else line.find(b"]") + 1
+                head = line[:end] + line[len(line.rstrip(b"\r\n")) :]
+                rest = line[end:]
             variable, equals, value = rest.partition(b"=")
             comment = rest.lstrip().startswith(COMMENT_BYTES)
             if not equals or comment:
@@ -510,6 +516,8 @@ def without_section(
         elif keys is not None and word not in keys:
             block.append(line)
             holding = holding or bool(word)
+        elif keys is not None and head:
+            block.append(head)
     if holding:
         kept.extend(block)
     return b"".join(kept)

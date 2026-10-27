@@ -367,7 +367,7 @@ export async function revList(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  if (optionOperand(ctx, texts, loneHelp(ctx)) !== null) {
+  if (optionOperand(ctx, texts, loneHelp(ctx, texts)) !== null) {
     throw new UsageError('', verbUsage(ctx))
   }
   const repo = await opened(ctx, fl)
@@ -519,7 +519,7 @@ export async function revParse(
   try {
     const marked = escaped(ctx.argv ?? [])
     const revisions = texts.filter((text) => text !== GIT_DIR_OPTION || marked.has(text))
-    checkOperands(ctx, revisions, loneHelp(ctx))
+    checkOperands(ctx, revisions, loneHelp(ctx, revisions))
     const argv = ctx.argv ?? []
     const verb = argv.indexOf('rev-parse')
     const words = argv.slice(verb + 1)

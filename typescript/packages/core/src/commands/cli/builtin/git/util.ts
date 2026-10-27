@@ -193,10 +193,12 @@ export function optionOperand(
  * exiting 129 (git 2.56).
  *
  * @param ctx the line's context, carrying its leaf
+ * @param texts the verb's positional text operands
  */
-export function loneHelp(ctx: Context): typeof STDOUT | typeof STDERR {
+export function loneHelp(ctx: Context, texts: readonly string[]): typeof STDOUT | typeof STDERR {
   const verb = ctx.spec?.name ?? ''
-  return (ctx.argv ?? []).slice(-2).join(' ') === `${verb} ${HELP_SWITCH}` ? STDOUT : STDERR
+  const alone = (ctx.argv ?? []).slice(-2).join(' ') === `${verb} ${HELP_SWITCH}`
+  return alone && texts.length === 1 && texts[0] === HELP_SWITCH ? STDOUT : STDERR
 }
 
 /**
@@ -397,7 +399,8 @@ export function configSection(
  *
  * With `keys` only those variables leave the blocks, and a block they leave
  * holding no variable leaves with them, header and all, as
- * `git branch --delete-merged` clears an upstream (git 2.56.0).
+ * `git branch --delete-merged` clears an upstream (git 2.56.0). A variable
+ * sharing its header's line leaves the header behind.
  *
  * A value continued onto the next line by a trailing backslash is followed, so
  * a continuation that opens with `[` is still part of the block. git 2.50.1
@@ -424,6 +427,7 @@ export function withoutSection(
   let word = ''
   for (const line of text.split(/(?<=\n)/)) {
     let value = line
+    let head = ''
     if (!continued) {
       let rest = line
       if (line.trimStart().startsWith('[')) {
@@ -436,7 +440,10 @@ export function withoutSection(
           (quoted?.[1] === section && quoted[2]?.replace(/\\(.)/g, '$1') === name) ||
           (dotted?.[1] === section && dotted[2] === name)
         const header = quoted ?? dotted
-        rest = line.slice(header ? header[0].length : line.indexOf(']') + 1)
+        const end = header ? header[0].length : line.indexOf(']') + 1
+        const ending = line.endsWith('\r\n') ? '\r\n' : line.endsWith('\n') ? '\n' : ''
+        head = line.slice(0, end) + ending
+        rest = line.slice(end)
       }
       const equals = rest.indexOf('=')
       const comment = /^\s*[;#]/.test(rest)
@@ -449,7 +456,7 @@ export function withoutSection(
     else if (keys !== null && !keys.has(word)) {
       block.push(line)
       holding = holding || word !== ''
-    }
+    } else if (keys !== null && head !== '') block.push(head)
   }
   if (holding) kept.push(...block)
   return kept.join('')

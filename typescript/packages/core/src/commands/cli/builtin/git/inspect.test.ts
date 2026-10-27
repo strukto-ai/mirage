@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawnSync, execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -180,3 +180,51 @@ it('lists branches as native git does: markers, tracking, worktrees and widths',
     )
   }
 }, 60_000)
+
+it('takes -h as help only when it is the verb’s one word', async () => {
+  for (const verb of ['rev-parse', 'rev-list']) {
+    const [code, out] = await run(`${verb} -h`)
+    expect(code, verb).toBe(0)
+    expect(out.startsWith(`usage: git ${verb}`), verb).toBe(true)
+    const [repeatedCode, repeatedOut] = await run(`${verb} HEAD ${verb} -h`)
+    expect(repeatedCode, verb).not.toBe(0)
+    expect(repeatedOut.includes('usage:'), verb).toBe(false)
+  }
+})
+
+it('keeps a branch checked out in a main worktree whose git directory is not .git', async () => {
+  const root = join(tmp, 'separate')
+  const env = {
+    ...NATIVE_ENV,
+    GIT_AUTHOR_NAME: 'Ada',
+    GIT_AUTHOR_EMAIL: 'ada@example.com',
+    GIT_COMMITTER_NAME: 'Ada',
+    GIT_COMMITTER_EMAIL: 'ada@example.com',
+  }
+  const git = (cwd: string, ...args: string[]): string =>
+    execFileSync('git', args, { cwd, env, encoding: 'utf8' })
+  mkdirSync(join(root, 'meta'), { recursive: true })
+  git(
+    tmp,
+    'init',
+    '-q',
+    '-b',
+    'main',
+    '--separate-git-dir',
+    join(root, 'meta/repo'),
+    join(root, 'work'),
+  )
+  const work = join(root, 'work')
+  git(work, 'commit', '-q', '--allow-empty', '-m', 'A')
+  git(work, 'branch', 'trunk')
+  git(work, 'branch', 'gone')
+  for (const name of ['main', 'gone']) git(work, 'branch', '-q', '--set-upstream-to=trunk', name)
+  git(work, 'worktree', 'add', '-q', '--relative-paths', '-b', 'other', '../wt')
+  const tip = git(work, 'rev-parse', '--short', 'gone').trim()
+  const mounted = await mountRepo(root)
+  const result = await mounted.shell('git -C /repo/wt branch --dry-run --delete-merged trunk')
+  expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([
+    0,
+    `Would delete branch gone (was ${tip}).\n`,
+  ])
+})
