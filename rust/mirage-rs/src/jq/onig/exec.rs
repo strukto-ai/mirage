@@ -111,6 +111,18 @@ pub(super) struct Machine {
     frames: Vec<Frame>,
     failing: bool,
     retries: u64,
+    star: Option<Repeat>,
+}
+
+/// A greedy repeat that ran out of budget part-way through the input,
+/// resumed when its instruction runs again.
+#[derive(Clone, Copy)]
+struct Repeat {
+    pc: usize,
+    base: usize,
+    pos: usize,
+    count: u32,
+    min_pos: Option<usize>,
 }
 
 /// The code of the unit at `pos` and its length: a UTF-8 character, or a
@@ -250,6 +262,7 @@ impl Machine {
         self.pos = origin;
         self.origin = origin;
         self.keep = origin;
+        self.star = None;
         self.slots.clear();
         self.slots.resize(prog.slots, UNSET);
         self.counts.clear();
@@ -422,7 +435,9 @@ impl Machine {
 
     fn region(&self, groups: usize) -> Region {
         let mut region = Vec::with_capacity(groups + 1);
-        region.push(Some((self.keep, self.pos)));
+        // A `\K` inside a lookahead can leave the start past the end the
+        // lookahead put back; Oniguruma reports the match from the end.
+        region.push(Some((self.keep.min(self.pos), self.pos)));
         for g in 1..=groups {
             let (start, end) = (self.slots[2 * g], self.slots[2 * g + 1]);
             region.push((start != UNSET && end != UNSET).then_some((start, end)));
@@ -521,6 +536,9 @@ impl Machine {
                 }
                 match matched {
                     Some(next) => {
+                        // A backreference compares a whole capture in one
+                        // step: charge it by the length it consumed.
+                        *budget = budget.saturating_sub((next - self.pos) as u64);
                         self.pos = next;
                         true
                     }
@@ -593,28 +611,63 @@ impl Machine {
                 max,
                 greedy,
             } => {
-                let base = self.pos;
-                let mut pos = self.pos;
-                let mut count = 0;
+                // Each unit taken costs a step; out of budget, the repeat
+                // keeps its place and the instruction runs again. The step
+                // that ran the instruction pays for its first unit, so a
+                // budget of one still makes progress.
+                let resumed = self.star.take().filter(|r| r.pc == pc);
+                let base = resumed.map_or(self.pos, |r| r.base);
+                let mut pos = resumed.map_or(self.pos, |r| r.pos);
+                let mut count = resumed.map_or(0, |r| r.count);
+                let mut min_pos = resumed.and_then(|r| r.min_pos);
                 let mut ok = true;
-                while count < *min {
-                    match take(prog, unit, hay, pos) {
-                        Some(next) => pos = next,
-                        None => {
-                            ok = false;
-                            break;
+                if min_pos.is_none() {
+                    while count < *min {
+                        match take(prog, unit, hay, pos) {
+                            Some(next) => pos = next,
+                            None => {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        count += 1;
+                        if count < *min {
+                            if *budget == 0 {
+                                self.star = Some(Repeat {
+                                    pc,
+                                    base,
+                                    pos,
+                                    count,
+                                    min_pos: None,
+                                });
+                                self.pc = pc;
+                                return Ok(None);
+                            }
+                            *budget -= 1;
                         }
                     }
-                    count += 1;
+                    min_pos = Some(pos);
                 }
                 if ok && *greedy {
-                    let min_pos = pos;
+                    let min_pos = min_pos.unwrap_or(pos);
                     while max.is_none_or(|max| count < max) {
                         match take(prog, unit, hay, pos) {
                             Some(next) => pos = next,
                             None => break,
                         }
                         count += 1;
+                        if *budget == 0 {
+                            self.star = Some(Repeat {
+                                pc,
+                                base,
+                                pos,
+                                count,
+                                min_pos: Some(min_pos),
+                            });
+                            self.pc = pc;
+                            return Ok(None);
+                        }
+                        *budget -= 1;
                     }
                     if pos > min_pos {
                         self.push(Frame::StarBack {
@@ -631,7 +684,6 @@ impl Machine {
                         count,
                     })?;
                 }
-                *budget = budget.saturating_sub(u64::from(count));
                 self.pos = pos;
                 ok
             }

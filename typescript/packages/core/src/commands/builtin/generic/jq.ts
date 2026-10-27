@@ -62,9 +62,8 @@ import { programFileRefusal, readProgramFile } from './program.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
-const DEC = new TextDecoder()
 // Text jq writes as it is, a leading byte order mark included.
-const RAW = new TextDecoder('utf-8', { ignoreBOM: true })
+const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
 const ENC = new TextEncoder()
 const INDENT_MIN = -1
 const INDENT_MAX = 7
@@ -453,9 +452,9 @@ export function readFrames(
     if (tag === FRAME_OUTPUT) {
       outputs.push(DEC.decode(payload))
     } else if (tag === FRAME_DEBUG || tag === FRAME_STDERR) {
-      messages.push([tag, RAW.decode(payload)])
+      messages.push([tag, DEC.decode(payload)])
     } else if (tag === FRAME_ERROR) {
-      stop = { kind: 'error', text: RAW.decode(payload.subarray(1)), string: payload[0] === 1 }
+      stop = { kind: 'error', text: DEC.decode(payload.subarray(1)), string: payload[0] === 1 }
     } else if (tag === FRAME_HALT) {
       const halt = JSON.parse(DEC.decode(payload)) as Omit<JqHalt, 'kind'>
       stop = { kind: 'halt', message: halt.message, string: halt.string, code: halt.code }
@@ -574,6 +573,7 @@ class Engine {
       stop = readFrames(stream.finish(), outputs, messages) ?? stop
     } catch (error) {
       if (!(error instanceof StreamRefusal)) throw error
+      console.debug(`jq: jq_eval leaves the document to jq-wasm: ${error.message}`)
       return null
     }
     for (;;) {

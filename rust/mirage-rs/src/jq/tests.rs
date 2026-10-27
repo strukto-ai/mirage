@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::compile::{Refusal, compile};
 use super::eval::{DEBUG, ERROR, HALT, OUTPUT, STDERR};
-use super::value::parse_json;
+use super::value::{Value, parse_json};
 use super::vm::{Limits, Next, Vm};
 use crate::Stream;
 
@@ -1800,6 +1800,76 @@ fn regex_the_matcher_cannot_run_exactly_never_answers_wrong() {
         assert!(compile(program, &HashMap::new()).is_err(), "{program}");
     }
     assert!(compile(r#"test("ß")"#, &HashMap::new()).is_ok());
+}
+
+/// A pattern the compiler cannot read is refused rather than fall over
+/// at run time: a literal, a `[pattern, flags]` pair and a global are
+/// read; anything else is left to libjq.
+#[test]
+fn regex_fallback_is_decided_at_compile_time() {
+    let mut globals = HashMap::new();
+    globals.insert("re".to_string(), Value::string("\\X"));
+    globals.insert("ok".to_string(), Value::string("a+"));
+    for program in [
+        r#"test(.p)"#,
+        r#"test("a"; .f)"#,
+        r#"test($re)"#,
+        r#"test(["ß", "i"])"#,
+        r#"sub(.p; "y")"#,
+        r#"["a"] as $p | test($p[0])"#,
+    ] {
+        assert!(
+            matches!(compile(program, &globals), Err(Refusal::Unsupported(_))),
+            "{program}"
+        );
+    }
+    for program in [
+        r#"test($ok)"#,
+        r#"test(["a+", "x"])"#,
+        r#"test("a"; null)"#,
+    ] {
+        assert!(compile(program, &globals).is_ok(), "{program}");
+    }
+}
+
+/// Every unit of a repeat, a control-escape chain and a backreference
+/// compare is charged, so one step never does unbounded work.
+#[test]
+fn regex_edge_cases_match_as_oniguruma_does() {
+    assert_eq!(
+        outputs(r#"[test("\\c\\c?"), test("\\cA")]"#, r#""\u001f""#),
+        vec!["[true,false]"]
+    );
+    assert_eq!(
+        outputs(r#"match("(?=a\\K)") | [.offset, .length]"#, r#""a""#),
+        vec!["[0,0]"]
+    );
+    assert_eq!(
+        outputs(r#"test("(.*)x\\1")"#, r#""axbb""#),
+        vec!["true"]
+    );
+    assert_eq!(
+        outputs(r#"test("^(.*)\\1$")"#, r#""abab""#),
+        vec!["true"]
+    );
+}
+
+#[test]
+fn a_long_repeat_pauses_with_the_budget() {
+    let hay = format!("\"{}\"", "a".repeat(100_000));
+    for program in [r#"test("^a*$")"#, r#"test("^(a{50000})\\1$")"#] {
+        let mut stream = open(program, 1 << 10);
+        let mut wire = Vec::new();
+        stream.feed(hay.as_bytes(), &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        let mut drains = 0;
+        while stream.busy() {
+            stream.drain(&mut wire).unwrap();
+            drains += 1;
+        }
+        assert!(drains > 50, "{program}: {drains} drains");
+        assert_eq!(frames(&wire), vec![Frame::Out("true".into())], "{program}");
+    }
 }
 
 #[test]
