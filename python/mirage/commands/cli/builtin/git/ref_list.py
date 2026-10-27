@@ -53,7 +53,7 @@ from mirage.commands.cli.builtin.git.render import (
     DETACHED_FROM,
     NO_BRANCH,
 )
-from mirage.commands.cli.builtin.git.repo import Repo
+from mirage.commands.cli.builtin.git.repo import Repo, config_bool
 from mirage.commands.cli.builtin.git.revparse import refs_named
 from mirage.commands.cli.builtin.git.seen import (
     guarded,
@@ -487,7 +487,8 @@ async def worktree_heads(repo: Repo) -> dict[str, str]:
     one around its common directory; a linked one is named by the
     ``gitdir`` file git keeps for it, less its ``/.git``. A branch is
     checked out even where its worktree's path is unknown (a common
-    directory not named ``.git``), with an empty path.
+    directory not named ``.git``), with an empty path; a bare
+    repository's ``HEAD`` checks nothing out.
 
     Args:
         repo (Repo): the opened repository.
@@ -510,7 +511,8 @@ async def worktree_heads(repo: Repo) -> dict[str, str]:
             if posixpath.basename(common.virtual) == ".git"
             else ""
         )
-    await note(common, main)
+    if not await config_bool(vfs, location, b"core", b"bare", False):
+        await note(common, main)
     root = common.join(WORKTREES)
     for entry in await read_names(vfs, root):
         linked = root.join(posixpath.basename(entry))

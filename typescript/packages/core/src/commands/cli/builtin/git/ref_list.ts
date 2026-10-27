@@ -339,7 +339,8 @@ export async function rootNames(repo: Repo): Promise<string[]> {
  * main worktree is the one this repository was found in or the one around its
  * common directory; a linked one is named by the `gitdir` file git keeps for
  * it, less its `/.git`. A branch is checked out even where its worktree's path
- * is unknown (a common directory not named `.git`), with an empty path.
+ * is unknown (a common directory not named `.git`), with an empty path; a bare
+ * repository's `HEAD` checks nothing out.
  */
 export async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
   const heads = new Map<string, string>()
@@ -356,7 +357,8 @@ export async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
   if (gitdir.virtual !== commondir.virtual)
     main =
       entryName(commondir.virtual) === '.git' ? commondir.virtual.slice(0, -'/.git'.length) : ''
-  await note(commondir, main)
+  if (!gitBool(await configValues(repo.vfs, repo.location, 'core.bare'), 'core.bare', false))
+    await note(commondir, main)
   const root = commondir.join(WORKTREES)
   for (const entry of await readNames(repo.vfs, root)) {
     const linked = root.join(entryName(entry))
