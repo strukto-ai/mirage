@@ -15,7 +15,7 @@
 import asyncio
 import inspect
 from collections import Counter
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Coroutine, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -215,6 +215,27 @@ def _key_of(op: str, kwargs: dict[str, Any]) -> str:
     return str(kwargs.get("Key", kwargs.get("Prefix", "")))
 
 
+def _at_once(call: Coroutine[Any, Any, T]) -> T:
+    """Run ``call`` to its end without yielding to the loop.
+
+    A request then takes effect at one instant, so the changes it is
+    traced with are its own. A fake that suspends inside a request,
+    such as through an async ``before`` hook, is refused.
+
+    Args:
+        call (Coroutine[Any, Any, T]): the fake's method, not started.
+
+    Raises:
+        RuntimeError: the fake suspended.
+    """
+    try:
+        call.send(None)
+    except StopIteration as done:
+        return done.value
+    call.close()
+    raise RuntimeError("the S3 fake suspended inside a request")
+
+
 def _code(exc: Exception) -> str:
     response = getattr(exc, "response", None)
     if isinstance(response, dict):
@@ -312,15 +333,16 @@ class Network:
         self,
         op: str,
         kwargs: dict[str, Any],
-        perform: Callable[[], Awaitable[T]],
+        perform: Callable[[], Coroutine[Any, Any, T]],
     ) -> T:
         """Carry one request to the store and its answer back.
 
         Args:
             op (str): the client method.
             kwargs (dict[str, Any]): its arguments.
-            perform (Callable[[], Awaitable[T]]): the fake's method; it
-                does not suspend, so it takes effect atomically.
+            perform (Callable[[], Coroutine[Any, Any, T]]): the fake's
+                method, run to its end in one step so it takes effect
+                atomically.
         """
         step = STEP.get()
         key = _key_of(op, kwargs)
@@ -344,7 +366,7 @@ class Network:
         before = self._snapshot()
         commits = dict(self._store.commits)
         try:
-            answer = await perform()
+            answer = _at_once(perform())
         except Exception as exc:
             self._trace.append(
                 Served(seq, loop.time(), step, op, key, sent, (), _code(exc))

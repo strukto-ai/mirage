@@ -14,6 +14,7 @@
 
 import asyncio
 import concurrent.futures
+import gc
 import selectors
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
@@ -24,6 +25,33 @@ T = TypeVar("T")
 SIM_EPOCH: Final = 1_767_225_600.0
 HORIZON_SECONDS: Final = 86_400.0
 MAX_TURNS: Final = 100_000
+REAL_IO: Final = (
+    "add_reader",
+    "add_writer",
+    "connect_accepted_socket",
+    "connect_read_pipe",
+    "connect_write_pipe",
+    "create_connection",
+    "create_datagram_endpoint",
+    "create_server",
+    "create_unix_connection",
+    "create_unix_server",
+    "getaddrinfo",
+    "getnameinfo",
+    "sendfile",
+    "sock_accept",
+    "sock_connect",
+    "sock_recv",
+    "sock_recv_into",
+    "sock_recvfrom",
+    "sock_recvfrom_into",
+    "sock_sendall",
+    "sock_sendfile",
+    "sock_sendto",
+    "start_tls",
+    "subprocess_exec",
+    "subprocess_shell",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,9 +284,12 @@ def _awaiting(task: asyncio.Task[Any]) -> tuple[str, ...]:
 class SimLoop(asyncio.SelectorEventLoop):
     """Real asyncio with virtual time.
 
-    Overrides only the public ``time()`` and injects a selector, so the
+    Overrides only public methods, ``time()`` and every real-I/O entry
+    point in ``REAL_IO`` (which raise), and injects a selector, so the
     ready queue keeps asyncio's FIFO order and no private loop name is
-    touched. Order comes from timers alone.
+    touched. Order comes from timers alone. An error the loop would only
+    log, such as a task's exception nobody retrieved, is kept in
+    ``unhandled`` and fails the run.
 
     Args:
         lag (Callable[[int], float]): the lag of the nth blocking job.
@@ -274,9 +305,20 @@ class SimLoop(asyncio.SelectorEventLoop):
         self._settling: list[asyncio.Future[None]] = []
         self._idle_hooks: list[Callable[[], bool]] = []
         self._held_hooks: list[Callable[[], tuple[str, ...]]] = []
+        self.unhandled: list[BaseException] = []
         super().__init__(selector=self.timeline)
         self.timeline.sealed = True
         self.set_default_executor(LagExecutor(self, lag))
+        self.set_exception_handler(self._keep)
+
+    def _keep(
+        self, loop: asyncio.AbstractEventLoop, context: dict[str, Any]
+    ) -> None:
+        del loop
+        error = context.get("exception")
+        if not isinstance(error, BaseException):
+            error = RuntimeError(context.get("message", "loop error"))
+        self.unhandled.append(error)
 
     def time(self) -> float:
         """Virtual seconds since the loop was built."""
@@ -331,6 +373,19 @@ class SimLoop(asyncio.SelectorEventLoop):
         return tuple(sorted(dumps, key=lambda d: d.name))
 
 
+def _refuse(name: str) -> Callable[..., Any]:
+    def refused(self: SimLoop, *args: Any, **kwargs: Any) -> Any:
+        del self, args, kwargs
+        raise RuntimeError(f"real I/O inside the simulator: loop.{name}")
+
+    refused.__name__ = name
+    return refused
+
+
+for _name in REAL_IO:
+    setattr(SimLoop, _name, _refuse(_name))
+
+
 class SimClock:
     """The workspace ``Clock`` as a view of the loop.
 
@@ -380,8 +435,10 @@ def _teardown(loop: SimLoop, finished: bool) -> None:
     left = sorted(t.get_name() for t in asyncio.all_tasks(loop))
     loop.timeline.cap = loop.timeline.turns + loop.timeline.max_turns
     failed = loop.run_until_complete(_cancel_all())
+    gc.collect(1)
+    failed += loop.unhandled
     if failed:
-        raise ExceptionGroup("tasks failed while cancelled", failed)
+        raise ExceptionGroup("errors nobody handled", failed)
     if finished and left:
         raise RuntimeError(f"tasks outlived the program: {left}")
 
@@ -394,7 +451,8 @@ def run(
     """Run ``main`` on a fresh ``SimLoop``, then close it.
 
     A task still pending when ``main`` returns is an error, and so is a
-    task that fails while it is cancelled. When ``main`` itself failed,
+    task that fails while it is cancelled or whose exception nobody
+    retrieved. When ``main`` itself failed,
     the teardown's failure is noted on that error instead of hiding it.
 
     Args:

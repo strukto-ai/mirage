@@ -30,23 +30,23 @@ State = str | Absent
 
 
 def state_of(content: bytes | None) -> State:
-    """A short digest of ``content``, or ABSENT for no object.
+    """The digest of ``content``, or ABSENT for no object.
 
     Args:
         content (bytes | None): the stored bytes.
     """
     if content is None:
         return ABSENT
-    return hashlib.md5(content).hexdigest()[:8]
+    return hashlib.md5(content).hexdigest()
 
 
 def show(state: State) -> str:
-    """``state`` as the trace prints it.
+    """``state`` as the trace prints it, the digest cut to 8 digits.
 
     Args:
         state (State): a digest or ABSENT.
     """
-    return state.value if isinstance(state, Absent) else state
+    return state.value if isinstance(state, Absent) else state[:8]
 
 
 @dataclass(frozen=True, slots=True)

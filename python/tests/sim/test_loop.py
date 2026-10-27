@@ -183,3 +183,39 @@ def test_one_program_replays_identically():
     first = _program(7)
     assert first == _program(7)
     assert first != _program(8)
+
+
+async def _crash() -> None:
+    raise ValueError("worker crashed")
+
+
+async def _start_a_worker_that_crashes() -> None:
+    asyncio.get_running_loop().create_task(_crash())
+    await asyncio.sleep(1)
+
+
+def test_a_task_that_fails_unobserved_fails_the_run():
+    with pytest.raises(ExceptionGroup) as caught:
+        run(_start_a_worker_that_crashes())
+    assert caught.group_contains(ValueError, match="worker crashed")
+
+
+async def _recv_with_data_waiting() -> None:
+    left, right = socket.socketpair()
+    left.setblocking(False)
+    right.sendall(b"ready")
+    try:
+        await asyncio.get_running_loop().sock_recv(left, 5)
+    finally:
+        left.close()
+        right.close()
+
+
+async def _resolve_a_host() -> None:
+    await asyncio.get_running_loop().getaddrinfo("localhost", 80)
+
+
+@pytest.mark.parametrize("program", [_recv_with_data_waiting, _resolve_a_host])
+def test_real_io_is_refused_even_when_it_would_not_wait(program):
+    with pytest.raises(RuntimeError, match="real I/O"):
+        run(program())
