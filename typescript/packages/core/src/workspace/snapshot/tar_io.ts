@@ -127,6 +127,11 @@ async function pack(
     [MANIFEST_NAME, ENC.encode(JSON.stringify(manifest, null, 2))],
     ...Object.entries(blobs),
   ]
+  const taken = counts(entries.map(([name]) => memberName(name)))
+  for (const [name] of entries) {
+    if ((taken.get(memberName(name)) ?? 0) > 1)
+      throw new Error(`Blob paths name one member: ${name}`)
+  }
   const members: util.JSONType[] = []
   for (const [index, [name, data]] of entries.entries()) {
     const size = typeof data === 'string' ? await fileSize(data) : data.byteLength
@@ -166,8 +171,9 @@ async function pack(
 /**
  * Read a snapshot tar from `source` in one pass: the manifest first, then
  * each blob it names, a disk mount's file written under `staging` when there
- * is one, every other blob held in memory; a member it names no blob for is
- * read past.
+ * is one (and held as well when the manifest names it elsewhere too), every
+ * other blob held in memory; a member it names no blob for is read past, and
+ * one stored twice is refused.
  */
 async function unpack(
   source: AsyncGenerator<Uint8Array>,
@@ -178,26 +184,26 @@ async function unpack(
   const staged = new Map<string, string>()
   const files = new Map<string, [WritableStreamDefaultWriter<Uint8Array>, Promise<number>]>()
   let manifest: Record<string, unknown> | null = null
-  let wanted = new Set<string>()
-  let diskBlobs = new Set<string>()
+  let named = new Map<string, number>()
+  let disk = new Map<string, number>()
   const begin = async (name: string): Promise<void> => {
+    if (held.has(name) || staged.has(name)) throw new Error(`Blob stored twice: ${name}`)
     if (name === MANIFEST_NAME) {
       held.set(name, [])
       return
     }
     if (manifest === null) {
       manifest = manifestOf(held)
-      wanted = new Set([...blobPaths(manifest)].map(memberName))
-      diskBlobs = new Set(diskFileRefs(manifest).map(([, , blobPath]) => memberName(blobPath)))
+      named = counts(blobPaths(manifest).map(memberName))
+      disk = counts(diskFileRefs(manifest).map(([, , blobPath]) => memberName(blobPath)))
     }
-    if (!wanted.has(name)) return
-    if (staging === null || !diskBlobs.has(name)) {
-      held.set(name, [])
-      return
+    if (!named.has(name)) return
+    if (staging !== null && disk.has(name)) {
+      const target = await stagedPath(staging, name)
+      files.set(name, fileWriter(target))
+      staged.set(name, target)
     }
-    const target = await stagedPath(staging, name)
-    files.set(name, fileWriter(target))
-    staged.set(name, target)
+    if (!staged.has(name) || (named.get(name) ?? 0) > (disk.get(name) ?? 0)) held.set(name, [])
   }
   const serve = async (
     request: Readonly<Record<string, util.JSONType>>,
@@ -213,11 +219,9 @@ async function unpack(
     }
     const name = textView(request.path).replace(/^\/+/, '')
     if (request.create === true || request.whole === true) await begin(name)
+    held.get(name)?.push(data)
     const file = files.get(name)
-    if (file === undefined) {
-      held.get(name)?.push(data)
-      return { reply: {} }
-    }
+    if (file === undefined) return { reply: {} }
     await file[0].write(data)
     if (request.op === 'flush' || request.whole === true) {
       files.delete(name)
@@ -268,14 +272,21 @@ function memberName(path: string): string {
     .join('/')
 }
 
-/** Every blob path the manifest names, each checked safe. */
-function blobPaths(manifest: Record<string, unknown>): Set<string> {
-  const paths = new Set<string>()
+/** The blob path of every reference in the manifest, each checked safe. */
+function blobPaths(manifest: Record<string, unknown>): string[] {
+  const paths: string[] = []
   resolveManifest(manifest, (path) => {
-    paths.add(path)
+    paths.push(path)
     return new Uint8Array()
   })
   return paths
+}
+
+/** How many times each name comes. */
+function counts(names: readonly string[]): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const name of names) out.set(name, (out.get(name) ?? 0) + 1)
+  return out
 }
 
 async function* once(data: Uint8Array): AsyncGenerator<Uint8Array> {

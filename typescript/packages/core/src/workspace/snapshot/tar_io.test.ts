@@ -175,6 +175,26 @@ describe('snapshot tars of disk files', () => {
     }
   })
 
+  it('refuses blob paths that name one member', async () => {
+    const blobs = { 'b/f': ENC.encode('one'), './b//f': ENC.encode('two') }
+    await expect(writeSnapshotTar({}, blobs)).rejects.toThrow(/name one member/)
+  })
+
+  it('reads a staged blob the manifest names elsewhere there too', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-tar-'))
+    try {
+      const tar = join(dir, 's.tar')
+      const manifest = { ...diskManifest('b/f'), cache: { [BLOB_REF_KEY]: 'b/f' } }
+      await writeFileTar(tar, manifest, { 'b/f': ENC.encode('data') })
+      const staging = join(dir, 'staging')
+      await mkdir(staging)
+      const state = (await readFileTar(tar, staging)) as Record<string, unknown>
+      expect(state.cache).toEqual(ENC.encode('data'))
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('keeps a staged blob inside the staging directory', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-tar-'))
     try {
