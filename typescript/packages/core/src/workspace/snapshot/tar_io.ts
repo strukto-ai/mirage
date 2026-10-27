@@ -67,9 +67,7 @@ export async function writeTar(
   manifest: Record<string, unknown>,
   blobs: Record<string, Uint8Array | string>,
 ): Promise<number> {
-  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
-  const written = writeStreamToFile(target, readable)
-  const writer = writable.getWriter()
+  const [writer, written] = fileWriter(target)
   try {
     await pack(manifest, blobs, null, (data) => writer.write(data))
     await writer.close()
@@ -167,8 +165,9 @@ async function pack(
 
 /**
  * Read a snapshot tar from `source` in one pass: the manifest first, then
- * each blob, a disk mount's file written under `staging` when there is one,
- * every other blob held in memory.
+ * each blob it names, a disk mount's file written under `staging` when there
+ * is one, every other blob held in memory; a member it names no blob for is
+ * read past.
  */
 async function unpack(
   source: AsyncGenerator<Uint8Array>,
@@ -179,6 +178,7 @@ async function unpack(
   const staged = new Map<string, string>()
   const files = new Map<string, [WritableStreamDefaultWriter<Uint8Array>, Promise<number>]>()
   let manifest: Record<string, unknown> | null = null
+  let wanted = new Set<string>()
   let diskBlobs = new Set<string>()
   const begin = async (name: string): Promise<void> => {
     if (name === MANIFEST_NAME) {
@@ -187,16 +187,16 @@ async function unpack(
     }
     if (manifest === null) {
       manifest = manifestOf(held)
+      wanted = blobPaths(manifest)
       diskBlobs = new Set(diskFileRefs(manifest).map(([, , blobPath]) => blobPath))
     }
-    if (!isSafeBlobPath(name)) throw new Error(`Unsafe blob path: ${String(name)}`)
+    if (!wanted.has(name)) return
     if (staging === null || !diskBlobs.has(name)) {
       held.set(name, [])
       return
     }
     const target = await stagedPath(staging, name)
-    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
-    files.set(name, [writable.getWriter(), writeStreamToFile(target, readable)])
+    files.set(name, fileWriter(target))
     staged.set(name, target)
   }
   const serve = async (
@@ -249,6 +249,25 @@ async function unpack(
     if (blob === undefined) throw new Error(`Manifest references missing blob: ${blobPath}`)
     return concat(blob)
   })
+}
+
+/** A writer into a new file at `path`, whose writes fail once the copy into the file does. */
+function fileWriter(path: string): [WritableStreamDefaultWriter<Uint8Array>, Promise<number>] {
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+  const writer = writable.getWriter()
+  const written = writeStreamToFile(path, readable)
+  void written.catch((error: unknown) => writer.abort(error))
+  return [writer, written]
+}
+
+/** Every blob path the manifest names, each checked safe. */
+function blobPaths(manifest: Record<string, unknown>): Set<string> {
+  const paths = new Set<string>()
+  resolveManifest(manifest, (path) => {
+    paths.add(path)
+    return new Uint8Array()
+  })
+  return paths
 }
 
 async function* once(data: Uint8Array): AsyncGenerator<Uint8Array> {

@@ -26,7 +26,7 @@ from mirage.shell.bytes import byte_view, text_view
 from mirage.types import JsonValue, VFSName
 from mirage.workspace.snapshot.keys import MountKey, StateKey, VFSStateKey
 from mirage.workspace.snapshot.manifest import resolve_manifest
-from mirage.workspace.snapshot.utils import BLOB_REF_KEY, is_safe_blob_path
+from mirage.workspace.snapshot.utils import BLOB_REF_KEY
 
 _MANIFEST_NAME = "manifest.json"
 
@@ -135,7 +135,8 @@ def read_tar(
 ) -> dict[str, Any]:
     """Read a tar produced by write_tar; return a resolved state dict.
 
-    mirage-rs's tar reads it once, in order, sniffing its compressor.
+    mirage-rs's tar reads it once, in order, sniffing its compressor;
+    a member the manifest names no blob for is read past, not held.
     With ``staging``, each disk mount's files are written there as they
     arrive and come back as host paths, so a restore copies them into
     place instead of holding them in memory; the caller removes the
@@ -150,6 +151,7 @@ def read_tar(
     staged: dict[str, Path] = {}
     files: dict[str, IO[bytes]] = {}
     manifest: dict[str, Any] | None = None
+    wanted: set[str] = set()
     disk: set[str] = set()
     with ExitStack() as stack:
         src = cast(
@@ -161,15 +163,16 @@ def read_tar(
         stack.callback(lambda: [f.close() for f in files.values()])
 
         def begin(name: str) -> None:
-            nonlocal manifest, disk
+            nonlocal manifest, wanted, disk
             if name == _MANIFEST_NAME:
                 held[name] = bytearray()
                 return
             if manifest is None:
                 manifest = _manifest_of(held)
+                wanted = _blob_paths(manifest)
                 disk = {blob for _, _, blob in _disk_file_refs(manifest)}
-            if not is_safe_blob_path(name):
-                raise ValueError(f"Unsafe blob path: {name!r}")
+            if name not in wanted:
+                return
             if staging is None or name not in disk:
                 held[name] = bytearray()
                 return
@@ -257,6 +260,22 @@ def _manifest_of(held: dict[str, bytearray]) -> dict[str, Any]:
     if _MANIFEST_NAME not in held:
         raise ValueError(f"{_MANIFEST_NAME} missing or unreadable")
     return cast(dict[str, Any], json.loads(held[_MANIFEST_NAME]))
+
+
+def _blob_paths(manifest: dict[str, Any]) -> set[str]:
+    """Every blob path the manifest names, each checked safe.
+
+    Args:
+        manifest (dict[str, Any]): the parsed manifest.
+    """
+    paths: set[str] = set()
+
+    def note(path: str) -> bytes:
+        paths.add(path)
+        return b""
+
+    resolve_manifest(manifest, note)
+    return paths
 
 
 def _disk_file_refs(
