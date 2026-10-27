@@ -4,7 +4,7 @@ import os
 RUNTIMES = {
     "monty": (
         "Mirage's sandboxed Python: a subset of the language and part of "
-        "the standard library, with no packages, network or processes"
+        "the standard library, with no packages, network or subprocesses"
     ),
     "local": (
         "the host's full Python: the whole language and standard library "
@@ -13,8 +13,8 @@ RUNTIMES = {
 }
 
 PROMPT = (
-    "Pick the runtime that can run this shell line, monty when it can, "
-    "and say why in one sentence.\n"
+    "Pick the runtime that can run the Python code in this line, monty "
+    "when it can, and say why in one sentence.\n"
     + "\n".join(f"{name}: {about}" for name, about in RUNTIMES.items())
 )
 

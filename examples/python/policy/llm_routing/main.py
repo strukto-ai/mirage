@@ -32,6 +32,9 @@ async def main() -> None:
                 print(f"      by {answer.policy}")
             res = await ws.shell(line)
             print(f"  output: {(res.stdout or b'').decode().strip()}")
+            if res.exit_code:
+                err = (res.stderr or b"").decode().strip()
+                print(f"  exit {res.exit_code}: {err}")
     finally:
         await ws.close()
 
