@@ -101,18 +101,17 @@ class PatchFiles {
         return suffix === '' ? this.orig : companion(this.orig, suffix)
       }
     }
-    const virtual = resolvePath(textView(path), this.cwd)
-    return PathSpec.fromStrPath(virtual, mountKey(virtual, this.root))
+    const name = textView(path)
+    const virtual = resolvePath(name, this.cwd)
+    return PathSpec.fromStrPath(name, mountKey(virtual, this.root), this.cwd)
   }
 
   private async kind(path: string): Promise<Record<string, util.JSONType>> {
     let found: FileStat
     try {
       let spec = this.spec(path)
-      if (this.links !== undefined) {
-        const real = this.links.resolve(spec.virtual)
-        spec = PathSpec.fromStrPath(real, mountKey(real, this.root))
-      }
+      const real = this.links?.resolve(spec.virtual) ?? spec.virtual
+      if (real !== spec.virtual) spec = PathSpec.fromStrPath(real, mountKey(real, this.root))
       found = await this.stat(spec)
     } catch (err) {
       if (err instanceof CycleError) return {}

@@ -129,14 +129,17 @@ class _PatchFiles:
             if path.startswith(typed):
                 suffix = text_view(path[len(typed) :])
                 return _companion(self.orig, suffix) if suffix else self.orig
-        virtual = resolve_path(text_view(path), self.cwd)
-        return PathSpec.from_str_path(virtual, mount_key(virtual, self.root))
+        name = text_view(path)
+        virtual = resolve_path(name, self.cwd)
+        key = mount_key(virtual, self.root)
+        return PathSpec.from_str_path(name, key, cwd=self.cwd)
 
     async def _kind(self, path: str) -> dict[str, JsonValue]:
         spec = self._spec(path)
         try:
-            if self.links is not None:
-                real = self.links.resolve(spec.virtual)
+            if self.links is not None and (
+                (real := self.links.resolve(spec.virtual)) != spec.virtual
+            ):
                 spec = PathSpec.from_str_path(real, mount_key(real, self.root))
             found = await self.stat(spec)
         except IsADirectoryError:

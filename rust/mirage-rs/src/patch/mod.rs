@@ -483,7 +483,8 @@ async fn patch_file(
 }
 
 /// Delete a file the patch emptied, and, for a name the patch gave, each
-/// directory above it that it leaves empty, as GNU does.
+/// directory above it that it leaves empty, as GNU does; a `.` names no
+/// directory of the name's own, and a `..` ends the walk.
 async fn remove(files: &Files, name: &[u8], parents: bool) -> Result<(), i32> {
     let path = name.to_vec();
     if !files.change(Request::Unlink { path }, name).await {
@@ -495,8 +496,13 @@ async fn remove(files: &Files, name: &[u8], parents: bool) -> Result<(), i32> {
     let mut dir = name;
     while let Some(at) = memchr::memrchr(b'/', dir) {
         dir = &dir[..at];
+        match dir.rsplit(|&b| b == b'/').next().unwrap_or(dir) {
+            b"" | b"." => continue,
+            b".." => break,
+            _ => {}
+        }
         let path = dir.to_vec();
-        if dir.is_empty() || failed(&files.host.ask(Request::Rmdir { path }).await.0) {
+        if failed(&files.host.ask(Request::Rmdir { path }).await.0) {
             break;
         }
     }
