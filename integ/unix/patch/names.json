@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "id": "patch_picks_the_file_among_its_names",
+      "seq": 9941415,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941415 && touch /data/patch_9941415/.keep; cd /data/patch_9941415 || exit 1; printf 'a\\n' > a.txt; printf -- '--- a.txt\\n+++ b.txt\\n@@ -1 +1 @@\\n-a\\n+b\\n' | patch; echo rc=$?; cat a.txt; printf 'a\\n' > long.txt; printf 'a\\n' > s.txt; printf -- '--- long.txt\\n+++ s.txt\\n@@ -1 +1 @@\\n-a\\n+b\\n' | patch; echo rc=$?; cat long.txt s.txt; mkdir -p d; printf 'a\\n' > d/x.txt; printf 'a\\n' > yy.txt; printf -- '--- d/x.txt\\n+++ yy.txt\\n@@ -1 +1 @@\\n-a\\n+b\\n' | patch -p0; echo rc=$?; cat d/x.txt yy.txt; mkdir -p sub; printf 'a\\n' > sub/f.txt; printf -- '--- sub/f.txt\\n+++ sub/f.txt\\n@@ -1 +1 @@\\n-a\\n+b\\n' | patch; echo rc=$?; printf -- 'x\\n--- a/gone.txt\\n+++ b/gone.txt\\n@@ -1 +1 @@\\n-a\\n+b\\n' | patch -p1; echo rc=$?; printf -- 'Index: sub/f.txt\\n--- /dev/null\\n+++ /dev/null\\n@@ -1 +1 @@\\n-a\\n+c\\n' | patch -p0; echo rc=$?; cat sub/f.txt; cd sub; printf -- '--- f.txt\\n+++ f.txt\\n@@ -1 +1 @@\\n-c\\n+e\\n' | patch; echo rc=$?; cat f.txt; cd ..; cd /; rm -r /data/patch_9941415",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file a.txt\nrc=0\nb\npatching file s.txt\nrc=0\na\nb\ncan't find file to patch at input line 3\nPerhaps you used the wrong -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|--- d/x.txt\n|+++ yy.txt\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\nrc=1\na\na\ncan't find file to patch at input line 3\nPerhaps you should have used the -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|--- sub/f.txt\n|+++ sub/f.txt\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\nrc=1\ncan't find file to patch at input line 4\nPerhaps you used the wrong -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|x\n|--- a/gone.txt\n|+++ b/gone.txt\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\nrc=1\npatching file sub/f.txt\nrc=0\nc\npatching file f.txt\nrc=0\ne\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "patch_creates_and_deletes_files",
+      "seq": 9941416,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941416 && touch /data/patch_9941416/.keep; cd /data/patch_9941416 || exit 1; printf -- '--- /dev/null\\n+++ b/d1/d2/new.txt\\n@@ -0,0 +1 @@\\n+n\\n' > c.diff; patch -p1 < c.diff; echo rc=$?; cat d1/d2/new.txt; patch -p1 < c.diff; echo rc=$?; printf -- '--- a/d1/d2/new.txt\\n+++ /dev/null\\n@@ -1 +0,0 @@\\n-n\\n' | patch -p1; echo rc=$?; ls; printf 'a\\nb\\nc\\n' > k.txt; printf -- '--- a/k.txt\\n+++ /dev/null\\n@@ -1,2 +0,0 @@\\n-a\\n-b\\n' | patch -p1; echo rc=$?; cat k.txt; printf -- '--- a/gone.txt\\n+++ /dev/null\\n@@ -1 +0,0 @@\\n-a\\n' | patch -p1; echo rc=$?; printf 'n\\n' > r.txt; printf -- '--- /dev/null\\n+++ b/r.txt\\n@@ -0,0 +1 @@\\n+n\\n' | patch -R -p1; echo rc=$?; ls; cd /; rm -r /data/patch_9941416",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file d1/d2/new.txt\nrc=0\nn\nThe next patch would create the file d1/d2/new.txt,\nwhich already exists!  Assume -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored\nrc=1\npatching file d1/d2/new.txt\nrc=0\nc.diff\npatching file k.txt\nNot deleting file k.txt as content differs from patch\nrc=1\nc\nThe next patch would delete the file gone.txt,\nwhich does not exist!  Assume -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored\nrc=1\npatching file r.txt\nrc=0\nc.diff\nk.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

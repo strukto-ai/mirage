@@ -33,6 +33,8 @@ const patch: CommandFn = async (_accessor, paths, _texts, ctx) => {
       return materialize(files.read(p))
     },
     (p, d) => files.write(p, d),
+    stat,
+    { mkdir: (p) => files.mkdir(p), unlink: (p) => files.unlink(p), rmdir: (p) => files.rmdir(p) },
   )
 }
 

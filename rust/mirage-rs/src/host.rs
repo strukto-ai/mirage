@@ -236,6 +236,20 @@ impl Host {
                 Some(_) => (json!({}), Vec::new()),
                 None => (failure("ENOENT", "No such file or directory"), Vec::new()),
             },
+            "rmdir" => {
+                let path = text(&request["path"]);
+                let inside = format!("{path}/");
+                let mut names = self.files.keys().chain(self.directories.iter());
+                let busy = names.any(|name| name.starts_with(&inside));
+                match self.directories.iter().position(|dir| *dir == path) {
+                    Some(at) if !busy => {
+                        self.directories.remove(at);
+                        (json!({}), Vec::new())
+                    }
+                    Some(_) => (failure("ENOTEMPTY", "Directory not empty"), Vec::new()),
+                    None => (failure("ENOENT", "No such file or directory"), Vec::new()),
+                }
+            }
             "flush" => {
                 let path = request["path"].as_str();
                 // A conditional write finds the file changed at its commit.

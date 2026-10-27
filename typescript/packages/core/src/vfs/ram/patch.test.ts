@@ -14,7 +14,7 @@
 
 import { expect, it } from 'vitest'
 import { patchGeneric } from '../../commands/builtin/generic/patch.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { runWithMountGate } from '../../context/session_context.ts'
 import { Files } from '../../workspace/files.ts'
 
@@ -45,6 +45,13 @@ it.each(['', '/data', '/nested/data'])(
         files.set(path.vfsPath, data)
         return Promise.resolve()
       }
+      const stat = (path: PathSpec): Promise<FileStat> => {
+        expect(path.virtual).toBe(prefix + '/' + path.vfsPath)
+        if (!files.has(path.vfsPath))
+          return Promise.reject(Object.assign(new Error('gone'), { code: 'ENOENT' }))
+        return Promise.resolve(new FileStat({ name: path.vfsPath, type: FileType.FILE }))
+      }
+      const unexpected = (): Promise<void> => Promise.reject(new Error('unexpected change'))
       const input = PathSpec.fromStrPath(prefix + '/fix.diff', 'fix.diff')
       const orig = PathSpec.fromStrPath(prefix + '/hello.txt', 'hello.txt')
       // The mount the command runs on, as its scope binds it.
@@ -59,6 +66,8 @@ it.each(['', '/data', '/nested/data'])(
           },
           read,
           write,
+          stat,
+          { mkdir: unexpected, unlink: unexpected, rmdir: unexpected },
         ),
       )
       expect(seen).toContain('hello.txt')

@@ -95,6 +95,10 @@ pub(crate) enum Request {
     Mkdir {
         path: Vec<u8>,
     },
+    /// Remove one directory, which must be empty.
+    Rmdir {
+        path: Vec<u8>,
+    },
     Write {
         path: Vec<u8>,
         mode: WriteMode,
@@ -206,6 +210,10 @@ impl Request {
             }
             Request::Mkdir { path } => {
                 put("op", "mkdir".into());
+                put("path", latin1(path));
+            }
+            Request::Rmdir { path } => {
+                put("op", "rmdir".into());
                 put("path", latin1(path));
             }
             Request::Write {

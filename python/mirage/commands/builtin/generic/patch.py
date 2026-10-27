@@ -12,16 +12,23 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error
+from mirage.errors.classify import classify, failure_text
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import fs_strerror
 from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.stream import Served, open_stream, serve_requests
 from mirage.shell.bytes import byte_view, text_view
-from mirage.types import JsonValue, PathSpec
+from mirage.types import FileStat, FileType, JsonValue, PathSpec
+from mirage.utils.key_prefix import mount_key
+from mirage.utils.path import resolve_path
 from mirage.utils.quote import shell_quote
 
 logger = logging.getLogger(__name__)
+
+
+# What patch changes on a path besides writing it.
+PatchChanges = Mapping[str, Callable[[PathSpec], Awaitable[None]]]
 
 
 def _companion(spec: PathSpec, suffix: str) -> PathSpec:
@@ -66,19 +73,26 @@ class _PatchFiles:
 
     The engine reads the patch as ``-`` and names every other file as its
     report does: the ORIGFILE operand as typed, or a name from the patch,
-    which resolves against the root of the mount the command runs on;
-    ``.orig`` and ``.rej`` after either name its companions. A file that
-    is not there or is a directory is the engine's to report; any other
-    failure is the command's.
+    which resolves against the working directory, as GNU's does; ``.orig``
+    and ``.rej`` after either name its companions. It stats the names it
+    picks the file among, makes the directories a file it creates needs,
+    and removes a file it empties with the directories that leaves empty.
+    A file that is not there or is a directory is the engine's to report;
+    any other failure is the command's.
 
     Args:
         source (PathSpec | None): the patch file, None for stdin.
         stdin (ByteSource | None): standard input.
         orig (PathSpec | None): ORIGFILE, the one file every section
             patches.
-        root (str): the root of the mount the command runs on.
+        cwd (str): the working directory names resolve against.
+        root (str): the root of the mount the command runs on, which
+            keys them.
         read_bytes (Callable): bound reader.
         write_bytes (Callable): bound writer.
+        stat (Callable): stat refusing a directory with EISDIR.
+        changes (Mapping[str, Callable]): ``mkdir``, ``unlink`` and
+            ``rmdir``.
     """
 
     def __init__(
@@ -86,25 +100,54 @@ class _PatchFiles:
         source: PathSpec | None,
         stdin: ByteSource | None,
         orig: PathSpec | None,
+        cwd: str,
         root: str,
         read_bytes: Callable[..., Awaitable[bytes]],
         write_bytes: Callable[..., Awaitable[None]],
+        stat: Callable[[PathSpec], Awaitable[FileStat]],
+        changes: PatchChanges,
     ) -> None:
         self.errors = ByteSpool()
         self.source = source
         self.stdin = stdin
         self.orig = orig
-        self.root = root.rstrip("/")
+        self.cwd = cwd
+        self.root = root
         self.read_bytes = read_bytes
         self.write_bytes = write_bytes
+        self.stat = stat
+        self.changes = changes
 
     def _spec(self, path: str) -> PathSpec:
         if self.orig is not None:
             typed = byte_view(self.orig.raw_path or self.orig.virtual)
-            suffix = text_view(path[len(typed) :])
-            return _companion(self.orig, suffix) if suffix else self.orig
-        name = text_view(path)
-        return PathSpec.from_str_path(f"{self.root}/{name}", name)
+            if path.startswith(typed):
+                suffix = text_view(path[len(typed) :])
+                return _companion(self.orig, suffix) if suffix else self.orig
+        virtual = resolve_path(text_view(path), self.cwd)
+        return PathSpec.from_str_path(virtual, mount_key(virtual, self.root))
+
+    async def _kind(self, path: str) -> dict[str, JsonValue]:
+        try:
+            found = await self.stat(self._spec(path))
+        except IsADirectoryError:
+            return {"kind": "dir"}
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            logger.debug("nothing stands at %r: %s", path, exc)
+            return {}
+        return {"kind": "dir" if found.type == FileType.DIRECTORY else "file"}
+
+    async def _change(self, op: str, path: str) -> dict[str, JsonValue]:
+        try:
+            await self.changes[op](self._spec(path))
+        except OSError as exc:
+            if (condition := classify(exc)) is None:
+                raise
+            return {
+                "error": byte_view(failure_text(exc)),
+                "errno": condition.name,
+            }
+        return {}
 
     async def serve(
         self, request: Mapping[str, JsonValue], data: bytes
@@ -119,6 +162,10 @@ class _PatchFiles:
         if request["op"] == "write":
             await self.write_bytes(self._spec(path), data)
             return Served({})
+        if request["op"] == "stat":
+            return Served(await self._kind(path))
+        if request["op"] in self.changes:
+            return Served(await self._change(str(request["op"]), path))
         if request.get("file") is not True:
             patch = await _load_patch_data(
                 self.source, self.stdin, self.read_bytes
@@ -167,7 +214,7 @@ def _strip_refusal(text: str, value: int | None) -> str:
 
 @dataclass(frozen=True, slots=True)
 class PatchFlags:
-    strip: int = 0
+    strip: int | None = None
     reverse: bool = False
     input_path: PathSpec | None = None
     forward: bool = False
@@ -180,7 +227,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> PatchFlags:
     # A count past a name's slashes strips them all, as any larger one
     # does, so UINTMAX stands in for one JSON cannot carry to mirage-rs.
     return PatchFlags(
-        strip=0 if strip is None else min(strip, UINTMAX),
+        strip=None if strip is None else min(strip, UINTMAX),
         reverse=fl.as_bool("R"),
         input_path=input_flag if isinstance(input_flag, PathSpec) else None,
         forward=fl.as_bool("N"),
@@ -193,6 +240,8 @@ async def patch_generic(
     ctx: Context,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    changes: PatchChanges,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(ctx.flags)
     if len(paths) > 2:
@@ -202,15 +251,18 @@ async def patch_generic(
     # `patch [ORIGFILE [PATCHFILE]]`: the second operand is the patch
     # file, ahead of -i, and the first is the one file every hunk goes to
     # in place of the names the patch's headers carry, which otherwise
-    # resolve against the root of the mount the command runs on.
+    # resolve against the working directory.
     orig = paths[0] if paths else None
     files = _PatchFiles(
         paths[1] if len(paths) > 1 else parsed.input_path,
         ctx.stdin,
         orig,
+        ctx.cwd.virtual,
         mount_root(ctx),
         read_bytes,
         write_bytes,
+        stat,
+        changes,
     )
     engine = open_stream(
         "patch",

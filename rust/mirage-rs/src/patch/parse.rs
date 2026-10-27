@@ -1,6 +1,10 @@
 //! A unified diff read into the file sections GNU patch 2.8 applies, each
 //! line held with the newline it ends with.
 
+use std::borrow::Cow;
+use std::collections::HashSet;
+use std::ops::Range;
+
 /// One line of a hunk: `b' '`, `b'-'` or `b'+'`, and its text with the
 /// newline it ends with, which a `\` line after it takes away.
 #[derive(Clone, Copy)]
@@ -10,13 +14,16 @@ pub(super) struct Line<'a> {
 }
 
 /// One `@@` hunk: where its header says each side starts, what the header
-/// carries after the closing `@@`, and its lines.
+/// carries after the closing `@@`, its lines, and whether the patch ended
+/// in the middle of a line while it was read, which GNU says before the
+/// hunk's own line.
 #[derive(Clone)]
 pub(super) struct Hunk<'a> {
     pub(super) old_start: i64,
     pub(super) new_start: i64,
     pub(super) note: &'a [u8],
     pub(super) body: Vec<Line<'a>>,
+    pub(super) cut: bool,
 }
 
 impl<'a> Hunk<'a> {
@@ -35,6 +42,7 @@ impl<'a> Hunk<'a> {
             new_start: self.old_start,
             note: self.note,
             body: self.body.iter().map(flip).collect(),
+            cut: self.cut,
         }
     }
 
@@ -54,19 +62,54 @@ impl<'a> Hunk<'a> {
     }
 }
 
+/// How reading a section's hunks ended: at a line that is no hunk's, at a
+/// last line the patch left without a newline right after them (GNU reads
+/// it twice, and says so each time), or at a line no hunk can hold, which
+/// ends the run (the line's number and text, and whether the patch ended
+/// in the middle of a line first).
+#[derive(Clone, PartialEq, Debug)]
+pub(super) enum End {
+    Done,
+    Cut,
+    Malformed(usize, Vec<u8>, bool),
+}
+
 /// One file's part of a patch: what its reject file's `---` and `+++`
-/// lines say, the file it patches by its headers, `-p` applied, and its
-/// hunks in order.
+/// lines say; the names GNU picks the file among, in its order (old, new,
+/// then `Index:` when both of those are left out), `-p` applied and a name
+/// it strips away or `/dev/null` left out; which header names `/dev/null`;
+/// the lines since the last section and the first hunk's line number,
+/// which GNU shows when it finds no file; whether its CRs were stripped;
+/// its hunks in order, and how reading them ended.
 pub(super) struct Section<'a> {
     pub(super) old_label: Vec<u8>,
     pub(super) new_label: Vec<u8>,
-    pub(super) target: Vec<u8>,
+    pub(super) names: Vec<Vec<u8>>,
+    pub(super) old_null: bool,
+    pub(super) new_null: bool,
+    pub(super) leading: Range<usize>,
+    pub(super) at: usize,
+    pub(super) crlf: bool,
     pub(super) hunks: Vec<Hunk<'a>>,
+    pub(super) end: End,
+}
+
+/// A patch's sections, and whether a last line it left without a newline
+/// was reached between sections, which GNU says once at the end.
+pub(super) struct Patch<'a> {
+    pub(super) sections: Vec<Section<'a>>,
+    pub(super) cut: bool,
 }
 
 /// The values a header number takes at most, so the placement arithmetic
 /// on one never overflows.
 const NUMBER: i64 = 1 << 48;
+
+/// A line GNU makes up where the patch ends inside a hunk: blank context.
+const BLANK: &[u8] = b" \n";
+
+/// What GNU says each time it reads a last line left without a newline.
+pub(super) const CUT: &str = "patch unexpectedly ends in middle of line";
 
 /// A patch's or a file's lines, each with the newline it ends with; the
 /// last may have none.
@@ -83,14 +126,48 @@ pub(super) fn lines(text: &[u8]) -> Vec<&[u8]> {
     lines
 }
 
-fn chomp(line: &[u8]) -> &[u8] {
+/// The patch with GNU's CRs stripped, and the lines whose `+++` header
+/// asked for it. A section whose `+++` line ends in CRLF is read with the
+/// CR taken off every line that ends so, up to the next `+++` line that
+/// does not.
+pub(super) fn strip_crs(patch: &[u8]) -> (Cow<'_, [u8]>, HashSet<usize>) {
+    let mut crlf = HashSet::new();
+    let asks = |line: &&[u8]| line.starts_with(b"+++ ") && line.ends_with(b"\r\n");
+    if !lines(patch).iter().any(asks) {
+        return (Cow::Borrowed(patch), crlf);
+    }
+    let mut stripping = false;
+    let mut out = Vec::with_capacity(patch.len());
+    for (index, line) in lines(patch).into_iter().enumerate() {
+        if line.starts_with(b"+++ ") {
+            stripping = line.ends_with(b"\r\n");
+            if stripping {
+                crlf.insert(index);
+            }
+        }
+        match line.strip_suffix(b"\r\n") {
+            Some(body) if stripping => {
+                out.extend_from_slice(body);
+                out.push(b'\n');
+            }
+            _ => out.extend_from_slice(line),
+        }
+    }
+    (Cow::Owned(out), crlf)
+}
+
+pub(super) fn chomp(line: &[u8]) -> &[u8] {
     line.strip_suffix(b"\n").unwrap_or(line)
 }
 
 /// A patch name with `-p` leading components dropped, GNU's way: a run of
 /// slashes is one separator, and a name with fewer components than `-p`
-/// drops leaves no name at all.
-fn strip_name(name: &[u8], strip: usize) -> Option<&[u8]> {
+/// drops leaves no name at all. With no `-p` the name is its basename.
+fn strip_name(name: &[u8], strip: Option<usize>) -> Option<&[u8]> {
+    let Some(strip) = strip else {
+        let cut = memchr::memrchr(b'/', name).map_or(0, |at| at + 1);
+        return Some(&name[cut..]);
+    };
     let mut rest = name;
     for _ in 0..strip {
         let cut = memchr::memchr(b'/', rest)?;
@@ -104,11 +181,10 @@ fn trim_slashes(name: &[u8]) -> &[u8] {
     &name[skip..]
 }
 
-/// A `---`/`+++` line's name, and what a reject file says for it: the file
-/// as `-p` leaves it (`/dev/null` when it leaves nothing) and the timestamp
-/// the header carried.
-fn label(line: &[u8], strip: usize) -> (&[u8], Vec<u8>) {
-    let rest = &chomp(line)[4..];
+/// A header line's name with the blanks around it gone, and the timestamp
+/// after a tab.
+fn name_and_stamp(rest: &[u8]) -> (&[u8], &[u8]) {
+    let rest = chomp(rest);
     let (name, stamp) = match memchr::memchr(b'\t', rest) {
         Some(tab) => rest.split_at(tab),
         None => (rest, &b""[..]),
@@ -119,13 +195,50 @@ fn label(line: &[u8], strip: usize) -> (&[u8], Vec<u8>) {
         .iter()
         .rposition(|b| !blank(b))
         .map_or(start, |at| at + 1);
-    let name = &name[start..end];
-    let stripped = if name == b"/dev/null" {
-        None
-    } else {
-        strip_name(name, strip)
-    };
-    (name, [stripped.unwrap_or(b"/dev/null"), stamp].concat())
+    (&name[start..end], stamp)
+}
+
+/// A name as a candidate for the file: `-p` applied, none for `/dev/null`
+/// or a name `-p` strips away.
+fn candidate(name: &[u8], strip: Option<usize>) -> Option<Vec<u8>> {
+    if name == b"/dev/null" {
+        return None;
+    }
+    let name = trim_slashes(strip_name(name, strip)?);
+    (!name.is_empty()).then(|| name.to_vec())
+}
+
+/// One side of a file's header: its candidate name, what a reject file
+/// says for it (the file as `-p` leaves it, `/dev/null` when it leaves
+/// nothing, then the timestamp), and whether it names `/dev/null`.
+struct Side {
+    name: Option<Vec<u8>>,
+    label: Vec<u8>,
+    null: bool,
+}
+
+impl Side {
+    fn read(line: &[u8], strip: Option<usize>) -> Side {
+        let (name, stamp) = name_and_stamp(&line[4..]);
+        let stripped = if name == b"/dev/null" {
+            None
+        } else {
+            strip_name(name, strip)
+        };
+        Side {
+            name: candidate(name, strip),
+            label: [stripped.unwrap_or(b"/dev/null"), stamp].concat(),
+            null: name == b"/dev/null",
+        }
+    }
+
+    fn none() -> Side {
+        Side {
+            name: None,
+            label: b"/dev/null".to_vec(),
+            null: false,
+        }
+    }
 }
 
 fn number(digits: &[u8]) -> Option<(i64, &[u8])> {
@@ -160,22 +273,44 @@ fn unterminate(body: &mut [Line<'_>]) {
     }
 }
 
-/// The hunks that start at `lines[index]`, and the index after them. A
-/// hunk ends when its header's line counts are used up, as GNU reads it,
-/// so a removed line that reads `-- x` is never taken for the next file's
-/// header.
-fn hunks<'a>(lines: &[&'a [u8]], mut index: usize) -> (Vec<Hunk<'a>>, usize) {
+/// The hunks that start at `lines[index]`, the index after them, and how
+/// they ended. A hunk ends when its header's line counts are used up, as
+/// GNU reads it, so a removed line that reads `-- x` is never taken for
+/// the next file's header. Where the patch ends first, the lines a hunk
+/// still wants are blank context when both its sides want as many, and
+/// the patch is malformed otherwise; a line no hunk holds in the middle of
+/// one is malformed too. `cut` is whether a last line without a newline was
+/// left off the end of `lines`.
+fn hunks<'a>(lines: &[&'a [u8]], mut index: usize, cut: bool) -> (Vec<Hunk<'a>>, usize, End) {
     let mut hunks = Vec::new();
     while let Some(&line) = lines.get(index) {
         let Some((old_start, mut old_left, new_start, mut new_left, note)) = header(line) else {
-            break;
+            return (hunks, index, End::Done);
         };
-        let mut body = Vec::new();
+        let mut hunk = Hunk {
+            old_start,
+            new_start,
+            note,
+            body: Vec::new(),
+            cut: false,
+        };
+        let mut last = index + 1;
         index += 1;
-        while let Some(&line) = lines.get(index) {
-            if old_left <= 0 && new_left <= 0 {
-                break;
-            }
+        while old_left > 0 || new_left > 0 {
+            let Some(&line) = lines.get(index) else {
+                if hunk.body.is_empty() || old_left != new_left {
+                    return (hunks, index, End::Malformed(last, BLANK.to_vec(), cut));
+                }
+                hunk.cut = cut;
+                for _ in 0..old_left {
+                    hunk.body.push(Line {
+                        kind: b' ',
+                        text: &BLANK[1..],
+                    });
+                }
+                hunks.push(hunk);
+                return (hunks, index, End::Done);
+            };
             match line[0] {
                 b' ' | b'\n' => {
                     old_left -= 1;
@@ -183,67 +318,110 @@ fn hunks<'a>(lines: &[&'a [u8]], mut index: usize) -> (Vec<Hunk<'a>>, usize) {
                 }
                 b'-' => old_left -= 1,
                 b'+' => new_left -= 1,
-                b'\\' => {
-                    unterminate(&mut body);
+                b'\\' if !hunk.body.is_empty() => {
+                    unterminate(&mut hunk.body);
                     index += 1;
                     continue;
                 }
-                _ => break,
+                _ => {
+                    return (
+                        hunks,
+                        index,
+                        End::Malformed(index + 1, line.to_vec(), false),
+                    );
+                }
             }
             let (kind, text) = match line[0] {
                 b'\n' => (b' ', line),
                 kind => (kind, &line[1..]),
             };
-            body.push(Line { kind, text });
+            hunk.body.push(Line { kind, text });
             index += 1;
+            last = index;
         }
         while lines.get(index).is_some_and(|line| line[0] == b'\\') {
-            unterminate(&mut body);
+            unterminate(&mut hunk.body);
             index += 1;
         }
-        hunks.push(Hunk {
-            old_start,
-            new_start,
-            note,
-            body,
-        });
+        hunks.push(hunk);
+        if cut && index == lines.len() {
+            return (hunks, index, End::Cut);
+        }
     }
-    (hunks, index)
+    (hunks, index, End::Done)
 }
 
 /// The patch's file sections in the order it gives them; a pair of headers
 /// with no hunk after them gives none. Two sections may name one file, and
 /// each is applied in turn, as GNU does; a section is never folded into
-/// another by its name.
-pub(super) fn sections<'a>(lines: &[&'a [u8]], strip: usize) -> Vec<Section<'a>> {
+/// another by its name. A last line the patch left without a newline is
+/// read as no line at all, as GNU reads it, and reading stops at the first
+/// malformed section. `crlf` holds the `+++` lines whose section had its
+/// CRs stripped.
+pub(super) fn sections<'a>(
+    lines: &[&'a [u8]],
+    strip: Option<usize>,
+    crlf: &HashSet<usize>,
+) -> Patch<'a> {
+    let cut = lines.last().is_some_and(|line| !line.ends_with(b"\n"));
+    let lines = &lines[..lines.len() - usize::from(cut)];
     let mut sections = Vec::new();
-    let mut old_label = b"/dev/null".to_vec();
+    let mut old = Side::none();
+    let mut index_name = None;
+    let mut since = 0;
     let mut index = 0;
+    let mut read = false;
     while let Some(&line) = lines.get(index) {
         index += 1;
         if line.starts_with(b"--- ") {
-            old_label = label(line, strip).1;
+            old = Side::read(line, strip);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix(b"Index: ") {
+            index_name = candidate(name_and_stamp(rest).0, strip);
             continue;
         }
         if !line.starts_with(b"+++ ") {
             continue;
         }
-        let (new_name, new_label) = label(line, strip);
-        let (hunks, next) = hunks(lines, index);
+        let new = Side::read(line, strip);
+        let plus = index - 1;
+        let (hunks, next, end) = hunks(lines, index, cut);
+        let first = index;
         index = next;
-        let target = strip_name(new_name, strip).unwrap_or_else(|| {
-            let cut = memchr::memrchr(b'/', new_name).map_or(0, |at| at + 1);
-            &new_name[cut..]
+        read = read || matches!(end, End::Cut) || hunks.last().is_some_and(|hunk| hunk.cut);
+        let old = std::mem::replace(&mut old, Side::none());
+        let index_name = index_name.take();
+        if hunks.is_empty() && !matches!(end, End::Malformed(..)) {
+            continue;
+        }
+        let mut names: Vec<Vec<u8>> = old.name.into_iter().chain(new.name).collect();
+        if names.is_empty() {
+            names.extend(index_name);
+        }
+        let malformed = matches!(end, End::Malformed(..));
+        sections.push(Section {
+            old_label: old.label,
+            new_label: new.label,
+            names,
+            old_null: old.null,
+            new_null: new.null,
+            leading: since..first,
+            at: first + 1,
+            crlf: crlf.contains(&plus),
+            hunks,
+            end,
         });
-        let old_label = std::mem::replace(&mut old_label, b"/dev/null".to_vec());
-        if !hunks.is_empty() {
-            sections.push(Section {
-                old_label,
-                new_label,
-                target: trim_slashes(target).to_vec(),
-                hunks,
-            });
+        since = index;
+        if malformed {
+            return Patch {
+                sections,
+                cut: false,
+            };
         }
     }
-    sections
+    Patch {
+        sections,
+        cut: cut && !read,
+    }
 }

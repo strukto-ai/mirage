@@ -16,7 +16,8 @@ import re
 from collections.abc import Mapping
 
 SURROGATE_BASE = 0xDC00
-RAW_BYTE = re.compile("[\udc80-\udcff]")
+SURROGATE_LOW = 0xDC80
+SURROGATE_HIGH = 0xDCFF
 ASCII_MAX = 0x80
 BYTE_MASK = 0xFF
 LOCALE_VARS = ("LC_ALL", "LC_CTYPE", "LANG")
@@ -84,7 +85,10 @@ def join_bytes(text: str) -> str:
     Args:
         text (str): the joined text.
     """
-    return decode_text(encode_text(text)) if RAW_BYTE.search(text) else text
+    raw = f"[{chr(SURROGATE_LOW)}-{chr(SURROGATE_HIGH)}]"
+    if text.isascii() or re.search(raw, text) is None:
+        return text
+    return decode_text(encode_text(text))
 
 
 def utf8_locale(env: Mapping[str, str] | None) -> bool:
