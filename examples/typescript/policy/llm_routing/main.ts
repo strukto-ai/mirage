@@ -1,5 +1,6 @@
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseArgs } from 'node:util'
 import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
 import { parseRuntime } from './utils.ts'
 
@@ -8,11 +9,14 @@ const CONFIG = resolve(
   '../../../python/policy/llm_routing/workspace.yaml',
 )
 
-async function main(): Promise<void> {
+async function main(model: string): Promise<void> {
   const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(CONFIG))
   const ws = new Workspace(args.mounts, {
     ...args.options,
-    policyFunctions: { parse_runtime: parseRuntime },
+    policyFunctions: {
+      parse_runtime: (task: string, runtimes: Record<string, string>, line: string) =>
+        parseRuntime(model, task, runtimes, line),
+    },
   })
   try {
     for (const line of [
@@ -37,4 +41,5 @@ async function main(): Promise<void> {
   }
 }
 
-await main()
+const { values } = parseArgs({ options: { model: { type: 'string', default: 'gpt-6-luna' } } })
+await main(values.model)

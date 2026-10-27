@@ -1,4 +1,6 @@
+import argparse
 import asyncio
+from functools import partial
 from pathlib import Path
 
 from utils import parse_runtime
@@ -10,11 +12,11 @@ from mirage.policy import Route
 HERE = Path(__file__).resolve().parent
 
 
-async def main() -> None:
+async def main(model: str) -> None:
     config = load_config(HERE / "workspace.yaml")
     ws = Workspace(
         **config.to_workspace_kwargs(),
-        policy_functions={"parse_runtime": parse_runtime},
+        policy_functions={"parse_runtime": partial(parse_runtime, model)},
     )
     try:
         for line in (
@@ -40,4 +42,6 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="gpt-6-luna")
+    asyncio.run(main(parser.parse_args().model))

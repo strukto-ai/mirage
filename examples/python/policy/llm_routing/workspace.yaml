@@ -12,5 +12,3 @@ runtimes:
 route_policy:
   script: route.py
   runtime: monty
-  env:
-    MODEL: gpt-6-luna
