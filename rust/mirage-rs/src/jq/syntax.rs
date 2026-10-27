@@ -1268,6 +1268,9 @@ impl<'a> Parser<'a> {
         match meta {
             Ast::Literal(Value::Object(_)) => {}
             Ast::Literal(_) => self.fail(loc, "Module metadata must be an object"),
+            _ if folds_in_jq(meta) => {
+                self.unsupported = Some("module metadata jq folds at compile time");
+            }
             _ => self.fail(loc, "Module metadata must be constant"),
         }
     }
@@ -1593,6 +1596,20 @@ fn loc_object(source: &str, loc: Loc) -> Ast {
     object.insert("file".into(), Value::string("<top-level>"));
     object.insert("line".into(), Value::number(line as f64));
     Ast::Literal(Value::object(object))
+}
+
+/// Whether jq's parser folds `ast` to a constant: `fold` leaves a string
+/// repeat and an array subtraction to run time, so a program whose module
+/// metadata holds one is left to libjq rather than refused.
+fn folds_in_jq(ast: &Ast) -> bool {
+    match ast {
+        Ast::Literal(_) => true,
+        Ast::Binop(_, a, b) | Ast::Comma(a, b) => folds_in_jq(a) && folds_in_jq(b),
+        Ast::Collect(None) => true,
+        Ast::Collect(Some(items)) => folds_in_jq(items),
+        Ast::Object(pairs) => pairs.iter().all(|(k, v)| folds_in_jq(k) && folds_in_jq(v)),
+        _ => false,
+    }
 }
 
 /// gen_binop's constant folding: two constants fold into their result,

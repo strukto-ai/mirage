@@ -305,6 +305,9 @@ impl Vm {
     /// value is freed across calls too. True once nothing is left.
     /// Cancellation retires a run this way, a bounded slice at a time.
     pub(crate) fn retire(&mut self, count: usize) -> bool {
+        if let Some(subtracting) = self.subtracting.take() {
+            self.teardown.push(subtracting.into_values());
+        }
         for _ in 0..count {
             if let Some(chunk) = self.teardown.last_mut() {
                 match chunk.pop() {
