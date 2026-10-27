@@ -44,6 +44,12 @@ env:
   # mem0 turns its telemetry on by default: importing it starts a PostHog
   # client, and every Python process then waits ~5 s at exit to flush it.
   MEM0_TELEMETRY: "False"
+  # Node 24's V8 tiers a wasm-to-JS import wrapper up after 1000 calls and
+  # can free an old one whose JIT page is already gone, so the TypeScript
+  # runner aborts on Linux with `Check failed: jit_page.has_value()` or a
+  # corrupted heap. A budget no run reaches never tiers up. It is a V8 flag,
+  # which NODE_OPTIONS refuses, so every tsx call passes it.
+  TSX_V8_FLAGS: --wasm-wrapper-tiering-budget=1000000000
 
 jobs:
   changes:
@@ -514,7 +520,7 @@ jobs:
       - name: Start the declarative battery on Nextcloud (background)
         run: |
           integ/scripts/background.sh start nextcloud \
-            'cd integ && pnpm exec tsx runners/typescript/main.ts --target nextcloud --strict'
+            'cd integ && pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --target nextcloud --strict'
 
       - name: Start MinIO
         run: |
@@ -617,7 +623,7 @@ jobs:
         working-directory: integ
         env:
           NOTION_ENABLED: "1"
-        run: pnpm exec tsx runners/typescript/main.ts --target notion --strict
+        run: pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --target notion --strict
 
       - name: Run notion MCP/REST parity check (TS)
         working-directory: integ
@@ -647,11 +653,11 @@ jobs:
         working-directory: integ
         env:
           LANCEDB_ENABLED: "1"
-        run: pnpm exec tsx runners/typescript/main.ts --target lancedb --strict
+        run: pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --target lancedb --strict
 
       - name: Run find arg-error battery (SaaS backends, dummy creds, no server)
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --facet argerr --strict
+        run: pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --facet argerr --strict
 
       - name: Run declarative battery on Nextcloud
         if: ${{ !cancelled() }}
@@ -968,7 +974,7 @@ jobs:
           --host typescript --facet core --facet http
           --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant,tidb_filesystem
           --emit-dir "$GITHUB_WORKSPACE/emit/typescript"
-          -- pnpm exec tsx runners/typescript/main.ts --strict
+          -- pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --strict
       - name: Probe the GridFS trash under a snapshot restore (typescript)
         if: matrix.shard == 0
         working-directory: integ
@@ -1142,7 +1148,7 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: integ
         run: >-
-          pnpm exec tsx runners/typescript/main.ts
+          pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts
           --target mongodb --target postgres --target chroma --target qdrant
           --strict
 
@@ -1292,7 +1298,7 @@ jobs:
       - name: Run declarative battery on tidb-filesystem (typescript, background)
         run: |
           integ/scripts/background.sh start tidb-filesystem-ts \
-            'cd integ && pnpm exec tsx runners/typescript/main.ts --target tidb-filesystem --strict'
+            'cd integ && pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --target tidb-filesystem --strict'
 
       - name: Run declarative battery on tidb-filesystem (python)
         run: ./python/.venv/bin/python integ/runners/python/main.py --target tidb-filesystem --strict
@@ -2316,7 +2322,7 @@ jobs:
         env:
           LANGFUSE_URL: http://localhost:3000
           JAEGER_URL: http://localhost:16686
-        run: pnpm exec tsx runners/typescript/main.ts --facet observability --strict
+        run: pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --facet observability --strict
 
       - name: Jaeger logs on failure
         if: failure()
@@ -2525,7 +2531,7 @@ jobs:
           failed=""
           for facet in $FACETS; do
             echo "::group::$facet"
-            pnpm exec tsx runners/typescript/main.ts --facet "$facet" --strict || failed="$failed $facet"
+            pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --facet "$facet" --strict || failed="$failed $facet"
             echo "::endgroup::"
           done
           if [ -n "$failed" ]; then echo "failed facets:$failed"; exit 1; fi
