@@ -128,9 +128,10 @@ fn lens_of_groups(node: &Node, lens: &mut [Option<Len>]) {
                 lens_of_groups(item, lens);
             }
         }
-        Node::Repeat { body, .. } | Node::Atomic(body) | Node::Look { body, .. } => {
-            lens_of_groups(body, lens)
-        }
+        Node::Repeat { body, .. }
+        | Node::Atomic(body)
+        | Node::Options(body)
+        | Node::Look { body, .. } => lens_of_groups(body, lens),
         Node::Cond(_, Some((yes, no))) => {
             lens_of_groups(yes, lens);
             lens_of_groups(no, lens);
@@ -145,6 +146,7 @@ fn len(node: &Node, groups: &[Option<Len>]) -> Len {
     match node {
         Node::Empty | Node::Anchor(_) | Node::Look { .. } | Node::Keep => (0, Some(0)),
         Node::Char(_) | Node::Byte(_) | Node::Set(_) | Node::Any(_) => (1, Some(1)),
+        Node::Caseless(_) => unreachable!("unravelled before compiling"),
         Node::Newline => (1, Some(2)),
         Node::Seq(items) => items
             .iter()
@@ -155,7 +157,7 @@ fn len(node: &Node, groups: &[Option<Len>]) -> Len {
             let max = lens.iter().try_fold(0, |acc, l| l.1.map(|m| acc.max(m)));
             (min, max)
         }
-        Node::Group(_, body) | Node::Atomic(body) => len(body, groups),
+        Node::Group(_, body) | Node::Atomic(body) | Node::Options(body) => len(body, groups),
         Node::Repeat { body, min, max, .. } => {
             let (lo, hi) = len(body, groups);
             (
@@ -200,6 +202,7 @@ fn prepare(node: &mut Node, groups: &[Option<Len>]) -> Result<(), String> {
         Node::Group(_, body)
         | Node::Repeat { body, .. }
         | Node::Atomic(body)
+        | Node::Options(body)
         | Node::Look { body, .. } => prepare(body, groups),
         Node::Cond(_, Some((yes, no))) => {
             prepare(yes, groups)?;
@@ -251,7 +254,9 @@ fn allowed_in_behind(node: &Node, negate: bool) -> bool {
         Node::Seq(items) | Node::Alt(items) => {
             items.iter().all(|item| allowed_in_behind(item, negate))
         }
-        Node::Repeat { body, .. } | Node::Atomic(body) => allowed_in_behind(body, negate),
+        Node::Repeat { body, .. } | Node::Atomic(body) | Node::Options(body) => {
+            allowed_in_behind(body, negate)
+        }
         Node::Cond(_, Some((yes, no))) => {
             allowed_in_behind(yes, negate) && allowed_in_behind(no, negate)
         }
@@ -295,7 +300,7 @@ pub(super) fn required(node: &Node) -> Option<char> {
     match node {
         Node::Char(c) => Some(*c),
         Node::Seq(items) => items.iter().find_map(required),
-        Node::Group(_, body) | Node::Atomic(body) => required(body),
+        Node::Group(_, body) | Node::Atomic(body) | Node::Options(body) => required(body),
         Node::Repeat { body, min, .. } if *min > 0 => required(body),
         _ => None,
     }
@@ -313,9 +318,10 @@ fn group_slots(node: &Node, out: &mut Vec<usize>) {
                 group_slots(item, out);
             }
         }
-        Node::Repeat { body, .. } | Node::Atomic(body) | Node::Look { body, .. } => {
-            group_slots(body, out)
-        }
+        Node::Repeat { body, .. }
+        | Node::Atomic(body)
+        | Node::Options(body)
+        | Node::Look { body, .. } => group_slots(body, out),
         Node::Cond(_, Some((yes, no))) => {
             group_slots(yes, out);
             group_slots(no, out);
@@ -356,6 +362,7 @@ impl Compiler<'_> {
                     self.emit(Inst::Unit(unit));
                 }
             }
+            Node::Caseless(_) => unreachable!("unravelled before compiling"),
             Node::Seq(items) => items.iter().for_each(|item| self.node(item)),
             Node::Alt(items) if items.is_empty() => {
                 self.emit(Inst::Fail);
@@ -394,6 +401,7 @@ impl Compiler<'_> {
                 self.node(body);
                 self.emit(Inst::AtomicEnd);
             }
+            Node::Options(body) => self.node(body),
             Node::Look {
                 behind,
                 negate,

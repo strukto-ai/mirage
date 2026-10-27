@@ -3,6 +3,7 @@
 mod class;
 mod compile;
 mod exec;
+mod fold;
 mod parse;
 #[cfg(test)]
 mod tests;
@@ -12,7 +13,6 @@ use self::exec::{Best, Machine, Mode};
 use self::parse::{Anchor, Flags};
 use crate::regex::Step;
 
-pub(crate) use self::class::folds_to_several;
 pub(crate) use self::exec::Region;
 
 /// The ONIG_OPTION_* bits jq's modifier letters set.
@@ -32,8 +32,8 @@ pub(crate) struct Options {
 /// jq's regex builtins compile with, with every group capturing
 /// (ONIG_OPTION_CAPTURE_GROUP). Subexp calls, absent operators, callouts,
 /// text segments (`\X`, `\y`), conditions that are no group reference,
-/// backreferences with a level, case folding to several characters and
-/// Unicode blocks are refused with an error.
+/// backreferences with a level and Unicode blocks are refused with an
+/// error.
 pub(crate) struct Regex {
     program: Program,
     groups: usize,

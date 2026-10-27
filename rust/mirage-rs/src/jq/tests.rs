@@ -1829,35 +1829,122 @@ fn now_asks_the_hosts_clock_at_each_call() {
 #[test]
 fn regex_the_matcher_cannot_run_exactly_never_answers_wrong() {
     assert_eq!(
-        outputs(r#"try test("STRASSE"; "i") catch ."#, r#""Straße""#),
-        vec![r#""Regex failure: case folding to several characters is not supported""#]
-    );
-    assert_eq!(
         outputs(
             r#"[test("strasse"; "i"), test("(?i)STRASSE")]"#,
             r#""Strasse""#
         ),
         vec!["[true,true]"]
     );
+    for program in [r#"test("(?~ab)")"#, r#"sub("\\X"; "y")"#] {
+        assert!(compile(program, &HashMap::new()).is_err(), "{program}");
+    }
     for program in [
+        r#"test("ß")"#,
         r#"test("ß"; "i")"#,
         r#"test("(?i)ß")"#,
         r#"test("\\x{df}"; "i")"#,
         r#"test("(?i)\\x{df}")"#,
         r#"test("[\\x{c0}-\\x{ff}]"; "i")"#,
         r#"test("[[:alpha:]]"; "i")"#,
-        r#"test("(?~ab)")"#,
-        r#"sub("\\X"; "y")"#,
-    ] {
-        assert!(compile(program, &HashMap::new()).is_err(), "{program}");
-    }
-    for program in [
-        r#"test("ß")"#,
-        r#"test("\\x{df}")"#,
         r#"test("[^\\x{df}]"; "i")"#,
         r#"test("[a-z]"; "i")"#,
     ] {
         assert!(compile(program, &HashMap::new()).is_ok(), "{program}");
+    }
+}
+
+/// Oniguruma folds some characters to several (`ß` to `ss`) in a run of
+/// literals, in a bracket class and in a backreference; jq 1.8.2's
+/// answers, offsets in characters.
+#[test]
+fn regex_case_folding_to_several_characters_matches_as_jq_does() {
+    let cases: &[(&str, &str, &str)] = &[
+        (r#"test("STRASSE"; "i")"#, r#""Straße""#, "true"),
+        (
+            r#"[match("ss"; "gi") | [.offset, .length, .string]]"#,
+            r#""ß""#,
+            r#"[[0,1,"ß"]]"#,
+        ),
+        (
+            r#"[match("ß"; "gi") | [.offset, .length, .string]]"#,
+            r#""ss""#,
+            r#"[[0,2,"ss"]]"#,
+        ),
+        (
+            r#"[test("sss"; "i"), test("ss|x"; "i")]"#,
+            r#""sß""#,
+            "[false,true]",
+        ),
+        (r#"test("sss"; "i")"#, r#""ßs""#, "true"),
+        (
+            r#"[test("^ffi$"; "i"), test("^ﬀi$"; "i")]"#,
+            r#""ﬃ""#,
+            "[true,false]",
+        ),
+        (r#"test("^ffi$"; "i")"#, r#""ﬀi""#, "false"),
+        (
+            r#"[test("^i̇$"; "i"), test("^i$"; "i")]"#,
+            r#""İ""#,
+            "[true,false]",
+        ),
+        (r#"test("^İ$"; "i")"#, r#""i̇""#, "true"),
+        (r#"test("ʼn"; "i")"#, r#""ŉ""#, "true"),
+        (
+            r#"[test("s."; "i"), test("s\\w"; "i"), test("\\p{Lower}\\p{Lower}"; "i")]"#,
+            r#""ß""#,
+            "[false,false,false]",
+        ),
+        (
+            r#"[match("[ß]"; "gi") | [.offset, .length]]"#,
+            r#""ssß""#,
+            "[[0,2],[2,1]]",
+        ),
+        (
+            r#"[match("[ß]"; "gi") | [.offset, .length]]"#,
+            r#""ssx""#,
+            "[[0,2]]",
+        ),
+        (r#"[match("[ﬀﬃ]"; "i") | .length]"#, r#""ffi""#, "[2]"),
+        (
+            r#"[test("^[\\p{Lu}]$"; "i"), test("^\\p{Lu}$"; "i"), test("^[[:upper:]]$"; "i")]"#,
+            r#""ss""#,
+            "[true,false,true]",
+        ),
+        (
+            r#"[test("^[^ß]$"; "i"), test("^[ß]$"; "i")]"#,
+            r#""ẞ""#,
+            "[false,true]",
+        ),
+        (
+            r#"[match("(ẞ)\\1"; "i") | [.offset, .length]]"#,
+            r#""ẞßx""#,
+            "[[0,2]]",
+        ),
+        (r#"test("(ss)\\1"; "i")"#, r#""ßß""#, "true"),
+        (
+            r#"[test("(ss)\\1"; "i"), test("^(ß)\\1$"; "i")]"#,
+            r#""ßss""#,
+            "[false,false]",
+        ),
+        (
+            r#"[test("^(K)\\1$"; "i"), test("^(\u212a)\\1$"; "i")]"#,
+            r#""K\u212a""#,
+            "[false,false]",
+        ),
+        (r#"test("^(K)\\1$"; "i")"#, r#""\u212a\u212a""#, "true"),
+        (
+            r#"try test("(?<=[ß])"; "i") catch ."#,
+            r#""x""#,
+            r#""Regex failure: invalid pattern in look-behind""#,
+        ),
+        (
+            r#"[match("ss|ß"; "gil") | [.offset, .length]]"#,
+            r#""ßss""#,
+            "[[0,1],[1,2]]",
+        ),
+    ];
+    for (program, input, want) in cases {
+        assert_eq!(outputs(program, input), vec![want.to_string()], "{program}");
     }
 }
 
@@ -1873,7 +1960,6 @@ fn regex_fallback_is_decided_at_compile_time() {
         r#"test(.p)"#,
         r#"test("a"; .f)"#,
         r#"test($re)"#,
-        r#"test(["ß", "i"])"#,
         r#"sub(.p; "y")"#,
         r#"["a"] as $p | test($p[0])"#,
     ] {
@@ -1882,7 +1968,12 @@ fn regex_fallback_is_decided_at_compile_time() {
             "{program}"
         );
     }
-    for program in [r#"test($ok)"#, r#"test(["a+", "x"])"#, r#"test("a"; null)"#] {
+    for program in [
+        r#"test($ok)"#,
+        r#"test(["a+", "x"])"#,
+        r#"test(["ß", "i"])"#,
+        r#"test("a"; null)"#,
+    ] {
         assert!(compile(program, &globals).is_ok(), "{program}");
     }
 }

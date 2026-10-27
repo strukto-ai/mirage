@@ -1,8 +1,8 @@
 // Adapted from Oniguruma 6.9.10 (BSD-2-Clause), src/regexec.c. See licenses/third_party/oniguruma.txt.
 
-use super::class;
 use super::compile::{Inst, Program, Unit};
 use super::parse::Anchor;
+use super::{class, fold};
 use crate::regex::Step;
 
 const UNSET: usize = usize::MAX;
@@ -226,24 +226,33 @@ fn newline(hay: &[u8], pos: usize) -> Option<usize> {
 }
 
 /// Whether `hay[pos..]` begins with what `hay[start..end]` holds,
-/// ignoring case when `fold`: where that ends.
+/// ignoring case when `fold`: where that ends. The caseless compare is
+/// Oniguruma's string_cmp_ic: as many bytes as the capture, character
+/// by character through each one's case folding.
 fn backref(hay: &[u8], start: usize, end: usize, pos: usize, fold: bool) -> Option<usize> {
-    if !fold {
-        let len = end - start;
-        return (hay.len() - pos >= len && hay[pos..pos + len] == hay[start..end])
-            .then_some(pos + len);
+    let len = end - start;
+    if hay.len() - pos < len {
+        return None;
     }
-    let (mut a, mut b) = (start, pos);
-    while a < end {
-        let (x, xl) = unit_at(hay, a)?;
-        let (y, yl) = unit_at(hay, b)?;
-        if x != y && !class::fold_eq(x, y) {
+    if !fold {
+        return (hay[pos..pos + len] == hay[start..end]).then_some(pos + len);
+    }
+    let (mut s1, mut s2) = (start, pos);
+    let end2 = pos + len;
+    while s1 < end {
+        let f1 = fold::case_fold(hay, &mut s1, end)?;
+        let f2 = fold::case_fold(hay, &mut s2, end2)?;
+        if f1.as_bytes() != f2.as_bytes() {
             return None;
         }
-        a += xl;
-        b += yl;
+        if s2 >= end2 {
+            if s1 < end {
+                return None;
+            }
+            break;
+        }
     }
-    Some(b)
+    Some(s2)
 }
 
 enum Popped {
