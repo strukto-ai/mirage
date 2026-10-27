@@ -438,7 +438,7 @@ def _teardown(loop: SimLoop, finished: bool) -> None:
     gc.collect(1)
     failed += loop.unhandled
     if failed:
-        raise ExceptionGroup("errors nobody handled", failed)
+        raise BaseExceptionGroup("errors nobody handled", failed)
     if finished and left:
         raise RuntimeError(f"tasks outlived the program: {left}")
 

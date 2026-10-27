@@ -219,3 +219,17 @@ async def _resolve_a_host() -> None:
 def test_real_io_is_refused_even_when_it_would_not_wait(program):
     with pytest.raises(RuntimeError, match="real I/O"):
         run(program())
+
+
+async def _a_callback_reads_a_cancelled_future() -> None:
+    loop = asyncio.get_running_loop()
+    cancelled = loop.create_future()
+    cancelled.cancel()
+    loop.call_soon(cancelled.result)
+    await asyncio.sleep(1)
+
+
+def test_a_callback_that_raises_cancelled_still_fails_the_run():
+    with pytest.raises(BaseExceptionGroup) as caught:
+        run(_a_callback_reads_a_cancelled_future())
+    assert caught.group_contains(asyncio.CancelledError)
