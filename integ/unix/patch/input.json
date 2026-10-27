@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "patch_reads_crlf_cut_and_malformed_input",
+      "seq": 9941417,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941417 && touch /data/patch_9941417/.keep; cd /data/patch_9941417 || exit 1; printf 'a\\nb\\n' > c.txt; printf -- '--- a/c.txt\\r\\n+++ b/c.txt\\r\\n@@ -1,2 +1,2 @@\\r\\n a\\r\\n-b\\r\\n+c\\r\\n' | patch -p1; echo rc=$?; cat c.txt; printf 'a\\r\\nb\\r\\n' > w.txt; printf -- '--- w.txt\\n+++ w.txt\\n@@ -1,2 +1,2 @@\\n a\\n-b\\n+c\\n' | patch; echo rc=$?; printf 'a\\nc\\n' > t.txt; printf -- '--- t\\n+++ t\\n@@ -1,2 +1,2 @@\\n-a\\n+b\\n c' | patch t.txt; echo rc=$?; cat t.txt; printf 'a\\nb\\n' > u.txt; printf -- '--- u\\n+++ u\\n@@ -1,2 +1,2 @@\\n-a\\n+b\\n' | patch u.txt; echo rc=$?; cat u.txt; printf 'a\\n' > m.txt; printf -- '--- m\\n+++ m\\n@@ -1 +1 @@\\n-a\\n+b' | patch m.txt 2>&1; echo rc=$?; cat m.txt; printf 'a\\nb\\n' > g.txt; printf -- '--- g.txt\\n+++ g.txt\\n@@ -1,2 +1,2 @@\\n-a\\nXYZ\\n+A\\n b\\n' | patch 2>&1; echo rc=$?; printf 'junk' | patch j.txt 2>&1; echo rc=$?; cd /; rm -r /data/patch_9941417",
+      "expect": {
+        "exit": 0,
+        "stdout": "(Stripping trailing CRs from patch; use --binary to disable.)\npatching file c.txt\nrc=0\na\nc\npatching file w.txt\nHunk #1 FAILED at 1 (different line endings).\n1 out of 1 hunk FAILED -- saving rejects to file w.txt.rej\nrc=1\npatching file t.txt\npatch unexpectedly ends in middle of line\nHunk #1 succeeded at 1 with fuzz 1.\nrc=0\nb\nc\npatching file u.txt\nHunk #1 succeeded at 1 with fuzz 1.\nrc=0\nb\nb\npatching file m.txt\npatch unexpectedly ends in middle of line\npatch: **** malformed patch at line 4:  \n\nrc=2\na\npatching file g.txt\npatch: **** malformed patch at line 5: XYZ\n\nrc=2\npatch unexpectedly ends in middle of line\npatch: **** Only garbage was found in the patch input.\nrc=2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

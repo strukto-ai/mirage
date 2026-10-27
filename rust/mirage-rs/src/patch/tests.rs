@@ -185,21 +185,33 @@ fn a_directory_is_refused_whole() {
 }
 
 #[test]
-fn a_missing_file_is_made_only_when_a_hunk_applies() {
-    let diff = "--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n";
+fn a_missing_file_is_made_only_by_a_patch_that_creates_it() {
+    let diff = "--- /dev/null\n+++ b/d/new.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n";
     let mut host = Host::with(&[], diff);
     let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
-    assert_eq!((status, out.as_str()), (0, "patching file new.txt\n"));
-    assert_eq!(file(&host, "new.txt").as_deref(), Some("one\ntwo\n"));
-    let diff = "--- a/gone.txt\n+++ b/gone.txt\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n";
+    assert_eq!((status, out.as_str()), (0, "patching file d/new.txt\n"));
+    assert_eq!(file(&host, "d/new.txt").as_deref(), Some("one\ntwo\n"));
+    assert_eq!(host.directories, ["d"]);
+    let diff = "x\n--- a/gone.txt\n+++ b/gone.txt\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n";
     let mut host = Host::with(&[], diff);
     let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
     assert_eq!(status, 1);
     assert_eq!(
         out,
-        "patching file gone.txt\nHunk #1 FAILED at 1.\nCannot stat file gone.txt, skipping backup\n1 out of 1 hunk FAILED -- saving rejects to file gone.txt.rej\n"
+        "can't find file to patch at input line 4\nPerhaps you used the wrong -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|x\n|--- a/gone.txt\n|+++ b/gone.txt\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\n"
     );
-    assert!(!host.files.contains_key("gone.txt"));
+    assert!(host.files.is_empty());
+}
+
+#[test]
+fn a_patch_that_empties_a_file_deletes_it_and_the_directories_it_empties() {
+    let diff = "--- a/d/e/f.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-a\n";
+    let mut host = Host::with(&[("d/e/f.txt", "a\n"), ("d/s.txt", "s\n")], diff);
+    host.directories = vec!["d".to_owned(), "d/e".to_owned()];
+    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!((status, out.as_str()), (0, "patching file d/e/f.txt\n"));
+    assert_eq!(host.directories, ["d"]);
+    assert!(!host.files.contains_key("d/e/f.txt"));
 }
 
 #[test]

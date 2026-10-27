@@ -47,6 +47,8 @@ async def patch(
         ctx,
         read_file,
         files.write,
+        stat,
+        {"mkdir": files.mkdir, "unlink": files.unlink, "rmdir": files.rmdir},
     )
 
 

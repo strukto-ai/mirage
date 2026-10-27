@@ -19,7 +19,7 @@ import pytest
 from mirage.commands.builtin.generic.patch import patch_generic
 from mirage.commands.config import Context
 from mirage.context import reset_mount_gate, set_mount_gate
-from mirage.types import MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
 from tests.fixtures.readers import readers
@@ -45,13 +45,18 @@ async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
         assert path.virtual == prefix + "/" + path.vfs_path
         files[path.vfs_path] = data
 
+    async def stat(path):
+        assert path.virtual == prefix + "/" + path.vfs_path
+        if path.vfs_path not in files:
+            raise FileNotFoundError(path.virtual)
+        return FileStat(name=path.vfs_path, type=FileType.FILE)
+
     input_path = PathSpec.from_str_path(prefix + "/fix.diff", "fix.diff")
     orig_path = PathSpec.from_str_path(prefix + "/hello.txt", "hello.txt")
     flags = {"p": "1"}
     if source == "input":
         flags["i"] = input_path
-    # The patch's own names resolve against the root of the mount the
-    # command runs on.
+    # The patch's own names resolve against the working directory.
     rows = (
         [
             MountRow(
@@ -70,7 +75,7 @@ async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
     operands = [orig_path, input_path] if source == "operand" else []
     token = set_mount_gate(prefix + "/", MountMode.WRITE)
     try:
-        await patch_generic(operands, [], ctx, read, write)
+        await patch_generic(operands, [], ctx, read, write, stat, {})
     finally:
         reset_mount_gate(token)
     assert "hello.txt" in seen

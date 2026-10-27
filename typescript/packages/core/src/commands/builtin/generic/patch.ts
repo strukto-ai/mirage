@@ -18,18 +18,19 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { ByteSpool } from '../../../io/spool.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
-import { stripSlash } from '../../../utils/slash.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
+import { classify, failureText } from '../../../errors/classify.ts'
 import { fsStrerror, isEisdir, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { openStream, serveRequests, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
 import { mountRoot } from '../utils/links.ts'
+import { resolvePath } from '../../../utils/path.ts'
 import { UINTMAX } from '../constants.ts'
 
 function companion(spec: PathSpec, suffix: string): PathSpec {
@@ -61,14 +62,19 @@ async function loadPatchData(
   }
 }
 
+/** What patch changes on a path besides writing it. */
+type PatchChanges = Readonly<Record<'mkdir' | 'unlink' | 'rmdir', (p: PathSpec) => Promise<void>>>
+
 /**
  * The files mirage-rs's patch engine reads and writes, whole. The engine
  * reads the patch as `-` and names every other file as its report does: the
  * ORIGFILE operand as typed, or a name from the patch, which resolves against
- * the root of the mount the command runs on; `.orig` and `.rej` after either
- * name its companions. A file that is not there or is a directory is the
- * engine's to report; any other failure is the command's. Mirrors Python's
- * _PatchFiles.
+ * the working directory, as GNU's does; `.orig` and `.rej` after either name
+ * its companions. It stats the names it picks the file among, makes the
+ * directories a file it creates needs, and removes a file it empties with
+ * the directories that leaves empty. A file that is not there or is a
+ * directory is the engine's to report; any other failure is the command's.
+ * Mirrors Python's _PatchFiles.
  */
 class PatchFiles {
   readonly errors = new ByteSpool()
@@ -77,18 +83,51 @@ class PatchFiles {
     private readonly source: PathSpec | null,
     private readonly stdin: ByteSource | null,
     private readonly orig: PathSpec | null,
+    private readonly cwd: string,
     private readonly root: string,
     private readonly read: (p: PathSpec) => Promise<Uint8Array>,
     private readonly write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+    private readonly stat: (p: PathSpec) => Promise<FileStat>,
+    private readonly changes: PatchChanges,
   ) {}
 
   private spec(path: string): PathSpec {
     if (this.orig !== null) {
-      const suffix = textView(path.slice(byteView(this.orig.rawPath).length))
-      return suffix === '' ? this.orig : companion(this.orig, suffix)
+      const typed = byteView(this.orig.rawPath)
+      if (path.startsWith(typed)) {
+        const suffix = textView(path.slice(typed.length))
+        return suffix === '' ? this.orig : companion(this.orig, suffix)
+      }
     }
-    const name = textView(path)
-    return PathSpec.fromStrPath(`${this.root.replace(/\/$/, '')}/${name}`, stripSlash(name))
+    const virtual = resolvePath(textView(path), this.cwd)
+    return PathSpec.fromStrPath(virtual, mountKey(virtual, this.root))
+  }
+
+  private async kind(path: string): Promise<Record<string, util.JSONType>> {
+    let found: FileStat
+    try {
+      found = await this.stat(this.spec(path))
+    } catch (err) {
+      if (isEisdir(err)) return { kind: 'dir' }
+      if (isEnoent(err) || classify(err) === 'ENOTDIR') return {}
+      throw err
+    }
+    return { kind: found.type === FileType.DIRECTORY ? 'dir' : 'file' }
+  }
+
+  private async change(
+    op: keyof PatchChanges,
+    path: string,
+  ): Promise<Record<string, util.JSONType>> {
+    try {
+      await this.changes[op](this.spec(path))
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      const errno = classify(err)
+      const error = byteView(failureText(err))
+      return errno === null ? { error } : { error, errno }
+    }
+    return {}
   }
 
   async serve(request: Readonly<Record<string, util.JSONType>>, data: Uint8Array): Promise<Served> {
@@ -96,6 +135,10 @@ class PatchFiles {
     if (request.op === 'write') {
       await this.write(this.spec(path), data)
       return { reply: {} }
+    }
+    if (request.op === 'stat') return { reply: await this.kind(path) }
+    if (request.op === 'mkdir' || request.op === 'unlink' || request.op === 'rmdir') {
+      return { reply: await this.change(request.op, path) }
     }
     if (request.file !== true) {
       const patch = await loadPatchData(this.source, this.stdin, this.read)
@@ -130,7 +173,7 @@ function stripRefusal(text: string, value: bigint | null): string {
 }
 
 interface PatchFlags {
-  readonly strip: number
+  readonly strip: number | null
   readonly reverse: boolean
   // -i as the parser classified it: a path keeps its typed spelling.
   readonly inputPath: PathSpec | string | null
@@ -140,11 +183,11 @@ interface PatchFlags {
 function parseFlags(bag: Record<string, FlagValue>): PatchFlags {
   const fl = new FlagView(bag, specOf('patch'))
   const input = fl.raw('i')
-  const strip = fl.asNumber('p', stripCount, stripRefusal, { low: 0n, exitCode: 2 }) ?? 0n
+  const strip = fl.asNumber('p', stripCount, stripRefusal, { low: 0n, exitCode: 2 }) ?? null
   // A count past a name's slashes strips them all, as any larger one does,
   // so UINTMAX stands in for one JSON cannot carry to mirage-rs.
   return {
-    strip: Number(strip > UINTMAX ? UINTMAX : strip),
+    strip: strip === null ? null : Number(strip > UINTMAX ? UINTMAX : strip),
     reverse: fl.asBool('R'),
     inputPath: input instanceof PathSpec ? input : (fl.asStr('i') ?? null),
     forward: fl.asBool('N'),
@@ -156,6 +199,8 @@ export async function patchGeneric(
   ctx: Context,
   read: (p: PathSpec) => Promise<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  stat: (p: PathSpec) => Promise<FileStat>,
+  changes: PatchChanges,
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(ctx.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.PATCH, paths[2]?.rawPath ?? '')
@@ -163,9 +208,8 @@ export async function patchGeneric(
   // `patch [ORIGFILE [PATCHFILE]]`: the second operand is the patch file,
   // ahead of -i, and the first is the one file every hunk goes to in place
   // of the names the patch's headers carry, which otherwise resolve against
-  // the root of the mount the command runs on. A `-i` classified as a path
-  // keeps its typed spelling, which the fatal line names. Mirrors Python's
-  // patch_generic.
+  // the working directory. A `-i` classified as a path keeps its typed
+  // spelling, which the fatal line names. Mirrors Python's patch_generic.
   const input = parsed.inputPath
   const source =
     paths[1] ??
@@ -175,7 +219,17 @@ export async function patchGeneric(
         ? PathSpec.fromStrPath(input, mountKey(input, root))
         : null)
   const orig = paths[0] ?? null
-  const files = new PatchFiles(source, ctx.stdin, orig, root, read, write)
+  const files = new PatchFiles(
+    source,
+    ctx.stdin,
+    orig,
+    ctx.cwd.virtual,
+    root,
+    read,
+    write,
+    stat,
+    changes,
+  )
   const engine = await openStream('patch', {
     strip: parsed.strip,
     reverse: parsed.reverse,

@@ -3,7 +3,7 @@
 //! with, so a last line without one matches only a hunk line a `\` line
 //! marks so.
 
-use super::parse::{Hunk, Line};
+use super::parse::{CUT, Hunk, Line};
 
 /// The fuzz factor the manual gives as patch's default: a hunk may leave
 /// up to this many of its outer context lines unmatched to be placed.
@@ -266,7 +266,10 @@ pub(super) struct Outcome<'a> {
 /// an earlier hunk already changed is rejected too, and no further fuzz is
 /// tried for it. When the first hunk is not found but reads at that same
 /// fuzz the other way round, the file is skipped as already applied (or
-/// reversed). Lines are reported in the patched file's numbering.
+/// reversed). Lines are reported in the patched file's numbering; a failed
+/// hunk whose first line and the file's end differently, one in CRLF and
+/// the other not, says `(different line endings)`, and a hunk the patch
+/// ended inside is preceded by GNU's line saying so.
 pub(super) fn section<'a>(
     lines: &[&'a [u8]],
     hunks: &[Hunk<'a>],
@@ -278,8 +281,12 @@ pub(super) fn section<'a>(
     let mut rejected = Vec::new();
     let mut exact = true;
     let (mut used, mut shift, mut grown) = (0i64, 0i64, 0i64);
+    let crlf = |line: Option<&[u8]>| line.is_some_and(|line| line.ends_with(b"\r\n"));
     for (index, given) in hunks.iter().enumerate() {
         let ordinal = index + 1;
+        if given.cut {
+            notes.push(CUT.to_owned());
+        }
         let hunk = given.tried(reverse);
         let want = needle(&hunk);
         let other = (ordinal == 1).then(|| needle(&hunk.swapped()));
@@ -292,9 +299,10 @@ pub(super) fn section<'a>(
             }
             if let Some(other) = &other {
                 if seek(lines, other, fuzz, other.claimed - 1, 0).is_some() {
+                    notes.extend(reversed_notes(reverse, forward));
                     return Outcome {
                         lines: None,
-                        notes: reversed_notes(reverse, forward),
+                        notes,
                         rejected: as_tried(hunks, reverse),
                         exact: false,
                     };
@@ -310,7 +318,17 @@ pub(super) fn section<'a>(
                 }
                 None => want.claimed,
             };
-            notes.push(format!("Hunk #{ordinal} FAILED at {}.", line + grown));
+            let endings =
+                crlf(lines.first().copied()) != crlf(hunk.body.first().map(|line| line.text));
+            let endings = if endings {
+                " (different line endings)"
+            } else {
+                ""
+            };
+            notes.push(format!(
+                "Hunk #{ordinal} FAILED at {}{endings}.",
+                line + grown
+            ));
             rejected.push((hunk, grown));
             exact = false;
             continue;
