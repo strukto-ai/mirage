@@ -3,6 +3,7 @@ import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
+from mirage.commands.builtin.constants import UINTMAX
 from mirage.commands.builtin.utils.links import mount_root
 from mirage.commands.builtin.utils.size_suffix import decimal_value
 from mirage.commands.builtin.utils.stream import read_stdin_async
@@ -97,11 +98,12 @@ class _PatchFiles:
         self.read_bytes = read_bytes
         self.write_bytes = write_bytes
 
-    def _spec(self, name: str) -> PathSpec:
+    def _spec(self, path: str) -> PathSpec:
         if self.orig is not None:
-            typed = self.orig.raw_path or self.orig.virtual
-            suffix = name[len(typed) :]
+            typed = byte_view(self.orig.raw_path or self.orig.virtual)
+            suffix = text_view(path[len(typed) :])
             return _companion(self.orig, suffix) if suffix else self.orig
+        name = text_view(path)
         return PathSpec.from_str_path(f"{self.root}/{name}", name)
 
     async def serve(
@@ -113,9 +115,9 @@ class _PatchFiles:
             request (Mapping[str, JsonValue]): What the engine asks.
             data (bytes): The bytes a write carries.
         """
-        name = text_view(str(request["path"]))
+        path = str(request["path"])
         if request["op"] == "write":
-            await self.write_bytes(self._spec(name), data)
+            await self.write_bytes(self._spec(path), data)
             return Served({})
         if request.get("file") is not True:
             patch = await _load_patch_data(
@@ -126,12 +128,12 @@ class _PatchFiles:
             return Served({"end": True}, patch)
         try:
             return Served(
-                {"end": True}, await self.read_bytes(self._spec(name))
+                {"end": True}, await self.read_bytes(self._spec(path))
             )
         except IsADirectoryError:
             return Served({"errno": "EISDIR"})
         except FileNotFoundError as exc:
-            logger.debug("nothing to patch yet at %s: %s", name, exc)
+            logger.debug("nothing to patch yet at %r: %s", path, exc)
             return Served({"errno": "ENOENT"})
 
 
@@ -175,8 +177,10 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> PatchFlags:
     fl = FlagView(flags, spec=SPECS["patch"])
     input_flag = fl.raw("i")
     strip = fl.as_number("p", _strip_count, _strip_refusal, low=0, exit_code=2)
+    # A count past a name's slashes strips them all, as any larger one
+    # does, so UINTMAX stands in for one JSON cannot carry to mirage-rs.
     return PatchFlags(
-        strip=0 if strip is None else strip,
+        strip=0 if strip is None else min(strip, UINTMAX),
         reverse=fl.as_bool("R"),
         input_path=input_flag if isinstance(input_flag, PathSpec) else None,
         forward=fl.as_bool("N"),

@@ -76,6 +76,41 @@
       "flags": [
         "p"
       ]
+    },
+    {
+      "id": "patch_p_past_uintmax",
+      "seq": 9941413,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941413 && touch /data/patch_9941413/.keep; cd /data/patch_9941413 || exit 1; printf 'a\\n' > h.txt && printf -- '--- a/h.txt\\n+++ b/h.txt\\n@@ -1 +1 @@\\n-a\\n+b\\n' > q.diff && patch -p10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 h.txt q.diff; echo rc=$?; cat h.txt; cd /; rm -r /data/patch_9941413",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file h.txt\nrc=0\nb\n",
+        "stderr": ""
+      }
     }
   ]
 }

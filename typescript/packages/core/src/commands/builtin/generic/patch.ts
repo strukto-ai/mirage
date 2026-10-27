@@ -30,6 +30,7 @@ import { shellQuote } from '../../../utils/quote.ts'
 import { openStream, serveRequests, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
 import { mountRoot } from '../utils/links.ts'
+import { UINTMAX } from '../constants.ts'
 
 function companion(spec: PathSpec, suffix: string): PathSpec {
   return PathSpec.fromStrPath(spec.virtual + suffix, spec.vfsPath + suffix)
@@ -81,18 +82,19 @@ class PatchFiles {
     private readonly write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   ) {}
 
-  private spec(name: string): PathSpec {
+  private spec(path: string): PathSpec {
     if (this.orig !== null) {
-      const suffix = name.slice(this.orig.rawPath.length)
+      const suffix = textView(path.slice(byteView(this.orig.rawPath).length))
       return suffix === '' ? this.orig : companion(this.orig, suffix)
     }
+    const name = textView(path)
     return PathSpec.fromStrPath(`${this.root.replace(/\/$/, '')}/${name}`, stripSlash(name))
   }
 
   async serve(request: Readonly<Record<string, util.JSONType>>, data: Uint8Array): Promise<Served> {
-    const name = textView(typeof request.path === 'string' ? request.path : '')
+    const path = typeof request.path === 'string' ? request.path : ''
     if (request.op === 'write') {
-      await this.write(this.spec(name), data)
+      await this.write(this.spec(path), data)
       return { reply: {} }
     }
     if (request.file !== true) {
@@ -101,7 +103,7 @@ class PatchFiles {
       return { reply: { end: true }, data: patch }
     }
     try {
-      return { reply: { end: true }, data: await this.read(this.spec(name)) }
+      return { reply: { end: true }, data: await this.read(this.spec(path)) }
     } catch (err) {
       if (isEisdir(err)) return { reply: { errno: 'EISDIR' } }
       if (isEnoent(err)) return { reply: { errno: 'ENOENT' } }
@@ -138,8 +140,11 @@ interface PatchFlags {
 function parseFlags(bag: Record<string, FlagValue>): PatchFlags {
   const fl = new FlagView(bag, specOf('patch'))
   const input = fl.raw('i')
+  const strip = fl.asNumber('p', stripCount, stripRefusal, { low: 0n, exitCode: 2 }) ?? 0n
+  // A count past a name's slashes strips them all, as any larger one does,
+  // so UINTMAX stands in for one JSON cannot carry to mirage-rs.
   return {
-    strip: Number(fl.asNumber('p', stripCount, stripRefusal, { low: 0n, exitCode: 2 }) ?? 0n),
+    strip: Number(strip > UINTMAX ? UINTMAX : strip),
     reverse: fl.asBool('R'),
     inputPath: input instanceof PathSpec ? input : (fl.asStr('i') ?? null),
     forward: fl.asBool('N'),

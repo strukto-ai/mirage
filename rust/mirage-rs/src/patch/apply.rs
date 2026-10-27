@@ -337,7 +337,7 @@ pub(super) fn section<'a>(
 /// The file's lines from `from` to `to`, as far as the file goes: a hunk
 /// with no old side goes where it is expected, past the end or not.
 fn window<'s, 'a>(lines: &'s [&'a [u8]], from: i64, to: i64) -> &'s [&'a [u8]] {
-    let clamp = |at: i64| (at.max(0) as usize).min(lines.len());
+    let clamp = |at: i64| usize::try_from(at.max(0)).map_or(lines.len(), |at| at.min(lines.len()));
     &lines[clamp(from)..clamp(to).max(clamp(from))]
 }
 
