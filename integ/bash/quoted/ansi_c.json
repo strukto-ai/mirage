@@ -559,6 +559,41 @@
         "stdout": "same\nx\n1\nrc=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ansi_c_split_bytes_join_into_that_character",
+      "seq": 930156,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=$'\\xc3'$'\\xa9'; [ \"$x\" = é ] && echo same; echo ${#x}; y=$'\\xc3'; y+=$'\\xa9'; echo ${#y}; printf x > /data/sp$'\\xc3'$'\\xa9'; cat /data/spé; echo; ls /data | grep -c '^spé$'; rm /data/spé",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n1\n1\nx\n1\n",
+        "stderr": ""
+      }
     }
   ]
 }

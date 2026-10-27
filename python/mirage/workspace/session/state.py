@@ -36,7 +36,7 @@ from mirage.shell.array import (
     array_with,
     make_array,
 )
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import encode_text, join_bytes
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import (
     FUNCNAME,
@@ -929,7 +929,7 @@ def appended(
     elif isinstance(held, list):
         held = array_get(held, 0)
     text = held or ""
-    return (text, added) if integer else (text + added, None)
+    return (text, added) if integer else (join_bytes(text + added), None)
 
 
 def ensure_var_visible(session: SessionState, name: str) -> None:

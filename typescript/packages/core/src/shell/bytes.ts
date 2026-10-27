@@ -166,6 +166,22 @@ export function decodeText(raw: Uint8Array): string {
 }
 
 /**
+ * Text whose raw bytes read as the characters they spell together.
+ *
+ * A word joined from pieces can hold byte stand-ins that only spell a
+ * character side by side: `$'\xc3'$'\xa9'` is the two bytes of `é`, each
+ * escaped alone. bash holds the word as bytes, so it is `é`, the same word
+ * `$'\xc3\xa9'` gives, to compare, measure and name a file by. Mirrors
+ * Python's `join_bytes`.
+ */
+export function joinBytes(text: string): string {
+  for (let i = 0; i < text.length; i++) {
+    if (isByteSentinel(text, i)) return decodeText(encodeText(text))
+  }
+  return text
+}
+
+/**
  * Whether the environment names a UTF-8 locale, as setlocale reads it.
  *
  * POSIX takes the character type from the first of `LC_ALL`, `LC_CTYPE` and

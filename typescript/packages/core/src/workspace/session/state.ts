@@ -39,7 +39,7 @@ import {
   RANDOM_MODULUS,
   RANDOM_UNSET,
 } from '../../shell/constants.ts'
-import { encodeText } from '../../shell/bytes.ts'
+import { encodeText, joinBytes } from '../../shell/bytes.ts'
 import { ArithError, ExitSignal, ReadonlyError } from '../../shell/errors.ts'
 import type { ArithResult, ArithWrite, ElementOps } from '../../shell/types.ts'
 import { varHidden } from '../../utils/hidden.ts'
@@ -756,7 +756,7 @@ export function appended(
 ): [string, string | null] {
   const text =
     typeof held === 'string' ? held : Array.isArray(held) ? arrayGet(held, 0) : (held?.['0'] ?? '')
-  return integer ? [text, added] : [text + added, null]
+  return integer ? [text, added] : [joinBytes(text + added), null]
 }
 
 export function ensureVarVisible(session: SessionState, name: string): void {

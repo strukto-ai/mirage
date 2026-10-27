@@ -14,6 +14,7 @@
 
 from collections.abc import Iterable, Sequence
 
+from mirage.shell.bytes import join_bytes
 from mirage.shell.constants import IFS_DEFAULT
 from mirage.utils.glob_walk import mark_globs, unmark_globs
 from mirage.workspace.expand.types import Chunk, FieldBreak, Piece
@@ -71,8 +72,8 @@ def join_chunks(chunks: Iterable[Chunk]) -> str:
     Args:
         chunks (Iterable[Chunk]): the word's pieces.
     """
-    return "".join(
-        c.text if isinstance(c, Piece) else c.joiner for c in chunks
+    return join_bytes(
+        "".join(c.text if isinstance(c, Piece) else c.joiner for c in chunks)
     )
 
 
@@ -139,4 +140,4 @@ def split_fields(chunks: Iterable[Chunk], ifs: str | None) -> list[str]:
             index = end
     if started:
         fields.append("".join(current))
-    return fields
+    return [join_bytes(field) for field in fields]
