@@ -192,39 +192,56 @@ it('takes -h as help only when it is the verb’s one word', async () => {
   }
 })
 
+const AUTHOR_ENV = {
+  ...NATIVE_ENV,
+  GIT_AUTHOR_NAME: 'Ada',
+  GIT_AUTHOR_EMAIL: 'ada@example.com',
+  GIT_COMMITTER_NAME: 'Ada',
+  GIT_COMMITTER_EMAIL: 'ada@example.com',
+}
+
+function nativeIn(cwd: string, ...args: string[]): string {
+  return execFileSync('git', args, { cwd, env: AUTHOR_ENV, encoding: 'utf8' })
+}
+
 it('keeps a branch checked out in a main worktree whose git directory is not .git', async () => {
   const root = join(tmp, 'separate')
-  const env = {
-    ...NATIVE_ENV,
-    GIT_AUTHOR_NAME: 'Ada',
-    GIT_AUTHOR_EMAIL: 'ada@example.com',
-    GIT_COMMITTER_NAME: 'Ada',
-    GIT_COMMITTER_EMAIL: 'ada@example.com',
-  }
-  const git = (cwd: string, ...args: string[]): string =>
-    execFileSync('git', args, { cwd, env, encoding: 'utf8' })
-  mkdirSync(join(root, 'meta'), { recursive: true })
-  git(
-    tmp,
-    'init',
-    '-q',
-    '-b',
-    'main',
-    '--separate-git-dir',
-    join(root, 'meta/repo'),
-    join(root, 'work'),
-  )
   const work = join(root, 'work')
-  git(work, 'commit', '-q', '--allow-empty', '-m', 'A')
-  git(work, 'branch', 'trunk')
-  git(work, 'branch', 'gone')
-  for (const name of ['main', 'gone']) git(work, 'branch', '-q', '--set-upstream-to=trunk', name)
-  git(work, 'worktree', 'add', '-q', '--relative-paths', '-b', 'other', '../wt')
-  const tip = git(work, 'rev-parse', '--short', 'gone').trim()
-  const mounted = await mountRepo(root)
-  const result = await mounted.shell('git -C /repo/wt branch --dry-run --delete-merged trunk')
+  mkdirSync(join(root, 'meta'), { recursive: true })
+  nativeIn(tmp, 'init', '-q', '-b', 'main', '--separate-git-dir', join(root, 'meta/repo'), work)
+  nativeIn(work, 'commit', '-q', '--allow-empty', '-m', 'A')
+  nativeIn(work, 'branch', 'trunk')
+  nativeIn(work, 'branch', 'gone')
+  for (const name of ['main', 'gone'])
+    nativeIn(work, 'branch', '-q', '--set-upstream-to=trunk', name)
+  nativeIn(work, 'worktree', 'add', '-q', '--relative-paths', '-b', 'o', '../wt')
+  const tip = nativeIn(work, 'rev-parse', '--short', 'gone').trim()
+  const result = await (
+    await mountRepo(root)
+  ).shell('git -C /repo/wt branch --dry-run --delete-merged trunk')
   expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([
     0,
     `Would delete branch gone (was ${tip}).\n`,
+  ])
+})
+
+it("takes a bare repository's HEAD as no checkout", async () => {
+  const root = join(tmp, 'bare')
+  const source = join(root, 'source')
+  const bare = join(root, 'repo.git')
+  mkdirSync(root, { recursive: true })
+  nativeIn(root, 'init', '-q', '-b', 'main', source)
+  nativeIn(source, 'commit', '-q', '--allow-empty', '-m', 'A')
+  nativeIn(root, 'clone', '-q', '--bare', source, bare)
+  nativeIn(bare, 'branch', 'trunk')
+  nativeIn(bare, 'branch', '-q', '--set-upstream-to=trunk', 'main')
+  nativeIn(bare, 'worktree', 'add', '-q', '--relative-paths', '-b', 'o', '../wt')
+  const tip = nativeIn(bare, 'rev-parse', '--short', 'main').trim()
+  const result = await (
+    await mountRepo(root)
+  ).shell('git -C /repo/wt branch --dry-run --delete-merged trunk')
+  expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([
+    0,
+    `Would delete branch main (was ${tip}).\n`,
   ])
 })

@@ -326,47 +326,80 @@ def test_an_upstream_pattern_must_name_a_branch(pattern):
         upstream_patterns(TABLE, KNOWN, [pattern])
 
 
+NATIVE_ENV = {
+    **os.environ,
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_AUTHOR_NAME": "Ada",
+    "GIT_AUTHOR_EMAIL": "ada@example.com",
+    "GIT_COMMITTER_NAME": "Ada",
+    "GIT_COMMITTER_EMAIL": "ada@example.com",
+}
+
+
+def native(cwd: Path, *args: str) -> str:
+    """Run the real git in ``cwd`` and return its stdout.
+
+    Args:
+        cwd (Path): where git runs.
+        *args (str): git's arguments.
+    """
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        env=NATIVE_ENV,
+        check=True,
+        capture_output=True,
+    ).stdout.decode()
+
+
+async def _dry_run(root: Path, line: str) -> tuple[int, bytes]:
+    with mounted(root) as ws:
+        ws.register_cli("git", GIT)
+        got = await ws.shell(line)
+    return got.exit_code, got.stdout or b""
+
+
 @pytest.mark.asyncio
 async def test_delete_merged_keeps_a_branch_checked_out_elsewhere(tmp_path):
-    env = {
-        **os.environ,
-        "GIT_CONFIG_GLOBAL": "/dev/null",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_AUTHOR_NAME": "Ada",
-        "GIT_AUTHOR_EMAIL": "ada@example.com",
-        "GIT_COMMITTER_NAME": "Ada",
-        "GIT_COMMITTER_EMAIL": "ada@example.com",
-    }
-
-    def git(*args: str, cwd: Path = tmp_path / "work") -> str:
-        return subprocess.run(
-            ["git", *args], cwd=cwd, env=env, check=True, capture_output=True
-        ).stdout.decode()
-
+    work = tmp_path / "work"
     (tmp_path / "meta").mkdir()
-    git(
+    native(
+        tmp_path,
         "init",
         "-q",
         "-b",
         "main",
         "--separate-git-dir",
         str(tmp_path / "meta" / "repo"),
-        str(tmp_path / "work"),
-        cwd=tmp_path,
+        str(work),
     )
-    git("commit", "-q", "--allow-empty", "-m", "A")
-    git("branch", "trunk")
-    git("branch", "gone")
+    native(work, "commit", "-q", "--allow-empty", "-m", "A")
+    native(work, "branch", "trunk")
+    native(work, "branch", "gone")
     for name in ("main", "gone"):
-        git("branch", "-q", "--set-upstream-to=trunk", name)
-    git("worktree", "add", "-q", "--relative-paths", "-b", "other", "../wt")
-    tip = git("rev-parse", "--short", "gone").strip()
-    with mounted(tmp_path) as ws:
-        ws.register_cli("git", GIT)
-        got = await ws.shell(
-            "git -C /repo/wt branch --dry-run --delete-merged trunk"
-        )
-    assert (got.exit_code, got.stdout) == (
-        0,
-        f"Would delete branch gone (was {tip}).\n".encode(),
+        native(work, "branch", "-q", "--set-upstream-to=trunk", name)
+    native(
+        work, "worktree", "add", "-q", "--relative-paths", "-b", "o", "../wt"
     )
+    tip = native(work, "rev-parse", "--short", "gone").strip()
+    assert await _dry_run(
+        tmp_path, "git -C /repo/wt branch --dry-run --delete-merged trunk"
+    ) == (0, f"Would delete branch gone (was {tip}).\n".encode())
+
+
+@pytest.mark.asyncio
+async def test_delete_merged_takes_a_bare_repository_head(tmp_path):
+    source, bare = tmp_path / "source", tmp_path / "repo.git"
+    native(tmp_path, "init", "-q", "-b", "main", str(source))
+    native(source, "commit", "-q", "--allow-empty", "-m", "A")
+    native(tmp_path, "clone", "-q", "--bare", str(source), str(bare))
+    native(bare, "branch", "trunk")
+    native(bare, "branch", "-q", "--set-upstream-to=trunk", "main")
+    native(
+        bare, "worktree", "add", "-q", "--relative-paths", "-b", "o", "../wt"
+    )
+    tip = native(bare, "rev-parse", "--short", "main").strip()
+    assert await _dry_run(
+        tmp_path, "git -C /repo/wt branch --dry-run --delete-merged trunk"
+    ) == (0, f"Would delete branch main (was {tip}).\n".encode())
