@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.cli.constants import HELP_EXIT
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 
@@ -871,6 +872,8 @@ class UsageError(GitError):
     one: after an unknown option on stderr, or alone, on stdout when
     ``-h`` asked for it and on stderr where it stands for the refusal
     itself (``rev-list --nosuch``, ``symbolic-ref`` with no operand).
+    The usage block ``-h`` asked for is help, not a refusal, and exits
+    0 (git 2.56).
 
     Args:
         shown (str): what goes to stdout, empty unless ``-h`` asked.
@@ -883,6 +886,8 @@ class UsageError(GitError):
     def __init__(self, shown: str, refused: str) -> None:
         super().__init__((refused or shown).removesuffix("\n"))
         self.stream = "stderr" if refused else "stdout"
+        if not refused:
+            self.code = HELP_EXIT
 
 
 class UnknownSubcommandError(UsageError):

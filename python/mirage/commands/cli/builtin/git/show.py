@@ -78,6 +78,7 @@ from mirage.commands.cli.builtin.git.types import (
 )
 from mirage.commands.cli.builtin.git.util import (
     check_operands,
+    lone_help,
     option_operand,
     require_vfs,
     revision_arg,
@@ -412,7 +413,7 @@ async def diff_tree(
     """
     fl = FlagView(ctx.flags)
     vfs = require_vfs(ctx)
-    if option_operand(ctx, texts) is not None:
+    if option_operand(ctx, texts, lone_help(ctx)) is not None:
         raise UsageError("", verb_usage(ctx))
     repo, location = await opened(ctx, fl)
     fully = await config_bool(vfs, location, b"core", b"quotepath", True)

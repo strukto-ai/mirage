@@ -19,6 +19,7 @@ import {
   GIT_SYNOPSES,
   GIT_USAGE_GAP,
   GIT_USAGE_WIDTH,
+  HELP_EXIT,
   USAGE_EXIT,
 } from './constants.ts'
 import { operandSlot, optionMetavar } from '../spec/help.ts'
@@ -111,8 +112,9 @@ function gitRows(path: string, spec: CommandSpec): string[] {
 /**
  * parse-options' answer to a word the verb does not take.
  *
- * `-h` asks for the usage block, which goes to stdout. A boolean long handed a
- * value is refused on one line, and so is an option that needs a value and ends
+ * `-h` asks for the usage block, which goes to stdout and exits 0 (git 2.56);
+ * everything else here exits 129. A boolean long handed a value is refused on
+ * one line, and so is an option that needs a value and ends
  * the line without one (it reaches the operands when the verb takes free text).
  * Anything else is an option the verb does not have: a long one is an "option"
  * and a short one a "switch", both named without their dashes and quoted with a
@@ -123,7 +125,7 @@ function gitRows(path: string, spec: CommandSpec): string[] {
  *   '--quiet=1')
  * @param path the verb's path under git, for its synopsis
  * @param spec the leaf's grammar, for its rows
- * @returns the refusal's stdout and its stderr; it exits 129
+ * @returns the refusal's stdout and its stderr
  */
 export function gitOptionRefusal(word: string, path: string, spec: CommandSpec): [string, string] {
   const usage = gitUsage(path, spec)
@@ -242,9 +244,10 @@ export function clapMissingOperands(
  * coincidence rather than by lineage.
  *
  * git answers in parse-options' words, and some of them print the verb's
- * usage block: after an unknown option on stderr, on stdout for `-h` and after
- * an ambiguous abbreviation. A missing value is one line, a long named an
- * "option" and a short one a "switch" (pinned against git 2.50.1).
+ * usage block: after an unknown option or an ambiguous abbreviation on
+ * stderr, and on stdout for `-h`, which exits 0 (git 2.56). A missing value is
+ * one line, a long named an "option" and a short one a "switch" (pinned
+ * against git 2.50.1).
  *
  * @param style the dialect the CLI's root declares
  * @param argparseMessage the message the spec machinery built, used as-is for
@@ -273,7 +276,7 @@ export function leafRefusal(
   if (kind === 'ambiguous' && ambiguous !== undefined) {
     const [token, [first = '', second = '']] = ambiguous
     const line = `error: ambiguous option: ${token.slice(2)} (could be ${first} or ${second})\n`
-    return [encodeText(line), USAGE_EXIT, encodeText(gitUsage(path, spec))]
+    return [encodeText(line + gitUsage(path, spec)), USAGE_EXIT, null]
   }
   const needy = parsed.needsValueOptions[0]
   if (kind === 'needs_value' && needy !== undefined) {
@@ -286,7 +289,11 @@ export function leafRefusal(
   if ((kind === 'invalid' || kind === 'unexpected_value') && token !== undefined) {
     const word = token.startsWith('-') ? token : `-${token}`
     const [shown, refused] = gitOptionRefusal(word, path, spec)
-    return [encodeText(refused), USAGE_EXIT, shown !== '' ? encodeText(shown) : null]
+    return [
+      encodeText(refused),
+      refused !== '' ? USAGE_EXIT : HELP_EXIT,
+      shown !== '' ? encodeText(shown) : null,
+    ]
   }
   return [argparseMessage, USAGE_EXIT, null]
 }

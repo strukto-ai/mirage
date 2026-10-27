@@ -37,15 +37,14 @@ import {
   checkSwitches,
   escaped,
   fatal,
+  loneHelp,
   optionOperand,
   offending,
   startPoint,
-  STDERR,
-  STDOUT,
   verbUsage,
   requireVfs,
 } from './util.ts'
-import { HELP_SWITCH, gitOptionRefusal, gitUsage, leafRefusal } from '../../refusal.ts'
+import { gitOptionRefusal, gitUsage, leafRefusal } from '../../refusal.ts'
 import { GIT_LONG_OPTIONS } from '../../constants.ts'
 import { isBare } from './discover.ts'
 import type { RepoLocation } from './types.ts'
@@ -368,8 +367,7 @@ export async function revList(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const sole = (ctx.argv ?? []).slice(-2).join(' ') === `rev-list ${HELP_SWITCH}`
-  if (optionOperand(ctx, texts, sole ? STDOUT : STDERR) !== null) {
+  if (optionOperand(ctx, texts, loneHelp(ctx)) !== null) {
     throw new UsageError('', verbUsage(ctx))
   }
   const repo = await opened(ctx, fl)
@@ -521,7 +519,7 @@ export async function revParse(
   try {
     const marked = escaped(ctx.argv ?? [])
     const revisions = texts.filter((text) => text !== GIT_DIR_OPTION || marked.has(text))
-    checkOperands(ctx, revisions)
+    checkOperands(ctx, revisions, loneHelp(ctx))
     const argv = ctx.argv ?? []
     const verb = argv.indexOf('rev-parse')
     const words = argv.slice(verb + 1)

@@ -989,7 +989,7 @@
       ],
       "command": "git -C /repo reset -h",
       "expect": {
-        "exit": 129,
+        "exit": 0,
         "stdout": "usage: git reset [-q] [<commit>]\n   or: git reset [-q] [<tree-ish>] [--] <pathspec>...\n\n    -q, --quiet           Only report errors\n\n",
         "stderr": ""
       }
@@ -1147,7 +1147,7 @@
       "command": "git -C /repo log -h 2>/dev/null | head -1; git -C /repo diff -h 2>&1 >/dev/null | head -1; git -C /repo rev-list -h 2>/dev/null | head -1; git -C /repo rev-list 2>&1 >/dev/null | head -1; git -C /repo symbolic-ref -d 2>&1 >/dev/null | head -1; git -C /repo branch -l -d topic 2>&1 >/dev/null | head -1; git -C /repo clone 2>&1 >/dev/null | head -1; git -C /repo rev-list > /dev/null 2>&1; echo $?",
       "expect": {
         "exit": 0,
-        "stdout": "usage: git log [<options>] [<revision-range>] [[--] <path>...]\nusage: git diff [<options>] [<commit>] [--] [<path>...]\nusage: git rev-list [<options>] <commit>... [--] [<path>...]\nusage: git rev-list [<options>] <commit>... [--] [<path>...]\nusage: git symbolic-ref [-m <reason>] <name> <ref>\nusage: git branch [<options>] [-r | -a] [--merged] [--no-merged]\nfatal: You must specify a repository to clone.\n129\n",
+        "stdout": "usage: git log [<options>] [<revision-range>] [[--] <path>...]\nusage: git diff [<options>] [<commit>] [--] [<path>...]\nusage: git rev-list [<options>] <commit>... [--] [<path>...]\nusage: git rev-list [<options>] <commit>... [--] [<path>...]\nusage: git symbolic-ref [-m <reason>] <name> <ref>\nusage: git branch [<options>] [-r | -a] [--merged] [--no-merged] [(--forked <branch>)...]\nfatal: You must specify a repository to clone.\n129\n",
         "stderr": ""
       }
     },
@@ -1608,6 +1608,62 @@
         "exit": 0,
         "stdout": "same\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "git_dash_h_exits_zero_where_it_is_help",
+      "seq": 13470502,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo status -h > /dev/null; echo $?; git -C /repo remote -h > /dev/null; echo $?; git -C /repo stash list -h > /dev/null; echo $?; git -C /repo rev-list -h > /dev/null; echo $?; git -C /repo rev-list HEAD -h 2> /dev/null; echo $?; git -C /repo diff-tree -h > /dev/null; echo $?; git -C /repo diff-tree HEAD -h 2> /dev/null; echo $?; git -C /repo rev-parse -h HEAD 2> /dev/null; echo $?; git -C /repo diff -h 2> /dev/null; echo $?; git -C /repo status --bogus -h 2> /dev/null; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\n0\n0\n129\n0\n129\n129\n129\n129\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_branch_de_is_ambiguous_beside_delete_merged",
+      "seq": 13470503,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo branch --de 2>&1 > /dev/null | head -1; git -C /repo branch --de 2> /dev/null; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: ambiguous option: de (could be --delete or --delete-merged)\n129\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_branch_lists_forked_and_deletes_merged",
+      "seq": 13470504,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q -b main /repo /repo/dm && cd /repo/dm && git branch t1 HEAD~1 && git branch t2 HEAD~1 && git branch keep HEAD~1 && printf '[branch \"t1\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/main\\n[branch \"t2\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/main\\n\\tdeleteMerged = false\\n[branch \"keep\"]\\n\\tremote = .\\n\\tmerge = refs/heads/t1\\n' >> .git/config && git branch --forked origin/main && git branch --forked t1 && git branch --dry-run --delete-merged origin/main && git branch --delete-merged 'origin/*' --delete-merged t1 | cut -d' ' -f1-3 && git branch; cd /repo; rm -rf /repo/dm)",
+      "expect": {
+        "exit": 0,
+        "stdout": "* main\n  t1\n  t2\n  keep\nDeleted branch t1\nDeleted branch keep\n* main\n  t2\n",
+        "stderr": "Skipping 't2' (branch.t2.deleteMerged is false)\nSkipping 't2' (branch.t2.deleteMerged is false)\n"
+      }
+    },
+    {
+      "id": "git_branch_delete_merged_keeps_what_git_keeps",
+      "seq": 13470505,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(export GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com && git init -q -b main /repo/dms && cd /repo/dms && git commit -q --allow-empty -m c1 && git commit -q --allow-empty -m c2 && git branch topic HEAD~1 && git switch -q -c side && git commit -q --allow-empty -m side && git switch -q main && git clone -q /repo/dms /repo/dmd && cd /repo/dmd && for b in t1:origin/topic t2:origin/side t3:origin/topic topic:origin/topic t4:main t7:main t8:main t9:main feat/a:main gone:main z:main y:main x:origin/side; do git branch \"${b%%:*}\" \"${b#*:}^0\"; done && printf '[branch \"t1\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/main\\n[branch \"t2\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/main\\n[branch \"t3\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/topic\\n[branch \"topic\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/topic\\n[branch \"t4\"]\\n\\tremote = .\\n\\tmerge = refs/heads/main\\n[branch \"t7\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/main\\n\\tdeleteMerged = false\\n[branch \"t8\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/main\\n[branch \"t9\"]\\n\\tremote = .\\n\\tmerge = refs/heads/t8\\n[branch \"feat/a\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/main\\n[branch \"gone\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/gone\\n[branch \"z\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/side\\n[branch \"y\"]\\n\\tremote = .\\n\\tmerge = refs/heads/z\\n\\trebase = true\\n[branch \"x\"]\\n\\tremote = .\\n\\tmerge = refs/heads/y\\n' >> .git/config && git branch --forked origin --forked main && git branch --forked '*' && git branch --dry-run --delete-merged 'origin/*' | cut -d' ' -f1-4 && git branch --delete-merged origin/topic --dry-run t3 | cut -d' ' -f1-4 && git branch --delete-merged origin/main --delete-merged t8 | cut -d' ' -f1-3 && git branch --delete-merged 'origin/*' feat/a t3 topic | cut -d' ' -f1-3 && git branch -q --delete-merged origin/main && git branch --delete-merged origin/side --delete-merged z --delete-merged y | cut -d' ' -f1-3 && git branch && git config --get-regexp '^branch\\.[xyz]\\.'; cd /repo; rm -rf /repo/dms /repo/dmd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "  feat/a\n* main\n  t1\n  t2\n  t4\n  t7\n  t8\n  t4\n  t9\n  x\n  y\nWould delete branch t1\nWould delete branch t3\nWould delete branch feat/a\nWould delete branch t3\nDeleted branch t1\nDeleted branch t9\nDeleted branch t8\nDeleted branch feat/a\nDeleted branch t3\nDeleted branch z\n  gone\n* main\n  t2\n  t4\n  t7\n  topic\n  x\n  y\nbranch.y.rebase true\nbranch.x.remote .\nbranch.x.merge refs/heads/y\n",
+        "stderr": "Skipping 't7' (branch.t7.deleteMerged is false)\nSkipping 't7' (branch.t7.deleteMerged is false)\n"
       }
     }
   ]

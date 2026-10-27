@@ -127,12 +127,14 @@ git update-ref refs/heads/odd "$(git commit-tree "$tree" -p main -m 'odd name')"
 git tag light side
 at 2025-06-03T10:00:00Z
 git tag -a annotated -m 'release two' main~1
-# A hidden side whose path back to a shared root runs through a commit
-# dated before that root: once the shown side is used up only hidden
-# commits are queued, and the limited walk has to keep going past that
-# point, or the shared root leaks into the range.
+# A hidden side whose path back to a shared commit runs through a commit
+# dated before it: once the shown side is used up only hidden commits are
+# queued, and the limited walk has to keep going past that point, or the
+# shared commit leaks into the range. It has a parent, so no root sits
+# above an unrelated commit in a graph, which git 2.56 draws apart; the
+# ranges hide that parent, so only hidden commits are queued after it.
 at 2025-07-01T10:00:00Z
-shared=$(git commit-tree "$(git rev-parse main^{tree})" -m 'skew shared')
+shared=$(git commit-tree "$(git rev-parse main^{tree})" -p main -m 'skew shared')
 at 2025-07-02T10:00:00Z
 git update-ref refs/heads/skew-shown "$(git commit-tree "$(git rev-parse main^{tree})" -p "$shared" -m 'skew shown')"
 at 2025-06-01T10:00:00Z

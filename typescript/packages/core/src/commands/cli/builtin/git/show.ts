@@ -45,6 +45,7 @@ import { deltas, shownSides, type Delta } from './rows.ts'
 import { located, placeNamed, shownItems } from './seen.ts'
 import {
   checkOperands,
+  loneHelp,
   optionOperand,
   revisionArg,
   splitMarked,
@@ -263,7 +264,9 @@ export async function diffTree(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  if (optionOperand(ctx, texts) !== null) throw new UsageError('', verbUsage(ctx))
+  if (optionOperand(ctx, texts, loneHelp(ctx)) !== null) {
+    throw new UsageError('', verbUsage(ctx))
+  }
   const repo = await opened(ctx, fl)
   const parsed = parseDiffFlags(
     fl,

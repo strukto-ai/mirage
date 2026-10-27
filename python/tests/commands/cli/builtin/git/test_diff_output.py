@@ -90,6 +90,33 @@ async def test_a_named_commit_keeps_its_header(readonly_repo, form, stdout):
     assert (got.exit_code, got.stdout) == (0, stdout)
 
 
+# A commit with no parent in the walk is drawn a column apart from the
+# commit below it (git 2.56 in CI; Apple's git 2.54 does not, so these stay
+# out of the native list).
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "form,stdout",
+    [
+        (
+            "log --graph --oneline --merges --all",
+            b"  * f72a17f evil merge\n* d07b9b4 merge side\n",
+        ),
+        (
+            "log --graph --oneline --no-merges -6 --all",
+            "* 9e9a1bb \u00e9lan aA\n \\ \n  * 0bddf6b \u00c9LAN Aa\n"
+            "* a0c4dcf docs: FIX typo\n"
+            "* eab4670 fix: Remove_Caching_Layer flag\n"
+            " \\ \n  * c90354f Add caching layer\n* 6f45eae by Bob\n".encode(),
+        ),
+    ],
+)
+async def test_a_root_stands_apart(readonly_repo, form, stdout):
+    with mounted(readonly_repo) as ws:
+        ws.register_cli("git", GIT)
+        got = await ws.shell("git -C /repo " + form)
+    assert (got.exit_code, got.stdout) == (0, stdout)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("form", ["--version", "version", "-v"])
 async def test_version_without_repository(git_ws, form):

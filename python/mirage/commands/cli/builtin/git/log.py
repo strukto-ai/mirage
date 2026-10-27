@@ -217,9 +217,11 @@ def _graphed(
             asked for.
     """
     width = abbrev_for(repo)
+    steps = (*walk.steps, *(WalkStep(c, True) for c in walk.boundary))
     graph = CommitGraph(
         walk.interesting.__contains__,
         flags.first_parent,
+        [step.commit for step in steps],
         frozenset(commit.id for commit in walk.boundary),
         walk.parents or None,
     )
@@ -236,7 +238,7 @@ def _graphed(
     out = ""
     shown_one = False
     missing_newline = False
-    for step in (*walk.steps, *(WalkStep(c, True) for c in walk.boundary)):
+    for step in steps:
         commit = step.commit
         graph.walk(commit)
         if not step.shown:

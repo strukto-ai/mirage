@@ -15,7 +15,12 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
-from mirage.commands.cli.constants import CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT
+from mirage.commands.cli.constants import (
+    CLAP_EXIT,
+    GIT_SYNOPSES,
+    HELP_EXIT,
+    USAGE_EXIT,
+)
 from mirage.commands.cli.refusal import HELP_SWITCH, git_option_refusal
 from mirage.commands.cli.types import CLI, WalkFlagBag, WalkResult
 from mirage.commands.spec.compile import (
@@ -374,8 +379,9 @@ def _usage_error(
     """Group-level option refusal, in the dialect the CLI declares.
 
     git answers an unknown option in parse-options' words and its usage
-    block (on stdout for ``-h``), and the bare ``git`` with its one
-    synopsis; both exit 129. The bare ``git -h`` prints the help. clap
+    block, and the bare ``git`` with its one synopsis; both exit 129.
+    ``-h`` puts the usage block on stdout and exits 0 (git 2.56), and the
+    bare ``git -h`` prints the help. clap
     answers with the message, the one usage line and a footer pointing at
     --help, and exits 2, at every level of the tree; the exit code is the
     group's just as much as the leaf's, so reading the style here is what
@@ -416,7 +422,7 @@ def _usage_error(
         return WalkResult(
             output=encode_text(shown or refused),
             stream="stdout" if shown else "stderr",
-            exit_code=USAGE_EXIT,
+            exit_code=HELP_EXIT if shown else USAGE_EXIT,
         )
     text = f"{message}\n\n{node_help(name, node, style)}"
     return WalkResult(

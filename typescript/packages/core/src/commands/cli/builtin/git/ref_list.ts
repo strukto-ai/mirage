@@ -330,7 +330,7 @@ async function withUpstreams(
 }
 
 /** The names at the top of this checkout's git directory. */
-async function rootNames(repo: Repo): Promise<string[]> {
+export async function rootNames(repo: Repo): Promise<string[]> {
   return (await readNames(repo.vfs, repo.location.gitdir)).map((entry) => entryName(entry))
 }
 
@@ -340,7 +340,7 @@ async function rootNames(repo: Repo): Promise<string[]> {
  * common directory; a linked one is named by the `gitdir` file git keeps for
  * it, less its `/.git`.
  */
-async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
+export async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
   const heads = new Map<string, string>()
   const { gitdir, commondir, worktree } = repo.location
   const note = async (dir: PathSpec, path: string): Promise<void> => {

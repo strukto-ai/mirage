@@ -549,12 +549,30 @@ BRANCH_OPTIONS = (
         "-D", action="store_true", help="Delete a branch even if not merged"
     ),
     Argument(
+        "--delete-merged",
+        action="append",
+        metavar="pattern",
+        help="Delete merged branches whose upstream matches (repeatable)",
+    ),
+    Argument(
+        "--dry-run",
+        action="store_true",
+        help="With --delete-merged, only print what would be deleted",
+    ),
+    Argument("--no-dry-run", action="store_true"),
+    Argument(
         "-l",
         "--list",
         action="store_true",
         help="List branches matching the patterns",
     ),
     *REF_FILTER_OPTIONS,
+    Argument(
+        "--forked",
+        action="append",
+        metavar="branch",
+        help="List branches whose upstream matches (repeatable)",
+    ),
     *SORT_OPTIONS,
     FORMAT_OPTION_REF,
     OMIT_EMPTY_OPTION,

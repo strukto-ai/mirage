@@ -20,7 +20,7 @@ import { PathSpec } from '../../types.ts'
 
 import { WalkResult, type CLI, type WalkFlagBag } from './types.ts'
 
-import { CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT } from './constants.ts'
+import { CLAP_EXIT, GIT_SYNOPSES, HELP_EXIT, USAGE_EXIT } from './constants.ts'
 import { gitOptionRefusal, HELP_SWITCH } from './refusal.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -350,7 +350,7 @@ function usageError(
     return new WalkResult({
       output: encodeText(shown !== '' ? shown : refused),
       stream: shown !== '' ? 'stdout' : 'stderr',
-      exitCode: USAGE_EXIT,
+      exitCode: shown !== '' ? HELP_EXIT : USAGE_EXIT,
     })
   }
   return new WalkResult({

@@ -18,6 +18,12 @@ import pytest
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
+from mirage.commands.cli.builtin.git.branch import (
+    hash_order,
+    selects,
+    upstream_patterns,
+)
+from mirage.commands.cli.builtin.git.errors import GitError
 from tests.commands.cli.builtin.git.conftest import (
     make_branch,
     mounted,
@@ -257,3 +263,62 @@ async def test_a_bad_start_point_outranks_the_collision(git_rw):
     # is reported first.
     result = await git_rw.shell("git -C /repo branch bb/cc nosuchrev")
     assert b"cannot lock ref" not in (result.stderr or b"")
+
+
+# The order git 2.56.0's --delete-merged deleted these in, each list given
+# in the refname order the branches were found in.
+@pytest.mark.parametrize(
+    ("names", "order"),
+    [
+        (["x", "y", "z"], ["z", "y", "x"]),
+        (
+            ["Fix-1", "feat/a", "feat/b", "fix-2", "plain"],
+            ["plain", "Fix-1", "feat/a", "feat/b", "fix-2"],
+        ),
+        (
+            [f"b{n:02d}" for n in range(52)],
+            "b38 b39 b34 b35 b36 b37 b30 b31 b32 b33 b12 b13 b10 b11 b16 b17"
+            " b14 b15 b18 b19 b29 b28 b27 b26 b25 b24 b23 b22 b21 b20 b49 b48"
+            " b41 b40 b43 b42 b45 b44 b47 b46 b50 b51 b05 b04 b07 b06 b01 b00"
+            " b03 b02 b09 b08".split(),
+        ),
+    ],
+)
+def test_merged_branches_go_in_git_s_hash_order(names, order):
+    assert hash_order(names) == order
+
+
+TABLE = {
+    "HEAD": "ref: refs/heads/main",
+    "refs/heads/main": "a" * 40,
+    "refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main",
+    "refs/remotes/origin/main": "a" * 40,
+    "refs/tags/v1": "a" * 40,
+}
+KNOWN = frozenset(TABLE)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "upstream", "chosen"),
+    [
+        ("origin", "refs/remotes/origin/main", True),
+        ("HEAD", "refs/heads/main", True),
+        ("@", "refs/remotes/origin/main", False),
+        ("origin/*", "refs/remotes/origin/main", True),
+        ("*", "refs/remotes/origin/main", False),
+        ("*", "refs/heads/main", True),
+        ("origin/**", "refs/remotes/origin/gone", True),
+        ("ORIGIN/*", "refs/remotes/origin/main", False),
+    ],
+)
+def test_an_upstream_pattern_names_a_branch_or_globs_one(
+    pattern, upstream, chosen
+):
+    selected = upstream_patterns(TABLE, KNOWN, [pattern])
+    assert selects(selected, upstream) is chosen
+
+
+@pytest.mark.parametrize("pattern", ["v1", "nosuch", "origin/", ""])
+def test_an_upstream_pattern_must_name_a_branch(pattern):
+    with pytest.raises(GitError, match="is not a valid branch or pattern"):
+        upstream_patterns(TABLE, KNOWN, [pattern])

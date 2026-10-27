@@ -21,6 +21,7 @@ from mirage.commands.cli.constants import (
     GIT_SYNOPSES,
     GIT_USAGE_GAP,
     GIT_USAGE_WIDTH,
+    HELP_EXIT,
     USAGE_EXIT,
 )
 from mirage.commands.spec.compile import (
@@ -127,7 +128,8 @@ def git_option_refusal(
 ) -> tuple[str, str]:
     """parse-options' answer to a word the verb does not take.
 
-    ``-h`` asks for the usage block, which goes to stdout. A boolean
+    ``-h`` asks for the usage block, which goes to stdout and exits 0
+    (git 2.56); everything else here exits 129. A boolean
     long handed a value is refused on one line, and so is an option
     that needs a value and ends the line without one (it reaches the
     operands when the verb takes free text). Anything else is an option
@@ -143,7 +145,7 @@ def git_option_refusal(
         spec (CommandSpec): the leaf's grammar, for its rows.
 
     Returns:
-        The refusal's stdout and its stderr; it exits 129.
+        The refusal's stdout and its stderr.
     """
     usage = git_usage(path, spec)
     if word == HELP_SWITCH:
@@ -270,8 +272,9 @@ def leaf_refusal(
     agreeing with argparse by coincidence rather than by lineage.
 
     git answers in parse-options' words, and some of them print the
-    verb's usage block: after an unknown option on stderr, on stdout
-    for ``-h`` and after an ambiguous abbreviation. A missing value is
+    verb's usage block: after an unknown option or an ambiguous
+    abbreviation on stderr, and on stdout for ``-h``, which exits 0
+    (git 2.56). A missing value is
     one line, a long named an "option" and a short one a "switch"
     (pinned against git 2.50.1).
 
@@ -303,11 +306,7 @@ def leaf_refusal(
             f"error: ambiguous option: {token[2:]} "
             f"(could be {first} or {second})\n"
         )
-        return (
-            encode_text(line),
-            USAGE_EXIT,
-            encode_text(git_usage(path, spec)),
-        )
+        return encode_text(line + git_usage(path, spec)), USAGE_EXIT, None
     if kind == "needs_value" and parsed.needs_value_options:
         needy = parsed.needs_value_options[0]
         named = (
@@ -324,7 +323,11 @@ def leaf_refusal(
         token = parsed.invalid_options[0]
         word = token if token.startswith("-") else f"-{token}"
         shown, refused = git_option_refusal(word, path, spec)
-        return encode_text(refused), USAGE_EXIT, encode_text(shown) or None
+        return (
+            encode_text(refused),
+            USAGE_EXIT if refused else HELP_EXIT,
+            encode_text(shown) or None,
+        )
     return argparse_message, USAGE_EXIT, None
 
 

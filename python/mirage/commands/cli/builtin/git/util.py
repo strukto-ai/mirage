@@ -245,7 +245,24 @@ def option_operand(
     return word
 
 
-def check_operands(ctx: Context, texts: Sequence[str]) -> None:
+def lone_help(ctx: Context) -> str:
+    """Where ``-h`` puts the usage block for a verb that takes it as help
+    only alone.
+
+    ``rev-list``, ``rev-parse`` and ``diff-tree`` print it on stdout,
+    exiting 0, when ``-h`` is their one word, and beside anything else
+    on stderr as a refusal, exiting 129 (git 2.56).
+
+    Args:
+        ctx (Context): the line's context, carrying its leaf.
+    """
+    verb = (ctx.spec or CommandSpec()).name
+    return STDOUT if tuple(ctx.argv[-2:]) == (verb, HELP_SWITCH) else STDERR
+
+
+def check_operands(
+    ctx: Context, texts: Sequence[str], help_stream: str = STDOUT
+) -> None:
     """Refuse an operand that is really an option, as an unrecognized
     argument.
 
@@ -255,8 +272,9 @@ def check_operands(ctx: Context, texts: Sequence[str]) -> None:
     Args:
         ctx (Context): the line's context, carrying its leaf.
         texts (Sequence[str]): positional text operands, as typed.
+        help_stream (str): where ``-h`` puts the usage block.
     """
-    word = option_operand(ctx, texts)
+    word = option_operand(ctx, texts, help_stream)
     if word is not None:
         raise UnrecognizedArgumentError(word)
 
@@ -425,7 +443,12 @@ def config_section(
     return text
 
 
-def without_section(data: bytes, section: str, name: str) -> bytes:
+def without_section(
+    data: bytes,
+    section: str,
+    name: str,
+    keys: frozenset[bytes] | None = None,
+) -> bytes:
     """A config's text with every block for ``section.name`` taken out.
 
     ``git branch -d`` drops the deleted branch's settings this way, so a
@@ -435,6 +458,10 @@ def without_section(data: bytes, section: str, name: str) -> bytes:
     with its escapes, or the older ``[branch.x]``. ``[Branch "x"]`` and
     ``[branch.X]`` are left, as git leaves them, and a line opening with
     ``[`` ends a block (pinned against git 2.50.1).
+
+    With ``keys`` only those variables leave the blocks, and a block
+    they leave holding no variable leaves with them, header and all, as
+    ``git branch --delete-merged`` clears an upstream (git 2.56.0).
 
     A value continued onto the next line by a trailing backslash is
     followed, so a continuation that opens with ``[`` is still part of
@@ -446,15 +473,22 @@ def without_section(data: bytes, section: str, name: str) -> bytes:
         data (bytes): the config file's contents.
         section (str): the section as git writes it, e.g. ``branch``.
         name (str): the subsection, e.g. the branch name.
+        keys (frozenset[bytes] | None): the variables to take out,
+            lowercase; None takes the whole block.
     """
     kept: list[bytes] = []
-    dropping = continued = inside = False
+    block: list[bytes] = []
+    dropping = continued = inside = holding = False
+    word = b""
     want = (section.encode(), name.encode())
     for line in data.splitlines(keepends=True):
         value = line
         if not continued:
             rest = line
             if line.lstrip().startswith(b"["):
+                if holding:
+                    kept.extend(block)
+                block, holding = [], False
                 quoted = QUOTED_HEADER.match(line)
                 dotted = DOTTED_HEADER.match(line)
                 dropping = (
@@ -464,13 +498,20 @@ def without_section(data: bytes, section: str, name: str) -> bytes:
                 ) or (dotted is not None and dotted.groups() == want)
                 header = quoted or dotted
                 rest = line[header.end() if header else line.find(b"]") + 1 :]
-            _, equals, value = rest.partition(b"=")
-            if not equals or rest.lstrip().startswith(COMMENT_BYTES):
+            variable, equals, value = rest.partition(b"=")
+            comment = rest.lstrip().startswith(COMMENT_BYTES)
+            if not equals or comment:
                 value = b""
+            word = b"" if comment else variable.strip().lower()
             inside = False
         continued, inside = _continues(value, inside)
         if not dropping:
             kept.append(line)
+        elif keys is not None and word not in keys:
+            block.append(line)
+            holding = holding or bool(word)
+    if holding:
+        kept.extend(block)
     return b"".join(kept)
 
 

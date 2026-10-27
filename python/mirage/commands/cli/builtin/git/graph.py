@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Iterator, Mapping, Set
+from collections.abc import Callable, Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 
 from dulwich.objects import Commit
@@ -20,6 +20,8 @@ from dulwich.objects import Commit
 SKIPPED = "..."
 # The cell a ``--boundary`` commit is drawn with, in place of ``*``.
 BOUNDARY = "o"
+# The roots a run climbs through before it starts again in its own column.
+CLIMB = 4
 
 
 @dataclass(eq=False, slots=True)
@@ -80,6 +82,14 @@ class _Shape:
         spreads (bool): an octopus with lines to its right, which it moves
             right before its own row.
         width (int): the width of its rows.
+        root (bool): no parent of it is in the walk, under
+            ``--first-parent`` too, and no merge drew it as a later
+            parent.
+        stairs (bool): a root climbing the run of roots before it.
+        shift (int): the blank cells a root is drawn right of its column
+            by, so the commit drawn next is not taken for its parent.
+        bends (bool): the line leading to it bends right on a row of its
+            own first.
     """
 
     col: int
@@ -89,6 +99,10 @@ class _Shape:
     extra: int
     spreads: bool
     width: int
+    root: bool
+    stairs: bool
+    shift: int
+    bends: bool
 
 
 class CommitGraph:
@@ -103,10 +117,23 @@ class CommitGraph:
     A ``--boundary`` commit is drawn with ``o``; a line leads on from it
     only to a parent the graph draws too.
 
+    A root, a commit none of whose parents is in the walk and that no
+    merge drew as a later parent, stands a column right of its own when
+    the commit walked next has no line leading to it, unless that one is
+    a root too with more walked after it. Each root after a root, but the
+    last commit walked, climbs a column further right, back to its own
+    column every fourth; one a line leads to joins a run already
+    climbing. A line leading to a root a column right bends on a row of
+    its own, which is the separator a format puts before the commit, or
+    none after a ``...`` row. Pinned against git 2.56.0.
+
     Args:
         interesting (Callable[[bytes], bool]): whether a commit is in
             the walk, so that a line leads to it.
         first_parent (bool): follow only first parents.
+        order (Sequence[Commit]): every commit the graph is walked
+            through, in order, for the commits walked after the one
+            being drawn.
         boundary (frozenset[bytes]): the ``--boundary`` commits.
         parents (Mapping[bytes, tuple[bytes, ...]] | None): the parents
             a path-limited walk drew its history with, each commit's own
@@ -117,16 +144,23 @@ class CommitGraph:
         self,
         interesting: Callable[[bytes], bool],
         first_parent: bool,
+        order: Sequence[Commit],
         boundary: frozenset[bytes] = frozenset(),
         parents: Mapping[bytes, tuple[bytes, ...]] | None = None,
     ) -> None:
         self._interesting = interesting
         self._first_parent = first_parent
+        self._order = order
         self._boundary = boundary
         self._parents = parents
         self._lines: list[_Line] = []
         self._pending: Commit | None = None
+        self._walked = 0
         self._skipped = False
+        self._resumed = False
+        self._after_root = False
+        self._stairs = 0
+        self._fanned: set[bytes] = set()
         self._owed: list[str] = []
         self._ahead: list[str] = []
         self._width = 0
@@ -144,6 +178,7 @@ class CommitGraph:
             self._owed = []
             self._skipped = True
         self._pending = commit
+        self._walked += 1
 
     def lead_in(self) -> str:
         """The rows before the walked commit's own, each with its newline,
@@ -173,10 +208,11 @@ class CommitGraph:
 
         Before a walked commit yet to be drawn it is the ``...`` row when
         commits were skipped, the commit's first row when it spreads the
-        lines to its right, and otherwise a row as wide as the commit's where
-        the lines stop. Before a commit leaving with a lead and two or more
-        parents besides, the lines right of it stand a cell over, and the row
-        widens by the octopus's dashes and a cell.
+        lines to its right or bends the line leading to it, and otherwise a
+        row as wide as the commit's where the lines stop. Before a commit
+        leaving with a lead and two or more parents besides, the lines
+        right of it stand a cell over, and the row widens by the octopus's
+        dashes and a cell.
         """
         commit = self._pending
         if commit is None:
@@ -184,7 +220,7 @@ class CommitGraph:
         if self._skipped:
             return self._skip_row(commit)
         shape = self._shape(commit)
-        if shape.spreads:
+        if shape.spreads or shape.bends:
             self._ahead = list(self._place(commit))
             return self._ahead.pop(0)
         parents = shape.parents
@@ -217,24 +253,32 @@ class CommitGraph:
         width = self._shape(commit).width
         self._rest(width, settle=True)
         self._skipped = False
+        self._resumed = True
         return SKIPPED.ljust(max(len(SKIPPED), width))
 
     def _columns(self) -> list[bytes]:
         order = sorted(self._lines, key=lambda line: line.goal)
         return list(dict.fromkeys(line.sha for line in order))
 
+    def _own_parents(self, commit: Commit) -> tuple[bytes, ...]:
+        if self._parents is None:
+            return tuple(commit.parents)
+        return self._parents.get(commit.id, tuple(commit.parents))
+
+    def _is_root(self, commit: Commit) -> bool:
+        return commit.id not in self._fanned and not any(
+            map(self._interesting, self._own_parents(commit))
+        )
+
+    def _followed(self, commit: Commit) -> list[bytes]:
+        own = self._own_parents(commit)
+        followed = own[:1] if self._first_parent else own
+        return list(dict.fromkeys(p for p in followed if self._interesting(p)))
+
     def _parents_of(
         self, commit: Commit, columns: list[bytes], col: int
     ) -> _Parents:
-        own = (
-            commit.parents
-            if self._parents is None
-            else self._parents.get(commit.id, tuple(commit.parents))
-        )
-        followed = own[:1] if self._first_parent else own
-        parents = list(
-            dict.fromkeys(p for p in followed if self._interesting(p))
-        )
+        parents = self._followed(commit)
         where = {sha: i for i, sha in enumerate(columns)}
         opened: list[bytes] = []
         lead: bytes | None = None
@@ -285,7 +329,35 @@ class CommitGraph:
             len(after),
             len(columns) + extra if spreads else 0,
         )
-        return _Shape(col, len(columns), parents, after, extra, spreads, width)
+        root = self._is_root(commit)
+        upcoming = self._order[self._walked : self._walked + 2]
+        stairs = (
+            root
+            and self._after_root
+            and len(upcoming) > 0
+            and (not known or self._stairs > 0)
+        )
+        climb = (self._stairs + 1) % CLIMB if stairs else 0
+        lifted = (
+            root
+            and len(upcoming) > 0
+            and upcoming[0].id not in columns
+            and not (len(upcoming) > 1 and self._is_root(upcoming[0]))
+        )
+        shift = 2 * max(climb, int(lifted))
+        return _Shape(
+            col,
+            len(columns),
+            parents,
+            after,
+            extra,
+            spreads,
+            width,
+            root,
+            stairs,
+            shift,
+            known and climb == 0 and lifted,
+        )
 
     def _place(self, commit: Commit) -> Iterator[str]:
         """Move the lines through a commit's rows, each row yielded as it is
@@ -297,9 +369,16 @@ class CommitGraph:
         shape = self._shape(commit)
         parents, width, extra = shape.parents, shape.width, shape.extra
         here = 2 * shape.col
+        resumed, self._resumed = self._resumed, False
+        if shape.bends and not resumed:
+            row = self._rest(width + 1, settle=True, past=here - 1)
+            yield row[: here + 1] + "\\" + row[here + 2 :]
         final = list(dict.fromkeys(shape.after))
         goal_of = {sha: 2 * i for i, sha in enumerate(final)}
-        self._width = width
+        self._width = width + shape.shift
+        self._stairs = self._stairs + 1 if shape.stairs else 0
+        self._after_root = shape.root
+        self._fanned.update(self._followed(commit)[1:])
         opened = len(parents.opened)
         spread = 2 * max(opened - 1, 0)
         others = [line for line in self._lines if line.sha != commit.id]
@@ -319,7 +398,7 @@ class CommitGraph:
         )
         if commit.id in self._boundary:
             row = row[:here] + BOUNDARY + row[here + 1 :]
-        yield row
+        yield row[:here] + " " * shape.shift + row[here:]
         born = [_Line(sha, here, goal_of[sha]) for sha in parents.opened]
         led = (
             [_Line(parents.lead, here, goal_of[parents.lead])]
@@ -344,7 +423,7 @@ class CommitGraph:
         self._join()
         self._merged_at = here if merging and self._settled() else None
         while not self._settled():
-            yield self._collapse_row(width)
+            yield self._collapse_row(self._width)
 
     def _spread_rows(
         self,

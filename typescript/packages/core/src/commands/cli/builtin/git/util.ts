@@ -186,6 +186,20 @@ export function optionOperand(
 }
 
 /**
+ * Where `-h` puts the usage block for a verb that takes it as help only alone.
+ *
+ * `rev-list`, `rev-parse` and `diff-tree` print it on stdout, exiting 0, when
+ * `-h` is their one word, and beside anything else on stderr as a refusal,
+ * exiting 129 (git 2.56).
+ *
+ * @param ctx the line's context, carrying its leaf
+ */
+export function loneHelp(ctx: Context): typeof STDOUT | typeof STDERR {
+  const verb = ctx.spec?.name ?? ''
+  return (ctx.argv ?? []).slice(-2).join(' ') === `${verb} ${HELP_SWITCH}` ? STDOUT : STDERR
+}
+
+/**
  * Refuse an operand that is really an option, as an unrecognized argument.
  *
  * For the verbs git words without a usage block (`log`, `show`, `reflog`),
@@ -193,9 +207,14 @@ export function optionOperand(
  *
  * @param ctx the line's context, carrying its leaf
  * @param texts positional text operands, as typed
+ * @param helpStream where `-h` puts the usage block
  */
-export function checkOperands(ctx: Context, texts: readonly string[]): void {
-  const word = optionOperand(ctx, texts)
+export function checkOperands(
+  ctx: Context,
+  texts: readonly string[],
+  helpStream: typeof STDOUT | typeof STDERR = STDOUT,
+): void {
+  const word = optionOperand(ctx, texts, helpStream)
   if (word !== null) throw new UnrecognizedArgumentError(word)
 }
 
@@ -376,6 +395,10 @@ export function configSection(
  * `[Branch "x"]` and `[branch.X]` are left, as git leaves them, and a line
  * opening with `[` ends a block (pinned against git 2.50.1).
  *
+ * With `keys` only those variables leave the blocks, and a block they leave
+ * holding no variable leaves with them, header and all, as
+ * `git branch --delete-merged` clears an upstream (git 2.56.0).
+ *
  * A value continued onto the next line by a trailing backslash is followed, so
  * a continuation that opens with `[` is still part of the block. git 2.50.1
  * reads it as a header there and leaves the rest of the block behind, which it
@@ -384,34 +407,52 @@ export function configSection(
  * @param text the config file's contents
  * @param section the section as git writes it, e.g. `branch`
  * @param name the subsection, e.g. the branch name
+ * @param keys the variables to take out, lowercase; null takes the whole block
  */
-export function withoutSection(text: string, section: string, name: string): string {
+export function withoutSection(
+  text: string,
+  section: string,
+  name: string,
+  keys: ReadonlySet<string> | null = null,
+): string {
+  const kept: string[] = []
+  let block: string[] = []
   let dropping = false
   let continued = false
   let inside = false
-  return text
-    .split(/(?<=\n)/)
-    .filter((line) => {
-      let value = line
-      if (!continued) {
-        let rest = line
-        if (line.trimStart().startsWith('[')) {
-          const quoted = QUOTED_HEADER.exec(line)
-          const dotted = DOTTED_HEADER.exec(line)
-          dropping =
-            (quoted?.[1] === section && quoted[2]?.replace(/\\(.)/g, '$1') === name) ||
-            (dotted?.[1] === section && dotted[2] === name)
-          const header = quoted ?? dotted
-          rest = line.slice(header ? header[0].length : line.indexOf(']') + 1)
-        }
-        const equals = rest.indexOf('=')
-        value = equals < 0 || /^\s*[;#]/.test(rest) ? '' : rest.slice(equals + 1)
-        inside = false
+  let holding = false
+  let word = ''
+  for (const line of text.split(/(?<=\n)/)) {
+    let value = line
+    if (!continued) {
+      let rest = line
+      if (line.trimStart().startsWith('[')) {
+        if (holding) kept.push(...block)
+        block = []
+        holding = false
+        const quoted = QUOTED_HEADER.exec(line)
+        const dotted = DOTTED_HEADER.exec(line)
+        dropping =
+          (quoted?.[1] === section && quoted[2]?.replace(/\\(.)/g, '$1') === name) ||
+          (dotted?.[1] === section && dotted[2] === name)
+        const header = quoted ?? dotted
+        rest = line.slice(header ? header[0].length : line.indexOf(']') + 1)
       }
-      ;[continued, inside] = continues(value, inside)
-      return !dropping
-    })
-    .join('')
+      const equals = rest.indexOf('=')
+      const comment = /^\s*[;#]/.test(rest)
+      value = equals < 0 || comment ? '' : rest.slice(equals + 1)
+      word = comment ? '' : (equals < 0 ? rest : rest.slice(0, equals)).trim().toLowerCase()
+      inside = false
+    }
+    ;[continued, inside] = continues(value, inside)
+    if (!dropping) kept.push(line)
+    else if (keys !== null && !keys.has(word)) {
+      block.push(line)
+      holding = holding || word !== ''
+    }
+  }
+  if (holding) kept.push(...block)
+  return kept.join('')
 }
 
 /**

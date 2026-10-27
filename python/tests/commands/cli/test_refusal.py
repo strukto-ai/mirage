@@ -138,8 +138,8 @@ def test_git_option_refusal_words_it_as_parse_options_does(word, streams):
 
 
 # parse-options names the last two options an abbreviation matched, each
-# with the `no-` it was matched under, puts the usage on stdout and exits
-# 129 (git 2.50.1).
+# with the `no-` it was matched under, puts the usage after it on stderr
+# and exits 129 (git 2.56.0; 2.50.1 put the usage on stdout).
 def test_git_words_an_ambiguous_abbreviation_its_own_way():
     parsed = _parsed_with(
         ambiguous_options=[("--no-m=x", ("--no-merged", "--no-move"))],
@@ -149,10 +149,20 @@ def test_git_words_an_ambiguous_abbreviation_its_own_way():
         UsageStyle.GIT, ARGPARSE_MESSAGE, parsed, "rm", SPEC
     ) == (
         b"error: ambiguous option: no-m=x "
-        b"(could be --no-merged or --no-move)\n",
+        b"(could be --no-merged or --no-move)\n" + USAGE.encode(),
         129,
-        USAGE.encode(),
+        None,
     )
+
+
+# The usage `-h` asks for is help: stdout and exit 0 (git 2.56.0).
+def test_git_answers_dash_h_with_the_usage_and_exit_zero():
+    parsed = _parsed_with(
+        invalid_options=["-h"], option_error_kinds=["invalid"]
+    )
+    assert leaf_refusal(
+        UsageStyle.GIT, ARGPARSE_MESSAGE, parsed, "rm", SPEC
+    ) == (b"", 0, USAGE.encode())
 
 
 def test_git_names_a_short_cluster_letter_the_parser_reports_bare():

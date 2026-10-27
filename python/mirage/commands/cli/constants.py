@@ -16,6 +16,10 @@
 # keep the GNU exit-2 machinery they already ride.
 USAGE_EXIT = 129
 
+# git exits 0 when `-h` asks for a verb's usage block, which it prints on
+# stdout; the same block printed as a refusal keeps USAGE_EXIT (git 2.56).
+HELP_EXIT = 0
+
 # clap exits 2 for a usage error at every level of its tree, agreeing
 # with argparse by coincidence rather than by lineage. It lives here
 # rather than beside the refusal renderers because the walk reads it
@@ -31,13 +35,13 @@ CLI_CONFIG_ENV = "MIRAGE_CLI_CONFIG"
 
 # git's own long options for each parse-options verb mirage implements, in
 # git's table order and its `--[no-]` notation, captured from
-# `git <verb> --help-all` (config's legacy table from its usage listing) on
-# git 2.50.1. Under git's usage style a leaf resolves an abbreviated long
-# option against its verb's table the way parse-options does, so a prefix
-# git finds ambiguous is refused even where mirage declares only one of the
-# options it could be. A git verb with no table (log, show, diff, rev-list,
-# diff-tree: the revision walkers) takes whole words only, as git's
-# revision parser does.
+# `git <verb> --help-all` on git 2.56.0 (config's legacy table from its
+# usage listing, on git 2.50.1). Under git's usage style a leaf resolves an
+# abbreviated long option against its verb's table the way parse-options
+# does, so a prefix git finds ambiguous is refused even where mirage
+# declares only one of the options it could be. A git verb with no table
+# (log, show, diff, rev-list, diff-tree: the revision walkers) takes whole
+# words only, as git's revision parser does.
 GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
     "fsck": (
         "[no-]verbose",
@@ -115,10 +119,14 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
         "[no-]verbose",
         "[no-]interactive",
         "[no-]patch",
+        "[no-]auto-advance",
+        "unified",
+        "inter-hunk-context",
         "[no-]edit",
         "[no-]force",
         "[no-]update",
         "[no-]renormalize",
+        "[no-]resolved",
         "[no-]intent-to-add",
         "[no-]all",
         "[no-]ignore-removal",
@@ -154,9 +162,12 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
         "[no-]show-current",
         "[no-]create-reflog",
         "[no-]edit-description",
+        "delete-merged",
+        "[no-]dry-run",
         "[no-]force",
         "merged",
         "no-merged",
+        "forked",
         "[no-]column",
         "[no-]sort",
         "[no-]points-at",
@@ -167,6 +178,7 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
     "checkout": (
         "[no-]guess",
         "[no-]overlay",
+        "[no-]auto-advance",
         "[no-]quiet",
         "[no-]recurse-submodules",
         "[no-]progress",
@@ -181,6 +193,8 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
         "ours",
         "theirs",
         "[no-]patch",
+        "unified",
+        "inter-hunk-context",
         "[no-]ignore-skip-worktree-bits",
         "[no-]pathspec-from-file",
         "[no-]pathspec-file-nul",
@@ -197,7 +211,7 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
         "[no-]fixup",
         "[no-]squash",
         "[no-]reset-author",
-        "trailer",
+        "[no-]trailer",
         "[no-]signoff",
         "[no-]template",
         "[no-]edit",
@@ -208,6 +222,8 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
         "[no-]include",
         "[no-]interactive",
         "[no-]patch",
+        "unified",
+        "inter-hunk-context",
         "[no-]only",
         "no-verify",
         "verify",
@@ -273,6 +289,7 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
         "[no-]omit-empty",
         "[no-]count",
         "[no-]format",
+        "[no-]start-after",
         "[no-]color",
         "[no-]exclude",
         "[no-]sort",
@@ -304,6 +321,9 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
         "keep",
         "[no-]recurse-submodules",
         "[no-]patch",
+        "[no-]auto-advance",
+        "unified",
+        "inter-hunk-context",
         "[no-]intent-to-add",
         "[no-]pathspec-from-file",
         "[no-]pathspec-file-nul",
@@ -322,6 +342,8 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
         "ours",
         "theirs",
         "[no-]patch",
+        "unified",
+        "inter-hunk-context",
         "[no-]ignore-skip-worktree-bits",
         "[no-]pathspec-from-file",
         "[no-]pathspec-file-nul",
@@ -396,7 +418,7 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
         "[no-]annotate",
         "message",
         "[no-]file",
-        "trailer",
+        "[no-]trailer",
         "[no-]edit",
         "[no-]sign",
         "[no-]cleanup",
@@ -422,9 +444,10 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
 
 # The synopsis lines git's usage block opens with, keyed like
 # GIT_LONG_OPTIONS ("" is the bare `git`). git's own lines, pinned on git
-# 2.47.3, cut down to the forms mirage implements; the option rows under
-# them are rendered from each leaf's spec, so the block never lists what
-# mirage would refuse. A line holding a newline is one git wraps itself.
+# 2.47.3 (branch's on 2.56.0), cut down to the forms mirage implements; the
+# option rows under them are rendered from each leaf's spec, so the block
+# never lists what mirage would refuse. A line holding a newline is one git
+# wraps itself.
 GIT_SYNOPSES: dict[str, tuple[str, ...]] = {
     "": (
         "git [-v | --version] [--help] [-C <path>] [--git-dir=<path>]\n"
@@ -442,12 +465,15 @@ GIT_SYNOPSES: dict[str, tuple[str, ...]] = {
         "                    [--textconv | --filters] [-Z]",
     ),
     "branch": (
-        "git branch [<options>] [-r | -a] [--merged] [--no-merged]",
+        "git branch [<options>] [-r | -a] [--merged] [--no-merged]"
+        " [(--forked <branch>)...]",
         "git branch [<options>] <branch-name> [<start-point>]",
         "git branch [<options>] [-l] [<pattern>...]",
         "git branch [<options>] [-r] (-d | -D) <branch-name>...",
         "git branch [<options>] [-r | -a] [--points-at]",
         "git branch [<options>] [-r | -a] [--format]",
+        "git branch [<options>] (--delete-merged <pattern>)..."
+        " [<branch-pattern>...]",
     ),
     "checkout": (
         "git checkout [<options>] <branch>",
