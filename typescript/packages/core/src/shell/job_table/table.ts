@@ -1304,10 +1304,11 @@ export class JobTable {
   /**
    * Stop what the lapsed instances on the store left running, without
    * waiting: the workspace calls it as it starts, so what a crashed instance
-   * ran stops before anything lists it. Once per table.
+   * ran stops before anything lists it. Once per table, and only on a store
+   * that leases owners: on any other, no owner lapses.
    */
   reapLapsed(): void {
-    if (this.swept || this.reapingStopped) return
+    if (this.swept || this.reapingStopped || this.store.leaseSeconds === null) return
     this.swept = true
     const sweeping = this.sweep().finally(() => {
       this.reaping.delete(sweeping)
