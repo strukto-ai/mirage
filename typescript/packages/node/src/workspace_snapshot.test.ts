@@ -581,6 +581,8 @@ describe('a VFS mounted at several prefixes', () => {
   it.each([
     ['/nope/', '/nope/'],
     ['/b/', '/b/'],
+    ['/c/', '/c/'],
+    [null, 'null'],
     [['/a/'], '["/a/"]'],
   ])('refuses a row naming %j as its VFS', async (target, shown) => {
     const shared = new RAMVFS()
@@ -907,5 +909,39 @@ describe('a VFS mounted at several prefixes', () => {
       if (row.prefix === '/') delete row.anchor
     }
     expect(buildMountArgs(state).anchored).toBeUndefined()
+  })
+
+  // A VFS shared by several prefixes runs one index, the first prefix's, so
+  // an override's index serves every prefix and none asks for credentials.
+  it.each(['/a/', '/b/'])(
+    "serves every prefix of a VFS with an override's index (%s)",
+    async (named) => {
+      const shared = new RAMVFS()
+      const redis = { type: 'redis' as const, url: 'redis://u:pw@localhost:6379/0', ttl: 30 }
+      const state = await savedState({ '/a': new Mount(shared, { index: redis }), '/b': shared })
+      const fresh = { type: 'ram' as const, ttl: 5 }
+      const args = buildMountArgs(state, { [named]: new Mount(new RAMVFS(), { index: fresh }) })
+      expect(args.mountArgs['/a/']?.options.index?.ttl).toBe(5)
+    },
+  )
+
+  it("keeps a scratch root's own index equal to the workspace's through a copy", async () => {
+    const index = { type: 'ram' as const, ttl: 41 }
+    const state = await savedState({ '/a': new RAMVFS() })
+    const loaded = await Workspace.fromState(
+      state,
+      { index },
+      { '/': new Mount(new RAMVFS(), { index }) },
+    )
+    try {
+      const copied = await loaded.copy()
+      try {
+        expect(copied.mount('/').indexConfig?.ttl).toBe(41)
+      } finally {
+        await copied.close()
+      }
+    } finally {
+      await loaded.close()
+    }
   })
 })

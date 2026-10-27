@@ -1709,7 +1709,13 @@ async def test_two_overrides_for_one_store_leave_the_rest_ambiguous():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("target", "shown"),
-    [("/nope/", "/nope/"), ("/b/", "/b/"), (["/a/"], '["/a/"]')],
+    [
+        ("/nope/", "/nope/"),
+        ("/b/", "/b/"),
+        ("/c/", "/c/"),
+        (None, "null"),
+        (["/a/"], '["/a/"]'),
+    ],
 )
 async def test_a_follower_naming_no_leader_is_refused(target, shown):
     shared = RAMVFS()
@@ -2094,3 +2100,20 @@ async def test_a_scratch_root_marker_off_the_root_is_ignored():
     rows["/data/"][MountKey.ANCHOR] = True
     del rows["/"][MountKey.ANCHOR]
     assert not build_mount_args(state, None, None).anchored
+
+
+# A VFS shared by several prefixes runs one index, the first prefix's, so
+# an override's index serves every prefix and none asks for credentials.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("named", ["/a/", "/b/"])
+async def test_an_override_index_serves_every_prefix_of_its_vfs(named):
+    shared = RAMVFS()
+    redis = RedisIndexConfig(url="redis://u:pw@localhost:6379/0", ttl=30)
+    state = await _saved_state(
+        {"/a": Mount(vfs=shared, index=redis), "/b": shared}
+    )
+    fresh = IndexConfig(ttl=5)
+    args = build_mount_args(
+        state, {named: Mount(vfs=RAMVFS(), index=fresh)}, None
+    )
+    assert args.mount_args["/a/"].index == fresh

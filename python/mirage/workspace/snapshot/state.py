@@ -447,14 +447,12 @@ def vfs_groups(state: dict[str, Any]) -> dict[str, str]:
     groups: dict[str, str] = {}
     for m in state[StateKey.MOUNTS]:
         prefix = norm_dir(m[MountKey.PREFIX])
-        named = m.get(MountKey.SAME_VFS_AS)
-        if named is None:
+        if MountKey.SAME_VFS_AS not in m:
             groups[prefix] = prefix
             continue
+        named = m[MountKey.SAME_VFS_AS]
         leader = norm_dir(named) if isinstance(named, str) else None
-        if leader is None or (
-            leader != prefix and groups.get(leader) != leader
-        ):
+        if leader is None or leader == prefix or groups.get(leader) != leader:
             shown = (
                 named
                 if isinstance(named, str)
@@ -579,6 +577,14 @@ def build_mount_args(
 
     mount_args: dict[str, Mount] = {}
     built: dict[str, tuple[BaseVFS, str | None]] = {}
+    # A VFS runs one index, its first prefix's (the registry aliases the
+    # rest): an override's index if one came with it, else the saved one.
+    given_index = {
+        id(override.vfs): override.index
+        for override in overrides.values()
+        if isinstance(override, Mount) and override.index is not None
+    }
+    indexed: set[int] = set()
     anchored = False
     for prefix, m in rows.items():
         group = groups[prefix]
@@ -659,6 +665,14 @@ def build_mount_args(
                 for name, limit in m.get(MountKey.COMMAND_LIMITS, {}).items()
             }
         )
+        index = (
+            None
+            if id(prov) in indexed
+            else restore_index_config(
+                m.get(MountKey.INDEX_CONFIG), given_index.get(id(prov)), prefix
+            )
+        )
+        indexed.add(id(prov))
         mount_args[m[MountKey.PREFIX]] = Mount(
             vfs=prov,
             mode=MountMode(m[MountKey.MODE]),
@@ -666,11 +680,7 @@ def build_mount_args(
             write=write,
             command_limits=limits,
             vfs_ref=ref,
-            index=restore_index_config(
-                m.get(MountKey.INDEX_CONFIG),
-                override.index if isinstance(override, Mount) else None,
-                prefix,
-            ),
+            index=index,
         )
 
     cli_args: dict[str, tuple[str | CLI, dict[str, Any] | None]] = {}
