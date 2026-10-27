@@ -231,13 +231,15 @@ const DONE_KEY = `__mirage_jq_done_${TOKEN}`
 // The variables the prelude binds: the document the program runs on, the
 // --arg / --argjson / --rawfile / --slurpfile bindings by name, the unread
 // documents `input` and `inputs` read, the parse error they meet past the
-// last of them, and the value it rebinds `$ARGS` to. They carry the same
-// token, so no `--arg` of the program's own can take one's place.
+// last of them, the value it rebinds `$ARGS` to, and the environment it
+// rebinds `$ENV` and `env` to. They carry the same token, so no `--arg` of
+// the program's own can take one's place.
 const VALUE_VAR = `__mirage_jq_value_${TOKEN}`
 const NAMED_VAR = `__mirage_jq_named_${TOKEN}`
 const INPUTS_VAR = `__mirage_jq_inputs_${TOKEN}`
 const INPUTS_ERROR_VAR = `__mirage_jq_inputs_error_${TOKEN}`
 const ARGS_VAR = `__mirage_jq_args_${TOKEN}`
+const ENV_VAR = `__mirage_jq_env_${TOKEN}`
 
 // The error no `try` inside the program caught: whether it was a string,
 // and its text as jq prints it.
@@ -374,7 +376,8 @@ interface Bound {
  * string onto its fixed-size WebAssembly stack, which one argument near
  * 1 MiB runs off the end of (a trap, or a silent overwrite of jq's own
  * data), while stdin is read from the heap. A run that binds nothing goes
- * on the plain document.
+ * on the plain document. `env`, an object as text, is what `$ENV` and `env`
+ * read in place of the process's environment.
  */
 function bound(
   doc: string,
@@ -383,22 +386,26 @@ function bound(
   inputs: readonly string[] | null,
   args: string | null,
   inputsError: string | null,
+  env: string | null = null,
 ): Bound {
   const plain = compacted(doc)
   // A name that is not an identifier can never be spelled as a variable,
   // so nothing needs it bound; $ARGS.named still carries it.
   const names = [...named.keys()].filter((name) => NAME.test(name))
-  if (names.length === 0 && inputs === null && args === null) {
+  if (names.length === 0 && inputs === null && args === null && env === null) {
     return { steps: [], stdin: plain, plain }
   }
   const steps = [
-    `. as [$${VALUE_VAR}, $${NAMED_VAR}, $${INPUTS_VAR}, $${ARGS_VAR}, $${INPUTS_ERROR_VAR}] |`,
+    `. as [$${VALUE_VAR}, $${NAMED_VAR}, $${INPUTS_VAR}, $${ARGS_VAR}, $${INPUTS_ERROR_VAR}, $${ENV_VAR}] |`,
   ]
   for (const name of names) steps.push(`$${NAMED_VAR}[${stringText(name)}] as $${name} |`)
   if (inputs !== null) steps.push(streamDefs(expr, inputsError !== null))
   // jq defines $ARGS itself, from a command line that no longer carries
   // the bindings, so the only way to serve mirage's own is to rebind it.
   if (args !== null) steps.push(`$${ARGS_VAR} as $ARGS |`)
+  // Bound after the names, so an `--arg ENV` leaves `$ENV` the environment,
+  // as jq binds it over one (compile.c).
+  if (env !== null) steps.push(`$${ENV_VAR} as $ENV | def env: $${ENV_VAR};`)
   steps.push(`$${VALUE_VAR} |`)
   const carried = [...named]
     .map(([name, text]) => `${stringText(name)}:${compacted(text)}`)
@@ -406,7 +413,8 @@ function bound(
   const docs = (inputs ?? []).map(compacted).join(',')
   const argsValue = args === null ? 'null' : compacted(args)
   const error = inputsError === null ? 'null' : stringText(inputsError)
-  const stdin = `[${plain},{${carried}},[${docs}],${argsValue},${error}]`
+  const envValue = env === null ? 'null' : compacted(env)
+  const stdin = `[${plain},{${carried}},[${docs}],${argsValue},${error},${envValue}]`
   return { steps, stdin, plain }
 }
 
@@ -763,8 +771,9 @@ export async function jqRun(
  * a number keeps its literal and an object its key order, and each output
  * comes back as jq's own compact dump of it, the spelling jq prints (`1.000`,
  * `1E+2`, `1e+17`, `-0`). `named` are the $name bindings, `inputs` the
- * documents still unread, `args` the value `$ARGS` should resolve to, and
- * `inputsError` the parse error the stream ends in.
+ * documents still unread, `args` the value `$ARGS` should resolve to,
+ * `inputsError` the parse error the stream ends in, and `env` the
+ * environment `$ENV` and `env` read in place of the process's.
  */
 export async function jqRunTexts(
   doc: string,
@@ -773,8 +782,9 @@ export async function jqRunTexts(
   inputs: readonly string[] | null = null,
   args: string | null = null,
   inputsError: string | null = null,
+  env: string | null = null,
 ): Promise<JqRun<string>> {
-  const done = await run(bound(doc, expr, named, inputs, args, inputsError), expr, true)
+  const done = await run(bound(doc, expr, named, inputs, args, inputsError, env), expr, true)
   // A text run hands back jq-wasm's lines as they are (see collected).
   return done as JqRun<string>
 }

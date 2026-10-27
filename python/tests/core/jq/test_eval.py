@@ -376,6 +376,16 @@ def test_a_text_run_keeps_every_literal_and_the_key_order_jq_reads():
     ]
 
 
+def test_a_text_run_reads_the_environment_it_is_given():
+    env = '{"HOME":"/home/a"}'
+    run = jq_run_texts("null", "[$ENV.HOME, env.HOME]", env=env)
+    assert run == JqRun(['["/home/a","/home/a"]'])
+    run = jq_run_texts("null", "[$ENV, env.HOME]", {"ENV": '"x"'}, env=env)
+    assert run == JqRun(['[{"HOME":"/home/a"},"/home/a"]'])
+    run = jq_run_texts("null", "def env: 1; env", env=env)
+    assert run == JqRun(["1"])
+
+
 def test_a_text_run_reports_errors_and_halts_in_jqs_own_spelling():
     assert jq_run_texts("1.000", '. + "a"').stop == JqError(
         'number (1.000) and string ("a") cannot be added', True

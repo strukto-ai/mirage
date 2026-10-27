@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use super::builtin::{self, Cfunc, Fault};
+use super::host::{self, Answer, Host};
 use super::value::{Object, Value, shed};
 
 #[derive(Clone, Copy, Debug)]
@@ -188,6 +189,8 @@ pub(crate) enum Next {
     Halt(Halt),
     Done,
     Paused,
+    /// `input` waits on the host's reply.
+    Input,
 }
 
 enum Flow {
@@ -195,6 +198,7 @@ enum Flow {
     Backtrack,
     Raise(Raise),
     Yield(Value),
+    Input,
 }
 
 /// Limits one run is held to.
@@ -230,6 +234,7 @@ pub(crate) struct Vm {
     limits: Limits,
     teardown: Vec<Vec<Value>>,
     pub(crate) steps: u64,
+    pub(crate) host: Host,
 }
 
 impl Vm {
@@ -254,6 +259,7 @@ impl Vm {
             limits,
             teardown: Vec::new(),
             steps: 0,
+            host: Host::default(),
         };
         vm.curr_frame = vm.arena.push(
             0,
@@ -493,6 +499,7 @@ impl Vm {
                     self.restore = true;
                     return Next::Output(value);
                 }
+                Flow::Input => return Next::Input,
                 Flow::Raise(raise) => {
                     self.error = Some(raise);
                     if let Some(next) = self.backtrack() {
@@ -710,6 +717,18 @@ impl Vm {
                 label.insert("__jq".into(), Value::number(self.next_label as f64));
                 self.next_label += 1;
                 self.push(Value::object(label));
+            }
+            Op::CallBuiltin(f, _) if host::is_host(*f) => {
+                let input = self.pop();
+                match self.host.call(*f, input) {
+                    Answer::Value(value) => self.push(value),
+                    Answer::Raise(message) => return Flow::Raise(Raise::Error(message)),
+                    Answer::Wait(input) => {
+                        self.push(input);
+                        self.pc = pc;
+                        return Flow::Input;
+                    }
+                }
             }
             Op::CallBuiltin(f, nargs) => {
                 let mut args = Vec::with_capacity(*nargs);

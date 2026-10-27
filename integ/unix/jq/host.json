@@ -1,0 +1,218 @@
+{
+  "cases": [
+    {
+      "id": "jq_first_inputs_leaves_the_rest_to_the_next_run",
+      "seq": 18700001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '1 2 3 4' | jq -c 'first(inputs)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n4\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_input_in_a_branch_not_taken_reads_nothing",
+      "seq": 18700002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '1 2 3 4' | jq -c 'if . == 1 then [., input] else . end'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1,2]\n3\n4\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_limit_inputs_then_the_main_loop_reads_on",
+      "seq": 18700003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '1 2 3 4 5' | jq -c '[., limit(2; inputs)]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1,2,3]\n[4,5]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_input_line_number_follows_each_document",
+      "seq": 18700004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '1\\n2\\n3\\n' | jq -c '[input_filename, input_line_number, input, input_line_number]'",
+      "expect": {
+        "exit": 5,
+        "stdout": "[\"<stdin>\",1,2,2]\n",
+        "stderr": "jq: error (at <stdin>:3): break\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_input_filename_is_null_before_any_input",
+      "seq": 18700005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[input_filename, input_line_number]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[null,0]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_input_meets_a_parse_error_mid_stream",
+      "seq": 18700006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '1 } 3 4' | jq -c '[., input]'",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "jq: error (at <stdin>:0): Unmatched '}' at line 1, column 3\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_debug_prints_compact_sorted_lines_to_stderr",
+      "seq": 18700007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '{\"b\":1,\"a\":2}' | jq -Sc 'debug, debug(\"m\", 2)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"a\":2,\"b\":1}\n{\"a\":2,\"b\":1}\n",
+        "stderr": "[\"DEBUG:\",{\"a\":2,\"b\":1}]\n[\"DEBUG:\",\"m\"]\n[\"DEBUG:\",2]\n"
+      },
+      "flags": [
+        "S",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_stderr_writes_a_string_raw_and_a_value_compact",
+      "seq": 18700008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '\"a\", {\"b\":1} | stderr | empty'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "a{\"b\":1}"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_debug_comes_before_the_run_error",
+      "seq": 18700009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '1 2 3' | jq -c '[., input] | debug | error'",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "[\"DEBUG:\",[1,2]]\njq: error (at <stdin>:0) (not a string): [1,2]\njq: error (at <stdin>:0): break\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_env_reads_exported_variables_only",
+      "seq": 18700010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "export JQ_HOST_VAR=v; JQ_LOCAL_VAR=1; jq -nc '[$ENV.JQ_HOST_VAR, env.JQ_HOST_VAR, $ENV.JQ_LOCAL_VAR]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"v\",\"v\",null]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_arg_named_env_leaves_dollar_env_the_environment",
+      "seq": 18700011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc --arg ENV x '[($ENV | type), (env | type), $ARGS.named.ENV]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"object\",\"object\",\"x\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c",
+        "arg"
+      ]
+    }
+  ]
+}

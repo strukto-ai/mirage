@@ -319,6 +319,25 @@ describe('InputReader', () => {
     }
   })
 
+  it('follows the input being read with its filename and line', async () => {
+    const reader = new InputReader(sources([bytes('1\n2\n'), bytes('3')]), jqOptions())
+    try {
+      expect([reader.filename(), reader.lineNumber()]).toEqual([null, 0])
+      const seen: [string | null, number][] = []
+      while ((await reader.nextInput()) !== NO_VALUE) {
+        seen.push([reader.filename(), reader.lineNumber()])
+      }
+      expect(seen).toEqual([
+        ['f0.json', 1],
+        ['f0.json', 2],
+        ['f1.json', 0],
+      ])
+      expect(reader.position()).toBe('f1.json:0')
+    } finally {
+      await reader.close()
+    }
+  })
+
   it('finds no documents in an empty input', async () => {
     expect(await values([bytes('')])).toEqual([])
     expect(await values([bytes('  \n\n ')])).toEqual([])

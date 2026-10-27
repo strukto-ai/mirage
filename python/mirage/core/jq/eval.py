@@ -56,13 +56,15 @@ DONE_KEY = f"__mirage_jq_done_{_TOKEN}"
 # The variables the prelude binds: the document the program runs on, the
 # --arg / --argjson / --rawfile / --slurpfile bindings by name, the unread
 # documents `input` and `inputs` read, the parse error they meet past the
-# last of them, and the value it rebinds `$ARGS` to. They carry the same
-# token, so no `--arg` of the program's own can take one's place.
+# last of them, the value it rebinds `$ARGS` to, and the environment it
+# rebinds `$ENV` and `env` to. They carry the same token, so no `--arg` of
+# the program's own can take one's place.
 VALUE_VAR = f"__mirage_jq_value_{_TOKEN}"
 NAMED_VAR = f"__mirage_jq_named_{_TOKEN}"
 INPUTS_VAR = f"__mirage_jq_inputs_{_TOKEN}"
 INPUTS_ERROR_VAR = f"__mirage_jq_inputs_error_{_TOKEN}"
 ARGS_VAR = f"__mirage_jq_args_{_TOKEN}"
+ENV_VAR = f"__mirage_jq_env_{_TOKEN}"
 
 # The error no `try` inside the program caught: whether it was a string,
 # and its text as jq prints it.
@@ -419,6 +421,7 @@ def _bound(
     inputs: Sequence[str] | None,
     args: str | None,
     inputs_error: str | None = None,
+    env: str | None = None,
 ) -> _Bound:
     """The bindings one run carries.
 
@@ -429,16 +432,18 @@ def _bound(
         inputs (Sequence[str] | None): the unread documents.
         args (str | None): the value of `$ARGS`.
         inputs_error (str | None): the parse error the stream ends in.
+        env (str | None): the environment `$ENV` and `env` read in place
+            of the process's, an object as text.
     """
     named = named or {}
     # A name that is not an identifier can never be spelled as a variable,
     # so nothing needs it bound; $ARGS.named still carries it.
     names = [name for name in named if IDENT.fullmatch(name)]
-    if not names and inputs is None and args is None:
+    if not names and inputs is None and args is None and env is None:
         return _Bound((), doc, doc)
     steps = [
         f". as [${VALUE_VAR}, ${NAMED_VAR}, ${INPUTS_VAR}, ${ARGS_VAR}, "
-        f"${INPUTS_ERROR_VAR}] |"
+        f"${INPUTS_ERROR_VAR}, ${ENV_VAR}] |"
     ]
     steps.extend(
         f"${NAMED_VAR}[{string_text(name)}] as ${name} |" for name in names
@@ -447,6 +452,10 @@ def _bound(
         steps.append(_stream_defs(expr, inputs_error is not None))
     if args is not None:
         steps.append(f"${ARGS_VAR} as $ARGS |")
+    # Bound after the names, so an `--arg ENV` leaves `$ENV` the
+    # environment, as jq binds it over one (compile.c).
+    if env is not None:
+        steps.append(f"${ENV_VAR} as $ENV | def env: ${ENV_VAR};")
     steps.append(f"${VALUE_VAR} |")
     carried = ",".join(
         f"{string_text(name)}:{text}" for name, text in named.items()
@@ -454,7 +463,7 @@ def _bound(
     error = "null" if inputs_error is None else string_text(inputs_error)
     stdin = (
         f"[{doc},{{{carried}}},[{','.join(inputs or ())}],"
-        f"{args or 'null'},{error}]"
+        f"{args or 'null'},{error},{env or 'null'}]"
     )
     return _Bound(tuple(steps), stdin, doc)
 
@@ -795,6 +804,7 @@ def jq_run_texts(
     inputs: Sequence[str] | None = None,
     args: str | None = None,
     inputs_error: str | None = None,
+    env: str | None = None,
 ) -> JqRun[str]:
     """Run a jq program on one document the way jq_run does, with the
     document, the bindings and the outputs all JSON text: jq's parser
@@ -809,13 +819,17 @@ def jq_run_texts(
         inputs (Sequence[str] | None): the documents still unread.
         args (str | None): the value `$ARGS` should resolve to.
         inputs_error (str | None): the parse error the stream ends in.
+        env (str | None): the environment `$ENV` and `env` read in place
+            of the process's.
 
     Raises:
         JqCompileError: libjq's refusal of the program, its compile
             errors numbered by the program's own lines.
     """
     run = _run(
-        expr, _bound(doc, expr, named, inputs, args, inputs_error), True
+        expr,
+        _bound(doc, expr, named, inputs, args, inputs_error, env),
+        True,
     )
     # A dumped run hands back strings only (see _collected).
     return cast("JqRun[str]", run)

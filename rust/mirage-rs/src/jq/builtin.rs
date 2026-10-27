@@ -135,6 +135,11 @@ cfuncs! {
     Halt = "halt" / 0,
     HaltError = "halt_error" / 1,
     InputFilename = "input_filename" / 0,
+    InputLineNumber = "input_line_number" / 0,
+    Input = "input" / 0,
+    Debug = "debug" / 0,
+    Stderr = "stderr" / 0,
+    Env = "env" / 0,
     HaveDecnum = "have_decnum" / 0,
     HaveLiteralNumbers = "have_literal_numbers" / 0,
     Floor = "floor" / 0,
@@ -416,7 +421,12 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
             Value::Number(code) => Err(Fault::Halt(Some(input.clone()), Some(code.value()))),
             _ => Err(type_error(input, "halt_error/1: number required")),
         },
-        Cfunc::InputFilename => Ok(Value::Null),
+        Cfunc::InputFilename
+        | Cfunc::InputLineNumber
+        | Cfunc::Input
+        | Cfunc::Debug
+        | Cfunc::Stderr
+        | Cfunc::Env => unreachable!("the VM answers its host builtins"),
         Cfunc::HaveDecnum => Ok(Value::True),
         Cfunc::HaveLiteralNumbers => Ok(Value::True),
         Cfunc::Floor => math1(input, f64::floor),
