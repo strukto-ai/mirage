@@ -1,6 +1,9 @@
 // Adapted from Oniguruma 6.9.10 (BSD-2-Clause), src/regparse.c. See licenses/third_party/oniguruma.txt.
 
+use std::iter::once;
+
 use super::class::{self, Ctype, Set};
+use super::fold;
 
 /// How deep groups, alternations and quantifiers may nest: every walk of
 /// the tree recurses, and a wasm build has a 1 MiB stack.
@@ -70,6 +73,9 @@ pub(super) enum Anchor {
 pub(super) enum Node {
     Empty,
     Char(char),
+    /// A literal read under ignore-case, which `fold::unravel` rewrites
+    /// before the tree is compiled.
+    Caseless(char),
     /// A byte `\xHH` names that starts no character.
     Byte(u8),
     Set(Box<Set>),
@@ -85,6 +91,8 @@ pub(super) enum Node {
         greedy: bool,
     },
     Atomic(Box<Node>),
+    /// `(?i:...)`: its own node, so a caseless run never joins across it.
+    Options(Box<Node>),
     Look {
         behind: bool,
         negate: bool,
@@ -133,9 +141,6 @@ struct Parser {
     /// The highest group a reference or condition names, checked once
     /// every group is known.
     referenced: usize,
-    /// Whether a caseless literal or class holds a character that folds
-    /// to several, which this matcher does not fold as Oniguruma does.
-    multi_fold: bool,
 }
 
 pub(super) fn parse(pattern: &str, flags: Flags) -> Result<Parsed, String> {
@@ -147,17 +152,13 @@ pub(super) fn parse(pattern: &str, flags: Flags) -> Result<Parsed, String> {
         names: Vec::new(),
         depth: 0,
         referenced: 0,
-        multi_fold: false,
     };
     let node = parser.alts(false)?;
     if parser.referenced > parser.groups {
         return Err(INVALID_BACKREF.into());
     }
-    if parser.multi_fold {
-        return Err(unsupported("case folding to several characters"));
-    }
     Ok(Parsed {
-        node,
+        node: fold::unravel(node, false),
         groups: parser.groups,
         names: parser.names,
     })
@@ -167,7 +168,7 @@ fn is_word(c: char) -> bool {
     class::contains(class::word(), c as u32)
 }
 
-fn seq(mut items: Vec<Node>) -> Node {
+pub(super) fn seq(mut items: Vec<Node>) -> Node {
     match items.len() {
         0 => Node::Empty,
         1 => items.pop().unwrap_or(Node::Empty),
@@ -376,13 +377,10 @@ impl Parser {
 
     fn literal(&mut self, c: char) -> Node {
         if self.flags.ignore_case {
-            self.multi_fold |= class::folds_to_several(c);
-            let set = class::fold(class::single(c));
-            if class::size(&set) > 1 {
-                return Node::Set(Box::new(set));
-            }
+            Node::Caseless(c)
+        } else {
+            Node::Char(c)
         }
-        Node::Char(c)
     }
 
     fn code_point(&mut self, code: u32) -> Node {
@@ -917,7 +915,7 @@ impl Parser {
                     self.flags = flags;
                     let body = self.alts(true);
                     self.flags = saved;
-                    return body.map(Atom::Node);
+                    return body.map(|body| Atom::Node(Node::Options(Box::new(body))));
                 }
                 '-' => negate = true,
                 'i' => flags.ignore_case = !negate,
@@ -1099,14 +1097,22 @@ impl Parser {
             add(&mut set, prev, prev);
         }
         if self.flags.ignore_case {
-            self.multi_fold |= !negate && class::holds_multi_fold(&set);
-            set = class::fold(set);
+            set = fold::close(set);
         }
         if negate {
             set = class::negate(set);
         }
         self.leave();
-        Ok(Node::Set(Box::new(set)))
+        let alternatives = if self.flags.ignore_case && !negate {
+            fold::alternatives(&set)
+        } else {
+            Vec::new()
+        };
+        let class = Node::Set(Box::new(set));
+        if alternatives.is_empty() {
+            return Ok(class);
+        }
+        Ok(Node::Alt(once(class).chain(alternatives).collect()))
     }
 
     /// Whether an unescaped `]` follows, so `[]` starts a class holding
@@ -1267,8 +1273,7 @@ impl Parser {
 
     fn class_crude(&mut self, first: u8) -> Result<Item, String> {
         Ok(match self.crude(first)? {
-            Node::Char(c) => Item::Char(c as u32),
-            Node::Set(set) => Item::Set(*set),
+            Node::Char(c) | Node::Caseless(c) => Item::Char(c as u32),
             Node::Byte(byte) => Item::Char(u32::from(byte)),
             _ => unreachable!("one character"),
         })

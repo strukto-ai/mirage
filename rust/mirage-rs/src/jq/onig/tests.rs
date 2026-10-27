@@ -33,6 +33,21 @@ fn strings(pattern: &str, hay: &str) -> Vec<String> {
         .collect()
 }
 
+/// Every match ignoring case, as `i` sets it.
+fn caseless(pattern: &str, hay: &str) -> Vec<String> {
+    let options = Options {
+        ignore_case: true,
+        ..Options::default()
+    };
+    spans(pattern, hay, options)
+        .into_iter()
+        .map(|region| {
+            let (start, end) = region[0].expect("a match");
+            hay[start..end].to_string()
+        })
+        .collect()
+}
+
 fn error(pattern: &str) -> String {
     match Regex::new(pattern, Options::default()) {
         Ok(_) => panic!("{pattern} compiled"),
@@ -88,6 +103,119 @@ fn lookarounds() {
     assert_eq!(error("(?<=a|bc)b"), "invalid pattern in look-behind");
     assert_eq!(error("(?<=a.*)b"), "invalid pattern in look-behind");
     assert_eq!(error("(?<!(a))b"), "invalid pattern in look-behind");
+}
+
+#[test]
+fn a_character_folds_to_several_as_oniguruma_does() {
+    let none: Vec<String> = Vec::new();
+    assert_eq!(caseless("ss", "ß"), ["ß"]);
+    assert_eq!(caseless("ß", "ss sſ SS ẞ"), ["ss", "sſ", "SS", "ẞ"]);
+    assert_eq!(caseless("ẞ", "ß"), ["ß"]);
+    assert_eq!(caseless("sss", "sß"), none);
+    assert_eq!(caseless("sss", "ßs"), ["ßs"]);
+    assert_eq!(caseless("^ffi$", "ﬃ"), ["ﬃ"]);
+    assert_eq!(caseless("^ffi$", "ﬀi"), none);
+    assert_eq!(caseless("^ﬀi$", "ﬃ"), none);
+    assert_eq!(caseless("^i̇$", "İ"), ["İ"]);
+    assert_eq!(caseless("^İ$", "i̇"), ["i̇"]);
+    assert_eq!(caseless("^İ$", "i"), none);
+    assert_eq!(caseless("^i$", "ı"), none);
+    assert_eq!(caseless("ʼn", "ŉ"), ["ŉ"]);
+    assert_eq!(caseless("s.", "ß"), none);
+    assert_eq!(caseless("s\\w", "ß"), none);
+    assert_eq!(caseless("\\p{Lower}\\p{Lower}", "ß"), none);
+    assert_eq!(caseless("^k$", "K"), ["K"]);
+}
+
+/// Consecutive literals fold as one string, across `(?:...)`, `\Q...\E`
+/// and `\x{...}`; a group, a quantifier or an option change ends the
+/// run.
+#[test]
+fn a_caseless_run_folds_together_up_to_a_boundary() {
+    let none: Vec<String> = Vec::new();
+    for pattern in [
+        "(?:s)s",
+        "(?:(?:s)s)",
+        "s(?:s)",
+        "s\\Qs\\E",
+        "\\x{73 73}",
+        "ss{1}",
+        "ss|x",
+        "(?:ss)+",
+        "s(?i)s",
+    ] {
+        assert_eq!(caseless(pattern, "ß"), ["ß"], "{pattern}");
+    }
+    for pattern in [
+        "(s)s",
+        "ss+",
+        "ss?",
+        "s{2}",
+        "(?:s)+s",
+        "(?i:s)s",
+        "(?i)s(?-i)s",
+    ] {
+        assert_eq!(caseless(pattern, "ß"), none, "{pattern}");
+    }
+    assert_eq!(strings("(?i)ss", "ß"), ["ß"]);
+    assert_eq!(strings("(?i:(?=a))*", "a"), ["", ""]);
+}
+
+#[test]
+fn a_look_behind_folds_one_character_to_one() {
+    let none: Vec<String> = Vec::new();
+    assert_eq!(caseless("(?<=ss)$", "xß"), none);
+    assert_eq!(caseless("(?<=ss)$", "xss"), [""]);
+    assert_eq!(caseless("(?<=ß)$", "xẞ"), [""]);
+    assert_eq!(caseless("(?<=ß)$", "xss"), none);
+    assert_eq!(caseless("(?<=x)ß(?=y)", "xssy"), ["ss"]);
+    assert_eq!(error("(?i)(?<=[ß])"), "invalid pattern in look-behind");
+}
+
+#[test]
+fn a_class_folds_to_several_characters() {
+    let none: Vec<String> = Vec::new();
+    assert_eq!(caseless("^[ß]$", "ss"), ["ss"]);
+    assert_eq!(caseless("[ß]", "SS sſ ẞ"), ["SS", "sſ", "ẞ"]);
+    assert_eq!(caseless("^[ẞ]$", "ss"), ["ss"]);
+    assert_eq!(caseless("^[ß-ẞ]$", "ss"), ["ss"]);
+    assert_eq!(caseless("^[\\p{Lu}]$", "ss"), ["ss"]);
+    assert_eq!(caseless("^\\p{Lu}$", "ss"), none);
+    assert_eq!(caseless("^[[:upper:]]$", "ss"), ["ss"]);
+    assert_eq!(caseless("^[ß&&ß]$", "ss"), ["ss"]);
+    assert_eq!(caseless("^[^ß]$", "ss"), none);
+    assert_eq!(caseless("^[^ß]$", "ẞ"), none);
+    assert_eq!(caseless("^[^s]$", "ß"), ["ß"]);
+    assert_eq!(caseless("[s]s", "ß"), none);
+    assert_eq!(caseless("[ß]", "ssß"), ["ss", "ß"]);
+    assert_eq!(caseless("[ß]", "ssx"), ["ss"]);
+    assert_eq!(caseless("^[ﬁ]$", "fi"), ["fi"]);
+    assert_eq!(caseless("^[ﬃ]$", "ffi"), ["ffi"]);
+    assert_eq!(caseless("[ﬀﬃ]", "ffi"), ["ff"]);
+    assert_eq!(caseless("^[ﬀ]i$", "ﬃ"), none);
+    assert_eq!(caseless("[ß]{2}", "ssss"), ["ssss"]);
+}
+
+#[test]
+fn a_backreference_compares_case_foldings() {
+    let none: Vec<String> = Vec::new();
+    assert_eq!(caseless("(ss)\\1", "ßß"), ["ßß"]);
+    assert_eq!(caseless("(ss)\\1", "ßss"), none);
+    assert_eq!(caseless("^(ß)\\1$", "ßss"), none);
+    assert_eq!(caseless("^(s)\\1ß$", "ssß"), ["ssß"]);
+    assert_eq!(caseless("^(ß)\\1$", "ßẞ"), none);
+    assert_eq!(caseless("(ẞ)\\1", "ẞßx"), ["ẞß"]);
+    assert_eq!(caseless("^(K)\\1$", "K\u{212a}"), none);
+    assert_eq!(caseless("^(K)\\1$", "\u{212a}K"), none);
+    assert_eq!(caseless("^(K)\\1$", "\u{212a}k"), none);
+    assert_eq!(
+        caseless("^(K)\\1$", "\u{212a}\u{212a}"),
+        ["\u{212a}\u{212a}"]
+    );
+    assert_eq!(caseless("^(\u{212a})\\1$", "K\u{212a}"), none);
+    assert_eq!(caseless("^(fi)\\1$", "ﬁﬁ"), ["ﬁﬁ"]);
+    assert_eq!(caseless("^(fi)\\1$", "fiﬁ"), none);
+    assert_eq!(caseless("^(σ)\\1$", "σς"), ["σς"]);
 }
 
 #[test]

@@ -3,43 +3,10 @@
 use std::sync::Arc;
 
 use super::builtin::{Fault, array_limit, type_error};
-use super::onig::{Options, Regex, Region, Search, folds_to_several};
+use super::onig::{Options, Regex, Region, Search};
 use super::value::{Object, Value};
 use super::vm::Limits;
 use crate::regex::Step;
-
-/// Oniguruma folds some characters to several (`ß` to `ss`), which this
-/// matcher does not; a case-insensitive search that could meet one fails
-/// rather than answer differently from jq.
-const MULTI_FOLD: &str = "Regex failure: case folding to several characters is not supported";
-
-fn multi_fold(text: &str) -> bool {
-    text.chars().any(folds_to_several)
-}
-
-/// Whether an inline option group (`(?i)`, `(?mi:`) turns case
-/// folding on somewhere in `pattern`.
-fn inline_ignore_case(pattern: &str) -> bool {
-    let bytes = pattern.as_bytes();
-    let mut at = 0;
-    while at < bytes.len() {
-        match bytes[at] {
-            b'\\' => at += 2,
-            b'(' if bytes.get(at + 1) == Some(&b'?') => {
-                at += 2;
-                while let Some(c) = bytes.get(at) {
-                    match c {
-                        b'i' => return true,
-                        b'a'..=b'z' => at += 1,
-                        _ => break,
-                    }
-                }
-            }
-            _ => at += 1,
-        }
-    }
-    false
-}
 
 /// For a regex builtin called with a literal pattern (and literal or no
 /// modifiers), the reason this matcher cannot run it, if it cannot: the
@@ -183,9 +150,6 @@ impl Matching {
             }
             Value::Null => {}
             _ => return Err(type_error(modifiers, "is not a string")),
-        }
-        if (options.ignore_case || inline_ignore_case(pattern)) && multi_fold(text) {
-            return Err(Fault::Error(Value::string(MULTI_FOLD)));
         }
         let regex = Regex::new(pattern, options)
             .map_err(|message| Fault::Error(Value::string(format!("Regex failure: {message}"))))?;
