@@ -955,7 +955,11 @@ describe('a VFS mounted at several prefixes', () => {
         '/a/': new Mount(live, { index: { type: 'ram', ttl: 600 } }),
         '/b/': new Mount(live, { index: { type: 'ram', ttl: 1 } }),
       }
-      const overrides = Object.fromEntries(order.map((p) => [p, given[p]!]))
+      const overrides: Record<string, Mount> = {}
+      for (const p of order) {
+        const mount = given[p]
+        if (mount !== undefined) overrides[p] = mount
+      }
       expect(buildMountArgs(state, overrides).mountArgs['/a/']?.options.index?.ttl).toBe(600)
     },
   )
