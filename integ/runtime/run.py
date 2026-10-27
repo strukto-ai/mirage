@@ -147,11 +147,11 @@ RUNTIME_REQUIRES: dict[str, list[str]] = {
 RUNTIME_ENTRY: dict[str, dict[str, Any]] = {
     "sandlock": {"captures": ["python3", "node", "@external"]},
     "docker": {
-        "captures": ["*"],
+        "captures": ["@line"],
         "config": {"container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"},
     },
     "ssh": {
-        "captures": ["*"],
+        "captures": ["@line"],
         "config": {
             "host": "${MIRAGE_INTEG_SSH_HOST}",
             "port": 2222,
@@ -160,19 +160,19 @@ RUNTIME_ENTRY: dict[str, dict[str, Any]] = {
         },
     },
     "e2b": {
-        "captures": ["*"],
+        "captures": ["@line"],
         "config": {"sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"},
     },
     "smolvm": {
-        "captures": ["*"],
+        "captures": ["@line"],
         "config": {"machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"},
     },
     "microsandbox": {
-        "captures": ["*"],
+        "captures": ["@line"],
         "config": {"sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"},
     },
     "apple_container": {
-        "captures": ["*"],
+        "captures": ["@line"],
         "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"},
     },
 }

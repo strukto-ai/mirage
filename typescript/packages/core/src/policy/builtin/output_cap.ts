@@ -30,14 +30,21 @@ export const DEFAULT_COMMAND_LIMITS: Record<string, Limit> = Object.assign(
   ),
 )
 
-/** The line's time limit when no `line` entry names one. Mirrors Python's LINE_TIMEOUT_SECONDS. */
+/** The line's time limit when no `@line` entry names one. Mirrors Python's LINE_TIMEOUT_SECONDS. */
 export const LINE_TIMEOUT_SECONDS = 600
 
-/** The entry naming every command in a limit table. Mirrors Python's ALL_COMMANDS. */
-export const ALL_COMMANDS = '*'
+/**
+ * The entry naming every command in a limit table, a group spelled with the
+ * `@` a runtime's captures use for theirs, so no command name can clash.
+ * Mirrors Python's ALL_COMMANDS.
+ */
+export const ALL_COMMANDS = '@all'
 
 /** The entry naming the whole line, whose `timeoutSeconds` is its one time limit. Mirrors Python's LINE. */
-export const LINE = 'line'
+export const LINE = '@line'
+
+/** What a line past its time limit is called: `line: timed out after Ns`. Mirrors Python's LINE_NAME. */
+export const LINE_NAME = 'line'
 
 interface LimitMount {
   commandLimits: Map<string, Limit>
@@ -61,7 +68,7 @@ function entries(table: Readonly<Record<string, Limit>>, name: string): (Limit |
  * Resolve one command's limit, the one precedence engine.
  *
  * Field by field, from the most specific layer that sets it: the profile's
- * entry for the command, then its `*` entry for every command, then the
+ * entry for the command, then its `@all` entry for every command, then the
  * mount's two, the workspace's two, the command's own default and the
  * built-in table; on a mount, its backend's default (`walkLimit`) last. A layer that names one bound inherits the rest. A command across
  * several mounts resolves on each and keeps the tightest bound. Mirrors
@@ -213,7 +220,7 @@ export function commandLimitsToJSON(
 
 /**
  * The whole line's deadline, the one time limit a line runs under: the
- * `line` entry's `timeoutSeconds`, the profile's over the workspace's, else
+ * `@line` entry's `timeoutSeconds`, the profile's over the workspace's, else
  * `LINE_TIMEOUT_SECONDS`. An entry naming it as null or 0 lifts it. Mirrors
  * Python's line_timeout.
  */
@@ -228,10 +235,10 @@ export function lineTimeout(
 
 /**
  * Refuse a table that names time where no time limit applies. A line runs
- * under one time limit, the `line` entry's `timeoutSeconds`; no command or
- * op entry takes one, and the `line` entry takes nothing else. A mount
- * names no line, since a line spans mounts. Mirrors Python's
- * check_command_limits.
+ * under one time limit, the `@line` entry's `timeoutSeconds`; no command or
+ * op entry takes one, and the `@line` entry takes nothing else. A mount
+ * names no line, since a line spans mounts. A key is a command or one of the
+ * two groups, `@all` and `@line`. Mirrors Python's check_command_limits.
  */
 export function checkCommandLimits(
   limits: Readonly<Record<string, Limit>>,
@@ -239,6 +246,11 @@ export function checkCommandLimits(
   takesLine: boolean,
 ): void {
   for (const [name, limit] of Object.entries(limits)) {
+    if (name !== ALL_COMMANDS && name !== LINE && (name === '*' || name.startsWith('@'))) {
+      throw new Error(
+        `${where}: command_limits['${name}']: not a command or a group; the groups are '${ALL_COMMANDS}' and '${LINE}'`,
+      )
+    }
     if (name !== LINE) {
       if (limit.fieldsSet.has('timeoutSeconds')) {
         throw new Error(

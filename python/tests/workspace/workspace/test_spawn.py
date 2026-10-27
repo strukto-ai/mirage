@@ -70,6 +70,19 @@ async def test_profile_process_views_and_revocation():
 
 
 @pytest.mark.asyncio
+async def test_terminate_stops_a_child_with_the_signal_it_names():
+    ws = Workspace({}, runtimes=[])
+    try:
+        child = ws.spawn(SpawnRequest(("sleep", "30")))
+        child.terminate(15)
+        info = await asyncio.wait_for(child.wait(), 5)
+        assert info.exit_code == 143
+        assert child.poll() == 143
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_monty_keeps_unsupported_subprocess_import():
     ws = Workspace({}, runtimes=[MontyRuntime()], mode=MountMode.EXEC)
     try:

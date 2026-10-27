@@ -97,7 +97,8 @@ export class ProcessHandle {
    * Request cancellation without waiting for the runner to exit. A runner
    * that already exited has nothing to cancel, but what it started may
    * still run (`sh -c 'sleep 100 &'`), so its children are stopped all the
-   * same.
+   * same. A KILL while the runner still stops under another signal cuts the
+   * grace that signal gave its program short, as a second `kill -KILL` does.
    *
    * @param signal what the stop stands for, KILL (9) unless a `kill` named another.
    */
@@ -106,7 +107,12 @@ export class ProcessHandle {
       this.cancelChildren(signal)
       return false
     }
-    if (this.current.cancellationRequested) return false
+    if (this.current.cancellationRequested) {
+      if (signal !== 9 || this.stopSignal === 9) return false
+      this.stopSignal = signal
+      this.cancelChildren(signal)
+      return true
+    }
     const previous = this.current
     this.current = Object.freeze({
       ...this.current,

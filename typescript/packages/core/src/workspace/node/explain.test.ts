@@ -176,7 +176,7 @@ class LineBox extends Runtime implements LineExecutor {
   lines: string[] = []
 
   constructor() {
-    super({ captures: ['*'] })
+    super({ captures: ['@line'] })
   }
 
   runLine(_e: unknown, _p: PathSpec[], _t: string[], ctx: Context): Promise<RunResult> {

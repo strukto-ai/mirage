@@ -1,13 +1,7 @@
 from dataclasses import dataclass
-from tarfile import TarFile
-from typing import Literal, TypeAlias
 
 from mirage.commands.builtin.generic.archive.types import MemberKind
-from mirage.io.types import ByteSource
 from mirage.types import PathSpec
-from mirage.utils.compress import GzipDataError
-
-CompressionSuffix: TypeAlias = Literal["", ":gz", ":bz2", ":xz"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,19 +53,3 @@ class CreateResult:
     notices: tuple[str, ...]
     exit_code: int
     write: bool = True
-
-
-@dataclass(frozen=True, slots=True)
-class ReadResult:
-    """An opened archive, its gzip failure and independent tar diagnostics.
-
-    ``cut`` is the index of the first member whose data ran past the end
-    of the stream, None when every member is whole, and ``tail`` is that
-    member's data that arrived, in whole blocks of the decoded stream.
-    """
-
-    archive: TarFile | None
-    failure: GzipDataError | None
-    notices: tuple[str, ...] = ()
-    cut: int | None = None
-    tail: ByteSource = b""

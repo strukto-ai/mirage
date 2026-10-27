@@ -12,7 +12,7 @@
           {
             "name": "apple_container",
             "captures": [
-              "*"
+              "@line"
             ],
             "config": {
               "container": "${MIRAGE_INTEG_APPLE_CONTAINER}"

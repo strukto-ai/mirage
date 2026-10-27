@@ -201,9 +201,9 @@ async def test_profile_can_raise_the_line_deadline():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        command_limits={"line": Limit(timeout_seconds=0.05)},
+        command_limits={"@line": Limit(timeout_seconds=0.05)},
         profiles={
-            "relaxed": {"command_limits": {"line": {"timeout_seconds": 5}}}
+            "relaxed": {"command_limits": {"@line": {"timeout_seconds": 5}}}
         },
     )
     try:
@@ -220,12 +220,12 @@ async def test_profile_can_raise_the_line_deadline():
     "mount_limits,options",
     [
         ({}, {"command_limits": {"sleep": Limit(timeout_seconds=1)}}),
-        ({"line": Limit(timeout_seconds=1)}, {}),
+        ({"@line": Limit(timeout_seconds=1)}, {}),
         (
             {},
             {
                 "profiles": {
-                    "p": {"command_limits": {"line": {"max_lines": 1}}}
+                    "p": {"command_limits": {"@line": {"max_lines": 1}}}
                 }
             },
         ),

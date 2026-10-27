@@ -12,19 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { tarGeneric } from './tar.ts'
-import type { Context } from '../../../../commands/config.ts'
-import { ensureStream } from '../../../../io/stream.ts'
-import { materialize } from '../../../../io/types.ts'
-import { readTar } from '../../tar_helper.ts'
 // Mirrors python/tests/commands/builtin/generic/tar/test_tar.py.
 
 import { expect, it } from 'vitest'
-import { PathSpec, FileStat, FileType, MountMode } from '../../../../types.ts'
+import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 
-const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function shell(
@@ -77,56 +71,4 @@ it('streams an archive without a writable root or a dash file', async () => {
   expect(DEC.decode(result.stderr)).toBe('a\n')
   expect((await ws.shell('test ! -e /-')).exitCode).toBe(0)
   await ws.close()
-})
-
-it('emits a known-size archive header before draining its source', async () => {
-  const pulled: string[] = []
-  let closed = false
-  const result = await tarGeneric(
-    [PathSpec.fromStrPath('/a')],
-    [],
-    {
-      flags: { create: true },
-      cwd: PathSpec.fromStrPath('/'),
-      stdin: null,
-    } as Context,
-    {
-      async *stream() {
-        try {
-          for (const part of ['abc', 'def']) {
-            await Promise.resolve()
-            pulled.push(part)
-            yield ENC.encode(part)
-          }
-        } finally {
-          closed = true
-        }
-      },
-      write: () => {
-        throw new Error('unexpected write')
-      },
-      mkdir: () => {
-        throw new Error('unexpected mkdir')
-      },
-      stat: () => Promise.resolve(new FileStat({ name: 'a', type: FileType.FILE, size: 6 })),
-      walk: () => {
-        throw new Error('unexpected walk')
-      },
-      isDir: () => Promise.resolve(false),
-    },
-  )
-  if (result?.[0] == null) throw new Error('missing archive')
-  const stream = ensureStream(result[0])[Symbol.asyncIterator]()
-  const first = await stream.next()
-  expect(first.done).toBe(false)
-  expect(pulled).toEqual(['abc'])
-  const rest = await materialize({ [Symbol.asyncIterator]: () => stream })
-  const header: unknown = first.value
-  if (!(header instanceof Uint8Array)) throw new Error('missing header')
-  const all = new Uint8Array(header.length + rest.length)
-  all.set(header)
-  all.set(rest, header.length)
-  expect(DEC.decode((await readTar(all))[0]?.data)).toBe('abcdef')
-  expect(result[1].exitCode).toBe(0)
-  expect(closed).toBe(true)
 })

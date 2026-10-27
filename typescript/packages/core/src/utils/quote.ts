@@ -127,20 +127,6 @@ export function escapeName(name: string): string {
   return escaped(name, ' \\')
 }
 
-/**
- * GNU's `escape` quoting style: C escapes, backslashes doubled.
- *
- * tar prints every member name it lists this way, under -t and under -v of
- * -c and -x alike, and leaves a space bare where ls -b protects it. tar 1.35
- * on debian:stable-slim lists a member stored as the bytes `a\xffb` as
- * `a\377b` and one named `back\slash` as `back\\slash`. A byte that is not
- * UTF-8 arrives here as its `decodeText` sentinel. Mirrors Python's
- * `escape_quote`.
- */
-export function escapeQuote(name: string): string {
-  return escaped(name, '\\')
-}
-
 function escaped(name: string, protectedChars: string): string {
   let out = ''
   for (const char of name) {

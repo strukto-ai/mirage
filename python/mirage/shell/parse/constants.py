@@ -37,6 +37,27 @@ BASH_KEYWORDS = frozenset(
     }
 )
 
+# The words the parser reads as syntax or as a declaration unless an alias
+# of the name expands: an alias of one changes how a later line parses.
+PARSED_WORDS = BASH_KEYWORDS | frozenset(
+    {
+        "time",
+        "coproc",
+        "[[",
+        "]]",
+        "]",
+        "{",
+        "}",
+        "declare",
+        "typeset",
+        "export",
+        "readonly",
+        "local",
+        "unset",
+        "unsetenv",
+    }
+)
+
 
 # The characters that end an unquoted word.
 WORD_BREAKS = frozenset(" \t\n;&|()<>")

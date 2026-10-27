@@ -75,13 +75,13 @@ RUNTIMES='{
   },
   "entry": {
     "sandlock": {"captures": ["python3", "node", "@external"]},
-    "docker": {"captures": ["*"], "config": {"container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"}},
-    "ssh": {"captures": ["*"], "config": {"host": "${MIRAGE_INTEG_SSH_HOST}", "port": 2222,
+    "docker": {"captures": ["@line"], "config": {"container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"}},
+    "ssh": {"captures": ["@line"], "config": {"host": "${MIRAGE_INTEG_SSH_HOST}", "port": 2222,
       "username": "${MIRAGE_INTEG_SSH_USERNAME}", "identity_file": "${MIRAGE_INTEG_SSH_KEY}"}},
-    "e2b": {"captures": ["*"], "config": {"sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"}},
-    "smolvm": {"captures": ["*"], "config": {"machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"}},
-    "microsandbox": {"captures": ["*"], "config": {"sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"}},
-    "apple_container": {"captures": ["*"], "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"}}
+    "e2b": {"captures": ["@line"], "config": {"sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"}},
+    "smolvm": {"captures": ["@line"], "config": {"machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"}},
+    "microsandbox": {"captures": ["@line"], "config": {"sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"}},
+    "apple_container": {"captures": ["@line"], "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"}}
   },
   "optional": ["sandlock", "e2b", "smolvm", "microsandbox", "apple_container"]
 }'

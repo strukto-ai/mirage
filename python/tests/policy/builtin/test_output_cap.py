@@ -124,21 +124,21 @@ def test_resolve_unknown_command_has_no_bound():
 def test_the_line_timeout_defaults_to_600_seconds():
     assert LINE_TIMEOUT_SECONDS == 600
     assert line_timeout() == LINE_TIMEOUT_SECONDS
-    assert line_timeout({"cat": Limit(max_lines=3)}, {"line": Limit()}) == 600
+    assert line_timeout({"cat": Limit(max_lines=3)}, {"@line": Limit()}) == 600
 
 
 def test_a_profile_line_entry_overrides_the_workspaces():
-    workspace = {"line": Limit(timeout_seconds=30)}
+    workspace = {"@line": Limit(timeout_seconds=30)}
     assert line_timeout(workspace) == 30
-    assert line_timeout(workspace, {"line": Limit(timeout_seconds=5)}) == 5
+    assert line_timeout(workspace, {"@line": Limit(timeout_seconds=5)}) == 5
     assert line_timeout(workspace, {"cat": Limit(max_lines=1)}) == 30
 
 
 @pytest.mark.parametrize("seconds", [None, 0])
 def test_a_line_entry_of_none_or_zero_lifts_the_deadline(seconds):
-    lifted = {"line": Limit(timeout_seconds=seconds)}
+    lifted = {"@line": Limit(timeout_seconds=seconds)}
     assert line_timeout(lifted) is None
-    assert line_timeout({"line": Limit(timeout_seconds=30)}, lifted) is None
+    assert line_timeout({"@line": Limit(timeout_seconds=30)}, lifted) is None
 
 
 @pytest.mark.parametrize(
@@ -148,19 +148,31 @@ def test_a_line_entry_of_none_or_zero_lifts_the_deadline(seconds):
             {"sleep": Limit(timeout_seconds=1)},
             "workspace",
             "workspace: command_limits['sleep'].timeout_seconds: a line"
-            " has one time limit, set it on 'line'",
+            " has one time limit, set it on '@line'",
         ),
         (
-            {"line": Limit(timeout_seconds=1, max_lines=3)},
+            {"@line": Limit(timeout_seconds=1, max_lines=3)},
             "profile",
-            "profile: command_limits['line'] takes only timeout_seconds,"
+            "profile: command_limits['@line'] takes only timeout_seconds,"
             " not max_lines",
         ),
         (
-            {"line": Limit(timeout_seconds=1)},
+            {"@line": Limit(timeout_seconds=1)},
             "mount /data",
-            "mount /data: command_limits['line']: a line spans mounts,"
+            "mount /data: command_limits['@line']: a line spans mounts,"
             " set it on the workspace or a profile",
+        ),
+        (
+            {"*": Limit(walk_limit=2)},
+            "workspace",
+            "workspace: command_limits['*']: not a command or a group;"
+            " the groups are '@all' and '@line'",
+        ),
+        (
+            {"@lines": Limit(max_lines=1)},
+            "profile",
+            "profile: command_limits['@lines']: not a command or a group;"
+            " the groups are '@all' and '@line'",
         ),
     ],
 )
@@ -176,7 +188,7 @@ def test_check_command_limits_refuses_time_where_none_applies(
 
 def test_check_command_limits_takes_a_line_entry_and_untimed_commands():
     check_command_limits(
-        {"line": Limit(timeout_seconds=None), "cat": Limit(max_lines=3)},
+        {"@line": Limit(timeout_seconds=None), "cat": Limit(max_lines=3)},
         "workspace",
         takes_line=True,
     )

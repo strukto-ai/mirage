@@ -26,11 +26,10 @@ import { dispatchOf } from '../../utils/links.ts'
 const tar: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  const stat = async (p: PathSpec): Promise<FileStat> => files.stat(p)
   const dispatch = dispatchOf(ctx)
   if (dispatch === undefined) throw new TypeError('tar: no workspace files')
-  const fl = new FlagView(ctx.flags, specOf('tar'))
-  if (!fl.asBool('create')) {
+  const walk = walkOf(files, dispatch, 'tar')
+  if (!new FlagView(ctx.flags, specOf('tar')).asBool('create')) {
     // -t reads and -x writes wherever cwd or -C says, which need not
     // be this mount, so both run on dispatch-relayed calls and each
     // path routes to the mount that owns it. Only -c stays on the
@@ -41,14 +40,8 @@ const tar: CommandFn = async (_accessor, paths, texts, ctx) => {
       ctx,
       {
         stream: fileStreamOp(dispatch),
-        write: async (p, data) => {
-          await dispatch('write', p, [data])
-        },
-        mkdir: async (p) => {
-          await dispatch('mkdir', p)
-        },
         stat: statOp(dispatch),
-        walk: walkOf(files, dispatch, 'tar'),
+        walk,
         isDir: relayIsDirOf(dispatch),
       },
       true,
@@ -56,13 +49,8 @@ const tar: CommandFn = async (_accessor, paths, texts, ctx) => {
   }
   return tarGeneric(resolved, texts, ctx, {
     stream: files.read,
-    // Archive output follows links even when the member scan preserves them.
-    write: async (p, data) => {
-      await dispatch('write', p, [data])
-    },
-    mkdir: (p, parents) => files.mkdir(p, parents),
-    stat,
-    walk: walkOf(files, dispatch, 'tar'),
+    stat: async (p: PathSpec): Promise<FileStat> => files.stat(p),
+    walk,
     isDir: isDirOf(files),
   })
 }

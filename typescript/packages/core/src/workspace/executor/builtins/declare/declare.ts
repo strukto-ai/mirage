@@ -61,7 +61,7 @@ import type { AttrMarks, DeclarationOperand } from './types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { traceAssignment } from '../../../../shell/xtrace.ts'
 import { concat } from '../../../../utils/bytes.ts'
-import { bodyAliases } from '../alias/alias.ts'
+import { bodyAliasValues } from '../alias/alias.ts'
 
 /**
  * Put a declaration's value-shaping marks on a name before its value
@@ -649,7 +649,12 @@ export function functionLines(
     const flags = functionFlags(session, name)
     if (bodies) {
       lines.push(
-        storedFunctionText(name, session.functions[name] ?? '', parser, bodyAliases(session, name)),
+        storedFunctionText(
+          name,
+          session.functions[name] ?? '',
+          parser,
+          bodyAliasValues(session, name),
+        ),
       )
       if (marks && flags !== 'f') lines.push(`declare -${flags} ${name}`)
     } else {

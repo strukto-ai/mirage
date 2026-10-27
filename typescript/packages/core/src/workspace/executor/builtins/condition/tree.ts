@@ -25,6 +25,7 @@ import { FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS } from './constants.ts'
 import { applyFilePair, applyUnary } from './operators.ts'
 import { runWithAdmission } from '../../../../context/session_context.ts'
 import { CondError } from './types.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { CondContext, CondNode } from './types.ts'
 
 /**
@@ -123,8 +124,8 @@ async function evalCondBinary(
   if (node.op === '!=') {
     return !fnmatch(node.left, node.right, true)
   }
-  if (node.op === '<') return node.left < node.right
-  if (node.op === '>') return node.left > node.right
+  if (node.op === '<') return compareCodePoints(node.left, node.right) < 0
+  if (node.op === '>') return compareCodePoints(node.left, node.right) > 0
   const compare = INT_COMPARATORS.get(node.op)
   if (compare !== undefined) {
     // [[ evaluates numeric operands as arithmetic: variables resolve,

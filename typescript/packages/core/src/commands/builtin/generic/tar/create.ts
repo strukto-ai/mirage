@@ -24,7 +24,6 @@ import {
   CREATE_ERROR_EXIT,
   EMPTY_ARCHIVE,
   EMPTY_MEMBER,
-  ERROR_TRAILER,
   FATAL_TRAILER,
   SELF_DUMP,
   USAGE_HINT,
@@ -283,8 +282,5 @@ export async function planCreate(
       })
     }
   }
-  // GNU closes a run that failed an operand with one trailer, after
-  // everything it did manage to name.
-  if (exitCode !== 0) notices.push(ERROR_TRAILER)
   return { members, notices, exitCode, write: true }
 }

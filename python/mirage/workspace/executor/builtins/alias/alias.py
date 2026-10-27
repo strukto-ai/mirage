@@ -14,15 +14,14 @@
 
 from collections.abc import Iterable
 
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
-from mirage.shell.helpers import get_text
+from mirage.shell.helpers import alias_rewrite
 from mirage.shell.types import TSNodeLike
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.alias.constants import (
     ALIAS_USAGE,
     BAD_NAME_CHARS,
-    FIRST_WORD,
     UNALIAS_USAGE,
 )
 from mirage.workspace.executor.builtins.alias.types import AliasMark
@@ -257,9 +256,20 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
 
 
 def body_aliases(session: SessionState, name: str) -> frozenset[str]:
-    """The alias names a stored function's body is read with: the ones
-    its definition saw, or the session's own for a definition that kept
-    none (one restored from a stored session).
+    """The alias names a stored function's body is read with
+    (``body_alias_values``).
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the function's name.
+    """
+    return frozenset(body_alias_values(session, name))
+
+
+def body_alias_values(session: SessionState, name: str) -> dict[str, str]:
+    """The aliases a stored function's body is read with, by name: the
+    ones its definition saw, or the session's own for a definition that
+    kept none (one restored from a stored session).
 
     Args:
         session (SessionState): shell session state.
@@ -271,12 +281,12 @@ def body_aliases(session: SessionState, name: str) -> frozenset[str]:
         and site.source == session.functions.get(name)
         and site.aliases is not None
     ):
-        return frozenset(site.aliases)
+        return dict(site.aliases)
     if not session.shopts.get(
         "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
     ):
-        return frozenset()
-    return frozenset(session.aliases)
+        return {}
+    return dict(session.aliases)
 
 
 def alias_view(
@@ -317,10 +327,9 @@ def alias_command_text(
     head: TSNodeLike,
     mark: AliasMark,
 ) -> tuple[str, tuple[frozenset[str], ...]] | None:
-    """Replace alias words, preserving the rest of the command and its guards.
-
-    Each insertion inherits the replaced word's guards and adds its name.
-    A trailing blank checks the next caller word through the same loop.
+    """Replace alias words, preserving the rest of the command and its
+    guards (``alias_rewrite``), with the aliases the read at ``mark``
+    expands.
 
     Args:
         session (SessionState): shell session state.
@@ -328,42 +337,12 @@ def alias_command_text(
         head (TSNodeLike): its unquoted command word.
         mark (AliasMark): the parse and row of the use.
     """
-    source = node.text or b""
-    inherited = _guards(session, node)
-    at, end = (
-        head.start_byte - node.start_byte,
-        head.end_byte - node.start_byte,
+    return alias_rewrite(
+        node,
+        head,
+        lambda name, blocked: alias_value(session, name, mark, blocked),
+        _guards(session, node),
     )
-    name = get_text(head)
-    seen: set[str] = set()
-    parts: list[bytes] = []
-    owners: list[frozenset[str]] = []
-    cursor = 0
-    while name not in seen:
-        blocked = inherited[at]
-        value = alias_value(session, name, mark, blocked)
-        if value is None:
-            break
-        seen.add(name)
-        inserted = encode_text(value)
-        parts.extend((source[cursor:at], inserted))
-        owners.extend(inherited[cursor:at])
-        owners.extend((blocked | {name},) * len(inserted))
-        cursor = end
-        if not value.endswith((" ", "\t")):
-            break
-        rest = decode_text(source[cursor:])
-        match = FIRST_WORD.search(rest)
-        if match is None:
-            break
-        name = match.group(0)
-        at = cursor + len(encode_text(rest[: match.start()]))
-        end = at + len(encode_text(name))
-    if not seen:
-        return None
-    parts.append(source[cursor:])
-    owners.extend(inherited[cursor:])
-    return decode_text(b"".join(parts)), tuple(owners)
 
 
 def alias_mark(session: SessionState, row: int) -> AliasMark:

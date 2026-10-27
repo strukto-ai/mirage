@@ -45,10 +45,22 @@ describe('RedisVFS over the Upstash REST api', () => {
     await ws.close()
   })
 
-  it('is the redis kind, keyed by url and prefix', () => {
+  it('is the redis kind, keyed by server and escaped prefix', () => {
     expect(vfs.name).toBe('redis')
-    expect(vfs.storageLocation()).toBe(`redis:${fake.url}/mirage:fs:`)
+    expect(vfs.storageLocation()).toBe(`redis:${new URL(fake.url).hostname}:6379/0:mirage%3Afs%3A`)
     expect(vfs.store).toBeInstanceOf(UpstashRedisStore)
+  })
+
+  it('keeps nested prefixes apart, since keys are {prefix}file:{path}', () => {
+    const at = (keyPrefix: string): string =>
+      new RedisVFS({
+        url: fake.url,
+        token: fake.token,
+        keyPrefix,
+        fetchImpl: fake.fetch,
+      }).storageLocation()
+    expect(at('p/') + '/sub/x').not.toBe(at('p/sub/') + '/x')
+    expect(at('p')).not.toBe(at('p/'))
   })
 
   it('tee writes through the api and cat reads it back', async () => {

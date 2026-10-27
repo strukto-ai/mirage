@@ -17,6 +17,7 @@ import os
 
 import pytest
 import pytest_asyncio
+from redis.exceptions import ResponseError
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.rename import rename
@@ -29,6 +30,12 @@ pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
 
 def spec(path: str) -> PathSpec:
     return PathSpec(vfs_path=path.lstrip("/"), virtual=path, directory=path)
+
+
+async def refuse(*_args: str | bytes) -> None:
+    raise ResponseError(
+        "OOM command not allowed when used memory > 'maxmemory'."
+    )
 
 
 @pytest_asyncio.fixture()
@@ -169,3 +176,62 @@ async def test_rename_resolves_dest_before_source(accessor):
 async def test_rename_to_root_child_is_allowed(accessor):
     await rename(accessor, spec("/a.txt"), spec("/b.txt"))
     assert await accessor.store.get_file("/b.txt") == b"hi"
+
+
+@pytest.mark.asyncio
+async def test_rename_file_keeps_the_source_when_the_write_is_refused(
+    accessor, monkeypatch
+):
+    # A full Redis refuses SET but still runs DEL, so deleting first lost
+    # both names.
+    monkeypatch.setattr(accessor.store, "set_file", refuse)
+    with pytest.raises(ResponseError):
+        await rename(accessor, spec("/a.txt"), spec("/d/b.txt"))
+    assert await accessor.store.get_file("/a.txt") == b"hi"
+
+
+@pytest.mark.asyncio
+async def test_rename_dir_keeps_the_source_when_the_write_is_refused(
+    accessor, monkeypatch
+):
+    monkeypatch.setattr(accessor.store, "add_dir", refuse)
+    with pytest.raises(ResponseError):
+        await rename(accessor, spec("/dir"), spec("/d/moved"))
+    assert await accessor.store.has_dir("/dir")
+    assert await accessor.store.get_file("/dir/f") == b"x"
+
+
+@pytest.mark.asyncio
+async def test_rename_dir_keeps_the_subtree_when_a_file_write_is_refused(
+    accessor, monkeypatch
+):
+    # The second write is refused, after the first landed: a walk that
+    # deleted each file once copied would already have lost the first.
+    store = accessor.store
+    await store.add_dir("/dir/sub")
+    await store.set_file("/dir/sub/deep", b"z")
+    real_set_file = store.set_file
+    written: list[str] = []
+
+    async def refuse_the_second(path: str, data: bytes) -> None:
+        written.append(path)
+        if len(written) == 2:
+            await refuse()
+        await real_set_file(path, data)
+
+    monkeypatch.setattr(store, "set_file", refuse_the_second)
+    with pytest.raises(ResponseError):
+        await rename(accessor, spec("/dir"), spec("/d/moved"))
+    assert await store.has_dir("/dir")
+    assert await store.has_dir("/dir/sub")
+    assert await store.get_file("/dir/f") == b"x"
+    assert await store.get_file("/dir/sub/deep") == b"z"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/a.txt", "/dir"])
+async def test_rename_onto_itself_keeps_it(accessor, path):
+    await rename(accessor, spec(path), spec(path))
+    assert await accessor.store.get_file("/a.txt") == b"hi"
+    assert await accessor.store.get_file("/dir/f") == b"x"
+    assert await accessor.store.has_dir("/dir")

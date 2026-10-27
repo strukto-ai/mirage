@@ -287,7 +287,7 @@ search fails, reaches its 10,000-match limit or finds nothing, or when the
 searched path is not a folder. [Search](/home/integration/search) lists how
 each option uses the search.
 
-`walk_limit: -1` in the mount's `"*"` [command limit](/home/core/output-limits) reads every file instead, since Box searches the text it extracted, not the bytes
+`walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Box searches the text it extracted, not the bytes
 `grep` reads, and indexes a write some time after it lands. A file that holds
 the word can be left out: an office file, PDF or archive, the end of a large
 file, a word Box splits differently (`foo.bar`), or a recent write.

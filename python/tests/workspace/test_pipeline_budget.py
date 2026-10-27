@@ -48,7 +48,9 @@ def _ws(line=None):
         {"/data": RAMVFS()},
         mode=MountMode.WRITE,
         command_limits=(
-            {"line": Limit(timeout_seconds=line)} if line is not None else None
+            {"@line": Limit(timeout_seconds=line)}
+            if line is not None
+            else None
         ),
     )
 

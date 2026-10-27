@@ -31,6 +31,7 @@ from mirage.policy.types import (
     RouteContext,
 )
 from mirage.runtime.base import Runtime
+from mirage.runtime.constants import WHOLE_LINE
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
@@ -205,7 +206,7 @@ class Router:
         """
         if name != WorkspaceRuntime.name:
             return self._placed(entries, name)
-        kept = [e for e in entries if "*" not in e.captures]
+        kept = [e for e in entries if WHOLE_LINE not in e.captures]
         bindings: dict[str, Runtime[Any] | None] = {
             command: None for entry in entries for command in entry.captures
         }

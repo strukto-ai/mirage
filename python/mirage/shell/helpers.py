@@ -847,8 +847,11 @@ def get_case_items(
 
 
 def get_declaration_keyword(node: TSNodeLike) -> str:
-    """Get keyword (export/local/declare) from declaration."""
-    return node.children[0].type
+    """Get keyword (export/local/declare) from declaration, past the
+    redirects written before it."""
+    return next(
+        c.type for c in node.children if c.type not in REDIRECT_NODE_TYPES
+    )
 
 
 def get_unset_args(node: TSNodeLike) -> list[str]:
@@ -858,11 +861,10 @@ def get_unset_args(node: TSNodeLike) -> list[str]:
     function unset (``unset -f``) from a variable unset, and the operand
     span is split the way the shell does so a subscript target
     (``unset arr[1]``, quoted or not) stays one word. A redirect among
-    the words is no operand.
+    or before the words is no operand.
     """
-    operands = [
-        c for c in node.children[1:] if c.type not in REDIRECT_NODE_TYPES
-    ]
+    words = [c for c in node.children if c.type not in REDIRECT_NODE_TYPES]
+    operands = words[1:]
     if not operands:
         return []
     text = bytearray(node.text or b"")
@@ -1101,3 +1103,71 @@ def get_function_body(node: TSNodeLike) -> FunctionBody:
             ),
         )
     ]
+
+
+# What an unquoted plain word parses as: the only words bash checks for an
+# alias, a name of digits included.
+ALIAS_WORD_TYPES = frozenset({NT.WORD, NT.NUMBER})
+
+
+def alias_rewrite(
+    node: TSNodeLike,
+    head: TSNodeLike,
+    value: Callable[[str, frozenset[str]], str | None],
+    guards: Sequence[frozenset[str]],
+) -> tuple[str, tuple[frozenset[str], ...]] | None:
+    """A command with its alias words replaced as bash reads it, and the
+    aliases being expanded at each byte of the result.
+
+    An insertion carries the replaced word's guards and its own name, so
+    no alias expands inside its own text, while the words around it keep
+    theirs. A value ending in a blank checks the command's next word,
+    the next child of the command, which an unquoted word must be.
+
+    Args:
+        node (TSNodeLike): the full command, including assignments.
+        head (TSNodeLike): its unquoted command word.
+        value (Callable[[str, frozenset[str]], str | None]): an alias's
+            text by name, given the guards at its word; None for none.
+        guards (Sequence[frozenset[str]]): the aliases being expanded at
+            each byte of the command.
+    """
+    source = node.text or b""
+    at = head.start_byte - node.start_byte
+    end = head.end_byte - node.start_byte
+    name = get_text(head)
+    seen: set[str] = set()
+    parts: list[bytes] = []
+    owners: list[frozenset[str]] = []
+    cursor = 0
+    while name not in seen:
+        blocked = guards[at]
+        text = value(name, blocked)
+        if text is None:
+            break
+        seen.add(name)
+        inserted = encode_text(text)
+        parts.extend((source[cursor:at], inserted))
+        owners.extend(guards[cursor:at])
+        owners.extend((blocked | {name},) * len(inserted))
+        cursor = end
+        if not text.endswith((" ", "\t")):
+            break
+        word = next(
+            (
+                c
+                for c in node.children
+                if c.start_byte - node.start_byte >= cursor
+            ),
+            None,
+        )
+        if word is None or word.type not in ALIAS_WORD_TYPES:
+            break
+        name = get_text(word)
+        at = word.start_byte - node.start_byte
+        end = word.end_byte - node.start_byte
+    if not seen:
+        return None
+    parts.append(source[cursor:])
+    owners.extend(guards[cursor:])
+    return decode_text(b"".join(parts)), tuple(owners)

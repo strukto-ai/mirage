@@ -14,7 +14,7 @@ mod unzip;
 
 use flate2::{Crc, Decompress, FlushDecompress, Status};
 
-use crate::request::{Opening, Reply, Request, bytes};
+use crate::request::{Opening, Request, failed, failure_text};
 use crate::task::Host;
 use crate::{Stream, StreamError, parse_config, task};
 
@@ -499,22 +499,6 @@ pub(super) fn wildcard(pattern: &[u8], name: &[u8], escapes: bool) -> bool {
             (None, _) => return false,
         }
     }
-}
-
-/// Whether the host failed the request.
-pub(super) fn failed(reply: &Reply) -> bool {
-    reply.error.is_some() || reply.fatal.is_some()
-}
-
-/// A host reply's failure text as bytes.
-pub(super) fn failure_text(reply: &Reply) -> Vec<u8> {
-    bytes(
-        reply
-            .error
-            .as_deref()
-            .or(reply.fatal.as_deref())
-            .unwrap_or_default(),
-    )
 }
 
 /// What decoding a member's data came to.

@@ -36,15 +36,14 @@ def _declaration_parts(
     Args:
         node (TSNodeLike): a ``declaration_command`` node.
     """
+    words = [c for c in node.children if not c.type.endswith("_redirect")]
     head = ""
-    if node.children:
-        text = node.children[0].text
+    if words:
+        text = words[0].text
         head = decode_text(text) if text else ""
     flags: list[str] = []
     operands: list[TSNodeLike] = []
-    for child in node.children[1:]:
-        if child.type.endswith("_redirect"):
-            continue
+    for child in words[1:]:
         if child.type == "word":
             text = child.text
             word = decode_text(text) if text else ""

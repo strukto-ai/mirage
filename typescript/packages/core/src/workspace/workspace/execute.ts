@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CommandTimeoutError } from '../../errors/types.ts'
-import { LINE, lineTimeout } from '../../policy/builtin/output_cap.ts'
+import { LINE_NAME, lineTimeout } from '../../policy/builtin/output_cap.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
@@ -89,6 +89,7 @@ import {
   type Judged,
   type Walked,
 } from '../node/explain.ts'
+import { refusedRow } from '../node/program.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
@@ -439,7 +440,7 @@ async function runPreparedLine(
   // itself; the caller's route comes back when it ends.
   const outerRouting = context.frame.routing
   try {
-    // The outermost line, recorded or not, runs under its `line` deadline,
+    // The outermost line, recorded or not, runs under its `@line` deadline,
     // which a nested one shares: past it the tree is stopped like an abort
     // and the line answers 124, as Python's asyncio.timeout does. The
     // deadline is in the line's stop, the one object the tree runs on, so a
@@ -477,8 +478,10 @@ async function runPreparedLine(
               ? parser.parse(command, aliases, effectiveSession.shopts.extglob ?? false)
               : literalTree(argv)
           // Syntax gates before policy, mirroring bash: an unparsable line exits 2
-          // and the policy is never consulted about it.
-          const io = argv === undefined ? syntaxRefusal(root) : null
+          // and the policy is never consulted about it. A refusal on a later
+          // line leaves the lines before it to run first (`refusedRow`), as
+          // bash reads its input a line at a time.
+          const io = argv === undefined && refusedRow(root) === null ? syntaxRefusal(root) : null
           if (io !== null) {
             const callStack = options.callStack
             // A substitution bash cannot parse ends the shell, from `eval` and
@@ -1222,7 +1225,7 @@ async function runParsedLine(
           error: aborted
             ? makeAbortError(killed)
             : expired
-              ? new CommandTimeoutError(LINE, deadline.seconds)
+              ? new CommandTimeoutError(LINE_NAME, deadline.seconds)
               : error,
         }
         const failed = failureResult(executionFailure.error)

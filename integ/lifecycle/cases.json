@@ -6648,7 +6648,7 @@
           "/data": {
             "vfs": "limited-ram",
             "command_limits": {
-              "*": {
+              "@all": {
                 "walk_limit": 2
               }
             },
@@ -6667,7 +6667,7 @@
           "/out/n": {
             "vfs": "limited-ram",
             "command_limits": {
-              "*": {
+              "@all": {
                 "walk_limit": 2
               }
             },
@@ -6682,7 +6682,7 @@
           "/w": {
             "vfs": "limited-ram",
             "command_limits": {
-              "*": {
+              "@all": {
                 "walk_limit": 1
               }
             },
@@ -6696,7 +6696,7 @@
           "/w/n": {
             "vfs": "limited-ram",
             "command_limits": {
-              "*": {
+              "@all": {
                 "walk_limit": 2
               }
             },

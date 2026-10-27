@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import threading
 
 import pytest
 
@@ -111,6 +112,65 @@ async def test_a_runner_stopped_with_a_signal_exits_128_plus_it(signal, code):
     assert handle.terminate(signal) is True
     info = await handle.join()
     assert (info.exit_code, handle.signal, seen) == (code, signal, [signal])
+
+
+# A KILL while the runner still stops under a gentler signal takes over,
+# for the runner and what it started, as a second ``kill -KILL`` does; a
+# repeated stop does not.
+@pytest.mark.asyncio
+async def test_a_kill_takes_over_a_gentler_stop():
+    started = asyncio.Event()
+    children: list[int] = []
+
+    async def run() -> int:
+        started.set()
+        await asyncio.Event().wait()
+        return 0
+
+    handle = ProcessHandle(
+        _info(), run, lambda _pid: None, children.append, run_with_execution
+    )
+    handle.start()
+    await started.wait()
+    assert handle.terminate(15) is True
+    assert handle.terminate(15) is False
+    assert handle.terminate(9) is True
+    assert handle.terminate(9) is False
+    info = await handle.join()
+    assert (info.exit_code, handle.signal, children) == (137, 9, [15, 9])
+
+
+# A KILL another thread sends while the stopped runner settles is either
+# refused or the status the runner reports: never accepted and lost.
+@pytest.mark.asyncio
+async def test_a_kill_racing_the_settle_is_the_status_it_reports():
+    started = asyncio.Event()
+
+    async def run() -> int:
+        started.set()
+        await asyncio.Event().wait()
+        return 0
+
+    handle = ProcessHandle(
+        _info(), run, lambda _pid: None, bind=run_with_execution
+    )
+    handle.start()
+    await started.wait()
+    assert handle.terminate(15) is True
+    held, killed = threading.Event(), []
+
+    def other() -> None:
+        with handle._lock:
+            held.set()
+            threading.Event().wait(0.2)
+            killed.append(handle.terminate(9))
+
+    thread = threading.Thread(target=other)
+    thread.start()
+    held.wait()
+    info = await handle.join()
+    thread.join()
+    assert (killed, info.exit_code) == ([True], 137)
 
 
 # What a program the runner started exited with after handling the signal

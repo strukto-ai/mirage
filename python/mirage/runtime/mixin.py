@@ -29,7 +29,7 @@ class LineExecutorMixin(ABC, Generic[E]):
     also inherits this owns any line routed to it wholesale: pipes,
     redirects, and every command in the line run inside the runtime's
     world (its own cat, its own grep), the workspace shell never
-    splits the line. Only an explicit "*" capture delegates a whole
+    splits the line. Only an explicit WHOLE_LINE capture delegates a whole
     workspace line. Named captures receive one safely quoted command.
 
     Interpreter runtimes never inherit

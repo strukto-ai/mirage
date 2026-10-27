@@ -344,10 +344,6 @@ async def plan_create(
                     size=entry.size,
                 )
             )
-    if exit_code:
-        # GNU closes a run that failed an operand with one trailer, after
-        # everything it did manage to name.
-        notices.append(constants.ERROR_TRAILER)
     return CreateResult(
         members=tuple(members), notices=tuple(notices), exit_code=exit_code
     )

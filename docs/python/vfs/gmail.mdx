@@ -472,5 +472,5 @@ of the plain-text body a `.gmail.json` holds, such as one inside a link.
 Attachments are always read, and so is every message for a text that is not
 ASCII, or that may be part of the labels field (`inbox`, `STARRED`, `Label_1`,
 `abel`), since a message's labels change after the listing kept its text. With
-`walk_limit: -1` in the mount's `"*"` [command limit](/home/core/output-limits), the listing keeps no message text, and every message
+`walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits), the listing keeps no message text, and every message
 is read.

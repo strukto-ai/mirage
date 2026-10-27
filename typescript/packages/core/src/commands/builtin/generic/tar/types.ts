@@ -12,13 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { TarEntry } from '../../tar_helper.ts'
-import type { GzipDataError } from '../../../../utils/compress.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { MemberKind } from '../archive/types.ts'
-
-export type CompressionKind = 'gzip' | 'bzip2' | 'xz'
-export type Compression = CompressionKind | null
 
 // One entry the create pass decided to put in the archive. Choosing
 // every member before writing any of them is what lets an exclusion
@@ -47,14 +42,4 @@ export interface CreateResult {
   // enter), which leave no file behind; an operand it merely failed to
   // stat still writes the rest.
   write: boolean
-}
-
-/** Parsed entries, their gzip failure and independent tar diagnostics. */
-export interface ReadResult {
-  entries: TarEntry[]
-  failure: GzipDataError | null
-  notices: string[]
-  // The first member whose data ran past the end of the stream, null when
-  // every member is whole.
-  cut: number | null
 }

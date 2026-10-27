@@ -349,6 +349,76 @@
         "stdout": "f () \n{ \n    [[ -n -- ]];\n    [[ 1 -eq 1 ]];\n    [[ a -nt b ]];\n    [[ -lt -nt b ]];\n    [[ ! -n -- ]];\n    [[ -n ! ]];\n    [[ a == ! ]];\n    [[ abc =~ a'.'c && ( x < y || ! -f z ) ]]\n}\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "function_prints_its_aliases_expanded",
+      "seq": 18500015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'shopt -s expand_aliases\nalias e='\"'\"'echo hi'\"'\"' g='\"'\"'e there'\"'\"' sp='\"'\"'echo sp '\"'\"'\nalias w=world\nf() { g | e; sp w; x=$(e); }\ndeclare -f f\nalias e='\"'\"'echo bye'\"'\"'; f'",
+      "expect": {
+        "exit": 0,
+        "stdout": "f () \n{ \n    echo hi there | echo hi;\n    echo sp world;\n    x=$(e)\n}\nhi\nsp world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "function_prints_aliases_in_its_words_and_past_redirects",
+      "seq": 18500017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'shopt -s expand_aliases\nalias e='\"'\"'echo OK;'\"'\"' a='\"'\"'echo '\"'\"' w='\"'\"'there'\"'\"'\nf() { e e :; a w>/dev/null after; }\ndeclare -f f\na w>&2 after'",
+      "expect": {
+        "exit": 0,
+        "stdout": "f () \n{ \n    echo OK;\n    echo OK;\n    :;\n    echo there after > /dev/null\n}\n",
+        "stderr": "there after\n"
+      }
     }
   ]
 }

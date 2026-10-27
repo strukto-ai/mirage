@@ -874,6 +874,41 @@
         "stdout": "2\n2\n2\na ) y\n",
         "stderr": "mirage: syntax error near ')'\nmirage: syntax error near ')'\nmirage: unexpected EOF while looking for matching `)'\n"
       }
+    },
+    {
+      "id": "cmdsub_dollar_before_a_backtick_is_literal",
+      "seq": 18500016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo $`echo hi` a$`echo b`c \"$`echo q`\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "$hi a$bc $q\n",
+        "stderr": ""
+      }
     }
   ]
 }

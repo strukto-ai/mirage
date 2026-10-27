@@ -161,7 +161,7 @@ async def test_a_glob_past_the_walk_limit_answers_why():
                         "mounts": {
                             "/": {
                                 "vfs": "ram",
-                                "command_limits": {"*": {"walk_limit": 2}},
+                                "command_limits": {"@all": {"walk_limit": 2}},
                             }
                         },
                     }

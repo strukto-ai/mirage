@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { PathSpec } from '@struktoai/mirage-core/types'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RedisVFS } from './redis.ts'
 
 const REDIS_URL = process.env.REDIS_URL
@@ -42,5 +43,74 @@ describe.skipIf(skip)('RedisVFS', () => {
     const res = new RedisVFS(REDIS_URL !== undefined ? { url: REDIS_URL } : {})
     await res.close()
     await res.close()
+  })
+})
+
+function spec(path: string): PathSpec {
+  return new PathSpec({ virtual: path, directory: path, vfsPath: path.slice(1), resolved: true })
+}
+
+const OOM = new Error("OOM command not allowed when used memory > 'maxmemory'.")
+const enc = (text: string): Uint8Array => new TextEncoder().encode(text)
+const dec = (data: Uint8Array | null): string | null =>
+  data === null ? null : new TextDecoder().decode(data)
+
+describe.skipIf(skip)('RedisVFS rename when a write is refused', () => {
+  let vfs: RedisVFS
+
+  beforeEach(async () => {
+    const prefix = `mirage:fs:rename-test:${Math.random().toString(36).slice(2)}:`
+    vfs = new RedisVFS(
+      REDIS_URL !== undefined ? { url: REDIS_URL, keyPrefix: prefix } : { keyPrefix: prefix },
+    )
+    await vfs.store.clear()
+    for (const dir of ['/', '/dir', '/dir/sub', '/d']) await vfs.store.addDir(dir)
+    await vfs.store.setFile('/a.txt', enc('hi'))
+    await vfs.store.setFile('/dir/f', enc('x'))
+    await vfs.store.setFile('/dir/sub/deep', enc('z'))
+  })
+
+  afterEach(async () => {
+    vi.restoreAllMocks()
+    await vfs.store.clear()
+    await vfs.close()
+  })
+
+  // A full Redis refuses SET but still runs DEL, so deleting first lost both names.
+  it('keeps a file whose new name could not be written', async () => {
+    vi.spyOn(vfs.store, 'setFile').mockRejectedValue(OOM)
+    await expect(vfs.rename(spec('/a.txt'), spec('/d/b.txt'))).rejects.toThrow('OOM')
+    expect(dec(await vfs.store.getFile('/a.txt'))).toBe('hi')
+  })
+
+  it('keeps a directory whose new name could not be written', async () => {
+    vi.spyOn(vfs.store, 'addDir').mockRejectedValue(OOM)
+    await expect(vfs.rename(spec('/dir'), spec('/d/moved'))).rejects.toThrow('OOM')
+    expect(await vfs.store.hasDir('/dir')).toBe(true)
+    expect(dec(await vfs.store.getFile('/dir/f'))).toBe('x')
+  })
+
+  // The second write is refused, after the first landed: a walk that deleted
+  // each file once copied would already have lost the first.
+  it('keeps the subtree when a later file under it could not be written', async () => {
+    const realSetFile = vfs.store.setFile.bind(vfs.store)
+    let writes = 0
+    vi.spyOn(vfs.store, 'setFile').mockImplementation(async (path, data) => {
+      writes += 1
+      if (writes === 2) throw OOM
+      await realSetFile(path, data)
+    })
+    await expect(vfs.rename(spec('/dir'), spec('/d/moved'))).rejects.toThrow('OOM')
+    expect(await vfs.store.hasDir('/dir')).toBe(true)
+    expect(await vfs.store.hasDir('/dir/sub')).toBe(true)
+    expect(dec(await vfs.store.getFile('/dir/f'))).toBe('x')
+    expect(dec(await vfs.store.getFile('/dir/sub/deep'))).toBe('z')
+  })
+
+  it.each(['/a.txt', '/dir'])('keeps %s renamed onto itself', async (path) => {
+    await vfs.rename(spec(path), spec(path))
+    expect(dec(await vfs.store.getFile('/a.txt'))).toBe('hi')
+    expect(dec(await vfs.store.getFile('/dir/f'))).toBe('x')
+    expect(await vfs.store.hasDir('/dir')).toBe(true)
   })
 })

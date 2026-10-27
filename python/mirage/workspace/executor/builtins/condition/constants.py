@@ -24,7 +24,7 @@ INT_COMPARATORS: Mapping[str, Callable[[int, int], bool]] = {
     "-ge": operator.ge,
 }
 
-STRING_BINARY = frozenset({"=", "==", "!="})
+STRING_BINARY = frozenset({"=", "==", "!=", "<", ">"})
 NUMERIC_BINARY = frozenset(INT_COMPARATORS)
 # `-nt`/`-ot` compare modification times; `-ef` asks for the same file,
 # which mirage answers as the same resolved path (a mount has no device

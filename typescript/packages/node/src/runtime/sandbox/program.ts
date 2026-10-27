@@ -33,6 +33,7 @@ import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { debuglog } from 'node:util'
 import { asyncChain, closeQuietly } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
 
 /**
@@ -152,7 +153,7 @@ export async function runProgram(
       stopTree(child)
       return
     }
-    stopping = endTree(child, signum).then(() => {
+    stopping = endTree(child, signum, runner).then(() => {
       stopTree(child)
     })
   }
@@ -353,15 +354,21 @@ export function killTree(child: ChildProcess, signum = 9): void {
 /**
  * Signal a child's process group and give the group `STOP_GRACE_SECONDS`
  * to end. The grace is the group's: a descendant still handling the signal
- * after the child exited keeps it. What is left after it is the caller's to
- * kill (`stopTree`). Mirrors Python's `end_tree`.
+ * after the child exited keeps it, unless a KILL reaches the runner first.
+ * What is left after it is the caller's to kill (`stopTree`). Mirrors
+ * Python's `end_tree`.
  *
  * @param signum the signal.
+ * @param runner the runner the signal stopped, whose KILL ends the grace.
  */
-export async function endTree(child: ChildProcess, signum: number): Promise<void> {
+export async function endTree(
+  child: ChildProcess,
+  signum: number,
+  runner?: ProcessHandle | null,
+): Promise<void> {
   killTree(child, signum)
   const deadline = Date.now() + STOP_GRACE_SECONDS * 1000
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline && runner?.signal !== 9) {
     if (child.pid === undefined || process.platform === 'win32') {
       if (child.exitCode !== null || child.signalCode !== null) return
     } else {

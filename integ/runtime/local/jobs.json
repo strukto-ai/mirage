@@ -86,6 +86,14 @@
             "stdout": "0\nsaved\n",
             "stderr": ""
           }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\" & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill %1; kill -9 %1; wait %1; echo $?; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "137\n",
+            "stderr": ""
+          }
         }
       ]
     }

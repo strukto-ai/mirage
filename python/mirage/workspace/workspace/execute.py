@@ -35,7 +35,7 @@ from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
-from mirage.policy.builtin.output_cap import LINE, line_timeout
+from mirage.policy.builtin.output_cap import LINE_NAME, line_timeout
 from mirage.policy.decisions import is_pending
 from mirage.process.table import ProcessTable
 from mirage.process.types import ProcessInfo
@@ -83,6 +83,7 @@ from mirage.workspace.node.occurrence import (
     claimant_for,
     evaluated_from,
 )
+from mirage.workspace.node.program import refused_row
 from mirage.workspace.node.run_tree import run_command_tree
 from mirage.workspace.session import (
     SessionState,
@@ -744,8 +745,14 @@ async def run_prepared_line(
         )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
-        # consulted about it.
-        unreadable = syntax_refusal(ast) if argv is None else None
+        # consulted about it. A refusal on a later line leaves the lines
+        # before it to run first (``refused_row``), as bash reads its
+        # input a line at a time.
+        unreadable = (
+            syntax_refusal(ast)
+            if argv is None and refused_row(ast) is None
+            else None
+        )
         if unreadable is not None:
             if call_stack is not None and unreadable.exit_code == 127:
                 # A substitution bash cannot parse ends the shell, from
@@ -1039,7 +1046,7 @@ async def run_prepared_line(
                         names = plan_names(nodes)
             # No seam of its own: the whole line is one task under
             # ``Workspace.shell``, and a cancel lands on whichever await
-            # the tree is in. A top-level line runs under its ``line``
+            # the tree is in. A top-level line runs under its ``@line``
             # deadline, which a nested one shares.
             io, _ = await run_with_timeout(
                 run_command_tree(
@@ -1072,7 +1079,7 @@ async def run_prepared_line(
                     if top_level
                     else None
                 ),
-                LINE,
+                LINE_NAME,
                 budget_start,
             )
             # A record a nested line earned is the line's to report when

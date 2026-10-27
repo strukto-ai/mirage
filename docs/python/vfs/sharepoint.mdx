@@ -316,7 +316,7 @@ What SharePoint answers through its own API, so fewer files are read. [Integrati
 `grep -rw` and
 `rg -w` read only the files Microsoft Graph search names, within one document
 library (a directory above one is read in full); every file is read when the
-search fails or finds nothing. `walk_limit: -1` in the mount's `"*"` [command limit](/home/core/output-limits) reads every file instead, since Graph searches the text
+search fails or finds nothing. `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Graph searches the text
 it extracted, not the bytes `grep` reads, and indexes a write some time after
 it lands, so a file that holds the word can be left out: an office file, PDF
 or archive, the end of a large file, or a word Graph splits differently

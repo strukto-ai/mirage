@@ -35,7 +35,7 @@ export interface MountSnapshot {
   vfs_state: VFSState
   // Set on the scratch root the workspace added because no mount claims `/`.
   anchor?: true
-  // The mount's own command limits, its "*" walk_limit among them.
+  // The mount's own command limits, its "@all" walk_limit among them.
   command_limits?: Record<string, unknown>
 }
 

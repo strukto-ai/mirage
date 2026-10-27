@@ -61,9 +61,9 @@ These list each folder instead:
 Every walk stops at its command's
 [`walk_limit`](/home/integration/search#walk_limit) on your mount, whether
 `read_tree` answered or Mirage listed each folder. It is a field of
-[`command_limits`](/home/core/output-limits): the `"*"` entry sets it for every
+[`command_limits`](/home/core/output-limits): the `"@all"` entry sets it for every
 command, and an entry named for one command, such as `find`, changes only how
-far that command walks. The mount's `"*"` entry, else the workspace's, also sets
+far that command walks. The mount's `"@all"` entry, else the workspace's, also sets
 your VFS's own `walk_limit`, which decides how it searches: with the service's
 search under a cap, by reading every file at `-1`. Return `None` for a folder
 too large to send in one call: Mirage then stops calling `readdir` once the

@@ -16,6 +16,7 @@ from collections.abc import Mapping, Sequence
 from functools import partial
 
 from mirage.commands.cli.walk import invoked_env_names, supplied_env_names
+from mirage.runtime.constants import WHOLE_LINE
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.secrets.errors import SecretsError
@@ -197,7 +198,7 @@ def guest_bound(
     bindings = decision.bindings
     if not bindings:
         return False
-    words: set[str] = {"*"}
+    words: set[str] = {WHOLE_LINE}
     for node in nodes:
         words |= command_words(node)
     for word in words:

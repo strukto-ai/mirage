@@ -5,12 +5,13 @@
 //! code. Nothing runs between polls; the host's yield between `drain`s is
 //! the only scheduling there is.
 
+use std::collections::HashSet;
 use std::future::{Future, poll_fn};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Waker};
 
-use crate::request::{Reply, Request};
+use crate::request::{Reply, Request, WriteMode, failed, failure_text};
 use crate::{Stream, StreamError};
 
 #[derive(Default)]
@@ -64,6 +65,98 @@ impl Host {
 
     pub(crate) fn warn(&self, data: &[u8]) {
         self.slot().err.extend_from_slice(data);
+    }
+
+    /// What stands at a path: `dir`, `file`, or None.
+    pub(crate) async fn stat(&self, path: &[u8]) -> Option<String> {
+        let path = path.to_vec();
+        self.ask(Request::Stat { path }).await.0.kind
+    }
+
+    /// Make a directory's chain top-down, each level once a run, skipping
+    /// what stands; the level that failed and why.
+    pub(crate) async fn ensure(
+        &self,
+        made: &mut HashSet<Vec<u8>>,
+        dir: &[u8],
+    ) -> Result<(), (Vec<u8>, Vec<u8>)> {
+        let mut level = Vec::new();
+        for part in dir.split(|&b| b == b'/').filter(|p| !p.is_empty()) {
+            level.push(b'/');
+            level.extend_from_slice(part);
+            if made.contains(&level) {
+                continue;
+            }
+            if self.stat(&level).await.as_deref() != Some("dir") {
+                let path = level.clone();
+                let (reply, _) = self.ask(Request::Mkdir { path }).await;
+                if failed(&reply) {
+                    return Err((level, failure_text(&reply)));
+                }
+            }
+            made.insert(level.clone());
+        }
+        Ok(())
+    }
+}
+
+/// A file a task writes: its first window held, so a file of one window is
+/// written whole by one request, a longer one streamed a window at a time;
+/// the failure that stopped it.
+pub(crate) struct File {
+    path: Vec<u8>,
+    held: Option<Vec<u8>>,
+    created: bool,
+    pub(crate) failed: Option<Vec<u8>>,
+}
+
+impl File {
+    pub(crate) fn new(path: Vec<u8>) -> File {
+        File {
+            path,
+            held: None,
+            created: false,
+            failed: None,
+        }
+    }
+
+    async fn ask(&mut self, host: &Host, request: Request) -> bool {
+        let (reply, _) = host.ask(request).await;
+        if failed(&reply) {
+            self.failed = Some(failure_text(&reply));
+        }
+        self.failed.is_none()
+    }
+
+    async fn send(&mut self, host: &Host, mode: WriteMode, data: Vec<u8>) -> bool {
+        let path = self.path.clone();
+        self.ask(host, Request::Write { path, mode, data }).await
+    }
+
+    /// Hold `window`, sending what was held before it; false once a write
+    /// failed.
+    pub(crate) async fn take(&mut self, host: &Host, window: &[u8]) -> bool {
+        let Some(held) = self.held.replace(window.to_vec()) else {
+            return true;
+        };
+        let mode = if std::mem::replace(&mut self.created, true) {
+            WriteMode::Append
+        } else {
+            WriteMode::Create
+        };
+        self.send(host, mode, held).await
+    }
+
+    /// Write what is held, the file whole when nothing was sent, and commit
+    /// it.
+    pub(crate) async fn close(&mut self, host: &Host) {
+        let held = self.held.take().unwrap_or_default();
+        if !self.created {
+            self.send(host, WriteMode::Whole, held).await;
+        } else if self.send(host, WriteMode::Append, held).await {
+            let path = Some(self.path.clone());
+            self.ask(host, Request::Flush { path }).await;
+        }
     }
 }
 

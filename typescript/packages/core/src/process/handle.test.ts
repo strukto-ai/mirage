@@ -130,6 +130,40 @@ describe('ProcessHandle', () => {
     expect([done.exitCode, handle.signal, bound]).toEqual([code, signal, [handle]])
   })
 
+  // A KILL while the runner still stops under a gentler signal takes over,
+  // for the runner and what it started, as a second `kill -KILL` does; a
+  // repeated stop does not.
+  it('a kill takes over a gentler stop', async () => {
+    const abort = new AbortController()
+    const run = (): Promise<number> =>
+      new Promise((_resolve, reject) => {
+        const stop = (): void => {
+          reject(new DOMException('aborted', 'AbortError'))
+        }
+        if (abort.signal.aborted) stop()
+        else abort.signal.addEventListener('abort', stop)
+      })
+    const children: number[] = []
+    const handle = new ProcessHandle(
+      info(),
+      run,
+      () => {
+        abort.abort()
+      },
+      ignore,
+      (signal) => {
+        children.push(signal)
+      },
+    )
+    handle.start()
+    expect(handle.terminate(15)).toBe(true)
+    expect(handle.terminate(15)).toBe(false)
+    expect(handle.terminate(9)).toBe(true)
+    expect(handle.terminate(9)).toBe(false)
+    const done = await handle.join()
+    expect([done.exitCode, handle.signal, children]).toEqual([137, 9, [15, 9]])
+  })
+
   // What a program the runner started exited with after handling the
   // signal is the program's, kept apart from the runner's own 128 plus it.
   it('keeps the status of a program that handled the signal', async () => {

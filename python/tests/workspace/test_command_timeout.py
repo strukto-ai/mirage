@@ -44,7 +44,7 @@ def restore_defaults():
 
 
 def _line(seconds: float | None) -> dict[str, Limit] | None:
-    return {"line": Limit(timeout_seconds=seconds)} if seconds else None
+    return {"@line": Limit(timeout_seconds=seconds)} if seconds else None
 
 
 def _ws(limits: dict | None = None, line: float | None = None) -> Workspace:
@@ -365,7 +365,7 @@ async def test_large_ram_command_honors_caller_cancel(command):
     assert fired[0] < 1
 
 
-_UNCAPPED = {"*": Limit(walk_limit=-1)}
+_UNCAPPED = {"@all": Limit(walk_limit=-1)}
 
 
 def _wide_ram() -> RAMVFS:

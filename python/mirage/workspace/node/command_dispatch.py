@@ -64,6 +64,7 @@ from mirage.shell.errors import (
     TooManyMatches,
 )
 from mirage.shell.helpers import (
+    ALIAS_WORD_TYPES,
     get_command_name,
     get_parts,
     get_text,
@@ -263,7 +264,7 @@ async def execute_command(
         and parts
         and parts[0].type == NT.COMMAND_NAME
         and parts[0].named_children
-        and parts[0].named_children[0].type == NT.WORD
+        and parts[0].named_children[0].type in ALIAS_WORD_TYPES
     ):
         head_node = parts[0]
         head = get_text(head_node)

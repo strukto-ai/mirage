@@ -362,6 +362,6 @@ read.
 
 Every message is read when the text is a key of the message JSON or a flag
 name, holds anything but ASCII letters and spaces, matches more than
-`max_messages` messages in a folder, or the search fails. `walk_limit: -1` in the mount's `"*"` [command limit](/home/core/output-limits) reads every file instead, since a server that answers `SEARCH` from a full-text index (Dovecot
+`max_messages` messages in a folder, or the search fails. `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since a server that answers `SEARCH` from a full-text index (Dovecot
 with an FTS plugin, for one) matches words rather than substrings, so a
 narrowed scan could miss a message there.

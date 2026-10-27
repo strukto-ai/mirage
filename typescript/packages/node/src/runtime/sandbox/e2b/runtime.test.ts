@@ -503,7 +503,7 @@ describe('E2B cancellation and validation', () => {
         mode: MountMode.EXEC,
         runtimes: [runtime, 'workspace'],
         ...(kind === 'timeout'
-          ? { commandLimits: { line: new Limit({ timeoutSeconds: 0.05 }) } }
+          ? { commandLimits: { '@line': new Limit({ timeoutSeconds: 0.05 }) } }
           : {}),
       },
     )
