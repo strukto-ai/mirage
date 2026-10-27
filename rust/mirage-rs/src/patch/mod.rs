@@ -238,30 +238,45 @@ fn ask(files: &Files, config: &Config, lines: &[&[u8]], section: &Section<'_>) {
     } else {
         b"Perhaps you should have used the -p or --strip option?"
     }]);
-    files.say(&[b"The text leading up to this was:"]);
-    files.say(&[b"--------------------------"]);
+    let rule = b"--------------------------";
+    files.say(&[b"The text leading up to this was:\n", rule]);
     for line in &lines[section.leading.clone()] {
         files.say(&[b"|", chomp(line)]);
     }
-    files.say(&[b"--------------------------"]);
-    files.say(&[b"File to patch: "]);
-    files.say(&[b"Skip this patch? [y] "]);
-    files.say(&[b"Skipping patch."]);
+    files.say(&[
+        rule,
+        b"\nFile to patch: \nSkip this patch? [y] \nSkipping patch.",
+    ]);
     ignored(files, section.hunks.len());
 }
 
 /// GNU's refusal of a patch that would create a file that holds lines
 /// already, or delete one that is not there.
-fn refuse(files: &Files, section: &Section<'_>, name: &[u8], creates: bool) {
+fn refuse(files: &Files, config: &Config, section: &Section<'_>, name: &[u8], creates: bool) {
     let (verb, why) = if creates {
         (&b"create"[..], &b"already exists"[..])
     } else {
         (&b"delete"[..], &b"does not exist"[..])
     };
-    files.say(&[b"The next patch would ", verb, b" the file ", name, b","]);
-    files.say(&[b"which ", why, b"!  Assume -R? [n] "]);
-    files.say(&[b"Apply anyway? [n] "]);
-    files.say(&[b"Skipping patch."]);
+    let when = if config.reverse {
+        &b", when reversed,"[..]
+    } else {
+        b""
+    };
+    files.say(&[
+        b"The next patch",
+        when,
+        b" would ",
+        verb,
+        b" the file ",
+        name,
+        b",",
+    ]);
+    let (ask, after) = apply::question(config.reverse, config.forward);
+    files.say(&[b"which ", why, b"!", ask.as_bytes()]);
+    for line in after {
+        files.say(&[line.as_bytes()]);
+    }
     ignored(files, section.hunks.len());
 }
 
@@ -329,7 +344,7 @@ async fn patch_file(
     if (creates && original.as_ref().is_some_and(|text| !text.is_empty()))
         || (deletes && original.is_none())
     {
-        refuse(files, section, &name, creates);
+        refuse(files, config, section, &name, creates);
         return Ok(true);
     }
     files.say(&[b"patching file ", &name]);

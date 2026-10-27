@@ -222,24 +222,30 @@ fn placed_note(ordinal: usize, line: i64, fuzz: i64, moved: i64) -> String {
     text + "."
 }
 
-/// GNU's lines for a patch that reads as the other direction. Standard
-/// input is never a terminal here, so every question is answered with its
-/// default and the file is skipped.
+/// GNU's question about a patch that reads the wrong way round, as a run
+/// without a terminal answers it, with its default: what ends the line
+/// saying why, then the lines after it.
+pub(super) fn question(reverse: bool, forward: bool) -> (&'static str, &'static [&'static str]) {
+    let after: &[&str] = &["Apply anyway? [n] ", "Skipping patch."];
+    match (forward, reverse) {
+        (true, _) => ("  Skipping patch.", &[]),
+        (false, true) => ("  Ignore -R? [n] ", after),
+        (false, false) => ("  Assume -R? [n] ", after),
+    }
+}
+
+/// GNU's lines for a patch that reads as the other direction.
 fn reversed_notes(reverse: bool, forward: bool) -> Vec<String> {
     let seen = if reverse {
         "Unreversed patch detected!"
     } else {
         "Reversed (or previously applied) patch detected!"
     };
-    if forward {
-        return vec![format!("{seen}  Skipping patch.")];
-    }
-    let ask = if reverse { "Ignore" } else { "Assume" };
-    vec![
-        format!("{seen}  {ask} -R? [n] "),
-        "Apply anyway? [n] ".to_owned(),
-        "Skipping patch.".to_owned(),
-    ]
+    let (ask, after) = question(reverse, forward);
+    let after = after.iter().map(|line| (*line).to_owned());
+    std::iter::once(format!("{seen}{ask}"))
+        .chain(after)
+        .collect()
 }
 
 /// The section's hunks as they are tried (`-R` swaps them), for a reject
