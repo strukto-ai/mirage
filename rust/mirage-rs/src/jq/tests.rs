@@ -1794,12 +1794,23 @@ fn regex_the_matcher_cannot_run_exactly_never_answers_wrong() {
     for program in [
         r#"test("ß"; "i")"#,
         r#"test("(?i)ß")"#,
+        r#"test("\\x{df}"; "i")"#,
+        r#"test("(?i)\\x{df}")"#,
+        r#"test("[\\x{c0}-\\x{ff}]"; "i")"#,
+        r#"test("[[:alpha:]]"; "i")"#,
         r#"test("(?~ab)")"#,
         r#"sub("\\X"; "y")"#,
     ] {
         assert!(compile(program, &HashMap::new()).is_err(), "{program}");
     }
-    assert!(compile(r#"test("ß")"#, &HashMap::new()).is_ok());
+    for program in [
+        r#"test("ß")"#,
+        r#"test("\\x{df}")"#,
+        r#"test("[^\\x{df}]"; "i")"#,
+        r#"test("[a-z]"; "i")"#,
+    ] {
+        assert!(compile(program, &HashMap::new()).is_ok(), "{program}");
+    }
 }
 
 /// A pattern the compiler cannot read is refused rather than fall over
@@ -1826,6 +1837,70 @@ fn regex_fallback_is_decided_at_compile_time() {
     for program in [r#"test($ok)"#, r#"test(["a+", "x"])"#, r#"test("a"; null)"#] {
         assert!(compile(program, &globals).is_ok(), "{program}");
     }
+}
+
+/// Subtracting two long arrays scans one for each item of the other, so
+/// the scan pauses with the budget rather than run in one step.
+#[test]
+fn array_subtraction_pauses_with_the_budget() {
+    let program = "[range(3000)] - [range(3000; 6000)] | length";
+    let mut stream = open(program, 1 << 10);
+    let mut wire = Vec::new();
+    stream.feed(b"null", &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    let mut drains = 0;
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+        drains += 1;
+    }
+    assert!(drains > 100, "{drains} drains");
+    assert_eq!(frames(&wire), vec![Frame::Out("3000".into())]);
+    assert_eq!(outputs("[1,2,3,2,[4]] - [2,[4]]", "null"), vec!["[1,3]"]);
+}
+
+/// A drain hands back once it holds a piece of output, `debug` and
+/// `stderr` lines included, however few steps wrote it.
+#[test]
+fn a_drain_writes_about_a_piece_of_output() {
+    let doc = format!("\"{}\"", "a".repeat(100_000));
+    for program in [
+        ". as $x | range(100) | $x",
+        ". as $x | range(100) | [$x] | debug | empty",
+        ". as $x | range(100) | [$x] | stderr | empty",
+    ] {
+        let mut stream = open(program, 1 << 16);
+        let mut wire = Vec::new();
+        stream.feed(doc.as_bytes(), &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        let mut drains = 0;
+        while stream.busy() {
+            let before = wire.len();
+            stream.drain(&mut wire).unwrap();
+            assert!(wire.len() - before < 2 * doc.len(), "{program}");
+            drains += 1;
+        }
+        assert!(drains >= 100, "{program}: {drains} drains");
+    }
+}
+
+/// Deleting at the end of a path as long as jq accepts walks the value
+/// without recursion.
+#[test]
+fn delpaths_walks_a_deep_path_without_recursion() {
+    assert_eq!(
+        outputs(
+            "[range(10000) | 0] as $p | null | setpath($p; 1) | delpaths([$p]) | getpath($p[:-1])",
+            "null"
+        ),
+        vec!["[]"]
+    );
+    assert_eq!(
+        outputs(
+            r#"delpaths([["a", 0], ["a", 2], ["b"]])"#,
+            r#"{"a":[1,2,3],"b":4,"c":5}"#
+        ),
+        vec![r#"{"a":[2],"c":5}"#]
+    );
 }
 
 /// Every unit of a repeat, a control-escape chain and a backreference

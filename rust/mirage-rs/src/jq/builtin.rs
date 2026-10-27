@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use super::parse::parse_value;
-use super::value::{MAX_DEPTH, Number, Object, TooDeep, Value, try_compare};
+use super::value::{List, MAX_DEPTH, Number, Object, TooDeep, Value, try_compare};
 use super::vm::Limits;
 
 const PATH_DEPTH: usize = 10000;
@@ -653,6 +653,51 @@ fn minus(a: &Value, b: &Value) -> Answer {
                 .collect(),
         )),
         _ => Err(type_error2(a, b, "cannot be subtracted")),
+    }
+}
+
+/// One array subtraction in progress: binop_minus scans `b` for each item
+/// of `a`, which two long arrays make quadratic, so the scan stops when
+/// the step budget runs out and goes on at the next drain.
+pub(crate) struct Subtracting {
+    from: Arc<List>,
+    without: Arc<List>,
+    at: usize,
+    kept: Vec<Value>,
+}
+
+impl Subtracting {
+    /// The scan `_minus`'s operands ask for, when both are arrays.
+    pub(crate) fn begin(args: &[Value]) -> Option<Subtracting> {
+        match (args.get(1), args.get(2)) {
+            (Some(Value::Array(from)), Some(Value::Array(without))) => Some(Subtracting {
+                from: Arc::clone(from),
+                without: Arc::clone(without),
+                at: 0,
+                kept: Vec::new(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// Scans on, spending `budget`: None when it ran out before the end.
+    pub(crate) fn run(&mut self, budget: &mut u64) -> Option<Result<Value, Fault>> {
+        let cost = (self.without.len() as u64 / 16).max(1);
+        if *budget == 0 {
+            *budget = 1;
+        }
+        while self.at < self.from.len() {
+            if *budget == 0 {
+                return None;
+            }
+            *budget = budget.saturating_sub(cost);
+            let item = &self.from[self.at];
+            if !self.without.iter().any(|other| item.equals(other)) {
+                self.kept.push(item.clone());
+            }
+            self.at += 1;
+        }
+        Some(Ok(Value::array(std::mem::take(&mut self.kept))))
     }
 }
 
@@ -1451,43 +1496,69 @@ fn dels(t: Value, keys: Vec<Value>) -> Answer {
     }
 }
 
-fn delpaths_sorted(
-    object: Value,
-    paths: &[Vec<Value>],
-    start: usize,
-    depth: usize,
-    limits: Limits,
-) -> Answer {
-    if depth > PATH_DEPTH {
-        return Err(fail("Path too deep"));
+/// jq's delpaths_sorted, walked with a stack of the values it is
+/// rebuilding. Each level covers the run of sorted paths that share its
+/// prefix, so no path is copied on the way down.
+fn delpaths_sorted(object: Value, paths: &[Vec<Value>], limits: Limits) -> Answer {
+    struct Level {
+        object: Value,
+        end: usize,
+        at: usize,
+        delkeys: Vec<Value>,
+        key: Value,
     }
-    let mut object = object;
-    let mut delkeys: Vec<Value> = Vec::new();
-    let mut i = 0;
-    while i < paths.len() {
+    let mut stack = vec![Level {
+        object,
+        end: paths.len(),
+        at: 0,
+        delkeys: Vec::new(),
+        key: Value::Null,
+    }];
+    loop {
+        let start = stack.len() - 1;
+        let Some(level) = stack.last_mut() else {
+            unreachable!("the walk holds its root")
+        };
+        if level.at == level.end {
+            let Some(done) = stack.pop() else {
+                unreachable!("the walk holds its root")
+            };
+            let object = dels(done.object, done.delkeys)?;
+            let Some(parent) = stack.last_mut() else {
+                return Ok(object);
+            };
+            let key = std::mem::replace(&mut parent.key, Value::Null);
+            let held = std::mem::replace(&mut parent.object, Value::Null);
+            parent.object = set(held, &key, object, limits)?;
+            continue;
+        }
+        let i = level.at;
         let key = paths[i][start].clone();
-        let delkey = paths[i].len() == start + 1;
         let mut j = i + 1;
-        while j < paths.len() && paths[j][start].equals(&key) {
+        while j < level.end && paths[j][start].equals(&key) {
             j += 1;
         }
-        if delkey {
-            delkeys.push(key);
-        } else {
-            let sub = get(&object, &key).map_err(Fault::Error)?;
-            if !matches!(sub, Value::Null) {
-                let rest: Vec<Vec<Value>> = paths[i..j]
-                    .iter()
-                    .filter(|p| p.len() > start + 1)
-                    .cloned()
-                    .collect();
-                let newsub = delpaths_sorted(sub, &rest, start + 1, depth + 1, limits)?;
-                object = set(object, &key, newsub, limits)?;
-            }
+        level.at = j;
+        if paths[i].len() == start + 1 {
+            level.delkeys.push(key);
+            continue;
         }
-        i = j;
+        let sub = get(&level.object, &key).map_err(Fault::Error)?;
+        if matches!(sub, Value::Null) {
+            continue;
+        }
+        if start + 1 > PATH_DEPTH {
+            return Err(fail("Path too deep"));
+        }
+        level.key = key;
+        stack.push(Level {
+            object: sub,
+            end: j,
+            at: i,
+            delkeys: Vec::new(),
+            key: Value::Null,
+        });
     }
-    dels(object, delkeys)
 }
 
 fn delpaths(object: Value, paths: &Value, limits: Limits) -> Answer {
@@ -1515,5 +1586,5 @@ fn delpaths(object: Value, paths: &Value, limits: Limits) -> Answer {
     if keys[0].is_empty() {
         return Ok(Value::Null);
     }
-    delpaths_sorted(object, &keys, 0, 0, limits)
+    delpaths_sorted(object, &keys, limits)
 }

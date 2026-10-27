@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use super::builtin::{Fault, array_limit, type_error};
-use super::onig::{Options, Regex, Region, Search};
+use super::onig::{Options, Regex, Region, Search, folds_to_several};
 use super::value::{Object, Value};
 use super::vm::Limits;
 use crate::regex::Step;
@@ -12,13 +12,6 @@ use crate::regex::Step;
 /// matcher does not; a case-insensitive search that could meet one fails
 /// rather than answer differently from jq.
 const MULTI_FOLD: &str = "Regex failure: case folding to several characters is not supported";
-
-/// Whether `c` folds, or is the case of something that folds, to several
-/// characters: Unicode's full case folding and case mappings agree on
-/// these but for capital sharp s.
-fn folds_to_several(c: char) -> bool {
-    c == '\u{1E9E}' || c.to_uppercase().nth(1).is_some() || c.to_lowercase().nth(1).is_some()
-}
 
 fn multi_fold(text: &str) -> bool {
     text.chars().any(folds_to_several)
@@ -64,9 +57,6 @@ pub(crate) fn unsupported(pattern: &str, modifiers: Option<&str>) -> Option<Stri
             'g' => {}
             _ => return None,
         }
-    }
-    if (options.ignore_case || inline_ignore_case(pattern)) && multi_fold(pattern) {
-        return Some(MULTI_FOLD.into());
     }
     match Regex::new(pattern, options) {
         Err(message)
@@ -194,9 +184,7 @@ impl Matching {
             Value::Null => {}
             _ => return Err(type_error(modifiers, "is not a string")),
         }
-        if (options.ignore_case || inline_ignore_case(pattern))
-            && (multi_fold(pattern) || multi_fold(text))
-        {
+        if (options.ignore_case || inline_ignore_case(pattern)) && multi_fold(text) {
             return Err(Fault::Error(Value::string(MULTI_FOLD)));
         }
         let regex = Regex::new(pattern, options)

@@ -607,7 +607,10 @@ impl Compiler<'_> {
         let f = builtin::lookup(op.function(), 2).expect("binop builtin");
         let folds = |x: &Value, y: &Value| {
             !(op == BinOp::Multiply
-                && (matches!(x, Value::String(_)) || matches!(y, Value::String(_))))
+                && (matches!(x, Value::String(_)) || matches!(y, Value::String(_)))
+                || op == BinOp::Minus
+                    && matches!(x, Value::Array(_))
+                    && matches!(y, Value::Array(_)))
         };
         let constants = match (constant(a), constant(b)) {
             (Some(x), Some(y)) if folds(&x, &y) => Some((x, y)),
