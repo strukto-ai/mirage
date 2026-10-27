@@ -143,22 +143,29 @@ async def test_to_workspace_kwargs_emits_redis_cache_config():
     assert kwargs["cache"].url == "redis://localhost:6379/3"
 
 
+def _on_redis(workspace_id: str) -> Workspace:
+    """A workspace whose YAML puts its cache and index on Redis, naming no
+    prefix.
+
+    Args:
+        workspace_id (str): the workspace's id.
+    """
+    cfg = load_config(
+        {
+            "workspace_id": workspace_id,
+            "cache": {"type": "redis"},
+            "index": {"type": "redis"},
+            "mounts": {"/m": {"vfs": "ram"}},
+        }
+    )
+    return Workspace(**cfg.to_workspace_kwargs())
+
+
 # A redis cache or index block that names no prefix keeps its keys to its
 # workspace, so two workspaces on one server never read each other's files.
 def test_a_redis_block_without_a_prefix_is_its_workspaces_own():
-    def built(workspace_id: str) -> Workspace:
-        cfg = load_config(
-            {
-                "workspace_id": workspace_id,
-                "cache": {"type": "redis"},
-                "index": {"type": "redis"},
-                "mounts": {"/m": {"vfs": "ram"}},
-            }
-        )
-        return Workspace(**cfg.to_workspace_kwargs())
-
     for workspace_id in ("w1", "w2"):
-        ws = built(workspace_id)
+        ws = _on_redis(workspace_id)
         assert ws._cache._data_prefix == f"mirage:cache:{workspace_id}:data:"
         index = ws.mount("/m/").index_store
         assert index._key_prefix == f"mirage:index:{workspace_id}:"
