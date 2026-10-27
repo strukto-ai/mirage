@@ -17,7 +17,10 @@ import tempfile
 
 from mirage import MountMode, Workspace
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.store import DiskWorkspaceStateStore, RAMWorkspaceStateStore
+from mirage.workspace.store import (
+    DiskWorkspaceStateStore,
+    RAMWorkspaceStateStore,
+)
 
 GROUPS = ("namespace", "workspace", "observer")
 PROBES = {
@@ -35,7 +38,9 @@ def build(group: str, root: str) -> Workspace:
         group (str): The group key to place on disk.
         root (str): The disk store's state directory.
     """
-    store = RAMWorkspaceStateStore(**{group: DiskWorkspaceStateStore(root=root)})
+    store = RAMWorkspaceStateStore(
+        **{group: DiskWorkspaceStateStore(root=root)}
+    )
     return Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.WRITE,
