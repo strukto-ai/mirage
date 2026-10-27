@@ -43,6 +43,7 @@ mod sort;
 mod split;
 mod strings;
 mod tac;
+mod tar;
 mod task;
 mod tr;
 mod tsort;
@@ -365,6 +366,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "split" => split::open(config),
         "strings" => strings::open(config),
         "tac" => tac::open(config),
+        "tar" => tar::open(config),
         "tr" => tr::open(config),
         "tsort" => tsort::open(config),
         "unexpand" => expand::open_unexpand(config),

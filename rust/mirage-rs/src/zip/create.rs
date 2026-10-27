@@ -10,9 +10,9 @@ use serde::Deserialize;
 
 use super::{
     ARCHIVE, CENTRAL, END, END64, GATHER, LOCAL, LOCATOR64, Spool, WINDOW, ZIP32, central,
-    end_record, failed, failure_text, say, u16_at, u32_at, wildcard,
+    end_record, say, u16_at, u32_at, wildcard,
 };
-use crate::request::{Opening, Reply, Request, WriteMode};
+use crate::request::{Opening, Reply, Request, WriteMode, failed, failure_text};
 use crate::task::Host;
 
 const INVALID: &str = "\nzip error: Zip file structure invalid ({})\n";

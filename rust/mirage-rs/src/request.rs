@@ -360,6 +360,22 @@ pub(crate) fn bytes(text: &str) -> Vec<u8> {
     text.chars().map(|c| c as u8).collect()
 }
 
+/// Whether the host failed the request.
+pub(crate) fn failed(reply: &Reply) -> bool {
+    reply.error.is_some() || reply.fatal.is_some()
+}
+
+/// A host reply's failure text as bytes.
+pub(crate) fn failure_text(reply: &Reply) -> Vec<u8> {
+    bytes(
+        reply
+            .error
+            .as_deref()
+            .or(reply.fatal.as_deref())
+            .unwrap_or_default(),
+    )
+}
+
 /// A failed read as the run reports it: the host's own line for an
 /// operand, else `NAME: TEXT`.
 pub(crate) fn read_failure(command: &[u8], name: &[u8], reply: &Reply) -> Vec<u8> {

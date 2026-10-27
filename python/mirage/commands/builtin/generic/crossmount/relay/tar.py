@@ -44,6 +44,7 @@ async def run_tar(
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
     vfs: Files | None,
+    cwd: str,
     stdin: ByteSource | None = None,
 ) -> CrossResult:
     """Run a tar whose archive, operands and -C destination span mounts.
@@ -62,6 +63,8 @@ async def run_tar(
         dispatch (DispatchFn): Workspace operation dispatcher.
         vfs (Files | None): The symlinks and mount boundaries the
             create scan merges into each walk.
+        cwd (str): The session's working directory, which relative names
+            and an extraction without -C resolve against.
         stdin (ByteSource | None): The archive input when ``-f -`` is used.
     """
     parsed = parse_flags(flag_kwargs)
@@ -77,14 +80,12 @@ async def run_tar(
             crossing=True,
         )
     )
-    archive = parsed.archive
-    directories = list(parsed.directories)
-    operands = scopes if parsed.create and archive else []
+    operands = scopes if parsed.create and parsed.archive else []
     return await tar(
         flat_scopes(operands),
-        read_bytes=prim["read_bytes"],
-        write_bytes=prim["write"],
-        mkdir_fn=prim["mkdir"],
+        list(text_args),
+        parsed,
+        stream=prim["read_stream"],
         stat=prim["stat"],
         walk=relay_walk_of(
             dispatch,
@@ -93,23 +94,10 @@ async def run_tar(
             tree,
         ),
         is_dir=relay_is_dir_of(dispatch),
-        selectors=list(text_args),
-        c=parsed.create,
-        x=parsed.extract,
-        t=parsed.list_only,
-        z=parsed.gzip,
-        j=parsed.bzip2,
-        J=parsed.xz,
-        v=parsed.verbose,
-        h=parsed.deref,
-        to_stdout=parsed.to_stdout,
-        f=archive,
-        C=directories or None,
-        strip_components=parsed.strip_components,
-        exclude=parsed.exclude,
-        one_file_system=parsed.one_file_system,
+        dispatch=dispatch,
+        cwd=PathSpec.from_str_path(cwd),
+        stdin=stdin,
         links=links,
         mounts=mount_view(vfs),
         relay=True,
-        stdin=stdin,
     )

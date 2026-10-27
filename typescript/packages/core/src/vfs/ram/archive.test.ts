@@ -31,7 +31,6 @@ import {
 } from '../../types.ts'
 import { runWithMountGate } from '../../context/session_context.ts'
 import { CycleError } from '../../utils/path.ts'
-import { readTar } from '../../commands/builtin/tar_helper.ts'
 import { UsageError } from '../../commands/errors.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 const RAM_TAR = GENERIC_COMMANDS.filter((c) => c.name === 'tar' && c.filetype == null)
@@ -609,12 +608,15 @@ describe('archive planner regressions', () => {
       '',
       links,
     )
-    const entries = await readTar(writes['/out.tar'] ?? new Uint8Array(0))
-    expect(entries).toHaveLength(1)
-    expect(entries[0]?.name).toBe('link')
-    expect(entries[0]?.linkname).toBe('/d/a.txt')
-    expect(entries[0]?.isFile).toBe(false)
-    expect(entries[0]?.data.byteLength).toBe(0)
+    expect(writes['/out.tar']).toBeDefined()
+    const { out } = await runCmd(RAM_TAR, vfs, [], {
+      list: true,
+      verbose: true,
+      file: PathSpec.fromStrPath('/out.tar'),
+    })
+    expect(DEC.decode(out)).toBe(
+      'lrwxrwxrwx 0/0               0 1970-01-01 00:00 link -> /d/a.txt\n',
+    )
   })
 
   it('-h stores the target bytes under the link name', async () => {
@@ -633,12 +635,14 @@ describe('archive planner regressions', () => {
       '',
       links,
     )
-    const entries = await readTar(writes['/out.tar'] ?? new Uint8Array(0))
-    expect(entries).toHaveLength(1)
-    expect(entries[0]?.name).toBe('link')
-    expect(entries[0]?.isFile).toBe(true)
-    expect(entries[0]?.linkname).toBe('')
-    expect(DEC.decode(entries[0]?.data)).toBe('alpha')
+    expect(writes['/out.tar']).toBeDefined()
+    const { out } = await runCmd(RAM_TAR, vfs, [], {
+      extract: true,
+      to_stdout: true,
+      verbose: true,
+      file: PathSpec.fromStrPath('/out.tar'),
+    })
+    expect(DEC.decode(out)).toBe('alpha')
   })
 
   it('-h on a link whose target is gone reports it and writes no member', async () => {

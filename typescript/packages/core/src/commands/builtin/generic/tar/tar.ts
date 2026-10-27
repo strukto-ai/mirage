@@ -12,133 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CHUNK_SIZE, chunks } from '../../../../io/cooperative.ts'
+import type { util } from 'zod'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import { ByteSpool } from '../../../../io/spool.ts'
-import { OutputStream, asyncChain, primeStream, closeQuietly } from '../../../../io/stream.ts'
-import {
-  compressStream,
-  decompressStream,
-  gunzipStream,
-  gzipCompressStream,
-} from '../../../../utils/compress.ts'
-import { FileStat, FileType, PathSpec } from '../../../../types.ts'
+import { IOResult } from '../../../../io/types.ts'
+import { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
-import {
-  readTarSpool,
-  writeTarStream,
-  type StreamingTarEntry,
-  type TarEntry,
-} from '../../tar_helper.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
+import { byteView } from '../../../../shell/bytes.ts'
 import {
-  CHILD_NAME,
-  CHILD_STATUS,
-  FOREIGN_INPUT,
-  COMPRESSION_SIGNATURES,
   CREATE_ERROR_EXIT,
-  EMPTY_PIPE,
-  ERROR_TRAILER,
-  FATAL_TRAILER,
-  INVALID_ARCHIVE,
-  UNEXPECTED_EOF,
   MODE_CONFLICT,
   MULTIPLE_ARCHIVES,
   NO_MODE,
   STRIP_COUNT,
-  TAPE_START,
   USAGE_HINT,
 } from './constants.ts'
 import { C_SPACE, UINTMAX } from '../../constants.ts'
 import { UsageError } from '../../../errors.ts'
 import type { FlagValue } from '../../../spec/types.ts'
-import {
-  cannot,
-  checkDirectories,
-  planCreate,
-  type DirProbe,
-  type StatFn,
-  type WalkFn,
-} from './create.ts'
-import { eisdir, fsStrerror, isFsError } from '../../../../errors/fs.ts'
-import { GzipDataError } from '../../../../utils/compress.ts'
-import { stdinStream } from '../../utils/stream.ts'
-import { lsModeString } from '../../utils/formatting.ts'
-import { ensureDir, extractDest } from '../archive/extract.ts'
-import type { Compression, CompressionKind, CreateResult, ReadResult } from './types.ts'
+import { checkDirectories, planCreate, type DirProbe, type StatFn, type WalkFn } from './create.ts'
+import { fsStrerror, walkRefusal } from '../../../../errors/fs.ts'
+import { extractDest } from '../archive/extract.ts'
 import { linksOf, mountView, mountRoot } from '../../utils/links.ts'
 import { formatOptionalRecords } from '../../utils/output.ts'
-import { escapeQuote } from '../../../../utils/quote.ts'
-
-const ENC = new TextEncoder()
-
-const DOTDOT_NOTICE = "tar: Removing leading `../' from member names"
-
-/**
- * Whether one -t/-x member selector keeps an archive member.
- *
- * GNU matches the stored spelling exactly (`memory/x` does not find
- * `./memory/x`), and a selector naming a directory takes its whole
- * subtree, with or without the trailing slash.
- */
-function matchesSelector(name: string, selector: string): boolean {
-  const base = rstripSlash(selector)
-  const trimmed = rstripSlash(name)
-  return trimmed === base || trimmed.startsWith(`${base}/`)
-}
-
-/**
- * Member indices the selectors keep, and the misses they report.
- *
- * No selector keeps everything. A selector that matches nothing is
- * GNU's per-operand diagnostic, reported in operand order; the caller
- * appends the one failure trailer.
- */
-function selectedMembers(
-  names: readonly string[],
-  selectors: readonly string[],
-): { keep: Set<number>; misses: string[] } {
-  if (selectors.length === 0) {
-    return { keep: new Set(names.map((_, index) => index)), misses: [] }
-  }
-  const keep = new Set<number>()
-  const misses: string[] = []
-  for (const selector of selectors) {
-    let hit = false
-    for (const [index, name] of names.entries()) {
-      if (matchesSelector(name, selector)) {
-        keep.add(index)
-        hit = true
-      }
-    }
-    if (!hit) misses.push(`tar: ${selector}: Not found in archive`)
-  }
-  return { keep, misses }
-}
-
-/**
- * The destination-relative components one member extracts to.
- *
- * GNU strips --strip-components off the stored spelling first, in which
- * a leading `.` counts as a component (--strip-components=1 turns
- * `./a/b` into `a/b`). Only then is the remainder cleaned for the
- * filesystem: `.` components vanish (a real OS resolves them; a virtual
- * path must not keep a literal `.` directory) and a leading `..` is
- * removed with GNU's one notice per run.
- */
-function outParts(name: string, stripN: number, notices: string[]): string[] {
-  let parts = rstripSlash(name).split('/')
-  if (stripN > 0) parts = parts.slice(stripN)
-  parts = parts.filter((part) => part !== '' && part !== '.')
-  while (parts.length > 0 && parts[0] === '..') {
-    if (!notices.includes(DOTDOT_NOTICE)) notices.push(DOTDOT_NOTICE)
-    parts.shift()
-  }
-  return parts
-}
+import { StreamHost, hostedStream } from '../../utils/stream_host.ts'
 
 // What tar needs from the mount it runs on. `stat` and `walk` are what
 // make a directory operand archivable at all; `isDir` answers on two
@@ -146,8 +45,6 @@ function outParts(name: string, stripN: number, notices: string[]): string[] {
 // mistaken for an absent one.
 export interface TarDeps {
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>
-  write: (p: PathSpec, data: ByteSource) => Promise<void>
-  mkdir: (p: PathSpec, parents?: boolean) => Promise<void>
   stat: StatFn
   walk: WalkFn
   isDir: DirProbe
@@ -165,25 +62,12 @@ function makePathSpec(virtual: string, prefix: string, operand?: PathSpec): Path
   })
 }
 
-function detectCompression(data: Uint8Array): Compression {
-  for (const kind of Object.keys(COMPRESSION_SIGNATURES) as CompressionKind[]) {
-    const signature = COMPRESSION_SIGNATURES[kind]
-    if (
-      data.byteLength >= signature.length &&
-      signature.every((byte, index) => data[index] === byte)
-    ) {
-      return kind
-    }
-  }
-  return null
-}
-
 /** tar's flags as argp read them. Mirrors Python's TarFlags. */
 export interface TarFlags {
   create: boolean
   extract: boolean
   list: boolean
-  compression: Compression
+  codec: string | null
   verbose: boolean
   dereference: boolean
   toStdout: boolean
@@ -195,6 +79,7 @@ export interface TarFlags {
 }
 
 const MODES = ['create', 'extract', 'list'] as const
+const CODECS = ['gzip', 'bzip2', 'xz'] as const
 const STRIP_COUNT_PATTERN = new RegExp(`^${C_SPACE}\\+?([0-9]+)$`)
 
 /**
@@ -231,18 +116,11 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags {
   if (fl.occurrences('file').length > 1) {
     throw new UsageError(`${MULTIPLE_ARCHIVES}\n${USAGE_HINT}`, CREATE_ERROR_EXIT)
   }
-  const compression: Compression = fl.asBool('gzip')
-    ? 'gzip'
-    : fl.asBool('bzip2')
-      ? 'bzip2'
-      : fl.asBool('xz')
-        ? 'xz'
-        : null
   return {
     create: fl.asBool('create'),
     extract: fl.asBool('extract'),
     list: fl.asBool('list'),
-    compression,
+    codec: CODECS.find((codec) => fl.asBool(codec)) ?? null,
     verbose: fl.asBool('verbose'),
     dereference: fl.asBool('dereference'),
     toStdout: fl.asBool('to_stdout'),
@@ -255,281 +133,12 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags {
 }
 
 /**
- * Read tar entries while retaining a failed gzip child's diagnostic.
- *
- * GNU tar 1.35 reads whatever gzip decoded before it stopped, whole blocks
- * only, and a tar parsing error must not mask the child's diagnostic and
- * exit status. A member whose data blocks ran out is the cut: GNU reaches
- * it and stops there. Mirrors Python's _open_archive for listing and
- * extraction.
+ * Plan what the host decides and run mirage-rs's tar over it: -c walks its
+ * operands and checks every -C here, then the engine encodes; -t and -x
+ * check every -C here, and the engine reads the archive and writes what it
+ * extracts where the last -C or the working directory says, on whichever
+ * mount owns it. Mirrors Python's tar.
  */
-async function readArchive(
-  raw: ByteSpool,
-  kind: Compression,
-  contents: ByteSpool,
-): Promise<ReadResult> {
-  const decoded = new ByteSpool()
-  let data = raw
-  try {
-    const first = await raw.read(0, 6)
-    const foreign = kind !== null ? FOREIGN_INPUT[kind] : undefined
-    if (
-      foreign !== undefined &&
-      !foreign.magic.every((byte, at) => first[at] === byte) &&
-      (raw.size > 0 || foreign.emptyToo)
-    ) {
-      return {
-        entries: [],
-        failure: new GzipDataError([foreign.line], true, foreign.status),
-        notices: [],
-        cut: null,
-      }
-    }
-    const detected = kind ?? detectCompression(first)
-    let failure: GzipDataError | null = null
-    if (detected !== null) {
-      try {
-        await decoded.fill(
-          detected === 'gzip'
-            ? gunzipStream(raw.stream())
-            : decompressStream(raw.stream(), detected),
-        )
-      } catch (error) {
-        if (!(error instanceof GzipDataError)) throw error
-        failure = error
-      }
-      data = decoded
-      if (failure !== null && data.size === 0)
-        return { entries: [], failure, notices: [], cut: null }
-    }
-    try {
-      const entries = await readTarSpool(data, contents)
-      const cut = entries.findIndex((e) => (e.header?.size ?? 0) > (e.body?.size ?? 0))
-      return { entries, failure, notices: [], cut: cut < 0 ? null : cut }
-    } catch (error) {
-      if (!(error instanceof Error)) throw error
-      return {
-        entries: [],
-        failure,
-        cut: null,
-        notices:
-          data.size >= 512
-            ? [...INVALID_ARCHIVE]
-            : failure === null
-              ? INVALID_ARCHIVE.slice(0, 1)
-              : [],
-      }
-    }
-  } finally {
-    try {
-      await decoded.close()
-    } finally {
-      await raw.close()
-    }
-  }
-}
-
-/**
- * tar's stderr when its gzip child fails: gzip's own lines, what tar printed
- * meanwhile, then tar's two fatal lines. The run exits 2, and the child's
- * failure outranks every member that was not found. Mirrors Python's
- * _child_failure.
- */
-function childFailure(failure: GzipDataError, lines: readonly string[]): Uint8Array {
-  const status = CHILD_STATUS.replace('{}', String(failure.exitCode))
-  return ENC.encode(failure.render('stdin') + [...lines, status, FATAL_TRAILER].join('\n') + '\n')
-}
-
-// tar's stderr when a member's data runs out: gzip's own lines first, if
-// gzip stopped too, then tar's lines and its two fatal ones. tar exits
-// before it waits for its child, so no child status is reported. Mirrors
-// Python's _cut_short.
-function cutShort(failure: GzipDataError | null, lines: readonly string[]): Uint8Array {
-  const lead = failure !== null ? failure.render('stdin') : ''
-  return ENC.encode(lead + [...lines, UNEXPECTED_EOF, FATAL_TRAILER].join('\n') + '\n')
-}
-
-function stderrOf(lines: readonly string[]): Uint8Array | null {
-  return formatOptionalRecords(lines)
-}
-
-// One of tar's own lines, spoken by `who` instead of `tar`.
-function voiced(line: string, who: string): string {
-  return who + line.slice('tar'.length)
-}
-
-/**
- * The run's fatal lines for an archive tar cannot open or read. GNU opens
- * the archive before it reads a member, so one it cannot open (missing, the
- * empty name, a link loop) ends the run as `Cannot open`; a directory opens
- * and then fails the first read, which GNU words as `Cannot read` at the
- * beginning of the tape. With a compressor the archive is opened by tar's
- * child, which names itself on each of those lines, and tar then reports the
- * child's status. A reading child has already spawned the compressor, which
- * meets an empty pipe and says so, unless the name was missing. Exit 2 every
- * way, named as typed (tar 1.35, gzip 1.13, xz 5.4). Mirrors Python's
- * _open_failure.
- */
-function openFailure(
-  shown: string,
-  err: unknown,
-  compression: Compression,
-  reading: boolean,
-): IOResult {
-  const who = compression !== null ? CHILD_NAME : 'tar'
-  const code = (err as { code?: string }).code
-  const lines =
-    reading && code === 'EISDIR'
-      ? [cannot(shown, 'read', String(fsStrerror(err)), who), voiced(TAPE_START, who)]
-      : [cannot(shown, 'open', String(fsStrerror(err)), who)]
-  lines.push(voiced(FATAL_TRAILER, who))
-  if (compression !== null) {
-    if (reading && code !== 'ENOENT')
-      for (const item of EMPTY_PIPE[compression] ?? []) lines.push(item)
-    lines.push(CHILD_STATUS.replace('{}', String(CREATE_ERROR_EXIT)), FATAL_TRAILER)
-  }
-  const stderr = stderrOf(lines)
-  return new IOResult({ exitCode: CREATE_ERROR_EXIT, ...(stderr !== null ? { stderr } : {}) })
-}
-
-// The archive's bytes, or the run's fatal lines when GNU would stop. A
-// backend that keys files alone reports a directory as absent, where GNU
-// opens it and fails the read, so a miss asks `isDir` before it is worded.
-// Mirrors Python's _read_archive.
-async function readArchiveBytes(
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  archive: PathSpec,
-  isDir: DirProbe,
-  compression: Compression,
-): Promise<ByteSpool | IOResult> {
-  const spool = new ByteSpool()
-  try {
-    await spool.fill(stream(archive))
-    return spool
-  } catch (err) {
-    await spool.close()
-    if (!isFsError(err)) throw err
-    const missing = (err as { code?: string }).code === 'ENOENT'
-    const failure =
-      missing && archive.walkError === null && (await isDir(archive)) ? eisdir(archive) : err
-    return openFailure(archive.rawPath, failure, compression, true)
-  }
-}
-
-async function writeArchive(
-  plan: CreateResult,
-  archivePath: PathSpec,
-  compression: Compression,
-  verbose: boolean,
-  deps: TarDeps,
-): Promise<CommandFnResult> {
-  const names: string[] = []
-  const notices = plan.notices.filter((n) => n !== ERROR_TRAILER)
-  const result = new IOResult({ exitCode: plan.exitCode })
-  async function* entries(): AsyncGenerator<StreamingTarEntry> {
-    for (const member of plan.members) {
-      const spool = new ByteSpool()
-      let source: ByteSource = new Uint8Array()
-      try {
-        let size = member.size ?? null
-        if (member.path !== null) {
-          try {
-            if (size === null) {
-              await spool.fill(deps.stream(member.path))
-              source = spool.stream()
-              size = spool.size
-            } else source = await primeStream(deps.stream(member.path))
-          } catch (error) {
-            if (!isFsError(error)) throw error
-            notices.push(cannot(member.spelled ?? member.name, 'open', String(fsStrerror(error))))
-            result.exitCode = CREATE_ERROR_EXIT
-            continue
-          }
-        } else size = 0
-        const length = size
-        async function* body(): AsyncGenerator<Uint8Array> {
-          let seen = 0
-          for await (const data of chunks(source)) {
-            const remaining = Math.max(0, length - seen)
-            if (remaining > 0) yield data.subarray(0, remaining)
-            seen += data.length
-          }
-          if (seen !== length) {
-            const warning =
-              seen < length
-                ? `File shrank by ${String(length - seen)} bytes; padding with zeros`
-                : 'file changed as we read it'
-            notices.push(`tar: ${member.spelled ?? member.name}: ${warning}`)
-            result.exitCode = Math.max(result.exitCode, 1)
-            while (seen < length) {
-              const count = Math.min(CHUNK_SIZE, length - seen)
-              yield new Uint8Array(count)
-              seen += count
-            }
-          }
-        }
-        yield {
-          header: {
-            name: member.name,
-            size: length,
-            mtime: new Date(0),
-            type: member.kind === 'dir' ? 'directory' : member.kind === 'link' ? 'symlink' : 'file',
-            mode: member.kind === 'dir' ? 0o755 : member.kind === 'link' ? 0o777 : 0o644,
-            linkname: member.kind === 'link' ? member.target : '',
-          },
-          body: body(),
-        }
-        names.push(escapeQuote(member.name))
-      } finally {
-        await closeQuietly(source)
-        await spool.close()
-      }
-    }
-    if (result.exitCode >= CREATE_ERROR_EXIT) notices.push(ERROR_TRAILER)
-    result.stderr = stderrOf([...notices, ...(verbose && archivePath.rawPath === '-' ? names : [])])
-  }
-  const raw = writeTarStream(entries())
-  const archive =
-    compression === 'gzip'
-      ? gzipCompressStream(raw)
-      : compression === null
-        ? raw
-        : compressStream(raw, compression)
-  if (archivePath.rawPath === '-') return [archive, result]
-  try {
-    await deps.write(archivePath, archive)
-  } catch (error) {
-    if (!isFsError(error)) throw error
-    return [null, openFailure(archivePath.rawPath, error, compression, false)]
-  }
-  const stdout = verbose ? formatOptionalRecords(names) : null
-  return [stdout, result]
-}
-
-function longMember(entry: TarEntry, name: string): string {
-  const header = entry.header
-  const kind = header?.type
-  const type =
-    entry.isDir === true
-      ? FileType.DIRECTORY
-      : kind === 'symlink'
-        ? FileType.SYMLINK
-        : FileType.FILE
-  const mode = lsModeString(new FileStat({ name, type, mode: header?.mode ?? 0o644 }))
-  const user =
-    header?.uname === undefined || header.uname === '' ? String(header?.uid ?? 0) : header.uname
-  const group =
-    header?.gname === undefined || header.gname === '' ? String(header?.gid ?? 0) : header.gname
-  const owner = `${user}/${group}`
-  const size = String(header?.size ?? entry.data.byteLength).padStart(
-    Math.max(1, 19 - owner.length),
-  )
-  const stamp = (header?.mtime ?? new Date(0)).toISOString().slice(0, 16).replace('T', ' ')
-  const target = escapeQuote(entry.linkname ?? '')
-  const suffix = kind === 'symlink' ? ` -> ${target}` : kind === 'link' ? ` link to ${target}` : ''
-  return `${mode} ${owner}${size} ${stamp} ${escapeQuote(name)}${suffix}`
-}
-
 export async function tarGeneric(
   paths: PathSpec[],
   texts: readonly string[],
@@ -537,21 +146,13 @@ export async function tarGeneric(
   deps: TarDeps,
   relay = false,
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(ctx.flags)
-  const { create, extract, list, compression, verbose } = parsed
-  const archiveOperand = parsed.archive
-  const COperands = parsed.directories
-  // Only the last -C is a destination; create checks every one.
-  const CFlag = COperands.at(-1) ?? null
-  const stripN = parsed.stripComponents
-  const exclude = parsed.exclude
-  const toStdout = parsed.toStdout
-  const mountPrefix = relay ? '' : mountRoot(ctx)
+  const flags = parseFlags(ctx.flags)
+  const prefix = relay ? '' : mountRoot(ctx)
   // With no -f the archive is standard input or output, which is GNU tar's
   // compiled-in default (no TAPE in the environment).
-  const archiveSpec =
-    archiveOperand !== null
-      ? makePathSpec(archiveOperand.virtual, mountPrefix, archiveOperand)
+  const archive =
+    flags.archive !== null
+      ? makePathSpec(flags.archive.virtual, prefix, flags.archive)
       : new PathSpec({
           virtual: '/dev/stdin',
           directory: '/dev/',
@@ -559,19 +160,18 @@ export async function tarGeneric(
           resolved: true,
           rawPath: '-',
         })
-  const destPath = extractDest(CFlag, ctx.cwd.virtual)
-  const directories = COperands.map((operand) =>
-    makePathSpec(operand.virtual, mountPrefix, operand),
-  )
-  const archiveStream = stdinStream(deps.stream, ctx.stdin)
-  const selectors = [...texts]
-  const verboseLines: string[] = []
-
-  if (create) {
+  const directories = flags.directories.map((dir) => makePathSpec(dir.virtual, prefix, dir))
+  const config: Record<string, util.JSONType> = {
+    archive: byteView(archive.rawPath),
+    codec: flags.codec,
+    verbose: flags.verbose,
+  }
+  let host: StreamHost
+  if (flags.create) {
     const plan = await planCreate(paths, {
-      archive: archiveSpec,
-      exclude,
-      dereference: parsed.dereference,
+      archive,
+      exclude: flags.exclude,
+      dereference: flags.dereference,
       stat: deps.stat,
       walk: deps.walk,
       isDir: deps.isDir,
@@ -579,194 +179,58 @@ export async function tarGeneric(
       links: linksOf(ctx) ?? null,
       // Every mount nested under an operand bounds the scan, a relayed run's too.
       mounts: mountView(ctx.vfs) ?? null,
-      oneFileSystem: parsed.oneFileSystem,
+      oneFileSystem: flags.oneFileSystem,
     })
     if (!plan.write) {
-      const stderr = stderrOf(plan.notices)
+      const stderr = formatOptionalRecords(plan.notices)
       return [
         null,
-        new IOResult({
-          exitCode: plan.exitCode,
-          ...(stderr !== null ? { stderr } : {}),
-        }),
+        new IOResult({ exitCode: plan.exitCode, ...(stderr !== null ? { stderr } : {}) }),
       ]
     }
-    return writeArchive(plan, archiveSpec, compression, verbose, deps)
+    if (archive.walkError !== null) {
+      config.unopened = byteView(fsStrerror(walkRefusal(archive)) ?? '')
+    }
+    const reads: PathSpec[] = [archive]
+    const members: util.JSONType[] = []
+    for (const member of plan.members) {
+      const item: Record<string, util.JSONType> = {
+        name: byteView(member.name),
+        kind: member.kind,
+        target: byteView(member.target),
+        spelled: byteView(member.spelled ?? ''),
+        size: member.size ?? null,
+      }
+      if (member.path !== null) {
+        reads.push(member.path)
+        item.path = byteView(member.path.rawPath)
+        item.operand = reads.length
+      }
+      members.push(item)
+    }
+    Object.assign(config, {
+      mode: 'create',
+      output: byteView(archive.virtual),
+      members,
+      notices: plan.notices.map((notice) => byteView(notice)),
+      status: plan.exitCode,
+    })
+    host = new StreamHost(reads, deps.stream, ctx, false)
+  } else if (flags.list || flags.extract) {
+    const refusal = await checkDirectories(directories, deps.isDir, deps.stat)
+    Object.assign(config, {
+      mode: flags.list ? 'list' : 'extract',
+      probe: archive.walkError === null,
+      selectors: texts.map((selector) => byteView(selector)),
+      strip: flags.stripComponents,
+      to_stdout: flags.toStdout,
+      base: byteView(rstripSlash(extractDest(directories.at(-1) ?? null, ctx.cwd.virtual))),
+      refusal: refusal.map((line) => byteView(line)),
+    })
+    host = new StreamHost([archive], deps.stream, ctx, false)
+  } else {
+    throw new UsageError(`${NO_MODE}\n${USAGE_HINT}`, CREATE_ERROR_EXIT)
   }
-
-  const contents = new ByteSpool()
-  let handedOff = false
-  try {
-    if (list) {
-      const raw = await readArchiveBytes(archiveStream, archiveSpec, deps.isDir, compression)
-      if (raw instanceof IOResult) return [null, raw]
-      const { entries, failure, notices, cut } = await readArchive(raw, compression, contents)
-      const names = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
-      const { keep, misses } = selectedMembers(names, selectors)
-      if (keep.size > 0) {
-        const errors = await checkDirectories(directories, deps.isDir, deps.stat)
-        if (errors.length > 0)
-          return [null, new IOResult({ exitCode: 2, stderr: stderrOf(errors) })]
-      }
-      const shown = entries.flatMap((entry, index) => {
-        const name = names[index] ?? entry.name
-        const reached = cut === null || index <= cut
-        return keep.has(index) && reached
-          ? [verbose ? longMember(entry, name) : escapeQuote(name)]
-          : []
-      })
-      const out: ByteSource | null = formatOptionalRecords(shown)
-      if (cut !== null) {
-        return [out, new IOResult({ exitCode: 2, stderr: cutShort(failure, notices) })]
-      }
-      if (failure !== null) {
-        return [out, new IOResult({ exitCode: 2, stderr: childFailure(failure, notices) })]
-      }
-      if (notices.length > 0 || misses.length > 0) {
-        const missStderr = stderrOf([...notices, ...misses, ERROR_TRAILER])
-        return [
-          out,
-          new IOResult({
-            exitCode: 2,
-            ...(missStderr !== null ? { stderr: missStderr } : {}),
-          }),
-        ]
-      }
-      return [out, new IOResult()]
-    }
-
-    if (extract) {
-      const raw = await readArchiveBytes(archiveStream, archiveSpec, deps.isDir, compression)
-      if (raw instanceof IOResult) return [null, raw]
-      const { entries, failure, notices, cut } = await readArchive(raw, compression, contents)
-      const listed = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
-      const { keep, misses } = selectedMembers(listed, selectors)
-      if (keep.size > 0) {
-        const errors = await checkDirectories(directories, deps.isDir, deps.stat)
-        if (errors.length > 0)
-          return [null, new IOResult({ exitCode: 2, stderr: stderrOf(errors) })]
-      }
-      const made = new Set<string>()
-      const outputs: ByteSource[] = []
-      // A member GNU cannot create (a read-only region, a missing op) is
-      // reported by its own name and the run goes on to the next one,
-      // closing with the one trailer and exit 2.
-      let failed = notices.length > 0
-      const toSpec = (virtual: string): PathSpec => makePathSpec(virtual, mountPrefix)
-      for (const [index, entry] of entries.entries()) {
-        if (cut !== null && index > cut) break
-        if (!keep.has(index)) continue
-        // Only the whole blocks that arrived are written.
-        if (index === cut) notices.push(UNEXPECTED_EOF)
-        // A symlink member has no bytes to write and no namespace to write
-        // into from here (links are workspace state, not the backend's),
-        // so extraction skips it rather than dropping an empty file where
-        // a link belongs.
-        const isDir = entry.isDir === true
-        if (!entry.isFile && !isDir) continue
-        if (isDir) {
-          if (!toStdout) {
-            // A directory member is the only record an empty directory
-            // leaves, so it has to be recreated even though nothing is
-            // written inside it. Under -O nothing reaches the
-            // filesystem at all.
-            const parts = outParts(entry.name, stripN, notices)
-            if (parts.length > 0) {
-              const outDir = `${rstripSlash(destPath)}/${parts.join('/')}`
-              try {
-                await ensureDir(outDir, toSpec, deps.mkdir, deps.stat, made)
-              } catch (err) {
-                if (!isFsError(err)) throw err
-                notices.push(cannot(parts.join('/'), 'mkdir', String(fsStrerror(err))))
-                failed = true
-                continue
-              }
-              if (verbose) verboseLines.push(escapeQuote(`${rstripSlash(entry.name)}/`))
-            }
-          }
-          continue
-        }
-        if (toStdout) {
-          outputs.push(entry.body?.stream() ?? entry.data)
-          if (verbose) verboseLines.push(escapeQuote(entry.name))
-          continue
-        }
-        const parts = outParts(entry.name, stripN, notices)
-        if (parts.length === 0) continue
-        const outPath = `${rstripSlash(destPath)}/${parts.join('/')}`
-        const parent = outPath.slice(0, outPath.lastIndexOf('/')) || '/'
-        if (parent !== '/') {
-          try {
-            await ensureDir(parent, toSpec, deps.mkdir, deps.stat, made)
-          } catch (err) {
-            if (!isFsError(err)) throw err
-            // GNU tar 1.35 (debian:stable-slim) reports ENOENT for the
-            // member after its parent mkdir failed.
-            notices.push(
-              cannot(parts.slice(0, -1).join('/'), 'mkdir', String(fsStrerror(err))),
-              cannot(parts.join('/'), 'open', 'No such file or directory'),
-            )
-            failed = true
-            continue
-          }
-        }
-        try {
-          await deps.write(makePathSpec(outPath, mountPrefix), entry.body?.stream() ?? entry.data)
-        } catch (err) {
-          if (!isFsError(err)) throw err
-          notices.push(cannot(parts.join('/'), 'open', String(fsStrerror(err))))
-          failed = true
-          continue
-        }
-        if (verbose) verboseLines.push(escapeQuote(entry.name))
-      }
-      if (toStdout) {
-        // GNU moves the verbose listing to stderr when stdout carries the
-        // member bytes.
-        const merged =
-          outputs.length > 0
-            ? new OutputStream(asyncChain(outputs)[Symbol.asyncIterator](), () => contents.close())
-            : null
-        handedOff = merged !== null
-        const errLines = [...notices, ...(verbose ? verboseLines : [])]
-        if (cut !== null) {
-          return [merged, new IOResult({ exitCode: 2, stderr: cutShort(failure, errLines) })]
-        }
-        if (failure !== null) {
-          return [merged, new IOResult({ exitCode: 2, stderr: childFailure(failure, errLines) })]
-        }
-        if (misses.length > 0 || failed) errLines.push(...misses, ERROR_TRAILER)
-        const stderr = stderrOf(errLines)
-        return [
-          merged,
-          new IOResult({
-            exitCode: misses.length > 0 || failed ? 2 : 0,
-            ...(stderr !== null ? { stderr } : {}),
-          }),
-        ]
-      }
-      const stdout = verbose ? formatOptionalRecords(verboseLines) : null
-      if (cut !== null) {
-        return [stdout, new IOResult({ exitCode: 2, stderr: cutShort(failure, notices) })]
-      }
-      if (failure !== null) {
-        return [stdout, new IOResult({ exitCode: 2, stderr: childFailure(failure, notices) })]
-      }
-      const errLines = [
-        ...notices,
-        ...(misses.length > 0 || failed ? [...misses, ERROR_TRAILER] : []),
-      ]
-      const stderr = stderrOf(errLines)
-      return [
-        stdout,
-        new IOResult({
-          exitCode: misses.length > 0 || failed ? 2 : 0,
-          ...(stderr !== null ? { stderr } : {}),
-        }),
-      ]
-    }
-  } finally {
-    if (!handedOff) await contents.close()
-  }
-  throw new UsageError(`${NO_MODE}\n${USAGE_HINT}`, CREATE_ERROR_EXIT)
+  const io = new IOResult()
+  return [hostedStream('tar', config, host, io, ctx.signal), io]
 }

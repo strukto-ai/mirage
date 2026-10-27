@@ -16,7 +16,6 @@ if TYPE_CHECKING:
         tar_generic,
     )
     from mirage.commands.builtin.generic.tar.types import (
-        CompressionSuffix,
         CreateResult,
         Member,
     )
@@ -35,14 +34,12 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "tar_generic",
     ),
     "mirage.commands.builtin.generic.tar.types": (
-        "CompressionSuffix",
         "CreateResult",
         "Member",
     ),
 }
 
 __all__ = [
-    "CompressionSuffix",
     "CreateResult",
     "Member",
     "TarFlags",

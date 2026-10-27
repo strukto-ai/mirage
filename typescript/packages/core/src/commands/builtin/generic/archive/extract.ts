@@ -12,54 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec, FileType, type StatFn } from '../../../../types.ts'
-
-export type MkdirFn = (p: PathSpec, parents?: boolean) => Promise<void>
+import { PathSpec } from '../../../../types.ts'
 
 /**
  * Where extraction lands: the explicit operand, else the cwd.
  *
  * The explicit operand is tar's last -C or unzip's -d, already validated
- * before extracting any members. TypeScript functions use virtual paths;
- * Python accessor functions use mount-relative paths.
+ * before extracting any members, as a virtual path. Mirrors Python's
+ * extract_dest.
  */
 export function extractDest(explicit: PathSpec | string | null, cwd: string): string {
   const target = explicit ?? cwd
   return target instanceof PathSpec ? target.virtual : target || '/'
-}
-
-async function dirExists(stat: StatFn, level: PathSpec): Promise<boolean> {
-  try {
-    return (await stat(level)).type === FileType.DIRECTORY
-  } catch {
-    // A stat miss here only means "not standing yet"; mkdir answers.
-    return false
-  }
-}
-
-/**
- * Create one directory chain top-down, skipping what exists.
- *
- * The dispatch mkdir op is single-level on most backends (the
- * `mkdirParents` knob is a per-backend exception), so extraction walks
- * the chain itself the way relay cp does: probe, then create only what
- * is missing, memoized per run so an archive of many files stats each
- * ancestor once.
- */
-export async function ensureDir(
-  dirPath: string,
-  toSpec: (virtual: string) => PathSpec,
-  mkdir: MkdirFn,
-  stat: StatFn,
-  made: Set<string>,
-): Promise<void> {
-  const parts = dirPath.split('/').filter((part) => part !== '')
-  for (let i = 1; i <= parts.length; i += 1) {
-    const level = `/${parts.slice(0, i).join('/')}`
-    if (made.has(level)) continue
-    if (!(await dirExists(stat, toSpec(level)))) {
-      await mkdir(toSpec(level))
-    }
-    made.add(level)
-  }
 }

@@ -14,11 +14,10 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.generic.gzip import gzip
-from mirage.commands.builtin.generic.tar.tar import _write_archive
-from mirage.commands.builtin.generic.tar.types import CreateResult, Member
+from mirage.commands.builtin.generic.tar.tar import TarFlags, tar
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, materialize
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -97,6 +96,9 @@ async def main() -> None:
     async def read_bytes(path: PathSpec) -> bytes:
         return await materialize(source())
 
+    async def read_whole(path: PathSpec) -> AsyncIterator[bytes]:
+        yield await read_bytes(path)
+
     async def consume(output: ByteSource | None) -> None:
         if output is None:
             return
@@ -113,11 +115,10 @@ async def main() -> None:
                 state["first_64k_ms"] = (time.perf_counter() - started) * 1000
             digest.update(chunk)
 
-    member = (
-        Member(name="payload.bin", kind="file", path=INPUT, size=SIZE)
-        if args.known_size
-        else Member(name="payload.bin", kind="file", path=INPUT)
-    )
+    async def stat(path: PathSpec) -> FileStat:
+        size = SIZE if args.known_size else None
+        return FileStat(name="payload.bin", type=FileType.FILE, size=size)
+
     reader = read_bytes if args.whole_read else read_stream
     cache = None
     if args.mode.startswith("cache_"):
@@ -136,16 +137,19 @@ async def main() -> None:
     tracemalloc.start()
     started = time.perf_counter()
     if args.mode == "tar_current":
-        output, io = await _write_archive(
-            CreateResult((member,), (), 0),
-            STDOUT,
-            "",
-            False,
-            reader,
-            unexpected,
+        output, io = await tar(
+            [INPUT],
+            [],
+            TarFlags(create=True, archive=STDOUT),
+            stream=read_whole if args.whole_read else read_stream,
+            stat=stat,
+            walk=unexpected,
+            is_dir=unexpected,
+            dispatch=None,
+            cwd=PathSpec.from_str_path("/"),
         )
-        assert io.exit_code == 0
         await consume(output)
+        assert io.exit_code == 0
     elif args.mode in ("gzip_file", "gzip_stdin"):
         output, io = await gzip(
             [INPUT] if args.mode == "gzip_file" else [],

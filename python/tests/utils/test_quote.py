@@ -17,7 +17,6 @@ import pytest
 from mirage.utils.quote import (
     SHELL_QUOTED_COMMANDS,
     escape_name,
-    escape_quote,
     needs_shell_quote,
     quotes_operands,
     shell_quote,
@@ -201,25 +200,3 @@ def test_never_quoting_commands_stay_out_of_the_table():
 )
 def test_ls_escape_names(name, expected):
     assert escape_name(name) == expected
-
-
-# GNU tar 1.35 on debian:stable-slim (LC_ALL=C.UTF-8), `tar -tf` of members
-# created under each name: tar's escape style leaves a space bare.
-@pytest.mark.parametrize(
-    "name,expected",
-    [
-        ("a b", "a b"),
-        ("back\\slash", "back\\\\slash"),
-        ("tab\tx", "tab\\tx"),
-        ("nl\nx", "nl\\nx"),
-        ("e\x1bx", "e\\033x"),
-        ("del\x7f", "del\\177"),
-        ("c1\x85", "c1\\302\\205"),
-        ("é", "é"),
-        ('q"uote', 'q"uote'),
-        ("s'q", "s'q"),
-        ("a\udcffb", "a\\377b"),
-    ],
-)
-def test_tar_escape_quote(name, expected):
-    assert escape_quote(name) == expected

@@ -1,5 +1,5 @@
 {
-  "baseline": 2932,
+  "baseline": 2920,
  "modules": {
   "vfs/tidb_filesystem/config": {
    "typescript_only": {
@@ -380,13 +380,6 @@
    "python_only": {
     "_s3_accessor": "Python's S3 client is the optional 's3' extra, so its accessor is built behind the install hint; TypeScript's S3 SDK is a core dependency.",
     "_Counted": "Python streams the tar into the caller's file-like target through tarfile, which needs tell(), and counts the bytes as they pass; TypeScript builds the tar in memory and takes its length."
-   }
-  },
-  "commands/builtin/generic/tar/tar": {
-   "python_only": {
-    "ZeroTail": "Python reads archives through tarfile, which refuses a stream that ends inside a member's data; ZeroTail feeds it zeros past the cut. TypeScript parses the blocks itself and sees the short member directly.",
-    "_index_archive": "Indexes a seekable spool through stdlib tarfile in a worker; TypeScript uses modern-tar.",
-    "_member_stream": "Reads stdlib tarfile members in a worker; TypeScript reads ByteSlice streams."
    }
   },
   "commands/builtin/general/curl": {
