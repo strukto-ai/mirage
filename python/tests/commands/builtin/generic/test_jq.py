@@ -2,7 +2,9 @@ import asyncio
 
 import pytest
 
+from mirage.commands.builtin.generic import jq as jq_module
 from mirage.commands.builtin.generic.jq import (
+    Engine,
     exit_code,
     indent_width,
     input_name,
@@ -11,6 +13,7 @@ from mirage.commands.builtin.generic.jq import (
     option_refusal,
     parse_flags,
     positional_value,
+    read_frames,
     read_options,
     run_status,
 )
@@ -725,3 +728,52 @@ async def test_the_program_file_is_read_after_the_option_loop():
     _, io = await _run_program_file("-n", "-f", "/d/missing.jq")
     assert io.exit_code == 2
     assert b"Could not open" in await materialize(io.stderr)
+
+
+def _frame(tag: int, payload: bytes) -> bytes:
+    return bytes([tag]) + len(payload).to_bytes(4, "little") + payload
+
+
+def test_frames_fold_into_outputs_and_the_stop_that_ended_the_run():
+    outputs: list[str] = []
+    wire = _frame(1, b"1") + _frame(1, b"[2]") + _frame(2, b"\x00{}")
+    assert read_frames(wire, outputs) == JqError("{}", False)
+    assert outputs == ["1", "[2]"]
+    halt = b'{"message":"bye","string":true,"code":3.0}'
+    assert read_frames(_frame(3, halt), []) == JqHalt("bye", True, 3.0)
+    with pytest.raises(ValueError):
+        read_frames(_frame(9, b""), [])
+
+
+class _NoWorker:
+    def __init__(self) -> None:
+        raise AssertionError("the run should stay on the loop's thread")
+
+
+@pytest.mark.asyncio
+async def test_a_program_that_never_ends_is_cancelled_on_this_thread(
+    monkeypatch,
+):
+    monkeypatch.setattr(jq_module, "Worker", _NoWorker)
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(
+            _run([], "until(false; .)", null_input=True), timeout=0.2
+        )
+    out, io = await _run(["/d/a.json"], ".a + 1")
+    assert (out, io.exit_code) == (b"2\n", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_program_jq_eval_refuses_runs_in_libjqs_worker():
+    out, io = await _run([], "now | type", null_input=True)
+    assert (out, io.exit_code) == (b'"number"\n', 0)
+
+
+@pytest.mark.asyncio
+async def test_a_document_jq_eval_cannot_read_is_handed_back():
+    engine = Engine.open(".", JqOptions(), None)
+    assert engine is not None
+    assert await engine.run("[") is None
+    run = await engine.run('{"a":1}')
+    assert run == JqRun(['{"a":1}'])
+    await engine.close()

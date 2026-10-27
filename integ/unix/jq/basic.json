@@ -674,6 +674,25 @@
       "flags": [
         "c"
       ]
+    },
+    {
+      "id": "jq_timeout_ends_a_program_that_never_ends",
+      "seq": 701221,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 0.5 jq -n 'until(false; .)'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=124\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

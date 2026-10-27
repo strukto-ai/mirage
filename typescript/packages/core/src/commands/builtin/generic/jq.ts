@@ -42,10 +42,14 @@ import {
   stringText,
   valueText,
   type InputSource,
+  type JqError,
+  type JqHalt,
   type JqOptions,
   type JqRun,
   type StreamReads,
 } from '../../../core/jq/index.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { closeStream, openStream, type OpenStream } from '../../../rs/stream.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -87,6 +91,12 @@ const ERROR_UNKNOWN = 5
 
 // The outputs -e counts as null-kind, as jq dumps them.
 const NULL_KIND = new Set(['null', 'false'])
+
+// The frames a jq_eval drain writes: an output's compact dump, the error
+// that ended the run, and a halt.
+const FRAME_OUTPUT = 1
+const FRAME_ERROR = 2
+const FRAME_HALT = 3
 
 // jq's exit status when it refuses the program itself, and when it could not
 // read one of its inputs, whatever the runs answered.
@@ -396,6 +406,109 @@ export function runStatus(run: JqRun<string>): number {
 }
 
 /**
+ * Read one jq_eval drain into a run: every output frame's compact dump onto
+ * `outputs`, and the stop an error or halt frame names, or null. A frame is
+ * a tag, a little-endian u32 length and its payload: an output's dump, an
+ * error's string flag byte then its text, or a halt's JSON.
+ */
+export function readFrames(bytes: Uint8Array, outputs: string[]): JqError | JqHalt | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let stop: JqError | JqHalt | null = null
+  let at = 0
+  while (at < bytes.byteLength) {
+    if (at + 5 > bytes.byteLength) throw new Error('jq_eval: truncated frame header')
+    const tag = view.getUint8(at)
+    const end = at + 5 + view.getUint32(at + 1, true)
+    if (end > bytes.byteLength) throw new Error('jq_eval: truncated frame')
+    const payload = bytes.subarray(at + 5, end)
+    at = end
+    if (tag === FRAME_OUTPUT) {
+      outputs.push(DEC.decode(payload))
+    } else if (tag === FRAME_ERROR) {
+      stop = { kind: 'error', text: DEC.decode(payload.subarray(1)), string: payload[0] === 1 }
+    } else if (tag === FRAME_HALT) {
+      const halt = JSON.parse(DEC.decode(payload)) as Omit<JqHalt, 'kind'>
+      stop = { kind: 'halt', message: halt.message, string: halt.string, code: halt.code }
+    } else {
+      throw new Error(`jq_eval: unknown frame ${String(tag)}`)
+    }
+  }
+  return stop
+}
+
+/**
+ * A program compiled once by mirage-rs's jq_eval and run on this thread, a
+ * bounded number of VM steps per drain, so a program that never ends still
+ * yields and the signal can stop it between two.
+ */
+class Engine {
+  private started = false
+  private readonly budget: YieldBudget
+
+  private constructor(
+    private readonly stream: OpenStream,
+    signal?: AbortSignal,
+  ) {
+    this.budget = new YieldBudget(signal)
+  }
+
+  /**
+   * Compile `expr` with the options' named bindings and `args` as `$ARGS`,
+   * or null when jq_eval refuses a builtin or syntax it uses.
+   */
+  static async open(
+    expr: string,
+    opts: JqOptions,
+    args: string | null,
+    signal?: AbortSignal,
+  ): Promise<Engine | null> {
+    let stream: OpenStream
+    try {
+      stream = await openStream('jq_eval', {
+        program: expr,
+        named: Object.fromEntries(opts.namedArgs),
+        args,
+      })
+    } catch (error) {
+      if (!(error instanceof StreamRefusal)) throw error
+      return null
+    }
+    return new Engine(stream, signal)
+  }
+
+  /**
+   * Run the program on one document's JSON text, or null for a document
+   * jq_eval cannot read (jq's own literals: `nan`, `+1`, `.5`), which the
+   * caller runs elsewhere.
+   */
+  async run(doc: string): Promise<JqRun<string> | null> {
+    const stream = this.stream
+    if (this.started) stream.begin({})
+    this.started = true
+    const outputs: string[] = []
+    let stop: JqError | JqHalt | null
+    try {
+      stop = readFrames(stream.feed(ENC.encode(doc)), outputs)
+      stop = readFrames(stream.finish(), outputs) ?? stop
+    } catch (error) {
+      if (!(error instanceof StreamRefusal)) throw error
+      return null
+    }
+    while (stream.busy()) {
+      const pending = this.budget.run()
+      if (pending !== undefined) await pending
+      stop = readFrames(stream.drain(), outputs) ?? stop
+    }
+    return { outputs, stop }
+  }
+
+  /** Close the program; a run cut short is retired a bounded slice at a time. */
+  close(): Promise<void> {
+    return closeStream(this.stream)
+  }
+}
+
+/**
  * Exit status for the program run over the whole input, as jq's main loop
  * settles it from what each run answered (runStatus).
  *
@@ -446,12 +559,18 @@ export function parseReport(failure: JqParseError, opts: JqOptions): string {
  * the failing read went on to, and the exit status is 2 whatever the runs
  * answered. `sources` are the inputs, in order, not yet opened.
  *
- * Every run goes to the invocation's worker, even a short one: a jq program
- * can loop forever and jq-wasm cannot be interrupted, so no run is known to
- * end (strukto-ai/mirage#1590).
+ * A program that reads neither `input` nor `inputs` runs in mirage-rs's
+ * jq_eval, compiled once per invocation and stepped in bounded slices on
+ * this thread, so a run that never ends still yields to the signal. A
+ * program it refuses, and every program that reads the stream, goes to the
+ * invocation's worker instead, even for a short run: jq-wasm cannot be
+ * interrupted, so no run there is known to end (strukto-ai/mirage#1590).
  */
 export class MainLoop {
-  private readonly worker = new Worker()
+  private worker: Worker | null = null
+  // The compiled program: undefined until the first run asks for it, null
+  // once jq_eval refused it.
+  private engine: Engine | null | undefined
   private readonly statuses: number[] = []
   private readonly reports: string[] = []
   private readonly reader: InputReader
@@ -503,7 +622,8 @@ export class MainLoop {
       this.io.exitCode =
         this.reader.failures() > 0 ? ERROR_SYSTEM : exitCode(this.statuses, this.opts)
       if (this.reports.length > 0) this.io.stderr = ENC.encode(this.reports.join(''))
-      await this.worker.close()
+      await this.engine?.close()
+      await this.worker?.close()
       await this.reader.close()
     }
   }
@@ -526,13 +646,19 @@ export class MainLoop {
    * the main loop reads on past it.
    */
   private evaluate(args: readonly unknown[]): Promise<JqRun<string>> {
+    this.worker ??= new Worker()
     return this.worker.call('jqRunTexts', args, this.signal)
   }
 
   private async run(doc: string, position: string): Promise<[JqRun<string>, string]> {
     const reads = this.reads
     if (!reads.input && !reads.inputs) {
-      const run = await this.evaluate([doc, this.expr, this.opts.namedArgs, null, this.args])
+      if (this.engine === undefined) {
+        this.engine = await Engine.open(this.expr, this.opts, this.args, this.signal)
+      }
+      const run =
+        (await this.engine?.run(doc)) ??
+        (await this.evaluate([doc, this.expr, this.opts.namedArgs, null, this.args]))
       return [await printable(run, this.opts, this.signal), position]
     }
     const docs: string[] = []

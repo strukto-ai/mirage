@@ -2,6 +2,7 @@
 # src/main.c (MIT; see licenses/third_party/jq.txt).
 
 import dataclasses
+import json
 import re
 from collections.abc import (
     AsyncIterator,
@@ -60,6 +61,8 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.stream import OpenStream, close_stream, open_stream
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec, ReadStreamFn
 
@@ -88,6 +91,10 @@ ERROR_UNKNOWN = 5
 
 # The outputs -e counts as null-kind, as jq dumps them.
 NULL_KIND = frozenset(("null", "false"))
+
+FRAME_OUTPUT = 1
+FRAME_ERROR = 2
+FRAME_HALT = 3
 
 # jq's exit status when it refuses the program itself, and when it could
 # not read one of its inputs, whatever the runs answered.
@@ -502,6 +509,99 @@ def parse_report(failure: JqParseError, opts: JqOptions) -> str:
     return f"jq: {kind}: {failure.message}\n"
 
 
+def read_frames(wire: bytes, outputs: list[str]) -> JqError | JqHalt | None:
+    """Fold one drain of mirage-rs's jq_eval into a run: each output frame
+    is a compact dump, an error or a halt frame is what stopped the run.
+
+    Args:
+        wire (bytes): the frames, a tag byte and a little-endian u32
+            length before each payload.
+        outputs (list[str]): the run's outputs so far, appended to.
+    """
+    stop: JqError | JqHalt | None = None
+    at = 0
+    while at < len(wire):
+        tag = wire[at]
+        size = int.from_bytes(wire[at + 1 : at + 5], "little")
+        payload = wire[at + 5 : at + 5 + size]
+        at += 5 + size
+        if tag == FRAME_OUTPUT:
+            outputs.append(payload.decode())
+        elif tag == FRAME_ERROR:
+            stop = JqError(payload[1:].decode(), payload[0] == 1)
+        elif tag == FRAME_HALT:
+            halt = json.loads(payload)
+            stop = JqHalt(halt["message"], halt["string"], halt["code"])
+        else:
+            raise ValueError(f"unknown jq_eval frame {tag}")
+    return stop
+
+
+class Engine:
+    """A program compiled once by mirage-rs's jq_eval and run on the
+    loop's own thread, a bounded number of VM steps per drain, so a
+    program that never ends still yields and its task can be cancelled.
+
+    Args:
+        stream (OpenStream): the compiled program.
+    """
+
+    def __init__(self, stream: OpenStream) -> None:
+        self._stream = stream
+        self._started = False
+        self._budget = YieldBudget()
+
+    @classmethod
+    def open(
+        cls, expr: str, opts: JqOptions, args: str | None
+    ) -> "Engine | None":
+        """Compile `expr`, or None when the engine cannot run it yet.
+
+        Args:
+            expr (str): jq program text.
+            opts (JqOptions): resolved options, for the named bindings.
+            args (str | None): the value of `$ARGS`, as text.
+        """
+        try:
+            stream = open_stream(
+                "jq_eval",
+                {
+                    "program": expr,
+                    "named": dict(opts.named_args),
+                    "args": args,
+                },
+            )
+        except StreamRefusal:
+            return None
+        return cls(stream)
+
+    async def run(self, doc: str) -> JqRun[str] | None:
+        """Run the program on one document, or None for a document jq_eval
+        cannot read, which the caller runs elsewhere.
+
+        Args:
+            doc (str): the document's JSON text.
+        """
+        stream = self._stream
+        if self._started:
+            stream.begin({})
+        self._started = True
+        outputs: list[str] = []
+        try:
+            stop = read_frames(stream.feed(doc.encode()), outputs)
+            stop = read_frames(stream.finish(), outputs) or stop
+        except StreamRefusal:
+            return None
+        while stream.busy():
+            await self._budget.run()
+            stop = read_frames(stream.drain(), outputs) or stop
+        return JqRun(outputs, stop)
+
+    async def close(self) -> None:
+        """Retire a run cut short a bounded slice at a time."""
+        await close_stream(self._stream)
+
+
 class MainLoop:
     """jq's main loop (main.c) over an invocation's input stream.
 
@@ -522,9 +622,14 @@ class MainLoop:
     run of the document the failing read went on to, and the exit status
     is 2 whatever the runs answered.
 
-    Every run goes to the invocation's worker, even a short one: a jq
-    program can loop forever and libjq cannot be interrupted, so no run
-    is known to end (strukto-ai/mirage#1590).
+    A program that reads neither `input` nor `inputs` runs in mirage-rs's
+    jq_eval (Engine), compiled once per invocation and stepped in bounded
+    slices on this thread, so a run that never ends still yields and
+    `timeout` cancels it between two. A program jq_eval refuses, a
+    document it cannot read, and every program that reads the stream go
+    to the invocation's worker instead, even for a short run: libjq
+    cannot be interrupted, so no run there is known to end
+    (strukto-ai/mirage#1590).
 
     Args:
         sources (list[InputSource]): the inputs, in order, not yet opened.
@@ -544,7 +649,9 @@ class MainLoop:
         args: str | None,
         io: IOResult,
     ) -> None:
-        self._worker = Worker()
+        self._engine: Engine | None = None
+        self._opened = False
+        self._worker: Worker | None = None
         self._reports: list[str] = []
         self._reader = InputReader(sources, opts, self._reports.append)
         self._expr = expr
@@ -590,7 +697,10 @@ class MainLoop:
             )
             if self._reports:
                 self._io.stderr = "".join(self._reports).encode()
-            await self._worker.close()
+            if self._engine is not None:
+                await self._engine.close()
+            if self._worker is not None:
+                await self._worker.close()
             await self._reader.close()
 
     async def _run(self, doc: str, position: str) -> tuple[JqRun[str], str]:
@@ -616,14 +726,13 @@ class MainLoop:
         """
         reads = self._reads
         if not (reads.input or reads.inputs):
-            run = await self._worker.call(
-                jq_run_texts,
-                doc,
-                self._expr,
-                self._opts.named_args,
-                None,
-                self._args,
-            )
+            if not self._opened:
+                self._opened = True
+                self._engine = Engine.open(self._expr, self._opts, self._args)
+            run = None if self._engine is None else await self._engine.run(doc)
+            if run is not None:
+                return await printable(run, self._opts), position
+            run = await self._evaluate(doc, None)
             return await printable(run, self._opts), position
         docs: list[str] = []
         failure: JqParseError | None = None
@@ -638,16 +747,27 @@ class MainLoop:
             docs.append(item)
             if not reads.inputs:
                 break
-        run = await self._worker.call(
+        run = await self._evaluate(
+            doc, docs, None if failure is None else failure.message
+        )
+        return await printable(run, self._opts), position
+
+    async def _evaluate(
+        self, doc: str, docs: list[str] | None, failure: str | None = None
+    ) -> JqRun[str]:
+        # libjq in the invocation's worker, made for the first run jq_eval
+        # does not take.
+        if self._worker is None:
+            self._worker = Worker()
+        return await self._worker.call(
             jq_run_texts,
             doc,
             self._expr,
             self._opts.named_args,
             docs,
             self._args,
-            None if failure is None else failure.message,
+            failure,
         )
-        return await printable(run, self._opts), position
 
     def _settle(self, run: JqRun[str], position: str) -> bool:
         # Fold one run into the invocation: its answer toward the exit
