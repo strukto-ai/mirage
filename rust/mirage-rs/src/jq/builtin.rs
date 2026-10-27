@@ -699,6 +699,14 @@ impl Subtracting {
         }
         Some(Ok(Value::array(std::mem::take(&mut self.kept))))
     }
+
+    /// The values a cancelled scan holds, for the VM to free in slices.
+    pub(crate) fn into_values(self) -> Vec<Value> {
+        let mut values = self.kept;
+        values.push(Value::Array(self.from));
+        values.push(Value::Array(self.without));
+        values
+    }
 }
 
 fn multiply(a: &Value, b: &Value, limits: Limits) -> Answer {

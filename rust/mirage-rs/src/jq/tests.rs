@@ -654,6 +654,29 @@ fn cancel_retires_the_stack_in_bounded_slices() {
     drop(stream);
 }
 
+/// A cancelled run frees the arrays a paused subtraction holds in the
+/// same slices as its stack.
+#[test]
+fn cancel_frees_a_paused_subtraction_across_drains() {
+    let program = "[range(100000) | [.]] - [range(3000) | [.]] | length";
+    let mut stream = open(program, 1 << 10);
+    let mut wire = Vec::new();
+    stream.feed(b"null", &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    for _ in 0..2000 {
+        stream.drain(&mut wire).unwrap();
+    }
+    assert!(stream.busy());
+    assert!(stream.cancel());
+    let mut drains = 0;
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+        drains += 1;
+    }
+    assert!(drains > 8, "freed in {drains} drains");
+    assert!(wire.is_empty());
+}
+
 #[test]
 fn a_block_cap_ends_unbounded_recursion() {
     let config = serde_json::json!({ "program": "def f: [f]; f", "blocks": 100_000 });
@@ -743,6 +766,31 @@ fn a_program_jq_refuses_is_told_from_one_left_to_libjq() {
             "{program:.40}"
         );
     }
+}
+
+/// jq folds `[1,2] - [2]` while it parses; this parser leaves that to
+/// run time, so metadata that needs it goes to libjq, and metadata that
+/// is not constant gets jq's error.
+#[test]
+fn module_metadata_jq_folds_is_left_to_libjq() {
+    assert!(compile("module {a: [1,2], b: {c: 3}}; .", &HashMap::new()).is_ok());
+    for program in [
+        "module {a: ([1,2] - [2])}; .",
+        r#"module {a: ("ab" * 2)}; ."#,
+        "module {a: [([1] - [1])]}; .",
+    ] {
+        assert!(
+            matches!(refusal(program), Refusal::Unsupported(_)),
+            "{program}"
+        );
+    }
+    let Refusal::Invalid(report) = refusal("module {a: .}; .") else {
+        panic!("jq refuses it");
+    };
+    assert!(
+        report.starts_with("jq: error: Module metadata must be constant at <top-level>, line 1"),
+        "{report}"
+    );
 }
 
 #[test]
