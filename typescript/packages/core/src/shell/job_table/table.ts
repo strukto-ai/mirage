@@ -1325,13 +1325,15 @@ export class JobTable {
     try {
       const live = await this.remoteProcesses()
       const lease = this.store.leaseSeconds
-      if (Object.keys(live).length === 0 || lease === null) return
+      if (this.reapingStopped || this.closed || Object.keys(live).length === 0 || lease === null)
+        return
       await new Promise<void>((wake) => {
         const timer = setTimeout(wake, lease * 1000)
         ;(timer as { unref?: () => void }).unref?.()
         this.sweepTick = { timer, wake }
       })
       this.sweepTick = null
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- a teardown may stop it across the await
       if (!this.reapingStopped && !this.closed) await this.remoteProcesses()
     } catch (err) {
       console.debug('lapsed owners not swept:', err)

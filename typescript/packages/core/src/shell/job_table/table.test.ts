@@ -1703,6 +1703,33 @@ describe('JobTable process plane', () => {
     await b.close()
   })
 
+  // A teardown while the sweep's first read is still out leaves no wait to
+  // start once the read answers.
+  it('starts no wait once teardown came during the first read', async () => {
+    class HeldReads extends RAMJobStore {
+      release: () => void = () => undefined
+      private readonly held = new Promise<void>((resolve) => {
+        this.release = resolve
+      })
+
+      override async processes(): Promise<Record<string, Record<string, RecordFields>>> {
+        await this.held
+        return super.processes()
+      }
+    }
+    const store = new HeldReads(30)
+    await store.renew('live')
+    await store.publish('live', { '2': { pid: 2, session: 's', runs: [] } })
+    const b = new JobTable(store)
+    b.reapLapsed()
+    const started = Date.now()
+    const killing = b.killAll()
+    store.release()
+    await killing
+    expect(Date.now() - started).toBeLessThan(5000)
+    await b.close()
+  })
+
   // The lease goes ahead of the record it vouches for, so no workspace ever
   // reads a record whose owner it takes for lapsed, even for a process that
   // is no job (a line, a spawned child) and so renewed nothing first; and
