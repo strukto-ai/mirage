@@ -18,9 +18,9 @@ import { materialize } from '../../io/types.ts'
 import { recordStream, revisionFor } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
-import { createS3Client, isNotFound, loadS3Module, s3Key } from './client.ts'
+import { createS3Client, isDenied, isNotFound, loadS3Module, s3Key } from './client.ts'
 import { fpRevFromS3Response, read } from './read.ts'
-import { enoent } from '../../errors/fs.ts'
+import { eacces, enoent } from '../../errors/fs.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192
 
@@ -72,6 +72,7 @@ export async function* readStream(
     if (isNotFound(err)) {
       throw enoent(path)
     }
+    if (isDenied(err)) throw eacces(path)
     throw err
   } finally {
     ;(client as unknown as { destroy?: () => void }).destroy?.()

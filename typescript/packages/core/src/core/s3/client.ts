@@ -19,7 +19,7 @@ import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import type { S3Module, S3SendClient } from './types.ts'
-import { CONDITION_LOST_CODES } from './constants.ts'
+import { CONDITION_LOST_CODES, DENIED_CODES } from './constants.ts'
 
 export function s3Key(path: string, config: S3Config): string {
   return kp.apply(config.keyPrefix ?? '', path)
@@ -100,6 +100,21 @@ export function isNotFound(err: unknown): boolean {
   if (e.name === 'NoSuchKey' || e.name === 'NotFound') return true
   if (e.Code === 'NoSuchKey' || e.Code === '404') return true
   return e.$metadata?.httpStatusCode === 404
+}
+
+/**
+ * Whether an S3 error means the key refuses this caller (403). Keyed on the
+ * error's code; a bodiless reply (named Unknown) is judged on its status. A
+ * HEAD carries no body, so a credential failure behind one reads as a
+ * refusal, as does any 403 the browser client's presigned fetch answers.
+ * Mirrors Python's `is_denied`.
+ */
+export function isDenied(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return false
+  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } }
+  if (e.name !== undefined && DENIED_CODES.has(e.name)) return true
+  const status = e.$metadata?.httpStatusCode
+  return e.name === 'Unknown' && status !== undefined && DENIED_CODES.has(String(status))
 }
 
 /**

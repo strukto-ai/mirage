@@ -27,8 +27,8 @@ from mirage.core.object_store.driver import (
     refused,
 )
 from mirage.core.object_store.errors import ConditionLostError
-from mirage.core.object_store.stat import make_stat
-from mirage.errors.fs import eexist, enoent, enotdir, enotsup
+from mirage.core.object_store.stat import make_stat, proves_directory
+from mirage.errors.fs import eacces, eexist, enoent, enotdir, enotsup
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, materialize
 from mirage.observe.context import record, revision_for, start_op
@@ -258,19 +258,38 @@ async def _row_at(
 
 
 async def _file_above(
-    driver: ObjectStoreDriver[A, C], accessor: A, path_spec: PathSpec
+    driver: ObjectStoreDriver[A, C],
+    accessor: A,
+    path_spec: PathSpec,
+    parents: bool,
 ) -> str | None:
     """The outermost ancestor of `path_spec` the store holds as a file.
+
+    A refused ancestor with keys below is a directory, as in stat; one
+    with nothing below is EACCES, naming the operand unless ``-p``.
 
     Args:
         driver (ObjectStoreDriver): the store's native surface.
         accessor (A): the store's accessor.
         path_spec (PathSpec): the directory about to be made.
+        parents (bool): ``-p``, which names the ancestor it stops at.
     """
     prefix = driver.key_prefix_of(accessor)
     async with driver.connect(accessor) as conn:
         for ancestor in ancestors(norm(path_spec.mount_path)):
-            if await driver.head(conn, kp.apply(prefix, ancestor)) is not None:
+            try:
+                held = await driver.head(conn, kp.apply(prefix, ancestor))
+            except PermissionError as exc:
+                named = (
+                    kp.mounted_path(path_spec, ancestor)
+                    if parents
+                    else path_spec
+                )
+                below = kp.apply_dir(prefix, ancestor)
+                if await proves_directory(driver, conn, below, named):
+                    continue
+                raise eacces(named) from exc
+            if held is not None:
                 return ancestor
     return None
 
@@ -296,7 +315,7 @@ def make_mkdir(driver: ObjectStoreDriver[A, C]) -> MkdirFn[A]:
             # the same callers `make_rmdir` protects.
             raise eexist(path_spec)
         if row is None:
-            above = await _file_above(driver, accessor, path_spec)
+            above = await _file_above(driver, accessor, path_spec, parents)
             if above is not None:
                 # A directory cannot sit under a file, and a marker below
                 # one made both unreadable. mkdir(2) blames the operand;

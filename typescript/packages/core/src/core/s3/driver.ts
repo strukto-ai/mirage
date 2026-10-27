@@ -37,6 +37,7 @@ import { ConditionLostError } from '../object_store/errors.ts'
 import {
   createS3Client,
   isConditionLost,
+  isDenied,
   isNotFound,
   loadS3Module,
   streamToBuffer,
@@ -149,6 +150,7 @@ async function head(conn: S3Conn, key: string): Promise<ObjectMeta | null> {
     )) as typeof resp
   } catch (err) {
     if (isNotFound(err)) return null
+    if (isDenied(err)) throw denied(key)
     throw err
   }
   const etag = etagOf(resp)
@@ -384,6 +386,7 @@ async function getVersioned(
       // A pinned revision gone from the store is no file, not absence.
       throw enoent(key)
     }
+    if (revision === null && isDenied(err)) throw denied(key)
     throw err
   }
   const etag = etagOf(resp)
@@ -532,6 +535,15 @@ async function* knownPages(
       return [key, version !== undefined ? quoted(version) : token]
     })
   }
+}
+
+/**
+ * The error for a key the store refuses this caller (403). Unnamed, as a
+ * kernel's EACCES is: the key carries the mount's prefix, so the layer above
+ * names the operand. Mirrors Python's `_denied`.
+ */
+function denied(key: string): Error {
+  return unnamedFsError('EACCES', `S3 refused '${key}'`)
 }
 
 /**
@@ -727,6 +739,7 @@ async function moveFile(conn: S3Conn, srcKey: string, dstKey: string): Promise<b
   try {
     await conn.send(new conn.mod.HeadObjectCommand({ Bucket: conn.config.bucket, Key: srcKey }))
   } catch (err) {
+    if (isDenied(err)) throw denied(srcKey)
     if (!isNotFound(err)) throw err
     return false
   }
@@ -786,14 +799,20 @@ async function movePrefix(conn: S3Conn, srcPfx: string, dstPfx: string): Promise
 }
 
 async function probePrefix(conn: S3Conn, pfx: string): Promise<boolean> {
-  const resp = (await conn.send(
-    new conn.mod.ListObjectsV2Command({
-      Bucket: conn.config.bucket,
-      Prefix: pfx,
-      Delimiter: '/',
-      MaxKeys: 1,
-    }),
-  )) as { CommonPrefixes?: unknown[]; Contents?: unknown[] }
+  let resp: { CommonPrefixes?: unknown[]; Contents?: unknown[] }
+  try {
+    resp = (await conn.send(
+      new conn.mod.ListObjectsV2Command({
+        Bucket: conn.config.bucket,
+        Prefix: pfx,
+        Delimiter: '/',
+        MaxKeys: 1,
+      }),
+    )) as typeof resp
+  } catch (err) {
+    if (isDenied(err)) throw denied(pfx)
+    throw err
+  }
   return (resp.CommonPrefixes ?? []).length > 0 || (resp.Contents ?? []).length > 0
 }
 

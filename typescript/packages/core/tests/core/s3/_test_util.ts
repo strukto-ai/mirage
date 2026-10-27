@@ -29,6 +29,21 @@ export const LOST_CODES = JSON.parse(
   ),
 ) as { cases: LostCode[]; matched: LostCode[] }
 
+export interface DeniedCode {
+  name: string
+  code: string
+  status: number
+  denied: boolean
+}
+
+/** integ/fixtures/s3/denied_codes.json, shared with the python suite. */
+export const DENIED_CASES = JSON.parse(
+  readFileSync(
+    new URL('../../../../../../integ/fixtures/s3/denied_codes.json', import.meta.url),
+    'utf-8',
+  ),
+) as { cases: DeniedCode[] }
+
 /** An SDK error named `name` with HTTP status `status`. */
 export function sdkError(name: string, status: number): Error {
   return Object.assign(new Error(name), { name, $metadata: { httpStatusCode: status } })

@@ -269,6 +269,8 @@ class ObjectStoreDriver(Generic[A, C]):
             key under ``stem + "/"`` — du's walk, which must not
             match sibling keys sharing the stem as a name prefix.
         head (Callable): point lookup of one key, None when absent;
+            a key the store refuses this caller raises PermissionError,
+            which stat and mkdir check against ``probe_prefix``; other
             classification failures propagate.
         get (Callable): full object bytes, None when absent.
         put (Callable): write one object, returning what the store's
@@ -286,7 +288,8 @@ class ObjectStoreDriver(Generic[A, C]):
         delete_file (Callable): delete one key (every revision on a
             versioned store); silent on a missing key.
         delete_prefix (Callable): delete every key under a prefix.
-        probe_prefix (Callable): whether any key sits under a prefix.
+        probe_prefix (Callable): whether any key sits under a prefix;
+            a refused listing raises PermissionError.
         is_not_found (Callable): whether a store error means the key is
             absent.
         move_file (Callable | None): relocate one object; False when the

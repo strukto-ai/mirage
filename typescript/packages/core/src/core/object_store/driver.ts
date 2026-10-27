@@ -163,8 +163,9 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
    */
   listSubtree: (conn: C, stem: string) => AsyncIterable<TreeEntry>
   /**
-   * Point lookup of one key, null when absent; classification failures
-   * propagate.
+   * Point lookup of one key, null when absent; a key the store refuses this
+   * caller throws EACCES, which stat and mkdir check against `probePrefix`; other
+   * classification failures propagate.
    */
   head: (conn: C, key: string) => Promise<ObjectMeta | null>
   /** Full object bytes, null when absent. */
@@ -190,7 +191,7 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
   deleteFile: (conn: C, key: string) => Promise<void>
   /** Delete every key under a prefix. */
   deletePrefix: (conn: C, pfx: string) => Promise<void>
-  /** Whether any key sits under a prefix. */
+  /** Whether any key sits under a prefix; a refused listing throws EACCES. */
   probePrefix: (conn: C, pfx: string) => Promise<boolean>
   /** Whether a store error means the key is absent. */
   isNotFound: (err: unknown) => boolean

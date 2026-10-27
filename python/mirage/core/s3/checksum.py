@@ -18,10 +18,11 @@ from mirage.accessor.s3 import S3Accessor
 from mirage.core.s3.client import (
     _key,
     create_s3_client,
+    is_denied,
     is_not_found,
 )
 from mirage.core.s3.read import _fp_rev_from_s3_response
-from mirage.errors.fs import enoent
+from mirage.errors.fs import eacces, enoent
 from mirage.observe.context import record, revision_for, start_op
 from mirage.types import PathSpec
 
@@ -70,6 +71,8 @@ async def checksum(
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(virtual) from exc
+        if is_denied(exc):
+            raise eacces(virtual) from exc
         raise
     sse = resp.get("ServerSideEncryption")
     if resp.get("SSECustomerAlgorithm") or (

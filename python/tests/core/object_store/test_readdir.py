@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 from dataclasses import replace
 
 import pytest
@@ -61,6 +62,22 @@ def test_readdir_on_a_file_is_enotdir(accessor):
     readdir = make_readdir(make_driver(store))
     with pytest.raises(NotADirectoryError):
         asyncio.run(readdir(accessor, spec("/a.txt")))
+
+
+@pytest.mark.parametrize(
+    "refused, path",
+    [({"rd/b.txt"}, "/rd/b.txt/x"), ({"rd/"}, "/rd/x")],
+    ids=["file-above", "prefix-above"],
+)
+def test_readdir_names_a_refused_probe_as_typed(accessor, refused, path):
+    # The store's own error names the key, which carries the mount's prefix.
+    store = FakeStore({"rd/b.txt": b"x"})
+    store.refused.update(refused)
+    readdir = make_readdir(make_driver(store))
+    with pytest.raises(PermissionError) as caught:
+        asyncio.run(readdir(accessor, spec(path)))
+    assert caught.value.errno == errno.EACCES
+    assert caught.value.filename == "/mnt" + path
 
 
 def test_readdir_root_of_an_empty_store_does_not_raise(accessor):

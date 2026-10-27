@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 
 import pytest
 
@@ -49,6 +50,40 @@ def test_stat_prefix_is_a_directory(accessor):
     store = FakeStore({"dir/f.txt": b"x"})
     stat = make_stat(make_driver(store))
     assert asyncio.run(stat(accessor, spec("/dir"))).type == FileType.DIRECTORY
+
+
+def test_stat_names_a_refused_file_as_typed(accessor):
+    # Nothing below the refused key, so it is the file; the store's own
+    # error names the key, which carries the mount's prefix.
+    store = FakeStore({"rd/b.txt": b"x"})
+    store.refused.add("rd/b.txt")
+    with pytest.raises(PermissionError) as caught:
+        asyncio.run(make_stat(make_driver(store))(accessor, spec("/rd/b.txt")))
+    assert caught.value.errno == errno.EACCES
+    assert caught.value.filename == "/mnt/rd/b.txt"
+
+
+@pytest.mark.parametrize(
+    "refused, path",
+    [({"rd/b.txt", "rd/b.txt/"}, "/rd/b.txt"), ({"rd/"}, "/rd/")],
+    ids=["head-and-probe", "probe-only"],
+)
+def test_stat_names_a_refused_probe(accessor, refused, path):
+    # Without ListBucket the probe is refused; a slashed path skips the head.
+    store = FakeStore({"rd/b.txt": b"x"})
+    store.refused.update(refused)
+    with pytest.raises(PermissionError) as caught:
+        asyncio.run(make_stat(make_driver(store))(accessor, spec(path)))
+    assert caught.value.errno == errno.EACCES
+    assert caught.value.filename == "/mnt" + path
+
+
+def test_stat_reads_a_refused_key_with_keys_below_as_a_directory(accessor):
+    # A grant scoped to rd/* refuses HEAD on the bare key rd.
+    store = FakeStore({"rd/a.txt": b"x"})
+    store.refused.add("rd")
+    st = asyncio.run(make_stat(make_driver(store))(accessor, spec("/rd")))
+    assert st.type == FileType.DIRECTORY
 
 
 def test_stat_missing_is_enoent(accessor):

@@ -20,7 +20,15 @@ import { runWithOwnVersion, writeCondition } from '../../cache/context.ts'
 import { OwnRead, type WriteCondition } from '../../cache/types.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
-import { eexist, enoent, enotdir, enotsup, isMissingPath } from '../../errors/fs.ts'
+import {
+  eacces,
+  eexist,
+  enoent,
+  enotdir,
+  enotsup,
+  isEacces,
+  isMissingPath,
+} from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { ancestors, gnuBasename, norm, parent } from '../../utils/path.ts'
@@ -37,7 +45,7 @@ import {
   requireHook,
 } from './driver.ts'
 import { ConditionLostError } from './errors.ts'
-import { makeStat } from './stat.ts'
+import { makeStat, provesDirectory } from './stat.ts'
 
 /** Describe only the facts confirmed by a successful object write. */
 export function writtenStat(path: PathSpec, meta: ObjectMeta | null): FileStat | null {
@@ -210,17 +218,31 @@ async function rowAt<A extends Accessor>(
   }
 }
 
-/** The outermost ancestor of `path` the store holds as a file. */
+/**
+ * The outermost ancestor of `path` the store holds as a file. A refused
+ * ancestor with keys below is a directory, as in stat; one with nothing below
+ * is EACCES, naming the operand unless `-p` names the ancestor it stops at.
+ */
 async function fileAbove<A extends Accessor, C>(
   driver: ObjectStoreDriver<A, C>,
   accessor: A,
   path: PathSpec,
+  parents: boolean,
 ): Promise<string | null> {
   const prefix = driver.keyPrefixOf(accessor)
   const { conn, close } = await driver.connect(accessor)
   try {
     for (const ancestor of ancestors(norm(path.mountPath))) {
-      if ((await driver.head(conn, kp.apply(prefix, ancestor))) !== null) return ancestor
+      let held: ObjectMeta | null
+      try {
+        held = await driver.head(conn, kp.apply(prefix, ancestor))
+      } catch (err) {
+        if (!isEacces(err)) throw err
+        const named = parents ? kp.mountedPath(path, ancestor) : path
+        if (await provesDirectory(driver, conn, kp.applyDir(prefix, ancestor), named)) continue
+        throw eacces(named)
+      }
+      if (held !== null) return ancestor
     }
   } finally {
     await close()
@@ -242,7 +264,7 @@ export function makeMkdir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
       throw eexist(path)
     }
     if (row === null) {
-      const above = await fileAbove(driver, accessor, path)
+      const above = await fileAbove(driver, accessor, path, parents)
       // A directory cannot sit under a file, and a marker below one made
       // both unreadable. mkdir(2) blames the operand; the walk `-p` makes
       // stops at the file and names it.

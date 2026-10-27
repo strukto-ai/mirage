@@ -17,8 +17,15 @@ import { publishRead } from '../../cache/context.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
-import { createS3Client, isNotFound, loadS3Module, s3Key, streamToBuffer } from './client.ts'
-import { enoent } from '../../errors/fs.ts'
+import {
+  createS3Client,
+  isDenied,
+  isNotFound,
+  loadS3Module,
+  s3Key,
+  streamToBuffer,
+} from './client.ts'
+import { eacces, enoent } from '../../errors/fs.ts'
 import { rangeHeader } from '../../utils/ranges.ts'
 
 export interface S3ReadOptions {
@@ -87,6 +94,7 @@ export async function read(
     if (isNotFound(err)) {
       throw enoent(path)
     }
+    if (isDenied(err)) throw eacces(path)
     throw err
   } finally {
     ;(client as unknown as { destroy?: () => void }).destroy?.()
