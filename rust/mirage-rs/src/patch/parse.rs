@@ -209,7 +209,7 @@ fn candidate(name: &[u8], strip: Option<usize>) -> Option<Vec<u8>> {
     if name == b"/dev/null" {
         return None;
     }
-    let name = trim_slashes(strip_name(name, strip)?);
+    let name = strip_name(name, strip)?;
     (!name.is_empty()).then(|| name.to_vec())
 }
 

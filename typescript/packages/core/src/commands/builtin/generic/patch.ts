@@ -29,8 +29,9 @@ import { fsStrerror, isEisdir, isEnoent, isFsError } from '../../../errors/fs.ts
 import { shellQuote } from '../../../utils/quote.ts'
 import { openStream, serveRequests, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
-import { mountRoot } from '../utils/links.ts'
-import { resolvePath } from '../../../utils/path.ts'
+import { linksOf, mountRoot } from '../utils/links.ts'
+import { CycleError, resolvePath } from '../../../utils/path.ts'
+import type { LinkView } from '../../../view/types.ts'
 import { UINTMAX } from '../constants.ts'
 
 function companion(spec: PathSpec, suffix: string): PathSpec {
@@ -88,6 +89,7 @@ class PatchFiles {
     private readonly read: (p: PathSpec) => Promise<Uint8Array>,
     private readonly write: (p: PathSpec, data: Uint8Array) => Promise<void>,
     private readonly stat: (p: PathSpec) => Promise<FileStat>,
+    private readonly links: LinkView | undefined,
     private readonly changes: PatchChanges,
   ) {}
 
@@ -106,8 +108,14 @@ class PatchFiles {
   private async kind(path: string): Promise<Record<string, util.JSONType>> {
     let found: FileStat
     try {
-      found = await this.stat(this.spec(path))
+      let spec = this.spec(path)
+      if (this.links !== undefined) {
+        const real = this.links.resolve(spec.virtual)
+        spec = PathSpec.fromStrPath(real, mountKey(real, this.root))
+      }
+      found = await this.stat(spec)
     } catch (err) {
+      if (err instanceof CycleError) return {}
       if (isEisdir(err)) return { kind: 'dir' }
       if (isEnoent(err) || classify(err) === 'ENOTDIR') return {}
       throw err
@@ -228,6 +236,7 @@ export async function patchGeneric(
     read,
     write,
     stat,
+    linksOf(ctx),
     changes,
   )
   const engine = await openStream('patch', {
