@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import TypeVar
 
 from mirage import Mount, MountMode, Workspace, WritePolicy
+from mirage.shell.join import shell_join
 from mirage.utils.ids import SeededIdSource
 from mirage.vfs.s3 import S3VFS, S3Config
 from tests.e2e.s3_mock import MultiBucketS3Client
@@ -118,7 +119,9 @@ class Actor:
         Args:
             key (str): the object key under the mount.
         """
-        result = await self._line(f"cat {PREFIX}{key}", Intent.READS, key)
+        result = await self._line(
+            shell_join(["cat", PREFIX + key]), Intent.READS, key
+        )
         self._seen[key] = result.stdout if result.exit_code == 0 else None
         return result
 
@@ -128,7 +131,9 @@ class Actor:
         Args:
             key (str): the object key under the mount.
         """
-        result = await self._line(f"test -e {PREFIX}{key}", Intent.TESTS, key)
+        result = await self._line(
+            shell_join(["test", "-e", PREFIX + key]), Intent.TESTS, key
+        )
         if result.exit_code == 1:
             self._seen[key] = None
         return result
@@ -146,7 +151,9 @@ class Actor:
         body = stamped(
             seen, StepRef(self.name, self._steps), key in self._seen
         )
-        text = f"printf '%s' '{body.decode()}' > {PREFIX}{key}"
+        content = body.decode(errors="surrogateescape")
+        line = shell_join(["printf", "%s", content])
+        text = f"{line} > {shell_join([PREFIX + key])}"
         result = await self._line(text, Intent.WRITES, key)
         if result.exit_code == 0:
             self._seen[key] = body
@@ -158,7 +165,9 @@ class Actor:
         Args:
             key (str): the object key under the mount.
         """
-        result = await self._line(f"rm -f {PREFIX}{key}", Intent.REMOVES, key)
+        result = await self._line(
+            shell_join(["rm", "-f", PREFIX + key]), Intent.REMOVES, key
+        )
         if result.exit_code == 0:
             self._seen[key] = None
         return result

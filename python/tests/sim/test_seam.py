@@ -181,3 +181,17 @@ async def _refused_holds():
 
 def test_holds_that_cannot_mean_what_they_say_are_refused():
     run(_refused_holds())
+
+
+async def _a_fake_that_suspends():
+    trace = Trace()
+    store = MultiBucketS3Client({"b": {"f": b"f0\n"}})
+    store.before("get_object", lambda: asyncio.sleep(0))
+    client = Connection(Network(trace, immediate, store), store, "https://s3")
+    with pytest.raises(RuntimeError, match="suspended inside a request"):
+        await _as("a", client.get_object(Bucket="b", Key="f"))
+    return [(s.changes, s.error) for s in trace.served()]
+
+
+def test_a_fake_that_suspends_inside_a_request_is_refused():
+    assert run(_a_fake_that_suspends())[0] == [((), "RuntimeError")]

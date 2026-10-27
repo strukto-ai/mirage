@@ -22,6 +22,7 @@ from tests.sim.trace import (
     State,
     StepRef,
     Trace,
+    show,
     state_of,
 )
 
@@ -162,6 +163,16 @@ def test_a_commit_no_modeled_line_accounts_for_is_unjudged():
 
 def test_a_stamp_names_its_line_and_basis():
     step = StepRef("a", 3)
-    assert stamped(S0, step, True) == S0 + f"a.3@{state_of(S0)}\n".encode()
+    assert (
+        stamped(S0, step, True) == S0 + f"a.3@{show(state_of(S0))}\n".encode()
+    )
     assert stamped(None, step, True) == b"a.3@absent\n"
     assert stamped(None, step, False) == b"a.3@unobserved\n"
+
+
+def test_versions_that_share_a_short_digest_stay_distinct():
+    lookalike = str(state_of(S0))[:8] + "0" * 24
+    s = _Script()
+    s.read("a", S0)
+    s.commit("a", Intent.WRITES, (lookalike, state_of(S1)))
+    assert s.lost() == ["a.1"]
