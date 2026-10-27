@@ -13,10 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { packTar } from 'modern-tar'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { gzip } from '../../utils/compress.ts'
 import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
@@ -28,13 +26,17 @@ import { Workspace } from '../workspace/workspace.ts'
 const ENC = new TextEncoder()
 
 async function tgzBytes(): Promise<Uint8Array> {
-  const raw = await packTar(
-    ['./memory/memory.json', './other.txt'].map((name) => {
-      const body = ENC.encode(`content:${name}\n`)
-      return { header: { name, size: body.byteLength, type: 'file' as const }, body }
-    }),
-  )
-  return gzip(raw)
+  const ram = new RAMVFS()
+  const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE })
+  const names = ['./memory/memory.json', './other.txt']
+  await ws.shell('mkdir /memory')
+  for (const name of names) {
+    await ws.dispatch('write', name.slice(1), [ENC.encode(`content:${name}\n`)])
+  }
+  await ws.shell(`cd / && tar -czf /files.tar.gz ${names.join(' ')}`)
+  const tgz = ram.store.files.get('/files.tar.gz')
+  if (tgz === undefined) throw new Error('tar -c wrote no archive')
+  return tgz
 }
 
 async function makeWs(): Promise<Workspace> {

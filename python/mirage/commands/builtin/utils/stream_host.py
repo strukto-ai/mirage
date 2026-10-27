@@ -319,22 +319,27 @@ class StreamHost:
         if source is None:
             return Served({"end": True})
         least = request.get("least")
+        ended = False
         try:
             chunk = await anext(source, None)
-            # A file read whole gathers chunks to `least` bytes a reply.
+            # A file read whole gathers chunks to `least` bytes a reply, the
+            # last of them sent with the end of the input.
             if chunk is not None and isinstance(least, int):
                 parts, size = [chunk], len(chunk)
-                while size < least and (more := await anext(source, None)):
+                while size < least:
+                    if (more := await anext(source, None)) is None:
+                        ended = True
+                        break
                     parts.append(more)
                     size += len(more)
                 chunk = b"".join(parts)
         except Exception as exc:
             del self.inputs[fd]
             return self._failed(fd, exc)
-        if chunk is None:
+        if chunk is None or ended:
             del self.inputs[fd]
             self.named.pop(fd, None)
-            return Served({"end": True})
+            return Served({"end": True}, bytes(chunk or b""))
         return Served({}, bytes(chunk))
 
     async def _replace(

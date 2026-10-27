@@ -67,9 +67,14 @@ impl Raw<'_> {
         }
         while !self.ended && self.unused().len() < want {
             match read(self.host, ARCHIVE, self.open.take()).await {
-                Ok(Some(data)) if self.data.is_empty() => self.data = data,
-                Ok(Some(data)) => self.data.extend_from_slice(&data),
-                Ok(None) => self.ended = true,
+                Ok((data, end)) => {
+                    if self.data.is_empty() {
+                        self.data = data;
+                    } else {
+                        self.data.extend_from_slice(&data);
+                    }
+                    self.ended = end;
+                }
                 Err(reply) => {
                     self.error = Some(*reply);
                     self.ended = true;

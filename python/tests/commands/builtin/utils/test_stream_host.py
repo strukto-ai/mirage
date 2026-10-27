@@ -49,6 +49,8 @@ async def test_an_operand_as_typed_reads_through_the_mount() -> None:
     assert (await host.serve({"op": "read", "fd": 1}, b"")).reply == {
         "end": True
     }
+    gathered: dict[str, JsonValue] = {**read, "least": 8}
+    assert await host.serve(gathered, b"") == ({"end": True}, b"one\n", None)
     missing: dict[str, JsonValue] = {"op": "read", "fd": 2, "path": "/b.txt"}
     reply = (await host.serve(missing, b"")).reply
     assert reply == {"error": "No such file or directory", "errno": "ENOENT"}

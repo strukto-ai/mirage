@@ -16,7 +16,6 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { packTar, unpackTar } from 'modern-tar'
 import { VFSName } from '../../types.ts'
 import { MountKey, StateKey, VFSStateKey } from './keys.ts'
 import {
@@ -30,13 +29,19 @@ import { BLOB_REF_KEY } from './utils.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-async function tarOf(files: Record<string, string>): Promise<Uint8Array> {
-  return packTar(
-    Object.entries(files).map(([name, text]) => {
-      const body = ENC.encode(text)
-      return { header: { name, size: body.byteLength, type: 'file' as const }, body }
-    }),
-  )
+/** One ustar member and the archive's end, as another archiver writes them. */
+function tarOf(name: string, text: string): Uint8Array {
+  const body = ENC.encode(text)
+  const out = new Uint8Array(512 + Math.ceil(body.byteLength / 512) * 512 + 1024)
+  out.set(ENC.encode(name), 0)
+  out.set(ENC.encode(`${body.byteLength.toString(8).padStart(11, '0')}\0`), 124)
+  out.fill(32, 148, 156)
+  out[156] = 48
+  out.set(ENC.encode('ustar\x0000'), 257)
+  const sum = out.subarray(0, 512).reduce((total, byte) => total + byte, 0)
+  out.set(ENC.encode(`${sum.toString(8).padStart(6, '0')}\0 `), 148)
+  out.set(body, 512)
+  return out
 }
 
 describe('writeSnapshotTar / readSnapshotTar', () => {
@@ -57,10 +62,12 @@ describe('writeSnapshotTar / readSnapshotTar', () => {
   it('writes valid JSON as manifest.json inside the tar', async () => {
     const manifest = { version: 2, mounts: [], cache: { limit: 0, entries: [] } }
     const tarBytes = await writeSnapshotTar(manifest as Record<string, unknown>, {})
-    const entries = await unpackTar(tarBytes)
-    const mf = entries.find((e) => e.header.name === 'manifest.json')
-    if (mf === undefined) throw new Error('manifest.json not found in tar')
-    const parsed = JSON.parse(DEC.decode(mf.data)) as Record<string, unknown>
+    expect(DEC.decode(tarBytes.subarray(0, 14))).toBe('manifest.json\0')
+    const size = Number.parseInt(DEC.decode(tarBytes.subarray(124, 135)), 8)
+    const parsed = JSON.parse(DEC.decode(tarBytes.subarray(512, 512 + size))) as Record<
+      string,
+      unknown
+    >
     expect(parsed.version).toBe(2)
     expect(parsed).toHaveProperty('mounts')
     expect(parsed).toHaveProperty('cache')
@@ -90,7 +97,7 @@ describe('readSnapshotTar path-traversal defense', () => {
       ],
       cache: { limit: 0, entries: [] },
     }
-    const tarBytes = await tarOf({ 'manifest.json': JSON.stringify(manifest) })
+    const tarBytes = tarOf('manifest.json', JSON.stringify(manifest))
     await expect(readSnapshotTar(tarBytes)).rejects.toThrow(/Unsafe blob path/)
   })
 
@@ -109,12 +116,12 @@ describe('readSnapshotTar path-traversal defense', () => {
       ],
       cache: { limit: 0, entries: [] },
     }
-    const tarBytes = await tarOf({ 'manifest.json': JSON.stringify(manifest) })
+    const tarBytes = tarOf('manifest.json', JSON.stringify(manifest))
     await expect(readSnapshotTar(tarBytes)).rejects.toThrow(/Unsafe blob path/)
   })
 
   it('throws when manifest.json is missing from the tar', async () => {
-    const tarBytes = await tarOf({ 'other.txt': 'x' })
+    const tarBytes = tarOf('other.txt', 'x')
     await expect(readSnapshotTar(tarBytes)).rejects.toThrow(/manifest\.json/)
   })
 })

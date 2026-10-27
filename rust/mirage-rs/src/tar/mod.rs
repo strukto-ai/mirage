@@ -268,13 +268,13 @@ fn open_failure(config: &Config, reply: &Reply, reading: bool) -> Vec<u8> {
     out
 }
 
-/// A host read of input `fd`, opening it with `open` first; the host's
-/// failure when it failed, else its bytes, none at the end.
+/// A host read of input `fd`, opening it with `open` first: its bytes and
+/// whether they are the input's last, or the host's failure.
 async fn read(
     host: &Host,
     fd: u32,
     open: Option<(Vec<u8>, Opening)>,
-) -> Result<Option<Vec<u8>>, Box<Reply>> {
+) -> Result<(Vec<u8>, bool), Box<Reply>> {
     let (reply, data) = host
         .ask(Request::Read {
             fd,
@@ -285,5 +285,5 @@ async fn read(
     if failed(&reply) {
         return Err(Box::new(reply));
     }
-    Ok((!reply.end).then_some(data))
+    Ok((data, reply.end))
 }

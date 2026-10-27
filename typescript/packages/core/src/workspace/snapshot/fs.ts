@@ -118,28 +118,9 @@ export async function readRegular(path: string): Promise<Uint8Array> {
   }
 }
 
-/**
- * Write exactly `size` bytes of the file at `path` to `sink`, one chunk at
- * a time, so a large file never sits in memory whole.
- */
-export async function copyFileInto(
-  path: string,
-  sink: WritableStreamDefaultWriter<Uint8Array>,
-  size: number,
-): Promise<void> {
-  const handle = await openRegular(path)
-  try {
-    let left = size
-    while (left > 0) {
-      const chunk = new Uint8Array(Math.min(CHUNK, left))
-      const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null)
-      if (bytesRead === 0) throw new Error(`${path}: file ended ${String(left)} bytes early`)
-      await sink.write(chunk.subarray(0, bytesRead))
-      left -= bytesRead
-    }
-  } finally {
-    await handle.close()
-  }
+/** The file at `path`, opened as `openRegular` opens it, a chunk at a time. */
+export async function* regularChunks(path: string): AsyncGenerator<Uint8Array> {
+  yield* chunksOf(await openRegular(path))
 }
 
 /** Write `source` to a file at `path`, chunk by chunk; returns the bytes written. */
@@ -172,26 +153,23 @@ export async function writeStreamToFile(
   return written
 }
 
-/** The file at `path` as a stream of chunks. */
-export function fileReadable(path: string): ReadableStream<Uint8Array> {
-  const fs = requireFs('fileReadable')
-  let handle: FileHandle | null = null
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      handle ??= await fs.open(path, 'r')
+/** The file at `path`, a chunk at a time. */
+export async function* fileChunks(path: string): AsyncGenerator<Uint8Array> {
+  yield* chunksOf(await requireFs('fileChunks').open(path, 'r'))
+}
+
+/** An open file's bytes a chunk at a time, closing it once read or let go. */
+async function* chunksOf(handle: FileHandle): AsyncGenerator<Uint8Array> {
+  try {
+    for (;;) {
       const chunk = new Uint8Array(CHUNK)
       const { bytesRead } = await handle.read(chunk, 0, CHUNK, null)
-      if (bytesRead === 0) {
-        await handle.close()
-        controller.close()
-        return
-      }
-      controller.enqueue(chunk.subarray(0, bytesRead))
-    },
-    async cancel() {
-      await handle?.close()
-    },
-  })
+      if (bytesRead === 0) return
+      yield chunk.subarray(0, bytesRead)
+    }
+  } finally {
+    await handle.close()
+  }
 }
 
 /** A fresh directory under the system temp dir, for staging a restore. */
