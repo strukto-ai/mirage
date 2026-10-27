@@ -482,3 +482,39 @@ describe('a profile policy reads as the session it judges for', () => {
     }
   }, 120000)
 })
+
+describe('policy functions', () => {
+  it('a copy and a restore keep them', async () => {
+    const directory = (command: string): Promise<boolean> => Promise.resolve(command === 'rm')
+    const source = `${CONTEXT}
+if await directory(ctx['command']):
+    print(json.dumps({'kind': 'deny', 'reason': 'directory says no'}))
+`
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: {
+          release: {
+            policy: {
+              preCommand: [{ script: new ScriptSource(source, 'python'), runtime: 'monty' }],
+            },
+          },
+        },
+        policyFunctions: { directory },
+      },
+    )
+    ws.createSession('s', { profile: 'release' })
+    const tar = await ws.snapshot()
+    const copied = await ws.copy()
+    const restored = await Workspace.load(tar, { policyFunctions: { directory } })
+    try {
+      for (const each of [copied, restored]) {
+        const refused = await each.shell('rm /data/x', { sessionId: 's' })
+        expect(refused.refusal).toMatchObject({ kind: 'deny', reason: 'directory says no' })
+      }
+    } finally {
+      for (const each of [ws, copied, restored]) await each.close()
+    }
+  }, 120000)
+})

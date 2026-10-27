@@ -252,6 +252,7 @@ export class Workspace {
   // Named for what it holds: the source declarations, never a secret.
   private readonly declaredSecretSources: Readonly<Record<string, SecretSource>>
   private secretSourcesBuilt: Readonly<Record<string, ResolvedSource>> | null = null
+  private readonly policyFunctions: Readonly<Record<string, (...args: never[]) => unknown>>
   private secretSourcesPending: Promise<Record<string, ResolvedSource>> | null = null
   private readonly router: Router
   private readonly scriptPolicy: ScriptPolicy
@@ -403,6 +404,7 @@ export class Workspace {
     // answers preExecute ahead of them all, through the same program
     // runner as the profile's policy.
     this.registry.policies.add(new PermissionsPolicy(this.sessionManager))
+    this.policyFunctions = { ...options.policyFunctions }
     this.scriptPolicy = new ScriptPolicy(
       this.sessionManager,
       // The entry points the runtime world attaches, so a profile policy reads
@@ -414,6 +416,10 @@ export class Workspace {
         dispatch: (issuer) =>
           this.programDispatch(issuer, this.dispatcher, { explaining: DryRun.DECIDING }),
         resolver: sandboxResolver,
+      },
+      {
+        externalLookup: this.policyFunctions,
+        secretSources: () => this.secretSources(),
       },
     )
     this.registry.policies.add(this.scriptPolicy)
@@ -2247,9 +2253,11 @@ export class Workspace {
       // first read with "unknown secrets source". Policy instances and
       // the route policy stay behind: a policy is a live host object whose
       // state two workspaces must not share, and the route names runtimes
-      // the copy does not carry. A caller's own profile table brings its
+      // the copy does not carry. The policy functions travel, the host's
+      // code as a CLI's spec is. A caller's own profile table brings its
       // own default.
       secrets: options.secrets ?? this.declaredSecretSources,
+      policyFunctions: options.policyFunctions ?? this.policyFunctions,
       clock: options.clock ?? this.clock,
       ids: options.ids ?? this.ids,
       ...(options.commandLimits !== undefined ? { commandLimits: options.commandLimits } : {}),

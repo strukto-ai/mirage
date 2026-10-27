@@ -17,9 +17,13 @@ import { CommandTimeoutError } from '../errors/types.ts'
 import { WorkspaceBinding } from '../runtime/binding.ts'
 import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
 import type { LanguageRuntime } from '../runtime/language.ts'
+import { MontyRuntime } from '../runtime/python/monty/runtime.ts'
 import type { MountResolver } from '../runtime/resolver.ts'
 import { scriptEngine } from '../runtime/script.ts'
 import type { DispatchFn, RunResult } from '../runtime/types.ts'
+import { SecretsError } from '../secrets/errors.ts'
+import { resolveConfigSecrets } from '../secrets/sources.ts'
+import type { ResolvedSource } from '../secrets/types.ts'
 import { FileStat, PathSpec, type JsonValue } from '../types.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import type { Policy } from './base.ts'
@@ -229,8 +233,10 @@ export interface ScriptWiring {
  * A program runs as any program does on its runtime: never edited, in the
  * session's cwd, with the context as JSON (`scriptContext`) in `CTX_ENV`
  * and on stdin, and its answer printed on stdout (`scriptAction`).
- * `CTX_ENV` is the only variable it is passed: the session's variables are
- * in the context, so none the agent sets changes how the program starts,
+ * Beside `CTX_ENV` it is passed only its entry's own `env`, a pointer read
+ * from the workspace's sources on the entry's first run and kept: the
+ * session's variables are in the context, so none the agent sets changes
+ * how the program starts,
  * and on pyodide it runs with `-P` (`PROGRAM_FLAGS`), so no file the agent
  * writes stands in for a module it imports. Every failure fails closed: a
  * program that exits non-zero, runs past the timeout, prints something
@@ -250,7 +256,15 @@ export interface ScriptWiring {
  * that rides each op as an argument: a mark kept in ambient context would
  * be whatever op another task dispatched while a read was in flight on a
  * runtime with no task isolation. Runs on one runtime are serialized; runs
- * on two runtimes go at once. Mirrors the Python `ScriptPolicy`.
+ * on two runtimes go at once.
+ *
+ * A program on monty may also call the host's `externalLookup` functions
+ * by name, sync or async, with plain data in and out; one that throws
+ * raises in the program. Its runs go at once: monty runs each on a worker
+ * of its own, and a function may be slow or reach the workspace again. No
+ * other runtime sees them. `secretSources` is the workspace's declared
+ * sources an `env` pointer is read from; absent reads each from its
+ * source's ambient defaults. Mirrors the Python `ScriptPolicy`.
  */
 export class ScriptPolicy implements Policy, SessionScoped {
   readonly [SESSION_SCOPED] = true as const
@@ -262,10 +276,26 @@ export class ScriptPolicy implements Policy, SessionScoped {
   private readonly issuer = Symbol('policy read')
   // Each runtime's last run, which its next waits on.
   private readonly queues = new Map<LanguageRuntime, Promise<unknown>>()
+  // The monty runtimes handed the external functions, whose runs go at once.
+  private readonly unqueued = new Set<LanguageRuntime>()
+  private readonly externalLookup: Readonly<Record<string, (...args: never[]) => unknown>>
+  private readonly secretSources:
+    | (() => Promise<Readonly<Record<string, ResolvedSource>>>)
+    | undefined
+  private readonly envs = new Map<string, Promise<Record<string, string>>>()
 
-  constructor(sessions: SessionScriptsQuery, wiring: ScriptWiring | null = null) {
+  constructor(
+    sessions: SessionScriptsQuery,
+    wiring: ScriptWiring | null = null,
+    options: {
+      externalLookup?: Readonly<Record<string, (...args: never[]) => unknown>> | undefined
+      secretSources?: (() => Promise<Readonly<Record<string, ResolvedSource>>>) | undefined
+    } = {},
+  ) {
     this.sessions = sessions
     this.wiring = wiring
+    this.externalLookup = { ...options.externalLookup }
+    this.secretSources = options.secretSources
   }
 
   async preExecute(ctx: RouteContext): Promise<(Deny | Ask | Route)[] | null> {
@@ -337,6 +367,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
     const engines = [...this.engines.values()]
     this.engines.clear()
     this.queues.clear()
+    this.unqueued.clear()
     for (const engine of engines) await engine.close()
   }
 
@@ -389,7 +420,8 @@ export class ScriptPolicy implements Policy, SessionScoped {
     let result: RunResult
     try {
       const engine = this.engine(entry)
-      result = await this.serialized(engine, async () => {
+      const env = await this.env(entry)
+      const run = async (): Promise<RunResult> => {
         // The runtime stops itself at the deadline; the signal stops it
         // when the wait gives up first, before the next run takes the
         // runtime.
@@ -399,7 +431,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
             engine.execute([], [], {
               flags: { c: entry.script.source, ...PROGRAM_FLAGS.get(entry.runtime) },
               cwd: PathSpec.fromStrPath(cwd),
-              env: { [CTX_ENV]: payload },
+              env: { ...env, [CTX_ENV]: payload },
               stdin: ENCODER.encode(payload),
               signal: cancel.signal,
               timeoutSeconds: SCRIPT_EVAL_TIMEOUT.seconds,
@@ -411,7 +443,8 @@ export class ScriptPolicy implements Policy, SessionScoped {
           cancel.abort()
           throw err
         }
-      })
+      }
+      result = this.unqueued.has(engine) ? await run() : await this.serialized(engine, run)
     } catch (err) {
       if (err instanceof CommandTimeoutError) {
         throw new Error(`script timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`)
@@ -451,9 +484,51 @@ export class ScriptPolicy implements Policy, SessionScoped {
       if (this.wiring !== null) {
         engine.bind(new WorkspaceBinding(this.wiring.dispatch(this.issuer), this.wiring.resolver))
       }
+      if (Object.keys(this.externalLookup).length > 0 && engine instanceof MontyRuntime) {
+        engine.externalLookup = this.externalLookup
+        this.unqueued.add(engine)
+      }
       this.engines.set(key, engine)
     }
     return engine
+  }
+
+  /**
+   * One program's `env` with every pointer read: one read per program,
+   * shared by the runs waiting on it and kept once it answers, given the
+   * program's timeout and retried by the next run after it fails or runs
+   * out of time. Throws a clause about "script" when a source cannot
+   * answer.
+   */
+  private env(entry: ProfileScript): Promise<Record<string, string>> {
+    const key = JSON.stringify([
+      entry.profile,
+      entry.runtime,
+      entry.script.source,
+      Object.entries(entry.env).sort(([a], [b]) => compareCodePoints(a, b)),
+    ])
+    let reading = this.envs.get(key)
+    if (reading === undefined) {
+      reading = runWithTimeout(this.readEnv(entry), SCRIPT_EVAL_TIMEOUT.seconds, 'policy program')
+      this.envs.set(key, reading)
+      reading.catch(() => {
+        if (this.envs.get(key) === reading) this.envs.delete(key)
+      })
+    }
+    return reading
+  }
+
+  /** One read of a program's `env` pointers; throws a clause about "script" when a source cannot answer. */
+  private async readEnv(entry: ProfileScript): Promise<Record<string, string>> {
+    const sources = this.secretSources === undefined ? undefined : await this.secretSources()
+    let read: Record<string, unknown>
+    try {
+      read = await resolveConfigSecrets({ ...entry.env }, sources, 'env')
+    } catch (err) {
+      if (err instanceof SecretsError) throw new Error(`script ${err.message}`)
+      throw err
+    }
+    return Object.fromEntries(Object.entries(read).map(([name, value]) => [name, String(value)]))
   }
 
   /** `work` after every run on `engine` before it: two runs on one runtime would interleave. */

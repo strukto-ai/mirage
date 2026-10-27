@@ -43,6 +43,10 @@ import { MontyExecution } from './execution.ts'
  * "Python subset" in docs/home/setup/runtime/monty.mdx. The parser
  * refuses class inheritance, method decorators and `yield` — use the
  * pyodide runtime for a program that needs those.
+ *
+ * `externalLookup` is the host functions the code may call by name, empty
+ * unless the one who built the runtime hands it some, as a policy does for
+ * its own programs.
  */
 export class MontyRuntime extends PythonRuntime<MontyExecution> {
   readonly name = 'monty'
@@ -57,6 +61,7 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
   // "No module named" that would imply a search happened.
   override readonly runsModules = false
   declare config: MontyConfig
+  externalLookup: Readonly<Record<string, (...args: never[]) => unknown>> = {}
   private readonly maxMemory: number | null
 
   constructor(options: RuntimeOptions<MontyConfig> = {}) {
@@ -104,9 +109,11 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
     // Every file call is the guest's own: none is left to land at the end.
     const files = RuntimeFiles.of(ctx, this.binding)
     const live = ctx.signal === undefined ? files : (files?.withSignal(ctx.signal) ?? null)
-    const result = await execution.run(program, ctx, live, output, errors).finally(async () => {
-      if (execution !== engine) await execution.close()
-    })
+    const result = await execution
+      .run(program, ctx, live, output, errors, this.externalLookup)
+      .finally(async () => {
+        if (execution !== engine) await execution.close()
+      })
     if (notice.length === 0) return result
     const stderr = result.stderr ?? new Uint8Array()
     const merged = new Uint8Array(notice.length + stderr.length)

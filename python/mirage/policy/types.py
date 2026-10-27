@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from mirage.commands.spec.types import WordKind
 from mirage.runtime.types import ScriptSource
+from mirage.secrets.config import SecretRef
 from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
 from mirage.vfs.types import VfsCall
 from mirage.view.types import FileView, SessionView
@@ -578,12 +579,16 @@ class ProfileScript:
         config (Mapping[str, Any]): that runtime's settings, as a
             ``runtimes`` entry's ``config`` block states them; empty for
             none.
+        env (Mapping[str, str | SecretRef]): the variables the program
+            runs with beside ``MIRAGE_POLICY_CTX``, a pointer still the
+            pointer; empty for none.
     """
 
     profile: str
     script: ScriptSource
     runtime: str
     config: Mapping[str, Any] = field(default_factory=dict)
+    env: Mapping[str, str | SecretRef] = field(default_factory=dict)
 
 
 class SessionCommandsQuery(Protocol):

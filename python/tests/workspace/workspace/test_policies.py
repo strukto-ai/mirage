@@ -2217,3 +2217,98 @@ async def test_a_prefix_leaves_a_readonly_name_and_the_next_command_alone():
         assert spy.commanded[-2:] == spy.routed[-2:]
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_program_calls_the_workspaces_policy_functions(
+    monkeypatch,
+):
+    monkeypatch.setenv("POLICY_DIRECTORY_TOKEN", "t0k")
+    seen: list[tuple[str, str]] = []
+
+    async def directory(command, token):
+        seen.append((command, token))
+        return command == "rm"
+
+    source = """
+import json, os
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+if await directory(ctx["command"], os.environ["TOKEN"]):
+    print(json.dumps({"kind": "deny", "reason": os.environ["WHY"]}))
+"""
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={
+            "release": {
+                "policy": {
+                    "pre_command": [
+                        {
+                            "script": ScriptSource(source),
+                            "runtime": "monty",
+                            "env": {
+                                "WHY": "directory says no",
+                                "TOKEN": {
+                                    "from": "env",
+                                    "key": "POLICY_DIRECTORY_TOKEN",
+                                },
+                            },
+                        }
+                    ]
+                }
+            }
+        },
+        policy_functions={"directory": directory},
+    )
+    try:
+        ws.create_session("s", profile="release")
+        assert (await ws.shell("echo hi", session_id="s")).exit_code == 0
+        refused = await ws.shell("rm /data/x", session_id="s")
+        assert refused.refusal is not None
+        assert refused.refusal.reason == "directory says no"
+        assert seen == [("echo", "t0k"), ("rm", "t0k")]
+    finally:
+        await ws.close()
+
+
+async def _directory(command):
+    return command == "rm"
+
+
+@pytest.mark.asyncio
+async def test_a_copy_and_a_restore_keep_the_policy_functions(tmp_path):
+    source = """
+import json, os
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+if await directory(ctx["command"]):
+    print(json.dumps({"kind": "deny", "reason": "directory says no"}))
+"""
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={
+            "release": {
+                "policy": {
+                    "pre_command": [
+                        {"script": ScriptSource(source), "runtime": "monty"}
+                    ]
+                }
+            }
+        },
+        policy_functions={"directory": _directory},
+    )
+    ws.create_session("s", profile="release")
+    tar = tmp_path / "ws.tar"
+    await ws.snapshot(tar)
+    copied = await ws.copy()
+    restored = await Workspace.load(
+        tar, policy_functions={"directory": _directory}
+    )
+    try:
+        for each in (copied, restored):
+            refused = await each.shell("rm /data/x", session_id="s")
+            assert refused.refusal is not None
+            assert refused.refusal.reason == "directory says no"
+    finally:
+        for each in (ws, copied, restored):
+            await each.close()

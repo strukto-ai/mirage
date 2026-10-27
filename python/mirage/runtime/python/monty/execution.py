@@ -18,6 +18,7 @@ import concurrent.futures
 import logging
 import os
 import signal
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from mirage.io.types import materialize
@@ -91,6 +92,7 @@ class MontyExecution:
         fs: MontyFs,
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
+        external_lookup: Mapping[str, Callable[..., Any]] | None = None,
     ) -> RunResult:
         """Run one program on a pooled worker.
 
@@ -101,9 +103,13 @@ class MontyExecution:
             output (OutputFn | None): receives stdout as it is printed;
                 None returns it in the result.
             errors (OutputFn | None): the same for stderr.
+            external_lookup (Mapping[str, Callable[..., Any]] | None):
+                the host functions the program may call by name.
         """
         prints = _Prints(output, errors)
-        code, note = await self._feed(program, cwd, fs, prints)
+        code, note = await self._feed(
+            program, cwd, fs, prints, external_lookup
+        )
         stdout, stderr = prints.streams()
         if note:
             stderr = (stderr or b"") + note
@@ -115,6 +121,7 @@ class MontyExecution:
         cwd: PathSpec | None,
         fs: MontyFs,
         prints: _Prints,
+        external_lookup: Mapping[str, Callable[..., Any]] | None = None,
     ) -> tuple[int, bytes]:
         """Feed the program to a worker; its status and what to add to
         its stderr.
@@ -124,6 +131,8 @@ class MontyExecution:
             cwd (PathSpec | None): the directory a feed starts in.
             fs (MontyFs): the files the program reaches.
             prints (_Prints): where its prints go.
+            external_lookup (Mapping[str, Callable[..., Any]] | None):
+                the host functions the program may call by name.
         """
         # Execution lives in a monty worker subprocess (0.0.19 moved it
         # out of process so an interpreter crash cannot take the host
@@ -173,6 +182,9 @@ class MontyExecution:
                         print_callback=prints,
                         cwd=start,
                         os=fs,
+                        external_lookup=(
+                            dict(external_lookup) if external_lookup else None
+                        ),
                     )
                 except asyncio.CancelledError:
                     _kill_worker(worker_pid)

@@ -23,6 +23,7 @@ from mirage.policy.builtin.output_cap import (
     command_limits_to_json,
 )
 from mirage.policy.constants import (
+    CTX_ENV,
     DEFAULT_ASK_REASON,
     DEFAULT_DENY_REASON,
     METHODS,
@@ -38,7 +39,7 @@ from mirage.policy.types import (
 )
 from mirage.process.config import ProcessPermissions
 from mirage.runtime.types import ScriptSource
-from mirage.secrets.config import EnvVar
+from mirage.secrets.config import EnvVar, SecretRef
 from mirage.types import (
     DEFAULT_VISIBILITY,
     Limit,
@@ -577,12 +578,29 @@ class ProfilePolicy(BaseModel):
             the shape a ``runtimes`` entry has. Monty when the program
             names none; without the ``monty`` extra installed, such a
             program fails closed with the extra's install hint.
+        env (dict[str, str | SecretRef]): variables the program runs
+            with beside ``MIRAGE_POLICY_CTX``, on any runtime: a literal,
+            or a pointer read from its source when the program first
+            runs. None of the session's reach it.
     """
 
     model_config = _DOC
 
     script: ScriptSource | str
     runtime: str | dict[str, Any] = PROGRAM_RUNTIME
+    env: dict[str, str | SecretRef] = {}
+
+    @field_validator("env")
+    @classmethod
+    def _v_env(
+        cls, v: dict[str, str | SecretRef]
+    ) -> dict[str, str | SecretRef]:
+        if CTX_ENV in v:
+            raise ValueError(
+                f"a policy program's env cannot set {CTX_ENV}, which "
+                f"carries its context"
+            )
+        return v
 
     @field_validator("runtime")
     @classmethod
@@ -627,6 +645,7 @@ def compile_program(program: ProfilePolicy, profile: str) -> ProfileScript:
         script=program.script,
         runtime=named["name"],
         config=dict(named.get("config") or {}),
+        env=dict(program.env),
     )
 
 
@@ -798,7 +817,8 @@ def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
     the limits and process scopes keep their unset fields, as the
     session record writes them on both hosts, and an env entry is
     written with the fields its author set, a managed one as its
-    pointer.
+    pointer. A policy program's ``env`` is written the same way, and
+    left out when empty.
 
     Args:
         profile (SessionProfile): the profile.
@@ -829,6 +849,20 @@ def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
             )
             for name, entry in profile.env.items()
         }
+    for method, programs in (profile.policy or {}).items():
+        for program, written in zip(
+            programs, doc["policy"][method], strict=True
+        ):
+            written.pop("env")
+            if program.env:
+                written["env"] = {
+                    name: (
+                        value
+                        if isinstance(value, str)
+                        else value.model_dump(by_alias=True)
+                    )
+                    for name, value in program.env.items()
+                }
     if profile.command_limits is not None:
         doc["command_limits"] = command_limits_to_json(profile.command_limits)
     if profile.processes is not None:

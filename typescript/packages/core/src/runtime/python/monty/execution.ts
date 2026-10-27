@@ -88,6 +88,7 @@ export class MontyExecution {
    * @param output receives stdout as it is printed; absent returns it in
    *   the result.
    * @param errors the same for stderr.
+   * @param externalLookup the host functions the program may call by name.
    */
   async run(
     program: Program,
@@ -95,6 +96,7 @@ export class MontyExecution {
     files: RuntimeFiles | null,
     output?: OutputFn,
     errors?: OutputFn,
+    externalLookup: Readonly<Record<string, (...args: never[]) => unknown>> = {},
   ): Promise<RunResult> {
     // A script is Monty's own script_name, which it keeps the last part of
     // for `__file__`, under the directory a feed starts in.
@@ -111,10 +113,12 @@ export class MontyExecution {
     try {
       // The prints are handed on inside the race, so a deadline or a kill
       // still stops a run whose reader holds its last writes back.
-      const run = this.feedOne(session, program, ctx, files, prints).then(async (outcome) => {
-        await prints.end()
-        return outcome
-      })
+      const run = this.feedOne(session, program, ctx, files, prints, externalLookup).then(
+        async (outcome) => {
+          await prints.end()
+          return outcome
+        },
+      )
       const winner = await Promise.race([run, interruption.promise])
       if (winner !== INTERRUPTED) {
         const [exitCode, note] = winner
@@ -233,6 +237,7 @@ export class MontyExecution {
     ctx: Context,
     files: RuntimeFiles | null,
     prints: Prints,
+    externalLookup: Readonly<Record<string, (...args: never[]) => unknown>>,
   ): Promise<[number, string]> {
     const module = await this.loadModule()
     // Monty has no `sys.stdin`, so piped bytes ride in as a global the
@@ -247,6 +252,7 @@ export class MontyExecution {
       cwd: ctx.cwd.virtual,
       printCallback: prints.write,
       os: new MontyFs(module, ctx.env ?? {}, files).handle,
+      ...(Object.keys(externalLookup).length > 0 ? { externalLookup: { ...externalLookup } } : {}),
     }
     try {
       await session.feedRun(program.code, options)

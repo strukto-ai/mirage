@@ -26,6 +26,7 @@ import type { Scope } from '../../policy/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import { snakeToCamel } from '../../utils/normalize.ts'
 import type { Language } from '../../runtime/types.ts'
+import type { SecretRef } from '../../secrets/config.ts'
 
 /** A compiled command tier as the session record stores it (the Python spelling). */
 export interface CommandsJSON {
@@ -83,6 +84,7 @@ export interface ScriptJSON {
   source: string
   runtime: string
   config?: Record<string, unknown>
+  env?: Record<string, string | SecretRef>
 }
 
 export function scriptToDict(entry: ProfileScript): ScriptJSON {
@@ -92,6 +94,7 @@ export function scriptToDict(entry: ProfileScript): ScriptJSON {
     source: entry.script.source,
     runtime: entry.runtime,
     config: { ...entry.config },
+    env: { ...entry.env },
   }
 }
 
@@ -101,6 +104,7 @@ export function scriptFromDict(data: ScriptJSON): ProfileScript {
     script: new ScriptSource(data.source, data.language as Language),
     runtime: data.runtime,
     config: { ...(data.config ?? {}) },
+    env: { ...(data.env ?? {}) },
   }
 }
 

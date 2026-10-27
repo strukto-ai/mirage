@@ -25,6 +25,7 @@ from mirage.policy.types import (
     Scope,
 )
 from mirage.runtime.types import ScriptSource
+from mirage.secrets.config import SecretRef
 
 
 def rule_to_dict(rule: CommandRule) -> dict[str, Any]:
@@ -96,6 +97,14 @@ def script_to_dict(entry: ProfileScript) -> dict[str, Any]:
         "source": entry.script.source,
         "runtime": entry.runtime,
         "config": dict(entry.config),
+        "env": {
+            name: (
+                value
+                if isinstance(value, str)
+                else value.model_dump(by_alias=True)
+            )
+            for name, value in entry.env.items()
+        },
     }
 
 
@@ -110,6 +119,14 @@ def script_from_dict(data: Mapping[str, Any]) -> ProfileScript:
         script=ScriptSource(data["source"], language=data["language"]),
         runtime=data["runtime"],
         config=dict(data.get("config") or {}),
+        env={
+            name: (
+                value
+                if isinstance(value, str)
+                else SecretRef.model_validate(value)
+            )
+            for name, value in (data.get("env") or {}).items()
+        },
     )
 
 

@@ -21,6 +21,7 @@ from mirage.policy.types import (
     Scope,
 )
 from mirage.runtime.types import ScriptSource
+from mirage.secrets.config import SecretRef
 from mirage.workspace.session.serialize import (
     commands_from_dict,
     commands_to_dict,
@@ -75,8 +76,29 @@ def test_script_round_trips_with_its_runtime_and_settings():
         "source": "pass\n",
         "runtime": "wasi",
         "config": {"home": "/w"},
+        "env": {},
     }
     assert script_from_dict(data) == entry
+
+
+def test_script_keeps_an_env_pointer_as_the_pointer():
+    entry = ProfileScript(
+        profile="release",
+        script=ScriptSource("pass\n"),
+        runtime="monty",
+        env={
+            "LLM_URL": "https://llm/v1",
+            "LLM_KEY": SecretRef(provider="aws-sm", ref="prod/llm", key="key"),
+        },
+    )
+    data = script_to_dict(entry)
+    assert data["env"] == {
+        "LLM_URL": "https://llm/v1",
+        "LLM_KEY": {"from": "aws-sm", "ref": "prod/llm", "key": "key"},
+    }
+    assert script_from_dict(data) == entry
+    del data["env"]
+    assert script_from_dict(data).env == {}
 
 
 def test_decision_round_trips_with_defaults():

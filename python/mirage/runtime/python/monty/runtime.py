@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from typing import Any, ClassVar
 
@@ -54,6 +54,10 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
     subset" in docs/home/setup/runtime/monty.mdx. The parser refuses
     class inheritance, method decorators and `yield` — use the `wasi`
     or `local` runtime for a program that needs those.
+
+    `external_lookup` is the host functions the code may call by name,
+    empty unless the one who built the runtime hands it some, as a
+    policy does for its own programs.
     """
 
     name = "monty"
@@ -86,6 +90,7 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
             raise ImportError(MISSING_EXTRA_HINT)
         super().__init__(captures, config)
         self._max_memory = memory_limit(self.config.max_memory)
+        self.external_lookup: Mapping[str, Callable[..., Any]] = {}
 
     async def open_engine(self) -> MontyExecution:
         return MontyExecution(self._max_memory)
@@ -132,6 +137,7 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
                 MontyFs(files, ctx.env or {}),
                 output,
                 errors,
+                self.external_lookup,
             )
         except asyncio.CancelledError:
             if files is not None:

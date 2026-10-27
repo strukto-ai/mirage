@@ -542,6 +542,85 @@
     {"op": "exec", "session": "agent", "command": "{ export A=1; export B=2; touch /data/m; sleep 30; } & until [ -e /data/m ]; do sleep 0.1; done; kill %1; wait", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "B: permission denied\n", "refusal": "B needs a nod"}}},
     {"op": "exec", "session": "agent", "command": "export A=1", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "A: permission denied\n", "refusal": "A needs a nod"}}}
    ]
+  },
+  {
+   "id": "a_policy_program_runs_with_its_entrys_env_and_none_of_the_sessions",
+   "settings": {
+    "mode": "write",
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "config": {}
+     }
+    },
+    "runtimes": [
+     "monty",
+     "workspace"
+    ]
+   },
+   "steps": [
+    {
+     "op": "session",
+     "id": "agent",
+     "profile": {
+      "env": {
+       "MODE": "safe"
+      },
+      "policy": {
+       "pre_command": [
+        {
+         "script": {
+          "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['command'] == 'rm':\n    print(json.dumps({'kind': 'deny', 'reason': os.environ['WHY']}))\nelif ctx['command'] == 'touch' and 'MODE' in os.environ:\n    print(json.dumps({'kind': 'deny', 'reason': 'the session leaked in'}))\n",
+          "language": "python"
+         },
+         "runtime": "monty",
+         "env": {
+          "WHY": "the entry says no"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "op": "exec",
+     "command": "echo r > /data/r",
+     "expect": {
+      "value": {
+       "exit_code": 0,
+       "stdout": "",
+       "stderr": "",
+       "refusal": null
+      }
+     }
+    },
+    {
+     "op": "exec",
+     "session": "agent",
+     "command": "rm /data/r",
+     "expect": {
+      "value": {
+       "exit_code": 126,
+       "stdout": "",
+       "stderr": "rm: Permission denied\n",
+       "refusal": "the entry says no"
+      }
+     }
+    },
+    {
+     "op": "exec",
+     "session": "agent",
+     "command": "touch /data/t",
+     "expect": {
+      "value": {
+       "exit_code": 0,
+       "stdout": "",
+       "stderr": "",
+       "refusal": null
+      }
+     }
+    }
+   ]
   }
  ]
 }

@@ -89,10 +89,10 @@ it:
 - **Input:** `ctx` as JSON, in the environment variable `MIRAGE_POLICY_CTX`
   and on stdin. On monty, which has no `sys.stdin`, stdin arrives as a
   `stdin` variable, so read the environment variable to run anywhere.
-  `MIRAGE_POLICY_CTX` is reserved, and the session never sees it. It is
-  the only variable Mirage passes the program: the session's variables
-  stay out of its environment. A runtime may add its own, as wasi adds
-  `PYTHONHOME` and `PYTHONDONTWRITEBYTECODE`.
+  `MIRAGE_POLICY_CTX` is reserved, and the session never sees it. Beside
+  it, Mirage passes only the entry's own [`env`](#variables): the
+  session's variables stay out of its environment. A runtime may add its
+  own, as wasi adds `PYTHONHOME` and `PYTHONDONTWRITEBYTECODE`.
 - **Session:** the program starts in the session's working directory, so
   `os.getcwd()` is the session's. The session's variables are in
   `ctx["env"]`, not in `os.environ`. An `import` never loads a module from
@@ -108,6 +108,71 @@ it:
 
 A deny or an ask without a `reason` gets the default one. Anything else on
 stdout, such as a debug line, fails the program; write those to stderr.
+
+## Variables
+
+An entry's `env` gives its program variables beside `MIRAGE_POLICY_CTX`, on
+every runtime. A value is a string, or a pointer to a
+[credential source](/home/authentication) such as `aws-sm` or `1password`,
+read the first time the program runs and kept for the workspace's life:
+
+```yaml workspace.yaml
+profiles:
+  reviewer:
+    policy:
+      pre_command:
+        - script: ./guard.py
+          runtime: monty
+          env:
+            DIRECTORY_URL: https://directory.example.com
+            DIRECTORY_TOKEN: {from: aws-sm, ref: prod/directory, key: token}
+```
+
+A session record and a snapshot keep the pointer, never the value it read. A
+source that cannot answer refuses the action, as a failed program does.
+`MIRAGE_POLICY_CTX` cannot be set here.
+
+## Host functions
+
+A program on monty can call functions the host hands the workspace, by
+name. They are passed in code, never in a document or over the server API,
+so a profile can call them but not add one. Programs on `wasi` and
+`pyodide`, and the agent's own programs, do not see them.
+
+<CodeGroup>
+```python Python
+async def lookup_user(session_id: str) -> dict:
+    return {"admin": session_id in ADMINS}
+
+ws = Workspace(mounts, profiles=profiles, policy_functions={"lookup_user": lookup_user})
+```
+
+```ts TypeScript
+const ws = new Workspace(mounts, {
+  profiles,
+  policyFunctions: {
+    lookup_user: async (sessionId: string) => ({ admin: ADMINS.has(sessionId) }),
+  },
+})
+```
+</CodeGroup>
+
+```python guard.py
+import json
+import os
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+user = await lookup_user(ctx["session_id"])
+if ctx["command"] == "rm" and not user["admin"]:
+    print(json.dumps({"kind": "deny", "reason": "only admins delete"}))
+```
+
+A function may be sync or async and takes and returns plain data: strings,
+numbers, booleans, `None`, lists and dicts. One that raises raises in the
+program, which may catch it; uncaught, the program fails and the action is
+refused. A function may take as long as it needs, within the program's 10
+seconds, and programs calling functions run side by side rather than one at
+a time.
 
 ## ctx
 
