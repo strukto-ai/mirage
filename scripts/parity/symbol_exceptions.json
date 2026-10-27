@@ -1,5 +1,5 @@
 {
-  "baseline": 2913,
+  "baseline": 2910,
  "modules": {
   "vfs/tidb_filesystem/config": {
    "typescript_only": {
@@ -450,7 +450,8 @@
     "readSnapshotTar": "TypeScript reads a snapshot from bytes or, streaming, from a file (readTar); Python's read_tar takes either.",
     "writeSnapshotTar": "TypeScript writes a snapshot to bytes or, streaming, to a file (writeTar); Python's write_tar takes either.",
     "pack": "The -c run TypeScript's byte and file writers share; Python's one write_tar runs it inline.",
-    "unpack": "The -x run TypeScript's byte and file readers share; Python's one read_tar runs it inline."
+    "unpack": "The -x run TypeScript's byte and file readers share; Python's one read_tar runs it inline.",
+    "fileWriter": "TypeScript writes a file through a stream it must fail when the copy does; Python writes its open file directly."
    }
   },
   "workspace/dispatcher/dispatcher": {
