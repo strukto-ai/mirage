@@ -292,7 +292,8 @@ export class StreamHost {
     const parts: Uint8Array[] = []
     try {
       next = await source.next()
-      // A file read whole gathers chunks to `least` bytes a reply.
+      // A file read whole gathers chunks to `least` bytes a reply, the last
+      // of them sent with the end of the input.
       const least = typeof request.least === 'number' ? request.least : 0
       for (let size = 0; next.done !== true; next = await source.next()) {
         parts.push(next.value)
@@ -303,13 +304,14 @@ export class StreamHost {
       this.inputs.delete(fd)
       return this.failed(fd, err)
     }
-    if (parts.length === 0) {
+    const reply = next.done === true ? { end: true } : {}
+    if (next.done === true) {
       this.inputs.delete(fd)
       this.named.delete(fd)
-      return { reply: { end: true } }
     }
+    if (parts.length === 0) return { reply }
     const [only, ...more] = parts
-    return { reply: {}, data: only !== undefined && more.length === 0 ? only : parts }
+    return { reply, data: only !== undefined && more.length === 0 ? only : parts }
   }
 
   /**

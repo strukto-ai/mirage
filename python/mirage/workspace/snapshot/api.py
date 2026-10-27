@@ -47,7 +47,7 @@ def _key_path(key: str) -> PathSpec:
 class _Counted:
     """A writable file-like target that counts what is written to it.
 
-    Its ``tell`` is the count, so tarfile can write to a target that
+    Its ``tell`` is the count, so the tar can be written to a target that
     cannot tell, such as a pipe.
     """
 

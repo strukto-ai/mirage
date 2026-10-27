@@ -67,7 +67,8 @@ pub(crate) enum Request {
     /// The next chunk of input `fd`; the first read of a named input says
     /// which file, and which operand when it is one still as typed. A file
     /// read whole asks for `least` bytes a reply, the host gathering chunks
-    /// until it has them or the input ends.
+    /// until it has them or the input ends, when the last of them come with
+    /// `end`.
     Read {
         fd: u32,
         open: Option<(Vec<u8>, Opening)>,
@@ -293,6 +294,7 @@ impl Request {
 #[derive(Deserialize, Default)]
 #[serde(default)]
 pub(crate) struct Reply {
+    /// The input ended; a read's bytes, if any, are its last.
     pub(crate) end: bool,
     /// Why an input, a write or a flush failed, as a diagnostic words it.
     pub(crate) error: Option<String>,

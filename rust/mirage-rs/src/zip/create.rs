@@ -449,19 +449,18 @@ async fn add(
         .clone()
         .map(|path| (path, Opening::Operand(found.operand)));
     let mut next = (found.kind == Kind::Link).then(|| found.target.clone());
+    let mut ended = false;
     loop {
         let data = match next.take() {
             Some(target) => target,
-            None if found.kind != Kind::File => break,
+            None if found.kind != Kind::File || ended => break,
             None => {
                 let (open, least) = (open.take(), GATHER);
                 let (reply, data) = host.ask(Request::Read { fd, open, least }).await;
                 if failed(&reply) {
                     return Err(failure_text(&reply));
                 }
-                if reply.end {
-                    break;
-                }
+                ended = reply.end;
                 data
             }
         };

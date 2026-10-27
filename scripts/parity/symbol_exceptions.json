@@ -443,10 +443,14 @@
   "workspace/snapshot/tar_io": {
    "python_only": {
     "Writable": "Python snapshot targets accept binary file-like writers; TypeScript uses its existing stream types.",
-    "_stage_disk_files": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
+    "_CODECS": "Python snapshots take gz, bz2 or xz; TypeScript takes gz alone, which it maps inline."
    },
    "typescript_only": {
-    "diskFileRefs": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
+    "CompressMode": "TypeScript's byte-buffer snapshot takes an optional gz mode; Python's compress is a string argument.",
+    "readSnapshotTar": "TypeScript reads a snapshot from bytes or, streaming, from a file (readTar); Python's read_tar takes either.",
+    "writeSnapshotTar": "TypeScript writes a snapshot to bytes or, streaming, to a file (writeTar); Python's write_tar takes either.",
+    "pack": "The -c run TypeScript's byte and file writers share; Python's one write_tar runs it inline.",
+    "unpack": "The -x run TypeScript's byte and file readers share; Python's one read_tar runs it inline."
    }
   },
   "workspace/dispatcher/dispatcher": {

@@ -139,23 +139,26 @@ async fn file(out: &mut Output<'_>, entry: &Entry, fd: u32) -> Option<Trouble> {
     };
     // The first read opens the file, and a file that does not open is left
     // out whole.
-    let mut next = match read(host, fd, open.take()).await {
-        Ok(data) => data,
+    let (mut data, mut end) = match read(host, fd, open.take()).await {
+        Ok(read) => read,
         Err(reply) => return Some(Trouble::Left(cannot(b"open", &reply))),
     };
     out.put(&header::encode(&entry.name, Kind::File, size, b""))
         .await;
     let mut seen = 0u64;
     let mut trouble = None;
-    while let Some(data) = next {
+    loop {
         let keep = (size - seen.min(size)).min(data.len() as u64) as usize;
         out.put(&data[..keep]).await;
         seen += data.len() as u64;
-        next = match read(host, fd, None).await {
-            Ok(data) => data,
+        if end {
+            break;
+        }
+        (data, end) = match read(host, fd, None).await {
+            Ok(read) => read,
             Err(reply) => {
                 trouble = Some(Trouble::Said(cannot(b"read", &reply), FAILED));
-                None
+                break;
             }
         };
     }

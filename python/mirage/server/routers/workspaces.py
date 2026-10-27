@@ -16,7 +16,6 @@ import errno
 import hashlib
 import io
 import json
-import tarfile
 import time
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
@@ -529,7 +528,7 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
             raise HTTPException(
                 status_code=400, detail=f"snapshot not found: {req.key}"
             )
-        except (SecretsError, ValueError, tarfile.TarError, KeyError) as e:
+        except (SecretsError, ValueError, KeyError) as e:
             # A secrets override naming an unknown source, or one whose
             # optional dependency is absent, is a bad request like any
             # other override the deployment got wrong; so is an upload

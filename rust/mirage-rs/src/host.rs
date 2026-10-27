@@ -142,6 +142,11 @@ impl Host {
             fault.after -= take;
         }
         let chunk: Vec<u8> = input.drain(..take).collect();
+        // A gathered read's last bytes come with the end, as hosts send them.
+        if input.is_empty() && fault.is_none() && request["least"].is_u64() {
+            self.inputs.remove(&fd);
+            return (json!({"end": true}), chunk);
+        }
         (json!({}), chunk)
     }
 

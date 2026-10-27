@@ -53,6 +53,9 @@ describe('StreamHost', () => {
     const first = await h.serve({ op: 'read', fd: 1, path: '/a.txt', operand: 1 }, new Uint8Array())
     expect(first).toEqual({ reply: {}, data: ENC.encode('one\n') })
     expect((await h.serve({ op: 'read', fd: 1 }, new Uint8Array())).reply).toEqual({ end: true })
+    const gathered = { op: 'read', fd: 1, path: '/a.txt', operand: 1, least: 8 }
+    const whole = await h.serve(gathered, new Uint8Array())
+    expect(whole).toEqual({ reply: { end: true }, data: ENC.encode('one\n') })
     const missing = await h.serve({ op: 'read', fd: 2, path: '/b.txt' }, new Uint8Array())
     expect(missing.reply).toEqual({ error: 'No such file or directory', errno: 'ENOENT' })
   })
