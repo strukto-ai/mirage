@@ -350,6 +350,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "jq_scan" => jq::open_scan(config),
         "jq_format" => jq::open_format(config),
         "jq_decode" => jq::open_decode(config),
+        "jq_eval" => jq::open_eval(config),
         "look" => look::open(config),
         "nl" => nl::open(config),
         "numfmt" => numfmt::open(config),

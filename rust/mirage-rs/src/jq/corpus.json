@@ -1,0 +1,5388 @@
+[
+ {
+  "id": "jq_test_0000",
+  "program": "true",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0001",
+  "program": "false",
+  "input": "null",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0002",
+  "program": "null",
+  "input": "42",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0003",
+  "program": "1",
+  "input": "null",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0004",
+  "program": "-1",
+  "input": "null",
+  "outputs": [
+   "-1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0005",
+  "program": "{}",
+  "input": "null",
+  "outputs": [
+   "{}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0006",
+  "program": "[]",
+  "input": "null",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0007",
+  "program": "{x:-1},{x:-.},{x:-.|abs}",
+  "input": "1",
+  "outputs": [
+   "{\"x\":-1}",
+   "{\"x\":-1}",
+   "{\"x\":1}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0008",
+  "program": ".",
+  "input": "﻿\"byte order mark\"",
+  "outputs": [
+   "\"byte order mark\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0009",
+  "program": "\"Aa\\r\\n\\t\\b\\f\\u03bc\"",
+  "input": "null",
+  "outputs": [
+   "\"Aa\\r\\n\\t\\b\\fμ\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0010",
+  "program": ".",
+  "input": "\"Aa\\r\\n\\t\\b\\f\\u03bc\"",
+  "outputs": [
+   "\"Aa\\r\\n\\t\\b\\fμ\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0011",
+  "program": "\"inter\\(\"pol\" + \"ation\")\"",
+  "input": "null",
+  "outputs": [
+   "\"interpolation\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0012",
+  "program": "@text,@json,([1,.]|@csv,@tsv),@html,(@uri|.,@urid),@sh,(@base64|.,@base64d)",
+  "input": "\"!()<>&'\\\"\\t\"",
+  "outputs": [
+   "\"!()<>&'\\\"\\t\"",
+   "\"\\\"!()<>&'\\\\\\\"\\\\t\\\"\"",
+   "\"1,\\\"!()<>&'\\\"\\\"\\t\\\"\"",
+   "\"1\\t!()<>&'\\\"\\\\t\"",
+   "\"!()&lt;&gt;&amp;&apos;&quot;\\t\"",
+   "\"%21%28%29%3C%3E%26%27%22%09\"",
+   "\"!()<>&'\\\"\\t\"",
+   "\"'!()<>&'\\\\''\\\"\\t'\"",
+   "\"ISgpPD4mJyIJ\"",
+   "\"!()<>&'\\\"\\t\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0013",
+  "program": "@base64",
+  "input": "\"foóbar\\n\"",
+  "outputs": [
+   "\"Zm/Ds2Jhcgo=\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0014",
+  "program": "@base64d",
+  "input": "\"Zm/Ds2Jhcgo=\"",
+  "outputs": [
+   "\"foóbar\\n\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0015",
+  "program": "@uri",
+  "input": "\"\\u03bc\"",
+  "outputs": [
+   "\"%CE%BC\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0016",
+  "program": "@urid",
+  "input": "\"%CE%BC\"",
+  "outputs": [
+   "\"μ\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0017",
+  "program": "@html \"<b>\\(.)</b>\"",
+  "input": "\"<script>hax</script>\"",
+  "outputs": [
+   "\"<b>&lt;script&gt;hax&lt;/script&gt;</b>\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0018",
+  "program": "[.[]|tojson|fromjson]",
+  "input": "[\"foo\", 1, [\"a\", 1, \"b\", 2, {\"foo\":\"bar\"}]]",
+  "outputs": [
+   "[\"foo\",1,[\"a\",1,\"b\",2,{\"foo\":\"bar\"}]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0019",
+  "program": "{a: 1}",
+  "input": "null",
+  "outputs": [
+   "{\"a\":1}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0020",
+  "program": "{a,b,(.d):.a,e:.b}",
+  "input": "{\"a\":1, \"b\":2, \"c\":3, \"d\":\"c\"}",
+  "outputs": [
+   "{\"a\":1,\"b\":2,\"c\":1,\"e\":2}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0021",
+  "program": "{\"a\",b,\"a$\\(1+1)\"}",
+  "input": "{\"a\":1, \"b\":2, \"c\":3, \"a$2\":4}",
+  "outputs": [
+   "{\"a\":1,\"b\":2,\"a$2\":4}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0022",
+  "program": ".foo",
+  "input": "{\"foo\": 42, \"bar\": 43}",
+  "outputs": [
+   "42"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0023",
+  "program": ".foo | .bar",
+  "input": "{\"foo\": {\"bar\": 42}, \"bar\": \"badvalue\"}",
+  "outputs": [
+   "42"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0024",
+  "program": ".foo.bar",
+  "input": "{\"foo\": {\"bar\": 42}, \"bar\": \"badvalue\"}",
+  "outputs": [
+   "42"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0025",
+  "program": ".foo_bar",
+  "input": "{\"foo_bar\": 2}",
+  "outputs": [
+   "2"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0026",
+  "program": ".[\"foo\"].bar",
+  "input": "{\"foo\": {\"bar\": 42}, \"bar\": \"badvalue\"}",
+  "outputs": [
+   "42"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0027",
+  "program": ".\"foo\".\"bar\"",
+  "input": "{\"foo\": {\"bar\": 20}}",
+  "outputs": [
+   "20"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0028",
+  "program": ".e0, .E1, .E-1, .E+1",
+  "input": "{\"e0\": 1, \"E1\": 2, \"E\": 3}",
+  "outputs": [
+   "1",
+   "2",
+   "2",
+   "4"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0029",
+  "program": "[.[]|.foo?]",
+  "input": "[1,[2],{\"foo\":3,\"bar\":4},{},{\"foo\":5}]",
+  "outputs": [
+   "[3,null,5]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0030",
+  "program": "[.[]|.foo?.bar?]",
+  "input": "[1,[2],[],{\"foo\":3},{\"foo\":{\"bar\":4}},{}]",
+  "outputs": [
+   "[4,null]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0031",
+  "program": "[..]",
+  "input": "[1,[[2]],{ \"a\":[1]}]",
+  "outputs": [
+   "[[1,[[2]],{\"a\":[1]}],1,[[2]],[2],2,{\"a\":[1]},[1],1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0032",
+  "program": "[.[]|.[]?]",
+  "input": "[1,null,[],[1,[2,[[3]]]],[{}],[{\"a\":[1,[2]]}]]",
+  "outputs": [
+   "[1,[2,[[3]]],{},{\"a\":[1,[2]]}]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0033",
+  "program": "[.[]|.[1:3]?]",
+  "input": "[1,null,true,false,\"abcdef\",{},{\"a\":1,\"b\":2},[],[1,2,3,4,5],[1,2]]",
+  "outputs": [
+   "[null,\"bc\",[],[2,3],[2]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0034",
+  "program": "map(try .a[] catch ., try .a.[] catch ., .a[]?, .a.[]?)",
+  "input": "[{\"a\": [1,2]}, {\"a\": 123}]",
+  "outputs": [
+   "[1,2,1,2,1,2,1,2,\"Cannot iterate over number (123)\",\"Cannot iterate over number (123)\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0035",
+  "program": "try [\"OK\", (.[] | error)] catch [\"KO\", .]",
+  "input": "{\"a\":[\"b\"],\"c\":[\"d\"]}",
+  "outputs": [
+   "[\"KO\",[\"b\"]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0036",
+  "program": "try (.foo[-1] = 0) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Out of bounds negative array index\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0037",
+  "program": "try (.foo[-2] = 0) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Out of bounds negative array index\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0038",
+  "program": ".[-1] = 5",
+  "input": "[0,1,2]",
+  "outputs": [
+   "[0,1,5]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0039",
+  "program": ".[-2] = 5",
+  "input": "[0,1,2]",
+  "outputs": [
+   "[0,5,2]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0040",
+  "program": "try (.[999999999] = 0) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Array index too large\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0041",
+  "program": ".[]",
+  "input": "[1,2,3]",
+  "outputs": [
+   "1",
+   "2",
+   "3"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0042",
+  "program": "1,1",
+  "input": "[]",
+  "outputs": [
+   "1",
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0043",
+  "program": "1,.",
+  "input": "[]",
+  "outputs": [
+   "1",
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0044",
+  "program": "[.]",
+  "input": "[2]",
+  "outputs": [
+   "[[2]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0045",
+  "program": "[[2]]",
+  "input": "[3]",
+  "outputs": [
+   "[[2]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0046",
+  "program": "[{}]",
+  "input": "[2]",
+  "outputs": [
+   "[{}]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0047",
+  "program": "[.[]]",
+  "input": "[\"a\"]",
+  "outputs": [
+   "[\"a\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0048",
+  "program": "[(.,1),((.,.[]),(2,3))]",
+  "input": "[\"a\",\"b\"]",
+  "outputs": [
+   "[[\"a\",\"b\"],1,[\"a\",\"b\"],\"a\",\"b\",2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0049",
+  "program": "[([5,5][]),.,.[]]",
+  "input": "[1,2,3]",
+  "outputs": [
+   "[5,5,[1,2,3],1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0050",
+  "program": "{x: (1,2)},{x:3} | .x",
+  "input": "null",
+  "outputs": [
+   "1",
+   "2",
+   "3"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0051",
+  "program": "[.[-4,-3,-2,-1,0,1,2,3]]",
+  "input": "[1,2,3]",
+  "outputs": [
+   "[null,1,2,3,1,2,3,null]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0052",
+  "program": "[range(0;10)]",
+  "input": "null",
+  "outputs": [
+   "[0,1,2,3,4,5,6,7,8,9]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0053",
+  "program": "[range(0,1;3,4)]",
+  "input": "null",
+  "outputs": [
+   "[0,1,2,0,1,2,3,1,2,1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0054",
+  "program": "[range(0;10;3)]",
+  "input": "null",
+  "outputs": [
+   "[0,3,6,9]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0055",
+  "program": "[range(0;10;-1)]",
+  "input": "null",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0056",
+  "program": "[range(0;-5;-1)]",
+  "input": "null",
+  "outputs": [
+   "[0,-1,-2,-3,-4]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0057",
+  "program": "[range(0,1;4,5;1,2)]",
+  "input": "null",
+  "outputs": [
+   "[0,1,2,3,0,2,0,1,2,3,4,0,2,4,1,2,3,1,3,1,2,3,4,1,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0058",
+  "program": "[while(.<100; .*2)]",
+  "input": "1",
+  "outputs": [
+   "[1,2,4,8,16,32,64]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0059",
+  "program": "[(label $here | .[] | if .>1 then break $here else . end), \"hi!\"]",
+  "input": "[0,1,2]",
+  "outputs": [
+   "[0,1,\"hi!\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0060",
+  "program": "[(label $here | .[] | if .>1 then break $here else . end), \"hi!\"]",
+  "input": "[0,2,1]",
+  "outputs": [
+   "[0,\"hi!\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0061",
+  "program": "[.[]|[.,1]|until(.[0] < 1; [.[0] - 1, .[1] * .[0]])|.[1]]",
+  "input": "[1,2,3,4,5]",
+  "outputs": [
+   "[1,2,6,24,120]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0062",
+  "program": "[label $out | foreach .[] as $item ([3, null]; if .[0] < 1 then break $out else [.[0] -1, $item] end; .[1])]",
+  "input": "[11,22,33,44,55,66,77,88,99]",
+  "outputs": [
+   "[11,22,33]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0063",
+  "program": "[foreach range(5) as $item (0; $item)]",
+  "input": "null",
+  "outputs": [
+   "[0,1,2,3,4]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0064",
+  "program": "[foreach .[] as [$i, $j] (0; . + $i - $j)]",
+  "input": "[[2,1], [5,3], [6,4]]",
+  "outputs": [
+   "[1,3,5]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0065",
+  "program": "[foreach .[] as {a:$a} (0; . + $a; -.)]",
+  "input": "[{\"a\":1}, {\"b\":2}, {\"a\":3, \"b\":4}]",
+  "outputs": [
+   "[-1,-1,-4]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0066",
+  "program": "[-foreach -.[] as $x (0; . + $x)]",
+  "input": "[1,2,3]",
+  "outputs": [
+   "[1,3,6]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0067",
+  "program": "[foreach .[] / .[] as $i (0; . + $i)]",
+  "input": "[1,2]",
+  "outputs": [
+   "[1,3,3.5,4.5]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0068",
+  "program": "[foreach .[] as $x (0; . + $x) as $x | $x]",
+  "input": "[1,2,3]",
+  "outputs": [
+   "[1,3,6]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0069",
+  "program": "[limit(3; .[])]",
+  "input": "[11,22,33,44,55,66,77,88,99]",
+  "outputs": [
+   "[11,22,33]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0070",
+  "program": "[limit(0; error)]",
+  "input": "\"badness\"",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0071",
+  "program": "[limit(1; 1, error)]",
+  "input": "\"badness\"",
+  "outputs": [
+   "[1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0072",
+  "program": "try limit(-1; error) catch .",
+  "input": "null",
+  "outputs": [
+   "\"limit doesn't support negative count\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0073",
+  "program": "[skip(3; .[])]",
+  "input": "[1,2,3,4,5,6,7,8,9]",
+  "outputs": [
+   "[4,5,6,7,8,9]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0074",
+  "program": "[skip(0,2,3,4; .[])]",
+  "input": "[1,2,3]",
+  "outputs": [
+   "[1,2,3,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0075",
+  "program": "[skip(3; .[])]",
+  "input": "[]",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0076",
+  "program": "try skip(-1; error) catch .",
+  "input": "null",
+  "outputs": [
+   "\"skip doesn't support negative count\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0077",
+  "program": "nth(1; 0,1,error(\"foo\"))",
+  "input": "null",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0078",
+  "program": "[first(range(.)), last(range(.))]",
+  "input": "10",
+  "outputs": [
+   "[0,9]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0079",
+  "program": "[first(range(.)), last(range(.))]",
+  "input": "0",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0080",
+  "program": "[nth(0,5,9,10,15; range(.)), try nth(-1; range(.)) catch .]",
+  "input": "10",
+  "outputs": [
+   "[0,5,9,\"nth doesn't support negative indices\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0081",
+  "program": "first(1,error(\"foo\"))",
+  "input": "null",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0082",
+  "program": "[limit(5,7; range(9))]",
+  "input": "null",
+  "outputs": [
+   "[0,1,2,3,4,0,1,2,3,4,5,6]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0083",
+  "program": "[nth(5,7; range(9;0;-1))]",
+  "input": "null",
+  "outputs": [
+   "[4,2]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0084",
+  "program": "[range(0,1,2;4,3,2;2,3)]",
+  "input": "null",
+  "outputs": [
+   "[0,2,0,3,0,2,0,0,0,1,3,1,1,1,1,1,2,2,2,2]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0085",
+  "program": "[range(3,5)]",
+  "input": "null",
+  "outputs": [
+   "[0,1,2,0,1,2,3,4]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0086",
+  "program": "[(index(\",\",\"|\"), rindex(\",\",\"|\")), indices(\",\",\"|\")]",
+  "input": "\"a,b|c,d,e||f,g,h,|,|,i,j\"",
+  "outputs": [
+   "[1,3,22,19,[1,5,7,12,14,16,18,20,22],[3,9,10,17,19]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0087",
+  "program": "join(\",\",\"/\")",
+  "input": "[\"a\",\"b\",\"c\",\"d\"]",
+  "outputs": [
+   "\"a,b,c,d\"",
+   "\"a/b/c/d\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0088",
+  "program": "[.[]|join(\"a\")]",
+  "input": "[[],[\"\"],[\"\",\"\"],[\"\",\"\",\"\"]]",
+  "outputs": [
+   "[\"\",\"\",\"a\",\"aa\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0089",
+  "program": "flatten(3,2,1)",
+  "input": "[0, [1], [[2]], [[[3]]]]",
+  "outputs": [
+   "[0,1,2,3]",
+   "[0,1,2,[3]]",
+   "[0,1,[2],[[3]]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0090",
+  "program": "[.[3:2], .[-5:4], .[:-2], .[-2:], .[3:3][1:], .[10:]]",
+  "input": "[0,1,2,3,4,5,6]",
+  "outputs": [
+   "[[],[2,3],[0,1,2,3,4],[5,6],[],[]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0091",
+  "program": "[.[3:2], .[-5:4], .[:-2], .[-2:], .[3:3][1:], .[10:]]",
+  "input": "\"abcdefghi\"",
+  "outputs": [
+   "[\"\",\"\",\"abcdefg\",\"hi\",\"\",\"\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0092",
+  "program": "del(.[2:4],.[0],.[-2:])",
+  "input": "[0,1,2,3,4,5,6,7]",
+  "outputs": [
+   "[1,4,5]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0093",
+  "program": ".[2:4] = ([], [\"a\",\"b\"], [\"a\",\"b\",\"c\"])",
+  "input": "[0,1,2,3,4,5,6,7]",
+  "outputs": [
+   "[0,1,4,5,6,7]",
+   "[0,1,\"a\",\"b\",4,5,6,7]",
+   "[0,1,\"a\",\"b\",\"c\",4,5,6,7]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0094",
+  "program": "reduce range(65540;65536;-1) as $i ([]; .[$i] = $i)|.[65536:]",
+  "input": "null",
+  "outputs": [
+   "[null,65537,65538,65539,65540]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0095",
+  "program": "1 as $x | 2 as $y | [$x,$y,$x]",
+  "input": "null",
+  "outputs": [
+   "[1,2,1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0096",
+  "program": "[1,2,3][] as $x | [[4,5,6,7][$x]]",
+  "input": "null",
+  "outputs": [
+   "[5]",
+   "[6]",
+   "[7]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0097",
+  "program": "42 as $x | . | . | . + 432 | $x + 1",
+  "input": "34324",
+  "outputs": [
+   "43"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0098",
+  "program": "1 + 2 as $x | -$x",
+  "input": "null",
+  "outputs": [
+   "-3"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0099",
+  "program": "\"x\" as $x | \"a\"+\"y\" as $y | $x+\",\"+$y",
+  "input": "null",
+  "outputs": [
+   "\"x,ay\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0100",
+  "program": "1 as $x | [$x,$x,$x as $x | $x]",
+  "input": "null",
+  "outputs": [
+   "[1,1,1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0101",
+  "program": "[1, {c:3, d:4}] as [$a, {c:$b, b:$c}] | $a, $b, $c",
+  "input": "null",
+  "outputs": [
+   "1",
+   "3",
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0102",
+  "program": ". as {as: $kw, \"str\": $str, (\"e\"+\"x\"+\"p\"): $exp} | [$kw, $str, $exp]",
+  "input": "{\"as\": 1, \"str\": 2, \"exp\": 3}",
+  "outputs": [
+   "[1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0103",
+  "program": ".[] as [$a, $b] | [$b, $a]",
+  "input": "[[1], [1, 2, 3]]",
+  "outputs": [
+   "[null,1]",
+   "[2,1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0104",
+  "program": ". as $i | . as [$i] | $i",
+  "input": "[0]",
+  "outputs": [
+   "0"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0105",
+  "program": ". as [$i] | . as $i | $i",
+  "input": "[0]",
+  "outputs": [
+   "[0]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0106",
+  "program": "1+1",
+  "input": "null",
+  "outputs": [
+   "2"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0107",
+  "program": "1+1",
+  "input": "\"wtasdf\"",
+  "outputs": [
+   "2"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0108",
+  "program": "2-1",
+  "input": "null",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0109",
+  "program": "2-(-1)",
+  "input": "null",
+  "outputs": [
+   "3"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0110",
+  "program": "1e+0+0.001e3",
+  "input": "\"I wonder what this will be?\"",
+  "outputs": [
+   "2"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0111",
+  "program": ".+4",
+  "input": "15",
+  "outputs": [
+   "19"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0112",
+  "program": ".+null",
+  "input": "{\"a\":42}",
+  "outputs": [
+   "{\"a\":42}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0113",
+  "program": "null+.",
+  "input": "null",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0114",
+  "program": ".a+.b",
+  "input": "{\"a\":42}",
+  "outputs": [
+   "42"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0115",
+  "program": "[1,2,3] + [.]",
+  "input": "null",
+  "outputs": [
+   "[1,2,3,null]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0116",
+  "program": "{\"a\":1} + {\"b\":2} + {\"c\":3}",
+  "input": "\"asdfasdf\"",
+  "outputs": [
+   "{\"a\":1,\"b\":2,\"c\":3}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0117",
+  "program": "\"asdf\" + \"jkl;\" + . + . + .",
+  "input": "\"some string\"",
+  "outputs": [
+   "\"asdfjkl;some stringsome stringsome string\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0118",
+  "program": "\"\\u0000\\u0020\\u0000\" + .",
+  "input": "\"\\u0000\\u0020\\u0000\"",
+  "outputs": [
+   "\"\\u0000 \\u0000\\u0000 \\u0000\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0119",
+  "program": "42 - .",
+  "input": "11",
+  "outputs": [
+   "31"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0120",
+  "program": "[1,2,3,4,1] - [.,3]",
+  "input": "1",
+  "outputs": [
+   "[2,4]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0121",
+  "program": "[-1 as $x | 1,$x]",
+  "input": "null",
+  "outputs": [
+   "[1,-1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0122",
+  "program": "[10 * 20, 20 / .]",
+  "input": "4",
+  "outputs": [
+   "[200,5]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0123",
+  "program": "1 + 2 * 2 + 10 / 2",
+  "input": "null",
+  "outputs": [
+   "10"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0124",
+  "program": "[16 / 4 / 2, 16 / 4 * 2, 16 - 4 - 2, 16 - 4 + 2]",
+  "input": "null",
+  "outputs": [
+   "[2,8,10,14]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0125",
+  "program": "1e-19 + 1e-20 - 5e-21",
+  "input": "null",
+  "outputs": [
+   "1.05e-19"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0126",
+  "program": "1 / 1e-17",
+  "input": "null",
+  "outputs": [
+   "1e+17"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0127",
+  "program": "9E999999999, 9999999999E999999990, 1E-999999999, 0.000000001E-999999990",
+  "input": "null",
+  "outputs": [
+   "9E+999999999",
+   "9.999999999E+999999999",
+   "1E-999999999",
+   "1E-999999999"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0128",
+  "program": "5E500000000 > 5E-5000000000, 10000E500000000 > 10000E-5000000000",
+  "input": "null",
+  "outputs": [
+   "true",
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0129",
+  "program": "(1e999999999, 10e999999999) > (1e-1147483646, 0.1e-1147483646)",
+  "input": "null",
+  "outputs": [
+   "true",
+   "true",
+   "true",
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0130",
+  "program": "25 % 7",
+  "input": "null",
+  "outputs": [
+   "4"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0131",
+  "program": "49732 % 472",
+  "input": "null",
+  "outputs": [
+   "172"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0132",
+  "program": "[(infinite, -infinite) % (1, -1, infinite)]",
+  "input": "null",
+  "outputs": [
+   "[0,0,0,0,0,-1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0133",
+  "program": "[nan % 1, 1 % nan | isnan]",
+  "input": "null",
+  "outputs": [
+   "[true,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0134",
+  "program": "1 + tonumber + (\"10\" | tonumber)",
+  "input": "4",
+  "outputs": [
+   "15"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0135",
+  "program": "\"123\\u0000456\" | try tonumber catch .",
+  "input": "null",
+  "outputs": [
+   "\"string (\\\"123\\\\u0000456\\\") cannot be parsed as a number\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0136",
+  "program": "map(toboolean)",
+  "input": "[\"false\",\"true\",false,true]",
+  "outputs": [
+   "[false,true,false,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0137",
+  "program": ".[] | try toboolean catch .",
+  "input": "[null,0,\"tru\",\"truee\",\"fals\",\"falsee\",[],{}]",
+  "outputs": [
+   "\"null (null) cannot be parsed as a boolean\"",
+   "\"number (0) cannot be parsed as a boolean\"",
+   "\"string (\\\"tru\\\") cannot be parsed as a boolean\"",
+   "\"string (\\\"truee\\\") cannot be parsed as a boolean\"",
+   "\"string (\\\"fals\\\") cannot be parsed as a boolean\"",
+   "\"string (\\\"falsee\\\") cannot be parsed as a boolean\"",
+   "\"array ([]) cannot be parsed as a boolean\"",
+   "\"object ({}) cannot be parsed as a boolean\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0138",
+  "program": "\"true\\u0000x\", \"false\\u0000\" | try toboolean catch .",
+  "input": "null",
+  "outputs": [
+   "\"string (\\\"true\\\\u0000x\\\") cannot be parsed as a boolean\"",
+   "\"string (\\\"false\\\\u0000\\\") cannot be parsed as a boolean\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0139",
+  "program": "[{\"a\":42},.object,10,.num,false,true,null,\"b\",[1,4]] | .[] as $x | [$x == .[]]",
+  "input": "{\"object\": {\"a\":42}, \"num\":10.0}",
+  "outputs": [
+   "[true,true,false,false,false,false,false,false,false]",
+   "[true,true,false,false,false,false,false,false,false]",
+   "[false,false,true,true,false,false,false,false,false]",
+   "[false,false,true,true,false,false,false,false,false]",
+   "[false,false,false,false,true,false,false,false,false]",
+   "[false,false,false,false,false,true,false,false,false]",
+   "[false,false,false,false,false,false,true,false,false]",
+   "[false,false,false,false,false,false,false,true,false]",
+   "[false,false,false,false,false,false,false,false,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0140",
+  "program": "[.[] | length]",
+  "input": "[[], {}, [1,2], {\"a\":42}, \"asdf\", \"\\u03bc\"]",
+  "outputs": [
+   "[0,0,2,1,4,1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0141",
+  "program": "utf8bytelength",
+  "input": "\"asdf\\u03bc\"",
+  "outputs": [
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0142",
+  "program": "[.[] | try utf8bytelength catch .]",
+  "input": "[[], {}, [1,2], 55, true, false]",
+  "outputs": [
+   "[\"array ([]) only strings have UTF-8 byte length\",\"object ({}) only strings have UTF-8 byte length\",\"array ([1,2]) only strings have UTF-8 byte length\",\"number (55) only strings have UTF-8 byte length\",\"boolean (true) only strings have UTF-8 byte length\",\"boolean (false) only strings have UTF-8 byte length\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0143",
+  "program": "map(keys)",
+  "input": "[{}, {\"abcd\":1,\"abc\":2,\"abcde\":3}, {\"x\":1, \"z\": 3, \"y\":2}]",
+  "outputs": [
+   "[[],[\"abc\",\"abcd\",\"abcde\"],[\"x\",\"y\",\"z\"]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0144",
+  "program": "[1,2,empty,3,empty,4]",
+  "input": "null",
+  "outputs": [
+   "[1,2,3,4]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0145",
+  "program": "map(add)",
+  "input": "[[], [1,2,3], [\"a\",\"b\",\"c\"], [[3],[4,5],[6]], [{\"a\":1}, {\"b\":2}, {\"a\":3}]]",
+  "outputs": [
+   "[null,6,\"abc\",[3,4,5,6],{\"a\":3,\"b\":2}]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0146",
+  "program": "map_values(.+1)",
+  "input": "[0,1,2]",
+  "outputs": [
+   "[1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0147",
+  "program": "[add(null), add(range(range(10))), add(empty), add(10,range(10))]",
+  "input": "null",
+  "outputs": [
+   "[null,120,null,55]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0148",
+  "program": ".sum = add(.arr[])",
+  "input": "{\"arr\":[]}",
+  "outputs": [
+   "{\"arr\":[],\"sum\":null}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0149",
+  "program": "add({(.[]):1}) | keys",
+  "input": "[\"a\",\"a\",\"b\",\"a\",\"d\",\"b\",\"d\",\"a\",\"d\"]",
+  "outputs": [
+   "[\"a\",\"b\",\"d\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0150",
+  "program": "def f: . + 1; def g: def g: . + 100; f | g | f; (f | g), g",
+  "input": "3.0",
+  "outputs": [
+   "106",
+   "105"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0151",
+  "program": "def f: (1000,2000); f",
+  "input": "123412345",
+  "outputs": [
+   "1000",
+   "2000"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0152",
+  "program": "def f(a;b;c;d;e;f): [a+1,b,c,d,e,f]; f(.[0];.[1];.[0];.[0];.[0];.[0])",
+  "input": "[1,2]",
+  "outputs": [
+   "[2,2,1,1,1,1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0153",
+  "program": "def f: 1; def g: f, def f: 2; def g: 3; f, def f: g; f, g; def f: 4; [f, def f: g; def g: 5; f, g]+[f,g]",
+  "input": "null",
+  "outputs": [
+   "[4,1,2,3,3,5,4,1,2,3,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0154",
+  "program": "def a: 0; . | a",
+  "input": "null",
+  "outputs": [
+   "0"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0155",
+  "program": "def f(a;b;c;d;e;f;g;h;i;j): [j,i,h,g,f,e,d,c,b,a]; f(.[0];.[1];.[2];.[3];.[4];.[5];.[6];.[7];.[8];.[9])",
+  "input": "[0,1,2,3,4,5,6,7,8,9]",
+  "outputs": [
+   "[9,8,7,6,5,4,3,2,1,0]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0156",
+  "program": "([1,2] + [4,5])",
+  "input": "[1,2,3]",
+  "outputs": [
+   "[1,2,4,5]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0157",
+  "program": "true",
+  "input": "[1]",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0158",
+  "program": "null,1,null",
+  "input": "\"hello\"",
+  "outputs": [
+   "null",
+   "1",
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0159",
+  "program": "[1,2,3]",
+  "input": "[5,6]",
+  "outputs": [
+   "[1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0160",
+  "program": "[.[]|floor]",
+  "input": "[-1.1,1.1,1.9]",
+  "outputs": [
+   "[-2,1,1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0161",
+  "program": "[.[]|sqrt]",
+  "input": "[4,9]",
+  "outputs": [
+   "[2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0162",
+  "program": "(add / length) as $m | map((. - $m) as $d | $d * $d) | add / length | sqrt",
+  "input": "[2,4,4,4,5,5,7,9]",
+  "outputs": [
+   "2"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0163",
+  "program": "atan * 4 * 1000000|floor / 1000000",
+  "input": "1",
+  "outputs": [
+   "3.141592"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0164",
+  "program": "[(3.141592 / 2) * (range(0;20) / 20)|cos * 1000000|floor / 1000000]",
+  "input": "null",
+  "outputs": [
+   "[1,0.996917,0.987688,0.972369,0.951056,0.923879,0.891006,0.85264,0.809017,0.760406,0.707106,0.649448,0.587785,0.522498,0.45399,0.382683,0.309017,0.233445,0.156434,0.078459]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0165",
+  "program": "[(3.141592 / 2) * (range(0;20) / 20)|sin * 1000000|floor / 1000000]",
+  "input": "null",
+  "outputs": [
+   "[0,0.078459,0.156434,0.233445,0.309016,0.382683,0.45399,0.522498,0.587785,0.649447,0.707106,0.760405,0.809016,0.85264,0.891006,0.923879,0.951056,0.972369,0.987688,0.996917]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0166",
+  "program": "def f(x): x | x; f([.], . + [42])",
+  "input": "[1,2,3]",
+  "outputs": [
+   "[[[1,2,3]]]",
+   "[[1,2,3],42]",
+   "[[1,2,3,42]]",
+   "[1,2,3,42,42]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0167",
+  "program": "def f: .+1; def g: f; def f: .+100; def f(a):a+.+11; [(g|f(20)), f]",
+  "input": "1",
+  "outputs": [
+   "[33,101]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0168",
+  "program": "def id(x):x; 2000 as $x | def f(x):1 as $x | id([$x, x, x]); def g(x): 100 as $x | f($x,$x+x); g($x)",
+  "input": "\"more testing\"",
+  "outputs": [
+   "[1,100,2100,100,2100]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0169",
+  "program": "def x(a;b): a as $a | b as $b | $a + $b; def y($a;$b): $a + $b; def check(a;b): [x(a;b)] == [y(a;b)]; check(.[];.[]*2)",
+  "input": "[1,2,3]",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0170",
+  "program": "[[20,10][1,0] as $x | def f: (100,200) as $y | def g: [$x + $y, .]; . + $x | g; f[0] | [f][0][1] | f]",
+  "input": "999999999",
+  "outputs": [
+   "[[110,130],[210,130],[110,230],[210,230],[120,160],[220,160],[120,260],[220,260]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0171",
+  "program": "def fac: if . == 1 then 1 else . * (. - 1 | fac) end; [.[] | fac]",
+  "input": "[1,2,3,4]",
+  "outputs": [
+   "[1,2,6,24]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0172",
+  "program": "reduce .[] as $x (0; . + $x)",
+  "input": "[1,2,4]",
+  "outputs": [
+   "7"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0173",
+  "program": "reduce .[] as [$i, {j:$j}] (0; . + $i - $j)",
+  "input": "[[2,{\"j\":1}], [5,{\"j\":3}], [6,{\"j\":4}]]",
+  "outputs": [
+   "5"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0174",
+  "program": "reduce [[1,2,10], [3,4,10]][] as [$i,$j] (0; . + $i * $j)",
+  "input": "null",
+  "outputs": [
+   "14"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0175",
+  "program": "[-reduce -.[] as $x (0; . + $x)]",
+  "input": "[1,2,3]",
+  "outputs": [
+   "[6]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0176",
+  "program": "[reduce .[] / .[] as $i (0; . + $i)]",
+  "input": "[1,2]",
+  "outputs": [
+   "[4.5]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0177",
+  "program": "reduce .[] as $x (0; . + $x) as $x | $x",
+  "input": "[1,2,3]",
+  "outputs": [
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0178",
+  "program": "reduce . as $n (.; .)",
+  "input": "null",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0179",
+  "program": ". as {$a, b: [$c, {$d}]} | [$a, $c, $d]",
+  "input": "{\"a\":1, \"b\":[2,{\"d\":3}]}",
+  "outputs": [
+   "[1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0180",
+  "program": ". as {$a, $b:[$c, $d]}| [$a, $b, $c, $d]",
+  "input": "{\"a\":1, \"b\":[2,{\"d\":3}]}",
+  "outputs": [
+   "[1,[2,{\"d\":3}],2,{\"d\":3}]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0181",
+  "program": ".[] | . as {$a, b: [$c, {$d}]} ?// [$a, {$b}, $e] ?// $f | [$a, $b, $c, $d, $e, $f]",
+  "input": "[{\"a\":1, \"b\":[2,{\"d\":3}]}, [4, {\"b\":5, \"c\":6}, 7, 8, 9], \"foo\"]",
+  "outputs": [
+   "[1,null,2,3,null,null]",
+   "[4,5,null,null,7,null]",
+   "[null,null,null,null,null,\"foo\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0182",
+  "program": ".[] | . as {a:$a} ?// {a:$a} ?// {a:$a} | $a",
+  "input": "[[3],[4],[5],6]",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): Cannot index array with string (\"a\")\n",
+  "exit": 5
+ },
+ {
+  "id": "jq_test_0183",
+  "program": ".[] as {a:$a} ?// {a:$a} ?// {a:$a} | $a",
+  "input": "[[3],[4],[5],6]",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): Cannot index array with string (\"a\")\n",
+  "exit": 5
+ },
+ {
+  "id": "jq_test_0184",
+  "program": "[[3],[4],[5],6][] | . as {a:$a} ?// {a:$a} ?// {a:$a} | $a",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): Cannot index array with string (\"a\")\n",
+  "exit": 5
+ },
+ {
+  "id": "jq_test_0185",
+  "program": "[[3],[4],[5],6] | .[] as {a:$a} ?// {a:$a} ?// {a:$a} | $a",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): Cannot index array with string (\"a\")\n",
+  "exit": 5
+ },
+ {
+  "id": "jq_test_0186",
+  "program": ".[] | . as {a:$a} ?// {a:$a} ?// $a | $a",
+  "input": "[[3],[4],[5],6]",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0187",
+  "program": ".[] as {a:$a} ?// {a:$a} ?// $a | $a",
+  "input": "[[3],[4],[5],6]",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0188",
+  "program": "[[3],[4],[5],6][] | . as {a:$a} ?// {a:$a} ?// $a | $a",
+  "input": "null",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0189",
+  "program": "[[3],[4],[5],6] | .[] as {a:$a} ?// {a:$a} ?// $a | $a",
+  "input": "null",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0190",
+  "program": ".[] | . as {a:$a} ?// $a ?// {a:$a} | $a",
+  "input": "[[3],[4],[5],6]",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0191",
+  "program": ".[] as {a:$a} ?// $a ?// {a:$a} | $a",
+  "input": "[[3],[4],[5],6]",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0192",
+  "program": "[[3],[4],[5],6][] | . as {a:$a} ?// $a ?// {a:$a} | $a",
+  "input": "null",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0193",
+  "program": "[[3],[4],[5],6] | .[] as {a:$a} ?// $a ?// {a:$a} | $a",
+  "input": "null",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0194",
+  "program": ".[] | . as $a ?// {a:$a} ?// {a:$a} | $a",
+  "input": "[[3],[4],[5],6]",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0195",
+  "program": ".[] as $a ?// {a:$a} ?// {a:$a} | $a",
+  "input": "[[3],[4],[5],6]",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0196",
+  "program": "[[3],[4],[5],6][] | . as $a ?// {a:$a} ?// {a:$a} | $a",
+  "input": "null",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0197",
+  "program": "[[3],[4],[5],6] | .[] as $a ?// {a:$a} ?// {a:$a} | $a",
+  "input": "null",
+  "outputs": [
+   "[3]",
+   "[4]",
+   "[5]",
+   "6"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0198",
+  "program": ". as $dot|any($dot[];not)",
+  "input": "[1,2,3,4,true,false,1,2,3,4,5]",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0199",
+  "program": ". as $dot|any($dot[];not)",
+  "input": "[1,2,3,4,true]",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0200",
+  "program": ". as $dot|all($dot[];.)",
+  "input": "[1,2,3,4,true,false,1,2,3,4,5]",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0201",
+  "program": ". as $dot|all($dot[];.)",
+  "input": "[1,2,3,4,true]",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0202",
+  "program": "any(true, error; .)",
+  "input": "\"badness\"",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0203",
+  "program": "all(false, error; .)",
+  "input": "\"badness\"",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0204",
+  "program": "any(not)",
+  "input": "[]",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0205",
+  "program": "all(not)",
+  "input": "[]",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0206",
+  "program": "any(not)",
+  "input": "[false]",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0207",
+  "program": "all(not)",
+  "input": "[false]",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0208",
+  "program": "[any,all]",
+  "input": "[]",
+  "outputs": [
+   "[false,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0209",
+  "program": "[any,all]",
+  "input": "[true]",
+  "outputs": [
+   "[true,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0210",
+  "program": "[any,all]",
+  "input": "[false]",
+  "outputs": [
+   "[false,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0211",
+  "program": "[any,all]",
+  "input": "[true,false]",
+  "outputs": [
+   "[true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0212",
+  "program": "[any,all]",
+  "input": "[null,null,true]",
+  "outputs": [
+   "[true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0213",
+  "program": "path(.foo[0,1])",
+  "input": "null",
+  "outputs": [
+   "[\"foo\",0]",
+   "[\"foo\",1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0214",
+  "program": "path(.[] | select(.>3))",
+  "input": "[1,5,3]",
+  "outputs": [
+   "[1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0215",
+  "program": "path(.)",
+  "input": "42",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0216",
+  "program": "try path(.a | map(select(.b == 0))) catch .",
+  "input": "{\"a\":[{\"b\":0}]}",
+  "outputs": [
+   "\"Invalid path expression with result [{\\\"b\\\":0}]\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0217",
+  "program": "try path(.a | map(select(.b == 0)) | .[0]) catch .",
+  "input": "{\"a\":[{\"b\":0}]}",
+  "outputs": [
+   "\"Invalid path expression near attempt to access element 0 of [{\\\"b\\\":0}]\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0218",
+  "program": "try path(.a | map(select(.b == 0)) | .c) catch .",
+  "input": "{\"a\":[{\"b\":0}]}",
+  "outputs": [
+   "\"Invalid path expression near attempt to access element \\\"c\\\" of [{\\\"b\\\":0}]\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0219",
+  "program": "try path(.a | map(select(.b == 0)) | .[]) catch .",
+  "input": "{\"a\":[{\"b\":0}]}",
+  "outputs": [
+   "\"Invalid path expression near attempt to iterate through [{\\\"b\\\":0}]\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0220",
+  "program": "path(.a[path(.b)[0]])",
+  "input": "{\"a\":{\"b\":0}}",
+  "outputs": [
+   "[\"a\",\"b\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0221",
+  "program": "[paths]",
+  "input": "[1,[[],{\"a\":2}]]",
+  "outputs": [
+   "[[0],[1],[1,0],[1,1],[1,1,\"a\"]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0222",
+  "program": "[\"foo\",1] as $p | getpath($p), setpath($p; 20), delpaths([$p])",
+  "input": "{\"bar\": 42, \"foo\": [\"a\", \"b\", \"c\", \"d\"]}",
+  "outputs": [
+   "\"b\"",
+   "{\"bar\":42,\"foo\":[\"a\",20,\"c\",\"d\"]}",
+   "{\"bar\":42,\"foo\":[\"a\",\"c\",\"d\"]}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0223",
+  "program": "map(getpath([2])), map(setpath([2]; 42)), map(delpaths([[2]]))",
+  "input": "[[0], [0,1], [0,1,2]]",
+  "outputs": [
+   "[null,null,2]",
+   "[[0,null,42],[0,1,42],[0,1,42]]",
+   "[[0],[0,1],[0,1]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0224",
+  "program": "map(delpaths([[0,\"foo\"]]))",
+  "input": "[[{\"foo\":2, \"x\":1}], [{\"bar\":2}]]",
+  "outputs": [
+   "[[{\"x\":1}],[{\"bar\":2}]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0225",
+  "program": "[\"foo\",1] as $p | getpath($p), setpath($p; 20), delpaths([$p])",
+  "input": "{\"bar\":false}",
+  "outputs": [
+   "null",
+   "{\"bar\":false,\"foo\":[null,20]}",
+   "{\"bar\":false}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0226",
+  "program": "delpaths([[-200]])",
+  "input": "[1,2,3]",
+  "outputs": [
+   "[1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0227",
+  "program": "try delpaths(0) catch .",
+  "input": "{}",
+  "outputs": [
+   "\"Paths must be specified as an array\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0228",
+  "program": "del(.), del(empty), del((.foo,.bar,.baz) | .[2,3,0]), del(.foo[0], .bar[0], .foo, .baz.bar[0].x)",
+  "input": "{\"foo\": [0,1,2,3,4], \"bar\": [0,1]}",
+  "outputs": [
+   "null",
+   "{\"foo\":[0,1,2,3,4],\"bar\":[0,1]}",
+   "{\"foo\":[1,4],\"bar\":[1]}",
+   "{\"bar\":[1]}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0229",
+  "program": "del(.[1], .[-6], .[2], .[-3:9])",
+  "input": "[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]",
+  "outputs": [
+   "[0,3,5,6,9]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0230",
+  "program": "del(.[nan])",
+  "input": "[1,2,3]",
+  "outputs": [
+   "[1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0231",
+  "program": "del(.[nan,nan])",
+  "input": "[1,2,3]",
+  "outputs": [
+   "[1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0232",
+  "program": "setpath([-1]; 1)",
+  "input": "[0]",
+  "outputs": [
+   "[1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0233",
+  "program": "pick(.a.b.c)",
+  "input": "null",
+  "outputs": [
+   "{\"a\":{\"b\":{\"c\":null}}}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0234",
+  "program": "pick(first)",
+  "input": "[1,2]",
+  "outputs": [
+   "[1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0235",
+  "program": "pick(first|first)",
+  "input": "[[10,20],30]",
+  "outputs": [
+   "[[10]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0236",
+  "program": "try pick(last) catch .",
+  "input": "[1,2]",
+  "outputs": [
+   "\"Out of bounds negative array index\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0237",
+  "program": ".message = \"goodbye\"",
+  "input": "{\"message\": \"hello\"}",
+  "outputs": [
+   "{\"message\":\"goodbye\"}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0238",
+  "program": ".foo = .bar",
+  "input": "{\"bar\":42}",
+  "outputs": [
+   "{\"bar\":42,\"foo\":42}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0239",
+  "program": ".foo |= .+1",
+  "input": "{\"foo\": 42}",
+  "outputs": [
+   "{\"foo\":43}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0240",
+  "program": ".[] += 2, .[] *= 2, .[] -= 2, .[] /= 2, .[] %=2",
+  "input": "[1,3,5]",
+  "outputs": [
+   "[3,5,7]",
+   "[2,6,10]",
+   "[-1,1,3]",
+   "[0.5,1.5,2.5]",
+   "[1,1,1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0241",
+  "program": "[.[] % 7]",
+  "input": "[-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7]",
+  "outputs": [
+   "[0,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,0]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0242",
+  "program": ".foo += .foo",
+  "input": "{\"foo\":2}",
+  "outputs": [
+   "{\"foo\":4}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0243",
+  "program": ".[0].a |= {\"old\":., \"new\":(.+1)}",
+  "input": "[{\"a\":1,\"b\":2}]",
+  "outputs": [
+   "[{\"a\":{\"old\":1,\"new\":2},\"b\":2}]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0244",
+  "program": "def inc(x): x |= .+1; inc(.[].a)",
+  "input": "[{\"a\":1,\"b\":2},{\"a\":2,\"b\":4},{\"a\":7,\"b\":8}]",
+  "outputs": [
+   "[{\"a\":2,\"b\":2},{\"a\":3,\"b\":4},{\"a\":8,\"b\":8}]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0245",
+  "program": ".[] | try (getpath([\"a\",0,\"b\"]) |= 5) catch .",
+  "input": "[null,{\"b\":0},{\"a\":0},{\"a\":null},{\"a\":[0,1]},{\"a\":{\"b\":1}},{\"a\":[{}]},{\"a\":[{\"c\":3}]}]",
+  "outputs": [
+   "{\"a\":[{\"b\":5}]}",
+   "{\"b\":0,\"a\":[{\"b\":5}]}",
+   "\"Cannot index number with number (0)\"",
+   "{\"a\":[{\"b\":5}]}",
+   "\"Cannot index number with string (\\\"b\\\")\"",
+   "\"Cannot index object with number (0)\"",
+   "{\"a\":[{\"b\":5}]}",
+   "{\"a\":[{\"c\":3,\"b\":5}]}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0246",
+  "program": "(.[] | select(. >= 2)) |= empty",
+  "input": "[1,5,3,0,7]",
+  "outputs": [
+   "[1,0]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0247",
+  "program": ".[] |= select(. % 2 == 0)",
+  "input": "[0,1,2,3,4,5]",
+  "outputs": [
+   "[0,2,4]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0248",
+  "program": ".foo[1,4,2,3] |= empty",
+  "input": "{\"foo\":[0,1,2,3,4,5]}",
+  "outputs": [
+   "{\"foo\":[0,5]}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0249",
+  "program": ".[2][3] = 1",
+  "input": "[4]",
+  "outputs": [
+   "[4,null,[null,null,null,1]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0250",
+  "program": ".foo[2].bar = 1",
+  "input": "{\"foo\":[11], \"bar\":42}",
+  "outputs": [
+   "{\"foo\":[11,null,{\"bar\":1}],\"bar\":42}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0251",
+  "program": "try ((map(select(.a == 1))[].b) = 10) catch .",
+  "input": "[{\"a\":0},{\"a\":1}]",
+  "outputs": [
+   "\"Invalid path expression near attempt to iterate through [{\\\"a\\\":1}]\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0252",
+  "program": "try ((map(select(.a == 1))[].a) |= .+1) catch .",
+  "input": "[{\"a\":0},{\"a\":1}]",
+  "outputs": [
+   "\"Invalid path expression near attempt to iterate through [{\\\"a\\\":1}]\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0253",
+  "program": "def x: .[1,2]; x=10",
+  "input": "[0,1,2]",
+  "outputs": [
+   "[0,10,10]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0254",
+  "program": "try (def x: reverse; x=10) catch .",
+  "input": "[0,1,2]",
+  "outputs": [
+   "\"Invalid path expression with result [2,1,0]\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0255",
+  "program": ".[] = 1",
+  "input": "[1,null,Infinity,-Infinity,NaN,-NaN]",
+  "outputs": [
+   "[1,1,1,1,1,1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0256",
+  "program": "[.[] | if .foo then \"yep\" else \"nope\" end]",
+  "input": "[{\"foo\":0},{\"foo\":1},{\"foo\":[]},{\"foo\":true},{\"foo\":false},{\"foo\":null},{\"foo\":\"foo\"},{}]",
+  "outputs": [
+   "[\"yep\",\"yep\",\"yep\",\"yep\",\"nope\",\"nope\",\"yep\",\"nope\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0257",
+  "program": "[.[] | if .baz then \"strange\" elif .foo then \"yep\" else \"nope\" end]",
+  "input": "[{\"foo\":0},{\"foo\":1},{\"foo\":[]},{\"foo\":true},{\"foo\":false},{\"foo\":null},{\"foo\":\"foo\"},{}]",
+  "outputs": [
+   "[\"yep\",\"yep\",\"yep\",\"yep\",\"nope\",\"nope\",\"yep\",\"nope\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0258",
+  "program": "[if 1,null,2 then 3 else 4 end]",
+  "input": "null",
+  "outputs": [
+   "[3,4,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0259",
+  "program": "[if empty then 3 else 4 end]",
+  "input": "null",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0260",
+  "program": "[if 1 then 3,4 else 5 end]",
+  "input": "null",
+  "outputs": [
+   "[3,4]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0261",
+  "program": "[if null then 3 else 5,6 end]",
+  "input": "null",
+  "outputs": [
+   "[5,6]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0262",
+  "program": "[if true then 3 end]",
+  "input": "7",
+  "outputs": [
+   "[3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0263",
+  "program": "[if false then 3 end]",
+  "input": "7",
+  "outputs": [
+   "[7]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0264",
+  "program": "[if false then 3 else . end]",
+  "input": "7",
+  "outputs": [
+   "[7]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0265",
+  "program": "[if false then 3 elif false then 4 end]",
+  "input": "7",
+  "outputs": [
+   "[7]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0266",
+  "program": "[if false then 3 elif false then 4 else . end]",
+  "input": "7",
+  "outputs": [
+   "[7]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0267",
+  "program": "[-if true then 1 else 2 end]",
+  "input": "null",
+  "outputs": [
+   "[-1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0268",
+  "program": "{x: if true then 1 else 2 end}",
+  "input": "null",
+  "outputs": [
+   "{\"x\":1}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0269",
+  "program": "if true then [.] else . end []",
+  "input": "null",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0270",
+  "program": "[.[] | [.foo[] // .bar]]",
+  "input": "[{\"foo\":[1,2], \"bar\": 42}, {\"foo\":[1], \"bar\": null}, {\"foo\":[null,false,3], \"bar\": 18}, {\"foo\":[], \"bar\":42}, {\"foo\": [null,false,null], \"bar\": 41}]",
+  "outputs": [
+   "[[1,2],[1],[3],[42],[41]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0271",
+  "program": ".[] //= .[0]",
+  "input": "[\"hello\",true,false,[false],null]",
+  "outputs": [
+   "[\"hello\",true,\"hello\",[false],\"hello\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0272",
+  "program": ".[] | [.[0] and .[1], .[0] or .[1]]",
+  "input": "[[true,[]], [false,1], [42,null], [null,false]]",
+  "outputs": [
+   "[true,true]",
+   "[false,true]",
+   "[false,true]",
+   "[false,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0273",
+  "program": "[.[] | not]",
+  "input": "[1,0,false,null,true,\"hello\"]",
+  "outputs": [
+   "[false,false,true,true,false,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0274",
+  "program": "[10 > 0, 10 > 10, 10 > 20, 10 < 0, 10 < 10, 10 < 20]",
+  "input": "{}",
+  "outputs": [
+   "[true,false,false,false,false,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0275",
+  "program": "[10 >= 0, 10 >= 10, 10 >= 20, 10 <= 0, 10 <= 10, 10 <= 20]",
+  "input": "{}",
+  "outputs": [
+   "[true,true,false,false,true,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0276",
+  "program": "[ 10 == 10, 10 != 10, 10 != 11, 10 == 11]",
+  "input": "{}",
+  "outputs": [
+   "[true,false,true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0277",
+  "program": "[\"hello\" == \"hello\", \"hello\" != \"hello\", \"hello\" == \"world\", \"hello\" != \"world\" ]",
+  "input": "{}",
+  "outputs": [
+   "[true,false,false,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0278",
+  "program": "[[1,2,3] == [1,2,3], [1,2,3] != [1,2,3], [1,2,3] == [4,5,6], [1,2,3] != [4,5,6]]",
+  "input": "{}",
+  "outputs": [
+   "[true,false,false,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0279",
+  "program": "[{\"foo\":42} == {\"foo\":42},{\"foo\":42} != {\"foo\":42}, {\"foo\":42} != {\"bar\":42}, {\"foo\":42} == {\"bar\":42}]",
+  "input": "{}",
+  "outputs": [
+   "[true,false,true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0280",
+  "program": "[{\"foo\":[1,2,{\"bar\":18},\"world\"]} == {\"foo\":[1,2,{\"bar\":18},\"world\"]},{\"foo\":[1,2,{\"bar\":18},\"world\"]} == {\"foo\":[1,2,{\"bar\":19},\"world\"]}]",
+  "input": "{}",
+  "outputs": [
+   "[true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0281",
+  "program": "[(\"foo\" | contains(\"foo\")), (\"foobar\" | contains(\"foo\")), (\"foo\" | contains(\"foobar\"))]",
+  "input": "{}",
+  "outputs": [
+   "[true,true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0282",
+  "program": "[contains(\"\"), contains(\"\\u0000\")]",
+  "input": "\"\\u0000\"",
+  "outputs": [
+   "[true,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0283",
+  "program": "[contains(\"\"), contains(\"a\"), contains(\"ab\"), contains(\"c\"), contains(\"d\")]",
+  "input": "\"ab\\u0000cd\"",
+  "outputs": [
+   "[true,true,true,true,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0284",
+  "program": "[contains(\"cd\"), contains(\"b\\u0000\"), contains(\"ab\\u0000\")]",
+  "input": "\"ab\\u0000cd\"",
+  "outputs": [
+   "[true,true,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0285",
+  "program": "[contains(\"b\\u0000c\"), contains(\"b\\u0000cd\"), contains(\"b\\u0000cd\")]",
+  "input": "\"ab\\u0000cd\"",
+  "outputs": [
+   "[true,true,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0286",
+  "program": "[contains(\"@\"), contains(\"\\u0000@\"), contains(\"\\u0000what\")]",
+  "input": "\"ab\\u0000cd\"",
+  "outputs": [
+   "[false,false,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0287",
+  "program": "[.[]|try if . == 0 then error(\"foo\") elif . == 1 then .a elif . == 2 then empty else . end catch .]",
+  "input": "[0,1,2,3]",
+  "outputs": [
+   "[\"foo\",\"Cannot index number with string (\\\"a\\\")\",3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0288",
+  "program": "[.[]|(.a, .a)?]",
+  "input": "[null,true,{\"a\":1}]",
+  "outputs": [
+   "[null,null,1,1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0289",
+  "program": "[[.[]|[.a,.a]]?]",
+  "input": "[null,true,{\"a\":1}]",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0290",
+  "program": "[if error then 1 else 2 end?]",
+  "input": "\"foo\"",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0291",
+  "program": "try error(0) // 1",
+  "input": "null",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0292",
+  "program": "1, try error(2), 3",
+  "input": "null",
+  "outputs": [
+   "1",
+   "3"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0293",
+  "program": "1 + try 2 catch 3 + 4",
+  "input": "null",
+  "outputs": [
+   "7"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0294",
+  "program": "[-try .]",
+  "input": "1",
+  "outputs": [
+   "[-1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0295",
+  "program": "try -.? catch .",
+  "input": "\"foo\"",
+  "outputs": [
+   "\"string (\\\"foo\\\") cannot be negated\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0296",
+  "program": "{x: try 1, y: try error catch 2, z: if true then 3 end}",
+  "input": "null",
+  "outputs": [
+   "{\"x\":1,\"y\":2,\"z\":3}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0297",
+  "program": "{x: 1 + 2, y: false or true, z: null // 3}",
+  "input": "null",
+  "outputs": [
+   "{\"x\":3,\"y\":true,\"z\":3}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0298",
+  "program": ".[] | try error catch .",
+  "input": "[1,null,2]",
+  "outputs": [
+   "1",
+   "null",
+   "2"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0299",
+  "program": "try error(\"\\($__loc__)\") catch .",
+  "input": "null",
+  "outputs": [
+   "\"{\\\"file\\\":\\\"<top-level>\\\",\\\"line\\\":1}\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0300",
+  "program": "[.[]|startswith(\"foo\")]",
+  "input": "[\"fo\", \"foo\", \"barfoo\", \"foobar\", \"barfoob\"]",
+  "outputs": [
+   "[false,true,false,true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0301",
+  "program": "[.[]|endswith(\"foo\")]",
+  "input": "[\"fo\", \"foo\", \"barfoo\", \"foobar\", \"barfoob\"]",
+  "outputs": [
+   "[false,true,true,false,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0302",
+  "program": "[.[] | split(\", \")]",
+  "input": "[\"a,b, c, d, e,f\",\", a,b, c, d, e,f, \"]",
+  "outputs": [
+   "[[\"a,b\",\"c\",\"d\",\"e,f\"],[\"\",\"a,b\",\"c\",\"d\",\"e,f\",\"\"]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0303",
+  "program": "split(\"\")",
+  "input": "\"abc\"",
+  "outputs": [
+   "[\"a\",\"b\",\"c\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0304",
+  "program": "[.[]|ltrimstr(\"foo\")]",
+  "input": "[\"fo\", \"foo\", \"barfoo\", \"foobar\", \"afoo\"]",
+  "outputs": [
+   "[\"fo\",\"\",\"barfoo\",\"bar\",\"afoo\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0305",
+  "program": "[.[]|rtrimstr(\"foo\")]",
+  "input": "[\"fo\", \"foo\", \"barfoo\", \"foobar\", \"foob\"]",
+  "outputs": [
+   "[\"fo\",\"\",\"bar\",\"foobar\",\"foob\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0306",
+  "program": "[.[]|trimstr(\"foo\")]",
+  "input": "[\"fo\", \"foo\", \"barfoo\", \"foobarfoo\", \"foob\"]",
+  "outputs": [
+   "[\"fo\",\"\",\"bar\",\"bar\",\"b\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0307",
+  "program": "[.[]|ltrimstr(\"\")]",
+  "input": "[\"a\", \"xx\", \"\"]",
+  "outputs": [
+   "[\"a\",\"xx\",\"\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0308",
+  "program": "[.[]|rtrimstr(\"\")]",
+  "input": "[\"a\", \"xx\", \"\"]",
+  "outputs": [
+   "[\"a\",\"xx\",\"\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0309",
+  "program": "[.[]|trimstr(\"\")]",
+  "input": "[\"a\", \"xx\", \"\"]",
+  "outputs": [
+   "[\"a\",\"xx\",\"\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0310",
+  "program": "[(index(\",\"), rindex(\",\")), indices(\",\")]",
+  "input": "\"a,bc,def,ghij,klmno\"",
+  "outputs": [
+   "[1,13,[1,4,8,13]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0311",
+  "program": "[ index(\"aba\"), rindex(\"aba\"), indices(\"aba\") ]",
+  "input": "\"xababababax\"",
+  "outputs": [
+   "[1,7,[1,3,5,7]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0312",
+  "program": "try _strindices(\"abc\") catch .",
+  "input": "123",
+  "outputs": [
+   "\"number (123) cannot be searched, as it is not a string\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0313",
+  "program": "try _strindices(123) catch .",
+  "input": "\"abc\"",
+  "outputs": [
+   "\"number (123) is not a string\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0314",
+  "program": "map(trim), map(ltrim), map(rtrim)",
+  "input": "[\" \\n\\t\\r\\f\\u000b\", \"\",\"  \", \"a\", \" a \", \"abc\", \"  abc  \", \"  abc\", \"abc  \"]",
+  "outputs": [
+   "[\"\",\"\",\"\",\"a\",\"a\",\"abc\",\"abc\",\"abc\",\"abc\"]",
+   "[\"\",\"\",\"\",\"a\",\"a \",\"abc\",\"abc  \",\"abc\",\"abc  \"]",
+   "[\"\",\"\",\"\",\"a\",\" a\",\"abc\",\"  abc\",\"  abc\",\"abc\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0315",
+  "program": "trim, ltrim, rtrim",
+  "input": "\"\\u0009\\u000A\\u000B\\u000C\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000abc\\u0009\\u000A\\u000B\\u000C\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\"",
+  "outputs": [
+   "\"abc\"",
+   "\"abc\\t\\n\\u000b\\f\\r                  　\"",
+   "\"\\t\\n\\u000b\\f\\r                  　abc\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0316",
+  "program": "try trim catch ., try ltrim catch ., try rtrim catch .",
+  "input": "123",
+  "outputs": [
+   "\"trim input must be a string\"",
+   "\"trim input must be a string\"",
+   "\"trim input must be a string\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0317",
+  "program": "indices(1)",
+  "input": "[0,1,1,2,3,4,1,5]",
+  "outputs": [
+   "[1,2,6]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0318",
+  "program": "indices([1,2])",
+  "input": "[0,1,2,3,1,4,2,5,1,2,6,7]",
+  "outputs": [
+   "[1,8]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0319",
+  "program": "indices([1,2])",
+  "input": "[1]",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0320",
+  "program": "indices(\", \")",
+  "input": "\"a,b, cd,e, fgh, ijkl\"",
+  "outputs": [
+   "[3,9,14]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0321",
+  "program": "index(\"!\")",
+  "input": "\"здравствуй мир!\"",
+  "outputs": [
+   "14"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0322",
+  "program": ".[:rindex(\"x\")]",
+  "input": "\"正xyz\"",
+  "outputs": [
+   "\"正\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0323",
+  "program": "indices(\"o\")",
+  "input": "\"🇬🇧oo\"",
+  "outputs": [
+   "[2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0324",
+  "program": "indices(\"o\")",
+  "input": "\"ƒoo\"",
+  "outputs": [
+   "[1,2]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0325",
+  "program": "[.[]|split(\",\")]",
+  "input": "[\"a, bc, def, ghij, jklmn, a,b, c,d, e,f\", \"a,b,c,d, e,f,g,h\"]",
+  "outputs": [
+   "[[\"a\",\" bc\",\" def\",\" ghij\",\" jklmn\",\" a\",\"b\",\" c\",\"d\",\" e\",\"f\"],[\"a\",\"b\",\"c\",\"d\",\" e\",\"f\",\"g\",\"h\"]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0326",
+  "program": "[.[]|split(\", \")]",
+  "input": "[\"a, bc, def, ghij, jklmn, a,b, c,d, e,f\", \"a,b,c,d, e,f,g,h\"]",
+  "outputs": [
+   "[[\"a\",\"bc\",\"def\",\"ghij\",\"jklmn\",\"a,b\",\"c,d\",\"e,f\"],[\"a,b,c,d\",\"e,f,g,h\"]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0327",
+  "program": "[.[] * 3]",
+  "input": "[\"a\", \"ab\", \"abc\"]",
+  "outputs": [
+   "[\"aaa\",\"ababab\",\"abcabcabc\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0328",
+  "program": "[.[] * \"abc\"]",
+  "input": "[-1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 3.7, 10.0]",
+  "outputs": [
+   "[null,null,\"\",\"\",\"abc\",\"abc\",\"abcabcabc\",\"abcabcabcabcabcabcabcabcabcabc\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0329",
+  "program": "[. * (nan,-nan)]",
+  "input": "\"abc\"",
+  "outputs": [
+   "[null,null]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0330",
+  "program": ". * 100000 | [.[:10],.[-10:]]",
+  "input": "\"abc\"",
+  "outputs": [
+   "[\"abcabcabca\",\"cabcabcabc\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0331",
+  "program": ". * 1000000000",
+  "input": "\"\"",
+  "outputs": [
+   "\"\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0332",
+  "program": "try (. * 1000000000) catch .",
+  "input": "\"abc\"",
+  "outputs": [
+   "\"Repeat string result too long\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0333",
+  "program": "[.[] / \",\"]",
+  "input": "[\"a, bc, def, ghij, jklmn, a,b, c,d, e,f\", \"a,b,c,d, e,f,g,h\"]",
+  "outputs": [
+   "[[\"a\",\" bc\",\" def\",\" ghij\",\" jklmn\",\" a\",\"b\",\" c\",\"d\",\" e\",\"f\"],[\"a\",\"b\",\"c\",\"d\",\" e\",\"f\",\"g\",\"h\"]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0334",
+  "program": "[.[] / \", \"]",
+  "input": "[\"a, bc, def, ghij, jklmn, a,b, c,d, e,f\", \"a,b,c,d, e,f,g,h\"]",
+  "outputs": [
+   "[[\"a\",\"bc\",\"def\",\"ghij\",\"jklmn\",\"a,b\",\"c,d\",\"e,f\"],[\"a,b,c,d\",\"e,f,g,h\"]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0335",
+  "program": "map(.[1] as $needle | .[0] | contains($needle))",
+  "input": "[[[],[]], [[1,2,3], [1,2]], [[1,2,3], [3,1]], [[1,2,3], [4]], [[1,2,3], [1,4]]]",
+  "outputs": [
+   "[true,true,true,false,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0336",
+  "program": "map(.[1] as $needle | .[0] | contains($needle))",
+  "input": "[[[\"foobar\", \"foobaz\"], [\"baz\", \"bar\"]], [[\"foobar\", \"foobaz\"], [\"foo\"]], [[\"foobar\", \"foobaz\"], [\"blap\"]]]",
+  "outputs": [
+   "[true,true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0337",
+  "program": "[({foo: 12, bar:13} | contains({foo: 12})), ({foo: 12} | contains({})), ({foo: 12, bar:13} | contains({baz:14}))]",
+  "input": "{}",
+  "outputs": [
+   "[true,true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0338",
+  "program": "{foo: {baz: 12, blap: {bar: 13}}, bar: 14} | contains({bar: 14, foo: {blap: {}}})",
+  "input": "{}",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0339",
+  "program": "{foo: {baz: 12, blap: {bar: 13}}, bar: 14} | contains({bar: 14, foo: {blap: {bar: 14}}})",
+  "input": "{}",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0340",
+  "program": "sort",
+  "input": "[42,[2,5,3,11],10,{\"a\":42,\"b\":2},{\"a\":42},true,2,[2,6],\"hello\",null,[2,5,6],{\"a\":[],\"b\":1},\"abc\",\"ab\",[3,10],{},false,\"abcd\",null]",
+  "outputs": [
+   "[null,null,false,true,2,10,42,\"ab\",\"abc\",\"abcd\",\"hello\",[2,5,3,11],[2,5,6],[2,6],[3,10],{},{\"a\":42},{\"a\":42,\"b\":2},{\"a\":[],\"b\":1}]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0341",
+  "program": "(sort_by(.b) | sort_by(.a)), sort_by(.a, .b), sort_by(.b, .c), group_by(.b), group_by(.a + .b - .c == 2)",
+  "input": "[{\"a\": 1, \"b\": 4, \"c\": 14}, {\"a\": 4, \"b\": 1, \"c\": 3}, {\"a\": 1, \"b\": 4, \"c\": 3}, {\"a\": 0, \"b\": 2, \"c\": 43}]",
+  "outputs": [
+   "[{\"a\":0,\"b\":2,\"c\":43},{\"a\":1,\"b\":4,\"c\":14},{\"a\":1,\"b\":4,\"c\":3},{\"a\":4,\"b\":1,\"c\":3}]",
+   "[{\"a\":0,\"b\":2,\"c\":43},{\"a\":1,\"b\":4,\"c\":14},{\"a\":1,\"b\":4,\"c\":3},{\"a\":4,\"b\":1,\"c\":3}]",
+   "[{\"a\":4,\"b\":1,\"c\":3},{\"a\":0,\"b\":2,\"c\":43},{\"a\":1,\"b\":4,\"c\":3},{\"a\":1,\"b\":4,\"c\":14}]",
+   "[[{\"a\":4,\"b\":1,\"c\":3}],[{\"a\":0,\"b\":2,\"c\":43}],[{\"a\":1,\"b\":4,\"c\":14},{\"a\":1,\"b\":4,\"c\":3}]]",
+   "[[{\"a\":1,\"b\":4,\"c\":14},{\"a\":0,\"b\":2,\"c\":43}],[{\"a\":4,\"b\":1,\"c\":3},{\"a\":1,\"b\":4,\"c\":3}]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0342",
+  "program": "unique",
+  "input": "[1,2,5,3,5,3,1,3]",
+  "outputs": [
+   "[1,2,3,5]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0343",
+  "program": "unique",
+  "input": "[]",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0344",
+  "program": "[min, max, min_by(.[1]), max_by(.[1]), min_by(.[2]), max_by(.[2])]",
+  "input": "[[4,2,\"a\"],[3,1,\"a\"],[2,4,\"a\"],[1,3,\"a\"]]",
+  "outputs": [
+   "[[1,3,\"a\"],[4,2,\"a\"],[3,1,\"a\"],[2,4,\"a\"],[4,2,\"a\"],[1,3,\"a\"]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0345",
+  "program": "[min,max,min_by(.),max_by(.)]",
+  "input": "[]",
+  "outputs": [
+   "[null,null,null,null]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0346",
+  "program": ".foo[.baz]",
+  "input": "{\"foo\":{\"bar\":4},\"baz\":\"bar\"}",
+  "outputs": [
+   "4"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0347",
+  "program": ".[] | .error = \"no, it's OK\"",
+  "input": "[{\"error\":true}]",
+  "outputs": [
+   "{\"error\":\"no, it's OK\"}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0348",
+  "program": "[{a:1}] | .[] | .a=999",
+  "input": "null",
+  "outputs": [
+   "{\"a\":999}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0349",
+  "program": "to_entries",
+  "input": "{\"a\": 1, \"b\": 2}",
+  "outputs": [
+   "[{\"key\":\"a\",\"value\":1},{\"key\":\"b\",\"value\":2}]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0350",
+  "program": "from_entries",
+  "input": "[{\"key\":\"a\", \"value\":1}, {\"Key\":\"b\", \"Value\":2}, {\"name\":\"c\", \"value\":3}, {\"Name\":\"d\", \"Value\":4}]",
+  "outputs": [
+   "{\"a\":1,\"b\":2,\"c\":3,\"d\":4}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0351",
+  "program": "with_entries(.key |= \"KEY_\" + .)",
+  "input": "{\"a\": 1, \"b\": 2}",
+  "outputs": [
+   "{\"KEY_a\":1,\"KEY_b\":2}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0352",
+  "program": "map(has(\"foo\"))",
+  "input": "[{\"foo\": 42}, {}]",
+  "outputs": [
+   "[true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0353",
+  "program": "map(has(2))",
+  "input": "[[0,1], [\"a\",\"b\",\"c\"]]",
+  "outputs": [
+   "[false,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0354",
+  "program": "has(nan)",
+  "input": "[0,1,2]",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0355",
+  "program": "keys",
+  "input": "[42,3,35]",
+  "outputs": [
+   "[0,1,2]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0356",
+  "program": "[][.]",
+  "input": "1000000000000000000",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0357",
+  "program": "map([1,2][0:.])",
+  "input": "[-1, 1, 2, 3, 1000000000000000000]",
+  "outputs": [
+   "[[1],[1],[1,2],[1,2],[1,2]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0358",
+  "program": "{\"k\": {\"a\": 1, \"b\": 2}} * .",
+  "input": "{\"k\": {\"a\": 0,\"c\": 3}}",
+  "outputs": [
+   "{\"k\":{\"a\":0,\"b\":2,\"c\":3}}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0359",
+  "program": "{\"k\": {\"a\": 1, \"b\": 2}, \"hello\": {\"x\": 1}} * .",
+  "input": "{\"k\": {\"a\": 0,\"c\": 3}, \"hello\": 1}",
+  "outputs": [
+   "{\"k\":{\"a\":0,\"b\":2,\"c\":3},\"hello\":1}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0360",
+  "program": "{\"k\": {\"a\": 1, \"b\": 2}, \"hello\": 1} * .",
+  "input": "{\"k\": {\"a\": 0,\"c\": 3}, \"hello\": {\"x\": 1}}",
+  "outputs": [
+   "{\"k\":{\"a\":0,\"b\":2,\"c\":3},\"hello\":{\"x\":1}}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0361",
+  "program": "{\"a\": {\"b\": 1}, \"c\": {\"d\": 2}, \"e\": 5} * .",
+  "input": "{\"a\": {\"b\": 2}, \"c\": {\"d\": 3, \"f\": 9}}",
+  "outputs": [
+   "{\"a\":{\"b\":2},\"c\":{\"d\":3,\"f\":9},\"e\":5}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0362",
+  "program": "[.[]|arrays]",
+  "input": "[1,2,\"foo\",[],[3,[]],{},true,false,null]",
+  "outputs": [
+   "[[],[3,[]]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0363",
+  "program": "[.[]|objects]",
+  "input": "[1,2,\"foo\",[],[3,[]],{},true,false,null]",
+  "outputs": [
+   "[{}]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0364",
+  "program": "[.[]|iterables]",
+  "input": "[1,2,\"foo\",[],[3,[]],{},true,false,null]",
+  "outputs": [
+   "[[],[3,[]],{}]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0365",
+  "program": "[.[]|scalars]",
+  "input": "[1,2,\"foo\",[],[3,[]],{},true,false,null]",
+  "outputs": [
+   "[1,2,\"foo\",true,false,null]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0366",
+  "program": "[.[]|values]",
+  "input": "[1,2,\"foo\",[],[3,[]],{},true,false,null]",
+  "outputs": [
+   "[1,2,\"foo\",[],[3,[]],{},true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0367",
+  "program": "[.[]|booleans]",
+  "input": "[1,2,\"foo\",[],[3,[]],{},true,false,null]",
+  "outputs": [
+   "[true,false]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0368",
+  "program": "[.[]|nulls]",
+  "input": "[1,2,\"foo\",[],[3,[]],{},true,false,null]",
+  "outputs": [
+   "[null]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0369",
+  "program": "flatten",
+  "input": "[0, [1], [[2]], [[[3]]]]",
+  "outputs": [
+   "[0,1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0370",
+  "program": "flatten(0)",
+  "input": "[0, [1], [[2]], [[[3]]]]",
+  "outputs": [
+   "[0,[1],[[2]],[[[3]]]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0371",
+  "program": "flatten(2)",
+  "input": "[0, [1], [[2]], [[[3]]]]",
+  "outputs": [
+   "[0,1,2,[3]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0372",
+  "program": "flatten(2)",
+  "input": "[0, [1, [2]], [1, [[3], 2]]]",
+  "outputs": [
+   "[0,1,2,1,[3],2]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0373",
+  "program": "try flatten(-1) catch .",
+  "input": "[0, [1], [[2]], [[[3]]]]",
+  "outputs": [
+   "\"flatten depth must not be negative\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0374",
+  "program": "transpose",
+  "input": "[[1], [2,3]]",
+  "outputs": [
+   "[[1,2],[null,3]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0375",
+  "program": "transpose",
+  "input": "[]",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0376",
+  "program": "ascii_upcase",
+  "input": "\"useful but not for é\"",
+  "outputs": [
+   "\"USEFUL BUT NOT FOR é\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0377",
+  "program": "bsearch(0,1,2,3,4)",
+  "input": "[1,2,3]",
+  "outputs": [
+   "-1",
+   "0",
+   "1",
+   "2",
+   "-4"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0378",
+  "program": "bsearch({x:1})",
+  "input": "[{ \"x\": 0 },{ \"x\": 1 },{ \"x\": 2 }]",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0379",
+  "program": "try [\"OK\", bsearch(0)] catch [\"KO\",.]",
+  "input": "\"aa\"",
+  "outputs": [
+   "[\"KO\",\"string (\\\"aa\\\") cannot be searched from\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0380",
+  "program": "strftime(\"%Y-%m-%dT%H:%M:%SZ\")",
+  "input": "[2015,2,5,23,51,47,4,63]",
+  "outputs": [
+   "\"2015-03-05T23:51:47Z\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0381",
+  "program": "strftime(\"%A, %B %d, %Y\")",
+  "input": "1435677542.822351",
+  "outputs": [
+   "\"Tuesday, June 30, 2015\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0382",
+  "program": "strftime(\"%Y-%m-%dT%H:%M:%SZ\")",
+  "input": "[2024,2,15]",
+  "outputs": [
+   "\"2024-03-15T00:00:00Z\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0383",
+  "program": "mktime",
+  "input": "[2024,8,21]",
+  "outputs": [
+   "1726876800"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0384",
+  "program": "gmtime",
+  "input": "1425599507",
+  "outputs": [
+   "[2015,2,5,23,51,47,4,63]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0385",
+  "program": "gmtime[5]",
+  "input": "1425599507.25",
+  "outputs": [
+   "47.25"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0386",
+  "program": "try strftime(\"%Y-%m-%dT%H:%M:%SZ\") catch .",
+  "input": "[\"a\",1,2,3,4,5,6,7]",
+  "outputs": [
+   "\"strftime/1 requires parsed datetime inputs\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0387",
+  "program": "try strflocaltime(\"%Y-%m-%dT%H:%M:%SZ\") catch .",
+  "input": "[\"a\",1,2,3,4,5,6,7]",
+  "outputs": [
+   "\"strflocaltime/1 requires parsed datetime inputs\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0388",
+  "program": "try mktime catch .",
+  "input": "[\"a\",1,2,3,4,5,6,7]",
+  "outputs": [
+   "\"mktime requires parsed datetime inputs\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0389",
+  "program": "try [\"OK\", strftime([])] catch [\"KO\", .]",
+  "input": "0",
+  "outputs": [
+   "[\"KO\",\"strftime/1 requires a string format\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0390",
+  "program": "try [\"OK\", strflocaltime({})] catch [\"KO\", .]",
+  "input": "0",
+  "outputs": [
+   "[\"KO\",\"strflocaltime/1 requires a string format\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0391",
+  "program": "[strptime(\"%Y-%m-%dT%H:%M:%SZ\")|(.,mktime)]",
+  "input": "\"2015-03-05T23:51:47Z\"",
+  "outputs": [
+   "[[2015,2,5,23,51,47,4,63],1425599507]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0392",
+  "program": "last(range(365 * 67)|(\"1970-03-01T01:02:03Z\"|strptime(\"%Y-%m-%dT%H:%M:%SZ\")|mktime) + (86400 * .)|strftime(\"%Y-%m-%dT%H:%M:%SZ\")|strptime(\"%Y-%m-%dT%H:%M:%SZ\"))",
+  "input": "null",
+  "outputs": [
+   "[2037,1,11,1,2,3,3,41]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0401",
+  "program": "modulemeta",
+  "input": "\"c\"",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): module not found: c\n",
+  "exit": 5
+ },
+ {
+  "id": "jq_test_0402",
+  "program": "modulemeta | .deps | length",
+  "input": "\"c\"",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): module not found: c\n",
+  "exit": 5
+ },
+ {
+  "id": "jq_test_0403",
+  "program": "modulemeta | .defs | length",
+  "input": "\"c\"",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): module not found: c\n",
+  "exit": 5
+ },
+ {
+  "id": "jq_test_0405",
+  "program": "try -. catch .",
+  "input": "\"very-long-long-long-long-string\"",
+  "outputs": [
+   "\"string (\\\"very-long-long-long-long...\\\") cannot be negated\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0406",
+  "program": "try (.-.) catch .",
+  "input": "\"very-long-long-long-long-string\"",
+  "outputs": [
+   "\"string (\\\"very-long-long-long-long...\\\") and string (\\\"very-long-long-long-long...\\\") cannot be subtracted\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0407",
+  "program": "\"x\" * range(0; 12; 2) + \"☆\" * 8 | try -. catch .",
+  "input": "null",
+  "outputs": [
+   "\"string (\\\"☆☆☆☆☆☆☆☆\\\") cannot be negated\"",
+   "\"string (\\\"xx☆☆☆☆☆☆☆☆\\\") cannot be negated\"",
+   "\"string (\\\"xxxx☆☆☆☆☆☆...\\\") cannot be negated\"",
+   "\"string (\\\"xxxxxx☆☆☆☆☆☆...\\\") cannot be negated\"",
+   "\"string (\\\"xxxxxxxx☆☆☆☆☆...\\\") cannot be negated\"",
+   "\"string (\\\"xxxxxxxxxx☆☆☆☆...\\\") cannot be negated\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0408",
+  "program": "try (. + \"x\") catch . == if have_decnum then \"number (12345678901234567890123456...) and string (\\\"x\\\") cannot be added\" else \"number (12345678901234568000000000...) and string (\\\"x\\\") cannot be added\" end",
+  "input": "123456789012345678901234567890",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0409",
+  "program": "join(\",\")",
+  "input": "[\"1\",2,true,false,3.4]",
+  "outputs": [
+   "\"1,2,true,false,3.4\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0410",
+  "program": ".[] | join(\",\")",
+  "input": "[[], [null], [null,null], [null,null,null]]",
+  "outputs": [
+   "\"\"",
+   "\"\"",
+   "\",\"",
+   "\",,\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0411",
+  "program": ".[] | join(\",\")",
+  "input": "[[\"a\",null], [null,\"a\"]]",
+  "outputs": [
+   "\"a,\"",
+   "\",a\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0412",
+  "program": "try join(\",\") catch .",
+  "input": "[\"1\",\"2\",{\"a\":{\"b\":{\"c\":33}}}]",
+  "outputs": [
+   "\"string (\\\"1,2,\\\") and object ({\\\"a\\\":{\\\"b\\\":{\\\"c\\\":33}}}) cannot be added\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0413",
+  "program": "try join(\",\") catch .",
+  "input": "[\"1\",\"2\",[3,4,5]]",
+  "outputs": [
+   "\"string (\\\"1,2,\\\") and array ([3,4,5]) cannot be added\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0414",
+  "program": "{if:0,and:1,or:2,then:3,else:4,elif:5,end:6,as:7,def:8,reduce:9,foreach:10,try:11,catch:12,label:13,import:14,include:15,module:16}",
+  "input": "null",
+  "outputs": [
+   "{\"if\":0,\"and\":1,\"or\":2,\"then\":3,\"else\":4,\"elif\":5,\"end\":6,\"as\":7,\"def\":8,\"reduce\":9,\"foreach\":10,\"try\":11,\"catch\":12,\"label\":13,\"import\":14,\"include\":15,\"module\":16}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0415",
+  "program": "try (1/.) catch .",
+  "input": "0",
+  "outputs": [
+   "\"number (1) and number (0) cannot be divided because the divisor is zero\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0416",
+  "program": "try (1/0) catch .",
+  "input": "0",
+  "outputs": [
+   "\"number (1) and number (0) cannot be divided because the divisor is zero\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0417",
+  "program": "try (0/0) catch .",
+  "input": "0",
+  "outputs": [
+   "\"number (0) and number (0) cannot be divided because the divisor is zero\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0418",
+  "program": "try (1%.) catch .",
+  "input": "0",
+  "outputs": [
+   "\"number (1) and number (0) cannot be divided (remainder) because the divisor is zero\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0419",
+  "program": "try (1%0) catch .",
+  "input": "0",
+  "outputs": [
+   "\"number (1) and number (0) cannot be divided (remainder) because the divisor is zero\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0420",
+  "program": "[range(-52;52;1)] as $powers | [$powers[]|pow(2;.)|log2|round] == $powers",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0421",
+  "program": "[range(-99/2;99/2;1)] as $orig | [$orig[]|pow(2;.)|log2] as $back | ($orig|keys)[]|. as $k | (($orig|.[$k])-($back|.[$k]))|if . < 0 then . * -1 else . end|select(.>.00005)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0422",
+  "program": "(.[{}] = 0)?",
+  "input": "null",
+  "outputs": [],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0423",
+  "program": "INDEX(range(5)|[., \"foo\\(.)\"]; .[0])",
+  "input": "null",
+  "outputs": [
+   "{\"0\":[0,\"foo0\"],\"1\":[1,\"foo1\"],\"2\":[2,\"foo2\"],\"3\":[3,\"foo3\"],\"4\":[4,\"foo4\"]}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0424",
+  "program": "JOIN({\"0\":[0,\"abc\"],\"1\":[1,\"bcd\"],\"2\":[2,\"def\"],\"3\":[3,\"efg\"],\"4\":[4,\"fgh\"]}; .[0]|tostring)",
+  "input": "[[5,\"foo\"],[3,\"bar\"],[1,\"foobar\"]]",
+  "outputs": [
+   "[[[5,\"foo\"],null],[[3,\"bar\"],[3,\"efg\"]],[[1,\"foobar\"],[1,\"bcd\"]]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0425",
+  "program": "range(5;10)|IN(range(10))",
+  "input": "null",
+  "outputs": [
+   "true",
+   "true",
+   "true",
+   "true",
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0426",
+  "program": "range(5;13)|IN(range(0;10;3))",
+  "input": "null",
+  "outputs": [
+   "false",
+   "true",
+   "false",
+   "false",
+   "true",
+   "false",
+   "false",
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0427",
+  "program": "range(10;12)|IN(range(10))",
+  "input": "null",
+  "outputs": [
+   "false",
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0428",
+  "program": "IN(range(10;20); range(10))",
+  "input": "null",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0429",
+  "program": "IN(range(5;20); range(10))",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0430",
+  "program": "(.a as $x | .b) = \"b\"",
+  "input": "{\"a\":null,\"b\":null}",
+  "outputs": [
+   "{\"a\":null,\"b\":\"b\"}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0431",
+  "program": "(.. | select(type == \"object\" and has(\"b\") and (.b | type) == \"array\")|.b) |= .[0]",
+  "input": "{\"a\": {\"b\": [1, {\"b\": 3}]}}",
+  "outputs": [
+   "{\"a\":{\"b\":1}}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0432",
+  "program": "isempty(empty)",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0433",
+  "program": "isempty(range(3))",
+  "input": "null",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0434",
+  "program": "isempty(1,error(\"foo\"))",
+  "input": "null",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0435",
+  "program": "index(\"\")",
+  "input": "\"\"",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0436",
+  "program": "builtins|length > 10",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0437",
+  "program": "\"-1\"|IN(builtins[] / \"/\"|.[1])",
+  "input": "null",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0438",
+  "program": "all(builtins[] / \"/\"; .[1]|tonumber >= 0)",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0439",
+  "program": "builtins|any(.[:1] == \"_\")",
+  "input": "null",
+  "outputs": [
+   "false"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0440",
+  "program": "map(. == 1)",
+  "input": "[1, 1.0, 1.000, 100e-2, 1e+0, 0.0001e4]",
+  "outputs": [
+   "[true,true,true,true,true,true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0441",
+  "program": ".[0] | tostring | . == if have_decnum then \"13911860366432393\" else \"13911860366432392\" end",
+  "input": "[13911860366432393]",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0442",
+  "program": ".x | tojson | . == if have_decnum then \"13911860366432393\" else \"13911860366432392\" end",
+  "input": "{\"x\":13911860366432393}",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0443",
+  "program": "(13911860366432393 == 13911860366432392) | . == if have_decnum then false else true end",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0444",
+  "program": ". - 10",
+  "input": "13911860366432393",
+  "outputs": [
+   "13911860366432382"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0445",
+  "program": ".[0] - 10",
+  "input": "[13911860366432393]",
+  "outputs": [
+   "13911860366432382"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0446",
+  "program": ".x - 10",
+  "input": "{\"x\":13911860366432393}",
+  "outputs": [
+   "13911860366432382"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0447",
+  "program": "-. | tojson == if have_decnum then \"-13911860366432393\" else \"-13911860366432392\" end",
+  "input": "13911860366432393",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0448",
+  "program": "-. | tojson == if have_decnum then \"0.12345678901234567890123456789\" else \"0.12345678901234568\" end",
+  "input": "-0.12345678901234567890123456789",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0449",
+  "program": "[1E+1000,-1E+1000 | tojson] == if have_decnum then [\"1E+1000\",\"-1E+1000\"] else [\"1.7976931348623157e+308\",\"-1.7976931348623157e+308\"] end",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0450",
+  "program": ". |= try . catch .",
+  "input": "1",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0451",
+  "program": ".[] as $n | $n+0 | [., tostring, . == $n]",
+  "input": "[-9007199254740993, -9007199254740992, 9007199254740992, 9007199254740993, 13911860366432393]",
+  "outputs": [
+   "[-9007199254740992,\"-9007199254740992\",true]",
+   "[-9007199254740992,\"-9007199254740992\",true]",
+   "[9007199254740992,\"9007199254740992\",true]",
+   "[9007199254740992,\"9007199254740992\",true]",
+   "[13911860366432392,\"13911860366432392\",true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0452",
+  "program": "abs",
+  "input": "\"abc\"",
+  "outputs": [
+   "\"abc\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0453",
+  "program": "map(abs)",
+  "input": "[-0, 0, -10, -1.1]",
+  "outputs": [
+   "[-0,0,10,1.1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0454",
+  "program": "map(fabs)",
+  "input": "[-0, 0, -10, -1.1]",
+  "outputs": [
+   "[0,0,10,1.1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0455",
+  "program": "map(abs == length) | unique",
+  "input": "[-10, -1.1, -1e-1, 1000000000000000002]",
+  "outputs": [
+   "[true]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0456",
+  "program": "map(abs)",
+  "input": "[0.1,1000000000000000002]",
+  "outputs": [
+   "[0.1,1000000000000000002]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0457",
+  "program": "[1E+1000,-1E+1000 | abs | tojson] | unique == if have_decnum then [\"1E+1000\"] else [\"1.7976931348623157e+308\"] end",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0458",
+  "program": "[1E+1000,-1E+1000 | length | tojson] | unique == if have_decnum then [\"1E+1000\"] else [\"1.7976931348623157e+308\"] end",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0459",
+  "program": "123 as $label | $label",
+  "input": "null",
+  "outputs": [
+   "123"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0460",
+  "program": "[ label $if | range(10) | ., (select(. == 5) | break $if) ]",
+  "input": "null",
+  "outputs": [
+   "[0,1,2,3,4,5]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0461",
+  "program": "reduce .[] as $then (4 as $else | $else; . as $elif | . + $then * $elif)",
+  "input": "[1,2,3]",
+  "outputs": [
+   "96"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0462",
+  "program": "1 as $foreach | 2 as $and | 3 as $or | { $foreach, $and, $or, a }",
+  "input": "{\"a\":4,\"b\":5}",
+  "outputs": [
+   "{\"foreach\":1,\"and\":2,\"or\":3,\"a\":4}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0463",
+  "program": "[ foreach .[] as $try (1 as $catch | $catch - 1; . + $try; .) ]",
+  "input": "[10,9,8,7]",
+  "outputs": [
+   "[10,19,27,34]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0464",
+  "program": "{ a, $__loc__, c }",
+  "input": "{\"a\":[1,2,3],\"b\":\"foo\",\"c\":{\"hi\":\"hey\"}}",
+  "outputs": [
+   "{\"a\":[1,2,3],\"__loc__\":{\"file\":\"<top-level>\",\"line\":1},\"c\":{\"hi\":\"hey\"}}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0465",
+  "program": "1 as $x | \"2\" as $y | \"3\" as $z | { $x, as, $y: 4, ($z): 5, if: 6, foo: 7 }",
+  "input": "{\"as\":8}",
+  "outputs": [
+   "{\"x\":1,\"as\":8,\"2\":4,\"3\":5,\"if\":6,\"foo\":7}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0466",
+  "program": "fromjson | isnan",
+  "input": "\"nan\"",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0467",
+  "program": "tojson | fromjson",
+  "input": "{\"a\":nan}",
+  "outputs": [
+   "{\"a\":null}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0468",
+  "program": ".[] | try (fromjson | isnan) catch .",
+  "input": "[\"NaN\",\"-NaN\",\"NaN1\",\"NaN10\",\"NaN100\",\"NaN1000\",\"NaN10000\",\"NaN100000\"]",
+  "outputs": [
+   "true",
+   "true",
+   "\"Invalid numeric literal at EOF at line 1, column 4 (while parsing 'NaN1')\"",
+   "\"Invalid numeric literal at EOF at line 1, column 5 (while parsing 'NaN10')\"",
+   "\"Invalid numeric literal at EOF at line 1, column 6 (while parsing 'NaN100')\"",
+   "\"Invalid numeric literal at EOF at line 1, column 7 (while parsing 'NaN1000')\"",
+   "\"Invalid numeric literal at EOF at line 1, column 8 (while parsing 'NaN10000')\"",
+   "\"Invalid numeric literal at EOF at line 1, column 9 (while parsing 'NaN100000')\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0469",
+  "program": "try input catch .",
+  "input": "null",
+  "outputs": [
+   "\"break\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0470",
+  "program": "debug",
+  "input": "1",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "[\"DEBUG:\",1]\n",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0471",
+  "program": "\"foo\" | try ((try . catch \"caught too much\") | error) catch \"caught just right\"",
+  "input": "null",
+  "outputs": [
+   "\"caught just right\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0472",
+  "program": ".[]|(try (if .==\"hi\" then . else error end) catch empty) | \"\\(.) there!\"",
+  "input": "[\"hi\",\"ho\"]",
+  "outputs": [
+   "\"hi there!\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0473",
+  "program": "try ([\"hi\",\"ho\"]|.[]|(try . catch (if .==\"ho\" then \"BROKEN\"|error else empty end)) | if .==\"ho\" then error else \"\\(.) there!\" end) catch \"caught outside \\(.)\"",
+  "input": "null",
+  "outputs": [
+   "\"hi there!\"",
+   "\"caught outside ho\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0474",
+  "program": ".[]|(try . catch (if .==\"ho\" then \"BROKEN\"|error else empty end)) | if .==\"ho\" then error else \"\\(.) there!\" end",
+  "input": "[\"hi\",\"ho\"]",
+  "outputs": [
+   "\"hi there!\""
+  ],
+  "stderr": "jq: error (at <stdin>:0): ho\n",
+  "exit": 5
+ },
+ {
+  "id": "jq_test_0475",
+  "program": "try (try error catch \"inner catch \\(.)\") catch \"outer catch \\(.)\"",
+  "input": "\"foo\"",
+  "outputs": [
+   "\"inner catch foo\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0476",
+  "program": "try ((try error catch \"inner catch \\(.)\")|error) catch \"outer catch \\(.)\"",
+  "input": "\"foo\"",
+  "outputs": [
+   "\"outer catch inner catch foo\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0477",
+  "program": "first(.?,.?)",
+  "input": "null",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0478",
+  "program": "{foo: \"bar\"} | .foo |= .?",
+  "input": "null",
+  "outputs": [
+   "{\"foo\":\"bar\"}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0479",
+  "program": ". |= try 2",
+  "input": "1",
+  "outputs": [
+   "2"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0480",
+  "program": ". |= try 2 catch 3",
+  "input": "1",
+  "outputs": [
+   "2"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0481",
+  "program": ".[] |= try tonumber",
+  "input": "[\"1\", \"2a\", \"3\", \" 4\", \"5 \", \"6.7\", \".89\", \"-876\", \"+5.43\", 21]",
+  "outputs": [
+   "[1,3,6.7,0.89,-876,5.43,21]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0482",
+  "program": "any(keys[]|tostring?;true)",
+  "input": "{\"a\":\"1\",\"b\":\"2\",\"c\":\"3\"}",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0483",
+  "program": "implode|explode",
+  "input": "[-1,0,1,2,3,1114111,1114112,55295,55296,57343,57344,1.1,1.9]",
+  "outputs": [
+   "[65533,0,1,2,3,1114111,65533,55295,65533,65533,57344,1,1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0484",
+  "program": "map(try implode catch .)",
+  "input": "[123,[\"a\"],[nan]]",
+  "outputs": [
+   "[\"implode input must be an array\",\"string (\\\"a\\\") can't be imploded, unicode codepoint needs to be numeric\",\"number (null) can't be imploded, unicode codepoint needs to be numeric\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0485",
+  "program": "try 0[implode] catch .",
+  "input": "[]",
+  "outputs": [
+   "\"Cannot index number with string (\\\"\\\")\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0486",
+  "program": "walk(.)",
+  "input": "{\"x\":0}",
+  "outputs": [
+   "{\"x\":0}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0487",
+  "program": "walk(1)",
+  "input": "{\"x\":0}",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0488",
+  "program": "[walk(.,1)]",
+  "input": "{\"x\":0}",
+  "outputs": [
+   "[{\"x\":0},1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0489",
+  "program": "walk(select(IN({}, []) | not))",
+  "input": "{\"a\":1,\"b\":[]}",
+  "outputs": [
+   "{\"a\":1}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0490",
+  "program": "[range(10)] | .[1.2:3.5]",
+  "input": "null",
+  "outputs": [
+   "[1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0491",
+  "program": "[range(10)] | .[1.5:3.5]",
+  "input": "null",
+  "outputs": [
+   "[1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0492",
+  "program": "[range(10)] | .[1.7:3.5]",
+  "input": "null",
+  "outputs": [
+   "[1,2,3]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0493",
+  "program": "[range(10)] | .[1.7:4294967295]",
+  "input": "null",
+  "outputs": [
+   "[1,2,3,4,5,6,7,8,9]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0494",
+  "program": "[range(10)] | .[1.7:-4294967296]",
+  "input": "null",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0495",
+  "program": "[[range(10)] | .[1.1,1.5,1.7]]",
+  "input": "null",
+  "outputs": [
+   "[1,1,1]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0496",
+  "program": "[range(5)] | .[1.1] = 5",
+  "input": "null",
+  "outputs": [
+   "[0,5,2,3,4]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0497",
+  "program": "[range(3)] | .[nan:1]",
+  "input": "null",
+  "outputs": [
+   "[0]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0498",
+  "program": "[range(3)] | .[1:nan]",
+  "input": "null",
+  "outputs": [
+   "[1,2]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0499",
+  "program": "[range(3)] | .[nan]",
+  "input": "null",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0500",
+  "program": "try ([range(3)] | .[nan] = 9) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Cannot set array element at NaN index\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0501",
+  "program": "try (\"foobar\" | .[1.5:3.5] = \"xyz\") catch .",
+  "input": "null",
+  "outputs": [
+   "\"Cannot update string slices\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0502",
+  "program": "try ([range(10)] | .[1.5:3.5] = [\"xyz\"]) catch .",
+  "input": "null",
+  "outputs": [
+   "[0,\"xyz\",4,5,6,7,8,9]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0503",
+  "program": "try (\"foobar\" | .[1.5]) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Cannot index string with number (1.5)\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0504",
+  "program": "try [\"ok\", setpath([1]; 1)] catch [\"ko\", .]",
+  "input": "{\"hi\":\"hello\"}",
+  "outputs": [
+   "[\"ko\",\"Cannot index object with number (1)\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0505",
+  "program": "try fromjson catch .",
+  "input": "\"{'a': 123}\"",
+  "outputs": [
+   "\"Invalid string literal; expected \\\", but got ' at line 1, column 5 (while parsing '{'a': 123}')\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0506",
+  "program": "try ltrimstr(1) catch \"x\", try rtrimstr(1) catch \"x\" | \"ok\"",
+  "input": "\"hi\"",
+  "outputs": [
+   "\"ok\"",
+   "\"ok\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0507",
+  "program": "try ltrimstr(\"x\") catch \"x\", try rtrimstr(\"x\") catch \"x\" | \"ok\"",
+  "input": "{\"hey\":[]}",
+  "outputs": [
+   "\"ok\"",
+   "\"ok\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0508",
+  "program": ".[] as [$x, $y] | try [\"ok\", ($x | ltrimstr($y))] catch [\"ko\", .]",
+  "input": "[[\"hi\",1],[1,\"hi\"],[\"hi\",\"hi\"],[1,1]]",
+  "outputs": [
+   "[\"ko\",\"startswith() requires string inputs\"]",
+   "[\"ko\",\"startswith() requires string inputs\"]",
+   "[\"ok\",\"\"]",
+   "[\"ko\",\"startswith() requires string inputs\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0509",
+  "program": ".[] as [$x, $y] | try [\"ok\", ($x | rtrimstr($y))] catch [\"ko\", .]",
+  "input": "[[\"hi\",1],[1,\"hi\"],[\"hi\",\"hi\"],[1,1]]",
+  "outputs": [
+   "[\"ko\",\"endswith() requires string inputs\"]",
+   "[\"ko\",\"endswith() requires string inputs\"]",
+   "[\"ok\",\"\"]",
+   "[\"ko\",\"endswith() requires string inputs\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0510",
+  "program": "try [\"OK\", setpath([[1]]; 1)] catch [\"KO\", .]",
+  "input": "[]",
+  "outputs": [
+   "[\"KO\",\"Cannot update field at array index of array\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0511",
+  "program": "foreach .[] as $x (0, 1; . + $x)",
+  "input": "[1, 2]",
+  "outputs": [
+   "1",
+   "3",
+   "2",
+   "4"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0512",
+  "program": "strflocaltime(\"\" | ., @uri)",
+  "input": "0",
+  "outputs": [
+   "\"\"",
+   "\"\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0513",
+  "program": "reduce range(9999) as $_ ([];[.]) | tojson | fromjson | flatten",
+  "input": "null",
+  "outputs": [
+   "[]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0514",
+  "program": "reduce range(10000) as $_ ([];[.]) | tojson | try (fromjson) catch . | (contains(\"<skipped: too deep>\") | not) and contains(\"Exceeds depth limit for parsing\")",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0515",
+  "program": "reduce range(10001) as $_ ([];[.]) | tojson | contains(\"<skipped: too deep>\")",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0516",
+  "program": "setpath([range(10000) | 0]; 0) | flatten",
+  "input": "null",
+  "outputs": [
+   "[0]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0517",
+  "program": "try setpath([range(10001) | 0]; 0) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Path too deep\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0518",
+  "program": "getpath([range(10000) | 0])",
+  "input": "null",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0519",
+  "program": "try getpath([range(10001) | 0]) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Path too deep\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0520",
+  "program": "delpaths([[range(10000) | 0]])",
+  "input": "null",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0521",
+  "program": "try delpaths([[range(10001) | 0]]) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Path too deep\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0522",
+  "program": "reduce range(10000) as $_ ([]; [.]) | contains([[]])",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0523",
+  "program": "try (reduce range(10001) as $_ ([]; [.]) as $x | $x | contains($x)) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Containment check too deep\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0524",
+  "program": "reduce range(10000) as $_ ({}; {a: .}) as $x | $x * $x | length",
+  "input": "null",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0525",
+  "program": "try (reduce range(10001) as $_ ({}; {a: .}) as $x | $x * $x) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Object merge too deep\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0526",
+  "program": "try ((reduce range(10001) as $_ ([]; [.])) as $x | (reduce range(10001) as $_ ([]; [.])) as $y | $x == $y) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Equality check too deep\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0527",
+  "program": "try ((reduce range(10001) as $_ ([]; [.])) as $x | [$x, $x] | sort) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Comparison too deep\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0528",
+  "program": "try ((reduce range(10001) as $_ ([]; [.])) as $x | [$x, $x] | unique) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Comparison too deep\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0529",
+  "program": "try ((reduce range(10001) as $_ ({}; {a: .})) as $x | [$x, $x] | sort) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Comparison too deep\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "jq_test_0530",
+  "program": "try ((reduce range(10001) as $_ ({}; {a: .})) as $x | [$x, $x] | unique) catch .",
+  "input": "null",
+  "outputs": [
+   "\"Comparison too deep\""
+  ],
+  "stderr": "",
+  "exit": 0
+ }
+]
