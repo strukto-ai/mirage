@@ -903,6 +903,9 @@ impl Compiler<'_> {
             },
             _ => {}
         }
+        if let Some(reason) = unsupported_regex(name, args) {
+            return Err(format!("unsupported regex: {reason}"));
+        }
         if let Some(index) = self.link(name, arity)? {
             let callee = ClosureRef {
                 level: self.level(bc, 0),
@@ -988,6 +991,26 @@ impl Compiler<'_> {
         }
         Program { bytecodes }
     }
+}
+
+/// A call of one of builtin.jq's regex functions whose literal pattern
+/// the matcher cannot run (see regex::unsupported).
+fn unsupported_regex(name: &str, args: &[Ast]) -> Option<String> {
+    let regex_args = match (name, args.len()) {
+        ("test" | "match" | "capture" | "scan" | "splits", 1 | 2) | ("split", 2) => args,
+        ("sub" | "gsub", 2) => &args[..1],
+        ("sub" | "gsub", 3) => &[args[0].clone(), args[2].clone()][..],
+        _ => return None,
+    };
+    let Ast::Literal(Value::String(pattern)) = &regex_args[0] else {
+        return None;
+    };
+    let modifiers = match regex_args.get(1) {
+        None | Some(Ast::Literal(Value::Null)) => None,
+        Some(Ast::Literal(Value::String(m))) => Some(&**m),
+        Some(_) => return None,
+    };
+    super::regex::unsupported(pattern, modifiers)
 }
 
 fn ret_follows(ops: &[Op], mut pc: usize) -> bool {
