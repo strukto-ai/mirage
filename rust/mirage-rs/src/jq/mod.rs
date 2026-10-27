@@ -2,6 +2,7 @@ mod builtin;
 mod compile;
 mod eval;
 mod format;
+mod host;
 mod parse;
 mod syntax;
 #[cfg(test)]

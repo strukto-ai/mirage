@@ -41,6 +41,8 @@ const DEC = new TextDecoder()
 
 const FILES: Record<string, string> = {
   '/d/four.json': '1\n2\n3\n4\n',
+  '/d/a.json': '{"a":1}\n',
+  '/d/b.json': '{"b":2}\n',
   '/d/bad.json': '{"a":1}\n{"a":2}\n[',
   '/d/mid.json': '1\n[1 2]\n3\n4\n',
   '/d/one.json': '1',
@@ -716,20 +718,92 @@ function joined(...parts: Uint8Array[]): Uint8Array {
 describe('jq_eval', () => {
   it('folds frames into outputs and the stop that ended the run', () => {
     const outputs: string[] = []
+    const messages: [number, string][] = []
     const wire = joined(
       frame(1, '1'),
+      frame(4, '["DEBUG:",1]'),
       frame(1, '[2]'),
+      frame(5, 'x'),
       frame(2, joined(Uint8Array.of(0), ENC.encode('{}'))),
     )
-    expect(readFrames(wire, outputs)).toEqual({ kind: 'error', text: '{}', string: false })
+    expect(readFrames(wire, outputs, messages)).toEqual({
+      kind: 'error',
+      text: '{}',
+      string: false,
+    })
     expect(outputs).toEqual(['1', '[2]'])
-    expect(readFrames(frame(3, '{"message":"bye","string":true,"code":3.0}'), [])).toEqual({
+    expect(messages).toEqual([
+      [4, '["DEBUG:",1]'],
+      [5, 'x'],
+    ])
+    expect(readFrames(frame(3, '{"message":"bye","string":true,"code":3.0}'), [], [])).toEqual({
       kind: 'halt',
       message: 'bye',
       string: true,
       code: 3,
     })
-    expect(() => readFrames(frame(9, ''), [])).toThrow()
+    expect(() => readFrames(frame(9, ''), [], [])).toThrow()
+  })
+
+  it.each([
+    ['[., input]', {}, '[1,2]\n[3,4]\n', '', 0],
+    ['first(inputs)', {}, '2\n4\n', '', 0],
+    ['if . == 1 then [., input] else . end', {}, '[1,2]\n3\n4\n', '', 0],
+    ['[., input, input]', {}, '[1,2,3]\n', 'jq: error (at /d/four.json:4): break\n', 5],
+    ['[input_filename, input_line_number]', { null_input: true }, '[null,0]\n', '', 0],
+    ['[inputs] | length', { null_input: true }, '4\n', '', 0],
+  ] as const)(
+    'takes each document when %s asks for it',
+    async (program, flags, stdout, stderr, exitCode) => {
+      expect(await ran('/d/four.json', program, flags)).toEqual({ stdout, stderr, exitCode })
+    },
+  )
+
+  it('meets a parse error and follows the reader position in input', async () => {
+    expect(await ran('/d/mid.json', '[., input]')).toEqual({
+      stdout: '[3,4]\n',
+      stderr:
+        'jq: error (at /d/mid.json:2): Expected separator between values at line 2, column 5\n',
+      exitCode: 0,
+    })
+    const result = await ranOver(
+      ['/d/a.json', '/d/b.json'],
+      '[., input_filename, input_line_number, input, input_filename]',
+    )
+    expect(result.stdout).toBe('[{"a":1},"/d/a.json",1,{"b":2},"/d/b.json"]\n')
+  })
+
+  it('writes debug and stderr lines before the run report', async () => {
+    const result = await ranOver(
+      [],
+      '{"b":1,"a":2} | (debug | empty), ("x" | stderr | empty), ({"c":3} | stderr | error)',
+      { null_input: true, sort_keys: true },
+    )
+    expect(result).toEqual({
+      stdout: '',
+      stderr:
+        '["DEBUG:",{"a":2,"b":1}]\n' + 'x{"c":3}jq: error (at <unknown>) (not a string): {"c":3}\n',
+      exitCode: 5,
+    })
+  })
+
+  it.each([
+    ['[$ENV.HOME, env.HOME, ($ENV | length)]', '["/home/agent","/home/agent",1]\n'],
+    [
+      '[$ENV.HOME, env.HOME, ($ENV | length), (now | type)]',
+      '["/home/agent","/home/agent",1,"number"]\n',
+    ],
+  ])("reads the session's exported environment in %s", async (program, stdout) => {
+    const ctx = {
+      stdin: null,
+      flags: { compact_output: true, null_input: true },
+      cwd: PathSpec.fromStrPath('/'),
+      env: { HOME: '/home/agent' },
+    } as Context
+    const result = await jqGeneric([], [program], ctx, read)
+    if (result === null) throw new Error('jq returned no result')
+    expect(DEC.decode(await materialize(result[0]))).toBe(stdout)
+    expect((await ranOver([], '$ENV', { null_input: true })).stdout).toBe('{}\n')
   })
 
   it('stops a program that never ends when its signal aborts', async () => {

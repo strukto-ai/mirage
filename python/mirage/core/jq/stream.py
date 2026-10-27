@@ -111,6 +111,16 @@ class InputReader:
             return UNKNOWN_POSITION
         return f"{self._name}:{self._line}"
 
+    def filename(self) -> str | None:
+        """The input the reader reads, None before it opened one, which
+        `input_filename` answers (jq_util_input_get_current_filename)."""
+        return self._name
+
+    def line_number(self) -> int:
+        """The lines read of the current input, which `input_line_number`
+        answers (jq_util_input_get_current_line)."""
+        return self._line
+
     async def close(self) -> None:
         """Close the input the reader stopped in, as jq's exit closes its
         file: a parse error, a halt, or a program that takes one `input`

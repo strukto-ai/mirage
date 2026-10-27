@@ -93,10 +93,12 @@ const ERROR_UNKNOWN = 5
 const NULL_KIND = new Set(['null', 'false'])
 
 // The frames a jq_eval drain writes: an output's compact dump, the error
-// that ended the run, and a halt.
+// that ended the run, a halt, a `debug` line and what `stderr` writes.
 const FRAME_OUTPUT = 1
 const FRAME_ERROR = 2
 const FRAME_HALT = 3
+const FRAME_DEBUG = 4
+const FRAME_STDERR = 5
 
 // jq's exit status when it refuses the program itself, and when it could not
 // read one of its inputs, whatever the runs answered.
@@ -407,11 +409,17 @@ export function runStatus(run: JqRun<string>): number {
 
 /**
  * Read one jq_eval drain into a run: every output frame's compact dump onto
- * `outputs`, and the stop an error or halt frame names, or null. A frame is
- * a tag, a little-endian u32 length and its payload: an output's dump, an
- * error's string flag byte then its text, or a halt's JSON.
+ * `outputs`, every debug or stderr frame onto `messages` as its tag and
+ * text, and the stop an error or halt frame names, or null. A frame is a
+ * tag, a little-endian u32 length and its payload: an output's dump, an
+ * error's string flag byte then its text, a halt's JSON, a `debug` line's
+ * dump, or the text `stderr` writes.
  */
-export function readFrames(bytes: Uint8Array, outputs: string[]): JqError | JqHalt | null {
+export function readFrames(
+  bytes: Uint8Array,
+  outputs: string[],
+  messages: [number, string][],
+): JqError | JqHalt | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   let stop: JqError | JqHalt | null = null
   let at = 0
@@ -424,6 +432,8 @@ export function readFrames(bytes: Uint8Array, outputs: string[]): JqError | JqHa
     at = end
     if (tag === FRAME_OUTPUT) {
       outputs.push(DEC.decode(payload))
+    } else if (tag === FRAME_DEBUG || tag === FRAME_STDERR) {
+      messages.push([tag, DEC.decode(payload)])
     } else if (tag === FRAME_ERROR) {
       stop = { kind: 'error', text: DEC.decode(payload.subarray(1)), string: payload[0] === 1 }
     } else if (tag === FRAME_HALT) {
@@ -437,29 +447,68 @@ export function readFrames(bytes: Uint8Array, outputs: string[]): JqError | JqHa
 }
 
 /**
+ * Where jq's input reader stands, as jq_eval takes it: the input it reads
+ * and the lines read of it.
+ */
+export function readerPosition(reader: InputReader): { filename: string | null; line: number } {
+  return { filename: reader.filename(), line: reader.lineNumber() }
+}
+
+/**
+ * jq's input callback (util.c) answering one `input`: the reader's next
+ * document, the end of the stream, or its parse error, and where the reader
+ * stands after it.
+ */
+export async function inputReply(
+  reader: InputReader,
+): Promise<[Record<string, string | number | null>, Uint8Array]> {
+  const item = await reader.nextInput()
+  const position = readerPosition(reader)
+  if (item === NO_VALUE) return [{ kind: 'end', ...position }, new Uint8Array()]
+  if (item instanceof JqParseError) {
+    return [{ kind: 'error', ...position }, ENC.encode(item.message)]
+  }
+  return [{ kind: 'value', ...position }, ENC.encode(item)]
+}
+
+/**
  * A program compiled once by mirage-rs's jq_eval and run on this thread, a
  * bounded number of VM steps per drain, so a program that never ends still
  * yields and the signal can stop it between two.
  */
 class Engine {
-  private started = false
   private readonly budget: YieldBudget
+  // jq's debug callback prints compactly, with -S and -a but none of the
+  // layout or raw options (main.c's dumpopts less pretty).
+  private readonly debugOpts: JqOptions
 
   private constructor(
     private readonly stream: OpenStream,
-    signal?: AbortSignal,
+    opts: JqOptions,
+    private readonly signal?: AbortSignal,
   ) {
     this.budget = new YieldBudget(signal)
+    this.debugOpts = jqOptions({
+      ...opts,
+      compact: true,
+      tab: false,
+      rawOutput: false,
+      joinOutput: false,
+      nulOutput: false,
+      seq: false,
+    })
   }
 
   /**
-   * Compile `expr` with the options' named bindings and `args` as `$ARGS`,
-   * or null when jq_eval refuses a builtin or syntax it uses.
+   * Compile `expr` with the options' named bindings, `args` as `$ARGS` and
+   * `env` (JSON text) as `$ENV` and `env`, or null when jq_eval refuses a
+   * builtin or syntax it uses.
    */
   static async open(
     expr: string,
     opts: JqOptions,
     args: string | null,
+    env: string,
     signal?: AbortSignal,
   ): Promise<Engine | null> {
     let stream: OpenStream
@@ -468,38 +517,64 @@ class Engine {
         program: expr,
         named: Object.fromEntries(opts.namedArgs),
         args,
+        env,
       })
     } catch (error) {
       if (!(error instanceof StreamRefusal)) throw error
       return null
     }
-    return new Engine(stream, signal)
+    return new Engine(stream, opts, signal)
   }
 
   /**
    * Run the program on one document's JSON text, or null for a document
-   * jq_eval cannot read (jq's own literals: `nan`, `+1`, `.5`), which the
-   * caller runs elsewhere.
+   * jq_eval cannot read, which the caller runs elsewhere.
+   *
+   * Each `input` the program calls takes the reader's next document then and
+   * there, as jq's input callback does, so the run consumes exactly what it
+   * asks for and the main loop reads on after it. `report` takes each line
+   * `debug` and `stderr` write, in order.
    */
-  async run(doc: string): Promise<JqRun<string> | null> {
+  async run(
+    doc: string,
+    reader: InputReader,
+    report: (line: string) => void,
+  ): Promise<JqRun<string> | null> {
     const stream = this.stream
-    if (this.started) stream.begin({})
-    this.started = true
+    stream.begin(readerPosition(reader))
     const outputs: string[] = []
+    const messages: [number, string][] = []
     let stop: JqError | JqHalt | null
     try {
-      stop = readFrames(stream.feed(ENC.encode(doc)), outputs)
-      stop = readFrames(stream.finish(), outputs) ?? stop
+      stop = readFrames(stream.feed(ENC.encode(doc)), outputs, messages)
+      stop = readFrames(stream.finish(), outputs, messages) ?? stop
     } catch (error) {
       if (!(error instanceof StreamRefusal)) throw error
       return null
     }
-    while (stream.busy()) {
-      const pending = this.budget.run()
-      if (pending !== undefined) await pending
-      stop = readFrames(stream.drain(), outputs) ?? stop
+    for (;;) {
+      let wire: Uint8Array
+      if (stream.busy()) {
+        const pending = this.budget.run()
+        if (pending !== undefined) await pending
+        wire = stream.drain()
+      } else if (stream.request() !== null) {
+        const [reply, data] = await inputReply(reader)
+        wire = stream.respond(reply, data)
+      } else {
+        break
+      }
+      stop = readFrames(wire, outputs, messages) ?? stop
+      for (const [tag, text] of messages) report(await this.message(tag, text))
+      messages.length = 0
     }
     return { outputs, stop }
+  }
+
+  // `debug` prints its line through jq's dumper, `stderr` its text.
+  private async message(tag: number, text: string): Promise<string> {
+    if (tag === FRAME_STDERR) return text
+    return DEC.decode(await formatOne(text, this.debugOpts, this.signal))
   }
 
   /** Close the program; a run cut short is retired a bounded slice at a time. */
@@ -549,22 +624,26 @@ export function parseReport(failure: JqParseError, opts: JqOptions): string {
  * null. The exit status and stderr settle on `io` once the stream is
  * drained.
  *
- * A run of a program that calls `input` or `inputs` reads what they take
- * before the program runs (see run), and nothing past it, so the loop never
- * reads further ahead than jq's own.
+ * A program runs in mirage-rs's jq_eval, compiled once per invocation and
+ * stepped in bounded slices on this thread, so a run that never ends still
+ * yields to the signal. Its `input` and `inputs` take each document from the
+ * reader when they ask for it, as jq's input callback does, so the next run
+ * starts after the documents the program consumed, and `debug` and `stderr`
+ * lines go to stderr in the order they were written, before the run's own
+ * report. `env` (JSON text) is what `$ENV` and `env` read.
+ *
+ * A program jq_eval refuses, and a document it cannot read, go to the
+ * invocation's worker instead, even for a short run: jq-wasm cannot be
+ * interrupted, so no run there is known to end (strukto-ai/mirage#1590). A
+ * run there of a program that calls `input` or `inputs` reads what they take
+ * before the program runs (see evaluateReading), and nothing past it, so the
+ * loop never reads further ahead than jq's own.
  *
  * An input that cannot be opened or read is reported when the reader reaches
  * it, and the reader goes on to the next. The loop checks for such a failure
  * before each document it reads, so it stops after the run of the document
  * the failing read went on to, and the exit status is 2 whatever the runs
  * answered. `sources` are the inputs, in order, not yet opened.
- *
- * A program that reads neither `input` nor `inputs` runs in mirage-rs's
- * jq_eval, compiled once per invocation and stepped in bounded slices on
- * this thread, so a run that never ends still yields to the signal. A
- * program it refuses, and every program that reads the stream, goes to the
- * invocation's worker instead, even for a short run: jq-wasm cannot be
- * interrupted, so no run there is known to end (strukto-ai/mirage#1590).
  */
 export class MainLoop {
   private worker: Worker | null = null
@@ -582,6 +661,7 @@ export class MainLoop {
     private readonly opts: JqOptions,
     private readonly reads: StreamReads,
     private readonly args: string | null,
+    private readonly env: string,
     private readonly io: IOResult,
     private readonly signal?: AbortSignal,
   ) {
@@ -593,7 +673,7 @@ export class MainLoop {
   async *outputs(): AsyncIterable<Uint8Array> {
     try {
       if (this.opts.nullInput) {
-        const [run, position] = await this.run('null', this.reader.position())
+        const [run, position] = await this.run('null')
         for (const value of run.outputs) {
           const pending = this.budget.run()
           if (pending !== undefined) await pending
@@ -610,7 +690,7 @@ export class MainLoop {
           if (this.opts.seq) continue
           return
         }
-        const [run, position] = await this.run(item, this.reader.position())
+        const [run, position] = await this.run(item)
         for (const value of run.outputs) {
           const pending = this.budget.run()
           if (pending !== undefined) await pending
@@ -628,45 +708,48 @@ export class MainLoop {
     }
   }
 
+  private evaluate(args: readonly unknown[]): Promise<JqRun<string>> {
+    this.worker ??= new Worker()
+    return this.worker.call('jqRunTexts', args, this.signal)
+  }
+
   /**
    * Run the program on one document (null under -n), and say where the
-   * reader stands after it, for its error report; `position` is where it
-   * stood once it had read the document. The run is what jq's main loop gets
-   * to print (see printable).
+   * reader stands after it, for its error report. The run is what jq's main
+   * loop gets to print (see printable).
+   */
+  private async run(doc: string): Promise<[JqRun<string>, string]> {
+    if (this.engine === undefined) {
+      this.engine = await Engine.open(this.expr, this.opts, this.args, this.env, this.signal)
+    }
+    const run =
+      (await this.engine?.run(doc, this.reader, (line) => this.reports.push(line))) ??
+      (await this.evaluateReading(doc))
+    return [await printable(run, this.opts, this.signal), this.reader.position()]
+  }
+
+  /**
+   * Run the program on one document in jq-wasm, reading first what its
+   * `input` and `inputs` take, so the next run starts past it.
    *
-   * `input` and `inputs` consume the stream the main loop reads, so a run
-   * reads what they take first, and the next run starts past it. How much a
-   * run takes is a runtime fact this evaluator does not report, so mirage
+   * How much a run takes is a runtime fact jq-wasm does not report, so mirage
    * assumes what the idioms do: `inputs` drains the rest (`[., inputs]`,
    * `reduce inputs as $x`), and `input` alone takes one (`[., input]` pairs
    * the documents up). A program that takes some other count
    * (`first(inputs)`, an `input` in a branch not taken) leaves real jq a
    * different remainder for its next run than here. A parse error stops the
    * reading: the run raises it where `input` or `inputs` would reach it, and
-   * the main loop reads on past it.
+   * the main loop reads on past it. Only a program jq_eval refuses runs here.
    */
-  private evaluate(args: readonly unknown[]): Promise<JqRun<string>> {
-    this.worker ??= new Worker()
-    return this.worker.call('jqRunTexts', args, this.signal)
-  }
-
-  private async run(doc: string, position: string): Promise<[JqRun<string>, string]> {
+  private async evaluateReading(doc: string): Promise<JqRun<string>> {
     const reads = this.reads
     if (!reads.input && !reads.inputs) {
-      if (this.engine === undefined) {
-        this.engine = await Engine.open(this.expr, this.opts, this.args, this.signal)
-      }
-      const run =
-        (await this.engine?.run(doc)) ??
-        (await this.evaluate([doc, this.expr, this.opts.namedArgs, null, this.args]))
-      return [await printable(run, this.opts, this.signal), position]
+      return this.evaluate([doc, this.expr, this.opts.namedArgs, null, this.args, null, this.env])
     }
     const docs: string[] = []
     let failure: JqParseError | null = null
-    let at = position
     for (;;) {
       const item = await this.reader.nextInput()
-      at = this.reader.position()
       if (item === NO_VALUE) break
       if (item instanceof JqParseError) {
         failure = item
@@ -675,15 +758,15 @@ export class MainLoop {
       docs.push(item)
       if (!reads.inputs) break
     }
-    const run = await this.evaluate([
+    return this.evaluate([
       doc,
       this.expr,
       this.opts.namedArgs,
       docs,
       this.args,
       failure === null ? null : failure.message,
+      this.env,
     ])
-    return [await printable(run, this.opts, this.signal), at]
   }
 
   // Fold one run into the invocation: its answer toward the exit status,
@@ -799,6 +882,9 @@ export async function jqGeneric(
     }
   }
   const io = new IOResult()
-  const loop = new MainLoop(sources, expr, jq, reads, args, io, ctx.signal)
+  // `$ENV` and `env` read the session's exported environment in place of
+  // jq's process environment.
+  const env = JSON.stringify(ctx.env ?? {})
+  const loop = new MainLoop(sources, expr, jq, reads, args, env, io, ctx.signal)
   return [loop.outputs(), io]
 }

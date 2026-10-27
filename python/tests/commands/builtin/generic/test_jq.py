@@ -23,7 +23,7 @@ from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
-from mirage.core.jq import JqError, JqHalt, JqOptions, JqRun
+from mirage.core.jq import InputReader, JqError, JqHalt, JqOptions, JqRun
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
@@ -736,13 +736,21 @@ def _frame(tag: int, payload: bytes) -> bytes:
 
 def test_frames_fold_into_outputs_and_the_stop_that_ended_the_run():
     outputs: list[str] = []
-    wire = _frame(1, b"1") + _frame(1, b"[2]") + _frame(2, b"\x00{}")
-    assert read_frames(wire, outputs) == JqError("{}", False)
+    messages: list[tuple[int, str]] = []
+    wire = (
+        _frame(1, b"1")
+        + _frame(4, b'["DEBUG:",1]')
+        + _frame(1, b"[2]")
+        + _frame(5, b"x")
+        + _frame(2, b"\x00{}")
+    )
+    assert read_frames(wire, outputs, messages) == JqError("{}", False)
     assert outputs == ["1", "[2]"]
+    assert messages == [(4, '["DEBUG:",1]'), (5, "x")]
     halt = b'{"message":"bye","string":true,"code":3.0}'
-    assert read_frames(_frame(3, halt), []) == JqHalt("bye", True, 3.0)
+    assert read_frames(_frame(3, halt), [], []) == JqHalt("bye", True, 3.0)
     with pytest.raises(ValueError):
-        read_frames(_frame(9, b""), [])
+        read_frames(_frame(9, b""), [], [])
 
 
 class _NoWorker:
@@ -771,9 +779,116 @@ async def test_a_program_jq_eval_refuses_runs_in_libjqs_worker():
 
 @pytest.mark.asyncio
 async def test_a_document_jq_eval_cannot_read_is_handed_back():
-    engine = Engine.open(".", JqOptions(), None)
+    engine = Engine.open(".", JqOptions(), None, "{}")
     assert engine is not None
-    assert await engine.run("[") is None
-    run = await engine.run('{"a":1}')
+    reader = InputReader([], JqOptions())
+    assert await engine.run("[", reader, print) is None
+    run = await engine.run('{"a":1}', reader, print)
     assert run == JqRun(['{"a":1}'])
     await engine.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("program", "flags", "out", "err", "code"),
+    [
+        ("[., input]", {}, b"[1,2]\n[3,4]\n", b"", 0),
+        ("first(inputs)", {}, b"2\n4\n", b"", 0),
+        (
+            "if . == 1 then [., input] else . end",
+            {},
+            b"[1,2]\n3\n4\n",
+            b"",
+            0,
+        ),
+        (
+            "[., input, input]",
+            {},
+            b"[1,2,3]\n",
+            b"jq: error (at /d/four.json:4): break\n",
+            5,
+        ),
+        (
+            "[input_filename, input_line_number]",
+            {"null_input": True},
+            b"[null,0]\n",
+            b"",
+            0,
+        ),
+        ("[inputs] | length", {"null_input": True}, b"4\n", b"", 0),
+    ],
+)
+async def test_input_takes_each_document_when_the_program_asks(
+    monkeypatch, program, flags, out, err, code
+):
+    monkeypatch.setattr(jq_module, "Worker", _NoWorker)
+    got, io = await _run(
+        ["/d/four.json"], program, compact_output=True, **flags
+    )
+    assert (got, await materialize(io.stderr), io.exit_code) == (
+        out,
+        err,
+        code,
+    )
+
+
+@pytest.mark.asyncio
+async def test_input_meets_a_parse_error_and_the_reader_position():
+    out, io = await _run(["/d/mid.json"], "[., input]", compact_output=True)
+    assert (out, io.exit_code) == (b"[3,4]\n", 0)
+    assert await materialize(io.stderr) == (
+        b"jq: error (at /d/mid.json:2): Expected separator between values "
+        b"at line 2, column 5\n"
+    )
+    out, _ = await _run(
+        ["/d/a.json", "/d/b.json"],
+        "[., input_filename, input_line_number, input, input_filename]",
+        compact_output=True,
+    )
+    assert out == b'[{"a":1},"/d/a.json",1,{"b":2},"/d/b.json"]\n'
+
+
+@pytest.mark.asyncio
+async def test_debug_and_stderr_write_before_the_runs_report():
+    out, io = await _run(
+        [],
+        '{"b":1,"a":2} | (debug | empty), ("x" | stderr | empty), '
+        '({"c":3} | stderr | error)',
+        null_input=True,
+        sort_keys=True,
+    )
+    assert (out, io.exit_code) == (b"", 5)
+    assert await materialize(io.stderr) == (
+        b'["DEBUG:",{"a":2,"b":1}]\n'
+        b'x{"c":3}jq: error (at <unknown>) (not a string): {"c":3}\n'
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("program", "out"),
+    [
+        (
+            "[$ENV.HOME, env.HOME, ($ENV | length)]",
+            b'["/home/agent","/home/agent",1]\n',
+        ),
+        (
+            "[$ENV.HOME, env.HOME, ($ENV | length), (now | type)]",
+            b'["/home/agent","/home/agent",1,"number"]\n',
+        ),
+    ],
+)
+async def test_env_reads_the_sessions_exported_environment(program, out):
+    bag = parse_to_kwargs(
+        parse_command(SPECS["jq"], ["-c", "-n", program], "/", "jq")
+    )
+    source, _ = await jq_generic(
+        [],
+        [program],
+        Context(flags=bag, env={"HOME": "/home/agent"}),
+        _read_stream,
+    )
+    assert source is not None
+    assert await materialize(source) == out
+    out, _ = await _run([], "$ENV", null_input=True)
+    assert out == b"{}\n"

@@ -396,6 +396,20 @@ async def test_no_input_at_all_reads_as_nothing():
 
 
 @pytest.mark.asyncio
+async def test_filename_and_line_follow_the_input_being_read():
+    reader = InputReader(_sources(b"1\n2\n", b"3"), JqOptions())
+    try:
+        assert (reader.filename(), reader.line_number()) == (None, 0)
+        seen = []
+        while await reader.next_input() is not NO_VALUE:
+            seen.append((reader.filename(), reader.line_number()))
+        assert seen == [("f0.json", 1), ("f0.json", 2), ("f1.json", 0)]
+        assert reader.position() == "f1.json:0"
+    finally:
+        await reader.close()
+
+
+@pytest.mark.asyncio
 async def test_an_empty_input_holds_no_documents():
     assert await _values(b"") == []
     assert await _values(b"  \n\n ") == []

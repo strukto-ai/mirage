@@ -707,6 +707,28 @@ describe('jqRunTexts', () => {
     ])
   })
 
+  it('reads the environment it is given', async () => {
+    const env = '{"HOME":"/home/a"}'
+    expect(
+      await jqRunTexts('null', '[$ENV.HOME, env.HOME]', new Map(), null, null, null, env),
+    ).toEqual({ outputs: ['["/home/a","/home/a"]'], stop: null })
+    expect(
+      await jqRunTexts(
+        'null',
+        '[$ENV, env.HOME]',
+        new Map([['ENV', '"x"']]),
+        null,
+        null,
+        null,
+        env,
+      ),
+    ).toEqual({ outputs: ['[{"HOME":"/home/a"},"/home/a"]'], stop: null })
+    expect(await jqRunTexts('null', 'def env: 1; env', new Map(), null, null, null, env)).toEqual({
+      outputs: ['1'],
+      stop: null,
+    })
+  })
+
   it("reports errors and halts in jq's own spelling", async () => {
     expect((await jqRunTexts('1.000', '. + "a"')).stop).toEqual({
       kind: 'error',

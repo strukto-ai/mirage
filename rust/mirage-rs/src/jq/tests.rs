@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::compile::compile;
-use super::eval::{ERROR, HALT, OUTPUT};
+use super::eval::{DEBUG, ERROR, HALT, OUTPUT, STDERR};
 use super::value::parse_json;
 use super::vm::{Limits, Next, Vm};
 use crate::Stream;
@@ -26,6 +26,10 @@ fn frames(mut wire: &[u8]) -> Vec<Frame> {
         let tag = wire[0];
         let len = u32::from_le_bytes(wire[1..5].try_into().unwrap()) as usize;
         let payload = String::from_utf8_lossy(&wire[5..5 + len]).into_owned();
+        if matches!(tag, DEBUG | STDERR) {
+            wire = &wire[5 + len..];
+            continue;
+        }
         out.push(match tag {
             OUTPUT => Frame::Out(payload),
             ERROR => Frame::Err(payload[1..].to_string()),
@@ -48,10 +52,22 @@ fn run(program: &str, input: &str, steps: u64) -> Vec<Frame> {
     let mut wire = Vec::new();
     stream.feed(input.as_bytes(), &mut wire).unwrap();
     stream.finish(&mut wire).unwrap();
-    while stream.busy() {
-        stream.drain(&mut wire).unwrap();
-    }
+    settle(&mut *stream, &mut wire);
     frames(&wire)
+}
+
+/// Drain `stream` to the end of its run, answering each `input` with the
+/// end of the stream, as for a run over one document.
+fn settle(stream: &mut dyn Stream, wire: &mut Vec<u8>) {
+    loop {
+        while stream.busy() {
+            stream.drain(wire).unwrap();
+        }
+        if stream.request(&mut Vec::new()).is_none() {
+            break;
+        }
+        stream.respond(br#"{"kind":"end"}"#, b"", wire).unwrap();
+    }
 }
 
 fn outputs(program: &str, input: &str) -> Vec<String> {
@@ -564,7 +580,7 @@ fn deep_values_drop_and_print_without_recursion() {
 
 #[test]
 fn unsupported_builtins_refuse_to_compile() {
-    for program in ["input", "test(\"a\")", "now", "$ENV", "@base32"] {
+    for program in ["test(\"a\")", "now", "@base32"] {
         assert!(compile(program, &HashMap::new()).is_err(), "{program}");
     }
 }
@@ -620,9 +636,7 @@ fn jq_test_corpus() {
         let mut wire = Vec::new();
         stream.feed(input.as_bytes(), &mut wire).unwrap();
         stream.finish(&mut wire).unwrap();
-        while stream.busy() {
-            stream.drain(&mut wire).unwrap();
-        }
+        settle(&mut *stream, &mut wire);
         let (mut got, mut error) = (Vec::new(), None);
         for f in frames(&wire) {
             match f {
@@ -653,7 +667,7 @@ fn jq_test_corpus() {
     }
     assert!(mismatch.is_empty(), "{}", mismatch.join("\n"));
     assert!(
-        pass >= 490 && refused <= 29,
+        pass >= 492 && refused <= 27,
         "pass {pass}, refused {refused}"
     );
 }
