@@ -1476,8 +1476,13 @@ class JobTable:
         """Stop what the lapsed instances on the store left running,
         without waiting: the workspace calls it as it starts, so what a
         crashed instance ran stops before anything lists it. Once per
-        table."""
-        if self._swept or self._reaping_stopped:
+        table, and only on a store that leases owners: on any other, no
+        owner lapses."""
+        if (
+            self._swept
+            or self._reaping_stopped
+            or self.store.lease_seconds is None
+        ):
             return
         self._swept = True
         task = asyncio.ensure_future(self._sweep())

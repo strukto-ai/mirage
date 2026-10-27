@@ -1681,6 +1681,14 @@ describe('JobTable process plane', () => {
     await b.close()
   })
 
+  // A store that leases no owner has no lapsed one, so a start sweeps nothing.
+  it('sweeps nothing on a store without leases', async () => {
+    const b = new JobTable(new RAMJobStore())
+    b.reapLapsed()
+    expect((b as unknown as { reaping: Set<Promise<void>> }).reaping.size).toBe(0)
+    await b.close()
+  })
+
   // Teardown ends a start's sweep that waits for a lease to pass.
   it('ends the sweep at teardown', async () => {
     const store = new RAMJobStore(30)

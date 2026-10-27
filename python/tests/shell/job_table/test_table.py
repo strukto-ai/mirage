@@ -1542,6 +1542,15 @@ async def test_a_start_reaps_lapsed_owners():
     await b.close()
 
 
+# A store that leases no owner has no lapsed one, so a start sweeps nothing.
+@pytest.mark.asyncio
+async def test_a_start_on_a_store_without_leases_sweeps_nothing():
+    b = JobTable(RAMJobStore())
+    b.reap_lapsed()
+    assert not b._reaping
+    await b.close()
+
+
 # Teardown ends a start's sweep that waits for a lease to pass.
 @pytest.mark.asyncio
 async def test_teardown_ends_the_sweep():
