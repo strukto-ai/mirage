@@ -505,7 +505,7 @@ if await directory(ctx['command']):
       },
     )
     ws.createSession('s', { profile: 'release' })
-    const tar = (await ws.snapshot()) as Uint8Array
+    const tar = await ws.snapshot()
     const copied = await ws.copy()
     const restored = await Workspace.load(tar, { policyFunctions: { directory } })
     try {
