@@ -439,6 +439,14 @@ export function isErofs(err: unknown): boolean {
   return hasCode(err, 'EROFS')
 }
 
+// A refusal, not an absence: a rule's or a policy's deny (EACCES), an
+// operation the store does not permit (EPERM) or a read-only mount (EROFS),
+// which a command reports for the one operand and goes on past. Python's
+// twin is `except PermissionError`.
+export function isRefusal(err: unknown): boolean {
+  return hasCode(err, 'EACCES') || hasCode(err, 'EPERM') || hasCode(err, 'EROFS')
+}
+
 // The per-entry swallow set for walk-and-warn commands (ls, tree, rg):
 // every stamped filesystem code plus the unstamped no-mount refusal.
 // Mirrors Python's `except (OSError, ValueError)`, where ValueError is

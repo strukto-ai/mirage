@@ -32,7 +32,7 @@ import {
   isEacces,
   isEnoent,
   isEnotdir,
-  isErofs,
+  isRefusal,
   walkRefusal,
 } from '../../../../errors/fs.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
@@ -129,13 +129,6 @@ function isoformat(dt: Date): string {
 
 export function nowIso(): string {
   return isoformat(new Date())
-}
-
-// A refusal, not an absence: a rule's or a policy's deny (EACCES) or a
-// read-only mount (EROFS), which chmod, chown, chgrp and touch report for
-// the one file and go on past. Python's twin is `except PermissionError`.
-export function isRefusal(err: unknown): boolean {
-  return isEacces(err) || isErofs(err)
 }
 
 // A refused attribute write. A read-only mount is GNU's per-operand line,

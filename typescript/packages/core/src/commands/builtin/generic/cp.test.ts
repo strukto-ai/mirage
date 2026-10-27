@@ -27,13 +27,15 @@ import {
   type StatFn,
 } from '../../../types.ts'
 import type { FindOptions } from '../../../core/generic/find.ts'
-import { eacces, enoent, enotsup, walkDeclined } from '../../../errors/fs.ts'
+import { eacces, enoent, enotsup, fsError, walkDeclined } from '../../../errors/fs.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import {
   cpFlags,
   cpGeneric,
+  destKind,
   overwriteGate,
   parseFlags,
+  sourceKind,
   targetDirError,
   transferFile,
   updateMode,
@@ -761,6 +763,28 @@ describe('cp probes propagate non-missing stat failures', () => {
     expect(await targetDirError('cp', missing, spec('/d'))).toBe(
       "cp: target directory '/d': No such file or directory",
     )
+  })
+})
+
+// A probe refused in any way (a store's EACCES, EPERM, a read-only region)
+// is GNU's Permission denied on the operand, at the operand or above it.
+// Mirrors test_cp.py's test_a_refused_probe_reads_as_permission_denied.
+describe('cp words a refused probe as Permission denied', () => {
+  it.each(['EACCES', 'EPERM', 'EROFS'])('%s', async (code) => {
+    const refused: StatFn = (p) => Promise.reject(fsError(key(p), code))
+    const above: StatFn = (p) =>
+      Promise.reject(p.virtual === '/d/x' ? enoent(key(p)) : fsError(key(p), code))
+    expect(await targetDirError('cp', refused, spec('/d'))).toBe(
+      "cp: target directory '/d': Permission denied",
+    )
+    for (const stat of [refused, above]) {
+      expect(await destKind(stat, spec('/d/x'))).toEqual({
+        exists: false,
+        isDir: false,
+        condition: 'EACCES',
+      })
+      expect(await sourceKind(stat, spec('/d/x'))).toEqual({ kind: null, condition: 'EACCES' })
+    }
   })
 })
 

@@ -18,7 +18,13 @@ import { parseToKwargs } from '../../../../commands/spec/parser.ts'
 import type { FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
-import { fsStrerror, isDotWalkError, isEnoent, isFsError } from '../../../../errors/fs.ts'
+import {
+  fsStrerror,
+  isDotWalkError,
+  isEnoent,
+  isFsError,
+  isRefusal,
+} from '../../../../errors/fs.ts'
 import { CycleError, gnuBasename, posixNormpath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
@@ -29,6 +35,10 @@ import type { Result } from '../types.ts'
 import type { FlagValue } from '../../../../commands/spec/types.ts'
 import type { FollowOperands, NamespaceLinks } from '../../../../view/types.ts'
 import { SLASH_KEEPS_LAST, followsLastComponent, lsLinkMode } from '../../../lookup/constants.ts'
+
+// Opt in by assigning a debug sink, as Python's module logger is off until
+// configured.
+export const logger: { debug?: (message: string) => void } = {}
 
 export function posixRelative(target: string, startDir: string): string {
   const t = target.split('/').filter(Boolean)
@@ -447,7 +457,15 @@ async function preparePair(
     if (!(err instanceof CycleError)) throw err
     followed = null
   }
-  const stat = followed === null ? null : await statOrNull(dispatch, PathSpec.fromStrPath(followed))
+  let stat: FileStat | null
+  try {
+    stat = followed === null ? null : await statOrNull(dispatch, PathSpec.fromStrPath(followed))
+  } catch (err) {
+    if (!isRefusal(err)) throw err
+    // A refused destination: the generic mv names it through its stat.
+    logger.debug?.(`mv: destination ${dst.virtual} refused: ${String(err)}`)
+    return { items, early: null }
+  }
   const intoDir =
     !fl.asBool('no_target_directory') && stat !== null && stat.type === FileType.DIRECTORY
   if (links.isLink(src.virtual)) {

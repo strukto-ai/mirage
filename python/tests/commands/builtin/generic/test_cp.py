@@ -20,14 +20,18 @@ from mirage.commands.builtin.generic.cp import (
     CpFlags,
     TransferLinks,
     cp_generic,
+    dest_kind,
     parse_flags,
+    source_kind,
+    target_dir_error,
     transfer_file,
     update_mode,
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
-from mirage.errors.fs import eacces, enotsup, walk_declined
+from mirage.errors.fs import eacces, enoent, enotsup, fs_error, walk_declined
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import (
     LINK_TARGET_KEY,
@@ -919,3 +923,34 @@ async def test_recursive_copy_omits_hidden_links():
     assert await copied.materialize_stdout() == b"a\npublic\nvisible\n"
     assert not ws.namespace.is_link("/other/copy/secret")
     assert not ws.namespace.is_link("/other/copy/sec/link")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "why", [FsCondition.EACCES, FsCondition.EPERM, FsCondition.EROFS]
+)
+async def test_a_refused_probe_reads_as_permission_denied(why):
+    # A probe refused in any way is GNU's Permission denied on the operand,
+    # at the operand or above it. Mirrors cp.test.ts.
+    async def refused(path: PathSpec) -> FileStat:
+        raise fs_error(path, why)
+
+    async def above(path: PathSpec) -> FileStat:
+        if path.virtual == "/d/x":
+            raise enoent(path)
+        raise fs_error(path, why)
+
+    assert (
+        await target_dir_error("cp", refused, _spec("/d"))
+        == "cp: target directory '/d': Permission denied"
+    )
+    for stat in (refused, above):
+        assert await dest_kind(stat, _spec("/d/x")) == (
+            False,
+            False,
+            FsCondition.EACCES,
+        )
+        assert await source_kind(stat, _spec("/d/x")) == (
+            None,
+            FsCondition.EACCES,
+        )

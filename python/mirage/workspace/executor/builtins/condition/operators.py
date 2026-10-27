@@ -25,6 +25,7 @@ from mirage.context.session_context import (
 )
 from mirage.errors.types import FileTooLargeError
 from mirage.io.types import materialize
+from mirage.policy import PolicyDenied
 from mirage.shell.errors import ArithError
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.dates import iso_timestamp
@@ -90,25 +91,32 @@ async def path_kind(
         val (str | PathSpec): operand as typed or classified.
     """
     walk = PathSpec.from_str_path(val, cwd=ctx.session.cwd)
-    if (
-        await dot_refusal(
-            partial(dispatch_stat, ctx.dispatch),
-            walk,
-            ctx.namespace.session_links(ctx.session).follow,
-        )
-        is not None
-    ):
-        # A path whose `.` and `..` do not resolve names nothing, which
-        # is what every file test reads as false.
-        return None, None
     try:
-        scope = operand_scope(ctx, val)
-    except CycleError:
-        # A link loop names nothing: stat fails with ELOOP and bash reads
-        # that as absent (`[ loop -ef loop ]` and `[ -e loop ]` are
-        # false), so a file test answers false rather than erroring.
+        if (
+            await dot_refusal(
+                partial(dispatch_stat, ctx.dispatch),
+                walk,
+                ctx.namespace.session_links(ctx.session).follow,
+            )
+            is not None
+        ):
+            # A path whose `.` and `..` do not resolve names nothing, which
+            # is what every file test reads as false.
+            return None, None
+        try:
+            scope = operand_scope(ctx, val)
+        except CycleError:
+            # A link loop names nothing: stat fails with ELOOP and bash
+            # reads that as absent (`[ loop -ef loop ]` and `[ -e loop ]`
+            # are false), so a file test answers false rather than erroring.
+            return None, None
+        stat = await resolve_path_stat(ctx.dispatch, scope)
+    except PolicyDenied:
+        raise
+    except PermissionError:
+        # bash reads a file test whose stat, or a stat on the way to it,
+        # a store refuses as false.
         return None, None
-    stat = await resolve_path_stat(ctx.dispatch, scope)
     if stat is None:
         return None, None
     if stat.type == FileType.DIRECTORY:

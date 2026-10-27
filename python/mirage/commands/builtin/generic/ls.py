@@ -842,6 +842,22 @@ def sort_stats(
     ]
 
 
+async def _operand_stat(path: PathSpec, stat: Stat) -> FileStat | None:
+    """An operand's stat, None for a path nothing is at.
+
+    Args:
+        path (PathSpec): the operand.
+        stat (Stat): the stat it is asked through.
+
+    Raises:
+        OSError: when its stat fails other than by absence.
+    """
+    try:
+        return await stat(path)
+    except MISS_ERRORS:
+        return None
+
+
 async def _file_entry(
     path: PathSpec,
     stat: Stat,
@@ -849,17 +865,27 @@ async def _file_entry(
     """The row of an operand that is no directory, None for a directory
     or a path nothing is at.
 
+    Args:
+        path (PathSpec): the operand.
+        stat (Stat): the stat it is asked through.
+
     Raises:
         OSError: when its stat fails other than by absence.
     """
-    try:
-        s = await stat(path)
-    except MISS_ERRORS:
+    s = await _operand_stat(path, stat)
+    if s is None or s.type == FileType.DIRECTORY:
         return None
-    if s.type == FileType.DIRECTORY:
-        return None
-    # GNU ls prints a file operand as given (`ls sub/x.txt` shows
-    # sub/x.txt, not x.txt); the row carries the operand spelling.
+    return _as_operand(s, path)
+
+
+def _as_operand(s: FileStat, path: PathSpec) -> FileStat:
+    """GNU ls prints a file operand as given (`ls sub/x.txt` shows
+    sub/x.txt, not x.txt); the row carries the operand spelling.
+
+    Args:
+        s (FileStat): the operand's stat.
+        path (PathSpec): the operand.
+    """
     return s.model_copy(update={"name": path.raw_path})
 
 
@@ -1156,13 +1182,14 @@ async def probe_operand(
                 )
             )
             return Operand(path, None, []), warnings
+        found: FileStat | None = None
         refused: str | None = None
         try:
-            row = await _file_entry(path, own_stat)
+            found = await _operand_stat(path, own_stat)
         except OSError as stat_exc:
-            row, refused = None, fs_strerror(stat_exc) or str(stat_exc)
-        if row is not None:
-            return Operand(path, row, []), warnings
+            refused = fs_strerror(stat_exc) or str(stat_exc)
+        if found is not None and found.type != FileType.DIRECTORY:
+            return Operand(path, _as_operand(found, path), []), warnings
         if (
             # A directory the session may not open is refused whole: the
             # names the namespace owes it (a link in it, a mount below it)
@@ -1179,7 +1206,7 @@ async def probe_operand(
             )
             verb = (
                 "cannot open directory"
-                if refused is None and isinstance(exc, PermissionError)
+                if found is not None and isinstance(exc, PermissionError)
                 else "cannot access"
             )
             warnings.append(

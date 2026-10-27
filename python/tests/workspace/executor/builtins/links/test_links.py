@@ -146,6 +146,60 @@ class PinLinks(Policy):
         return None
 
 
+class RefuseSteps(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        name, virtual = ctx.call.name, ctx.path.virtual.rstrip("/")
+        if (name, virtual) == ("readdir", "/data/p"):
+            return Deny("unlisted")
+        if name == "stat" and virtual.endswith(".hid"):
+            return Deny("hidden")
+        if name == "unlink" and virtual.endswith(".pinned"):
+            return Deny("pinned")
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, stderr, made",
+    [
+        ("ln -s /data/f.txt /data/p/d", "", "/data/p/d/f.txt"),
+        (
+            "ln -s y /data/z.hid",
+            "ln: failed to create symbolic link '/data/z.hid': "
+            "Permission denied\n",
+            None,
+        ),
+        (
+            "ln -sf y /data/x.pinned",
+            "ln: failed to create symbolic link '/data/x.pinned': "
+            "Permission denied\n",
+            None,
+        ),
+    ],
+    ids=["unlisted-parent", "refused-name", "refused-unlink"],
+)
+async def test_ln_words_a_refusal_by_the_step_that_meets_it(
+    line, stderr, made
+):
+    # GNU 9.7: a directory it may stat takes the link whatever its parent
+    # lists; a name it may not stat refuses the link; under -f an unlink
+    # refused after the lstat passed refuses the link, not the access.
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        policies=[RefuseSteps()],
+    )
+    await ws.shell(
+        "mkdir -p /data/p/d; printf f > /data/f.txt; printf x > /data/x.pinned"
+    )
+    r = await ws.shell(line)
+    assert (r.exit_code, r.stderr or b"") == (
+        1 if stderr else 0,
+        stderr.encode(),
+    )
+    assert made is None or ws.namespace.is_link(made)
+
+
 @pytest.mark.asyncio
 async def test_ln_f_refuses_the_same_file_before_removing_it():
     # Pinned on coreutils 9.7: `ln -sf a a` and `ln -f a a` are refused
@@ -463,6 +517,65 @@ async def test_prepare_mv_leaves_link_sources_for_the_generic():
     assert link in rewritten
     assert not ws.namespace.is_link("/data/dst/l")
     assert ws.namespace.is_link("/data/l")
+
+
+@pytest.mark.asyncio
+async def test_prepare_mv_leaves_a_refused_destination_to_the_generic():
+    # A store refusing the destination's stat ended the line; the generic
+    # mv names it through its own stat (`cannot stat 'b'`).
+    ws = _ws()
+    await ws.shell("printf a > /data/a; ln -s /data/a /data/l")
+    real = ws.dispatch
+
+    async def refusing(op: str, path: PathSpec, **kwargs: Any) -> Any:
+        if op == "stat" and path.virtual == "/data/b":
+            raise PermissionError(errno.EACCES, "Permission denied", "b")
+        return await real(op, path, **kwargs)
+
+    items: list[str | PathSpec] = [
+        PathSpec.from_str_path("/data/a"),
+        PathSpec.from_str_path("/data/b"),
+    ]
+    rewritten, early = await prepare_mv(
+        ws.namespace, refusing, items, ("/data/a", "/data/b"), "/"
+    )
+    assert (rewritten, early) == (items, None)
+
+
+class SealedTarget(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if ctx.call.name == "stat" and ctx.path.virtual == "/data/sealed":
+            return Deny("sealed")
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, check, shown",
+    [
+        ("mv /data/z /data/dlink", "cat /data/dlink", b"z"),
+        ("mv /data/sl /data/dlink", "readlink /data/dlink", b"z\n"),
+        ("mv -T /data/z /data/dlink", "cat /data/dlink", b"z"),
+    ],
+    ids=["file", "link", "no-target-directory"],
+)
+async def test_mv_replaces_a_link_whose_target_it_may_not_stat(
+    line, check, shown
+):
+    # GNU 9.7: a destination it cannot stat is no directory, so the move
+    # renames over the link and exits 0, whatever the source is.
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        policies=[SealedTarget()],
+    )
+    await ws.shell(
+        "printf z > /data/z; printf s > /data/sealed; "
+        "ln -s /data/sealed /data/dlink; ln -s z /data/sl"
+    )
+    r = await ws.shell(line)
+    assert (r.exit_code, r.stderr or b"") == (0, b"")
+    assert (await ws.shell(check)).stdout == shown
 
 
 @pytest.mark.asyncio

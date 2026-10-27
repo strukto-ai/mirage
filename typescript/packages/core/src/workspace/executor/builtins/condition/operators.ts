@@ -23,7 +23,8 @@ import { ArithError } from '../../../../shell/errors.ts'
 import { type FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { effectivePathMode, sessionAccess } from '../../../../context/session_context.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
-import { isEfbig } from '../../../../errors/fs.ts'
+import { isEfbig, isRefusal } from '../../../../errors/fs.ts'
+import { PolicyDenied } from '../../../../policy/errors.ts'
 import { followPaths } from '../links/links.ts'
 import { absPath } from '../shared.ts'
 import { toScope, scopePath } from '../scope.ts'
@@ -62,27 +63,36 @@ async function pathKind(
   ctx: CondContext,
   val: string | PathSpec,
 ): Promise<['dir' | 'file' | 'char' | 'fifo' | null, FileStat | null]> {
-  // A path whose `.` and `..` do not resolve names nothing, which is what
-  // every file test reads as false.
   const walk = PathSpec.fromStrPath(val, undefined, ctx.session.cwd)
-  if (
-    (await dotRefusal(dispatchStat(ctx.dispatch), walk, (v) =>
-      ctx.namespace.sessionLinks(ctx.session).follow(v),
-    )) !== null
-  ) {
-    return [null, null]
-  }
-  let scope: PathSpec
+  let stat: FileStat | null
   try {
-    scope = operandScope(ctx, val)
+    // A path whose `.` and `..` do not resolve names nothing, which is what
+    // every file test reads as false.
+    if (
+      (await dotRefusal(dispatchStat(ctx.dispatch), walk, (v) =>
+        ctx.namespace.sessionLinks(ctx.session).follow(v),
+      )) !== null
+    ) {
+      return [null, null]
+    }
+    let scope: PathSpec
+    try {
+      scope = operandScope(ctx, val)
+    } catch (err) {
+      // A link loop names nothing: stat fails with ELOOP and bash reads
+      // that as absent (`[ loop -ef loop ]` and `[ -e loop ]` are false),
+      // so a file test answers false rather than erroring.
+      if (err instanceof CycleError) return [null, null]
+      throw err
+    }
+    stat = await resolvePathStat(ctx.dispatch, scope)
   } catch (err) {
-    // A link loop names nothing: stat fails with ELOOP and bash reads
-    // that as absent (`[ loop -ef loop ]` and `[ -e loop ]` are false),
-    // so a file test answers false rather than erroring.
-    if (err instanceof CycleError) return [null, null]
+    if (err instanceof PolicyDenied) throw err
+    // bash reads a file test whose stat, or a stat on the way to it, a
+    // store refuses as false.
+    if (isRefusal(err)) return [null, null]
     throw err
   }
-  const stat = await resolvePathStat(ctx.dispatch, scope)
   if (stat === null) return [null, null]
   if (stat.type === FileType.DIRECTORY) return ['dir', stat]
   if (stat.type === FileType.CHAR_DEVICE) return ['char', stat]

@@ -14,13 +14,17 @@
 
 import { descendantPath } from './paths.ts'
 import { FileType, type PathSpec, type StatFn } from '../../../types.ts'
-import { eloop, enoent, enotdir, isMissingPath } from '../../../errors/fs.ts'
+import { eacces, eloop, enoent, enotdir, isMissingPath } from '../../../errors/fs.ts'
 
 // The destination verdicts GNU meets at the destination's own stat, before
-// any create or rename: a plain file in its chain, or a link loop in it. cp
-// and mv both word them `cannot stat 'DST'` (coreutils 9.7). Mirrors
-// Python's STAT_REFUSALS.
-export const STAT_REFUSALS: ReadonlySet<FsCondition> = new Set<FsCondition>(['ENOTDIR', 'ELOOP'])
+// any create or rename: a plain file in its chain, a link loop in it, or a
+// refused stat, a store's or a policy's. cp and mv both word them `cannot stat 'DST'`
+// (coreutils 9.7). Mirrors Python's STAT_REFUSALS.
+export const STAT_REFUSALS: ReadonlySet<FsCondition> = new Set<FsCondition>([
+  'ENOTDIR',
+  'ELOOP',
+  'EACCES',
+])
 import { rstripSlash } from '../../../utils/slash.ts'
 import { respelled } from '../../../utils/key_prefix.ts'
 import { parent } from '../../../utils/path.ts'
@@ -55,6 +59,7 @@ export function copyTargets(
 ): [PathSpec, PathSpec][] {
   if (sources.length > 1 && !dstIsDir) {
     if (dstErr === 'ELOOP') throw eloop(`target '${dst.rawPath}'`)
+    if (dstErr === 'EACCES') throw eacces(`target '${dst.rawPath}'`)
     if (!dstExists && dstErr !== 'ENOTDIR') throw enoent(`target '${dst.rawPath}'`)
     throw enotdir(`target '${dst.rawPath}'`)
   }

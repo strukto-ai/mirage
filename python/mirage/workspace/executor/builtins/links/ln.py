@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import posixpath
 from dataclasses import dataclass
 from functools import partial
@@ -57,6 +58,8 @@ from mirage.workspace.mount.namespace.probe import (
     path_stat,
 )
 from mirage.workspace.session import SessionState
+
+logger = logging.getLogger(__name__)
 
 _TARGET_DIR_LONG = "--target-directory"
 _SUFFIX_LONG = "--suffix"
@@ -302,7 +305,12 @@ async def _listed_by_parent(dispatch: DispatchFn, virtual: str) -> bool:
     parent, _, name = virtual.rstrip("/").rpartition("/")
     if not name:
         return False
-    listing = await path_readdir(dispatch, parent or "/")
+    try:
+        listing = await path_readdir(dispatch, parent or "/")
+    except PermissionError as exc:
+        # A parent it may not list says nothing against the stat's row.
+        logger.debug("ln: listing %s refused: %s", parent or "/", exc)
+        return True
     return any(
         str(entry).rstrip("/").rsplit("/", 1)[-1] == name for entry in listing
     )
@@ -423,21 +431,25 @@ async def plan_links(
         why = _walk_verdict(links, typed, cwd, follow_last=True)
         if why is not None:
             return [], f"ln: failed to access '{typed}': {posix_phrase(why)}\n"
-        unwalked = await dot_refusal(
-            partial(dispatch_stat, dispatch),
-            PathSpec.from_str_path(typed, cwd=cwd),
-            links.follow,
-        )
-        if unwalked is not None:
-            return [], (
-                f"ln: failed to access '{typed}': {fs_strerror(unwalked)}\n"
+        try:
+            unwalked = await dot_refusal(
+                partial(dispatch_stat, dispatch),
+                PathSpec.from_str_path(typed, cwd=cwd),
+                links.follow,
             )
-        resolved, stat = await _dir_at(
-            links,
-            dispatch,
-            operand_abs(links, target_dir, cwd),
-            flags.no_dereference,
-        )
+            if unwalked is not None:
+                return [], (
+                    f"ln: failed to access '{typed}': "
+                    f"{fs_strerror(unwalked)}\n"
+                )
+            resolved, stat = await _dir_at(
+                links,
+                dispatch,
+                operand_abs(links, target_dir, cwd),
+                flags.no_dereference,
+            )
+        except PermissionError as exc:
+            return [], f"ln: failed to access '{typed}': {fs_strerror(exc)}\n"
         if stat is None:
             return [], (
                 f"ln: failed to access '{typed}': "
@@ -469,11 +481,24 @@ async def plan_links(
     last_abs = operand_abs(links, last, cwd)
     # The empty name reads as the working directory in `last_abs`, and it
     # is no directory to link into.
-    resolved, stat = (
-        (last_abs, None)
-        if word_text(last) == ""
-        else await _dir_at(links, dispatch, last_abs, flags.no_dereference)
-    )
+    try:
+        resolved, stat = (
+            (last_abs, None)
+            if word_text(last) == ""
+            else await _dir_at(links, dispatch, last_abs, flags.no_dereference)
+        )
+    except PermissionError as exc:
+        # GNU reads a name it cannot stat as no directory, so one TARGET
+        # links at it and meets the refusal there; a hard link's source
+        # is reached first.
+        if len(operands) > 2:
+            return [], f"ln: target '{word_text(last)}': {fs_strerror(exc)}\n"
+        if flags.symbolic:
+            why = classify(exc) or FsCondition.EACCES
+            return [], _refused(
+                flags, word_text(last), word_text(operands[0]), why
+            )
+        return [LinkPlan(operands[0], last_abs, word_text(last))], None
     is_dir = stat is not None and stat.type == FileType.DIRECTORY
     if len(operands) == 2 and not is_dir:
         return [LinkPlan(operands[0], last_abs, word_text(last))], None
@@ -526,7 +551,10 @@ async def _source_bytes(
                 f"ln: failed to access '{typed}': "
                 "Too many levels of symbolic links\n"
             )
-    stat = await path_stat(dispatch, src_abs)
+    try:
+        stat = await path_stat(dispatch, src_abs)
+    except PermissionError as exc:
+        return None, f"ln: failed to access '{typed}': {fs_strerror(exc)}\n"
     if stat is None:
         return None, (
             f"ln: failed to access '{typed}': "
@@ -558,6 +586,38 @@ async def make_link(
     out: list[str],
 ) -> None:
     """Make one link, appending GNU's line to ``errors`` or ``out``.
+
+    A stat of the name that is refused is GNU's lstat under ``-f`` or
+    ``-b`` and the call that makes the link otherwise.
+
+    Args:
+        links (NamespaceReader): the link table as the session sees it.
+        dispatch (DispatchFn): op dispatcher.
+        cwd (str): session working directory.
+        plan (LinkPlan): the link to make.
+        flags (LnFlags): the parsed flags.
+        errors (list[str]): stderr lines, appended in place.
+        out (list[str]): ``-v`` lines, appended in place.
+    """
+    try:
+        await _attempt_link(links, dispatch, cwd, plan, flags, errors, out)
+    except PermissionError as exc:
+        why = classify(exc) or FsCondition.EACCES
+        errors.append(
+            _refused(flags, plan.link_typed, word_text(plan.source), why)
+        )
+
+
+async def _attempt_link(
+    links: NamespaceReader,
+    dispatch: DispatchFn,
+    cwd: str,
+    plan: LinkPlan,
+    flags: LnFlags,
+    errors: list[str],
+    out: list[str],
+) -> None:
+    """``make_link`` up to a refused stat of the name.
 
     A symlink stores the target as typed (or relative under ``-r``). A
     hard link of a symlink is the link itself, so it becomes a second
@@ -608,11 +668,14 @@ async def make_link(
         errors.append(_refused(flags, typed, target_typed, why))
         return
     if not flags.symbolic:
-        unwalked = await dot_refusal(
-            walker,
-            PathSpec.from_str_path(plan.source, cwd=cwd),
-            links.follow,
-        )
+        try:
+            unwalked = await dot_refusal(
+                walker,
+                PathSpec.from_str_path(plan.source, cwd=cwd),
+                links.follow,
+            )
+        except PermissionError as exc:
+            unwalked = exc
         if unwalked is not None:
             errors.append(
                 f"ln: failed to access '{target_typed}': "
@@ -779,6 +842,14 @@ async def make_link(
         except DotWalkLoop:
             errors.append(
                 _refused(flags, typed, target_typed, FsCondition.ELOOP)
+            )
+            return
+        except PermissionError as exc:
+            # GNU's lstat passed; making the link over it is refused.
+            arrow = "" if flags.symbolic else f" => '{target_typed}'"
+            errors.append(
+                f"ln: failed to create {kind} '{typed}'{arrow}: "
+                f"{fs_strerror(exc)}\n"
             )
             return
         occupied = False

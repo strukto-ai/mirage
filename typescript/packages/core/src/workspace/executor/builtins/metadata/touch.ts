@@ -25,6 +25,7 @@ import {
   isEnoent,
   isEnotdir,
   isMissingOp,
+  isRefusal,
   strerrorOf,
   walkRefusal,
 } from '../../../../errors/fs.ts'
@@ -33,14 +34,7 @@ import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { expandOperands, fail, finish, parseLine } from '../shared.ts'
-import {
-  isRefusal,
-  nowIso,
-  permissionError,
-  parseTouchStamp,
-  setattrLink,
-  setattrVia,
-} from './metadata.ts'
+import { nowIso, permissionError, parseTouchStamp, setattrLink, setattrVia } from './metadata.ts'
 import type { Result } from '../types.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 

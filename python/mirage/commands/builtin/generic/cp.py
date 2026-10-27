@@ -694,6 +694,8 @@ async def target_dir_error(
         condition = FsCondition.ENOTDIR
     except DotWalkLoop:
         condition = FsCondition.ELOOP
+    except PermissionError:
+        condition = FsCondition.EACCES
     except (FileNotFoundError, ValueError):
         condition = FsCondition.ENOENT
     else:
@@ -747,11 +749,16 @@ async def dest_kind(
         # Its `..` passes a name that is not there: the chain of the path
         # it simplifies to says nothing about this one.
         return False, False, FsCondition.ENOENT
+    except PermissionError:
+        return False, False, FsCondition.EACCES
     except (FileNotFoundError, ValueError) as exc:
         _logger.debug("no destination at %s: %s", target.virtual, exc)
     else:
         return True, info.type == FileType.DIRECTORY, None
-    return False, False, await absent_dest_error(stat, target)
+    try:
+        return False, False, await absent_dest_error(stat, target)
+    except PermissionError:
+        return False, False, FsCondition.EACCES
 
 
 def slash_refuses_file(
@@ -815,7 +822,10 @@ async def source_kind(
         _logger.debug("no source at %s: %s", path.virtual, exc)
     else:
         return info.type, None
-    _, is_dir = await nearest_ancestor(stat, path)
+    try:
+        _, is_dir = await nearest_ancestor(stat, path)
+    except PermissionError:
+        return None, FsCondition.EACCES
     return None, FsCondition.ENOENT if is_dir else FsCondition.ENOTDIR
 
 
