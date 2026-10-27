@@ -10,6 +10,7 @@ permissions:
       - rust/**
       - scripts/gen_unicode_width.py
       - scripts/gen_unicode_classes.py
+      - scripts/gen_unicode_case_fold.py
       - scripts/gen_rust_notices.py
       - scripts/check_mirage_rs_wheel.py
       - scripts/check_release_artifacts.py
@@ -27,6 +28,7 @@ permissions:
       - rust/**
       - scripts/gen_unicode_width.py
       - scripts/gen_unicode_classes.py
+      - scripts/gen_unicode_case_fold.py
       - scripts/gen_rust_notices.py
       - licenses/third_party/**
       - python/THIRD_PARTY_NOTICES
@@ -92,6 +94,7 @@ jobs:
           python3 scripts/gen_rust_notices.py
           python3 scripts/gen_unicode_width.py
           python3 scripts/gen_unicode_classes.py
+          python3 scripts/gen_unicode_case_fold.py
           git diff --exit-code
 
   # Every wheel platform is built and run on main, and by the release

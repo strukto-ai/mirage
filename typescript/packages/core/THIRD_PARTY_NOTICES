@@ -3213,10 +3213,12 @@ written authorization of the copyright holder.
 
 ------------------------------------------------------------------------
 
-rust/mirage-rs/src/generated/unicode_width.rs and
-rust/mirage-rs/src/generated/unicode_classes.rs are generated from the Unicode
-16.0.0 Character Database (https://www.unicode.org/Public/16.0.0/ucd/) by
-scripts/gen_unicode_width.py and scripts/gen_unicode_classes.py, and
+rust/mirage-rs/src/generated/unicode_width.rs,
+rust/mirage-rs/src/generated/unicode_classes.rs and
+rust/mirage-rs/src/generated/unicode_case_fold.rs are generated from the
+Unicode 16.0.0 Character Database (https://www.unicode.org/Public/16.0.0/ucd/)
+by scripts/gen_unicode_width.py, scripts/gen_unicode_classes.py and
+scripts/gen_unicode_case_fold.py, and
 python/mirage/utils/generated/width_data.py and
 typescript/packages/core/src/utils/generated/width_data.ts from the Unicode
 15.0.0 Character Database (https://www.unicode.org/Public/15.0.0/ucd/), as
