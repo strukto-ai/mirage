@@ -500,13 +500,25 @@ impl Parser {
         };
         Ok(match c {
             'c' => {
-                let Some(c) = self.next() else {
-                    return Err(END_AT_CONTROL.into());
-                };
-                match c {
-                    '?' => 0x7f,
-                    '\\' => self.escaped_value()? & 0x9f,
-                    c => (c as u32) & 0x9f,
+                // `\c\c...x` nests one control escape in the next; read the
+                // chain with a loop: masking twice masks as once.
+                let mut nested = false;
+                loop {
+                    let Some(c) = self.next() else {
+                        return Err(END_AT_CONTROL.into());
+                    };
+                    match c {
+                        '?' if nested => break 0x7f & 0x9f,
+                        '?' => break 0x7f,
+                        '\\' => match self.peek() {
+                            Some('c') => {
+                                self.next();
+                                nested = true;
+                            }
+                            _ => break self.escaped_value()? & 0x9f,
+                        },
+                        c => break (c as u32) & 0x9f,
+                    }
                 }
             }
             'n' => 0x0a,

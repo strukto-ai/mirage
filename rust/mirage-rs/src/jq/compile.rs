@@ -108,6 +108,9 @@ struct Compiler<'a> {
     /// The bytecode whose STOREVs become STOREVNs, while a `?//`
     /// alternative other than the last is compiled into it.
     storevn: Option<usize>,
+    /// How deep the compiler is in builtin.jq's definitions, whose regex
+    /// calls pass their callers' patterns on.
+    in_library: usize,
 }
 
 /// Why a program does not compile here.
@@ -139,6 +142,7 @@ pub(crate) fn compile(source: &str, globals: &HashMap<String, Value>) -> Result<
         library: library().map_err(Refusal::Unsupported)?,
         linked: HashMap::new(),
         storevn: None,
+        in_library: 0,
     };
     compiler
         .code(0, &ast, &None)
@@ -846,9 +850,61 @@ impl Compiler<'_> {
         let (fbc, index) = self.function(0);
         self.linked.insert(key, index);
         let inner = Self::params(def, fbc, &None);
-        self.code(fbc, &Self::body(def), &inner)?;
+        self.in_library += 1;
+        let compiled = self.code(fbc, &Self::body(def), &inner);
+        self.in_library -= 1;
+        compiled?;
         self.emit(fbc, Op::Ret);
         Ok(Some(index))
+    }
+
+    /// What a regex call's pattern or modifiers are at compile time: a
+    /// literal, or a `--arg`-style global nothing in scope shadows. None
+    /// when only the run knows.
+    fn known<'v>(&'v self, ast: &'v Ast, env: &Env) -> Option<&'v Value> {
+        match ast {
+            Ast::Literal(value) => Some(value),
+            Ast::Var(name, _) if find_var(env, name).is_none() => self.globals.get(name),
+            _ => None,
+        }
+    }
+
+    /// Why one of builtin.jq's regex functions, called from the program,
+    /// cannot run on this matcher (see regex::unsupported): its pattern
+    /// needs syntax the matcher lacks, or is only known at run time, when
+    /// a pattern the matcher lacks could no longer go to libjq. The
+    /// compiler then refuses the program, which the host runs on libjq.
+    fn unsupported_regex(&self, name: &str, args: &[Ast], env: &Env) -> Option<String> {
+        if self.in_library > 0 {
+            return None;
+        }
+        let (pattern, modifiers) = match (name, args.len()) {
+            ("test" | "match" | "capture" | "scan" | "splits", 1) => (&args[0], None),
+            ("test" | "match" | "capture" | "scan" | "splits" | "split", 2) => {
+                (&args[0], Some(&args[1]))
+            }
+            ("sub" | "gsub", 2) => (&args[0], None),
+            ("sub" | "gsub", 3) => (&args[0], Some(&args[2])),
+            _ => return None,
+        };
+        let modifiers = match modifiers.map(|m| self.known(m, env)) {
+            None | Some(Some(Value::Null)) => None,
+            Some(Some(Value::String(m))) => Some(&**m),
+            Some(Some(_)) => return None,
+            Some(None) => return Some("modifiers known only at run time".into()),
+        };
+        match self.known(pattern, env) {
+            Some(Value::String(pattern)) => super::regex::unsupported(pattern, modifiers),
+            Some(Value::Array(pair)) => match (pair.first(), pair.get(1)) {
+                (Some(Value::String(pattern)), Some(Value::String(m))) => {
+                    super::regex::unsupported(pattern, Some(m))
+                }
+                (Some(Value::String(pattern)), _) => super::regex::unsupported(pattern, None),
+                _ => None,
+            },
+            Some(_) => None,
+            None => Some("a pattern known only at run time".into()),
+        }
     }
 
     fn closure(&mut self, bc: usize, arg: &Ast, env: &Env) -> Result<ClosureRef, String> {
@@ -930,7 +986,7 @@ impl Compiler<'_> {
             },
             _ => {}
         }
-        if let Some(reason) = unsupported_regex(name, args) {
+        if let Some(reason) = self.unsupported_regex(name, args, env) {
             return Err(format!("unsupported regex: {reason}"));
         }
         if let Some(index) = self.link(name, arity)? {
@@ -1018,26 +1074,6 @@ impl Compiler<'_> {
         }
         Program { bytecodes }
     }
-}
-
-/// A call of one of builtin.jq's regex functions whose literal pattern
-/// the matcher cannot run (see regex::unsupported).
-fn unsupported_regex(name: &str, args: &[Ast]) -> Option<String> {
-    let regex_args = match (name, args.len()) {
-        ("test" | "match" | "capture" | "scan" | "splits", 1 | 2) | ("split", 2) => args,
-        ("sub" | "gsub", 2) => &args[..1],
-        ("sub" | "gsub", 3) => &[args[0].clone(), args[2].clone()][..],
-        _ => return None,
-    };
-    let Ast::Literal(Value::String(pattern)) = &regex_args[0] else {
-        return None;
-    };
-    let modifiers = match regex_args.get(1) {
-        None | Some(Ast::Literal(Value::Null)) => None,
-        Some(Ast::Literal(Value::String(m))) => Some(&**m),
-        Some(_) => return None,
-    };
-    super::regex::unsupported(pattern, modifiers)
 }
 
 fn ret_follows(ops: &[Op], mut pc: usize) -> bool {

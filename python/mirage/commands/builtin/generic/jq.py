@@ -693,7 +693,8 @@ class Engine:
         try:
             stop = read_frames(stream.feed(doc.encode()), outputs, messages)
             stop = read_frames(stream.finish(), outputs, messages) or stop
-        except StreamRefusal:
+        except StreamRefusal as exc:
+            logger.debug("jq_eval leaves the document to libjq: %s", exc)
             return None
         while True:
             if stream.busy():

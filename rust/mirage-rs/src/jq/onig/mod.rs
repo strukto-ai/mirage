@@ -80,7 +80,14 @@ impl Regex {
             Some(Inst::Anchor(anchor @ (Anchor::BufStart | Anchor::SearchStart))) => Some(*anchor),
             _ => None,
         };
+        // The leading `.*` shortcut skips start offsets an earlier attempt
+        // already covered, which a backreference to the `.*` breaks.
+        let backrefs = program
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, Inst::Backref(..)));
         let star = match lead {
+            _ if backrefs => None,
             Some(Inst::Star {
                 unit: unit @ (Unit::Any | Unit::AnyNl),
                 max: None,

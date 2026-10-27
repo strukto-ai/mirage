@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Mapping, Sequence
 
 import pytest
 
@@ -918,7 +919,12 @@ async def test_env_reads_the_sessions_exported_environment(program, out):
     assert out == b"{}\n"
 
 
-def _no_libjq(*args: object) -> None:
+def _no_libjq(
+    expr: str,
+    named: Mapping[str, str] | None = None,
+    inputs: Sequence[str] | None = None,
+    args: str | None = None,
+) -> None:
     raise AssertionError("jq_eval should word the refusal itself")
 
 
