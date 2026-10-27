@@ -16,6 +16,7 @@
 // python twin is tests/core/object_store/conftest.py.
 
 import { Accessor } from '../../../src/accessor/base.ts'
+import { unnamedFsError } from '../../../src/errors/fs.ts'
 import { PathSpec } from '../../../src/types.ts'
 import { rstripSlash, stripSlash } from '../../../src/utils/slash.ts'
 import { compareCodePoints } from '../../../src/utils/sort.ts'
@@ -60,6 +61,8 @@ export class FakeStore {
   connects = 0
   readonly puts: [string, Uint8Array][] = []
   readonly deletes: string[] = []
+  // Keys and prefixes the store refuses (403), as a scoped grant does.
+  readonly refused = new Set<string>()
 
   constructor(objects: Record<string, string> = {}) {
     for (const [key, value] of Object.entries(objects)) {
@@ -128,6 +131,7 @@ async function* listSubtree(conn: FakeStore, stem: string): AsyncIterable<TreeEn
 }
 
 function head(conn: FakeStore, key: string): Promise<ObjectMeta | null> {
+  if (conn.refused.has(key)) return Promise.reject(unnamedFsError('EACCES', `refused '${key}'`))
   const data = conn.objects.get(key)
   if (data === undefined) return Promise.resolve(null)
   return Promise.resolve({ ...fakeMeta(key, data), modified: MODIFIED })
@@ -185,6 +189,7 @@ function copyFile(conn: FakeStore, srcKey: string, dstKey: string): Promise<bool
 }
 
 function probePrefix(conn: FakeStore, pfx: string): Promise<boolean> {
+  if (conn.refused.has(pfx)) return Promise.reject(unnamedFsError('EACCES', `refused '${pfx}'`))
   return Promise.resolve(conn.under(pfx).length > 0)
 }
 

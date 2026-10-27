@@ -13,12 +13,36 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.object_store.driver import A, C, ObjectStoreDriver, StatFn
-from mirage.errors.fs import enoent
+from mirage.errors.fs import eacces, enoent
 from mirage.observe.context import revision_for
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils import key_prefix as kp
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import raw_path_of
+
+
+async def proves_directory(
+    driver: ObjectStoreDriver[A, C],
+    conn: C,
+    pfx: str,
+    named: PathSpec,
+) -> bool:
+    """Whether any key sits under ``pfx``; a refused probe is EACCES.
+
+    A grant without ListBucket refuses the probe as well as the key, so
+    the refusal is named for the path the caller reports. Mirrors TS
+    ``provesDirectory``.
+
+    Args:
+        driver (ObjectStoreDriver): the store's native surface.
+        conn (C): the open connection.
+        pfx (str): the key prefix, slash-terminated.
+        named (PathSpec): the path a refusal names.
+    """
+    try:
+        return await driver.probe_prefix(conn, pfx)
+    except PermissionError as exc:
+        raise eacces(named) from exc
 
 
 def make_stat(driver: ObjectStoreDriver[A, C]) -> StatFn[A]:
@@ -46,16 +70,21 @@ def make_stat(driver: ObjectStoreDriver[A, C]) -> StatFn[A]:
 
         kpfx = driver.key_prefix_of(accessor)
         key = kp.apply(kpfx, path)
+        refused: PermissionError | None = None
         async with driver.connect(accessor) as conn:
             # Point lookup first — works for files. Skipped when the path
             # hints a directory (trailing slash), so a coexisting object
             # of the same name does not shadow the prefix.
             if not hints_directory:
                 pinned = revision_for(virtual)
-                if pinned is not None and driver.head_revision is not None:
-                    meta = await driver.head_revision(conn, key, pinned)
-                else:
-                    meta = await driver.head(conn, key)
+                try:
+                    if pinned is not None and driver.head_revision is not None:
+                        meta = await driver.head_revision(conn, key, pinned)
+                    else:
+                        meta = await driver.head(conn, key)
+                except PermissionError as exc:
+                    # A grant scoped below refuses a directory's own key.
+                    refused, meta = exc, None
                 if meta is not None:
                     return FileStat(
                         name=path.rstrip("/").rsplit("/", 1)[-1],
@@ -72,12 +101,14 @@ def make_stat(driver: ObjectStoreDriver[A, C]) -> StatFn[A]:
             # valid prefix (directory): a marker or any deeper key proves
             # it.
             pfx = key.rstrip("/") + "/" if key else ""
-            if await driver.probe_prefix(conn, pfx):
+            if await proves_directory(driver, conn, pfx, path_spec):
                 return FileStat(
                     name=path.rstrip("/").rsplit("/", 1)[-1] or "/",
                     type=FileType.DIRECTORY,
                 )
 
+        if refused is not None:
+            raise eacces(path_spec) from refused
         raise enoent(virtual)
 
     return stat

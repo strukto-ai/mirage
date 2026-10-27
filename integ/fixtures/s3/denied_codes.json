@@ -1,0 +1,35 @@
+{
+  "_note": "Which S3 error codes read as a refused key (EACCES), for both hosts' is_denied / isDenied. code is the error's Code (python) and name (typescript). A HEAD's 403 is bodiless: botocore spells it as the code \"403\", the JS SDK names it Unknown and keeps 403 in $metadata, which typescript's own tests cover. A credential failure with a body keeps its own code; behind a bodiless HEAD it reads as a refusal.",
+  "cases": [
+    {
+      "name": "403",
+      "code": "AccessDenied",
+      "status": 403,
+      "denied": true
+    },
+    {
+      "name": "403-bodiless",
+      "code": "403",
+      "status": 403,
+      "denied": true
+    },
+    {
+      "name": "bad-signature",
+      "code": "SignatureDoesNotMatch",
+      "status": 403,
+      "denied": false
+    },
+    {
+      "name": "unknown-key-id",
+      "code": "InvalidAccessKeyId",
+      "status": 403,
+      "denied": false
+    },
+    {
+      "name": "404",
+      "code": "NoSuchKey",
+      "status": 404,
+      "denied": false
+    }
+  ]
+}

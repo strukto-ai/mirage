@@ -19,6 +19,7 @@ export const CONDITION_LOST_CODES: ReadonlySet<string> = new Set([
   '409',
   'ConditionalRequestConflict',
 ])
+export const DENIED_CODES: ReadonlySet<string> = new Set(['403', 'AccessDenied'])
 
 // The stores whose ETag is an object's MD5 for a single-part upload kept
 // unencrypted, so md5sum can take it instead of reading the object.

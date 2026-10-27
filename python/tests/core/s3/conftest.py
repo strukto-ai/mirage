@@ -23,6 +23,12 @@ LOST_CODES = json.loads(
         / "integ/fixtures/write/lost_codes.json"
     ).read_text()
 )
+DENIED_CASES = json.loads(
+    (
+        Path(__file__).resolve().parents[4]
+        / "integ/fixtures/s3/denied_codes.json"
+    ).read_text()
+)
 
 
 def client_error(code: str, status: int, op: str) -> ClientError:

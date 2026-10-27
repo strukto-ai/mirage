@@ -20,8 +20,8 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import type { S3HttpAgents } from '../../vfs/s3/config.ts'
-import { LOST_CODES, sdkError } from '../../../tests/core/s3/_test_util.ts'
-import { createS3Client, isConditionLost } from './client.ts'
+import { DENIED_CASES, LOST_CODES, sdkError } from '../../../tests/core/s3/_test_util.ts'
+import { createS3Client, isConditionLost, isDenied } from './client.ts'
 
 interface ResolvedHandlerConfig {
   connectionTimeout?: number
@@ -124,6 +124,21 @@ describe('isConditionLost', () => {
     ['transport', new Error('socket hang up'), false],
   ] as const)('%s', (_name, err, lost) => {
     expect(isConditionLost(err)).toBe(lost)
+  })
+})
+
+describe('isDenied', () => {
+  it.each(DENIED_CASES.cases.map((c) => [c.name, c] as const))('%s', (_name, c) => {
+    expect(isDenied(sdkError(c.code, c.status))).toBe(c.denied)
+  })
+
+  it.each([
+    // The SDK names a bodiless reply Unknown; its status is the code.
+    ['403-unknown', sdkError('Unknown', 403), true],
+    ['404-unknown', sdkError('Unknown', 404), false],
+    ['transport', new Error('socket hang up'), false],
+  ] as const)('%s', (_name, err, denied) => {
+    expect(isDenied(err)).toBe(denied)
   })
 })
 

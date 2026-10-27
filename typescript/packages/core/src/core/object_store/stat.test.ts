@@ -54,6 +54,42 @@ describe('object_store stat', () => {
     })
   })
 
+  // Mirrors python's test_stat_names_a_refused_file_as_typed.
+  it('names a refused file as typed', async () => {
+    const store = new FakeStore({ 'rd/b.txt': 'x' })
+    store.refused.add('rd/b.txt')
+    const stat = makeStat(makeDriver(store))
+    await expect(stat(accessor, spec('/rd/b.txt'))).rejects.toMatchObject({
+      code: 'EACCES',
+      message: '/mnt/rd/b.txt',
+    })
+  })
+
+  // Mirrors python's test_stat_names_a_refused_probe. A slashed path skips
+  // the head, so only the probe answers.
+  it.each([
+    [['rd/b.txt', 'rd/b.txt/'], '/rd/b.txt'],
+    [['rd/'], '/rd/'],
+  ])('names a refused probe: %j', async (refused, path) => {
+    const store = new FakeStore({ 'rd/b.txt': 'x' })
+    for (const key of refused) store.refused.add(key)
+    const stat = makeStat(makeDriver(store))
+    await expect(stat(accessor, spec(path))).rejects.toMatchObject({
+      code: 'EACCES',
+      message: '/mnt' + path,
+    })
+  })
+
+  // Mirrors python's test_stat_reads_a_refused_key_with_keys_below_as_a_directory.
+  it('reads a refused key with keys below as a directory', async () => {
+    const store = new FakeStore({ 'rd/a.txt': 'x' })
+    store.refused.add('rd')
+    const stat = makeStat(makeDriver(store))
+    await expect(stat(accessor, spec('/rd'))).resolves.toMatchObject({
+      type: FileType.DIRECTORY,
+    })
+  })
+
   it('reports ENOENT for a missing path', async () => {
     const stat = makeStat(makeDriver(new FakeStore({ 'a.txt': 'hi' })))
     await expect(codeOf(stat(accessor, spec('/never')))).resolves.toBe('ENOENT')

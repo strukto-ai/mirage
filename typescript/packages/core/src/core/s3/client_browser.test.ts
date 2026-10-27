@@ -14,6 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { S3BrowserPresignedUrlProvider, S3BrowserSignOptions } from '../../vfs/s3/config.ts'
+import { isDenied } from './client.ts'
 import { BROWSER_S3_MODULE, createBrowserS3Client } from './client_browser.ts'
 
 interface FetchCall {
@@ -154,6 +155,40 @@ describe('createBrowserS3Client — command dispatch', () => {
     const chunks: number[] = []
     for await (const c of body) chunks.push(...c)
     expect(chunks).toEqual([104, 105])
+  })
+
+  // A presigned fetch carries no SDK error code, so a 403 takes the shape the
+  // SDK gives a bodiless one and isDenied reads it as a refused key.
+  it.each([
+    ['GET', () => new BROWSER_S3_MODULE.GetObjectCommand({ Bucket: 'b', Key: 'k' })],
+    ['HEAD', () => new BROWSER_S3_MODULE.HeadObjectCommand({ Bucket: 'b', Key: 'k' })],
+    [
+      'LIST',
+      () => new BROWSER_S3_MODULE.ListObjectsV2Command({ Bucket: 'b', Prefix: 'k/', MaxKeys: 1 }),
+    ],
+  ] as const)('%s 403 throws an error isDenied reads as a refusal', async (_op, command) => {
+    const { provider } = makeProvider(() => 'https://signed/403')
+    fetchHandle = installTimeout(() => new Response('', { status: 403 }))
+    const client = createBrowserS3Client(cfg(provider))
+    const err = await client.send(command()).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(isDenied(err)).toBe(true)
+  })
+
+  it('GET 500 is no refusal', async () => {
+    const { provider } = makeProvider(() => 'https://signed/500')
+    fetchHandle = installTimeout(() => new Response('', { status: 500 }))
+    const client = createBrowserS3Client(cfg(provider))
+    const err = await client
+      .send(new BROWSER_S3_MODULE.GetObjectCommand({ Bucket: 'b', Key: 'k' }))
+      .then(
+        () => null,
+        (e: unknown) => e,
+      )
+    expect(err).not.toBeNull()
+    expect(isDenied(err)).toBe(false)
   })
 
   it('GET 404 throws with $metadata.httpStatusCode so isNotFoundError matches', async () => {

@@ -23,7 +23,7 @@ from typing import Any, cast
 import aioboto3
 from botocore.config import Config
 
-from mirage.core.s3.constants import CONDITION_LOST_CODES
+from mirage.core.s3.constants import CONDITION_LOST_CODES, DENIED_CODES
 from mirage.utils import key_prefix as kp
 from mirage.vfs.s3.config import S3Config
 from mirage.vfs.secrets import reveal_secret
@@ -38,6 +38,22 @@ def is_not_found(exc: Exception) -> bool:
     if hasattr(exc, "response"):
         code = exc.response.get("Error", {}).get("Code")
         return code in ("404", "NoSuchKey")
+    return False
+
+
+def is_denied(exc: Exception) -> bool:
+    """Whether an S3 error means the key refuses this caller (403).
+
+    A HEAD carries no body, so botocore spells its 403 as the code
+    ``"403"`` and a credential failure behind one reads as a refusal.
+    Mirrors TS ``isDenied``.
+
+    Args:
+        exc (Exception): Error raised by a botocore call.
+    """
+    if hasattr(exc, "response"):
+        code = exc.response.get("Error", {}).get("Code")
+        return code in DENIED_CODES
     return False
 
 

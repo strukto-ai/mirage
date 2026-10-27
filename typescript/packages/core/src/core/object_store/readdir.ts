@@ -16,29 +16,37 @@ import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import type { TreeEntry } from './driver.ts'
 import type { Accessor } from '../../accessor/base.ts'
-import { listingError } from '../../errors/fs.ts'
+import { eacces, isEacces, listingError } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { rawPathOf } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { ObjectStoreDriver, ReaddirFn, TreeFn } from './driver.ts'
+import { provesDirectory } from './stat.ts'
 
 async function probeFile<A extends Accessor, C>(
   driver: ObjectStoreDriver<A, C>,
   conn: C,
   kpfx: string,
+  named: PathSpec,
   key: string,
 ): Promise<boolean> {
-  return (await driver.head(conn, kp.apply(kpfx, key))) !== null
+  try {
+    return (await driver.head(conn, kp.apply(kpfx, key))) !== null
+  } catch (err) {
+    if (isEacces(err)) throw eacces(named)
+    throw err
+  }
 }
 
 async function probeDir<A extends Accessor, C>(
   driver: ObjectStoreDriver<A, C>,
   conn: C,
   kpfx: string,
+  named: PathSpec,
   key: string,
 ): Promise<boolean> {
-  return driver.probePrefix(conn, kp.applyDir(kpfx, key))
+  return provesDirectory(driver, conn, kp.applyDir(kpfx, key), named)
 }
 
 /** Build a prefix listing over one driver. Mirrors Python's `make_readdir`. */
@@ -100,8 +108,8 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
         throw await listingError(
           path,
           rawPath,
-          (p) => probeFile(driver, conn, kpfx, p),
-          (p) => probeDir(driver, conn, kpfx, p),
+          (p) => probeFile(driver, conn, kpfx, path, p),
+          (p) => probeDir(driver, conn, kpfx, path, p),
         )
       }
     } finally {

@@ -17,9 +17,13 @@ from pathlib import Path
 
 import pytest
 
-from mirage.core.s3.client import create_s3_client, is_condition_lost
+from mirage.core.s3.client import (
+    create_s3_client,
+    is_condition_lost,
+    is_denied,
+)
 from mirage.vfs.s3.config import S3Config
-from tests.core.s3.conftest import LOST_CODES, client_error
+from tests.core.s3.conftest import DENIED_CASES, LOST_CODES, client_error
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
 
 _CASES = LOST_CODES["cases"]
@@ -33,6 +37,19 @@ def test_only_a_lost_condition_reads_as_lost(case):
 
 def test_a_transport_failure_is_not_a_lost_condition():
     assert not is_condition_lost(ConnectionError("reset by peer"))
+
+
+_DENIED = DENIED_CASES["cases"]
+
+
+@pytest.mark.parametrize("case", _DENIED, ids=[c["name"] for c in _DENIED])
+def test_only_a_refusal_reads_as_denied(case):
+    exc = client_error(case["code"], case["status"], "GetObject")
+    assert is_denied(exc) is case["denied"]
+
+
+def test_a_transport_failure_is_not_a_refusal():
+    assert not is_denied(ConnectionError("reset by peer"))
 
 
 MIRAGE = Path(__file__).resolve().parents[3] / "mirage"

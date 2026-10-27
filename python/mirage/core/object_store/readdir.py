@@ -23,7 +23,8 @@ from mirage.core.object_store.driver import (
     TreeEntry,
     TreeFn,
 )
-from mirage.errors.fs import listing_error
+from mirage.core.object_store.stat import proves_directory
+from mirage.errors.fs import eacces, listing_error
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils import key_prefix as kp
 from mirage.utils.filetype import content_type_for_path
@@ -33,15 +34,26 @@ logger = logging.getLogger(__name__)
 
 
 async def _probe_file(
-    driver: ObjectStoreDriver[A, C], conn: C, kpfx: str, key: str
+    driver: ObjectStoreDriver[A, C],
+    conn: C,
+    kpfx: str,
+    named: PathSpec,
+    key: str,
 ) -> bool:
-    return await driver.head(conn, kp.apply(kpfx, key)) is not None
+    try:
+        return await driver.head(conn, kp.apply(kpfx, key)) is not None
+    except PermissionError as exc:
+        raise eacces(named) from exc
 
 
 async def _probe_dir(
-    driver: ObjectStoreDriver[A, C], conn: C, kpfx: str, key: str
+    driver: ObjectStoreDriver[A, C],
+    conn: C,
+    kpfx: str,
+    named: PathSpec,
+    key: str,
 ) -> bool:
-    return await driver.probe_prefix(conn, kp.apply_dir(kpfx, key))
+    return await proves_directory(driver, conn, kp.apply_dir(kpfx, key), named)
 
 
 def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
@@ -105,8 +117,8 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
                 raise await listing_error(
                     path_spec,
                     path,
-                    partial(_probe_file, driver, conn, kpfx),
-                    partial(_probe_dir, driver, conn, kpfx),
+                    partial(_probe_file, driver, conn, kpfx, path_spec),
+                    partial(_probe_dir, driver, conn, kpfx, path_spec),
                 )
         listed = sorted(names)
         if len(names) > driver.scope_error:

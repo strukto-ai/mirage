@@ -20,8 +20,9 @@ from mirage.core.s3.client import (
     _key,
     closing_body,
     create_s3_client,
+    is_denied,
 )
-from mirage.errors.fs import enoent
+from mirage.errors.fs import eacces, enoent
 from mirage.observe.context import record, revision_for, start_op
 from mirage.types import PathSpec
 from mirage.utils.ranges import range_header
@@ -102,4 +103,6 @@ async def read(
             and exc.response.get("Error", {}).get("Code") == "NoSuchKey"
         ):
             raise enoent(virtual)
+        if is_denied(exc):
+            raise eacces(virtual) from exc
         raise

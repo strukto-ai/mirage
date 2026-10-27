@@ -30,6 +30,7 @@ from mirage.core.s3.client import (
     closing_body,
     create_s3_client,
     is_condition_lost,
+    is_denied,
     is_key_gone,
     is_not_found,
 )
@@ -143,6 +144,8 @@ async def _head(conn: S3Conn, key: str) -> ObjectMeta | None:
     except Exception as exc:
         if is_not_found(exc):
             return None
+        if is_denied(exc):
+            raise _denied(key) from exc
         raise
     etag_raw = _etag_of(resp)
     return ObjectMeta(
@@ -357,6 +360,8 @@ async def _get_versioned(
         if revision is None:
             if is_not_found(exc):
                 return None
+            if is_denied(exc):
+                raise _denied(key) from exc
         elif is_key_gone(exc):
             # A pinned revision gone from the store is no file, not absence.
             raise enoent(key) from exc
@@ -519,6 +524,18 @@ async def _known_pages(
             (key, _quoted(versions[key]) if key in versions else token)
             for key, token in listed
         ]
+
+
+def _denied(key: str) -> PermissionError:
+    """The error for a key the store refuses this caller (403).
+
+    Unnamed, as a kernel's EACCES is: the key carries the mount's prefix,
+    so the command names its own operand instead. Mirrors TS ``denied``.
+
+    Args:
+        key (str): the refused key.
+    """
+    return PermissionError(f"S3 refused '{key}'")
 
 
 def _delete_refused(failed: list[str]) -> PermissionError:
@@ -744,6 +761,8 @@ async def _move_file(conn: S3Conn, src_key: str, dst_key: str) -> bool:
     try:
         await conn.client.head_object(Bucket=conn.config.bucket, Key=src_key)
     except Exception as exc:
+        if is_denied(exc):
+            raise _denied(src_key) from exc
         if not is_not_found(exc):
             raise
         return False
@@ -807,9 +826,14 @@ async def _move_prefix(conn: S3Conn, src_pfx: str, dst_pfx: str) -> bool:
 
 
 async def _probe_prefix(conn: S3Conn, pfx: str) -> bool:
-    resp = await conn.client.list_objects_v2(
-        Bucket=conn.config.bucket, Prefix=pfx, Delimiter="/", MaxKeys=1
-    )
+    try:
+        resp = await conn.client.list_objects_v2(
+            Bucket=conn.config.bucket, Prefix=pfx, Delimiter="/", MaxKeys=1
+        )
+    except Exception as exc:
+        if is_denied(exc):
+            raise _denied(pfx) from exc
+        raise
     return bool(resp.get("CommonPrefixes") or resp.get("Contents"))
 
 

@@ -60,6 +60,20 @@ describe('object_store readdir', () => {
     await expect(codeOf(readdir(accessor, spec('/a.txt')))).resolves.toBe('ENOTDIR')
   })
 
+  // Mirrors python's test_readdir_names_a_refused_probe_as_typed.
+  it.each([
+    [['rd/b.txt'], '/rd/b.txt/x'],
+    [['rd/'], '/rd/x'],
+  ])('names a refused probe as typed: %j', async (refused, path) => {
+    const store = new FakeStore({ 'rd/b.txt': 'x' })
+    for (const key of refused) store.refused.add(key)
+    const readdir = makeReaddir(makeDriver(store))
+    await expect(readdir(accessor, spec(path))).rejects.toMatchObject({
+      code: 'EACCES',
+      message: '/mnt' + path,
+    })
+  })
+
   it('does not raise on the root of an empty store', async () => {
     const readdir = makeReaddir(makeDriver(new FakeStore()))
     await expect(readdir(accessor, spec('/'))).resolves.toEqual([])

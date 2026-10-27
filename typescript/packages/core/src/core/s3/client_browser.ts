@@ -209,6 +209,17 @@ function makeNotFound(path: string): Error & { $metadata: { httpStatusCode: numb
   return e
 }
 
+// The presigned fetch does not parse an error body, so a 403 takes the shape
+// the SDK gives a bodiless one (Unknown, status 403), which isDenied reads.
+function makeDenied(path: string): Error & { $metadata: { httpStatusCode: number } } {
+  const e = new Error(`S3 refused: ${path}`) as Error & {
+    $metadata: { httpStatusCode: number }
+  }
+  e.name = 'Unknown'
+  e.$metadata = { httpStatusCode: 403 }
+  return e
+}
+
 async function sendBrowserCommand(
   provider: S3BrowserPresignedUrlProvider,
   defaultContentType: string | undefined,
@@ -242,6 +253,7 @@ async function sendBrowserCommand(
       const url = await provider(`/${key}`, 'GET')
       const resp = await send(url)
       if (resp.status === 404) throw makeNotFound(key)
+      if (resp.status === 403) throw makeDenied(key)
       if (!resp.ok) {
         throw new Error(`S3 GET ${key} failed: ${String(resp.status)} ${resp.statusText}`)
       }
@@ -264,6 +276,7 @@ async function sendBrowserCommand(
       const url = await provider(`/${key}`, 'HEAD')
       const resp = await send(url, { method: 'HEAD' })
       if (resp.status === 404) throw makeNotFound(key)
+      if (resp.status === 403) throw makeDenied(key)
       if (!resp.ok) {
         throw new Error(`S3 HEAD ${key} failed: ${String(resp.status)} ${resp.statusText}`)
       }
@@ -297,6 +310,7 @@ async function sendBrowserCommand(
         opts.listContinuationToken = input.ContinuationToken
       const url = await provider('/', 'LIST', opts)
       const resp = await send(url)
+      if (resp.status === 403) throw makeDenied(opts.listPrefix)
       if (!resp.ok) {
         throw new Error(`S3 LIST failed: ${String(resp.status)} ${resp.statusText}`)
       }

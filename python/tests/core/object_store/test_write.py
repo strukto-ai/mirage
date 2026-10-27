@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 from dataclasses import replace
 
 import pytest
@@ -211,6 +212,61 @@ def test_mkdir_refuses_a_directory_under_a_file(accessor):
         with pytest.raises(NotADirectoryError) as caught:
             asyncio.run(mkdir(accessor, spec(path), parents=parents))
         assert caught.value.filename == named
+    assert store.puts == []
+
+
+def test_mkdir_passes_a_refused_ancestor_with_keys_below(accessor):
+    # A grant scoped to rd/* refuses HEAD on the bare key rd; the keys
+    # below prove a directory, so nothing above the new one is a file.
+    store = FakeStore({"rd/a.txt": b"x"})
+    store.refused.add("rd")
+    mkdir = make_mkdir(make_driver(store))
+    asyncio.run(mkdir(accessor, spec("/rd/new"), parents=True))
+    assert store.puts == [("rd/new/", b"")]
+
+
+def test_mkdir_names_a_refused_ancestor_whose_probe_is_refused(accessor):
+    store = FakeStore()
+    store.refused.update({"rd", "rd/"})
+    mkdir = make_mkdir(make_driver(store))
+    with pytest.raises(PermissionError) as caught:
+        asyncio.run(mkdir(accessor, spec("/rd/new"), parents=True))
+    assert caught.value.errno == errno.EACCES
+    assert caught.value.filename == "/mnt/rd"
+
+
+def test_mkdir_keeps_an_ancestor_lookup_failure_its_own(accessor):
+    # A transport fault on an empty ancestor must not turn into EACCES.
+    store = FakeStore()
+    looked_up = make_driver(store).head
+
+    async def failing_head(conn: FakeStore, key: str) -> ObjectMeta | None:
+        if key == "rd":
+            raise ConnectionError("reset by peer")
+        return await looked_up(conn, key)
+
+    driver = replace(make_driver(store), head=failing_head)
+    with pytest.raises(ConnectionError):
+        asyncio.run(
+            make_mkdir(driver)(accessor, spec("/rd/new"), parents=True)
+        )
+    assert store.puts == []
+
+
+@pytest.mark.parametrize(
+    "parents, named", [(True, "/mnt/rd"), (False, "/mnt/rd/new")]
+)
+def test_mkdir_names_a_refused_ancestor_holding_nothing(
+    accessor, parents, named
+):
+    # mkdir(2) blames the operand; the walk `-p` makes names where it stops.
+    store = FakeStore()
+    store.refused.add("rd")
+    mkdir = make_mkdir(make_driver(store))
+    with pytest.raises(PermissionError) as caught:
+        asyncio.run(mkdir(accessor, spec("/rd/new"), parents=parents))
+    assert caught.value.errno == errno.EACCES
+    assert caught.value.filename == named
     assert store.puts == []
 
 

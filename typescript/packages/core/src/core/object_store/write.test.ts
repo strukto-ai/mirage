@@ -242,6 +242,53 @@ describe('object_store write', () => {
     expect(store.puts).toEqual([])
   })
 
+  // Mirrors python's test_mkdir_passes_a_refused_ancestor_with_keys_below.
+  it('mkdir passes a refused ancestor with keys below', async () => {
+    const store = new FakeStore({ 'rd/a.txt': 'x' })
+    store.refused.add('rd')
+    await makeMkdir(makeDriver(store))(accessor, spec('/rd/new'), true)
+    expect(store.puts.map(([key]) => key)).toEqual(['rd/new/'])
+  })
+
+  // Mirrors python's test_mkdir_names_a_refused_ancestor_whose_probe_is_refused.
+  it('mkdir names a refused ancestor whose probe is refused', async () => {
+    const store = new FakeStore()
+    store.refused.add('rd').add('rd/')
+    await expect(
+      makeMkdir(makeDriver(store))(accessor, spec('/rd/new'), true),
+    ).rejects.toMatchObject({ code: 'EACCES', message: '/mnt/rd' })
+  })
+
+  // Mirrors python's test_mkdir_keeps_an_ancestor_lookup_failure_its_own.
+  it('mkdir keeps an ancestor lookup failure its own', async () => {
+    // A transport fault on an empty ancestor must not turn into EACCES.
+    const store = new FakeStore()
+    const base = makeDriver(store)
+    const driver = {
+      ...base,
+      head: (conn: Store, key: string) =>
+        key === 'rd' ? Promise.reject(new Error('socket hang up')) : base.head(conn, key),
+    }
+    await expect(makeMkdir(driver)(accessor, spec('/rd/new'), true)).rejects.toThrow(
+      'socket hang up',
+    )
+    expect(store.puts).toEqual([])
+  })
+
+  // Mirrors python's test_mkdir_names_a_refused_ancestor_holding_nothing.
+  // mkdir(2) blames the operand; the walk `-p` makes names where it stops.
+  it.each([
+    [true, '/mnt/rd'],
+    [false, '/mnt/rd/new'],
+  ])('mkdir names a refused ancestor holding nothing (parents=%s)', async (parents, named) => {
+    const store = new FakeStore()
+    store.refused.add('rd')
+    await expect(
+      makeMkdir(makeDriver(store))(accessor, spec('/rd/new'), parents),
+    ).rejects.toMatchObject({ code: 'EACCES', message: named })
+    expect(store.puts).toEqual([])
+  })
+
   it('mkdir refuses a directory under a file', async () => {
     // A marker below a file put a directory under it. mkdir(2) blames the
     // operand; the walk `mkdir -p` makes names the file it stops at.

@@ -62,6 +62,8 @@ class FakeStore:
         self.connects = 0
         self.puts: list[tuple[str, bytes]] = []
         self.deletes: list[str] = []
+        # Keys and prefixes the store refuses (403), as a scoped grant does.
+        self.refused: set[str] = set()
 
     def under(self, pfx: str) -> list[str]:
         return sorted(k for k in self.objects if k.startswith(pfx))
@@ -108,6 +110,8 @@ async def list_subtree(conn: FakeStore, stem: str) -> AsyncIterator[TreeEntry]:
 
 
 async def head(conn: FakeStore, key: str) -> ObjectMeta | None:
+    if key in conn.refused:
+        raise PermissionError(f"refused {key!r}")
     if key not in conn.objects:
         return None
     return replace(fake_meta(key, conn.objects[key]), modified=MODIFIED)
@@ -158,6 +162,8 @@ async def copy_file(conn: FakeStore, src_key: str, dst_key: str) -> bool:
 
 
 async def probe_prefix(conn: FakeStore, pfx: str) -> bool:
+    if pfx in conn.refused:
+        raise PermissionError(f"refused {pfx!r}")
     return bool(conn.under(pfx))
 
 
