@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { CommandRule, AdmissionRules, Decision } from '../../policy/types.ts'
+import type { CommandRule, AdmissionRules, Decision, ProfileScript } from '../../policy/types.ts'
 import { Outcome, Scope } from '../../policy/types.ts'
 import {
   commandsFromDict,
@@ -23,7 +23,10 @@ import {
   decisionToDict,
   ruleFromDict,
   ruleToDict,
+  scriptFromDict,
+  scriptToDict,
 } from './serialize.ts'
+import { ScriptSource } from '../../runtime/types.ts'
 
 describe('session record codecs', () => {
   it('a rule round-trips and writes mount only when set', () => {
@@ -86,5 +89,26 @@ describe('session record codecs', () => {
     expect(decisionFromDict(decisionToDict(waiting))).toEqual(waiting)
     expect(decisionToDict(record).outcome).toBe('allow')
     expect(decisionToDict(record).scope).toBe('session')
+  })
+
+  it('a script keeps an env pointer as the pointer', () => {
+    const entry: ProfileScript = {
+      profile: 'release',
+      script: new ScriptSource('pass\n', 'python'),
+      runtime: 'monty',
+      config: {},
+      env: {
+        LLM_URL: 'https://llm/v1',
+        LLM_KEY: { from: 'aws-sm', ref: 'prod/llm', key: 'key' },
+      },
+    }
+    const data = scriptToDict(entry)
+    expect(data.env).toEqual({
+      LLM_URL: 'https://llm/v1',
+      LLM_KEY: { from: 'aws-sm', ref: 'prod/llm', key: 'key' },
+    })
+    expect(scriptFromDict(data)).toEqual(entry)
+    const { env: _env, ...older } = data
+    expect(scriptFromDict(older).env).toEqual({})
   })
 })

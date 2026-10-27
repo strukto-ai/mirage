@@ -240,6 +240,7 @@ describe('SessionManager with a session table', () => {
           script: new ScriptSource('pass', 'python'),
           runtime: 'pyodide',
           config: { home: '/w' },
+          env: {},
         },
       ],
     }
@@ -677,6 +678,7 @@ it.each([false, true])(
               script: new ScriptSource('pass', 'python'),
               runtime: 'monty',
               config: {},
+              env: {},
             },
           ],
         },

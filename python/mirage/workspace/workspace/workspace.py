@@ -273,6 +273,7 @@ class Workspace:
         profile: str | None = None,
         policies: list[Policy] | None = None,
         on_ask: AskHandler | None = None,
+        policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         clis: dict[str, tuple[str | CLI, dict[str, Any] | None]] | None = None,
         env: Mapping[str, str | EnvVar | Mapping[str, Any]] | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
@@ -438,6 +439,8 @@ class Workspace:
             self._session_mgr,
             dispatch=self.dispatch,
             resolver=self._sandbox_resolver,
+            external_lookup=policy_functions,
+            secret_sources=self._secret_sources,
         )
         self._registry.policies.add(self._script_policy)
         for entry in policies or []:

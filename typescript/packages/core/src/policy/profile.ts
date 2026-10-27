@@ -19,7 +19,13 @@ import {
   commandLimitsToJSON,
   parseCommandLimits,
 } from './builtin/output_cap.ts'
-import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, METHODS, PROGRAM_RUNTIME } from './constants.ts'
+import {
+  CTX_ENV,
+  DEFAULT_ASK_REASON,
+  DEFAULT_DENY_REASON,
+  METHODS,
+  PROGRAM_RUNTIME,
+} from './constants.ts'
 import type {
   CommandRule,
   AdmissionRules,
@@ -28,7 +34,12 @@ import type {
   ScriptMethod,
 } from './types.ts'
 import { type Language, ScriptSource } from '../runtime/types.ts'
-import { EnvVarSchema, type EnvEntries } from '../secrets/config.ts'
+import {
+  EnvVarSchema,
+  SecretRefSchema,
+  type EnvEntries,
+  type SecretRef,
+} from '../secrets/config.ts'
 import type { ProcessScope, ShowEntry, Visibility } from '../types.ts'
 import { type MountMode, parseMountMode, weakerMode } from '../types.ts'
 import type { HideReason } from './types.ts'
@@ -180,13 +191,17 @@ export interface SessionProfile {
  * `runtime` is a name, or `{name, config}` for one that needs settings,
  * the shape a `runtimes` entry has. Monty when the program names none;
  * without `@pydantic/monty` installed, such a program fails closed with
- * the package's install hint.
+ * the package's install hint. `env` is the variables the program runs
+ * with beside `MIRAGE_POLICY_CTX`, on any runtime: a literal, or a
+ * pointer read from its source when the program first runs. None of the
+ * session's reach it.
  */
 export interface ProfilePolicySpec {
   readonly script: ScriptSource | string
   readonly runtime?:
     | string
     | { readonly name: string; readonly config?: Readonly<Record<string, unknown>> }
+  readonly env?: Readonly<Record<string, string | SecretRef>>
 }
 
 /** A profile's policy: each `pre` method's programs, asked in order. */
@@ -251,7 +266,7 @@ const PROFILE_FIELDS = [
   'command_limits',
   'processes',
 ] as const
-const PROGRAM_FIELDS = ['script', 'runtime'] as const
+const PROGRAM_FIELDS = ['script', 'runtime', 'env'] as const
 
 // A document mapping, not merely "an object": a Set, a Date or any class
 // instance has no own enumerable string keys, so Object.entries would read
@@ -627,8 +642,26 @@ export function parseProgram(raw: unknown, at: string, code = false): ProfilePol
   if (!(script instanceof ScriptSource) && typeof script !== 'string') {
     throw new Error(`${at}.script must be a script path or source`)
   }
+  let env = {}
+  if (program.env !== undefined) {
+    const entries = asObject(program.env, `${at}.env`)
+    if (CTX_ENV in entries) {
+      throw new Error(
+        `${at}.env: a policy program's env cannot set ${CTX_ENV}, which carries its context`,
+      )
+    }
+    const parsed: Record<string, string | SecretRef> = {}
+    for (const [name, value] of Object.entries(entries)) {
+      const pointer = typeof value === 'string' ? null : SecretRefSchema.safeParse(value)
+      if (pointer !== null && !pointer.success) {
+        throw new Error(`${at}.env.${name} must be a string or a {from, ref, key} pointer`)
+      }
+      parsed[name] = pointer === null ? (value as string) : pointer.data
+    }
+    env = { env: parsed }
+  }
   const runtime = program.runtime === undefined ? PROGRAM_RUNTIME : program.runtime
-  if (typeof runtime === 'string') return { script, runtime }
+  if (typeof runtime === 'string') return { script, runtime, ...env }
   const named = asObject(runtime, `${at}.runtime`)
   const settings = named.config
   if (
@@ -641,11 +674,12 @@ export function parseProgram(raw: unknown, at: string, code = false): ProfilePol
       `${at}.runtime: a policy runtime is a name or {name, config}, got ` + JSON.stringify(runtime),
     )
   }
-  if (settings === undefined) return { script, runtime: { name: named.name } }
+  if (settings === undefined) return { script, runtime: { name: named.name }, ...env }
   const config = settings as Record<string, unknown>
   return {
     script,
     runtime: { name: named.name, config: code ? config : normalizeFields(config) },
+    ...env,
   }
 }
 
@@ -671,6 +705,7 @@ export function compileProgram(program: ProfilePolicySpec, profile: string): Pro
     script: program.script,
     runtime: runtime.name,
     config: { ...runtime.config },
+    env: { ...program.env },
   }
 }
 
@@ -753,7 +788,7 @@ export function profileToDict(profile: SessionProfile): Record<string, unknown> 
     doc.policy = Object.fromEntries(
       Object.entries(profile.policy).map(([method, programs]) => [
         METHODS[method as ScriptMethod],
-        programs.map(({ script, runtime = PROGRAM_RUNTIME }) => ({
+        programs.map(({ script, runtime = PROGRAM_RUNTIME, env }) => ({
           script:
             typeof script === 'string'
               ? script
@@ -774,6 +809,7 @@ export function profileToDict(profile: SessionProfile): Record<string, unknown> 
                       }
                     : {}),
                 },
+          ...(env !== undefined && Object.keys(env).length > 0 ? { env: { ...env } } : {}),
         })),
       ]),
     )

@@ -160,6 +160,13 @@ export interface WorkspaceOptions {
    */
   onAsk?: AskHandler
   /**
+   * Host functions a profile's policy program on monty, or the
+   * `routePolicy` program, may call by name, sync or async, with plain
+   * data in and out. Code only: no document or API can add one, and no
+   * other runtime or agent program sees them.
+   */
+  policyFunctions?: Readonly<Record<string, (...args: never[]) => unknown>>
+  /**
    * Installed CLIs, fully separate from mounts: key = installed head
    * word, value = a registered CLI name (the YAML `cli:` key) or a
    * CLI instance, plus the installation's own config. Every entry

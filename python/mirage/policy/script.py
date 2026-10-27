@@ -13,10 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import contextlib
 import dataclasses
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from enum import Enum
 from typing import Any
 
@@ -60,9 +61,13 @@ from mirage.policy.types import (
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT_SECONDS
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.python.monty.runtime import MontyRuntime
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.script import script_engine
 from mirage.runtime.types import DispatchFn
+from mirage.secrets.errors import SecretsError
+from mirage.secrets.sources import resolve_config_secrets
+from mirage.secrets.types import ResolvedSource
 from mirage.types import JsonValue, PathSpec
 
 logger = logging.getLogger(__name__)
@@ -236,9 +241,11 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     A program runs as any program does on its runtime: never edited,
     in the session's cwd, with the context as JSON (``script_context``)
     in ``CTX_ENV`` and on stdin, and its answer printed on stdout
-    (``script_action``). ``CTX_ENV`` is the only variable it is
-    passed: the session's variables are in the context, so none the
-    agent sets changes how the program starts, and on wasi it runs with
+    (``script_action``). Beside ``CTX_ENV`` it is passed only its
+    entry's own ``env``, a pointer read from the workspace's sources on
+    the entry's first run and kept: the session's variables are in the
+    context, so none the agent sets changes how the program starts, and
+    on wasi it runs with
     ``-P`` (``PROGRAM_FLAGS``), so no file the agent writes stands in
     for a module it imports. Every failure fails closed: a program that
     exits non-zero, runs past the timeout, prints something else, or
@@ -258,6 +265,12 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     its own read would re-enter the run waiting on it. Runs on one
     runtime are serialized; runs on two runtimes go at once.
 
+    A program on monty may also call the host's ``external_lookup``
+    functions by name, sync or async, with plain data in and out; one
+    that raises raises in the program. Its runs go at once: monty runs
+    each on a worker of its own, and a function may be slow or reach the
+    workspace again. No other runtime sees them.
+
     Args:
         sessions (SessionScriptsQuery): the session manager, answering
             ``scripts_of(session_id)``.
@@ -268,6 +281,13 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         resolver (MountResolver | None): the live mount routing table
             the dispatch is attached with. Travels with ``dispatch``:
             one without the other is refused.
+        external_lookup (Mapping[str, Callable[..., Any]] | None): the
+            functions a program on monty may call, by name; None for
+            none.
+        secret_sources (Callable[[], Awaitable[Mapping[str,
+            ResolvedSource]]] | None): the workspace's declared secret
+            sources, which an ``env`` pointer is read from; None reads
+            each from its source's ambient defaults.
 
     Raises:
         ValueError: ``dispatch`` and ``resolver`` were not given
@@ -279,6 +299,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         sessions: SessionScriptsQuery,
         dispatch: DispatchFn | None = None,
         resolver: MountResolver | None = None,
+        external_lookup: Mapping[str, Callable[..., Any]] | None = None,
+        secret_sources: Callable[[], Awaitable[Mapping[str, ResolvedSource]]]
+        | None = None,
     ) -> None:
         if (dispatch is None) != (resolver is None):
             raise ValueError(
@@ -287,8 +310,11 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         self._sessions = sessions
         self._dispatch = dispatch
         self._resolver = resolver
+        self._external_lookup = dict(external_lookup or {})
+        self._secret_sources = secret_sources
+        self._envs: dict[str, dict[str, str]] = {}
         self._engines: dict[
-            tuple[str, str], tuple[LanguageRuntime[Any], asyncio.Lock]
+            tuple[str, str], tuple[LanguageRuntime[Any], asyncio.Lock | None]
         ] = {}
 
     async def pre_execute(
@@ -449,8 +475,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             ValueError: the program failed, as a clause about "script".
         """
         engine, lock = self._engine(entry)
+        env = await self._env(entry)
         try:
-            async with lock:
+            async with lock or contextlib.nullcontext():
                 result = await asyncio.wait_for(
                     engine.execute(
                         [],
@@ -461,7 +488,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
                                 **PROGRAM_FLAGS.get(entry.runtime, {}),
                             },
                             cwd=PathSpec.from_str_path(cwd),
-                            env={CTX_ENV: payload},
+                            env={**env, CTX_ENV: payload},
                             stdin=payload.encode(),
                         ),
                     ),
@@ -484,11 +511,12 @@ class ScriptPolicy(Policy, SessionScopedMixin):
 
     def _engine(
         self, entry: ProfileScript
-    ) -> tuple[LanguageRuntime[Any], asyncio.Lock]:
+    ) -> tuple[LanguageRuntime[Any], asyncio.Lock | None]:
         """The policy's own runtime for one program and the lock its runs
         take, built on first use and shared by every program naming the
         same runtime and settings: two runs on one runtime would
-        interleave.
+        interleave. A monty runtime handed the external functions takes
+        no lock, since each of its runs has a worker of its own.
 
         Args:
             entry (ProfileScript): the program.
@@ -509,9 +537,39 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             engine = script_engine(entry.script, entry.runtime, config)
             if self._dispatch is not None and self._resolver is not None:
                 engine.bind(WorkspaceBinding(self._reading, self._resolver))
-            built = (engine, asyncio.Lock())
+            lock: asyncio.Lock | None = asyncio.Lock()
+            if self._external_lookup and isinstance(engine, MontyRuntime):
+                engine.external_lookup = self._external_lookup
+                lock = None
+            built = (engine, lock)
             self._engines[key] = built
         return built
+
+    async def _env(self, entry: ProfileScript) -> dict[str, str]:
+        """One program's ``env`` with every pointer read, kept once read.
+
+        Args:
+            entry (ProfileScript): the program.
+
+        Raises:
+            ValueError: a source could not answer, as a clause about
+                "script".
+        """
+        key = json.dumps(_plain(entry.env), sort_keys=True)
+        resolved = self._envs.get(key)
+        if resolved is None:
+            sources = (
+                await self._secret_sources()
+                if self._secret_sources is not None
+                else None
+            )
+            try:
+                read = await resolve_config_secrets(entry.env, sources, "env")
+            except SecretsError as exc:
+                raise ValueError(f"script {exc}") from exc
+            resolved = {name: str(value) for name, value in read.items()}
+            self._envs[key] = resolved
+        return resolved
 
     async def _reading(
         self,

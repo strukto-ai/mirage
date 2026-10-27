@@ -411,6 +411,10 @@ export class Workspace {
           this.programDispatch(issuer, this.dispatcher, { explaining: DryRun.DECIDING }),
         resolver: sandboxResolver,
       },
+      {
+        externalLookup: options.policyFunctions,
+        secretSources: () => this.secretSources(),
+      },
     )
     this.registry.policies.add(this.scriptPolicy)
     for (const entry of options.policies ?? []) this.registry.policies.add(entry)

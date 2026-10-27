@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import type { Context } from '../commands/config.ts'
 import { WordKind } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
@@ -6,6 +7,7 @@ import type { WorkspaceBinding } from '../runtime/binding.ts'
 import type * as ScriptModule from '../runtime/script.ts'
 import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
+import { MontyRuntime } from '../runtime/python/monty/runtime.ts'
 import { PrefixResolver } from '../runtime/resolver.ts'
 import { ScriptSource, type DispatchFn, type RunResult } from '../runtime/types.ts'
 import {
@@ -24,6 +26,7 @@ import { Files } from '../workspace/files.ts'
 import { readers } from '../test-utils.ts'
 import { CALLS } from '../workspace/dispatcher/constants.ts'
 import type { VfsCall } from '../vfs/types.ts'
+import { registerSecrets } from '../secrets/registry.ts'
 import { CTX_ENV, DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 import { Policies } from './policies.ts'
 import { ScriptPolicy, scriptAction, scriptContext } from './script.ts'
@@ -162,7 +165,13 @@ function entry(
   source = 'SOURCE',
   config: Record<string, unknown> = {},
 ): ProfileScript {
-  return { profile: 'release', script: new ScriptSource(source, 'python'), runtime, config }
+  return {
+    profile: 'release',
+    script: new ScriptSource(source, 'python'),
+    runtime,
+    config,
+    env: {},
+  }
 }
 
 function scripts(programs: ProfileScripts): { scriptsOf: () => ProfileScripts } {
@@ -843,4 +852,180 @@ describe('a policy program on monty', () => {
     const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('monty', READER)] })))
     expect(await policy.preCommand(ctx('cat'))).toBeNull()
   }, 60_000)
+})
+
+describe('ScriptPolicy env and external functions', () => {
+  const CALLS_LOOKUP = [
+    'import json, os',
+    'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
+    'user = await lookup_user(os.environ["WHO"])',
+    'if user["admin"]:',
+    '    print(json.dumps({"kind": "deny", "reason": "admin may not " + ctx["command"]}))',
+  ].join('\n')
+
+  function withEnv(base: ProfileScript, env: ProfileScript['env']): ProfileScript {
+    return { ...base, env }
+  }
+
+  beforeEach(() => {
+    registerSecrets('env', z.strictObject({}), () =>
+      Promise.resolve({ fields: { ...process.env } as Record<string, string> }),
+    )
+  })
+
+  it("runs a program with its entry's env beside the context", async () => {
+    const engine = new FakeProgram()
+    built.factory = () => engine
+    const policy = track(
+      new ScriptPolicy(scripts({ preCommand: [withEnv(entry(), { LLM_URL: 'https://llm/v1' })] })),
+    )
+    await policy.preCommand(ctx('cat', { session: sessionView() }))
+    const [request] = engine.requests
+    expect(request?.env).toEqual({
+      LLM_URL: 'https://llm/v1',
+      [CTX_ENV]: request?.env?.[CTX_ENV],
+    })
+  })
+
+  it('reads an env pointer on the first run and keeps it', async () => {
+    vi.stubEnv('POLICY_TOKEN', 'first')
+    const engine = new FakeProgram()
+    built.factory = () => engine
+    const pointer = { from: 'env', ref: '', key: 'POLICY_TOKEN' }
+    const policy = track(
+      new ScriptPolicy(scripts({ preCommand: [withEnv(entry(), { TOKEN: pointer })] })),
+    )
+    await policy.preCommand(ctx())
+    vi.stubEnv('POLICY_TOKEN', 'second')
+    await policy.preCommand(ctx())
+    vi.unstubAllEnvs()
+    expect(engine.requests.map((r) => r.env?.TOKEN)).toEqual(['first', 'first'])
+  })
+
+  it('fails closed on an env pointer it cannot read, until it can', async () => {
+    vi.stubEnv('POLICY_TOKEN', undefined)
+    const engine = new FakeProgram()
+    built.factory = () => engine
+    const pointer = { from: 'env', ref: '', key: 'POLICY_TOKEN' }
+    const policy = track(
+      new ScriptPolicy(scripts({ preCommand: [withEnv(entry(), { TOKEN: pointer })] })),
+    )
+    const [refusal] = (await policy.preCommand(ctx())) ?? []
+    expect(refusal?.kind).toBe('deny')
+    expect(refusal?.kind === 'deny' ? refusal.reason : '').toMatch(
+      /^profile 'release' policy env\.TOKEN: /,
+    )
+    expect(engine.requests).toEqual([])
+    vi.stubEnv('POLICY_TOKEN', 'late')
+    expect(await policy.preCommand(ctx())).toBeNull()
+    vi.unstubAllEnvs()
+    expect(engine.requests[0]?.env?.TOKEN).toBe('late')
+  })
+
+  it("reads an env pointer through the workspace's declared sources", async () => {
+    vi.stubEnv('POLICY_TOKEN', 't')
+    const asked: string[] = []
+    const engine = new FakeProgram()
+    built.factory = () => engine
+    const pointer = { from: 'env', ref: '', key: 'POLICY_TOKEN' }
+    const policy = track(
+      new ScriptPolicy(scripts({ preCommand: [withEnv(entry(), { TOKEN: pointer })] }), null, {
+        secretSources: () => {
+          asked.push('sources')
+          return Promise.resolve({})
+        },
+      }),
+    )
+    await policy.preCommand(ctx())
+    vi.unstubAllEnvs()
+    expect(asked).toEqual(['sources'])
+    expect(engine.requests[0]?.env?.TOKEN).toBe('t')
+  })
+
+  it("lets a monty program call the host's functions", async () => {
+    const policy = track(
+      new ScriptPolicy(
+        scripts({ preCommand: [withEnv(entry('monty', CALLS_LOOKUP), { WHO: 'root' })] }),
+        null,
+        {
+          externalLookup: {
+            lookup_user: (name: string) => Promise.resolve({ admin: name === 'root' }),
+          },
+        },
+      ),
+    )
+    expect(await policy.preCommand(ctx('rm'))).toEqual([
+      { kind: 'deny', reason: 'admin may not rm' },
+    ])
+  }, 60_000)
+
+  it('fails closed on a monty program calling a function it was not handed', async () => {
+    const policy = track(
+      new ScriptPolicy(
+        scripts({ preCommand: [withEnv(entry('monty', CALLS_LOOKUP), { WHO: 'root' })] }),
+      ),
+    )
+    expect(await policy.preCommand(ctx('rm'))).toEqual([
+      { kind: 'deny', reason: "profile 'release' policy exited 1" },
+    ])
+  }, 60_000)
+
+  it('raises in the program what a function throws', async () => {
+    const source = [
+      'import json',
+      'try:',
+      '    await lookup_user("root")',
+      'except ValueError as exc:',
+      '    print(json.dumps({"kind": "ask", "reason": str(exc)}))',
+    ].join('\n')
+    const down = new Error('directory down')
+    down.name = 'ValueError'
+    const policy = track(
+      new ScriptPolicy(scripts({ preCommand: [entry('monty', source)] }), null, {
+        externalLookup: { lookup_user: () => Promise.reject(down) },
+      }),
+    )
+    expect(await policy.preCommand(ctx())).toEqual([{ kind: 'ask', reason: 'directory down' }])
+  }, 60_000)
+
+  it('runs monty programs handed the functions at once', async () => {
+    let entered = 0
+    let release!: () => void
+    const both = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const policy = track(
+      new ScriptPolicy(
+        scripts({ preCommand: [withEnv(entry('monty', CALLS_LOOKUP), { WHO: 'root' })] }),
+        null,
+        {
+          externalLookup: {
+            lookup_user: async () => {
+              entered += 1
+              if (entered === 2) release()
+              await both
+              return { admin: false }
+            },
+          },
+        },
+      ),
+    )
+    expect(await Promise.all([policy.preCommand(ctx()), policy.preCommand(ctx())])).toEqual([
+      null,
+      null,
+    ])
+  }, 60_000)
+
+  it('hands the functions to a monty runtime only', async () => {
+    const engine = new FakeProgram()
+    built.factory = () => engine
+    const policy = track(
+      new ScriptPolicy(scripts({ preCommand: [entry('pyodide')] }), null, {
+        externalLookup: { lookup_user: () => ({}) },
+      }),
+    )
+    await policy.preCommand(ctx())
+    expect(engine instanceof MontyRuntime).toBe(false)
+    expect('externalLookup' in engine).toBe(false)
+  })
 })

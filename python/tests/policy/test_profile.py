@@ -43,6 +43,7 @@ from mirage.policy.profile import (
     ProfileMount,
     SessionProfile,
     VarsBlock,
+    compile_program,
     profile_from_dict,
     profile_to_dict,
 )
@@ -51,6 +52,7 @@ from mirage.process.config import ProcessPermissions
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult, ScriptSource
+from mirage.secrets.config import SecretRef
 from mirage.types import (
     HiddenPaths,
     HiddenVars,
@@ -108,6 +110,10 @@ DOCUMENT = {
                 "runtime": {
                     "name": "monty",
                     "config": {"auto_load_from_imports": True},
+                },
+                "env": {
+                    "LLM_URL": "https://llm/v1",
+                    "LLM_KEY": {"from": "aws-sm", "ref": "prod/llm", "key": "key"},
                 },
             }
         ]
@@ -3184,6 +3190,68 @@ def test_a_policy_program_without_a_runtime_runs_on_monty():
     )
     assert profile.policy is not None
     assert profile.policy["pre_command"][0].runtime == "monty"
+
+
+def test_a_policy_program_takes_an_env_of_literals_and_pointers():
+    profile = SessionProfile.model_validate(
+        {
+            "policy": {
+                "pre_command": [
+                    {
+                        "script": ScriptSource("pass"),
+                        "env": {
+                            "LLM_URL": "https://llm/v1",
+                            "LLM_KEY": {
+                                "from": "1password",
+                                "ref": "op://v/llm",
+                                "key": "credential",
+                            },
+                        },
+                    }
+                ]
+            }
+        }
+    )
+    assert profile.policy is not None
+    [program] = profile.policy["pre_command"]
+    assert program.env == {
+        "LLM_URL": "https://llm/v1",
+        "LLM_KEY": SecretRef(
+            provider="1password", ref="op://v/llm", key="credential"
+        ),
+    }
+    assert compile_program(program, "p").env == program.env
+    doc = profile_to_dict(profile)
+    assert doc["policy"]["pre_command"][0]["env"]["LLM_KEY"] == {
+        "from": "1password",
+        "ref": "op://v/llm",
+        "key": "credential",
+    }
+    assert profile_from_dict(doc) == profile
+
+
+def test_a_policy_program_without_env_writes_none():
+    profile = SessionProfile.model_validate(
+        {"policy": {"pre_command": [{"script": ScriptSource("pass")}]}}
+    )
+    assert "env" not in profile_to_dict(profile)["policy"]["pre_command"][0]
+
+
+@pytest.mark.parametrize(
+    "env",
+    [{"MIRAGE_POLICY_CTX": "x"}, {"K": 1}, {"K": {"from": "env"}}],
+)
+def test_a_policy_programs_env_is_refused_when_malformed(env):
+    with pytest.raises(ValidationError):
+        SessionProfile.model_validate(
+            {
+                "policy": {
+                    "pre_command": [
+                        {"script": ScriptSource("pass"), "env": env}
+                    ]
+                }
+            }
+        )
 
 
 def test_a_policy_program_with_a_null_runtime_is_refused():

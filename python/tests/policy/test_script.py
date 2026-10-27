@@ -39,6 +39,7 @@ from mirage.policy.types import (
 )
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.python import MontyRuntime
 from mirage.runtime.resolver import MountResolver, PrefixResolver
 from mirage.runtime.types import (
     DispatchFn,
@@ -46,6 +47,7 @@ from mirage.runtime.types import (
     RunResult,
     ScriptSource,
 )
+from mirage.secrets.config import SecretRef
 from mirage.shell.variable import ShellValue, VarAttr
 from mirage.types import (
     CapacityResult,
@@ -860,3 +862,192 @@ async def test_a_program_starts_in_the_sessions_directory():
     policy = _policy("pre_command", engine)
     await policy.pre_command(_ctx(session=_session(cwd="/data")))
     assert engine.requests[0].cwd.virtual == "/data"
+
+
+@pytest.mark.asyncio
+async def test_a_program_runs_with_its_entrys_env_beside_the_context():
+    engine = FakeProgram()
+    entry = dataclasses.replace(_entry(), env={"LLM_URL": "https://llm/v1"})
+    policy = _policy("pre_command", engine, entries=(entry,))
+    await policy.pre_command(_ctx(session=_session()))
+    [request] = engine.requests
+    assert request.env == {
+        "LLM_URL": "https://llm/v1",
+        CTX_ENV: request.env[CTX_ENV],
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_env_pointer_is_read_on_the_first_run_and_kept(monkeypatch):
+    monkeypatch.setenv("POLICY_TOKEN", "first")
+    engine = FakeProgram()
+    entry = dataclasses.replace(
+        _entry(),
+        env={"TOKEN": SecretRef(provider="env", key="POLICY_TOKEN")},
+    )
+    policy = _policy("pre_command", engine, entries=(entry,))
+    await policy.pre_command(_ctx())
+    monkeypatch.setenv("POLICY_TOKEN", "second")
+    await policy.pre_command(_ctx())
+    assert [r.env["TOKEN"] for r in engine.requests] == ["first", "first"]
+
+
+@pytest.mark.asyncio
+async def test_an_env_pointer_that_cannot_be_read_fails_closed_until_it_can(
+    monkeypatch,
+):
+    monkeypatch.delenv("POLICY_TOKEN", raising=False)
+    engine = FakeProgram()
+    entry = dataclasses.replace(
+        _entry(),
+        env={"TOKEN": SecretRef(provider="env", key="POLICY_TOKEN")},
+    )
+    policy = _policy("pre_command", engine, entries=(entry,))
+    [refusal] = await policy.pre_command(_ctx())
+    assert isinstance(refusal, Deny)
+    assert refusal.reason.startswith("profile 'release' policy env.TOKEN: ")
+    assert engine.requests == []
+    monkeypatch.setenv("POLICY_TOKEN", "late")
+    assert await policy.pre_command(_ctx()) is None
+    assert engine.requests[0].env["TOKEN"] == "late"
+
+
+@pytest.mark.asyncio
+async def test_an_env_pointer_reads_the_workspaces_declared_sources(
+    monkeypatch,
+):
+    asked: list[str] = []
+
+    async def sources():
+        asked.append("sources")
+        return {}
+
+    monkeypatch.setenv("POLICY_TOKEN", "t")
+    engine = FakeProgram()
+    entry = dataclasses.replace(
+        _entry(),
+        env={"TOKEN": SecretRef(provider="env", key="POLICY_TOKEN")},
+    )
+    policy = ScriptPolicy(
+        Programs({"pre_command": (entry,)}), secret_sources=sources
+    )
+    policy._engines[_key(entry)] = (engine, asyncio.Lock())
+    await policy.pre_command(_ctx())
+    assert asked == ["sources"]
+    assert engine.requests[0].env["TOKEN"] == "t"
+
+
+_CALLS_LOOKUP = """
+import json, os
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+user = await lookup_user(os.environ["WHO"])
+if user["admin"]:
+    print(json.dumps({"kind": "deny", "reason": "admin may not " + ctx["command"]}))
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_monty_program_calls_the_hosts_functions():
+    async def lookup_user(name):
+        return {"admin": name == "root"}
+
+    entry = dataclasses.replace(
+        _entry(source=_CALLS_LOOKUP), env={"WHO": "root"}
+    )
+    policy = ScriptPolicy(
+        Programs({"pre_command": (entry,)}),
+        external_lookup={"lookup_user": lookup_user},
+    )
+    try:
+        assert await policy.pre_command(_ctx(command="rm")) == (
+            Deny("admin may not rm"),
+        )
+    finally:
+        await policy.close()
+
+
+@pytest.mark.asyncio
+async def test_a_monty_program_without_the_function_fails_closed():
+    entry = dataclasses.replace(
+        _entry(source=_CALLS_LOOKUP), env={"WHO": "root"}
+    )
+    policy = ScriptPolicy(Programs({"pre_command": (entry,)}))
+    try:
+        assert await policy.pre_command(_ctx(command="rm")) == (
+            Deny("profile 'release' policy exited 1"),
+        )
+    finally:
+        await policy.close()
+
+
+@pytest.mark.asyncio
+async def test_a_function_that_raises_raises_in_the_program():
+    async def lookup_user(name):
+        raise ValueError("directory down")
+
+    source = """
+import json
+try:
+    await lookup_user("root")
+except ValueError as exc:
+    print(json.dumps({"kind": "ask", "reason": str(exc)}))
+"""
+    policy = ScriptPolicy(
+        Programs({"pre_command": (_entry(source=source),)}),
+        external_lookup={"lookup_user": lookup_user},
+    )
+    try:
+        assert await policy.pre_command(_ctx()) == (Ask("directory down"),)
+    finally:
+        await policy.close()
+
+
+@pytest.mark.asyncio
+async def test_monty_runs_handed_the_functions_go_at_once():
+    entered = 0
+    both = asyncio.Event()
+
+    async def lookup_user(name):
+        nonlocal entered
+        entered += 1
+        if entered == 2:
+            both.set()
+        await both.wait()
+        return {"admin": False}
+
+    entry = dataclasses.replace(
+        _entry(source=_CALLS_LOOKUP), env={"WHO": "root"}
+    )
+    policy = ScriptPolicy(
+        Programs({"pre_command": (entry,)}),
+        external_lookup={"lookup_user": lookup_user},
+    )
+    try:
+        answers = await asyncio.wait_for(
+            asyncio.gather(
+                policy.pre_command(_ctx()), policy.pre_command(_ctx())
+            ),
+            timeout=30,
+        )
+        [(engine, lock)] = policy._engines.values()
+    finally:
+        await policy.close()
+    assert answers == [None, None]
+    assert isinstance(engine, MontyRuntime) and lock is None
+
+
+@pytest.mark.asyncio
+async def test_only_a_monty_runtime_is_handed_the_functions(monkeypatch):
+    engine = FakeProgram()
+    monkeypatch.setattr(
+        "mirage.policy.script.script_engine",
+        lambda script, runtime, config: engine,
+    )
+    policy = ScriptPolicy(
+        Programs({"pre_command": (_entry("wasi"),)}),
+        external_lookup={"lookup_user": lambda name: {}},
+    )
+    await policy.pre_command(_ctx())
+    [(built, lock)] = policy._engines.values()
+    assert built is engine and isinstance(lock, asyncio.Lock)
+    assert not hasattr(engine, "external_lookup")

@@ -16,7 +16,9 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 import { MountMode } from '../types.ts'
+import { ScriptSource } from '../runtime/types.ts'
 import {
+  compileProgram,
   parseProfileMount,
   parseProfileMounts,
   parseProfilePolicy,
@@ -405,6 +407,46 @@ function policyRuntime(settings: Record<string, unknown>, code: boolean): unknow
 }
 
 describe('parseProfilePolicy', () => {
+  it("reads a program's env of literals and pointers, and compiles it", () => {
+    const policy = parseProfilePolicy(
+      {
+        pre_command: [
+          {
+            script: 'p.py',
+            env: {
+              LLM_URL: 'https://llm/v1',
+              LLM_KEY: { from: '1password', ref: 'op://v/llm', key: 'credential' },
+            },
+          },
+        ],
+      },
+      'policy',
+    )
+    const env = {
+      LLM_URL: 'https://llm/v1',
+      LLM_KEY: { from: '1password', ref: 'op://v/llm', key: 'credential' },
+    }
+    expect(policy.preCommand?.[0]?.env).toEqual(env)
+    const [program] = policy.preCommand ?? []
+    if (program === undefined) throw new Error('no program')
+    expect(compileProgram({ ...program, script: new ScriptSource('pass') }, 'p').env).toEqual(env)
+  })
+
+  it.each([[{ MIRAGE_POLICY_CTX: 'x' }], [{ K: 1 }], [{ K: { from: 'env' } }], [['K']]])(
+    'refuses a malformed program env %j',
+    (env) => {
+      expect(() =>
+        parseProfilePolicy({ pre_command: [{ script: 'p.py', env }] }, 'policy'),
+      ).toThrow()
+    },
+  )
+
+  it('writes no env for a program without one', () => {
+    const doc = profileToDict({ policy: { preCommand: [{ script: new ScriptSource('pass') }] } })
+    const [written] = (doc.policy as { pre_command: Record<string, unknown>[] }).pre_command
+    expect(written !== undefined && 'env' in written).toBe(false)
+  })
+
   it("reads a runtime's settings in the document's spelling from a config, and as given from code", () => {
     expect(policyRuntime({ auto_load_from_imports: false }, false)).toEqual({
       name: 'pyodide',
@@ -432,6 +474,10 @@ const DOCUMENT = {
       {
         script: { source: 'print()', language: 'python', module: false },
         runtime: { name: 'monty', config: { auto_load_from_imports: true } },
+        env: {
+          LLM_URL: 'https://llm/v1',
+          LLM_KEY: { from: 'aws-sm', ref: 'prod/llm', key: 'key' },
+        },
       },
     ],
   },

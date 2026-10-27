@@ -16,6 +16,7 @@ import { z } from 'zod'
 import type { FileView, SessionAccess } from '../view/types.ts'
 import type { VfsCall } from '../vfs/types.ts'
 import type { ScriptSource } from '../runtime/types.ts'
+import type { SecretRef } from '../secrets/config.ts'
 import type { Limit, MountMode, PathSpec, Producer, Refusal } from '../types.ts'
 import type { WordKind } from '../commands/spec/types.ts'
 import type { SessionView } from '../view/types.ts'
@@ -445,13 +446,16 @@ export type ScriptMethod =
  * (`scriptContext`) in `MIRAGE_POLICY_CTX` and on stdin; `scriptAction`
  * reads the answer it prints. `profile` is the profile's name, which
  * every refusal about its program prints; empty for a profile document
- * passed to `createSession` without a name.
+ * passed to `createSession` without a name. `env` is the variables the
+ * program runs with beside `MIRAGE_POLICY_CTX`, a pointer still the
+ * pointer.
  */
 export interface ProfileScript {
   readonly profile: string
   readonly script: ScriptSource
   readonly runtime: string
   readonly config: Readonly<Record<string, unknown>>
+  readonly env: Readonly<Record<string, string | SecretRef>>
 }
 
 /** A session's policy programs, by method. */
