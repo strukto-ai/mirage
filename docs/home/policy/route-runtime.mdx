@@ -100,33 +100,38 @@ A routing program can ask an LLM where a line runs. A program on monty has
 no network of its own, so the call to the model is a
 [host function](/home/policy/scripts#host-functions) you write, with
 structured output limiting the answer to your runtimes. The program keeps
-the prompt:
+the task and the runtimes:
 
 ```yaml workspace.yaml
 runtimes: [monty, local, workspace]
 route_policy:
   script: ./route.py
   runtime: monty
-  env:
-    MODEL: gpt-6-luna
 ```
 
 ```python route.py
 import json
 import os
 
-PROMPT = (
+TASK = (
     "Pick the runtime that can run the Python code in this line, monty "
-    "when it can, and say why in one sentence.\n"
-    "monty: Mirage's sandboxed Python: a subset of the language and part of "
-    "the standard library, with no packages, network or subprocesses\n"
-    "local: the host's full Python: the whole language and standard library "
-    "and any installed package, with the host's files and network"
+    "when it can."
 )
+
+RUNTIMES = {
+    "monty": (
+        "Mirage's sandboxed Python: a subset of the language and part of "
+        "the standard library, with no packages, network or subprocesses"
+    ),
+    "local": (
+        "the host's full Python: the whole language and standard library "
+        "and any installed package, with the host's files and network"
+    ),
+}
 
 ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
 if any(c["command"] == "python3" for c in ctx["commands"]):
-    choice = await parse_runtime(os.environ["MODEL"], PROMPT, ctx["line"])
+    choice = await parse_runtime(TASK, RUNTIMES, ctx["line"])
     print(json.dumps({"kind": "route", **choice}))
 ```
 
@@ -137,7 +142,12 @@ class RuntimeChoice(BaseModel):
 ```
 
 ```python utils.py
-async def parse_runtime(model: str, prompt: str, line: str) -> dict[str, str]:
+async def parse_runtime(
+    model: str, task: str, runtimes: dict[str, str], line: str
+) -> dict[str, str]:
+    prompt = f"{task} Say why in one sentence.\n" + "\n".join(
+        f"{name}: {about}" for name, about in runtimes.items()
+    )
     done = await AsyncOpenAI().responses.parse(
         model=model, instructions=prompt, input=line, text_format=RuntimeChoice
     )
@@ -145,7 +155,10 @@ async def parse_runtime(model: str, prompt: str, line: str) -> dict[str, str]:
 ```
 
 ```python main.py
-ws = Workspace(**config.to_workspace_kwargs(), policy_functions={"parse_runtime": parse_runtime})
+ws = Workspace(
+    **config.to_workspace_kwargs(),
+    policy_functions={"parse_runtime": partial(parse_runtime, "gpt-6-luna")},
+)
 ```
 
 `ws.shell(line)` runs each line where the model sends it. `ws.explain(line)`
@@ -166,7 +179,9 @@ $ python3 -c "import sqlite3; print(sqlite3.sqlite_version)"
 ```
 
 The model's answer counts against the program's 10 seconds. The full
-example:
+example, in
 [Python](https://github.com/strukto-ai/mirage/tree/main/examples/python/policy/llm_routing)
 and
-[TypeScript](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/policy/llm_routing).
+[TypeScript](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/policy/llm_routing),
+also takes `--model jev-latest`, which asks [Jev](https://docs.typesafe.ai)
+and gives its confidence as the reason.

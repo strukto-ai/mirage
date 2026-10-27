@@ -35,6 +35,7 @@
     "@struktoai/mirage-opencode": "workspace:*",
     "@struktoai/mirage-pi": "workspace:*",
     "@struktoai/mirage-vercel": "workspace:*",
+    "@typesafe-ai/sdk": "^0.7.0",
     "ai": "^7.0.153",
     "deepagents": "^1.15.1",
     "langchain": "^1.5.19",
