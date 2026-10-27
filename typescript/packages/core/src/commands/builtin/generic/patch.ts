@@ -149,7 +149,7 @@ class PatchFiles {
       return { reply: { end: true }, data: await this.read(this.spec(path)) }
     } catch (err) {
       if (isEisdir(err)) return { reply: { errno: 'EISDIR' } }
-      if (isEnoent(err)) return { reply: { errno: 'ENOENT' } }
+      if (isEnoent(err) || classify(err) === 'ENOTDIR') return { reply: { errno: 'ENOENT' } }
       throw err
     }
   }
