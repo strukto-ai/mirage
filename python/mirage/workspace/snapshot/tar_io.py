@@ -15,6 +15,7 @@
 import io
 import json
 import os
+from collections import Counter
 from collections.abc import Callable
 from contextlib import ExitStack
 from pathlib import Path
@@ -66,7 +67,8 @@ def write_tar(
         target (str | Path | Writable): filesystem path OR a writable file-like
             object with a `write` method (BytesIO, etc.).
         manifest (dict[str, Any]): JSON-serializable dict.
-        blobs (dict[str, bytes | Path]): side-files keyed by tar path.
+        blobs (dict[str, bytes | Path]): side-files keyed by tar path;
+            two that name one member (``b/f``, ``./b//f``) are refused.
         compress (str | None): None | "gz" | "bz2" | "xz".
     """
     if compress not in _CODECS:
@@ -78,6 +80,10 @@ def write_tar(
         manifest, indent=2, default=_json_default
     ).encode("utf-8")
     entries = [(_MANIFEST_NAME, manifest_bytes), *blobs.items()]
+    taken = Counter(_member_name(name) for name, _ in entries)
+    for name, _ in entries:
+        if taken[_member_name(name)] > 1:
+            raise ValueError(f"Blob paths name one member: {name!r}")
     members: list[JsonValue] = [
         {
             "name": byte_view(name),
@@ -136,11 +142,12 @@ def read_tar(
     """Read a tar produced by write_tar; return a resolved state dict.
 
     mirage-rs's tar reads it once, in order, sniffing its compressor;
-    a member the manifest names no blob for is read past, not held.
-    With ``staging``, each disk mount's files are written there as they
-    arrive and come back as host paths, so a restore copies them into
-    place instead of holding them in memory; the caller removes the
-    directory once the state is loaded.
+    a member the manifest names no blob for is read past, not held, and
+    one stored twice is refused. With ``staging``, each disk mount's
+    files are written there as they arrive and come back as host paths,
+    so a restore copies them into place instead of holding them in
+    memory (one the manifest also names elsewhere is held as well); the
+    caller removes the directory once the state is loaded.
 
     Args:
         source (str | Path | BinaryIO): filesystem path OR a readable file-like
@@ -151,8 +158,8 @@ def read_tar(
     staged: dict[str, Path] = {}
     files: dict[str, IO[bytes]] = {}
     manifest: dict[str, Any] | None = None
-    wanted: set[str] = set()
-    disk: set[str] = set()
+    named: Counter[str] = Counter()
+    disk: Counter[str] = Counter()
     with ExitStack() as stack:
         src = cast(
             BinaryIO,
@@ -163,28 +170,30 @@ def read_tar(
         stack.callback(lambda: [f.close() for f in files.values()])
 
         def begin(name: str) -> None:
-            nonlocal manifest, wanted, disk
+            nonlocal manifest, named, disk
+            if name in held or name in staged:
+                raise ValueError(f"Blob stored twice: {name!r}")
             if name == _MANIFEST_NAME:
                 held[name] = bytearray()
                 return
             if manifest is None:
                 manifest = _manifest_of(held)
-                wanted = {_member_name(blob) for blob in _blob_paths(manifest)}
-                disk = {
+                named = Counter(map(_member_name, _blob_paths(manifest)))
+                disk = Counter(
                     _member_name(blob)
                     for _, _, blob in _disk_file_refs(manifest)
-                }
-            if name not in wanted:
+                )
+            if name not in named:
                 return
-            if staging is None or name not in disk:
+            if staging is not None and name in disk:
+                target = (staging / name).resolve()
+                if not target.is_relative_to(staging.resolve()):
+                    raise ValueError(f"Unsafe blob path: {name!r}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                files[name] = target.open("wb")
+                staged[name] = target
+            if name not in staged or named[name] > disk[name]:
                 held[name] = bytearray()
-                return
-            target = (staging / name).resolve()
-            if not target.is_relative_to(staging.resolve()):
-                raise ValueError(f"Unsafe blob path: {name!r}")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            files[name] = target.open("wb")
-            staged[name] = target
 
         def serve(
             request: dict[str, JsonValue], data: bytes
@@ -205,7 +214,7 @@ def read_tar(
                 files[name].write(data)
                 if op == "flush" or request.get("whole"):
                     files.pop(name).close()
-            elif name in held:
+            if name in held:
                 held[name] += data
             return {}, b""
 
@@ -275,16 +284,17 @@ def _member_name(path: str) -> str:
     return "/".join(part for part in path.split("/") if part not in ("", "."))
 
 
-def _blob_paths(manifest: dict[str, Any]) -> set[str]:
-    """Every blob path the manifest names, each checked safe.
+def _blob_paths(manifest: dict[str, Any]) -> list[str]:
+    """The blob path of every reference in the manifest, each checked
+    safe.
 
     Args:
         manifest (dict[str, Any]): the parsed manifest.
     """
-    paths: set[str] = set()
+    paths: list[str] = []
 
     def note(path: str) -> bytes:
-        paths.add(path)
+        paths.append(path)
         return b""
 
     resolve_manifest(manifest, note)

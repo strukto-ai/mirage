@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import io
+import tarfile
 
 import pytest
 
@@ -64,6 +65,37 @@ def test_a_blob_path_tar_spells_otherwise_reads_back(tmp_path):
     mount = read_tar(buffer, staging)[StateKey.MOUNTS][0]
     vfs_state = mount[MountKey.VFS_STATE]
     assert vfs_state[VFSStateKey.FILES]["f"] == staging / "b" / "f"
+
+
+def test_one_member_named_twice_is_refused():
+    with pytest.raises(ValueError, match="name one member"):
+        write_tar(io.BytesIO(), {}, {"b/f": b"one", "./b//f": b"two"})
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        for name, data in (
+            ("manifest.json", b'{"k": {"%s": "b/f"}}' % BLOB_REF_KEY.encode()),
+            ("b/f", b"one"),
+            ("./b/f", b"two"),
+        ):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    buffer.seek(0)
+    with pytest.raises(ValueError, match="stored twice"):
+        read_tar(buffer)
+
+
+def test_a_staged_blob_named_elsewhere_is_read_there_too(tmp_path):
+    manifest = {**_disk_manifest("b/f"), "cache": {BLOB_REF_KEY: "b/f"}}
+    buffer = io.BytesIO()
+    write_tar(buffer, manifest, {"b/f": b"data"})
+    buffer.seek(0)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    state = read_tar(buffer, staging)
+    assert state["cache"] == b"data"
+    vfs_state = state[StateKey.MOUNTS][0][MountKey.VFS_STATE]
+    assert vfs_state[VFSStateKey.FILES]["f"].read_bytes() == b"data"
 
 
 def test_a_staged_blob_stays_inside_the_staging_directory(tmp_path):
