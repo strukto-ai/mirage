@@ -208,11 +208,17 @@ impl Input<'_> {
     }
 
     /// A member's data as the file it holds: a sparse member's runs at
-    /// their offsets, with zeros between and after them.
+    /// their offsets, with zeros before each, the file ending where the
+    /// last run does.
     async fn data(&mut self, member: &Member, sink: &mut Sink<'_>) -> bool {
         let Some(sparse) = &member.sparse else {
             return self.copy(member.size, sink, None).await;
         };
+        let end = sparse
+            .runs
+            .chunks_exact(2)
+            .last()
+            .map_or(0, |run| run[0] + run[1]);
         let mut holes = Holes {
             runs: sparse.runs.clone(),
             next: 0,
@@ -221,35 +227,41 @@ impl Input<'_> {
         };
         let whole = self.copy(member.size, sink, Some(&mut holes)).await;
         if whole {
-            holes.zeros(self.raw.host, sink, sparse.real).await;
+            holes.zeros(self.raw.host, sink, end).await;
         }
         whole
     }
 
     /// The runs a pax 1.0 sparse member's data starts with, as decimal
-    /// lines (their count, then each offset and length) up to the end of
-    /// their block, taken off its `size`; none when the input ends first.
-    async fn runs(&mut self, size: &mut u64) -> Option<Vec<u64>> {
-        let mut text = Vec::new();
-        loop {
-            let ended = text.iter().filter(|&&b| b == b'\n').count();
-            let numbers: Vec<u64> = text
-                .split(|&b| b == b'\n')
-                .take(ended)
-                .map_while(|line| std::str::from_utf8(line).ok()?.parse().ok())
-                .collect();
-            if let Some(&count) = numbers.first() {
-                let want = usize::try_from(count).ok().and_then(|n| n.checked_mul(2));
-                if let Some(runs) = want.and_then(|want| numbers.get(1..=want)) {
-                    return Some(runs.to_vec());
+    /// lines (their count, then each offset and length) padded to a whole
+    /// block, taken off its `size`; none inside when a line is no number
+    /// or they run past the data, none at all when the input ends first.
+    async fn runs(&mut self, size: &mut u64) -> Option<Option<Vec<u64>>> {
+        let (mut numbers, mut line) = (Vec::<u64>::new(), Vec::new());
+        while *size >= BLOCK as u64 {
+            let block = self.block().await?;
+            *size -= BLOCK as u64;
+            for &byte in &block {
+                if byte != b'\n' {
+                    line.push(byte);
+                    continue;
+                }
+                let number = std::str::from_utf8(&line)
+                    .ok()
+                    .and_then(|line| line.parse().ok());
+                let Some(number) = number else {
+                    return Some(None);
+                };
+                numbers.push(number);
+                line.clear();
+                let want = numbers[0].checked_mul(2).and_then(|n| n.checked_add(1));
+                if want == Some(numbers.len() as u64) {
+                    numbers.remove(0);
+                    return Some(Some(numbers));
                 }
             }
-            if numbers.len() < ended || *size < BLOCK as u64 {
-                return Some(numbers.get(1..).unwrap_or_default().to_vec());
-            }
-            text.extend(self.block().await?);
-            *size -= BLOCK as u64;
         }
+        Some(None)
     }
 }
 
@@ -264,8 +276,12 @@ struct Holes {
 }
 
 impl Holes {
-    /// Zeros up to `end` in the file.
+    /// Zeros up to `end` in the file, passed over once the sink takes
+    /// nothing.
     async fn zeros(&mut self, host: &Host, sink: &mut Sink<'_>, end: u64) {
+        if matches!(sink, Sink::Skip) {
+            self.at = self.at.max(end);
+        }
         while self.at < end {
             let n = (end - self.at).min(WINDOW as u64);
             sink.take(host, &ZEROS[..n as usize]).await;
@@ -647,12 +663,24 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         member.target = long_link.take().unwrap_or(member.target);
         global.apply(&mut member);
         std::mem::take(&mut pax).apply(&mut member);
+        let mut sound = true;
         if let Some(sparse) = member.sparse.as_mut().filter(|sparse| sparse.inline) {
             let Some(runs) = input.runs(&mut member.size).await else {
                 cut = true;
                 break;
             };
-            sparse.runs = runs;
+            sound = runs.is_some();
+            sparse.runs = runs.unwrap_or_default();
+        }
+        if let Some(sparse) = member
+            .sparse
+            .as_mut()
+            .filter(|sparse| !sound || !sparse.sound())
+        {
+            let name = escaped(&member.name);
+            run.say([b"tar: ", &name[..], b": malformed sparse archive member"].concat());
+            run.failed = true;
+            sparse.runs.clear();
         }
         if member.kind == Kind::File && member.name.ends_with(b"/") {
             member.kind = Kind::Dir;

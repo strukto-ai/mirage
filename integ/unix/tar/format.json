@@ -244,6 +244,41 @@
         "stdout": "-rw-r--r-- 0/0          200004 1970-01-01 00:00 s\n-rw-r--r-- 0/0          100000 1970-01-01 00:00 e\nrc=0\n-rw-r--r-- 0/0          200004 1970-01-01 00:00 s\n-rw-r--r-- 0/0          100000 1970-01-01 00:00 e\nrc=0\n-rw-r--r-- 0/0          200004 1970-01-01 00:00 s\n-rw-r--r-- 0/0          100000 1970-01-01 00:00 e\nrc=0\n3477dab701cdb38a2e9a5d2b1d76fdc8  -\ns\ne\nrc=0\n3477dab701cdb38a2e9a5d2b1d76fdc8  x/s\n0019d23bef56a136a1891211d7007f6f  x/e\n3477dab701cdb38a2e9a5d2b1d76fdc8  y/s\n0019d23bef56a136a1891211d7007f6f  y/e\n200004 y/s\n100000 y/e\n300004 total\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tar_refuses_a_sparse_map_past_its_file_and_ends_at_the_last_run",
+      "seq": 15100078,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf %s 'H4sIAAAAAAACA+3WQQrCMBAF0KxzCk+QZtIaVwXdqCsRxAMEjFA1VRKF4ukNCqJCwU0K2v8opPxNIcMfKjKRjZemmVuzsZ4lIR/aTkm5er7fc5KKiA0a1oFLOBsfP8/6SanBbLEW4WR8sMKZ3dGXxD/Sqo6p5Ipe09o4Wzquhq+ht+YQqqstc87gB8TZre6jm1YHK2TmEvVfF0Vb/yk+n/3XOvZfov/JER9yQld7a4Ir6DWzPaf67ft2/0f5+/6XeqQV9n8XjnssfwAAAAAAAAAAAAAAAIB/cQPYLXwHACgAAA==' | base64 -d | gzip -d | tar -tvf -; echo rc=$?; mkdir z; printf %s 'H4sIAAAAAAACA+3WQQrCMBAF0KxzCk+QZtIaVwXdqCsRxAMEjFA1VRKF4ukNCqJCwU0K2v8opPxNIcMfKjKRjZemmVuzsZ4lIR/aTkm5er7fc5KKiA0a1oFLOBsfP8/6SanBbLEW4WR8sMKZ3dGXxD/Sqo6p5Ipe09o4Wzquhq+ht+YQqqstc87gB8TZre6jm1YHK2TmEvVfF0Vb/yk+n/3XOvZfov/JER9yQld7a4Ir6DWzPaf67ft2/0f5+/6XeqQV9n8XjnssfwAAAAAAAAAAAAAAAIB/cQPYLXwHACgAAA==' | base64 -d | gzip -d | tar -xf - -C z; echo rc=$?; wc -c z/m z/after; printf %s 'H4sIAAAAAAACA+3VsWrDMBAGYM1+Cj9AkE8nW0oGQ7IknUqg9AHUVgHjKDGWA6FPX+NAcQoZOjiU5v8WiZNAw/HrZCaz5dadn7z78K2YBF3cWkkV+fd+qCtiVYj0LO7gFDvX9s+Lx6QX6eb5VcbGtdHLWH36csGstWXSZl7k1hZzsgmb8bXDKbztj+91LFXC6urEBV+GhHlcDK4paaYSAX9O36aXoUvrau8lZWGi/Js8v5n//gf4mX9jSKSE/E9uhQg8NLfrphr7v8i/vs4/GWsY+b+HY42xDAAAAAAAAAAAAAAAAADwH3wBzqY5sQAoAAA=' | base64 -d | gzip -d | tar -tvf -; echo rc=$?; printf %s 'H4sIAAAAAAACA+3VsWrDMBAGYM1+Cj9AkE8nW0oGQ7IknUqg9AHUVgHjKDGWA6FPX+NAcQoZOjiU5v8WiZNAw/HrZCaz5dadn7z78K2YBF3cWkkV+fd+qCtiVYj0LO7gFDvX9s+Lx6QX6eb5VcbGtdHLWH36csGstWXSZl7k1hZzsgmb8bXDKbztj+91LFXC6urEBV+GhHlcDK4paaYSAX9O36aXoUvrau8lZWGi/Js8v5n//gf4mX9jSKSE/E9uhQg8NLfrphr7v8i/vs4/GWsY+b+HY42xDAAAAAAAAAAAAAAAAADwH3wBzqY5sQAoAAA=' | base64 -d | gzip -d | tar -xOf - m | od -c; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 0/0               3 1970-01-01 00:00 m\n-rw-r--r-- 0/0               3 1970-01-01 00:00 after\nrc=2\nrc=2\n0 z/m\n3 z/after\n3 total\n-rw-r--r-- 0/0 9223372036854775807 1970-01-01 00:00 m\n-rw-r--r-- 0/0                   3 1970-01-01 00:00 after\nrc=0\n0000000   A\n0000001\nrc=0\n",
+        "stderr": "tar: m: malformed sparse archive member\ntar: Exiting with failure status due to previous errors\ntar: m: malformed sparse archive member\ntar: Exiting with failure status due to previous errors\n"
+      }
     }
   ]
 }

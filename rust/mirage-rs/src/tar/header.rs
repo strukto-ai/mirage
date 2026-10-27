@@ -72,6 +72,21 @@ pub(super) struct Sparse {
     pub(super) inline: bool,
 }
 
+impl Sparse {
+    /// Whether the runs go forward without overlapping and end inside the
+    /// file, as GNU requires of a pax 1.0 map; a map that does not is
+    /// refused whatever the format, though GNU lets some pass in others.
+    pub(super) fn sound(&self) -> bool {
+        let mut end = 0;
+        self.runs.chunks_exact(2).all(|run| {
+            let stop = run[0].checked_add(run[1]);
+            let fits = run[0] >= end && stop.is_some_and(|stop| stop <= self.real);
+            end = stop.unwrap_or(u64::MAX);
+            fits
+        })
+    }
+}
+
 /// The runs a GNU sparse header's 24-byte entries hold, up to the first
 /// that is no offset and length.
 pub(super) fn runs(entries: &[u8]) -> Vec<u64> {
