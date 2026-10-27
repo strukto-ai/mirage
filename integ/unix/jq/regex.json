@@ -143,6 +143,150 @@
         "stdout": "rc=5\n",
         "stderr": "jq: error (at <stdin>:0): Regex failure: retry-limit-in-match over\n"
       }
+    },
+    {
+      "id": "jq_regex_folds_sharp_s_to_ss",
+      "seq": 18610010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '[\"ß\",\"ss\",\"SS\",\"sſ\",\"ẞ\",\"s\"]' | jq -c 'map(test(\"^ss$\";\"i\")), map(test(\"^ß$\";\"i\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[true,true,true,true,true,false]\n[true,true,true,true,true,false]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_folds_a_ligature_to_its_letters",
+      "seq": 18610011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '[\"ﬃ\",\"ffi\",\"FFI\",\"ﬀi\",\"ﬁ\"]' | jq -c 'map(test(\"^ffi$\";\"i\")), map(test(\"^[ﬃ]$\";\"i\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[true,true,true,false,false]\n[true,true,true,false,false]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_fold_covers_one_literal_run",
+      "seq": 18610012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"ß\"' | jq -c '[test(\"(s)s\";\"i\"), test(\"(?:s)s\";\"i\"), test(\"ss+\";\"i\"), test(\"s(?i)s\";\"i\"), test(\"(?i:s)s\";\"i\"), test(\"[s]s\";\"i\")]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[false,true,false,true,false,false]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_folds_a_class_member_to_several",
+      "seq": 18610013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"ssßSS\"' | jq -c '[match(\"[ß]\";\"gi\") | [.offset, .length, .string]], [match(\"[^ß]\";\"gi\") | .string]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[0,2,\"ss\"],[2,1,\"ß\"],[3,2,\"SS\"]]\n[\"s\",\"s\",\"S\",\"S\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_global_match_folds_each_way",
+      "seq": 18610014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"Strasse STRASSE Straße\"' | jq -c '[match(\"ß\";\"gi\") | .string], [match(\"ss\";\"gi\") | .string]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"ss\",\"SS\",\"ß\"]\n[\"ss\",\"SS\",\"ß\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_backreference_folds_by_the_bytes",
+      "seq": 18610015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '[\"ßß\",\"ßss\",\"ssß\"]' | jq -c 'map(test(\"^(ss)\\\\1$\";\"i\")), map(test(\"^(ß)\\\\1$\";\"i\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[true,false,false]\n[true,false,false]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_look_behind_folds_one_to_one",
+      "seq": 18610016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '[\"xß\",\"xss\",\"xẞ\"]' | jq -c 'map(test(\"(?<=ss)$\";\"i\")), map(test(\"(?<=ß)$\";\"i\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[false,true,false]\n[true,false,true]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_look_behind_rejects_a_class_folding_to_several",
+      "seq": 18610017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"ss\"' | jq 'test(\"(?<=[ß])$\";\"i\")'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=5\n",
+        "stderr": "jq: error (at <stdin>:0): Regex failure: invalid pattern in look-behind\n"
+      }
+    },
+    {
+      "id": "jq_regex_sub_folds_dotted_i_and_apostrophe_n",
+      "seq": 18610018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '[\"İ\",\"i̇\",\"ŉ\",\"ʼN\"]' | jq -c 'map(sub(\"i̇\";\"I\";\"i\")), map(test(\"^ŉ$\";\"i\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"I\",\"I\",\"ŉ\",\"ʼN\"]\n[false,false,true,true]\n",
+        "stderr": ""
+      }
     }
   ]
 }
