@@ -31,6 +31,7 @@ import {
   optionRefusal,
   parseFlags,
   positionalValue,
+  readFrames,
   readOptions,
   runStatus,
 } from './jq.ts'
@@ -68,11 +69,13 @@ async function ranOver(
   program: string,
   flags: Context['flags'] = {},
   stream: typeof read = read,
+  signal?: AbortSignal,
 ): Promise<Ran> {
   const ctx = {
     stdin: null,
     flags: { compact_output: true, ...flags },
     cwd: PathSpec.fromStrPath('/'),
+    signal,
   } as Context
   const specs = paths.map((path) => PathSpec.fromStrPath(path))
   const result = await jqGeneric(specs, [program], ctx, stream)
@@ -688,5 +691,58 @@ describe('jqGeneric over an input it cannot read', () => {
       message: `jq: Bad JSON in --${option} x ${path}: Could not open ${path}: ${reason}`,
       exitCode: 2,
     })
+  })
+})
+
+function frame(tag: number, payload: string | Uint8Array): Uint8Array {
+  const body = typeof payload === 'string' ? ENC.encode(payload) : payload
+  const out = new Uint8Array(5 + body.length)
+  out[0] = tag
+  new DataView(out.buffer).setUint32(1, body.length, true)
+  out.set(body, 5)
+  return out
+}
+
+function joined(...parts: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+  let at = 0
+  for (const part of parts) {
+    out.set(part, at)
+    at += part.length
+  }
+  return out
+}
+
+describe('jq_eval', () => {
+  it('folds frames into outputs and the stop that ended the run', () => {
+    const outputs: string[] = []
+    const wire = joined(
+      frame(1, '1'),
+      frame(1, '[2]'),
+      frame(2, joined(Uint8Array.of(0), ENC.encode('{}'))),
+    )
+    expect(readFrames(wire, outputs)).toEqual({ kind: 'error', text: '{}', string: false })
+    expect(outputs).toEqual(['1', '[2]'])
+    expect(readFrames(frame(3, '{"message":"bye","string":true,"code":3.0}'), [])).toEqual({
+      kind: 'halt',
+      message: 'bye',
+      string: true,
+      code: 3,
+    })
+    expect(() => readFrames(frame(9, ''), [])).toThrow()
+  })
+
+  it('stops a program that never ends when its signal aborts', async () => {
+    const started = Date.now()
+    await expect(
+      ranOver([], 'until(false; .)', { null_input: true }, read, AbortSignal.timeout(200)),
+    ).rejects.toThrow()
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect((await ran('/d/one.json', '. + 1')).stdout).toBe('2\n')
+  })
+
+  it('runs a program jq_eval refuses in the worker', async () => {
+    const result = await ranOver([], 'now | type', { null_input: true })
+    expect(result).toEqual({ stdout: '"number"\n', stderr: '', exitCode: 0 })
   })
 })
