@@ -147,6 +147,18 @@ async def _subtree(
     return entries, [c.rstrip("/") for c in visible_crossings], unreadable
 
 
+def _stat_problem(exc: OSError | ValueError) -> str:
+    """The phrase a member whose stat failed is reported with.
+
+    A plain file in its chain or a refusal keeps its errno; anything else
+    reads as missing. Mirrors TS ``statProblem``.
+
+    Args:
+        exc (OSError | ValueError): the failed stat's error.
+    """
+    return posix_phrase(classify(exc) or FsCondition.ENOENT)
+
+
 async def _follow(
     virtual: str,
     root: PathSpec,
@@ -190,10 +202,13 @@ async def _follow(
     spec = _child_spec(target, root)
     try:
         target_stat = await stat(spec)
-    except NotADirectoryError:
-        return [], [], posix_phrase(FsCondition.ENOTDIR), []
-    except (FileNotFoundError, ValueError):
-        return [], [], posix_phrase(FsCondition.ENOENT), []
+    except (
+        FileNotFoundError,
+        NotADirectoryError,
+        PermissionError,
+        ValueError,
+    ) as exc:
+        return [], [], _stat_problem(exc), []
     if target_stat.type != FileType.DIRECTORY:
         return (
             [
@@ -296,8 +311,13 @@ async def scan_operand(
     else:
         try:
             root_stat = await stat(path)
-        except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
-            reason = posix_phrase(classify(exc) or FsCondition.ENOENT)
+        except (
+            FileNotFoundError,
+            NotADirectoryError,
+            PermissionError,
+            ValueError,
+        ) as exc:
+            reason = _stat_problem(exc)
             return Scan(
                 problems=(Problem(path=base, reason=reason, fatal=True),),
                 missing=True,

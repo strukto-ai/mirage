@@ -54,6 +54,7 @@ import {
   fsStrerror,
   isDotWalkError,
   isEacces,
+  isRefusal,
   isEnotdir,
   isFsError,
   isMissingPath,
@@ -540,6 +541,7 @@ export async function targetDirError(
   } catch (err) {
     if (isEnotdir(err)) condition = 'ENOTDIR'
     else if ((err as { code?: unknown }).code === 'ELOOP') condition = 'ELOOP'
+    else if (isRefusal(err)) condition = 'EACCES'
     else if (isMissingPath(err)) condition = 'ENOENT'
     else throw err
   }
@@ -576,11 +578,17 @@ export async function destKind(
     // Its `..` passes a name that is not there: the chain of the path it
     // simplifies to says nothing about this one.
     if (isDotWalkError(err)) return { exists: false, isDir: false, condition: 'ENOENT' }
+    if (isRefusal(err)) return { exists: false, isDir: false, condition: 'EACCES' }
     if (!isMissingPath(err)) throw err
   }
   if (info !== null)
     return { exists: true, isDir: info.type === FileType.DIRECTORY, condition: null }
-  return { exists: false, isDir: false, condition: await absentDestError(stat, target) }
+  try {
+    return { exists: false, isDir: false, condition: await absentDestError(stat, target) }
+  } catch (err) {
+    if (!isRefusal(err)) throw err
+    return { exists: false, isDir: false, condition: 'EACCES' }
+  }
 }
 
 // Whether a slash-terminated destination refuses a non-directory. POSIX
@@ -618,11 +626,17 @@ export async function sourceKind(
     const code = (err as { code?: unknown }).code
     if (code === 'ENOTDIR') return { kind: null, condition: 'ENOTDIR' }
     if (code === 'ELOOP') return { kind: null, condition: 'ELOOP' }
-    if (code === 'EACCES') return { kind: null, condition: 'EACCES' }
+    if (isRefusal(err)) return { kind: null, condition: 'EACCES' }
     if (!isMissingPath(err)) throw err
   }
   if (info !== null) return { kind: info.type, condition: null }
-  const [, isDir] = await nearestAncestor(stat, path)
+  let isDir: boolean
+  try {
+    ;[, isDir] = await nearestAncestor(stat, path)
+  } catch (err) {
+    if (!isRefusal(err)) throw err
+    return { kind: null, condition: 'EACCES' }
+  }
   return { kind: null, condition: isDir ? 'ENOENT' : 'ENOTDIR' }
 }
 

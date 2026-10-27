@@ -4,6 +4,7 @@ import pytest
 
 from mirage.commands.builtin.generic.archive import walk as aw
 from mirage.commands.builtin.generic.archive.types import Walked
+from mirage.errors.fs import fs_error
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.types import (
@@ -99,6 +100,23 @@ def _mounts(
     )
 
 
+_REFUSALS = [
+    pytest.param(FsCondition.EACCES, id="eacces"),
+    pytest.param(FsCondition.EPERM, id="eperm"),
+    pytest.param(FsCondition.EROFS, id="erofs"),
+]
+
+
+def _refusing(at: str, why: FsCondition, tree: "_Tree | None" = None):
+    async def stat(path: PathSpec) -> FileStat:
+        if path.virtual == at:
+            raise fs_error(path, why)
+        assert tree is not None
+        return await tree.stat(path)
+
+    return stat
+
+
 async def _scan(tree: _Tree, path: PathSpec, **kwargs):
     return await aw.scan_operand(
         path, stat=tree.stat, walk=tree.walk, **kwargs
@@ -148,6 +166,39 @@ async def test_a_missing_operand_is_one_fatal_problem_and_no_entries():
     assert scan.missing
     assert not scan.entries
     assert [(p.path, p.fatal) for p in scan.problems] == [("/nope", True)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("why", _REFUSALS)
+async def test_a_refused_operand_is_one_fatal_problem_said_as_refused(why):
+    # GNU tar: `Cannot stat: Permission denied`, the other operands go on;
+    # a refusal keeps its own errno.
+    tree = _Tree({})
+    scan = await aw.scan_operand(
+        _spec("/rd/b.txt"), stat=_refusing("/rd/b.txt", why), walk=tree.walk
+    )
+    assert scan.missing
+    assert [(p.path, p.reason, p.fatal) for p in scan.problems] == [
+        ("/rd/b.txt", posix_phrase(why), True)
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("why", _REFUSALS)
+async def test_a_link_to_a_refused_target_is_one_fatal_problem(why):
+    # GNU tar -h: `l: Cannot stat: Permission denied`, the rest go on.
+    tree = _Tree({"/rd/b.txt": b"b"}, dirs=("/rd",))
+    scan = await aw.scan_operand(
+        _spec("/rd/l"),
+        stat=_refusing("/rd/b.txt", why, tree),
+        walk=tree.walk,
+        links=_links({"/rd/l": "/rd/b.txt"}),
+        dereference=True,
+    )
+    assert scan.missing
+    assert [(p.path, p.reason, p.fatal) for p in scan.problems] == [
+        ("/rd/l", posix_phrase(why), True)
+    ]
 
 
 @pytest.mark.asyncio

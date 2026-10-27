@@ -18,6 +18,7 @@ import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseChmod } from '../../../../uti
 import { lsModeString } from '../../../../commands/builtin/utils/formatting.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
 import { UsageError } from '../../../../commands/errors.ts'
+import { isRefusal } from '../../../../errors/fs.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
@@ -26,7 +27,6 @@ import { expandOperands, fail, parseLine, result } from '../shared.ts'
 import {
   type WalkEntry,
   beforeRecursiveChange,
-  isRefusal,
   permissionError,
   resolveOperand,
   setattrVia,

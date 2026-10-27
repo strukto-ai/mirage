@@ -41,15 +41,13 @@ import {
 } from '../../../../utils/path.ts'
 import {
   fsStrerror,
-  isEacces,
   isEexist,
   isEisdir,
   isEnoent,
   isEnotdir,
-  isErofs,
+  isRefusal,
 } from '../../../../errors/fs.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
-import { PolicyDenied } from '../../../../policy/index.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { NamespaceLinks } from '../../../../view/types.ts'
 import type { NamespaceReader } from '../../../dispatcher/reader.ts'
@@ -64,6 +62,10 @@ import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { classify } from '../../../../errors/classify.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import type { FsCondition } from '../../../../errors/types.ts'
+
+// Opt in by assigning a debug sink, as Python's module logger is off until
+// configured.
+export const logger: { debug?: (message: string) => void } = {}
 
 const TARGET_DIR_LONG = '--target-directory'
 const SUFFIX_LONG = '--suffix'
@@ -213,7 +215,16 @@ async function listedByParent(dispatch: DispatchFn, virtual: string): Promise<bo
   const cut = stripped.lastIndexOf('/')
   const name = stripped.slice(cut + 1)
   if (name === '') return false
-  const listing = await pathReaddir(dispatch, stripped.slice(0, cut) || '/')
+  const parent = stripped.slice(0, cut) || '/'
+  let listing: string[]
+  try {
+    listing = await pathReaddir(dispatch, parent)
+  } catch (err) {
+    if (!isRefusal(err)) throw err
+    // A parent it may not list says nothing against the stat's row.
+    logger.debug?.(`ln: listing ${parent} refused: ${String(err)}`)
+    return true
+  }
   return listing.some((entry) => {
     const s = rstripSlash(entry)
     return s.slice(s.lastIndexOf('/') + 1) === name
@@ -337,23 +348,30 @@ export async function planLinks(
     const typed = targetTyped ?? targetDir
     const why = walkVerdict(links, typed, cwd, true)
     if (why !== null) return [[], `ln: failed to access '${typed}': ${posixPhrase(why)}\n`]
-    const unwalked = await dotRefusal(
-      dispatchStat(dispatch),
-      PathSpec.fromStrPath(typed, undefined, cwd),
-      (v) => links.follow(v),
-    )
-    if (unwalked !== null) {
-      return [
-        [],
-        `ln: failed to access '${typed}': ${fsStrerror(unwalked) ?? posixPhrase('ENOENT')}\n`,
-      ]
+    let resolved: string
+    let stat: FileStat | null
+    try {
+      const unwalked = await dotRefusal(
+        dispatchStat(dispatch),
+        PathSpec.fromStrPath(typed, undefined, cwd),
+        (v) => links.follow(v),
+      )
+      if (unwalked !== null) {
+        return [
+          [],
+          `ln: failed to access '${typed}': ${fsStrerror(unwalked) ?? posixPhrase('ENOENT')}\n`,
+        ]
+      }
+      ;[resolved, stat] = await dirAt(
+        links,
+        dispatch,
+        operandAbs(links, targetDir, cwd),
+        flags.noDereference,
+      )
+    } catch (err) {
+      if (!isRefusal(err)) throw err
+      return [[], `ln: failed to access '${typed}': ${String(fsStrerror(err))}\n`]
     }
-    const [resolved, stat] = await dirAt(
-      links,
-      dispatch,
-      operandAbs(links, targetDir, cwd),
-      flags.noDereference,
-    )
     if (stat === null) {
       return [
         [],
@@ -391,10 +409,26 @@ export async function planLinks(
   const lastAbs = operandAbs(links, last, cwd)
   // The empty name reads as the working directory in `lastAbs`, and it is
   // no directory to link into.
-  const [resolved, stat] =
-    wordText(last) === ''
-      ? [lastAbs, null]
-      : await dirAt(links, dispatch, lastAbs, flags.noDereference)
+  let resolved: string
+  let stat: FileStat | null
+  try {
+    ;[resolved, stat] =
+      wordText(last) === ''
+        ? [lastAbs, null]
+        : await dirAt(links, dispatch, lastAbs, flags.noDereference)
+  } catch (err) {
+    if (!isRefusal(err)) throw err
+    // GNU reads a name it cannot stat as no directory, so one TARGET links
+    // at it and meets the refusal there; a hard link's source is reached
+    // first.
+    if (operands.length > 2) {
+      return [[], `ln: target '${wordText(last)}': ${String(fsStrerror(err))}\n`]
+    }
+    if (flags.symbolic) {
+      return [[], refused(flags, wordText(last), wordText(first), classify(err) ?? 'EACCES')]
+    }
+    return [[{ source: first, linkAbs: lastAbs, linkTyped: wordText(last) }], null]
+  }
   const isDir = stat !== null && stat.type === FileType.DIRECTORY
   if (operands.length === 2 && !isDir) {
     return [[{ source: first, linkAbs: lastAbs, linkTyped: wordText(last) }], null]
@@ -434,7 +468,13 @@ async function sourceBytes(
       throw err
     }
   }
-  const stat = await pathStat(dispatch, resolved)
+  let stat: FileStat | null
+  try {
+    stat = await pathStat(dispatch, resolved)
+  } catch (err) {
+    if (!isRefusal(err)) throw err
+    return [null, `ln: failed to access '${typed}': ${String(fsStrerror(err))}\n`]
+  }
   if (stat === null) {
     return [
       null,
@@ -468,8 +508,28 @@ async function sourceBytes(
 // stores the target as typed (or relative under -r). A hard link of a
 // symlink is the link itself, so it becomes a second symlink with the
 // same target, unless -L asks for the target's bytes; a hard link of a
-// file is a byte copy through the dispatcher.
+// file is a byte copy through the dispatcher. A stat of the name that is
+// refused is GNU's lstat under -f or -b and the call that makes the link
+// otherwise.
 export async function makeLink(
+  links: NamespaceReader,
+  dispatch: DispatchFn,
+  cwd: string,
+  plan: LinkPlan,
+  flags: LnFlags,
+  errors: string[],
+  out: string[],
+): Promise<void> {
+  try {
+    await attemptLink(links, dispatch, cwd, plan, flags, errors, out)
+  } catch (err) {
+    if (!isRefusal(err)) throw err
+    errors.push(refused(flags, plan.linkTyped, wordText(plan.source), classify(err) ?? 'EACCES'))
+  }
+}
+
+// makeLink up to a refused stat of the name.
+async function attemptLink(
   links: NamespaceReader,
   dispatch: DispatchFn,
   cwd: string,
@@ -508,11 +568,15 @@ export async function makeLink(
     return
   }
   if (!flags.symbolic) {
-    const unwalked = await dotRefusal(
-      walker,
-      PathSpec.fromStrPath(plan.source, undefined, cwd),
-      (v) => links.follow(v),
-    )
+    let unwalked: unknown
+    try {
+      unwalked = await dotRefusal(walker, PathSpec.fromStrPath(plan.source, undefined, cwd), (v) =>
+        links.follow(v),
+      )
+    } catch (err) {
+      if (!isRefusal(err)) throw err
+      unwalked = err
+    }
     if (unwalked !== null) {
       errors.push(
         `ln: failed to access '${targetTyped}': ${fsStrerror(unwalked) ?? posixPhrase('ENOENT')}\n`,
@@ -676,6 +740,12 @@ export async function makeLink(
         errors.push(refused(flags, typed, targetTyped, 'ELOOP'))
         return
       }
+      if (isRefusal(err)) {
+        // GNU's lstat passed; making the link over it is refused.
+        const arrow = flags.symbolic ? '' : ` => '${targetTyped}'`
+        errors.push(`ln: failed to create ${kind} '${typed}'${arrow}: ${String(fsStrerror(err))}\n`)
+        return
+      }
       if (!isEnoent(err) && !isEnotdir(err)) throw err
     }
     occupied = false
@@ -723,12 +793,10 @@ export async function makeLink(
       errors.push(`ln: failed to create ${kind} '${typed}'${arrow}: ${String(fsStrerror(err))}\n`)
       return
     }
-    if (err instanceof PolicyDenied || isEacces(err) || isErofs(err)) {
+    if (isRefusal(err)) {
       // A read-only region or a policy deny, which ln voices as its own
       // per-operand line, as GNU does for EROFS.
-      errors.push(
-        `ln: failed to create ${kind} '${typed}': ${fsStrerror(err) ?? posixPhrase('EACCES')}\n`,
-      )
+      errors.push(`ln: failed to create ${kind} '${typed}': ${String(fsStrerror(err))}\n`)
       return
     }
     throw err
@@ -794,7 +862,7 @@ export async function handleLn(
     return fail('ln', 'ln: cannot combine --target-directory and --no-target-directory\n')
   }
   const links = namespace.sessionLinks(session)
-  const [plans, refused] = await planLinks(
+  const [plans, planRefusal] = await planLinks(
     links,
     dispatch,
     session.cwd,
@@ -803,7 +871,7 @@ export async function handleLn(
     targetTyped,
     flags,
   )
-  if (refused !== null) return fail('ln', refused)
+  if (planRefusal !== null) return fail('ln', planRefusal)
   const errors: string[] = []
   const out: string[] = []
   for (const plan of plans) {

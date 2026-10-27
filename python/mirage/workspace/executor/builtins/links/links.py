@@ -546,11 +546,16 @@ async def _prepare_pair(
         followed: str | None = links.follow(dst.virtual)
     except CycleError:
         followed = None
-    stat = (
-        None
-        if followed is None
-        else await stat_or_none(dispatch, PathSpec.from_str_path(followed))
-    )
+    try:
+        stat = (
+            None
+            if followed is None
+            else await stat_or_none(dispatch, PathSpec.from_str_path(followed))
+        )
+    except PermissionError as exc:
+        # A refused destination: the generic mv names it through its stat.
+        logger.debug("mv: destination %s refused: %s", dst.virtual, exc)
+        return items, None
     into_dir = (
         not fl.as_bool("no_target_directory")
         and stat is not None

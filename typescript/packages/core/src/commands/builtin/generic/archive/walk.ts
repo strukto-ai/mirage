@@ -21,7 +21,8 @@ import {
   type StatFn,
 } from '../../../../types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
-import { isEnotdir } from '../../../../errors/fs.ts'
+import { isRefusal } from '../../../../errors/fs.ts'
+import { classify } from '../../../../errors/classify.ts'
 import { CycleError } from '../../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 import type { Entry, MemberKind, Problem, Scan, Walked } from './types.ts'
@@ -174,7 +175,7 @@ async function follow(
   try {
     targetStat = await deps.stat(spec)
   } catch (err) {
-    return [[], [], posixPhrase(isEnotdir(err) ? 'ENOTDIR' : 'ENOENT'), []]
+    return [[], [], statProblem(err), []]
   }
   if (targetStat.type !== FileType.DIRECTORY) {
     return [[{ namePath: virtual, kind: 'file', read: spec, size: targetStat.size }], [], '', []]
@@ -192,6 +193,14 @@ async function follow(
 // The problems for directories a walk could not open. A rule refused each
 // one. tar prints the reason after "Cannot open: " and fails the run;
 // Info-ZIP stores the directory and is silent.
+// The phrase a member whose stat failed is reported with: a plain file in
+// its chain or a refusal keeps its errno, anything else reads as missing.
+// Mirrors Python's posix_phrase(classify(exc) or ENOENT).
+function statProblem(err: unknown): string {
+  const why = classify(err)
+  return posixPhrase(why !== null && (why === 'ENOTDIR' || isRefusal(err)) ? why : 'ENOENT')
+}
+
 function unreadableProblems(closed: readonly string[]): Problem[] {
   return closed.map((path) => ({ path, reason: posixPhrase('EACCES'), unreadable: true }))
 }
@@ -235,13 +244,7 @@ export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan>
       return {
         entries: [],
         crossings: [],
-        problems: [
-          {
-            path: base,
-            reason: posixPhrase(isEnotdir(err) ? 'ENOTDIR' : 'ENOENT'),
-            fatal: true,
-          },
-        ],
+        problems: [{ path: base, reason: statProblem(err), fatal: true }],
         missing: true,
       }
     }

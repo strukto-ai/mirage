@@ -17,15 +17,18 @@ import posixpath
 from dataclasses import replace
 
 from mirage.commands.builtin.utils.paths import descendant_path
-from mirage.errors.fs import eloop, enoent, enotdir
+from mirage.errors.fs import eacces, eloop, enoent, enotdir
 from mirage.errors.types import FsCondition
 from mirage.types import FileType, PathSpec, StatFn
 from mirage.utils.path import parent
 
 # The destination verdicts met at the destination's own stat, before any
-# create or rename: a plain file in its chain, or a link loop in it. cp
-# and mv both word them ``cannot stat 'DST'``.
-STAT_REFUSALS = frozenset({FsCondition.ENOTDIR, FsCondition.ELOOP})
+# create or rename: a plain file in its chain, a link loop in it, or a
+# refused stat, a store's or a policy's. cp and mv both word them
+# ``cannot stat 'DST'``.
+STAT_REFUSALS = frozenset(
+    {FsCondition.ENOTDIR, FsCondition.ELOOP, FsCondition.EACCES}
+)
 
 _SWALLOW = (FileNotFoundError, ValueError)
 
@@ -77,6 +80,8 @@ def copy_targets(
         label = f"target '{dst.raw_path}'"
         if dst_err is FsCondition.ELOOP:
             raise eloop(label)
+        if dst_err is FsCondition.EACCES:
+            raise eacces(label)
         if not dst_exists and dst_err is not FsCondition.ENOTDIR:
             raise enoent(label)
         raise enotdir(label)

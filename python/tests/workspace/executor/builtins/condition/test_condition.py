@@ -12,14 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
+from collections.abc import Callable
 from typing import Any, cast
 
 import pytest
 
 import mirage.workspace.executor.builtins.condition.condition as condition_module
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.errors.fs import efbig
+from mirage.errors.fs import eacces, efbig, fs_error
+from mirage.errors.types import FsCondition
 from mirage.io import IOResult
+from mirage.policy import PolicyDenied
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.clock import Clock, ManualClock
 from mirage.workspace.executor.builtins.condition import CondContext, eval_flat
@@ -102,6 +106,24 @@ class _UnknownSizeDispatch:
             if isinstance(self.content, OSError):
                 raise self.content
             return self.content, IOResult()
+        raise AssertionError(op)
+
+
+class _FailingStatDispatch:
+    """Fails every stat with one condition, as a store refusing a key does.
+
+    Args:
+        fail (Callable): builds the error for the path stat was asked.
+    """
+
+    def __init__(self, fail: Callable[[PathSpec], Exception]) -> None:
+        self.fail = fail
+
+    async def __call__(
+        self, op: str, scope: PathSpec, **kwargs: Any
+    ) -> tuple[Any, IOResult]:
+        if op == "stat":
+            raise self.fail(scope)
         raise AssertionError(op)
 
 
@@ -223,6 +245,55 @@ async def test_e_missing_on_prefix_store_false():
     assert await eval_flat(ctx, ["-e", "/data/znope"]) is False
     assert await eval_flat(ctx, ["-d", "/data/znope"]) is False
     assert await eval_flat(ctx, ["-s", "/data/znope"]) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "expr, expected",
+    [
+        (["-e", "/data/b"], False),
+        (["-f", "/data/b"], False),
+        (["-r", "/data/b"], False),
+        (["-s", "/data/b"], False),
+        (["!", "-e", "/data/b"], True),
+        (["/data/a", "-nt", "/data/b"], False),
+    ],
+)
+async def test_a_refused_stat_reads_as_absent(expr, expected):
+    # GNU bash 5.2: a file test whose stat fails EACCES is false, silently.
+    ctx = _stub_ctx(_FailingStatDispatch(eacces))
+    assert await eval_flat(ctx, expr) is expected
+
+
+@pytest.mark.asyncio
+async def test_a_stat_refused_eperm_reads_as_absent():
+    ctx = _stub_ctx(
+        _FailingStatDispatch(lambda path: fs_error(path, FsCondition.EPERM))
+    )
+    assert await eval_flat(ctx, ["-e", "/data/b"]) is False
+
+
+@pytest.mark.asyncio
+async def test_a_policy_refusal_stays_loud():
+    # A store's refusal reads as false; a policy's keeps its own line.
+    ctx = _stub_ctx(
+        _FailingStatDispatch(
+            lambda path: PolicyDenied(
+                errno.EACCES, "Permission denied", path.virtual
+            )
+        )
+    )
+    with pytest.raises(PolicyDenied):
+        await eval_flat(ctx, ["-e", "/data/b"])
+
+
+@pytest.mark.asyncio
+async def test_a_failing_stat_other_than_a_refusal_still_raises():
+    ctx = _stub_ctx(
+        _FailingStatDispatch(lambda path: fs_error(path, FsCondition.EIO))
+    )
+    with pytest.raises(OSError):
+        await eval_flat(ctx, ["-e", "/data/b"])
 
 
 @pytest.mark.asyncio

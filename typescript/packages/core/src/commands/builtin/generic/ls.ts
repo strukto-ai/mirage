@@ -465,9 +465,15 @@ export async function sortStats(
 // The row of an operand that is no directory, null for a directory or a path
 // nothing is at; a stat that fails other than by absence throws.
 async function fileEntry(stat: Stat, path: PathSpec): Promise<FileStat | null> {
+  const s = await operandStat(stat, path)
+  return s !== null && s.type !== FileType.DIRECTORY ? asOperand(s, path) : null
+}
+
+// An operand's stat, null for a path nothing is at; a stat that fails other
+// than by absence throws. Mirrors Python ls `_operand_stat`.
+async function operandStat(stat: Stat, path: PathSpec): Promise<FileStat | null> {
   try {
-    const s = await stat(path)
-    return s.type !== FileType.DIRECTORY ? asOperand(s, path) : null
+    return await stat(path)
   } catch (err) {
     if (!isMissError(err) && !isMissingPath(err)) throw err
     return null
@@ -690,23 +696,25 @@ async function probeOperand(
     // itself, unless -L or -H asked for the target (coreutils 9.7).
     const walkRefused = isDotWalkError(err)
     const looped = walkRefused && (err as { code?: string }).code === 'ELOOP'
-    let row: FileStat | null = null
+    let found: FileStat | null = null
     let refused: unknown = null
     if (!walkRefused) {
       try {
-        row = await fileEntry(ownStat, path)
+        found = await operandStat(ownStat, path)
       } catch (statErr) {
         if (!isWalkError(statErr)) throw statErr
         refused = statErr
       }
     }
-    if (row !== null) return { path, row, groups: [] }
+    if (found !== null && found.type !== FileType.DIRECTORY) {
+      return { path, row: asOperand(found, path), groups: [] }
+    }
     const link = looped && commandLineArg && !ctx.followArgs ? linkRow(path, links) : null
     if (link !== null) return { path, row: link, groups: [] }
     // GNU 9.7 stats an operand before it opens one: a stat that fails is what
     // it names, and a directory it may not read is worded apart, the entry
     // being there.
-    const verb = refused === null && isEacces(err) ? 'cannot open directory' : 'cannot access'
+    const verb = found !== null && isEacces(err) ? 'cannot open directory' : 'cannot access'
     warnings.push({
       message: `ls: ${verb} '${path.rawPath}': ${errText(refused ?? err)}`,
       serious: commandLineArg,

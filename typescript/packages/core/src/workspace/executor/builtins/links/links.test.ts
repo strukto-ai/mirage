@@ -247,6 +247,79 @@ describe('ln with a source it cannot read', () => {
   })
 })
 
+class RefuseSteps implements Policy {
+  preVfs(ctx: VfsContext): Action | null {
+    const name = ctx.call.name
+    const virtual = ctx.path.virtual.replace(/\/+$/, '')
+    if (name === 'readdir' && virtual === '/data/p') return { kind: 'deny', reason: 'unlisted' }
+    if (name === 'stat' && virtual.endsWith('.hid')) return { kind: 'deny', reason: 'hidden' }
+    if (name === 'unlink' && virtual.endsWith('.pinned')) return { kind: 'deny', reason: 'pinned' }
+    return null
+  }
+}
+
+// Mirrors python's test_ln_words_a_refusal_by_the_step_that_meets_it.
+describe('ln words a refusal by the step that meets it', () => {
+  // GNU 9.7: a directory it may stat takes the link whatever its parent
+  // lists; a name it may not stat refuses the link; under -f an unlink
+  // refused after the lstat passed refuses the link, not the access.
+  it.each([
+    ['ln -s /data/f.txt /data/p/d', '', '/data/p/d/f.txt'],
+    [
+      'ln -s y /data/z.hid',
+      "ln: failed to create symbolic link '/data/z.hid': Permission denied\n",
+      null,
+    ],
+    [
+      'ln -sf y /data/x.pinned',
+      "ln: failed to create symbolic link '/data/x.pinned': Permission denied\n",
+      null,
+    ],
+  ])('%s', async (line, stderr, made) => {
+    const ws = makeWs([new RefuseSteps()])
+    try {
+      await ws.shell('mkdir -p /data/p/d; printf f > /data/f.txt; printf x > /data/x.pinned')
+      const r = await ws.shell(line)
+      expect([r.exitCode, err(r)]).toEqual([stderr === '' ? 0 : 1, stderr])
+      if (made !== null) expect(ws.namespace.isLink(made)).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+class SealedTarget implements Policy {
+  preVfs(ctx: VfsContext): Action | null {
+    if (ctx.call.name === 'stat' && ctx.path.virtual === '/data/sealed') {
+      return { kind: 'deny', reason: 'sealed' }
+    }
+    return null
+  }
+}
+
+// Mirrors python's test_mv_replaces_a_link_whose_target_it_may_not_stat.
+// GNU 9.7: a destination it cannot stat is no directory, so the move renames
+// over the link and exits 0, whatever the source is.
+describe('mv onto a link whose target it may not stat', () => {
+  it.each([
+    ['mv /data/z /data/dlink', 'cat /data/dlink', 'z'],
+    ['mv /data/sl /data/dlink', 'readlink /data/dlink', 'z\n'],
+    ['mv -T /data/z /data/dlink', 'cat /data/dlink', 'z'],
+  ])('%s replaces the link', async (line, check, shown) => {
+    const ws = makeWs([new SealedTarget()])
+    try {
+      await ws.shell(
+        'printf z > /data/z; printf s > /data/sealed; ln -s /data/sealed /data/dlink; ln -s z /data/sl',
+      )
+      const r = await ws.shell(line)
+      expect([r.exitCode, err(r)]).toEqual([0, ''])
+      expect(DEC.decode((await ws.shell(check)).stdout)).toBe(shown)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('rm and unlink reach a link through the dispatcher', () => {
   it('an unlink of a link meets the op methods', async () => {
     // The node table is written through the dispatcher, so a preVfs
@@ -492,6 +565,24 @@ describe('mv re-anchors what the node table holds', () => {
       expect(prepared.items).toContain(link)
       expect(ws.namespace.isLink('/data/dst/l')).toBe(false)
       expect(ws.namespace.isLink('/data/l')).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Mirrors python's test_prepare_mv_leaves_a_refused_destination_to_the_generic.
+  it('leaves a refused destination to the generic', async () => {
+    const ws = makeWs()
+    try {
+      await ws.shell('printf a > /data/a; ln -s /data/a /data/l')
+      const real = dispatchOf(ws)
+      const refusing: DispatchFn = (op, path, ...rest) =>
+        op === 'stat' && path.virtual === '/data/b'
+          ? Promise.reject(eacces('/data/b'))
+          : real(op, path, ...rest)
+      const items = [PathSpec.fromStrPath('/data/a'), PathSpec.fromStrPath('/data/b')]
+      const prepared = await prepareMv(ws.namespace, refusing, items, ['/data/a', '/data/b'], '/')
+      expect(prepared).toEqual({ items, early: null })
     } finally {
       await ws.close()
     }
