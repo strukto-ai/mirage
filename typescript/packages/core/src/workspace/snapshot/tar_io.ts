@@ -187,8 +187,8 @@ async function unpack(
     }
     if (manifest === null) {
       manifest = manifestOf(held)
-      wanted = blobPaths(manifest)
-      diskBlobs = new Set(diskFileRefs(manifest).map(([, , blobPath]) => blobPath))
+      wanted = new Set([...blobPaths(manifest)].map(memberName))
+      diskBlobs = new Set(diskFileRefs(manifest).map(([, , blobPath]) => memberName(blobPath)))
     }
     if (!wanted.has(name)) return
     if (staging === null || !diskBlobs.has(name)) {
@@ -240,12 +240,12 @@ async function unpack(
   }
   manifest ??= manifestOf(held)
   for (const [map, rel, blobPath] of diskFileRefs(manifest)) {
-    const path = staged.get(blobPath)
+    const path = staged.get(memberName(blobPath))
     if (path !== undefined) map[rel] = path
   }
   return resolveManifest(manifest, (blobPath: string): Uint8Array => {
     if (!isSafeBlobPath(blobPath)) throw new Error(`Unsafe blob path: ${String(blobPath)}`)
-    const blob = held.get(blobPath)
+    const blob = held.get(memberName(blobPath))
     if (blob === undefined) throw new Error(`Manifest references missing blob: ${blobPath}`)
     return concat(blob)
   })
@@ -258,6 +258,14 @@ function fileWriter(path: string): [WritableStreamDefaultWriter<Uint8Array>, Pro
   const written = writeStreamToFile(path, readable)
   void written.catch((error: unknown) => writer.abort(error))
   return [writer, written]
+}
+
+/** The name tar's -x gives the member a blob path was written under: the path without its empty and `.` components. */
+function memberName(path: string): string {
+  return path
+    .split('/')
+    .filter((part) => part !== '' && part !== '.')
+    .join('/')
 }
 
 /** Every blob path the manifest names, each checked safe. */

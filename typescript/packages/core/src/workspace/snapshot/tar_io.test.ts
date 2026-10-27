@@ -156,6 +156,25 @@ describe('snapshot tars of disk files', () => {
     }
   })
 
+  it('reads back a blob path tar spells otherwise', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-tar-'))
+    try {
+      const blobs = { './b//f': ENC.encode('data') }
+      const tarBytes = await writeSnapshotTar({ k: { [BLOB_REF_KEY]: './b//f' } }, blobs)
+      expect(await readSnapshotTar(tarBytes)).toEqual({ k: ENC.encode('data') })
+      const tar = join(dir, 's.tar')
+      await writeFileTar(tar, diskManifest('./b//f'), blobs)
+      const staging = join(dir, 'staging')
+      await mkdir(staging)
+      const state = (await readFileTar(tar, staging)) as Record<string, unknown>
+      const mount = (state[StateKey.MOUNTS] as Record<string, Record<string, unknown>>[])[0]
+      const files = mount?.[MountKey.VFS_STATE]?.[VFSStateKey.FILES] as Record<string, string>
+      expect(DEC.decode(await readFile(files.f ?? ''))).toBe('data')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('keeps a staged blob inside the staging directory', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-tar-'))
     try {
