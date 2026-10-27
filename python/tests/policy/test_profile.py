@@ -113,7 +113,11 @@ DOCUMENT = {
                 },
                 "env": {
                     "LLM_URL": "https://llm/v1",
-                    "LLM_KEY": {"from": "aws-sm", "ref": "prod/llm", "key": "key"},
+                    "LLM_KEY": {
+                        "from": "aws-sm",
+                        "ref": "prod/llm",
+                        "key": "key",
+                    },
                 },
             }
         ]

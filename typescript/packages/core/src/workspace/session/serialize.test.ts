@@ -108,7 +108,8 @@ describe('session record codecs', () => {
       LLM_KEY: { from: 'aws-sm', ref: 'prod/llm', key: 'key' },
     })
     expect(scriptFromDict(data)).toEqual(entry)
-    const { env: _env, ...older } = data
+    const older = { ...data }
+    delete older.env
     expect(scriptFromDict(older).env).toEqual({})
   })
 })
