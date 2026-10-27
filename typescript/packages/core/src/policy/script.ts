@@ -282,7 +282,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
   private readonly secretSources:
     | (() => Promise<Readonly<Record<string, ResolvedSource>>>)
     | undefined
-  private readonly envs = new Map<string, Record<string, string>>()
+  private readonly envs = new Map<string, Promise<Record<string, string>>>()
 
   constructor(
     sessions: SessionScriptsQuery,
@@ -420,7 +420,11 @@ export class ScriptPolicy implements Policy, SessionScoped {
     let result: RunResult
     try {
       const engine = this.engine(entry)
-      const env = await this.env(entry)
+      const env = await runWithTimeout(
+        this.env(entry),
+        SCRIPT_EVAL_TIMEOUT.seconds,
+        'policy program',
+      )
       const run = async (): Promise<RunResult> => {
         // The runtime stops itself at the deadline; the signal stops it
         // when the wait gives up first, before the next run takes the
@@ -494,29 +498,40 @@ export class ScriptPolicy implements Policy, SessionScoped {
   }
 
   /**
-   * One program's `env` with every pointer read, kept once read. Throws a
-   * clause about "script" when a source cannot answer.
+   * One program's `env` with every pointer read: one read per program,
+   * shared by the runs waiting on it and kept once it answers, retried by
+   * the next run after it fails. Throws a clause about "script" when a
+   * source cannot answer.
    */
-  private async env(entry: ProfileScript): Promise<Record<string, string>> {
-    const key = JSON.stringify(
+  private env(entry: ProfileScript): Promise<Record<string, string>> {
+    const key = JSON.stringify([
+      entry.profile,
+      entry.runtime,
+      entry.script.source,
       Object.entries(entry.env).sort(([a], [b]) => compareCodePoints(a, b)),
-    )
-    let resolved = this.envs.get(key)
-    if (resolved === undefined) {
-      const sources = this.secretSources === undefined ? undefined : await this.secretSources()
-      let read: Record<string, unknown>
-      try {
-        read = await resolveConfigSecrets({ ...entry.env }, sources, 'env')
-      } catch (err) {
-        if (err instanceof SecretsError) throw new Error(`script ${err.message}`)
-        throw err
-      }
-      resolved = Object.fromEntries(
-        Object.entries(read).map(([name, value]) => [name, String(value)]),
-      )
-      this.envs.set(key, resolved)
+    ])
+    let reading = this.envs.get(key)
+    if (reading === undefined) {
+      reading = this.readEnv(entry)
+      this.envs.set(key, reading)
+      reading.catch(() => {
+        if (this.envs.get(key) === reading) this.envs.delete(key)
+      })
     }
-    return resolved
+    return reading
+  }
+
+  /** One read of a program's `env` pointers; throws a clause about "script" when a source cannot answer. */
+  private async readEnv(entry: ProfileScript): Promise<Record<string, string>> {
+    const sources = this.secretSources === undefined ? undefined : await this.secretSources()
+    let read: Record<string, unknown>
+    try {
+      read = await resolveConfigSecrets({ ...entry.env }, sources, 'env')
+    } catch (err) {
+      if (err instanceof SecretsError) throw new Error(`script ${err.message}`)
+      throw err
+    }
+    return Object.fromEntries(Object.entries(read).map(([name, value]) => [name, String(value)]))
   }
 
   /** `work` after every run on `engine` before it: two runs on one runtime would interleave. */

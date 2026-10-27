@@ -435,11 +435,12 @@ class Workspace:
                 directory
             ),
         )
+        self._policy_functions = dict(policy_functions or {})
         self._script_policy = ScriptPolicy(
             self._session_mgr,
             dispatch=self.dispatch,
             resolver=self._sandbox_resolver,
-            external_lookup=policy_functions,
+            external_lookup=self._policy_functions,
             secret_sources=self._secret_sources,
         )
         self._registry.policies.add(self._script_policy)
@@ -1759,6 +1760,7 @@ class Workspace:
         drift_policy: DriftPolicy = DriftPolicy.STRICT,
         runtimes: list[Runtime[Any] | str] | None = None,
         policies: list[Policy] | None = None,
+        policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
         profile: str | None = None,
@@ -1812,6 +1814,9 @@ class Workspace:
                 register, as the constructor takes them. A snapshot
                 carries none, and the restored session tables are
                 vetted under these.
+            policy_functions (Mapping[str, Callable[..., Any]] | None):
+                the functions a monty policy program calls, as the
+                constructor takes them. A snapshot carries none.
             profiles (Mapping[str, SessionProfile | Mapping[str, Any]] |
                 None): a profile table of the caller's own, in place of
                 the one the snapshot recorded; it brings its own default.
@@ -1843,6 +1848,7 @@ class Workspace:
                 drift_policy=drift_policy,
                 runtimes=runtimes,
                 policies=policies,
+                policy_functions=policy_functions,
                 profiles=profiles,
                 profile=profile,
                 clock=clock,
@@ -1862,6 +1868,7 @@ class Workspace:
         drift_policy: DriftPolicy = DriftPolicy.STRICT,
         runtimes: list[Runtime[Any] | str] | None = None,
         policies: list[Policy] | None = None,
+        policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
         profile: str | None = None,
@@ -1898,6 +1905,9 @@ class Workspace:
                 register, as the constructor takes them. A snapshot
                 carries none, and the restored session tables are
                 vetted under these.
+            policy_functions (Mapping[str, Callable[..., Any]] | None):
+                the functions a monty policy program calls, as the
+                constructor takes them. A snapshot carries none.
             profiles (Mapping[str, SessionProfile | Mapping[str, Any]] |
                 None): a profile table of the caller's own, in place of
                 the one the snapshot recorded; it brings its own default.
@@ -1921,6 +1931,7 @@ class Workspace:
             secrets=secrets,
             runtimes=runtimes,
             policies=policies,
+            policy_functions=policy_functions,
             profiles=profiles,
             profile=profile,
             clock=clock,
@@ -1972,12 +1983,14 @@ class Workspace:
         # first read with "unknown secrets source". Policy instances
         # and the route policy stay behind: a policy is a live host
         # object whose state two workspaces must not share, and the
-        # route names runtimes the copy does not carry.
+        # route names runtimes the copy does not carry. The policy
+        # functions travel, the host's code as a CLI's spec is.
         return await type(self)._from_state(
             state,
             mounts=mounts,
             clis=reusable_clis(self),
             secrets=self._declared_sources,
+            policy_functions=self._policy_functions,
             shared=frozenset(mounts),
             clock=self._clock,
             ids=self._ids,
@@ -1993,6 +2006,7 @@ class Workspace:
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         runtimes: list[Runtime[Any] | str] | None = None,
         policies: list[Policy] | None = None,
+        policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
         profile: str | None = None,
@@ -2021,6 +2035,7 @@ class Workspace:
             profile=args.profile if built_for_state else profile,
             runtimes=runtimes,
             policies=policies,
+            policy_functions=policy_functions,
             clock=clock,
             ids=ids,
         )

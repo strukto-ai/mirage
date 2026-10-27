@@ -441,6 +441,14 @@ describe('parseProfilePolicy', () => {
     },
   )
 
+  it('keeps an env entry named __proto__ as its own', () => {
+    const raw = JSON.parse('{"__proto__": "x", "K": {"from": "env", "key": "K"}}') as unknown
+    const policy = parseProfilePolicy({ pre_command: [{ script: 'p.py', env: raw }] }, 'policy')
+    const env = policy.preCommand?.[0]?.env ?? {}
+    expect(Object.keys(env)).toEqual(['__proto__', 'K'])
+    expect(Object.getPrototypeOf(env)).toBe(Object.prototype)
+  })
+
   it('writes no env for a program without one', () => {
     const doc = profileToDict({ policy: { preCommand: [{ script: new ScriptSource('pass') }] } })
     const [written] = (doc.policy as { pre_command: Record<string, unknown>[] }).pre_command

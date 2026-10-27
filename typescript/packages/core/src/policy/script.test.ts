@@ -1029,3 +1029,73 @@ describe('ScriptPolicy env and external functions', () => {
     expect('externalLookup' in engine).toBe(false)
   })
 })
+
+describe('ScriptPolicy env reads', () => {
+  const pointer = { TOKEN: { from: 'env', ref: '', key: 'POLICY_TOKEN' } }
+
+  beforeEach(() => {
+    registerSecrets('env', z.strictObject({}), () =>
+      Promise.resolve({ fields: { ...process.env } as Record<string, string> }),
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('times out an env read that stalls', async () => {
+    const seconds = SCRIPT_EVAL_TIMEOUT.seconds
+    SCRIPT_EVAL_TIMEOUT.seconds = 0.05
+    try {
+      const engine = new FakeProgram()
+      built.factory = () => engine
+      const policy = track(
+        new ScriptPolicy(scripts({ preCommand: [{ ...entry(), env: pointer }] }), null, {
+          secretSources: () => new Promise(() => undefined),
+        }),
+      )
+      expect(await policy.preCommand(ctx())).toEqual([
+        { kind: 'deny', reason: "profile 'release' policy timed out after 0.05s" },
+      ])
+      expect(engine.requests).toEqual([])
+    } finally {
+      SCRIPT_EVAL_TIMEOUT.seconds = seconds
+    }
+  })
+
+  it('shares one env read among first runs together', async () => {
+    vi.stubEnv('POLICY_TOKEN', 't')
+    let reads = 0
+    const engine = new FakeProgram()
+    built.factory = () => engine
+    const policy = track(
+      new ScriptPolicy(scripts({ preCommand: [{ ...entry(), env: pointer }] }), null, {
+        secretSources: async () => {
+          reads += 1
+          await new Promise((resolve) => setTimeout(resolve, 10))
+          return {}
+        },
+      }),
+    )
+    await Promise.all([
+      policy.preCommand(ctx()),
+      policy.preCommand(ctx()),
+      policy.preCommand(ctx()),
+    ])
+    expect(reads).toBe(1)
+    expect(engine.requests.map((r) => r.env?.TOKEN)).toEqual(['t', 't', 't'])
+  })
+
+  it('reads one pointer apart for two programs', async () => {
+    vi.stubEnv('POLICY_TOKEN', 'first')
+    const engine = new FakeProgram()
+    built.factory = () => engine
+    let programs: ProfileScripts = { preCommand: [{ ...entry('monty', 'ONE'), env: pointer }] }
+    const policy = track(new ScriptPolicy({ scriptsOf: () => programs }))
+    await policy.preCommand(ctx())
+    vi.stubEnv('POLICY_TOKEN', 'second')
+    programs = { preCommand: [{ ...entry('monty', 'TWO'), env: pointer }] }
+    await policy.preCommand(ctx())
+    expect(engine.requests.map((r) => r.env?.TOKEN)).toEqual(['first', 'second'])
+  })
+})

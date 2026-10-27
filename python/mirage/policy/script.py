@@ -312,7 +312,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         self._resolver = resolver
         self._external_lookup = dict(external_lookup or {})
         self._secret_sources = secret_sources
-        self._envs: dict[str, dict[str, str]] = {}
+        self._envs: dict[str, asyncio.Task[dict[str, str]]] = {}
         self._engines: dict[
             tuple[str, str], tuple[LanguageRuntime[Any], asyncio.Lock | None]
         ] = {}
@@ -475,8 +475,10 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             ValueError: the program failed, as a clause about "script".
         """
         engine, lock = self._engine(entry)
-        env = await self._env(entry)
         try:
+            env = await asyncio.wait_for(
+                self._env(entry), timeout=SCRIPT_EVAL_TIMEOUT_SECONDS
+            )
             async with lock or contextlib.nullcontext():
                 result = await asyncio.wait_for(
                     engine.execute(
@@ -546,7 +548,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         return built
 
     async def _env(self, entry: ProfileScript) -> dict[str, str]:
-        """One program's ``env`` with every pointer read, kept once read.
+        """One program's ``env`` with every pointer read: one read per
+        program, shared by the runs waiting on it and kept once it
+        answers, retried by the next run after it fails.
 
         Args:
             entry (ProfileScript): the program.
@@ -555,21 +559,46 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             ValueError: a source could not answer, as a clause about
                 "script".
         """
-        key = json.dumps(_plain(entry.env), sort_keys=True)
-        resolved = self._envs.get(key)
-        if resolved is None:
-            sources = (
-                await self._secret_sources()
-                if self._secret_sources is not None
-                else None
-            )
-            try:
-                read = await resolve_config_secrets(entry.env, sources, "env")
-            except SecretsError as exc:
-                raise ValueError(f"script {exc}") from exc
-            resolved = {name: str(value) for name, value in read.items()}
-            self._envs[key] = resolved
-        return resolved
+        key = json.dumps(
+            [
+                entry.profile,
+                entry.runtime,
+                entry.script.source,
+                _plain(entry.env),
+            ],
+            sort_keys=True,
+        )
+        task = self._envs.get(key)
+        if task is None:
+            task = asyncio.ensure_future(self._read_env(entry))
+            self._envs[key] = task
+        try:
+            return await asyncio.shield(task)
+        finally:
+            if task.done() and (task.cancelled() or task.exception()):
+                if self._envs.get(key) is task:
+                    del self._envs[key]
+
+    async def _read_env(self, entry: ProfileScript) -> dict[str, str]:
+        """One read of a program's ``env`` pointers.
+
+        Args:
+            entry (ProfileScript): the program.
+
+        Raises:
+            ValueError: a source could not answer, as a clause about
+                "script".
+        """
+        sources = (
+            await self._secret_sources()
+            if self._secret_sources is not None
+            else None
+        )
+        try:
+            read = await resolve_config_secrets(entry.env, sources, "env")
+        except SecretsError as exc:
+            raise ValueError(f"script {exc}") from exc
+        return {name: str(value) for name, value in read.items()}
 
     async def _reading(
         self,

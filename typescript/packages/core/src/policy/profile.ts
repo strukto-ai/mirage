@@ -650,15 +650,14 @@ export function parseProgram(raw: unknown, at: string, code = false): ProfilePol
         `${at}.env: a policy program's env cannot set ${CTX_ENV}, which carries its context`,
       )
     }
-    const parsed: Record<string, string | SecretRef> = {}
-    for (const [name, value] of Object.entries(entries)) {
+    const parsed = Object.entries(entries).map(([name, value]) => {
       const pointer = typeof value === 'string' ? null : SecretRefSchema.safeParse(value)
       if (pointer !== null && !pointer.success) {
         throw new Error(`${at}.env.${name} must be a string or a {from, ref, key} pointer`)
       }
-      parsed[name] = pointer === null ? (value as string) : pointer.data
-    }
-    env = { env: parsed }
+      return [name, pointer === null ? (value as string) : pointer.data] as const
+    })
+    env = { env: Object.fromEntries(parsed) }
   }
   const runtime = program.runtime === undefined ? PROGRAM_RUNTIME : program.runtime
   if (typeof runtime === 'string') return { script, runtime, ...env }

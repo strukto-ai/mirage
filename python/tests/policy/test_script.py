@@ -1051,3 +1051,67 @@ async def test_only_a_monty_runtime_is_handed_the_functions(monkeypatch):
     [(built, lock)] = policy._engines.values()
     assert built is engine and isinstance(lock, asyncio.Lock)
     assert not hasattr(engine, "external_lookup")
+
+
+@pytest.mark.asyncio
+async def test_an_env_read_that_stalls_times_out(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.policy.script.SCRIPT_EVAL_TIMEOUT_SECONDS", 0.05
+    )
+
+    async def stalled():
+        await asyncio.Event().wait()
+        return {}
+
+    engine = FakeProgram()
+    entry = dataclasses.replace(
+        _entry(), env={"TOKEN": SecretRef(provider="env", key="POLICY_TOKEN")}
+    )
+    policy = ScriptPolicy(
+        Programs({"pre_command": (entry,)}), secret_sources=stalled
+    )
+    policy._engines[_key(entry)] = (engine, asyncio.Lock())
+    assert await policy.pre_command(_ctx()) == (
+        Deny("profile 'release' policy timed out after 0.05s"),
+    )
+    assert engine.requests == []
+
+
+@pytest.mark.asyncio
+async def test_first_runs_together_share_one_env_read(monkeypatch):
+    monkeypatch.setenv("POLICY_TOKEN", "t")
+    reads = 0
+
+    async def sources():
+        nonlocal reads
+        reads += 1
+        await asyncio.sleep(0.01)
+        return {}
+
+    engine = FakeProgram()
+    entry = dataclasses.replace(
+        _entry(), env={"TOKEN": SecretRef(provider="env", key="POLICY_TOKEN")}
+    )
+    policy = ScriptPolicy(
+        Programs({"pre_command": (entry,)}), secret_sources=sources
+    )
+    policy._engines[_key(entry)] = (engine, asyncio.Lock())
+    await asyncio.gather(*(policy.pre_command(_ctx()) for _ in range(3)))
+    assert reads == 1
+    assert [r.env["TOKEN"] for r in engine.requests] == ["t", "t", "t"]
+
+
+@pytest.mark.asyncio
+async def test_two_programs_with_one_pointer_read_it_apart(monkeypatch):
+    monkeypatch.setenv("POLICY_TOKEN", "first")
+    pointer = {"TOKEN": SecretRef(provider="env", key="POLICY_TOKEN")}
+    one = dataclasses.replace(_entry(source="ONE"), env=pointer)
+    two = dataclasses.replace(_entry(source="TWO"), env=pointer)
+    engine = FakeProgram()
+    policy = ScriptPolicy(Programs({"pre_command": (one,)}))
+    policy._engines[_key(one)] = (engine, asyncio.Lock())
+    await policy.pre_command(_ctx())
+    monkeypatch.setenv("POLICY_TOKEN", "second")
+    policy._sessions = Programs({"pre_command": (two,)})
+    await policy.pre_command(_ctx())
+    assert [r.env["TOKEN"] for r in engine.requests] == ["first", "second"]
