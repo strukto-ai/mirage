@@ -127,9 +127,10 @@ class _PatchFiles:
         """The file a name the engine gives stands for.
 
         A stat or a read keeps the name as spelled, so `f/` or `f/.` asks
-        for a directory, as GNU's stat does; a change goes to the file the
-        name resolves to, through the `.` steps a store without empty
-        directories cannot walk, unless the name ends naming a directory.
+        for a directory, as GNU's stat does; a change drops the `.` steps a
+        store without empty directories cannot walk, unless the name ends
+        naming a directory, and keeps each `..` for the walk to take after
+        the links before it, as the system's own lookup does.
 
         Args:
             path (str): the name, as the engine sends it.
@@ -143,10 +144,10 @@ class _PatchFiles:
         name = text_view(path)
         virtual = resolve_path(name, self.cwd)
         key = mount_key(virtual, self.root)
-        spelled = not change or name.endswith(("/", "/.")) or name == "."
-        return PathSpec.from_str_path(
-            name if spelled else virtual, key, cwd=self.cwd
-        )
+        if change and not name.endswith(("/", "/.")) and name != ".":
+            parts = [part for part in name.split("/") if part not in ("", ".")]
+            name = "/" * name.startswith("/") + "/".join(parts)
+        return PathSpec.from_str_path(name, key, cwd=self.cwd)
 
     async def _kind(self, path: str) -> dict[str, JsonValue]:
         spec = self._spec(path)

@@ -96,9 +96,10 @@ class PatchFiles {
   /**
    * The file a name the engine gives stands for. A stat or a read keeps the
    * name as spelled, so `f/` or `f/.` asks for a directory, as GNU's stat
-   * does; a change goes to the file the name resolves to, through the `.`
-   * steps a store without empty directories cannot walk, unless the name
-   * ends naming a directory. Mirrors Python's `_spec`.
+   * does; a change drops the `.` steps a store without empty directories
+   * cannot walk, unless the name ends naming a directory, and keeps each
+   * `..` for the walk to take after the links before it, as the system's
+   * own lookup does. Mirrors Python's `_spec`.
    */
   private spec(path: string, change = false): PathSpec {
     if (this.orig !== null) {
@@ -108,10 +109,13 @@ class PatchFiles {
         return suffix === '' ? this.orig : companion(this.orig, suffix)
       }
     }
-    const name = textView(path)
-    const virtual = resolvePath(name, this.cwd)
-    const spelled = !change || name.endsWith('/') || name.endsWith('/.') || name === '.'
-    return PathSpec.fromStrPath(spelled ? name : virtual, mountKey(virtual, this.root), this.cwd)
+    let name = textView(path)
+    const key = mountKey(resolvePath(name, this.cwd), this.root)
+    if (change && !name.endsWith('/') && !name.endsWith('/.') && name !== '.') {
+      const parts = name.split('/').filter((part) => part !== '' && part !== '.')
+      name = (name.startsWith('/') ? '/' : '') + parts.join('/')
+    }
+    return PathSpec.fromStrPath(name, key, this.cwd)
   }
 
   private async kind(path: string): Promise<Record<string, util.JSONType>> {
