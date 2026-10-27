@@ -93,7 +93,14 @@ class PatchFiles {
     private readonly changes: PatchChanges,
   ) {}
 
-  private spec(path: string): PathSpec {
+  /**
+   * The file a name the engine gives stands for. A stat or a read keeps the
+   * name as spelled, so `f/` or `f/.` asks for a directory, as GNU's stat
+   * does; a change goes to the file the name resolves to, through the `.`
+   * steps a store without empty directories cannot walk, unless the name
+   * ends naming a directory. Mirrors Python's `_spec`.
+   */
+  private spec(path: string, change = false): PathSpec {
     if (this.orig !== null) {
       const typed = byteView(this.orig.rawPath)
       if (path.startsWith(typed)) {
@@ -103,7 +110,8 @@ class PatchFiles {
     }
     const name = textView(path)
     const virtual = resolvePath(name, this.cwd)
-    return PathSpec.fromStrPath(name, mountKey(virtual, this.root), this.cwd)
+    const spelled = !change || name.endsWith('/') || name.endsWith('/.') || name === '.'
+    return PathSpec.fromStrPath(spelled ? name : virtual, mountKey(virtual, this.root), this.cwd)
   }
 
   private async kind(path: string): Promise<Record<string, util.JSONType>> {
@@ -127,7 +135,7 @@ class PatchFiles {
     path: string,
   ): Promise<Record<string, util.JSONType>> {
     try {
-      await this.changes[op](this.spec(path))
+      await this.changes[op](this.spec(path, true))
     } catch (err) {
       if (!isFsError(err)) throw err
       const errno = classify(err)
@@ -140,7 +148,7 @@ class PatchFiles {
   async serve(request: Readonly<Record<string, util.JSONType>>, data: Uint8Array): Promise<Served> {
     const path = typeof request.path === 'string' ? request.path : ''
     if (request.op === 'write') {
-      await this.write(this.spec(path), data)
+      await this.write(this.spec(path, true), data)
       return { reply: {} }
     }
     if (request.op === 'stat') return { reply: await this.kind(path) }

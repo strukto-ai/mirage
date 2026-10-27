@@ -123,7 +123,18 @@ class _PatchFiles:
         self.links = links
         self.changes = changes
 
-    def _spec(self, path: str) -> PathSpec:
+    def _spec(self, path: str, change: bool = False) -> PathSpec:
+        """The file a name the engine gives stands for.
+
+        A stat or a read keeps the name as spelled, so `f/` or `f/.` asks
+        for a directory, as GNU's stat does; a change goes to the file the
+        name resolves to, through the `.` steps a store without empty
+        directories cannot walk, unless the name ends naming a directory.
+
+        Args:
+            path (str): the name, as the engine sends it.
+            change (bool): the name is written, made or removed.
+        """
         if self.orig is not None:
             typed = byte_view(self.orig.raw_path or self.orig.virtual)
             if path.startswith(typed):
@@ -132,7 +143,10 @@ class _PatchFiles:
         name = text_view(path)
         virtual = resolve_path(name, self.cwd)
         key = mount_key(virtual, self.root)
-        return PathSpec.from_str_path(name, key, cwd=self.cwd)
+        spelled = not change or name.endswith(("/", "/.")) or name == "."
+        return PathSpec.from_str_path(
+            name if spelled else virtual, key, cwd=self.cwd
+        )
 
     async def _kind(self, path: str) -> dict[str, JsonValue]:
         spec = self._spec(path)
@@ -151,7 +165,7 @@ class _PatchFiles:
 
     async def _change(self, op: str, path: str) -> dict[str, JsonValue]:
         try:
-            await self.changes[op](self._spec(path))
+            await self.changes[op](self._spec(path, change=True))
         except OSError as exc:
             if (condition := classify(exc)) is None:
                 raise
@@ -172,7 +186,7 @@ class _PatchFiles:
         """
         path = str(request["path"])
         if request["op"] == "write":
-            await self.write_bytes(self._spec(path), data)
+            await self.write_bytes(self._spec(path, change=True), data)
             return Served({})
         if request["op"] == "stat":
             return Served(await self._kind(path))
