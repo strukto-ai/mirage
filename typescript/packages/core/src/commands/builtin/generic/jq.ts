@@ -63,6 +63,8 @@ import { programFileRefusal, readProgramFile } from './program.ts'
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 const DEC = new TextDecoder()
+// Text jq writes as it is, a leading byte order mark included.
+const RAW = new TextDecoder('utf-8', { ignoreBOM: true })
 const ENC = new TextEncoder()
 const INDENT_MIN = -1
 const INDENT_MAX = 7
@@ -104,6 +106,11 @@ const FRAME_STDERR = 5
 // read one of its inputs, whatever the runs answered.
 const ERROR_COMPILE = 3
 const ERROR_SYSTEM = 2
+
+// The last line of jq's report of a program it refuses, which jq_eval's
+// refusal to compile such a program ends in; any other refusal names what
+// jq_eval cannot run yet.
+const COMPILE_REPORT = /(?:^|\n)jq: [0-9]+ compile errors?$/
 const USAGE_HINT =
   'Use jq --help for help with command-line options,\n' +
   'or see the jq manpage, or online docs at https://jqlang.org'
@@ -446,9 +453,9 @@ export function readFrames(
     if (tag === FRAME_OUTPUT) {
       outputs.push(DEC.decode(payload))
     } else if (tag === FRAME_DEBUG || tag === FRAME_STDERR) {
-      messages.push([tag, DEC.decode(payload)])
+      messages.push([tag, RAW.decode(payload)])
     } else if (tag === FRAME_ERROR) {
-      stop = { kind: 'error', text: DEC.decode(payload.subarray(1)), string: payload[0] === 1 }
+      stop = { kind: 'error', text: RAW.decode(payload.subarray(1)), string: payload[0] === 1 }
     } else if (tag === FRAME_HALT) {
       const halt = JSON.parse(DEC.decode(payload)) as Omit<JqHalt, 'kind'>
       stop = { kind: 'halt', message: halt.message, string: halt.string, code: halt.code }
@@ -513,9 +520,10 @@ class Engine {
   }
 
   /**
-   * Compile `expr` with the options' named bindings, `args` as `$ARGS` and
-   * `env` (JSON text) as `$ENV` and `env`, or null when jq_eval refuses a
-   * builtin or syntax it uses.
+   * Compile `expr`, as typed, with the options' named bindings, `args` as
+   * `$ARGS` and `env` (JSON text) as `$ENV` and `env`, or null when jq_eval
+   * leaves a builtin or syntax it uses to jq-wasm. Throws JqCompileError,
+   * with jq's report, for a program jq itself refuses.
    */
   static async open(
     expr: string,
@@ -531,11 +539,12 @@ class Engine {
         named: Object.fromEntries(opts.namedArgs),
         args,
         env,
-        now: Date.now() / 1000,
         zone: localZone() ?? null,
       })
     } catch (error) {
       if (!(error instanceof StreamRefusal)) throw error
+      if (COMPILE_REPORT.test(error.message)) throw new JqCompileError(error.message)
+      console.debug(`jq: jq_eval leaves the program to jq-wasm: ${error.message}`)
       return null
     }
     return new Engine(stream, opts, signal)
@@ -556,7 +565,7 @@ class Engine {
     report: (line: string) => void,
   ): Promise<JqRun<string> | null> {
     const stream = this.stream
-    stream.begin({ ...readerPosition(reader), now: Date.now() / 1000 })
+    stream.begin(readerPosition(reader))
     const outputs: string[] = []
     const messages: [number, string][] = []
     let stop: JqError | JqHalt | null
@@ -573,11 +582,15 @@ class Engine {
         const pending = this.budget.run()
         if (pending !== undefined) await pending
         wire = stream.drain()
-      } else if (stream.request() !== null) {
-        const [reply, data] = await inputReply(reader)
-        wire = stream.respond(reply, data)
       } else {
-        break
+        const asked = stream.request()
+        if (asked === null) break
+        // `now` asks the clock at each call; `input` the reader.
+        const [reply, data]: [Record<string, string | number | null>, Uint8Array] =
+          asked[0].op === 'now'
+            ? [{ kind: 'now', now: Date.now() / 1000 }, new Uint8Array()]
+            : await inputReply(reader)
+        wire = stream.respond(reply, data)
       }
       stop = readFrames(wire, outputs, messages) ?? stop
       for (const [tag, text] of messages) report(await this.message(tag, text))
@@ -864,12 +877,20 @@ export async function jqGeneric(
   const reads = streamReads(expr)
   const readsStream = reads.input || reads.inputs
   const args = referencesArgs(expr) ? argsText(jq) : null
+  // `$ENV` and `env` read the session's exported environment in place of
+  // jq's process environment.
+  const env = JSON.stringify(ctx.env ?? {})
   try {
-    await jqCheck(expr, jq.namedArgs, readsStream ? [] : null, args)
+    // jq compiles its program before it opens a single input, so a
+    // refusal is all it prints. jq_eval words jq's refusals itself, reading
+    // the program as typed, so its lines and columns are jq's; jq-wasm
+    // checks only a program jq_eval leaves to it. The run compiles it again
+    // when it starts, so nothing is held open for a stream no one reads.
+    const checked = await Engine.open(expression, jq, args, env, ctx.signal)
+    if (checked === null) await jqCheck(expr, jq.namedArgs, readsStream ? [] : null, args)
+    else await checked.close()
   } catch (error) {
     if (!(error instanceof JqCompileError)) throw error
-    // jq compiles its program before it opens a single input, so a
-    // refusal is all it prints.
     return [
       null,
       new IOResult({
@@ -897,9 +918,6 @@ export async function jqGeneric(
     }
   }
   const io = new IOResult()
-  // `$ENV` and `env` read the session's exported environment in place of
-  // jq's process environment.
-  const env = JSON.stringify(ctx.env ?? {})
   const loop = new MainLoop(sources, expr, jq, reads, args, env, io, ctx.signal)
   return [loop.outputs(), io]
 }

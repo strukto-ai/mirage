@@ -1,8 +1,10 @@
 mod builtin;
+mod check;
 mod compile;
 mod eval;
 mod format;
 mod host;
+mod lalr;
 mod onig;
 mod parse;
 mod regex;

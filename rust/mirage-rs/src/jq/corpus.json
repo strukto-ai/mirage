@@ -4061,6 +4061,70 @@
   "exit": 0
  },
  {
+  "id": "jq_test_0393",
+  "program": "import \"a\" as foo; import \"b\" as bar; def fooa: foo::a; [fooa, bar::a, bar::b, foo::a]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: b\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_test_0394",
+  "program": "import \"c\" as foo; [foo::a, foo::c]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: c\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_test_0395",
+  "program": "include \"c\"; [a, c]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: c\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_test_0396",
+  "program": "import \"data\" as $e; import \"data\" as $d; [$d[].this,$e[].that,$d::d[].this,$e::e[].that]|join(\";\")",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: data\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_test_0397",
+  "program": "import \"data\" as $a; import \"data\" as $b; def f: {$a, $b}; f",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: data\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_test_0398",
+  "program": "include \"shadow1\"; e",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: shadow1\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_test_0399",
+  "program": "include \"shadow1\"; include \"shadow2\"; e",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: shadow2\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_test_0400",
+  "program": "import \"shadow1\" as f; import \"shadow2\" as f; import \"shadow1\" as e; [e::e, f::e]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: shadow1\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
   "id": "jq_test_0401",
   "program": "modulemeta",
   "input": "\"c\"",
@@ -4083,6 +4147,14 @@
   "outputs": [],
   "stderr": "jq: error (at <stdin>:0): module not found: c\n",
   "exit": 5
+ },
+ {
+  "id": "jq_test_0404",
+  "program": "import \"test_bind_order\" as check; check::check",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: test_bind_order\n\njq: 1 compile error\n",
+  "exit": 3
  },
  {
   "id": "jq_test_0405",
@@ -5384,5 +5456,1345 @@
   ],
   "stderr": "",
   "exit": 0
+ },
+ {
+  "id": "jq_fail_0000",
+  "program": "\"u\\vw\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid escape at line 1, column 4 (while parsing '\"\\v\"') at <top-level>, line 1, column 3:\n    \"u\\vw\"\n      ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0001",
+  "program": "{(0):1}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Cannot use number (0) as object key at <top-level>, line 1, column 3:\n    {(0):1}\n      ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0002",
+  "program": "{1+2:3}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected LITERAL at <top-level>, line 1, column 2:\n    {1+2:3}\n     ^\njq: error: May need parentheses around object key expression at <top-level>, line 1, column 2:\n    {1+2:3}\n     ^^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0003",
+  "program": "{non_const:., (0):1}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Cannot use number (0) as object key at <top-level>, line 1, column 16:\n    {non_const:., (0):1}\n                   ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0004",
+  "program": ". as $foo | break $foo",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $*label-foo is not defined at <top-level>, line 1, column 13:\n    . as $foo | break $foo\n                ^^^^^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0005",
+  "program": ". as [] | null",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected ']', expecting BINDING or '[' or '{' at <top-level>, line 1, column 7:\n    . as [] | null\n          ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0006",
+  "program": ". as {} | null",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected '}' at <top-level>, line 1, column 7:\n    . as {} | null\n          ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0007",
+  "program": ". as $foo | [$foo, $bar]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $bar is not defined at <top-level>, line 1, column 20:\n    . as $foo | [$foo, $bar]\n                       ^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0008",
+  "program": ". as {(true):$foo} | $foo",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Cannot use boolean (true) as object key at <top-level>, line 1, column 8:\n    . as {(true):$foo} | $foo\n           ^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0009",
+  "program": "module (.+1); 0",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Module metadata must be constant at <top-level>, line 1, column 8:\n    module (.+1); 0\n           ^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0010",
+  "program": "module []; 0",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Module metadata must be an object at <top-level>, line 1, column 8:\n    module []; 0\n           ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0011",
+  "program": "include \"a\" (.+1); 0",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Module metadata must be constant at <top-level>, line 1, column 13:\n    include \"a\" (.+1); 0\n                ^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0012",
+  "program": "include \"a\" []; 0",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Module metadata must be an object at <top-level>, line 1, column 13:\n    include \"a\" []; 0\n                ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0013",
+  "program": "include \"\\ \"; 0",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid escape at line 1, column 4 (while parsing '\"\\ \"') at <top-level>, line 1, column 10:\n    include \"\\ \"; 0\n             ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0014",
+  "program": "include \"\\(a)\"; 0",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Import path must be constant at <top-level>, line 1, column 9:\n    include \"\\(a)\"; 0\n            ^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0015",
+  "program": "import \"syntaxerror\" as e; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: syntaxerror\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0016",
+  "program": "%::wat",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected '%', expecting end of file at <top-level>, line 1, column 1:\n    %::wat\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0017",
+  "program": "{",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 1:\n    {\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "jq_fail_0018",
+  "program": "}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected INVALID_CHARACTER, expecting end of file at <top-level>, line 1, column 1:\n    }\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0000",
+  "program": "1 +",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 3:\n    1 +\n      ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0001",
+  "program": "  1 +",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 5:\n      1 +\n        ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0002",
+  "program": "if",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 1:\n    if\n    ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0003",
+  "program": "if\n",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 3:\n    if\n      ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0004",
+  "program": "if . then 1",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 11:\n    if . then 1\n              ^\njq: error: Possibly unterminated 'if' statement at <top-level>, line 1, column 1:\n    if . then 1\n    ^^^^^^^^^^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0005",
+  "program": "[\n  try if .\n         then 1\n         else 2\n  catch ]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected catch, expecting end or '|' or ',' at <top-level>, line 5, column 3:\n      catch ]\n      ^^^^^\njq: error: Possibly unterminated 'if' statement at <top-level>, line 2, column 7:\n      try if .\n          ^^^^\njq: error: Possibly unterminated 'try' statement at <top-level>, line 2, column 3:\n      try if .\n      ^^^^^^^^\njq: 3 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0006",
+  "program": "1 == 2 == 3",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected == at <top-level>, line 1, column 8:\n    1 == 2 == 3\n           ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0007",
+  "program": "1 < 2 > 3",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected '>' at <top-level>, line 1, column 7:\n    1 < 2 > 3\n          ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0008",
+  "program": ". = 1 |= 2",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected |= at <top-level>, line 1, column 7:\n    . = 1 |= 2\n          ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0009",
+  "program": "break",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting BINDING at <top-level>, line 1, column 1:\n    break\n    ^^^^^\njq: error: break requires a label to break to at <top-level>, line 1, column 1:\n    break\n    ^^^^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0010",
+  "program": "break $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $*label-x is not defined at <top-level>, line 1, column 1:\n    break $x\n    ^^^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0011",
+  "program": "label $f | break $g",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $*label-g is not defined at <top-level>, line 1, column 12:\n    label $f | break $g\n               ^^^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0012",
+  "program": "f",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: f/0 is not defined at <top-level>, line 1, column 1:\n    f\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0013",
+  "program": "f(1)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: f/1 is not defined at <top-level>, line 1, column 1:\n    f(1)\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0014",
+  "program": "f($x)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: f/1 is not defined at <top-level>, line 1, column 1:\n    f($x)\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0015",
+  "program": "$x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 1:\n    $x\n    ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0016",
+  "program": "$__prog_args",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $__prog_args is not defined at <top-level>, line 1, column 1:\n    $__prog_args\n    ^^^^^^^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0017",
+  "program": "$x | $y",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 1:\n    $x | $y\n    ^^\njq: error: $y is not defined at <top-level>, line 1, column 6:\n    $x | $y\n         ^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0018",
+  "program": "[$x, f, g(1)]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 2:\n    [$x, f, g(1)]\n     ^^\njq: error: f/0 is not defined at <top-level>, line 1, column 6:\n    [$x, f, g(1)]\n         ^\njq: error: g/1 is not defined at <top-level>, line 1, column 9:\n    [$x, f, g(1)]\n            ^\njq: 3 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0019",
+  "program": "f(g) | h",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: f/1 is not defined at <top-level>, line 1, column 1:\n    f(g) | h\n    ^\njq: error: h/0 is not defined at <top-level>, line 1, column 8:\n    f(g) | h\n           ^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0020",
+  "program": "def f: $x; 1",
+  "input": "null",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0021",
+  "program": "def f: $q; f",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $q is not defined at <top-level>, line 1, column 8:\n    def f: $q; f\n           ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0022",
+  "program": "def f: $y; f | $z",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $z is not defined at <top-level>, line 1, column 16:\n    def f: $y; f | $z\n                   ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0023",
+  "program": "def f($v): $v + $w; f(1)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $w is not defined at <top-level>, line 1, column 17:\n    def f($v): $v + $w; f(1)\n                    ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0024",
+  "program": "def f: 1; def g: f; g | h",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: h/0 is not defined at <top-level>, line 1, column 25:\n    def f: 1; def g: f; g | h\n                            ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0025",
+  "program": "def f(g): g; f($a) | $b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 22:\n    def f(g): g; f($a) | $b\n                         ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0026",
+  "program": ".[$x] = 1 | $z",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $z is not defined at <top-level>, line 1, column 13:\n    .[$x] = 1 | $z\n                ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0027",
+  "program": "$a += $b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 7:\n    $a += $b\n          ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0028",
+  "program": "reduce $a as $x ($b; $c)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 18:\n    reduce $a as $x ($b; $c)\n                     ^^\njq: error: $a is not defined at <top-level>, line 1, column 8:\n    reduce $a as $x ($b; $c)\n           ^^\njq: error: $c is not defined at <top-level>, line 1, column 22:\n    reduce $a as $x ($b; $c)\n                         ^^\njq: 3 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0029",
+  "program": "foreach $a as $x ($b; $c; $d)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 19:\n    foreach $a as $x ($b; $c; $d)\n                      ^^\njq: error: $a is not defined at <top-level>, line 1, column 9:\n    foreach $a as $x ($b; $c; $d)\n            ^^\njq: error: $c is not defined at <top-level>, line 1, column 23:\n    foreach $a as $x ($b; $c; $d)\n                          ^^\njq: error: $d is not defined at <top-level>, line 1, column 27:\n    foreach $a as $x ($b; $c; $d)\n                              ^^\njq: 4 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0030",
+  "program": "path($a) | $b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 12:\n    path($a) | $b\n               ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0031",
+  "program": "map($a) | $b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 11:\n    map($a) | $b\n              ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0032",
+  "program": "has($a) | $b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $a is not defined at <top-level>, line 1, column 5:\n    has($a) | $b\n        ^^\njq: error: $b is not defined at <top-level>, line 1, column 11:\n    has($a) | $b\n              ^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0033",
+  "program": "limit($n; $m)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $n is not defined at <top-level>, line 1, column 7:\n    limit($n; $m)\n          ^^\njq: error: $m is not defined at <top-level>, line 1, column 11:\n    limit($n; $m)\n              ^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0034",
+  "program": "map($a) + map($b)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 15:\n    map($a) + map($b)\n                  ^^\njq: error: $a is not defined at <top-level>, line 1, column 5:\n    map($a) + map($b)\n        ^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0035",
+  "program": "\"\\(map($a))\\(map($b))\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 18:\n    \"\\(map($a))\\(map($b))\"\n                     ^^\njq: error: $a is not defined at <top-level>, line 1, column 8:\n    \"\\(map($a))\\(map($b))\"\n           ^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0036",
+  "program": ". as {a:$x, ($x):$y} | $y",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 14:\n    . as {a:$x, ($x):$y} | $y\n                 ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0037",
+  "program": ". as [$a] ?// $b | $c",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $c is not defined at <top-level>, line 1, column 20:\n    . as [$a] ?// $b | $c\n                       ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0038",
+  "program": "{$x: 1}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 2:\n    {$x: 1}\n     ^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0039",
+  "program": "{a: $x, $y}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 5:\n    {a: $x, $y}\n        ^^\njq: error: $y is not defined at <top-level>, line 1, column 9:\n    {a: $x, $y}\n            ^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0040",
+  "program": "\"\\($a)\" | $b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $a is not defined at <top-level>, line 1, column 4:\n    \"\\($a)\" | $b\n       ^^\njq: error: $b is not defined at <top-level>, line 1, column 11:\n    \"\\($a)\" | $b\n              ^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0041",
+  "program": "if $a then $b elif $c then $d else $e end",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $a is not defined at <top-level>, line 1, column 4:\n    if $a then $b elif $c then $d else $e end\n       ^^\njq: error: $b is not defined at <top-level>, line 1, column 12:\n    if $a then $b elif $c then $d else $e end\n               ^^\njq: error: $c is not defined at <top-level>, line 1, column 20:\n    if $a then $b elif $c then $d else $e end\n                       ^^\njq: error: $d is not defined at <top-level>, line 1, column 28:\n    if $a then $b elif $c then $d else $e end\n                               ^^\njq: error: $e is not defined at <top-level>, line 1, column 36:\n    if $a then $b elif $c then $d else $e end\n                                       ^^\njq: 5 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0042",
+  "program": "try $a catch $b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $a is not defined at <top-level>, line 1, column 5:\n    try $a catch $b\n        ^^\njq: error: $b is not defined at <top-level>, line 1, column 14:\n    try $a catch $b\n                 ^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0043",
+  "program": "$a? // $b and $c",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $a is not defined at <top-level>, line 1, column 1:\n    $a? // $b and $c\n    ^^\njq: error: $b is not defined at <top-level>, line 1, column 8:\n    $a? // $b and $c\n           ^^\njq: error: $c is not defined at <top-level>, line 1, column 15:\n    $a? // $b and $c\n                  ^^\njq: 3 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0044",
+  "program": "$a[$b:$c]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 4:\n    $a[$b:$c]\n       ^^\njq: error: $c is not defined at <top-level>, line 1, column 7:\n    $a[$b:$c]\n          ^^\njq: error: $a is not defined at <top-level>, line 1, column 1:\n    $a[$b:$c]\n    ^^\njq: 3 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0045",
+  "program": "{(1):2, a: $q}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Cannot use number (1) as object key at <top-level>, line 1, column 3:\n    {(1):2, a: $q}\n      ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0046",
+  "program": "{(1+1):2}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Cannot use number (2) as object key at <top-level>, line 1, column 3:\n    {(1+1):2}\n      ^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0047",
+  "program": "{([\"a\"]):1}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Cannot use array ([\"a\"]) as object key at <top-level>, line 1, column 3:\n    {([\"a\"]):1}\n      ^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0048",
+  "program": "{({\"a\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}):1}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Cannot use object ({\"a\":\"bbbbbbbbbbbbbbbbbbb...}) as object key at <top-level>, line 1, column 3:\n    {({\"a\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}):1}\n      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0049",
+  "program": "{(null):1}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Cannot use null (null) as object key at <top-level>, line 1, column 3:\n    {(null):1}\n      ^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0050",
+  "program": ". as {(1):$x} | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Cannot use number (1) as object key at <top-level>, line 1, column 8:\n    . as {(1):$x} | $x\n           ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0051",
+  "program": "\"\\x\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid escape at line 1, column 4 (while parsing '\"\\x\"') at <top-level>, line 1, column 2:\n    \"\\x\"\n     ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0052",
+  "program": "\"\\u12\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid \\uXXXX escape at line 1, column 6 (while parsing '\"\\u12\"') at <top-level>, line 1, column 2:\n    \"\\u12\"\n     ^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0053",
+  "program": "\"\\ud800\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid \\uXXXX\\uXXXX surrogate pair escape at line 1, column 8 (while parsing '\"\\ud800\"') at <top-level>, line 1, column 2:\n    \"\\ud800\"\n     ^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0054",
+  "program": "\"abc",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting QQSTRING_TEXT or QQSTRING_INTERP_START or QQSTRING_END at <top-level>, line 1, column 2:\n    \"abc\n     ^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0055",
+  "program": "\"\\(1",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting QQSTRING_INTERP_END or '|' or ',' at <top-level>, line 1, column 4:\n    \"\\(1\n       ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0056",
+  "program": "\"\\(1]\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected INVALID_CHARACTER, expecting QQSTRING_INTERP_END or '|' or ',' at <top-level>, line 1, column 5:\n    \"\\(1]\"\n        ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0057",
+  "program": "@ \"x\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected INVALID_CHARACTER, expecting end of file at <top-level>, line 1, column 1:\n    @ \"x\"\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0058",
+  "program": "é",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected INVALID_CHARACTER, expecting end of file at <top-level>, line 1, column 1:\n    é\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0059",
+  "program": ".a.[",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 4:\n    .a.[\n       ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0060",
+  "program": ".a | .[",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 7:\n    .a | .[\n          ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0061",
+  "program": ".[1:",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 4:\n    .[1:\n       ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0062",
+  "program": "{",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 1:\n    {\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0063",
+  "program": "}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected INVALID_CHARACTER, expecting end of file at <top-level>, line 1, column 1:\n    }\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0064",
+  "program": ")",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected INVALID_CHARACTER, expecting end of file at <top-level>, line 1, column 1:\n    )\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0065",
+  "program": "]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected INVALID_CHARACTER, expecting end of file at <top-level>, line 1, column 1:\n    ]\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0066",
+  "program": "(1",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting '|' or ',' or ')' at <top-level>, line 1, column 2:\n    (1\n     ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0067",
+  "program": "[1,2",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting '|' or ',' or ']' at <top-level>, line 1, column 4:\n    [1,2\n       ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0068",
+  "program": "{a:1",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting '}' at <top-level>, line 1, column 4:\n    {a:1\n       ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0069",
+  "program": "{a 1}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected LITERAL, expecting '}' at <top-level>, line 1, column 4:\n    {a 1}\n       ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0070",
+  "program": "{(1)}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected '}', expecting ':' at <top-level>, line 1, column 5:\n    {(1)}\n        ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0071",
+  "program": "{1:2}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected LITERAL at <top-level>, line 1, column 2:\n    {1:2}\n     ^\njq: error: May need parentheses around object key expression at <top-level>, line 1, column 2:\n    {1:2}\n     ^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0072",
+  "program": ". as $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting '|' at <top-level>, line 1, column 6:\n    . as $x\n         ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0073",
+  "program": ". as $x |",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 9:\n    . as $x |\n            ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0074",
+  "program": ". as [$a, $b | $a",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected '|', expecting ',' or ']' at <top-level>, line 1, column 14:\n    . as [$a, $b | $a\n                 ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0075",
+  "program": "reduce . as $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting '(' at <top-level>, line 1, column 13:\n    reduce . as $x\n                ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0076",
+  "program": "reduce . as $x (0)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected ')', expecting '|' or ',' or ';' at <top-level>, line 1, column 18:\n    reduce . as $x (0)\n                     ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0077",
+  "program": "foreach . as $x (0; 1; 2; 3)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected ';', expecting '|' or ',' or ')' at <top-level>, line 1, column 25:\n    foreach . as $x (0; 1; 2; 3)\n                            ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0078",
+  "program": "def f: 1",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting '|' or ',' or ';' at <top-level>, line 1, column 8:\n    def f: 1\n           ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0079",
+  "program": "def f: 1;",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Top-level program not given (try \".\")\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0080",
+  "program": "def f(: 1; f",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected ':', expecting IDENT or BINDING at <top-level>, line 1, column 7:\n    def f(: 1; f\n          ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0081",
+  "program": "def if: 1; 1",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected if, expecting IDENT at <top-level>, line 1, column 5:\n    def if: 1; 1\n        ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0082",
+  "program": "def f($a; b): 1; f(1; 2) | f(1)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: f/1 is not defined at <top-level>, line 1, column 28:\n    def f($a; b): 1; f(1; 2) | f(1)\n                               ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0083",
+  "program": "try",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 1:\n    try\n    ^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0084",
+  "program": "try 1 catch",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 7:\n    try 1 catch\n          ^^^^^\njq: error: Possibly unterminated 'try' statement at <top-level>, line 1, column 1:\n    try 1 catch\n    ^^^^^^^^^^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0085",
+  "program": "if 1 then 2 else 3",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting end or '|' or ',' at <top-level>, line 1, column 18:\n    if 1 then 2 else 3\n                     ^\njq: error: Possibly unterminated 'if' statement at <top-level>, line 1, column 1:\n    if 1 then 2 else 3\n    ^^^^^^^^^^^^^^^^^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0086",
+  "program": "if 1 then 2 elif 3 end",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end, expecting then or '|' or ',' at <top-level>, line 1, column 20:\n    if 1 then 2 elif 3 end\n                       ^^^\njq: error: Possibly unterminated 'if' statement at <top-level>, line 1, column 1:\n    if 1 then 2 elif 3 end\n    ^^^^^^^^^^^^^^^^^^^^^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0087",
+  "program": ".a.b.c +",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 8:\n    .a.b.c +\n           ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0088",
+  "program": "1 as $x | 2 as $y | $z",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $z is not defined at <top-level>, line 1, column 21:\n    1 as $x | 2 as $y | $z\n                        ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0089",
+  "program": "label | 1",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected '|', expecting BINDING at <top-level>, line 1, column 7:\n    label | 1\n          ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0090",
+  "program": "label $x 1",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected LITERAL, expecting '|' at <top-level>, line 1, column 10:\n    label $x 1\n             ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0091",
+  "program": ". |",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 3:\n    . |\n      ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0092",
+  "program": "| .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected '|', expecting end of file at <top-level>, line 1, column 1:\n    | .\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0093",
+  "program": ", 1",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected ',', expecting end of file at <top-level>, line 1, column 1:\n    , 1\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0094",
+  "program": "1,",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 2:\n    1,\n     ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0095",
+  "program": "..a",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected IDENT, expecting end of file at <top-level>, line 1, column 3:\n    ..a\n      ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0096",
+  "program": ".. .a",
+  "input": "null",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0097",
+  "program": ".[]?? | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 9:\n    .[]?? | $x\n            ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0098",
+  "program": "-",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 1:\n    -\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0099",
+  "program": "1 -",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 3:\n    1 -\n      ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0100",
+  "program": "- -",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 3:\n    - -\n      ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0101",
+  "program": "$",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting '$' at <top-level>, line 1, column 1:\n    $\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0102",
+  "program": "$$",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting '$' at <top-level>, line 1, column 2:\n    $$\n     ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0103",
+  "program": "$$$$x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: x/-1 is not defined at <top-level>, line 1, column 1:\n    $$$$x\n    ^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0104",
+  "program": "@base64d @base64",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected FORMAT, expecting end of file at <top-level>, line 1, column 10:\n    @base64d @base64\n             ^^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0105",
+  "program": "import \"a\" as $x; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0106",
+  "program": "import \"a\" as x; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0107",
+  "program": "include \"a\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 11:\n    include \"a\"\n              ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0108",
+  "program": "module {a:1}; .a | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 20:\n    module {a:1}; .a | $x\n                       ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0109",
+  "program": "module 1; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Module metadata must be an object at <top-level>, line 1, column 8:\n    module 1; .\n           ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0110",
+  "program": "1 # comment\n+",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 2, column 1:\n    +\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0111",
+  "program": "# only a comment",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Top-level program not given (try \".\")\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0112",
+  "program": "1 # comment \\\n continued\n+",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 3, column 1:\n    +\n    ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0113",
+  "program": "\t1 +\t",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 5:\n    \t1 +\t\n        ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0114",
+  "program": "1\n+\n",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 2, column 2:\n    +\n     ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0115",
+  "program": ".a\n|\n$x\n|\n.b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 3, column 1:\n    $x\n    ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0116",
+  "program": "(1;2)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected ';', expecting '|' or ',' or ')' at <top-level>, line 1, column 3:\n    (1;2)\n      ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0117",
+  "program": "[1;2]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected ';', expecting '|' or ',' or ']' at <top-level>, line 1, column 3:\n    [1;2]\n      ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0118",
+  "program": "f(1,2;3",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected end of file, expecting ';' or ')' at <top-level>, line 1, column 7:\n    f(1,2;3\n          ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0119",
+  "program": "$__loc__ | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 12:\n    $__loc__ | $x\n               ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0120",
+  "program": "{$__loc__} | $y",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $y is not defined at <top-level>, line 1, column 14:\n    {$__loc__} | $y\n                 ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0121",
+  "program": "1 as [$a, {b: $c, $d}] | [$a, $c, $d, $e]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $e is not defined at <top-level>, line 1, column 39:\n    1 as [$a, {b: $c, $d}] | [$a, $c, $d, $e]\n                                          ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0122",
+  "program": "[.[] | {a: $x}]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 12:\n    [.[] | {a: $x}]\n               ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0123",
+  "program": ". as [$a] ?// {$b} | $a, $b, $c",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $c is not defined at <top-level>, line 1, column 30:\n    . as [$a] ?// {$b} | $a, $b, $c\n                                 ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0124",
+  "program": "input_filename | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 18:\n    input_filename | $x\n                     ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0125",
+  "program": "ltrimstr($a) | $b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 16:\n    ltrimstr($a) | $b\n                   ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0126",
+  "program": "splits($a) | $b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 14:\n    splits($a) | $b\n                 ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0127",
+  "program": "getpath($a) | $b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $a is not defined at <top-level>, line 1, column 9:\n    getpath($a) | $b\n            ^^\njq: error: $b is not defined at <top-level>, line 1, column 15:\n    getpath($a) | $b\n                  ^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0128",
+  "program": "first(f) | g",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: g/0 is not defined at <top-level>, line 1, column 12:\n    first(f) | g\n               ^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0129",
+  "program": "nosuch(1) | nosuch(2)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: nosuch/1 is not defined at <top-level>, line 1, column 1:\n    nosuch(1) | nosuch(2)\n    ^^^^^^\njq: error: nosuch/1 is not defined at <top-level>, line 1, column 13:\n    nosuch(1) | nosuch(2)\n                ^^^^^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0130",
+  "program": ". as $x | def f: $x; f | $y",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $y is not defined at <top-level>, line 1, column 26:\n    . as $x | def f: $x; f | $y\n                             ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0131",
+  "program": "def f: def g: $q; g; f",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $q is not defined at <top-level>, line 1, column 15:\n    def f: def g: $q; g; f\n                  ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0132",
+  "program": "def f: def g: 3; $q; f",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $q is not defined at <top-level>, line 1, column 18:\n    def f: def g: 3; $q; f\n                     ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0133",
+  "program": "@text \"\\($x)\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 10:\n    @text \"\\($x)\"\n             ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0134",
+  "program": "\"a\" as $x | \"\\($x) \\($y)\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $y is not defined at <top-level>, line 1, column 22:\n    \"a\" as $x | \"\\($x) \\($y)\"\n                         ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0135",
+  "program": "[limit(3; .[])] | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 19:\n    [limit(3; .[])] | $x\n                      ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0136",
+  "program": "1 as $x | $x as $y | $z",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $z is not defined at <top-level>, line 1, column 22:\n    1 as $x | $x as $y | $z\n                         ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0137",
+  "program": ". as [$x, $x] | $y",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $y is not defined at <top-level>, line 1, column 17:\n    . as [$x, $x] | $y\n                    ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0138",
+  "program": "{a:1} | .a as $a | {$a, $b}",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $b is not defined at <top-level>, line 1, column 25:\n    {a:1} | .a as $a | {$a, $b}\n                            ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0139",
+  "program": "if . then error else $e end",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $e is not defined at <top-level>, line 1, column 22:\n    if . then error else $e end\n                         ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0140",
+  "program": "try error($x) catch .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 11:\n    try error($x) catch .\n              ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0141",
+  "program": "$ENV.PATH | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 13:\n    $ENV.PATH | $x\n                ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0142",
+  "program": "env | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 7:\n    env | $x\n          ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0143",
+  "program": "now | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 7:\n    now | $x\n          ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0144",
+  "program": "test(\"a\") | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 13:\n    test(\"a\") | $x\n                ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0145",
+  "program": "input | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 9:\n    input | $x\n            ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0146",
+  "program": "debug | $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 9:\n    debug | $x\n            ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0147",
+  "program": "1 as $x | [$x, $y] | .[$z]",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: $y is not defined at <top-level>, line 1, column 16:\n    1 as $x | [$x, $y] | .[$z]\n                   ^^\njq: error: $z is not defined at <top-level>, line 1, column 24:\n    1 as $x | [$x, $y] | .[$z]\n                           ^^\njq: 2 compile errors\n",
+  "exit": 3
  }
 ]

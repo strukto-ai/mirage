@@ -34,6 +34,8 @@ pub(crate) struct Host {
     pub(crate) filename: Value,
     pub(crate) line: f64,
     pub(crate) reply: Option<Reply>,
+    pub(crate) now: Option<f64>,
+    pub(crate) asking: Option<&'static str>,
     pub(crate) messages: Vec<Message>,
 }
 
@@ -44,6 +46,8 @@ impl Default for Host {
             filename: Value::Null,
             line: 0.0,
             reply: None,
+            now: None,
+            asking: None,
             messages: Vec::new(),
         }
     }
@@ -54,6 +58,7 @@ pub(crate) fn is_host(f: Cfunc) -> bool {
     matches!(
         f,
         Cfunc::Input
+            | Cfunc::Now
             | Cfunc::Debug
             | Cfunc::Stderr
             | Cfunc::Env
@@ -63,12 +68,24 @@ pub(crate) fn is_host(f: Cfunc) -> bool {
 }
 
 impl Host {
-    /// Run host builtin `f` on `input`. `input` with no reply waiting
-    /// pauses the run; the end of the stream is jq's `break` error.
+    /// Run host builtin `f` on `input`. `input` or `now` with no answer
+    /// waiting pauses the run on a request for one, so `now` reads the
+    /// host's clock at each call; the end of the stream is jq's `break`
+    /// error.
     pub(crate) fn call(&mut self, f: Cfunc, input: Value) -> Answer {
         match f {
+            Cfunc::Now => match self.now.take() {
+                Some(seconds) => Answer::Value(Value::number(seconds)),
+                None => {
+                    self.asking = Some("now");
+                    Answer::Wait(input)
+                }
+            },
             Cfunc::Input => match self.reply.take() {
-                None => Answer::Wait(input),
+                None => {
+                    self.asking = Some("input");
+                    Answer::Wait(input)
+                }
                 Some(Reply::Value(value)) => Answer::Value(value),
                 Some(Reply::End) => Answer::Raise(Value::string("break")),
                 Some(Reply::Error(message)) => Answer::Raise(Value::string(message)),

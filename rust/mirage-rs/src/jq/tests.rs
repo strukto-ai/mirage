@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::compile::compile;
+use super::compile::{Refusal, compile};
 use super::eval::{DEBUG, ERROR, HALT, OUTPUT, STDERR};
 use super::value::parse_json;
 use super::vm::{Limits, Next, Vm};
@@ -56,17 +56,27 @@ fn run(program: &str, input: &str, steps: u64) -> Vec<Frame> {
     frames(&wire)
 }
 
-/// Drain `stream` to the end of its run, answering each `input` with the
-/// end of the stream, as for a run over one document.
+/// The time the tests' host answers `now` with.
+const CLOCK: f64 = 1700000000.5;
+
+/// Drain a run to its end, answering `now` with CLOCK and `input` with
+/// the end of the stream.
 fn settle(stream: &mut dyn Stream, wire: &mut Vec<u8>) {
     loop {
         while stream.busy() {
             stream.drain(wire).unwrap();
         }
-        if stream.request(&mut Vec::new()).is_none() {
+        let Some(header) = stream.request(&mut Vec::new()) else {
             break;
-        }
-        stream.respond(br#"{"kind":"end"}"#, b"", wire).unwrap();
+        };
+        let reply = if header == br#"{"op":"now"}"# {
+            serde_json::json!({ "kind": "now", "now": CLOCK })
+        } else {
+            serde_json::json!({ "kind": "end" })
+        };
+        stream
+            .respond(reply.to_string().as_bytes(), b"", wire)
+            .unwrap();
     }
 }
 
@@ -702,6 +712,55 @@ fn unsupported_builtins_refuse_to_compile() {
 }
 
 #[test]
+fn the_grammar_builds_as_bison_builds_jqs() {
+    let tables = super::syntax::tables();
+    assert_eq!(tables.states(), 312);
+    assert_eq!(tables.rules.len(), 168);
+    assert_eq!(tables.conflicts, 0);
+}
+
+fn refusal(program: &str) -> Refusal {
+    match compile(program, &HashMap::new()) {
+        Ok(_) => panic!("{program:.40} compiles"),
+        Err(refusal) => refusal,
+    }
+}
+
+#[test]
+fn a_program_jq_refuses_is_told_from_one_left_to_libjq() {
+    assert!(matches!(refusal("if"), Refusal::Invalid(_)));
+    assert!(matches!(refusal("$x"), Refusal::Invalid(_)));
+    for program in [
+        "import \"a\" as a; .",
+        "include \"a\"; $x",
+        "$$$$x",
+        "\"\\\u{e9}\"",
+        &format!("{}.{}", "[".repeat(600), "]".repeat(600)),
+        &".a".repeat(600),
+    ] {
+        assert!(
+            matches!(refusal(program), Refusal::Unsupported(_)),
+            "{program:.40}"
+        );
+    }
+}
+
+#[test]
+fn a_program_deeper_than_bisons_stack_exhausts_its_memory() {
+    let program = format!("{}1{}", "(".repeat(9995), ")".repeat(9995));
+    let Refusal::Invalid(report) = refusal(&program) else {
+        panic!("jq refuses it");
+    };
+    let want = format!(
+        "jq: error: memory exhausted at <top-level>, line 1, column 9997:\n    {program}\n    {}^\njq: 1 compile error",
+        " ".repeat(9996)
+    );
+    assert_eq!(report, want);
+    let program = format!("{}1{}", "(".repeat(9994), ")".repeat(9994));
+    assert!(compile(&program, &HashMap::new()).is_ok());
+}
+
+#[test]
 fn named_arguments_and_args_bind_as_constants() {
     let config = serde_json::json!({
         "program": "[$x, $ARGS.named.x]",
@@ -719,56 +778,81 @@ fn named_arguments_and_args_bind_as_constants() {
 }
 
 /// Cases whose output differs from jq 1.8.2's, each with the reason.
-const DIVERGENT: &[(&str, &str)] = &[
-    (
-        ".[] | try (fromjson | isnan) catch .",
-        "fromjson words its parse errors its own way, not as jv_parse does",
-    ),
-    (
-        "try fromjson catch .",
-        "fromjson words its parse errors its own way, not as jv_parse does",
-    ),
-];
+const DIVERGENT: &[(&str, &str)] = &[];
 
-/// jq 1.8.2's tests/jq.test, each case's outputs as a jq 1.8.2 binary
-/// printed them (scripts/gen_jq_corpus.py), at a budget that pauses the
-/// VM every few steps. A case may be refused at compile, which sends the
-/// program to libjq; any other difference fails unless DIVERGENT names it.
+/// Whether an open's refusal is jq's report of a program it refuses,
+/// which ends in its count of compile errors.
+fn compile_report(message: &str) -> bool {
+    let last = message.lines().last().unwrap_or_default();
+    last.strip_prefix("jq: ")
+        .and_then(|rest| rest.split_once(' '))
+        .is_some_and(|(n, noun)| {
+            n.parse::<usize>().is_ok() && matches!(noun, "compile error" | "compile errors")
+        })
+}
+
+/// jq 1.8.2's tests/jq.test and the generator's probes, each case's
+/// outputs as a jq 1.8.2 binary printed them (scripts/gen_jq_corpus.py),
+/// at a budget that pauses the VM every few steps. A program jq refuses
+/// must be refused with jq's report, byte for byte, or left to libjq; one
+/// jq runs may be left to libjq at compile; any other difference fails
+/// unless DIVERGENT names it.
 #[test]
 fn jq_test_corpus() {
-    let (pass, refused) = run_corpus(include_str!("corpus.json"));
+    let (pass, refused, reported, left) = run_corpus(include_str!("corpus.json"));
     assert!(
-        pass >= 506 && refused <= 13,
-        "pass {pass}, refused {refused}"
+        pass >= 506 && refused <= 13 && reported >= 161 && left <= 13,
+        "pass {pass}, refused {refused}, reported {reported}, left {left}"
     );
 }
 
 /// jq 1.8.2's tests/onig.test, its regex cases, run as the corpus above.
 #[test]
 fn onig_test_corpus() {
-    let (pass, refused) = run_corpus(include_str!("onig.json"));
+    let (pass, refused, _, _) = run_corpus(include_str!("onig.json"));
     assert!(pass >= 47 && refused == 0, "pass {pass}, refused {refused}");
 }
 
 /// Runs a corpus: how many cases passed and how many were refused.
-fn run_corpus(corpus: &str) -> (usize, usize) {
+fn run_corpus(corpus: &str) -> (usize, usize, usize, usize) {
     let cases: Vec<serde_json::Value> = serde_json::from_str(corpus).unwrap();
     let (mut pass, mut refused, mut mismatch) = (0, 0, Vec::new());
+    let (mut reported, mut left) = (0, 0);
     for case in &cases {
         let program = case["program"].as_str().unwrap();
         let input = case["input"].as_str().unwrap();
-        if parse_json(input).is_err() {
-            continue;
-        }
+        let stderr = case["stderr"].as_str().unwrap();
         let config = serde_json::json!({
             "program": program,
             "steps": 7,
-            "now": 0,
             "zone": "UTC",
         });
-        let Ok(mut stream) = super::eval::open(config.to_string().as_bytes()) else {
-            refused += 1;
+        let opened = super::eval::open(config.to_string().as_bytes());
+        if case["exit"] == 3 {
+            match opened {
+                Err(e) if !compile_report(&e.message) => left += 1,
+                Err(e) if e.message == stderr.trim_end_matches('\n') => reported += 1,
+                Err(e) => mismatch.push(format!(
+                    "{program:?}\n  got  {:?}\n  want {stderr:?}",
+                    e.message
+                )),
+                Ok(_) => mismatch.push(format!("{program:?} compiles; jq refuses it:\n{stderr}")),
+            }
             continue;
+        }
+        if parse_json(input).is_err() {
+            continue;
+        }
+        let mut stream = match opened {
+            Ok(stream) => stream,
+            Err(e) if compile_report(&e.message) => {
+                mismatch.push(format!("{program:?} refused; jq runs it:\n{}", e.message));
+                continue;
+            }
+            Err(_) => {
+                refused += 1;
+                continue;
+            }
         };
         let mut wire = Vec::new();
         stream.feed(input.as_bytes(), &mut wire).unwrap();
@@ -788,7 +872,7 @@ fn run_corpus(corpus: &str) -> (usize, usize) {
             .iter()
             .map(|v| v.as_str().unwrap().to_string())
             .collect();
-        let want_error = case["stderr"].as_str().unwrap().lines().find_map(|l| {
+        let want_error = stderr.lines().find_map(|l| {
             let (_, rest) = l.strip_prefix("jq: error (at <stdin>:")?.split_once(')')?;
             rest.strip_prefix(": ")
                 .or_else(|| rest.strip_prefix(" (not a string): "))
@@ -803,7 +887,7 @@ fn run_corpus(corpus: &str) -> (usize, usize) {
         }
     }
     assert!(mismatch.is_empty(), "{}", mismatch.join("\n"));
-    (pass, refused)
+    (pass, refused, reported, left)
 }
 
 #[test]
@@ -1624,14 +1708,12 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
 ];
 
 fn host_run(program: &str, zone: &str) -> Vec<Frame> {
-    let config = serde_json::json!({ "program": program, "now": 1700000000.5, "zone": zone });
+    let config = serde_json::json!({ "program": program, "zone": zone });
     let mut stream = super::eval::open(config.to_string().as_bytes()).expect("compiles");
     let mut wire = Vec::new();
     stream.feed(b"null", &mut wire).unwrap();
     stream.finish(&mut wire).unwrap();
-    while stream.busy() {
-        stream.drain(&mut wire).unwrap();
-    }
+    settle(&mut *stream, &mut wire);
     frames(&wire)
 }
 
@@ -1657,8 +1739,8 @@ fn date_builtins_print_what_jq_prints() {
 }
 
 #[test]
-fn now_and_local_time_need_the_host() {
-    for program in ["now", "localtime", "strflocaltime(\"%Y\")", "def f: now; f"] {
+fn local_time_needs_a_zone_the_engine_reads() {
+    for program in ["localtime", "strflocaltime(\"%Y\")", "strptime(\"%s\")"] {
         let config = serde_json::json!({ "program": program });
         assert!(
             super::eval::open(config.to_string().as_bytes()).is_err(),
@@ -1666,39 +1748,34 @@ fn now_and_local_time_need_the_host() {
         );
     }
     for zone in ["America/New_York", "EST", "EST5EDT,M3.2.0", "x"] {
-        let config = serde_json::json!({ "program": "localtime", "now": 0, "zone": zone });
+        let config = serde_json::json!({ "program": "localtime", "zone": zone });
         assert!(
             super::eval::open(config.to_string().as_bytes()).is_err(),
             "{zone}"
         );
     }
-    let config = serde_json::json!({ "program": "mktime, gmtime, todate, fromdate" });
+    let config = serde_json::json!({ "program": "now, mktime, gmtime, todate" });
     assert!(super::eval::open(config.to_string().as_bytes()).is_ok());
 }
 
 #[test]
-fn now_is_the_clock_each_document_began_with() {
-    let config = serde_json::json!({ "program": "now", "now": 1.5 });
-    let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
-    let mut seen = Vec::new();
-    for begin in [None, Some(2.5)] {
-        if let Some(now) = begin {
-            stream
-                .begin(serde_json::json!({ "now": now }).to_string().as_bytes())
-                .unwrap();
-        }
-        let mut wire = Vec::new();
-        stream.feed(b"null", &mut wire).unwrap();
-        stream.finish(&mut wire).unwrap();
+fn now_asks_the_hosts_clock_at_each_call() {
+    let mut stream = open("[now, now]", 1 << 16);
+    let mut wire = Vec::new();
+    stream.feed(b"null", &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    for seconds in [1.5, 2.5] {
         while stream.busy() {
             stream.drain(&mut wire).unwrap();
         }
-        seen.extend(frames(&wire));
+        assert_eq!(stream.request(&mut Vec::new()).unwrap(), br#"{"op":"now"}"#);
+        let reply = serde_json::json!({ "kind": "now", "now": seconds });
+        stream
+            .respond(reply.to_string().as_bytes(), b"", &mut wire)
+            .unwrap();
     }
-    assert_eq!(
-        seen,
-        vec![Frame::Out("1.5".into()), Frame::Out("2.5".into())]
-    );
+    settle(&mut *stream, &mut wire);
+    assert_eq!(frames(&wire), vec![Frame::Out("[1.5,2.5]".into())]);
 }
 
 #[test]
@@ -1723,4 +1800,20 @@ fn regex_the_matcher_cannot_run_exactly_never_answers_wrong() {
         assert!(compile(program, &HashMap::new()).is_err(), "{program}");
     }
     assert!(compile(r#"test("ß")"#, &HashMap::new()).is_ok());
+}
+
+#[test]
+fn sorting_mixed_literal_and_computed_numbers_never_panics() {
+    let got = outputs(
+        "[9007199254740993, (9007199254740992 + 0), 9007199254740992, 9007199254740993] | sort | length",
+        "null",
+    );
+    assert_eq!(got, vec!["4"]);
+}
+
+#[test]
+fn input_reads_every_number_spelling_the_reader_accepts() {
+    for text in ["nan00", "nan", "-nan", "NaN"] {
+        assert!(parse_json(text).is_ok(), "{text}");
+    }
 }

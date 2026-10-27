@@ -1,11 +1,12 @@
 The JSON parser and UTF-8 decoder in rust/mirage-rs/src/jq/ follow
 src/jv_parse.c, src/jv.c, src/jv_unicode.c and src/jv_utf8_tables.h of jq
-1.8.2 (https://github.com/jqlang/jq); its evaluator (syntax.rs, compile.rs,
-vm.rs, builtin.rs, host.rs, time.rs, regex.rs, value.rs and builtin.jq) follows
-src/lexer.l, src/parser.y, src/compile.c, src/execute.c, src/exec_stack.h,
-src/builtin.c, src/builtin.jq, src/jv_aux.c, src/jv_print.c and the
-callbacks of src/main.c and src/util.c, and its test corpora (corpus.json
-and onig.json) hold the programs and inputs of tests/jq.test and
+1.8.2 (https://github.com/jqlang/jq); its evaluator (syntax.rs, check.rs,
+compile.rs, vm.rs, builtin.rs, host.rs, time.rs, regex.rs, value.rs and
+builtin.jq) follows src/lexer.l, src/parser.y, src/locfile.c,
+src/compile.c, src/execute.c, src/exec_stack.h, src/builtin.c,
+src/builtin.jq, src/jv_aux.c, src/jv_print.c and the callbacks of
+src/main.c and src/util.c, and its test corpora (corpus.json and
+onig.json) hold the programs and inputs of tests/jq.test and
 tests/onig.test;
 the input reader in
 python/mirage/core/jq/stream.py and

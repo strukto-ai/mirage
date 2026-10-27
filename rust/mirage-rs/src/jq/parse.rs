@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, VecDeque};
 use serde::Deserialize;
 
 use super::unicode::{BLOCK, Bytes, DecodeCursor, JsonString, WORK};
+use super::value::{Value, parse_json};
 use crate::{Stream, StreamError};
 
 const DEPTH: usize = 10000;
@@ -1469,6 +1470,63 @@ fn frame(tag: u8, payload: &[u8], out: &mut Vec<u8>) {
     out.push(tag);
     out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     out.extend_from_slice(payload);
+}
+
+/// jv_parse_sized: the one JSON value `text` holds, read by the scanner
+/// jq reads its inputs with, or jq's message for why it holds none, more
+/// than one, or a bad one, naming the text up to its first NUL.
+pub(crate) fn parse_value(text: &[u8]) -> Result<Value, String> {
+    let mut scanner = Scanner::new(Config::default());
+    let mut docs: Vec<Vec<u8>> = Vec::new();
+    let mut doc = Vec::new();
+    let mut error = None;
+    let mut wire = Vec::new();
+    let mut fold = |wire: &mut Vec<u8>, docs: &mut Vec<Vec<u8>>, error: &mut Option<String>| {
+        let mut at = 0;
+        while at + 5 <= wire.len() {
+            let size =
+                u32::from_le_bytes(wire[at + 1..at + 5].try_into().expect("4 bytes")) as usize;
+            let payload = &wire[at + 5..at + 5 + size];
+            match wire[at] {
+                1 => doc.extend_from_slice(payload),
+                2 => docs.push(std::mem::take(&mut doc)),
+                _ => *error = Some(String::from_utf8_lossy(payload).into_owned()),
+            }
+            at += 5 + size;
+        }
+        wire.clear();
+        docs.len() > 1 || error.is_some()
+    };
+    let mut stop = false;
+    for chunk in text.chunks(WORK) {
+        scanner.feed(chunk, &mut wire).map_err(|e| e.message)?;
+        while scanner.busy() {
+            scanner.drain(&mut wire).map_err(|e| e.message)?;
+        }
+        if fold(&mut wire, &mut docs, &mut error) {
+            stop = true;
+            break;
+        }
+    }
+    if !stop {
+        scanner.finish(&mut wire).map_err(|e| e.message)?;
+        while scanner.busy() {
+            scanner.drain(&mut wire).map_err(|e| e.message)?;
+        }
+        fold(&mut wire, &mut docs, &mut error);
+    }
+    let shown = text.split(|b| *b == 0).next().unwrap_or_default();
+    let shown = String::from_utf8_lossy(shown);
+    let message = match (docs.len(), error) {
+        (0, Some(message)) | (1, Some(message)) => message,
+        (0, None) => "Expected JSON value".to_string(),
+        (1, None) => {
+            let text = String::from_utf8_lossy(&docs[0]);
+            return parse_json(&text).map_err(|e| format!("{e} (while parsing '{shown}')"));
+        }
+        _ => "Unexpected extra JSON values".to_string(),
+    };
+    Err(format!("{message} (while parsing '{shown}')"))
 }
 
 #[cfg(test)]

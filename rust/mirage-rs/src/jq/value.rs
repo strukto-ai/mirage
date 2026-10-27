@@ -644,13 +644,66 @@ pub(crate) fn try_compare(a: &Value, b: &Value) -> Result<Ordering, TooDeep> {
     }
 }
 
+enum Open {
+    Array(Vec<Value>),
+    Object(Object, Option<Arc<str>>),
+}
+
+fn close(
+    stack: &mut Vec<Open>,
+    mut value: Value,
+    bytes: &[u8],
+    at: &mut usize,
+) -> Result<Option<Value>, String> {
+    loop {
+        match stack.last_mut() {
+            None => return Ok(Some(value)),
+            Some(Open::Array(items)) => items.push(value),
+            Some(Open::Object(object, key)) => {
+                let key = key.take().ok_or("Object keys must be strings")?;
+                object.insert(key, value);
+            }
+        }
+        while *at < bytes.len() && matches!(bytes[*at], b' ' | b'\t' | b'\n' | b'\r') {
+            *at += 1;
+        }
+        match (stack.last(), bytes.get(*at)) {
+            (_, Some(b',')) => {
+                *at += 1;
+                return Ok(None);
+            }
+            (Some(Open::Array(_)), Some(b']')) => {
+                *at += 1;
+                let Some(Open::Array(items)) = stack.pop() else {
+                    unreachable!()
+                };
+                value = Value::array(items);
+            }
+            (Some(Open::Object(..)), Some(b'}')) => {
+                *at += 1;
+                let Some(Open::Object(object, _)) = stack.pop() else {
+                    unreachable!()
+                };
+                value = Value::object(object);
+            }
+            _ => return Err(format!("Expected separator between values at offset {at}")),
+        }
+    }
+}
+
+fn finish(value: Value, bytes: &[u8], mut at: usize) -> Result<Value, String> {
+    while at < bytes.len() && matches!(bytes[at], b' ' | b'\t' | b'\n' | b'\r') {
+        at += 1;
+    }
+    if at < bytes.len() {
+        return Err(format!("Unexpected extra JSON values at offset {at}"));
+    }
+    Ok(value)
+}
+
 /// Parse one JSON document, as the host hands it over already checked.
 /// Numbers keep their literal. Nesting is walked with a stack.
 pub(crate) fn parse_json(text: &str) -> Result<Value, String> {
-    enum Open {
-        Array(Vec<Value>),
-        Object(Object, Option<Arc<str>>),
-    }
     let bytes = text.as_bytes();
     let mut at = 0;
     let mut stack: Vec<Open> = Vec::new();
@@ -742,7 +795,7 @@ pub(crate) fn parse_json(text: &str) -> Result<Value, String> {
                 at += 4;
                 Value::Null
             }
-            Some(b'-' | b'+' | b'.' | b'0'..=b'9' | b'n' | b'N' | b'I') => {
+            Some(b'-' | b'+' | b'.' | b'0'..=b'9' | b'n' | b'N' | b'i' | b'I' | b's' | b'S') => {
                 let start = at;
                 while at < bytes.len()
                     && !matches!(
@@ -772,58 +825,6 @@ pub(crate) fn parse_json(text: &str) -> Result<Value, String> {
         }
         after_comma = true;
     }
-
-    fn close(
-        stack: &mut Vec<Open>,
-        mut value: Value,
-        bytes: &[u8],
-        at: &mut usize,
-    ) -> Result<Option<Value>, String> {
-        loop {
-            match stack.last_mut() {
-                None => return Ok(Some(value)),
-                Some(Open::Array(items)) => items.push(value),
-                Some(Open::Object(object, key)) => {
-                    let key = key.take().ok_or("Object keys must be strings")?;
-                    object.insert(key, value);
-                }
-            }
-            while *at < bytes.len() && matches!(bytes[*at], b' ' | b'\t' | b'\n' | b'\r') {
-                *at += 1;
-            }
-            match (stack.last(), bytes.get(*at)) {
-                (_, Some(b',')) => {
-                    *at += 1;
-                    return Ok(None);
-                }
-                (Some(Open::Array(_)), Some(b']')) => {
-                    *at += 1;
-                    let Some(Open::Array(items)) = stack.pop() else {
-                        unreachable!()
-                    };
-                    value = Value::array(items);
-                }
-                (Some(Open::Object(..)), Some(b'}')) => {
-                    *at += 1;
-                    let Some(Open::Object(object, _)) = stack.pop() else {
-                        unreachable!()
-                    };
-                    value = Value::object(object);
-                }
-                _ => return Err(format!("Expected separator between values at offset {at}")),
-            }
-        }
-    }
-
-    fn finish(value: Value, bytes: &[u8], mut at: usize) -> Result<Value, String> {
-        while at < bytes.len() && matches!(bytes[at], b' ' | b'\t' | b'\n' | b'\r') {
-            at += 1;
-        }
-        if at < bytes.len() {
-            return Err(format!("Unexpected extra JSON values at offset {at}"));
-        }
-        Ok(value)
-    }
 }
 
 /// A number as jq's reader spells it: a decimal literal (a sign, leading
@@ -834,16 +835,20 @@ fn number_token(token: &str) -> Option<Value> {
         Some(rest) => (true, rest),
         None => (false, token),
     };
-    match body {
-        "nan" | "NaN" => return Some(Value::number(f64::NAN)),
-        "Infinity" | "infinity" => {
-            return Some(Value::number(if negative {
-                f64::NEG_INFINITY
-            } else {
-                f64::INFINITY
-            }));
-        }
-        _ => {}
+    let word = body.strip_prefix('+').unwrap_or(body).to_ascii_lowercase();
+    let nan = word
+        .strip_prefix("snan")
+        .or_else(|| word.strip_prefix("nan"))
+        .is_some_and(|rest| rest.bytes().all(|b| b == b'0'));
+    if nan {
+        return Some(Value::number(f64::NAN));
+    }
+    if word == "inf" || word == "infinity" {
+        return Some(Value::number(if negative {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        }));
     }
     let digits = body.strip_prefix('+').unwrap_or(body);
     let (mantissa, exponent) = match digits.find(['e', 'E']) {

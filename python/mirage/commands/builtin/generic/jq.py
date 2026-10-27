@@ -3,6 +3,7 @@
 
 import dataclasses
 import json
+import logging
 import os
 import re
 import time
@@ -68,6 +69,8 @@ from mirage.rs.stream import OpenStream, close_stream, open_stream
 from mirage.runtime.types import DispatchFn
 from mirage.types import JsonValue, PathSpec, ReadStreamFn
 
+logger = logging.getLogger(__name__)
+
 INDENT_MIN = -1
 INDENT_MAX = 7
 # A width in jq's range has at most one significant digit; the sign and
@@ -104,6 +107,11 @@ FRAME_STDERR = 5
 # not read one of its inputs, whatever the runs answered.
 ERROR_COMPILE = 3
 ERROR_SYSTEM = 2
+
+# The last line of jq's report of a program it refuses, which jq_eval's
+# refusal to compile such a program ends in; any other refusal names what
+# jq_eval cannot run yet.
+COMPILE_REPORT = re.compile(r"(?:\A|\n)jq: [0-9]+ compile errors?\Z")
 
 USAGE_HINT = (
     "Use jq --help for help with command-line options,\n"
@@ -633,10 +641,13 @@ class Engine:
         """Compile `expr`, or None when the engine cannot run it yet.
 
         Args:
-            expr (str): jq program text.
+            expr (str): jq program text, as typed.
             opts (JqOptions): resolved options, for the named bindings.
             args (str | None): the value of `$ARGS`, as text.
             env (str): the environment `$ENV` and `env` read, as text.
+
+        Raises:
+            JqCompileError: a program jq itself refuses, with jq's report.
         """
         try:
             stream = open_stream(
@@ -646,11 +657,13 @@ class Engine:
                     "named": dict(opts.named_args),
                     "args": args,
                     "env": env,
-                    "now": time.time(),
                     "zone": local_zone(),
                 },
             )
-        except StreamRefusal:
+        except StreamRefusal as exc:
+            if COMPILE_REPORT.search(exc.message):
+                raise JqCompileError(exc.message) from exc
+            logger.debug("jq_eval leaves the program to libjq: %s", exc)
             return None
         return cls(stream, opts)
 
@@ -674,7 +687,7 @@ class Engine:
                 `stderr` write, in order.
         """
         stream = self._stream
-        stream.begin({**reader_position(reader), "now": time.time()})
+        stream.begin(reader_position(reader))
         outputs: list[str] = []
         messages: list[tuple[int, str]] = []
         try:
@@ -686,8 +699,13 @@ class Engine:
             if stream.busy():
                 await self._budget.run()
                 wire = stream.drain()
-            elif stream.request() is not None:
-                reply, data = await input_reply(reader)
+            elif (asked := stream.request()) is not None:
+                # `now` asks the clock at each call; `input` the reader.
+                reply: dict[str, JsonValue]
+                if asked[0].get("op") == "now":
+                    reply, data = {"kind": "now", "now": time.time()}, b""
+                else:
+                    reply, data = await input_reply(reader)
                 wire = stream.respond(reply, data)
             else:
                 break
@@ -1014,11 +1032,20 @@ async def _jq(
     reads = stream_reads(expr)
     reads_stream = reads.input or reads.inputs
     args = args_text(opts) if references_args(expr) else None
+    env_text = json.dumps(dict(env or {}))
     try:
-        jq_check(expr, opts.named_args, [] if reads_stream else None, args)
-    except JqCompileError as exc:
         # jq compiles its program before it opens a single input, so a
-        # refusal is all it prints.
+        # refusal is all it prints. jq_eval words jq's refusals itself,
+        # reading the program as typed, so its lines and columns are jq's;
+        # libjq checks only a program jq_eval leaves to it. The run
+        # compiles it again when it starts, so nothing is held open for a
+        # stream no one reads.
+        checked = Engine.open(expression, opts, args, env_text)
+        if checked is None:
+            jq_check(expr, opts.named_args, [] if reads_stream else None, args)
+        else:
+            await checked.close()
+    except JqCompileError as exc:
         return None, IOResult(
             exit_code=ERROR_COMPILE, stderr=f"{exc}\n".encode()
         )
@@ -1040,9 +1067,7 @@ async def _jq(
                 )
             )
     io = IOResult()
-    loop = MainLoop(
-        sources, expr, opts, reads, args, json.dumps(dict(env or {})), io
-    )
+    loop = MainLoop(sources, expr, opts, reads, args, env_text, io)
     return loop.outputs(), io
 
 

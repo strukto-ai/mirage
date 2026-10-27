@@ -2108,6 +2108,121 @@
       "flags": [
         "f"
       ]
+    },
+    {
+      "id": "jq_compile_error_columns_count_leading_blanks",
+      "seq": 18600001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '  1 +'",
+      "expect": {
+        "exit": 3,
+        "stdout": "",
+        "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 5:\n      1 +\n        ^\njq: 1 compile error\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_compile_error_reports_every_undefined_name",
+      "seq": 18600002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '$x | nosuch(1)'",
+      "expect": {
+        "exit": 3,
+        "stdout": "",
+        "stderr": "jq: error: $x is not defined at <top-level>, line 1, column 1:\n    $x | nosuch(1)\n    ^^\njq: error: nosuch/1 is not defined at <top-level>, line 1, column 6:\n    $x | nosuch(1)\n         ^^^^^^\njq: 2 compile errors\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_compile_error_at_the_end_points_at_the_last_blank",
+      "seq": 18600003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n 'if\n'",
+      "expect": {
+        "exit": 3,
+        "stdout": "",
+        "stderr": "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 3:\n    if\n      ^\njq: 1 compile error\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_compile_error_recovers_to_report_unterminated_statements",
+      "seq": 18600004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '[\n  try if .\n         then 1\n         else 2\n  catch ]'",
+      "expect": {
+        "exit": 3,
+        "stdout": "",
+        "stderr": "jq: error: syntax error, unexpected catch, expecting end or '|' or ',' at <top-level>, line 5, column 3:\n      catch ]\n      ^^^^^\njq: error: Possibly unterminated 'if' statement at <top-level>, line 2, column 7:\n      try if .\n          ^^^^\njq: error: Possibly unterminated 'try' statement at <top-level>, line 2, column 3:\n      try if .\n      ^^^^^^^^\njq: 3 compile errors\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_compile_error_reports_parse_and_literal_errors_in_order",
+      "seq": 18600005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n '{(1):2} | \"\\x\"'",
+      "expect": {
+        "exit": 3,
+        "stdout": "",
+        "stderr": "jq: error: Cannot use number (1) as object key at <top-level>, line 1, column 3:\n    {(1):2} | \"\\x\"\n      ^\njq: error: Invalid escape at line 1, column 4 (while parsing '\"\\x\"') at <top-level>, line 1, column 12:\n    {(1):2} | \"\\x\"\n               ^^\njq: 2 compile errors\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_compile_error_in_a_program_file_counts_its_lines",
+      "seq": 18600006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqc && printf 'def f: .;\\n\\n.a | $x\\n' > /data/qjqc/p.jq && jq -n -f /data/qjqc/p.jq",
+      "expect": {
+        "exit": 3,
+        "stdout": "",
+        "stderr": "jq: error: $x is not defined at <top-level>, line 3, column 6:\n    .a | $x\n         ^^\njq: 1 compile error\n"
+      },
+      "flags": [
+        "n",
+        "f"
+      ]
     }
   ]
 }
