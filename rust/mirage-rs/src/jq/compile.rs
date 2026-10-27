@@ -576,7 +576,13 @@ impl Compiler<'_> {
 
     fn binop(&mut self, bc: usize, op: BinOp, a: &Ast, b: &Ast, env: &Env) -> Result<(), String> {
         let f = builtin::lookup(op.function(), 2).expect("binop builtin");
-        if let (Some(x), Some(y)) = (constant(a), constant(b)) {
+        let folds = |x: &Value, y: &Value| {
+            !(op == BinOp::Multiply
+                && (matches!(x, Value::String(_)) || matches!(y, Value::String(_))))
+        };
+        if let (Some(x), Some(y)) = (constant(a), constant(b))
+            && folds(&x, &y)
+        {
             let limits = Limits {
                 blocks: usize::MAX,
                 items: usize::MAX,
@@ -890,13 +896,11 @@ impl Compiler<'_> {
             }
             ("last", 1) => return self.closed(|c| c.last(bc, &args[0], env)),
             ("range", 2) => return self.closed(|c| c.range(bc, &args[0], &args[1], env)),
-            ("format", 1) => {
-                if let Ast::Literal(Value::String(f)) = &args[0] {
-                    if !FORMATS.contains(&&**f) {
-                        return Err(format!("unsupported format @{f}"));
-                    }
-                }
-            }
+            ("format", 1) => match &args[0] {
+                Ast::Literal(Value::String(f)) if FORMATS.contains(&&**f) => {}
+                Ast::Literal(Value::String(f)) => return Err(format!("unsupported format @{f}")),
+                _ => return Err("unsupported: a format named at run time".into()),
+            },
             _ => {}
         }
         if let Some(index) = self.link(name, arity)? {

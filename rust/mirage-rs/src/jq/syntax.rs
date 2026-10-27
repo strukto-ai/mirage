@@ -50,8 +50,21 @@ impl Lexer<'_> {
                 }
                 b' ' | b'\t' | b'\r' => self.at += 1,
                 b'#' => {
-                    while self.at < self.src.len() && self.src[self.at] != b'\n' {
-                        self.at += 1;
+                    self.at += 1;
+                    while let Some(&c) = self.src.get(self.at) {
+                        match (c, self.src.get(self.at + 1)) {
+                            (b'\n', _) => break,
+                            (b'\\', Some(b'\\')) => self.at += 2,
+                            (b'\\', Some(b'\n')) => {
+                                self.line += 1;
+                                self.at += 2;
+                            }
+                            (b'\\', Some(b'\r')) if self.src.get(self.at + 2) == Some(&b'\n') => {
+                                self.line += 1;
+                                self.at += 3;
+                            }
+                            _ => self.at += 1,
+                        }
                     }
                 }
                 _ => break,

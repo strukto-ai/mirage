@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use super::builtin::{self, Cfunc, Fault};
-use super::value::{Object, Value};
+use super::value::{Object, Value, shed};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Target {
@@ -228,6 +228,7 @@ pub(crate) struct Vm {
     restore: bool,
     initial: bool,
     limits: Limits,
+    teardown: Vec<Vec<Value>>,
     pub(crate) steps: u64,
 }
 
@@ -251,6 +252,7 @@ impl Vm {
             restore: true,
             initial: true,
             limits,
+            teardown: Vec::new(),
             steps: 0,
         };
         vm.curr_frame = vm.arena.push(
@@ -274,12 +276,43 @@ impl Vm {
         self.arena.entries.len()
     }
 
-    /// Free up to `count` blocks, newest first; true once none are left.
+    /// Free up to `count` nodes: stack blocks newest first, then the
+    /// values they held, one container level at a time, so a deep or wide
+    /// value is freed across calls too. True once nothing is left.
     /// Cancellation retires a run this way, a bounded slice at a time.
     pub(crate) fn retire(&mut self, count: usize) -> bool {
-        let keep = self.arena.entries.len().saturating_sub(count);
-        self.arena.entries.truncate(keep);
-        self.arena.entries.is_empty()
+        for _ in 0..count {
+            if let Some(chunk) = self.teardown.last_mut() {
+                match chunk.pop() {
+                    Some(value) => {
+                        let children = shed(value);
+                        if !children.is_empty() {
+                            self.teardown.push(children);
+                        }
+                    }
+                    None => {
+                        self.teardown.pop();
+                    }
+                }
+                continue;
+            }
+            let values = match self.arena.entries.pop() {
+                Some(entry) => match entry.block {
+                    Block::Value(value) => vec![value],
+                    Block::Frame(frame) => frame.locals,
+                    Block::Fork(fork) => vec![fork.value_at_path],
+                },
+                None => vec![
+                    std::mem::replace(&mut self.path, Value::Null),
+                    std::mem::replace(&mut self.value_at_path, Value::Null),
+                ],
+            };
+            if values.iter().all(|v| matches!(v, Value::Null)) && self.arena.entries.is_empty() {
+                break;
+            }
+            self.teardown.push(values);
+        }
+        self.arena.entries.is_empty() && self.teardown.is_empty()
     }
 
     fn push(&mut self, value: Value) {

@@ -657,3 +657,117 @@ fn jq_test_corpus() {
         "pass {pass}, refused {refused}"
     );
 }
+
+#[test]
+fn numbers_strings_and_parsing_match_jq() {
+    let cases: &[(&str, &str, &[&str])] = &[
+        (
+            "[13911860366432393] == [13911860366432392]",
+            "null",
+            &["false"],
+        ),
+        (
+            "[13911860366432393] < [13911860366432392], [13911860366432392] < [13911860366432393], [100000000000000000001] < [1E20]",
+            "null",
+            &["false", "true", "false"],
+        ),
+        ("[-1e-400, -0.0, -0]", "null", &["[-1E-400,0.0,0]"]),
+        (
+            "ldexp(0.5; 1024), ldexp(1; -1074)",
+            "null",
+            &["8.98846567431158e+307", "5e-324"],
+        ),
+        (
+            r#""aaaa" | indices("aa"), ("aéaéa" | indices("a"))"#,
+            "null",
+            &["[0,1,2]", "[0,2,4]"],
+        ),
+        (
+            "reduce range(600) as $_ ([]; [.]) as $x | $x | contains($x)",
+            "null",
+            &["true"],
+        ),
+        (
+            r#""{\"a\":1,}", "[1,]", "\"\\ud800x\"", "\"a\tb\"" | try fromjson catch ."#,
+            "null",
+            &[
+                r#""Expected another key-value pair at line 1, column 8 (while parsing '{\"a\":1,}')""#,
+                r#""Expected another array element at line 1, column 4 (while parsing '[1,]')""#,
+                r#""Invalid \\uXXXX\\uXXXX surrogate pair escape at line 1, column 9 (while parsing '\"\\ud800x\"')""#,
+                r#""Invalid string: control characters from U+0000 through U+001F must be escaped at line 1, column 5 (while parsing '\"a\tb\"')""#,
+            ],
+        ),
+        (
+            r#""\"\\udc00\"" | fromjson | explode"#,
+            "null",
+            &["[65533]"],
+        ),
+        (". # c \\\n| . + 1", "1", &["1"]),
+        (". # c \\\\\n| . + 1", "1", &["2"]),
+    ];
+    for (program, input, expected) in cases {
+        assert_eq!(outputs(program, input), *expected, "{program}");
+    }
+}
+
+#[test]
+fn constant_folding_builds_no_large_string() {
+    let got = run(r#""abc" * 1000000000"#, "null", 1 << 16);
+    assert_eq!(
+        got,
+        vec![Frame::Err("Repeat string result too long".into())]
+    );
+}
+
+#[test]
+fn growing_arrays_respect_the_element_cap() {
+    for program in [
+        ".[100000] = 0",
+        r#""a" * 2000 | explode"#,
+        r#""a" * 2000 | split("")"#,
+    ] {
+        let config = serde_json::json!({ "program": program, "items": 1000 });
+        let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+        let mut wire = Vec::new();
+        stream.feed(b"[]", &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        while stream.busy() {
+            stream.drain(&mut wire).unwrap();
+        }
+        assert_eq!(
+            frames(&wire),
+            vec![Frame::Err(
+                "jq array limit of 1000 elements exceeded".into()
+            )],
+            "{program}"
+        );
+    }
+}
+
+#[test]
+fn a_format_named_at_run_time_falls_back() {
+    let globals = HashMap::from([("f".to_string(), parse_json("\"urid\"").unwrap())]);
+    assert!(compile("format($f)", &globals).is_err());
+    assert!(compile("@text, @base64d", &HashMap::new()).is_ok());
+}
+
+#[test]
+fn cancel_frees_a_deep_value_across_drains() {
+    let mut stream = open(
+        "reduce range(200000) as $i (null; [.]) | until(false; .)",
+        1 << 16,
+    );
+    let mut wire = Vec::new();
+    stream.feed(b"null", &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    for _ in 0..40 {
+        stream.drain(&mut wire).unwrap();
+    }
+    assert!(stream.cancel());
+    let mut drains = 0;
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+        drains += 1;
+    }
+    assert!(drains >= 10, "freed in {drains} drains");
+}
