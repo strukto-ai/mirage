@@ -308,6 +308,32 @@ class S3Service:
         self.stop()
 
 
+class S3DeniedService:
+    """The bucket integ/server/s3_denied.py seeds, read as its reader.
+
+    The reader lists every key but is refused GetObject on one, which is
+    how a per-key 403 reaches a mount. The fake owns the bucket, so
+    nothing is created or removed here, and checks no signature, so any
+    secret stands in for the reader's.
+    """
+
+    def vfs(self, mount: dict) -> S3VFS:
+        return S3VFS(
+            S3Config(
+                bucket=os.environ["S3_DENIED_BUCKET"],
+                region=S3_REGION,
+                endpoint_url=os.environ["S3_DENIED_ENDPOINT"],
+                aws_access_key_id=os.environ["S3_DENIED_ACCESS_KEY_ID"],
+                aws_secret_access_key=S3_SECRET,
+                path_style=True,
+                key_prefix=mount.get("prefix"),
+            )
+        )
+
+    async def teardown(self) -> None:
+        return None
+
+
 class GridFSService:
     def __init__(self, run_id: str) -> None:
         self.uri = MONGODB_URI
@@ -2520,6 +2546,7 @@ class PostgresService:
 Service = (
     AirtableService
     | S3Service
+    | S3DeniedService
     | OneDriveService
     | SharePointService
     | Mem0Service
@@ -2645,7 +2672,7 @@ def build_redis(
 def build_s3(
     mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
-    assert isinstance(service, S3Service)
+    assert isinstance(service, S3Service | S3DeniedService)
     return service.vfs(mount), _noop
 
 
@@ -3024,6 +3051,8 @@ BUILDERS = {
 async def make_service(target: dict, run_id: str) -> "Service | None":
     if target.get("service") == "s3":
         return S3Service(run_id)
+    if target.get("service") == "s3-denied":
+        return S3DeniedService()
     if target.get("service") == "gridfs":
         return GridFSService(run_id)
     if target.get("service") == "databricks":

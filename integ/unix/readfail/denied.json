@@ -1,0 +1,507 @@
+{
+  "cases": [
+    {
+      "id": "readfail_denied_scoped_dir_stats",
+      "seq": 15900001,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "stat -c %F /data/rd",
+      "expect": {
+        "exit": 0,
+        "stdout": "directory\n",
+        "stderr": ""
+      },
+      "note": "The reader's grant covers rd/* alone, so a HEAD on the bare key rd answers 403 as on AWS; the keys below it still prove the directory. These cases run first, before a listing tells the index what rd is."
+    },
+    {
+      "id": "readfail_denied_scoped_dir_tests",
+      "seq": 15900002,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "test -d /data/rd && echo dir",
+      "expect": {
+        "exit": 0,
+        "stdout": "dir\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "readfail_denied_scoped_dir_cd",
+      "seq": 15900003,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "cd /data/rd && cat a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "needle a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "readfail_denied_cp_falls_back",
+      "seq": 15900004,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "cp /data/rd/b.txt /data/rd/x.txt || echo fallback",
+      "expect": {
+        "exit": 0,
+        "stdout": "fallback\n",
+        "stderr": "cp: cannot stat '/data/rd/b.txt': Permission denied\n"
+      },
+      "note": "The store refuses GetObject on rd/b.txt, so its HEAD answers 403 while the listing still names it: GNU's file in a directory it may read but not search (coreutils 9.7, debian 13.6, as nobody). The stat-shaped cases run first, before a listing tells the index the key's size."
+    },
+    {
+      "id": "readfail_denied_stat",
+      "seq": 15900005,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "stat -c %s /data/rd/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: cannot statx '/data/rd/b.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_mv",
+      "seq": 15900006,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "mv /data/rd/b.txt /data/rd/m.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot stat '/data/rd/b.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_test_reads_absent",
+      "seq": 15900007,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "test -e /data/rd/b.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": ""
+      },
+      "note": "GNU bash 5.2.37 reads a file test whose stat fails EACCES as false, silently, and the line goes on."
+    },
+    {
+      "id": "readfail_denied_bracket_reads_absent",
+      "seq": 15900008,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "[ -f /data/rd/b.txt ] || echo no",
+      "expect": {
+        "exit": 0,
+        "stdout": "no\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "readfail_denied_test_slashed_reads_absent",
+      "seq": 15900009,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "test -e /data/rd/b.txt/; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "readfail_denied_test_dotted_reads_absent",
+      "seq": 15900010,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "test -e /data/rd/b.txt/../a.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "readfail_denied_cat_reads_on",
+      "seq": 15900011,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "cat /data/rd/a.txt /data/rd/b.txt /data/rd/c.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "needle a\nneedle c\n",
+        "stderr": "cat: /data/rd/b.txt: Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_head",
+      "seq": 15900012,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "head -1 /data/rd/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "head: cannot open '/data/rd/b.txt' for reading: Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_md5sum",
+      "seq": 15900013,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "md5sum /data/rd/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "md5sum: /data/rd/b.txt: Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_wc_counts_on",
+      "seq": 15900014,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "wc -c /data/rd/b.txt /data/rd/c.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "9 /data/rd/c.txt\n9 total\n",
+        "stderr": "wc: /data/rd/b.txt: Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_cp_onto_refused",
+      "seq": 15900015,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "cp /data/rd/a.txt /data/rd/b.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": "cp: cannot stat '/data/rd/b.txt': Permission denied\n"
+      },
+      "note": "A refused destination fails its stat as GNU's does (coreutils 9.7, as nobody, the file in a directory it may read but not search), with every cp and mv spelling below."
+    },
+    {
+      "id": "readfail_denied_cp_many_onto_refused",
+      "seq": 15900016,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "cp /data/rd/a.txt /data/rd/c.txt /data/rd/b.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": "cp: target '/data/rd/b.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_cp_into_refused_target_dir",
+      "seq": 15900017,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "cp -t /data/rd/b.txt /data/rd/a.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": "cp: target directory '/data/rd/b.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_mv_onto_refused_falls_back",
+      "seq": 15900018,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "mv /data/rd/a.txt /data/rd/b.txt || echo fallback",
+      "expect": {
+        "exit": 0,
+        "stdout": "fallback\n",
+        "stderr": "mv: cannot stat '/data/rd/b.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_ln_under_refused",
+      "seq": 15900019,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "ln -s a /data/rd/b.txt/x || echo fallback",
+      "expect": {
+        "exit": 0,
+        "stdout": "fallback\n",
+        "stderr": "ln: failed to create symbolic link '/data/rd/b.txt/x': Permission denied\n"
+      },
+      "note": "ln, cp, mv and ls meet the refused key in a stat of the name or of its parent chain, as GNU meets a directory it may not search, and word it as GNU does (coreutils 9.7, debian 13.6, as nobody). They run before a listing, which would tell the index the key and let a stat find it."
+    },
+    {
+      "id": "readfail_denied_ln_force_onto_refused",
+      "seq": 15900020,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "ln -sf a /data/rd/b.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": "ln: failed to access '/data/rd/b.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_ln_many_onto_refused",
+      "seq": 15900021,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "ln -s a b /data/rd/b.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": "ln: target '/data/rd/b.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_ln_into_refused_target_dir",
+      "seq": 15900022,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "ln -s -t /data/rd/b.txt a; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": "ln: failed to access '/data/rd/b.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_ln_hard_from_refused",
+      "seq": 15900023,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "ln /data/rd/b.txt /data/rd/h.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": "ln: failed to access '/data/rd/b.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_ln_hard_onto_refused",
+      "seq": 15900024,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "ln /data/rd/a.txt /data/rd/b.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": "ln: failed to create hard link '/data/rd/b.txt' => '/data/rd/a.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_ln_backup_onto_refused",
+      "seq": 15900025,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "ln -sb a /data/rd/b.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": "ln: failed to access '/data/rd/b.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_ln_hard_through_refused",
+      "seq": 15900026,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "ln /data/rd/b.txt/../a.txt /data/rd/h.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": "ln: failed to access '/data/rd/b.txt/../a.txt': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_ln_into_slashed_refused_dir",
+      "seq": 15900027,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "ln -s -t /data/rd/b.txt/ a; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:1\n",
+        "stderr": "ln: failed to access '/data/rd/b.txt/': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_cp_under_refused",
+      "seq": 15900028,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "cp /data/rd/a.txt /data/rd/b.txt/x || echo fallback",
+      "expect": {
+        "exit": 0,
+        "stdout": "fallback\n",
+        "stderr": "cp: cannot stat '/data/rd/b.txt/x': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_cp_from_under_refused",
+      "seq": 15900029,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "cp /data/rd/b.txt/x /data/rd/y.txt || echo fallback",
+      "expect": {
+        "exit": 0,
+        "stdout": "fallback\n",
+        "stderr": "cp: cannot stat '/data/rd/b.txt/x': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_mv_under_refused",
+      "seq": 15900030,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "mv /data/rd/a.txt /data/rd/b.txt/x || echo fallback",
+      "expect": {
+        "exit": 0,
+        "stdout": "fallback\n",
+        "stderr": "mv: cannot stat '/data/rd/b.txt/x': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_ls_under_refused",
+      "seq": 15900031,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "ls /data/rd/b.txt/x; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:2\n",
+        "stderr": "ls: cannot access '/data/rd/b.txt/x': Permission denied\n"
+      }
+    },
+    {
+      "id": "readfail_denied_tar_archives_on",
+      "seq": 15900032,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "tar -cf - /data/rd/a.txt /data/rd/b.txt /data/rd/c.txt | tar -tf -; echo rc:${PIPESTATUS[0]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/rd/a.txt\ndata/rd/c.txt\nrc:2\n",
+        "stderr": "tar: Removing leading `/' from member names\ntar: /data/rd/b.txt: Cannot stat: Permission denied\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "note": "GNU tar 1.35 names the refused member, archives the others and exits 2; it also prints `Removing leading `/' from hard link targets`, which mirage never has."
+    },
+    {
+      "id": "readfail_denied_grep_r_walks_on",
+      "seq": 15900033,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "grep -r needle /data/rd",
+      "expect": {
+        "exit": 2,
+        "stdout": "/data/rd/a.txt:needle a\n/data/rd/c.txt:needle c\n",
+        "stderr": "grep: /data/rd/b.txt: Permission denied\n"
+      },
+      "note": "Exit 2, not 1: a refused file is an error, never a no-match."
+    },
+    {
+      "id": "readfail_denied_ls_lists_it",
+      "seq": 15900034,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "ls /data/rd",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\nb.txt\nc.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "readfail_denied_warm_test_reads_present",
+      "seq": 15900035,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "test -e /data/rd/b.txt; echo rc:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc:0\n",
+        "stderr": ""
+      },
+      "note": "Divergence from GNU, kept on purpose: after a listing the index answers a stat without a HEAD, so a key the store lists but refuses to read is present (test -e and even -r true, stat names its size) while a cold stat is refused; only reading it fails. S3 grants listing and reading apart; GNU has no such state, and its two nearest shapes (an unsearchable directory, an unreadable file) each answer one way."
+    },
+    {
+      "id": "readfail_denied_warm_stat_names_size",
+      "seq": 15900036,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "stat -c %s /data/rd/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "9\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "readfail_denied_warm_md5sum",
+      "seq": 15900037,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "md5sum /data/rd/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "md5sum: /data/rd/b.txt: Permission denied\n"
+      },
+      "note": "Now a listing has told the index rd/b.txt's size, so a stat answers from it and the refusal comes from the command's own request: md5sum's HEAD, mv's source probe. GNU's mv in a directory it may enter but not write says the same (coreutils 9.7, debian 13.6, as nobody)."
+    },
+    {
+      "id": "readfail_denied_warm_mv",
+      "seq": 15900038,
+      "targets": [
+        "s3-denied"
+      ],
+      "command": "mv /data/rd/b.txt /data/rd/m.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot move '/data/rd/b.txt' to '/data/rd/m.txt': Permission denied\n"
+      }
+    }
+  ]
+}
