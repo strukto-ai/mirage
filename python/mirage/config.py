@@ -166,7 +166,7 @@ class RedisCacheBlock(BaseModel):
     limit: str | int = "512MB"
     max_drain_bytes: int | None = None
     url: str = "redis://localhost:6379/0"
-    key_prefix: str = "mirage:cache:"
+    key_prefix: str | None = None
 
 
 CacheBlock = Annotated[
@@ -188,7 +188,7 @@ class RedisIndexBlock(BaseModel):
     type: Literal["redis"]
     ttl: StrictFloat = 600
     url: str = "redis://localhost:6379/0"
-    key_prefix: str = "mirage:index:"
+    key_prefix: str | None = None
 
 
 IndexBlock = Annotated[

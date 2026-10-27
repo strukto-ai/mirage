@@ -38,7 +38,7 @@ export interface IndexConfigSnapshot {
   type: IndexType
   ttl: number
   url?: string
-  key_prefix?: string
+  key_prefix?: string | null
 }
 
 export function indexConfigDump(
@@ -50,7 +50,7 @@ export function indexConfigDump(
   if (data.type === IndexType.REDIS) {
     const redis = config as RedisIndexConfig
     data.url = redis.url ?? 'redis://localhost:6379/0'
-    data.key_prefix = redis.keyPrefix ?? 'mirage:index:'
+    data.key_prefix = redis.keyPrefix ?? null
     const url = new URL(data.url)
     if (!reveal && (url.username !== '' || url.password !== '')) data.url = REDACTED_SECRET
   }
@@ -71,6 +71,6 @@ export function restoreIndexConfig(
   }
   const config: RedisIndexConfig = { type: data.type, ttl: data.ttl }
   if (data.url !== undefined) config.url = data.url
-  if (data.key_prefix !== undefined) config.keyPrefix = data.key_prefix
+  if (data.key_prefix != null) config.keyPrefix = data.key_prefix
   return config
 }

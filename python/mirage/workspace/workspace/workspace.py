@@ -2342,9 +2342,12 @@ class Workspace:
         """Hydrate sessions from the session store (idempotent).
 
         The discovery record resolves first so a minted default session
-        id can adopt the stored pointer before hydration keys off it.
+        id can adopt the stored pointer before hydration keys off it. The
+        first call also starts stopping what lapsed instances of the
+        workspace left running (``JobTable.reap_lapsed``).
         """
         self._sync_bridge.observe()
+        self.job_table.reap_lapsed()
         await self._meta.ensure()
         await self._session_mgr.ensure_loaded()
 

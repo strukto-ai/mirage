@@ -64,7 +64,7 @@ async def test_config_index_redis_block_builds_redis_config():
     )
     kwargs = cfg.to_workspace_kwargs()
     assert isinstance(kwargs["index"], RedisIndexConfig)
-    assert kwargs["index"].key_prefix == "mirage:index:"
+    assert kwargs["index"].key_prefix is None
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,7 @@ from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.context import reset_current_session, set_current_session
 from mirage.runtime.sandbox import RemoteSandbox
+from mirage.shell.job_table.ram import RAMJobStore
 from mirage.types import MountBackend, MountMode
 from mirage.utils.clock import ManualClock
 from mirage.utils.ids import SeededIdSource, SystemIdSource
@@ -846,5 +847,27 @@ async def test_a_workspace_reaps_the_runs_its_runtimes_reach():
         left = await ws._reap_runs(runs, 15)
         assert left == [elsewhere, broken, theirs, host]
         assert box.reaped == [("t1", 15), ("t3", 15), ("broken", 15)]
+    finally:
+        await ws.close()
+
+
+# A workspace stops what a lapsed instance left as it starts, before
+# anything lists processes.
+@pytest.mark.asyncio
+async def test_a_workspace_reaps_a_lapsed_instance_as_it_starts():
+    box = _ReapedBox(("t1",))
+    ws = Workspace({}, runtimes=[box])
+    try:
+        store = RAMJobStore(lease_seconds=30.0)
+        ws.job_table.store = store
+        run = {"runtime": "reapbox", "tag": "t1", "command": "x"}
+        await store.publish(
+            "dead", {"2": {"pid": 2, "session": "s", "runs": [run]}}
+        )
+        await ws.shell("true")
+        async with asyncio.timeout(5):
+            while "dead" in await store.processes():
+                await asyncio.sleep(0.01)
+        assert box.reaped == [("t1", 15)]
     finally:
         await ws.close()

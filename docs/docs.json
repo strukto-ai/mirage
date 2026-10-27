@@ -295,6 +295,12 @@
             ]
           },
           {
+            "group": "Infrastructure",
+            "pages": [
+              "home/infrastructure"
+            ]
+          },
+          {
             "group": "Configuration",
             "pages": [
               "home/configuration",
