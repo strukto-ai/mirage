@@ -64,7 +64,7 @@ These are common options, not an exhaustive flag reference.
 A workspace runs as several instances when more than one process builds it
 under the same `workspace_id` on one shared
 [store](/home/configuration#cache-index-and-store), as
-[Infrastructure](/home/infrastructure#run-several-instances-of-one-workspace)
+[Infrastructure](/home/infrastructure/jobs#run-several-instances-of-one-workspace)
 shows. The instances share each session's background jobs: in one process
 through a RAM store, and across processes through a store that keeps jobs on
 Redis. On any of them, `jobs` lists the session's jobs under the same

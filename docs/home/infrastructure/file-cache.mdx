@@ -1,0 +1,90 @@
+---
+title: File cache
+description: Where a workspace caches the file content it reads, in memory or on Redis.
+icon: database
+---
+
+The file cache keeps file content Mirage has read, so a second read is served
+without asking the backend again.
+
+| `type` | Keeps it | Keys |
+| --- | --- | --- |
+| `ram` | In the process's memory, up to `limit` | `limit`, default `512MB`; `max_drain_bytes` |
+| `redis` | On Redis, under the workspace's own keys | `url`, `key_prefix`, `limit`, `max_drain_bytes` |
+
+`limit` is in bytes or a size string. `max_drain_bytes` is the largest file a
+streamed read copies into the cache: 8 MiB or `limit`, whichever is smaller,
+and never more than `limit`.
+
+The key is `cache`, beside `store` rather than inside it.
+
+## In memory
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    cache:
+      type: ram
+      limit: 2GB
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.cache.file.config import CacheConfig
+
+    ws = Workspace(mounts, cache=CacheConfig(limit="2GB"))
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(mounts, { cache: { type: 'ram', limit: '2GB' } })
+    ```
+  </Tab>
+</Tabs>
+
+## On Redis
+
+With the cache on Redis, a file one instance of the workspace read is served
+to the others without asking the backend again.
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    workspace_id: agent
+    cache:
+      type: redis
+      url: redis://redis.internal:6379/0
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.cache.file.config import RedisCacheConfig
+
+    ws = Workspace(
+        mounts,
+        workspace_id="agent",
+        cache=RedisCacheConfig(url="redis://redis.internal:6379/0"),
+    )
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(mounts, {
+      workspaceId: 'agent',
+      cache: { type: 'redis', url: 'redis://redis.internal:6379/0' },
+    })
+    ```
+  </Tab>
+</Tabs>
+
+The keys belong to the workspace, so two workspaces on one Redis never read
+each other's files. Naming the same `key_prefix` in several workspaces shares
+one cache between them, which is safe only when they mount the same backends
+at the same paths. On Redis, `limit` does not evict anything; cap the
+server's memory with `maxmemory` instead.

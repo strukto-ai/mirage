@@ -1,0 +1,102 @@
+---
+title: History
+description: Where a workspace records the commands it runs, in memory, on disk or on Redis.
+icon: clock-rotate-left
+---
+
+The history store records every command a session runs at the top level. The
+`history` builtin and `/.bash_history` are two views of that one record, and a
+[policy](/home/policy/policies) reads it as `/.bash_history`.
+
+History is kept per session. A workspace built again shows a session's
+history once it has that session again: keep the
+[sessions](/home/infrastructure/sessions) where they survive too, or give the
+session a fixed id with `default_session_id`.
+
+History grows with every command, so it can go to a backend of its own while
+the rest of the state stays where it is.
+
+| `type` | Keeps it | Keys |
+| --- | --- | --- |
+| `ram` | In the process's memory, until it exits | |
+| `disk` | In files under `root` | `root`, default `~/.mirage/state` |
+| `redis` | On Redis, under `key_prefix` and the workspace id | `url`, `key_prefix`, default `mirage:` |
+
+The group key is `store.observer`.
+
+## On disk
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    workspace_id: agent
+    store:
+      type: redis
+      url: redis://redis.internal:6379/0
+      observer:
+        type: disk
+        root: /var/lib/mirage
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.workspace.store import DiskWorkspaceStateStore, RedisWorkspaceStateStore
+
+    store = RedisWorkspaceStateStore(
+        url="redis://redis.internal:6379/0",
+        observer=DiskWorkspaceStateStore(root="/var/lib/mirage"),
+    )
+    ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { DiskWorkspaceStateStore, RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+
+    const store = new RedisWorkspaceStateStore({
+      url: 'redis://redis.internal:6379/0',
+      observer: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
+    })
+    const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
+    ```
+  </Tab>
+</Tabs>
+
+Here the rest of the state is on Redis and only the history stays on the
+machine's disk.
+
+## On Redis
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    workspace_id: agent
+    store:
+      observer:
+        type: redis
+        url: redis://history.internal:6379/0
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.workspace.store import RAMWorkspaceStateStore, RedisWorkspaceStateStore
+
+    store = RAMWorkspaceStateStore(
+        observer=RedisWorkspaceStateStore(url="redis://history.internal:6379/0"),
+    )
+    ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { RAMWorkspaceStateStore, RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+
+    const store = new RAMWorkspaceStateStore({
+      observer: new RedisWorkspaceStateStore({ url: 'redis://history.internal:6379/0' }),
+    })
+    const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
+    ```
+  </Tab>
+</Tabs>

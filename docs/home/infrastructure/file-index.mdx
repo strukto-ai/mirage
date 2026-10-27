@@ -1,0 +1,101 @@
+---
+title: Index
+description: Where a workspace caches directory listings and file metadata, for the whole workspace or one mount.
+icon: folder-tree
+---
+
+The index keeps directory listings and file metadata, so `ls`, `find` and
+`stat` answer from one listing instead of asking the backend each time.
+
+| `type` | Keeps it | Keys |
+| --- | --- | --- |
+| `ram` | In the process's memory | `ttl`, default `600` seconds |
+| `redis` | On Redis, under the workspace's own keys | `url`, `key_prefix`, `ttl` |
+
+The key is `index`, beside `store`. A mount's own `index` replaces it for that
+mount.
+
+## For the whole workspace
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    workspace_id: agent
+    index:
+      type: redis
+      url: redis://redis.internal:6379/0
+      ttl: 300
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.cache.index import RedisIndexConfig
+
+    ws = Workspace(
+        mounts,
+        workspace_id="agent",
+        index=RedisIndexConfig(url="redis://redis.internal:6379/0", ttl=300),
+    )
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(mounts, {
+      workspaceId: 'agent',
+      index: { type: 'redis', url: 'redis://redis.internal:6379/0', ttl: 300 },
+    })
+    ```
+  </Tab>
+</Tabs>
+
+With the index on Redis, one listing answers every instance of the
+workspace. The keys belong to the workspace, and naming the same `key_prefix`
+in several workspaces shares one index, as for the
+[file cache](/home/infrastructure/file-cache).
+
+## For one mount
+
+A mount whose listings change rarely can keep them longer than the rest:
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mounts:
+      /archive:
+        vfs: s3
+        config:
+          bucket: agent-archive
+        index:
+          type: ram
+          ttl: 3600
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Mount, Workspace
+    from mirage.cache.index import IndexConfig
+    from mirage.vfs.s3 import S3VFS, S3Config
+
+    ws = Workspace({
+        "/archive": Mount(
+            S3VFS(S3Config(bucket="agent-archive")),
+            index=IndexConfig(ttl=3600),
+        ),
+    })
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Mount, S3VFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace({
+      '/archive': new Mount(new S3VFS({ bucket: 'agent-archive' }), {
+        index: { type: 'ram', ttl: 3600 },
+      }),
+    })
+    ```
+  </Tab>
+</Tabs>

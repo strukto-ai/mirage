@@ -1,0 +1,95 @@
+---
+title: Namespace
+description: Where a workspace keeps symlinks and file attributes, in memory, on disk or on Redis.
+icon: link
+---
+
+The namespace store keeps what a backend has no place for:
+
+- Symlinks made with `ln -s`.
+- Modes, owners and times that `chmod`, `chown` and `touch` set on a backend
+  that cannot store them.
+- Extended attributes set with `setfattr`.
+
+Every instance of the workspace on the same store sees the same links and
+attributes.
+
+| `type` | Keeps them | Keys |
+| --- | --- | --- |
+| `ram` | In the process's memory, until it exits | |
+| `disk` | In files under `root` | `root`, default `~/.mirage/state` |
+| `redis` | On Redis, under `key_prefix` and the workspace id | `url`, `key_prefix`, default `mirage:` |
+
+`store.namespace` moves only this store. `store.type` moves it together with
+the others, as the [overview](/home/infrastructure/overview#one-store-or-several)
+shows.
+
+## On disk
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    workspace_id: agent
+    store:
+      namespace:
+        type: disk
+        root: /var/lib/mirage
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.workspace.store import DiskWorkspaceStateStore, RAMWorkspaceStateStore
+
+    store = RAMWorkspaceStateStore(
+        namespace=DiskWorkspaceStateStore(root="/var/lib/mirage"),
+    )
+    ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { DiskWorkspaceStateStore, RAMWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+
+    const store = new RAMWorkspaceStateStore({
+      namespace: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
+    })
+    const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
+    ```
+  </Tab>
+</Tabs>
+
+## On Redis
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    workspace_id: agent
+    store:
+      namespace:
+        type: redis
+        url: redis://redis.internal:6379/0
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.workspace.store import RAMWorkspaceStateStore, RedisWorkspaceStateStore
+
+    store = RAMWorkspaceStateStore(
+        namespace=RedisWorkspaceStateStore(url="redis://redis.internal:6379/0"),
+    )
+    ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { RAMWorkspaceStateStore, RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+
+    const store = new RAMWorkspaceStateStore({
+      namespace: new RedisWorkspaceStateStore({ url: 'redis://redis.internal:6379/0' }),
+    })
+    const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
+    ```
+  </Tab>
+</Tabs>

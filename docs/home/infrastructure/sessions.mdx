@@ -1,0 +1,135 @@
+---
+title: Sessions
+description: Where a workspace keeps its sessions, in memory, on disk, on Redis or in an S3 bucket.
+icon: user
+---
+
+The sessions store keeps each session's shell state and the workspace's own
+record:
+
+- Each session's working directory, variables, functions, shell options and
+  last exit status.
+- Which sessions the workspace has, and which one is the default.
+
+A workspace built again under the same id finds its sessions where it left
+them, and every instance of the workspace on the same store shares them.
+
+| `type` | Keeps them | Keys |
+| --- | --- | --- |
+| `ram` | In the process's memory, until it exits | |
+| `disk` | In files under `root` | `root`, default `~/.mirage/state` |
+| `redis` | On Redis, under `key_prefix` and the workspace id | `url`, `key_prefix`, default `mirage:` |
+| `s3` | In a bucket, under `key_prefix` and the workspace id | The [S3 config fields](/home/setup/s3), `key_prefix`, default `mirage/` |
+
+The group key is `store.workspace`. It is the only store that takes `s3`, so
+`s3` goes on this key, never on `store.type`.
+
+## On disk
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    workspace_id: agent
+    store:
+      workspace:
+        type: disk
+        root: /var/lib/mirage
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.workspace.store import DiskWorkspaceStateStore, RAMWorkspaceStateStore
+
+    store = RAMWorkspaceStateStore(
+        workspace=DiskWorkspaceStateStore(root="/var/lib/mirage"),
+    )
+    ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { DiskWorkspaceStateStore, RAMWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+
+    const store = new RAMWorkspaceStateStore({
+      workspace: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
+    })
+    const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
+    ```
+  </Tab>
+</Tabs>
+
+## On Redis
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    workspace_id: agent
+    store:
+      workspace:
+        type: redis
+        url: redis://redis.internal:6379/0
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.workspace.store import RAMWorkspaceStateStore, RedisWorkspaceStateStore
+
+    store = RAMWorkspaceStateStore(
+        workspace=RedisWorkspaceStateStore(url="redis://redis.internal:6379/0"),
+    )
+    ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { RAMWorkspaceStateStore, RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+
+    const store = new RAMWorkspaceStateStore({
+      workspace: new RedisWorkspaceStateStore({ url: 'redis://redis.internal:6379/0' }),
+    })
+    const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
+    ```
+  </Tab>
+</Tabs>
+
+## In an S3 bucket
+
+The block takes the same fields as an [S3 mount](/home/setup/s3), so
+credentials and an `endpoint_url` for an S3-compatible store go here too.
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    workspace_id: agent
+    store:
+      workspace:
+        type: s3
+        bucket: agent-state
+        region: us-east-1
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import Workspace
+    from mirage.vfs.s3 import S3Config
+    from mirage.workspace.store import RAMWorkspaceStateStore, S3WorkspaceStateStore
+
+    store = RAMWorkspaceStateStore(
+        workspace=S3WorkspaceStateStore(S3Config(bucket="agent-state", region="us-east-1")),
+    )
+    ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { RAMWorkspaceStateStore, S3WorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+
+    const store = new RAMWorkspaceStateStore({
+      workspace: new S3WorkspaceStateStore({ bucket: 'agent-state', region: 'us-east-1' }),
+    })
+    const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
+    ```
+  </Tab>
+</Tabs>
