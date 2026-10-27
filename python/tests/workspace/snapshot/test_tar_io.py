@@ -48,6 +48,24 @@ def test_a_captured_file_replaced_by_a_link_is_refused(tmp_path):
     assert b"host" not in buffer.getvalue()
 
 
+def test_a_blob_path_tar_spells_otherwise_reads_back(tmp_path):
+    buffer = io.BytesIO()
+    write_tar(buffer, {"k": {BLOB_REF_KEY: "./b//f"}}, {"./b//f": b"data"})
+    buffer.seek(0)
+    assert read_tar(buffer) == {"k": b"data"}
+    buffer.seek(0)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    state = read_tar(buffer, staging)
+    assert state == {"k": b"data"}
+    buffer = io.BytesIO()
+    write_tar(buffer, _disk_manifest("./b//f"), {"./b//f": b"data"})
+    buffer.seek(0)
+    mount = read_tar(buffer, staging)[StateKey.MOUNTS][0]
+    vfs_state = mount[MountKey.VFS_STATE]
+    assert vfs_state[VFSStateKey.FILES]["f"] == staging / "b" / "f"
+
+
 def test_a_staged_blob_stays_inside_the_staging_directory(tmp_path):
     buffer = io.BytesIO()
     write_tar(buffer, _disk_manifest("b/f"), {"b/f": b"data"})

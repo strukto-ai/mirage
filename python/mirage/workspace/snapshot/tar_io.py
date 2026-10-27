@@ -169,8 +169,11 @@ def read_tar(
                 return
             if manifest is None:
                 manifest = _manifest_of(held)
-                wanted = _blob_paths(manifest)
-                disk = {blob for _, _, blob in _disk_file_refs(manifest)}
+                wanted = {_member_name(blob) for blob in _blob_paths(manifest)}
+                disk = {
+                    _member_name(blob)
+                    for _, _, blob in _disk_file_refs(manifest)
+                }
             if name not in wanted:
                 return
             if staging is None or name not in disk:
@@ -210,15 +213,15 @@ def read_tar(
     if manifest is None:
         manifest = _manifest_of(held)
     for files_map, rel, blob_path in _disk_file_refs(manifest):
-        if blob_path in staged:
-            files_map[rel] = staged[blob_path]
+        if _member_name(blob_path) in staged:
+            files_map[rel] = staged[_member_name(blob_path)]
 
     def reader(blob_path: str) -> bytes:
-        if blob_path not in held:
+        if _member_name(blob_path) not in held:
             raise ValueError(
                 f"Manifest references missing blob: {blob_path!r}"
             )
-        return bytes(held[blob_path])
+        return bytes(held[_member_name(blob_path)])
 
     return resolve_manifest(manifest, reader)
 
@@ -260,6 +263,16 @@ def _manifest_of(held: dict[str, bytearray]) -> dict[str, Any]:
     if _MANIFEST_NAME not in held:
         raise ValueError(f"{_MANIFEST_NAME} missing or unreadable")
     return cast(dict[str, Any], json.loads(held[_MANIFEST_NAME]))
+
+
+def _member_name(path: str) -> str:
+    """The name tar's -x gives the member a blob path was written under:
+    the path without its empty and ``.`` components.
+
+    Args:
+        path (str): the blob path.
+    """
+    return "/".join(part for part in path.split("/") if part not in ("", "."))
 
 
 def _blob_paths(manifest: dict[str, Any]) -> set[str]:
