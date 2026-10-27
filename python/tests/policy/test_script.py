@@ -946,17 +946,22 @@ if user["admin"]:
 """
 
 
+async def _lookup_user(name):
+    return {"admin": name == "root"}
+
+
+async def _directory_down(name):
+    raise ValueError("directory down")
+
+
 @pytest.mark.asyncio
 async def test_a_monty_program_calls_the_hosts_functions():
-    async def lookup_user(name):
-        return {"admin": name == "root"}
-
     entry = dataclasses.replace(
         _entry(source=_CALLS_LOOKUP), env={"WHO": "root"}
     )
     policy = ScriptPolicy(
         Programs({"pre_command": (entry,)}),
-        external_lookup={"lookup_user": lookup_user},
+        external_lookup={"lookup_user": _lookup_user},
     )
     try:
         assert await policy.pre_command(_ctx(command="rm")) == (
@@ -982,9 +987,6 @@ async def test_a_monty_program_without_the_function_fails_closed():
 
 @pytest.mark.asyncio
 async def test_a_function_that_raises_raises_in_the_program():
-    async def lookup_user(name):
-        raise ValueError("directory down")
-
     source = """
 import json
 try:
@@ -994,7 +996,7 @@ except ValueError as exc:
 """
     policy = ScriptPolicy(
         Programs({"pre_command": (_entry(source=source),)}),
-        external_lookup={"lookup_user": lookup_user},
+        external_lookup={"lookup_user": _directory_down},
     )
     try:
         assert await policy.pre_command(_ctx()) == (Ask("directory down"),)
@@ -1054,13 +1056,21 @@ async def test_only_a_monty_runtime_is_handed_the_functions(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_an_env_read_that_stalls_times_out(monkeypatch):
+async def test_an_env_read_that_stalls_times_out_and_is_tried_again(
+    monkeypatch,
+):
     monkeypatch.setattr(
         "mirage.policy.script.SCRIPT_EVAL_TIMEOUT_SECONDS", 0.05
     )
 
-    async def stalled():
-        await asyncio.Event().wait()
+    monkeypatch.setenv("POLICY_TOKEN", "t")
+    calls = 0
+
+    async def stalls_once():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await asyncio.Event().wait()
         return {}
 
     engine = FakeProgram()
@@ -1068,13 +1078,15 @@ async def test_an_env_read_that_stalls_times_out(monkeypatch):
         _entry(), env={"TOKEN": SecretRef(provider="env", key="POLICY_TOKEN")}
     )
     policy = ScriptPolicy(
-        Programs({"pre_command": (entry,)}), secret_sources=stalled
+        Programs({"pre_command": (entry,)}), secret_sources=stalls_once
     )
     policy._engines[_key(entry)] = (engine, asyncio.Lock())
     assert await policy.pre_command(_ctx()) == (
         Deny("profile 'release' policy timed out after 0.05s"),
     )
     assert engine.requests == []
+    assert await policy.pre_command(_ctx()) is None
+    assert engine.requests[0].env["TOKEN"] == "t"
 
 
 @pytest.mark.asyncio

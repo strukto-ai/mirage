@@ -2271,11 +2271,12 @@ if await directory(ctx["command"], os.environ["TOKEN"]):
         await ws.close()
 
 
+async def _directory(command):
+    return command == "rm"
+
+
 @pytest.mark.asyncio
 async def test_a_copy_and_a_restore_keep_the_policy_functions(tmp_path):
-    async def directory(command):
-        return command == "rm"
-
     source = """
 import json, os
 ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
@@ -2294,14 +2295,14 @@ if await directory(ctx["command"]):
                 }
             }
         },
-        policy_functions={"directory": directory},
+        policy_functions={"directory": _directory},
     )
     ws.create_session("s", profile="release")
     tar = tmp_path / "ws.tar"
     await ws.snapshot(tar)
     copied = await ws.copy()
     restored = await Workspace.load(
-        tar, policy_functions={"directory": directory}
+        tar, policy_functions={"directory": _directory}
     )
     try:
         for each in (copied, restored):

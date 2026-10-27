@@ -476,9 +476,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         """
         engine, lock = self._engine(entry)
         try:
-            env = await asyncio.wait_for(
-                self._env(entry), timeout=SCRIPT_EVAL_TIMEOUT_SECONDS
-            )
+            env = await self._env(entry)
             async with lock or contextlib.nullcontext():
                 result = await asyncio.wait_for(
                     engine.execute(
@@ -550,7 +548,8 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     async def _env(self, entry: ProfileScript) -> dict[str, str]:
         """One program's ``env`` with every pointer read: one read per
         program, shared by the runs waiting on it and kept once it
-        answers, retried by the next run after it fails.
+        answers, given the program's timeout and retried by the next run
+        after it fails or runs out of time.
 
         Args:
             entry (ProfileScript): the program.
@@ -570,7 +569,11 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         )
         task = self._envs.get(key)
         if task is None:
-            task = asyncio.ensure_future(self._read_env(entry))
+            task = asyncio.ensure_future(
+                asyncio.wait_for(
+                    self._read_env(entry), timeout=SCRIPT_EVAL_TIMEOUT_SECONDS
+                )
+            )
             self._envs[key] = task
         try:
             return await asyncio.shield(task)

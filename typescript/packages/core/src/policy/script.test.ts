@@ -1043,21 +1043,28 @@ describe('ScriptPolicy env reads', () => {
     vi.unstubAllEnvs()
   })
 
-  it('times out an env read that stalls', async () => {
+  it('times out an env read that stalls, and tries again', async () => {
+    vi.stubEnv('POLICY_TOKEN', 't')
     const seconds = SCRIPT_EVAL_TIMEOUT.seconds
     SCRIPT_EVAL_TIMEOUT.seconds = 0.05
     try {
+      let calls = 0
       const engine = new FakeProgram()
       built.factory = () => engine
       const policy = track(
         new ScriptPolicy(scripts({ preCommand: [{ ...entry(), env: pointer }] }), null, {
-          secretSources: () => new Promise(() => undefined),
+          secretSources: () => {
+            calls += 1
+            return calls === 1 ? new Promise(() => undefined) : Promise.resolve({})
+          },
         }),
       )
       expect(await policy.preCommand(ctx())).toEqual([
         { kind: 'deny', reason: "profile 'release' policy timed out after 0.05s" },
       ])
       expect(engine.requests).toEqual([])
+      expect(await policy.preCommand(ctx())).toBeNull()
+      expect(engine.requests[0]?.env?.TOKEN).toBe('t')
     } finally {
       SCRIPT_EVAL_TIMEOUT.seconds = seconds
     }

@@ -420,11 +420,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
     let result: RunResult
     try {
       const engine = this.engine(entry)
-      const env = await runWithTimeout(
-        this.env(entry),
-        SCRIPT_EVAL_TIMEOUT.seconds,
-        'policy program',
-      )
+      const env = await this.env(entry)
       const run = async (): Promise<RunResult> => {
         // The runtime stops itself at the deadline; the signal stops it
         // when the wait gives up first, before the next run takes the
@@ -499,9 +495,10 @@ export class ScriptPolicy implements Policy, SessionScoped {
 
   /**
    * One program's `env` with every pointer read: one read per program,
-   * shared by the runs waiting on it and kept once it answers, retried by
-   * the next run after it fails. Throws a clause about "script" when a
-   * source cannot answer.
+   * shared by the runs waiting on it and kept once it answers, given the
+   * program's timeout and retried by the next run after it fails or runs
+   * out of time. Throws a clause about "script" when a source cannot
+   * answer.
    */
   private env(entry: ProfileScript): Promise<Record<string, string>> {
     const key = JSON.stringify([
@@ -512,7 +509,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
     ])
     let reading = this.envs.get(key)
     if (reading === undefined) {
-      reading = this.readEnv(entry)
+      reading = runWithTimeout(this.readEnv(entry), SCRIPT_EVAL_TIMEOUT.seconds, 'policy program')
       this.envs.set(key, reading)
       reading.catch(() => {
         if (this.envs.get(key) === reading) this.envs.delete(key)
