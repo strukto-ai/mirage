@@ -7,8 +7,9 @@ icon: user
 The sessions store keeps each session's shell state and the workspace's own
 record:
 
-- Each session's working directory, variables, functions, shell options and
-  last exit status.
+- Each session's working directory, variables, functions, mount modes and
+  [profile](/home/profiles) rules. Shell options and the last exit status
+  stay with the running instance.
 - Which sessions the workspace has, and which one is the default.
 
 A workspace built again under the same id finds its sessions where it left
