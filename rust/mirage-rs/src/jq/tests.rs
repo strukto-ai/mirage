@@ -389,15 +389,110 @@ const CASES: &[(&str, &str, &[&str])] = &[
         "[[1],0]",
         &["[[1,2],[0,1,2]]"],
     ),
+    (
+        r#"[match("(a)|b"; "g") | .captures]"#,
+        r#""ab""#,
+        &[
+            r#"[[{"offset":0,"length":1,"string":"a","name":null}],[{"offset":-1,"string":null,"length":0,"name":null}]]"#,
+        ],
+    ),
+    (
+        r#"capture("(?<y>\\d{4})-(?<m>\\d{2})")"#,
+        r#""2023-01""#,
+        &[r#"{"y":"2023","m":"01"}"#],
+    ),
+    (
+        r#"[match("."; "g") | [.offset, .length]]"#,
+        r#""x😀é""#,
+        &[r#"[[0,1],[1,1],[2,1]]"#],
+    ),
+    (
+        r#"[match("^|."; "g") | [.offset, .length, .string]]"#,
+        r#""éa""#,
+        &[r#"[[0,0,""],[0,1,"�"],[1,1,"a"]]"#],
+    ),
+    (
+        r#"[match(""; "g") | .offset]"#,
+        r#""éé""#,
+        &[r#"[0,1,1,2,2]"#],
+    ),
+    (
+        r#"gsub("(?<x>[A-Z])"; "_\(.x | ascii_downcase)")"#,
+        r#""CamelCaseString""#,
+        &[r#""_camel_case_string""#],
+    ),
+    (
+        r#"[splits(", *"; null)]"#,
+        r#""a, b,c""#,
+        &[r#"["a","b","c"]"#],
+    ),
+    (r#"[scan("b+"; "i")]"#, r#""abBbcB""#, &[r#"["bBb","B"]"#]),
+    (
+        r#"[match("ab|abcd"; "gl") | .string]"#,
+        r#""abcd ab abcd""#,
+        &[r#"["abcd","abcd"]"#],
+    ),
+    (
+        r#"[match("b*"; "gn") | .offset]"#,
+        r#""abbcb""#,
+        &[r#"[1,4]"#],
+    ),
+    (
+        r#"[match("(?<=a+)b"; "g") | .offset]"#,
+        r#""aab b ab""#,
+        &[r#"[2,7]"#],
+    ),
+    (
+        r#"[match("(?i)k"; "g") | .string]"#,
+        r#""kKK""#,
+        &["[\"k\",\"K\",\"\u{212a}\"]"],
+    ),
+    (
+        r#"[match("(?:()|())*\\1\\2") | .captures[] | .offset]"#,
+        r#""""#,
+        &[r#"[0,0]"#],
+    ),
+    (
+        r#"[match("\\bbar\\b|o\\B"; "g") | .offset]"#,
+        r#""foo bar""#,
+        &[r#"[1,4]"#],
+    ),
+    (
+        r#"[match("$"; "g") | .offset], [match("(?m)^"; "g") | .offset]"#,
+        r#""a\nb\n""#,
+        &[r#"[3,4]"#, r#"[0,2]"#],
+    ),
+    (
+        r#"try test("(") catch ."#,
+        r#""x""#,
+        &[r#""Regex failure: end pattern with unmatched parenthesis""#],
+    ),
+    (
+        r#"try test("a"; "gq") catch ."#,
+        r#""x""#,
+        &[r#""gq is not a valid modifier string""#],
+    ),
+    (
+        r#"try (1 | test("a")) catch ."#,
+        "null",
+        &[r#""number (1) cannot be matched, as it is not a string""#],
+    ),
+    (
+        r#"try test("a"; 1) catch ."#,
+        r#""x""#,
+        &[r#""number (1) is not a string""#],
+    ),
+    (
+        r#"try test("(?<=a|bc)b") catch ."#,
+        r#""x""#,
+        &[r#""Regex failure: invalid pattern in look-behind""#],
+    ),
 ];
 
 #[test]
 fn programs_match_jq() {
     let mut failures = Vec::new();
     for (program, input, expected) in CASES {
-        if program.contains("splits") {
-            continue;
-        }
         let got = outputs(program, input);
         if got != *expected {
             failures.push(format!(
@@ -411,9 +506,6 @@ fn programs_match_jq() {
 #[test]
 fn every_budget_gives_the_same_frames() {
     for (program, input, _) in CASES {
-        if program.contains("splits") {
-            continue;
-        }
         let whole = run(program, input, 1 << 16);
         for steps in [1, 7, 128] {
             assert_eq!(
@@ -423,6 +515,30 @@ fn every_budget_gives_the_same_frames() {
             );
         }
     }
+}
+
+/// Exponential backtracking stops at Oniguruma's retry limit, as jq's
+/// does, and the search behind it pauses at every drain on the way.
+#[test]
+fn a_runaway_regex_pauses_every_drain_until_the_retry_limit() {
+    let mut stream = open(r#"test("^(a+)+$")"#, 1 << 16);
+    let mut wire = Vec::new();
+    stream
+        .feed(format!("\"{}!\"", "a".repeat(30)).as_bytes(), &mut wire)
+        .unwrap();
+    stream.finish(&mut wire).unwrap();
+    let mut drains = 0;
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+        drains += 1;
+    }
+    assert!(drains > 100, "{drains} drains");
+    assert_eq!(
+        frames(&wire),
+        vec![Frame::Err(
+            "Regex failure: retry-limit-in-match over".into()
+        )]
+    );
 }
 
 #[test]
@@ -580,7 +696,7 @@ fn deep_values_drop_and_print_without_recursion() {
 
 #[test]
 fn unsupported_builtins_refuse_to_compile() {
-    for program in ["test(\"a\")", "@base32"] {
+    for program in ["builtins", "modulemeta", "@base32", "@urid"] {
         assert!(compile(program, &HashMap::new()).is_err(), "{program}");
     }
 }
@@ -620,7 +736,23 @@ const DIVERGENT: &[(&str, &str)] = &[
 /// program to libjq; any other difference fails unless DIVERGENT names it.
 #[test]
 fn jq_test_corpus() {
-    let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!("corpus.json")).unwrap();
+    let (pass, refused) = run_corpus(include_str!("corpus.json"));
+    assert!(
+        pass >= 506 && refused <= 13,
+        "pass {pass}, refused {refused}"
+    );
+}
+
+/// jq 1.8.2's tests/onig.test, its regex cases, run as the corpus above.
+#[test]
+fn onig_test_corpus() {
+    let (pass, refused) = run_corpus(include_str!("onig.json"));
+    assert!(pass >= 47 && refused == 0, "pass {pass}, refused {refused}");
+}
+
+/// Runs a corpus: how many cases passed and how many were refused.
+fn run_corpus(corpus: &str) -> (usize, usize) {
+    let cases: Vec<serde_json::Value> = serde_json::from_str(corpus).unwrap();
     let (mut pass, mut refused, mut mismatch) = (0, 0, Vec::new());
     for case in &cases {
         let program = case["program"].as_str().unwrap();
@@ -671,10 +803,7 @@ fn jq_test_corpus() {
         }
     }
     assert!(mismatch.is_empty(), "{}", mismatch.join("\n"));
-    assert!(
-        pass >= 506 && refused <= 13,
-        "pass {pass}, refused {refused}"
-    );
+    (pass, refused)
 }
 
 #[test]

@@ -2635,11 +2635,12 @@ bzip2/libbzip2 version 1.1.0 of 6 September 2010
 The JSON parser and UTF-8 decoder in rust/mirage-rs/src/jq/ follow
 src/jv_parse.c, src/jv.c, src/jv_unicode.c and src/jv_utf8_tables.h of jq
 1.8.2 (https://github.com/jqlang/jq); its evaluator (syntax.rs, compile.rs,
-vm.rs, builtin.rs, host.rs, time.rs, value.rs and builtin.jq) follows src/lexer.l,
-src/parser.y, src/compile.c, src/execute.c, src/exec_stack.h,
+vm.rs, builtin.rs, host.rs, time.rs, regex.rs, value.rs and builtin.jq) follows
+src/lexer.l, src/parser.y, src/compile.c, src/execute.c, src/exec_stack.h,
 src/builtin.c, src/builtin.jq, src/jv_aux.c, src/jv_print.c and the
-callbacks of src/main.c and src/util.c, and its
-test corpus (corpus.json) holds the programs and inputs of tests/jq.test;
+callbacks of src/main.c and src/util.c, and its test corpora (corpus.json
+and onig.json) hold the programs and inputs of tests/jq.test and
+tests/onig.test;
 the input reader in
 python/mirage/core/jq/stream.py and
 typescript/packages/core/src/core/jq/stream.ts follows its src/util.c; and
@@ -2702,6 +2703,42 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+------------------------------------------------------------------------
+
+The regex engine in rust/mirage-rs/src/jq/onig/ follows Oniguruma 6.9.10
+(https://github.com/kkos/oniguruma), the library jq 1.8.2 matches with:
+its ONIG_SYNTAX_PERL_NG pattern syntax and error texts follow
+src/regparse.c, src/regsyntax.c and src/regerror.c, its lookbehind checks
+src/regcomp.c, and its matcher and search limits src/regexec.c. Oniguruma
+carries this notice:
+
+Oniguruma LICENSE
+-----------------
+
+Copyright (c) 2002-2021  K.Kosako  <kkosako0@gmail.com>
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE.
 
 ------------------------------------------------------------------------
 

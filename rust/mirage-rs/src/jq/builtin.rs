@@ -48,7 +48,7 @@ fn fail(message: impl Into<String>) -> Fault {
     Fault::Error(Value::string(message.into()))
 }
 
-fn type_error(bad: &Value, message: &str) -> Fault {
+pub(super) fn type_error(bad: &Value, message: &str) -> Fault {
     fail(format!("{} ({}) {message}", bad.kind(), bad.dump_trunc()))
 }
 
@@ -194,6 +194,7 @@ cfuncs! {
     Strftime = "strftime" / 1,
     StrfLocaltime = "strflocaltime" / 1,
     Strptime = "strptime" / 1,
+    MatchImpl = "_match_impl" / 3,
 }
 
 /// Steps a call is charged beyond its dispatch: one per 16 elements or
@@ -231,7 +232,7 @@ fn string_limit(text: String, limits: Limits) -> Answer {
     Ok(Value::string(text))
 }
 
-fn array_limit(items: Vec<Value>, limits: Limits) -> Answer {
+pub(super) fn array_limit(items: Vec<Value>, limits: Limits) -> Answer {
     if items.len() > limits.items {
         return Err(fail(format!(
             "jq array limit of {} elements exceeded",
@@ -517,6 +518,12 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
         | Cfunc::Strftime
         | Cfunc::StrfLocaltime
         | Cfunc::Strptime => unreachable!("the VM runs the time builtins with its clock"),
+        Cfunc::MatchImpl => {
+            let mut budget = u64::MAX;
+            super::regex::Matching::begin(&args)?
+                .run(&mut budget, limits)
+                .unwrap_or_else(|| unreachable!("an unlimited search paused"))
+        }
     }
 }
 
