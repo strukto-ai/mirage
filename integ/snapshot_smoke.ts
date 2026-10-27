@@ -58,9 +58,11 @@ async function functions(ws: Workspace, phase: 'write' | 'read'): Promise<void> 
 }
 
 async function write(path: string): Promise<void> {
+  const direct = new RAMVFS()
   const ws = new Workspace(
     {
-      '/direct/': new RAMVFS(),
+      '/direct/': direct,
+      '/same/': direct,
       '/nested/registered/': new Mount(await buildVfs('portable-ram'), {
         vfsRef: 'portable-ram',
         index: { ttl: 37 },
@@ -85,6 +87,8 @@ async function read(path: string): Promise<void> {
     await check(ws, 'cat /direct/note.txt', 'portable\n')
     await check(ws, 'cat /nested/registered/*.txt', 'registered\n')
     await check(ws, 'cat /nested/registered/link', 'portable\n')
+    await check(ws, "printf 'one store\\n' > /same/both.txt")
+    await check(ws, 'cat /direct/both.txt', 'one store\n')
     await functions(ws, 'read')
     const registered = ws.mounts().find((m) => m.prefix === '/nested/registered/')
     assert(registered?.vfs instanceof PortableRAM)
