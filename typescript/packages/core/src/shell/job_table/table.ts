@@ -1213,7 +1213,9 @@ export class JobTable {
    * then kept by the table's lease renewal (`keepLease`) while any process
    * runs, on its own timer whatever a round costs. The record is written
    * again every third of the lease, so it outlives its store's expiry and
-   * comes back should a workspace have taken this one for lapsed. A failed
+   * comes back should a workspace have taken this one for lapsed. Each
+   * record carries `seen_at`, when its processes were read, the last time
+   * this workspace vouched for them and their native runs. A failed
    * round is logged and tried again the next one, and a stop that fails
    * leaves the others it came with to be applied; the sleep between rounds
    * keeps no host alive on its own.
@@ -1225,6 +1227,7 @@ export class JobTable {
     let renewed = lease === null
     let rounds = 0
     for (;;) {
+      const seen = this.clock.now()
       const records = this.records()
       const text = JSON.stringify(records)
       try {
@@ -1234,7 +1237,12 @@ export class JobTable {
           this.keepLease()
         }
         if (text !== published || (rewrite > 0 && rounds % rewrite === 0)) {
-          await this.store.publish(this.owner, records)
+          await this.store.publish(
+            this.owner,
+            Object.fromEntries(
+              Object.entries(records).map(([pid, record]) => [pid, { ...record, seen_at: seen }]),
+            ),
+          )
           published = text
         }
         for (const [pid, signal] of await this.store.takeStops(this.owner)) {
@@ -1297,16 +1305,20 @@ export class JobTable {
    * Stop the native runs a lapsed owner left, those this workspace reaches,
    * and keep its record holding only the rest, for a workspace that reaches
    * them. The owner's lease is checked again before each run is stopped, so
-   * one that renewed meanwhile keeps its runs, and its record as it is.
+   * one that renewed meanwhile keeps its runs, and its record as it is. Each
+   * run goes to the reaper with its record's `seen_at`.
    */
   private async reapOwner(owner: string): Promise<void> {
     try {
       const records = (await this.store.processes())[owner] ?? {}
       const runsOf = (record: RecordFields) => record.runs as Record<string, JsonValue>[]
       const left: Record<string, JsonValue>[] = []
-      for (const run of Object.values(records).flatMap(runsOf)) {
-        if (await this.store.alive(owner)) return
-        if (this.reaper === null || (await this.reaper([run], 15)).length > 0) left.push(run)
+      for (const record of Object.values(records)) {
+        for (const run of runsOf(record)) {
+          if (await this.store.alive(owner)) return
+          const vouched = { ...run, seen_at: (record.seen_at ?? null) as JsonValue }
+          if (this.reaper === null || (await this.reaper([vouched], 15)).length > 0) left.push(run)
+        }
       }
       const kept: Record<string, RecordFields> = {}
       for (const [pid, record] of Object.entries(records)) {

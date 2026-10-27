@@ -1514,7 +1514,8 @@ async function until(check: () => Promise<boolean>): Promise<void> {
 
 describe('JobTable process plane', () => {
   // A table on a shared store publishes the processes it runs while it runs
-  // any, and its record goes once it runs none; another table lists them.
+  // any, each stamped with when it read them, and its record goes once it
+  // runs none; another table lists them.
   it('publishes its processes while it runs any', async () => {
     const store = new RAMJobStore(30)
     const [a, b] = [publishing(store), publishing(store)]
@@ -1529,6 +1530,7 @@ describe('JobTable process plane', () => {
     await until(async () => a.owner in (await b.remoteProcesses()))
     const record = (await b.remoteProcesses())[a.owner]?.[String(job.pid)]
     expect([record?.command, record?.session, record?.runs]).toEqual(['sleep 30', 's', []])
+    expect(Math.abs((record?.seen_at as number) - Date.now() / 1000)).toBeLessThan(5)
     expect(await a.remoteProcesses()).toEqual({})
     expect(await a.kill(job.id, 's')).toBe(true)
     await until(async () => Object.keys(await store.processes()).length === 0)
@@ -1620,14 +1622,14 @@ describe('JobTable process plane', () => {
   })
 
   // A lapsed owner's processes are not listed; the native runs it left are
-  // handed to the reaper, and its record keeps only the runs nobody here
-  // reached.
+  // handed to the reaper, each with when its owner last vouched for it, and
+  // its record keeps only the runs nobody here reached.
   it.each([false, true])("reaps a lapsed owner's runs (one unreached: %s)", async (unreached) => {
     const store = new RAMJobStore(30)
     const host = { host: 'h', pid: 41, started_at: 1, command: 'x' }
     const box = { runtime: 'docker', tag: 't', command: 'y' }
     await store.publish('dead', {
-      '2': { pid: 2, session: 's', runs: [host] },
+      '2': { pid: 2, session: 's', runs: [host], seen_at: 5 },
       '3': { pid: 3, session: 's', runs: [box] },
     })
     const reaped: [unknown[], number][] = []
@@ -1641,8 +1643,8 @@ describe('JobTable process plane', () => {
       async () => reaped.length === 2 && (await store.processes()).dead?.['2'] === undefined,
     )
     expect(reaped).toEqual([
-      [[host], 15],
-      [[box], 15],
+      [[{ ...host, seen_at: 5 }], 15],
+      [[{ ...box, seen_at: null }], 15],
     ])
     expect(await store.processes()).toEqual(
       unreached ? { dead: { '3': { pid: 3, session: 's', runs: [box] } } } : {},

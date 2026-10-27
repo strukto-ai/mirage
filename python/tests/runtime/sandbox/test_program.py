@@ -77,6 +77,20 @@ async def _ended(pid: int) -> bool:
     return False
 
 
+async def _running(pid: int) -> bool:
+    """Whether ``pid`` runs: present, and no zombie.
+
+    Args:
+        pid (int): the process to look for.
+    """
+    ps = await asyncio.create_subprocess_exec(
+        "ps", "-o", "stat=", "-p", str(pid), stdout=asyncio.subprocess.PIPE
+    )
+    out, _ = await ps.communicate()
+    state = out.decode().strip()
+    return bool(state) and not state.startswith("Z")
+
+
 @pytest.mark.asyncio
 async def test_run_cli_returns_both_streams_and_the_status():
     ran = await run_program(
@@ -601,6 +615,36 @@ async def test_a_kept_child_is_a_native_run_of_its_runner(tmp_path):
     assert runner.runs == {}
 
 
+# A kept child that exits while what it started holds its output open
+# marks its run with when it exited, the last time its group was known.
+@pytest.mark.asyncio
+async def test_a_kept_child_that_exits_first_marks_its_run(tmp_path):
+    pid_file = tmp_path / "pid"
+    children: Children = {}
+
+    async def run() -> int:
+        ran = await run_program(
+            "sh",
+            None,
+            ["-c", f"echo $$ > {pid_file}; sleep 0.5 &"],
+            None,
+            children=children,
+        )
+        return ran.exit_code
+
+    runner = ProcessTable(bind=run_with_execution).start(
+        session_id="s", command="sh", cwd=PathSpec.from_str_path("/"), run=run
+    )
+    key = f"host:{await _wait_for_pid(pid_file)}"
+    async with asyncio.timeout(5):
+        while "exited_at" not in runner.runs.get(key, {}):
+            await asyncio.sleep(0.01)
+    exited = runner.runs[key]["exited_at"]
+    assert isinstance(exited, float) and abs(exited - time.time()) < 5
+    assert (await runner.join()).exit_code == 0
+    assert runner.runs == {}
+
+
 # A run a lapsed workspace left on this host is stopped, its whole group,
 # while its PID still names the process it started; a PID that names a
 # later process, or a run of another host, is left alone.
@@ -630,8 +674,10 @@ async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
             await child.wait()
 
 
-# A run whose leader exited before the program it started is stopped too:
-# its group outlives the leader, and no new process takes its id meanwhile.
+# A run whose leader exited before the program it started is stopped too,
+# its group outliving the leader, while a member started by the time the
+# group was last known to be the run's: a group that took the id since,
+# or one never known, is left alone.
 @pytest.mark.asyncio
 async def test_a_left_host_run_whose_leader_exited_is_reaped(tmp_path):
     pid_file = tmp_path / "pid"
@@ -643,21 +689,19 @@ async def test_a_left_host_run_whose_leader_exited_is_reaped(tmp_path):
     )
     run = host_run(child.pid, ["sh"])
     await child.wait()
+    exited = {**run, "exited_at": time.time()}
     survivor = await _wait_for_pid(pid_file)
     try:
         assert await reap_host_run(run, 15)
-        async with asyncio.timeout(5):
-            while True:
-                try:
-                    os.kill(survivor, 0)
-                except ProcessLookupError:
-                    break
-                await asyncio.sleep(0.05)
+        assert await reap_host_run(
+            {**run, "seen_at": float(run["started_at"]) - 60}, 15
+        )
+        assert await _running(survivor)
+        assert await reap_host_run(exited, 15)
+        assert await _ended(survivor)
     finally:
-        try:
+        if await _running(survivor):
             os.kill(survivor, 9)
-        except ProcessLookupError:
-            pass
 
 
 def _denied(group: int, signum: int) -> None:

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from functools import partial
 
@@ -1216,7 +1217,8 @@ async def _until(check: Callable[[], Awaitable[bool]]) -> None:
 
 
 # A table on a shared store publishes the processes it runs while it runs
-# any, and its record goes once it runs none; another table lists them.
+# any, each stamped with when it read them, and its record goes once it
+# runs none; another table lists them.
 @pytest.mark.asyncio
 async def test_a_table_publishes_its_processes_while_it_runs_any(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
@@ -1234,6 +1236,7 @@ async def test_a_table_publishes_its_processes_while_it_runs_any(monkeypatch):
         "s",
         [],
     )
+    assert abs(float(record["seen_at"]) - time.time()) < 5
     assert await a.remote_processes() == {}
     assert await a.kill(job.id, "s")
 
@@ -1328,8 +1331,8 @@ async def test_a_remote_signal_reads_the_grants_after_the_store(monkeypatch):
 
 
 # A lapsed owner's processes are not listed; the native runs it left are
-# handed to the reaper, and its record keeps only the runs nobody here
-# reached.
+# handed to the reaper, each with when its owner last vouched for it, and
+# its record keeps only the runs nobody here reached.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("unreached", [False, True])
 async def test_a_lapsed_owners_runs_are_reaped(unreached):
@@ -1339,7 +1342,7 @@ async def test_a_lapsed_owners_runs_are_reaped(unreached):
     await store.publish(
         "dead",
         {
-            "2": {"pid": 2, "session": "s", "runs": [host]},
+            "2": {"pid": 2, "session": "s", "runs": [host], "seen_at": 5.0},
             "3": {"pid": 3, "session": "s", "runs": [box]},
         },
     )
@@ -1347,7 +1350,7 @@ async def test_a_lapsed_owners_runs_are_reaped(unreached):
 
     async def reaper(runs: list, signum: int) -> list:
         reaped.append((runs, signum))
-        return [run for run in runs if unreached and run == box]
+        return [run for run in runs if unreached and run.get("tag") == "t"]
 
     b = JobTable(store)
     b.reaper = reaper
@@ -1355,7 +1358,10 @@ async def test_a_lapsed_owners_runs_are_reaped(unreached):
     async with asyncio.timeout(5):
         while b._reaping:
             await asyncio.sleep(0.01)
-    assert reaped == [([host], 15), ([box], 15)]
+    assert reaped == [
+        ([{**host, "seen_at": 5.0}], 15),
+        ([{**box, "seen_at": None}], 15),
+    ]
     kept = await store.processes()
     if unreached:
         assert kept == {

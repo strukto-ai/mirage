@@ -1400,9 +1400,11 @@ class JobTable:
         (``_keep_lease``) while any process runs, on its own timer
         whatever a round costs. The record is written again every third
         of the lease, so it outlives its store's expiry and comes back
-        should a workspace have taken this one for lapsed. A failed round
-        is logged and tried again the next one, and a stop that fails
-        leaves the others it came with to be applied.
+        should a workspace have taken this one for lapsed. Each record
+        carries ``seen_at``, when its processes were read, the last time
+        this workspace vouched for them and their native runs. A failed
+        round is logged and tried again the next one, and a stop that
+        fails leaves the others it came with to be applied.
         """
         published: dict[str, RecordFields] | None = None
         lease = self.store.lease_seconds
@@ -1414,6 +1416,7 @@ class JobTable:
         renewed = lease is None
         rounds = 0
         while True:
+            seen = self.clock.now()
             records = self._records()
             try:
                 if not renewed:
@@ -1421,7 +1424,13 @@ class JobTable:
                     renewed = True
                     self._keep_lease()
                 if records != published or (rewrite and rounds % rewrite == 0):
-                    await self.store.publish(self.owner, records)
+                    await self.store.publish(
+                        self.owner,
+                        {
+                            pid: {**record, "seen_at": seen}
+                            for pid, record in records.items()
+                        },
+                    )
                     published = records
                 for pid, signal in await self.store.take_stops(self.owner):
                     try:
@@ -1478,7 +1487,8 @@ class JobTable:
         workspace reaches, and keep its record holding only the rest, for
         a workspace that reaches them. The owner's lease is checked again
         before each run is stopped, so one that renewed meanwhile keeps
-        its runs, and its record as it is.
+        its runs, and its record as it is. Each run goes to the reaper
+        with its record's ``seen_at``.
 
         Args:
             owner (str): the lapsed owner.
@@ -1490,7 +1500,9 @@ class JobTable:
                 for run in record["runs"]:
                     if await self.store.alive(owner):
                         return
-                    if self.reaper is None or await self.reaper([run], 15):
+                    if self.reaper is None or await self.reaper(
+                        [{**run, "seen_at": record.get("seen_at")}], 15
+                    ):
                         left.append(run)
             kept = {
                 pid: {

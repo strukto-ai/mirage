@@ -42,6 +42,14 @@ async function ended(pid: number): Promise<boolean> {
   return false
 }
 
+// Whether `pid` runs: present, and no zombie.
+function running(pid: number): boolean {
+  const state = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+    encoding: 'utf8',
+  }).stdout.trim()
+  return state !== '' && !state.startsWith('Z')
+}
+
 // A child that starts a sleep in a session of its own, so killing the
 // child's group leaves it running with the output pipes it inherited.
 const ESCAPE = [
@@ -568,6 +576,35 @@ describe('host runs', () => {
     expect(runner.runs).toEqual({})
   })
 
+  // A kept child that exits while what it started holds its output open
+  // marks its run with when it exited, the last time its group was known.
+  it('marks the run of a kept child that exits first', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const children = new Set<ChildProcess>()
+    const runner = new ProcessTable(runWithExecution).start({
+      sessionId: 's',
+      command: 'sh',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      run: async () =>
+        (
+          await runProgram('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.5 &`], null, {
+            children,
+          })
+        ).exitCode,
+    })
+    const key = `host:${String(await escapedPid(pidFile))}`
+    const deadline = Date.now() + 5000
+    while (runner.runs[key]?.exited_at === undefined && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    const exited = runner.runs[key]?.exited_at
+    expect(typeof exited === 'number' && Math.abs(exited - Date.now() / 1000) < 5).toBe(true)
+    expect((await runner.join()).exitCode).toBe(0)
+    expect(runner.runs).toEqual({})
+  })
+
   // A run a lapsed workspace left on this host is stopped, its whole group,
   // while its PID still names the process it started; a PID that names a
   // later process, or a run of another host, is left alone.
@@ -598,8 +635,10 @@ describe('host runs', () => {
     }
   })
 
-  // A run whose leader exited before the program it started is stopped too:
-  // its group outlives the leader, and no new process takes its id meanwhile.
+  // A run whose leader exited before the program it started is stopped too,
+  // its group outliving the leader, while a member started by the time the
+  // group was last known to be the run's: a group that took the id since,
+  // or one never known, is left alone.
   it('reaps a left host run whose leader exited', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
@@ -609,24 +648,16 @@ describe('host runs', () => {
     })
     const run = hostRun(child.pid ?? 0, ['sh'])
     await new Promise((resolve) => child.once('exit', resolve))
+    const exited = { ...run, exited_at: Date.now() / 1000 }
     const survivor = await escapedPid(pidFile)
-    const alive = (): boolean => {
-      try {
-        process.kill(survivor, 0)
-        return true
-      } catch {
-        return false
-      }
-    }
     try {
       expect(await reapHostRun(run, 15)).toBe(true)
-      const deadline = Date.now() + 5000
-      while (alive() && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 50))
-      }
-      expect(alive()).toBe(false)
+      expect(await reapHostRun({ ...run, seen_at: (run.started_at as number) - 60 }, 15)).toBe(true)
+      expect(running(survivor)).toBe(true)
+      expect(await reapHostRun(exited, 15)).toBe(true)
+      expect(await ended(survivor)).toBe(true)
     } finally {
-      if (alive()) process.kill(survivor, 'SIGKILL')
+      if (running(survivor)) process.kill(survivor, 'SIGKILL')
     }
   })
 

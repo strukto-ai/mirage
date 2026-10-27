@@ -163,8 +163,13 @@ export async function runProgram(
   signal?.addEventListener('abort', abort, { once: true })
   children?.add(child)
   const runKey = `host:${String(child.pid)}`
-  if (children !== undefined && child.pid !== undefined)
-    runner?.addRun(runKey, hostRun(child.pid, [executable, ...args]))
+  if (children !== undefined && child.pid !== undefined && runner !== null) {
+    const run = hostRun(child.pid, [executable, ...args])
+    runner.addRun(runKey, run)
+    child.once('exit', () => {
+      if (runKey in runner.runs) runner.addRun(runKey, { ...run, exited_at: Date.now() / 1000 })
+    })
+  }
   const exited = new Promise<number>((resolve, reject) => {
     child.once('error', (error: NodeJS.ErrnoException) => {
       reject(error.code === 'ENOENT' && hint !== null ? new Error(hint) : error)
@@ -233,49 +238,63 @@ export async function runProgram(
 /**
  * How another workspace on this host reaches a child `runProgram` started,
  * which leads its own process group: the host, the PID, and when it
- * started, so a PID the host reused is never taken for it. Mirrors Python's
- * `host_run`.
+ * started, so a PID the host reused is never taken for it. `runProgram` adds
+ * `exited_at` once the child exits while what it started may run on. Mirrors
+ * Python's `host_run`.
  */
 export function hostRun(pid: number, argv: readonly string[]): Record<string, JsonValue> {
   return { host: hostname(), pid, started_at: Date.now() / 1000, command: shellJoin(argv) }
 }
 
-/**
- * When a host process started, as `ps -o lstart` prints it, in epoch
- * seconds; null once no process has the PID. Rejects when the host has no
- * `ps`.
- */
-function startedAt(pid: number): Promise<number | null> {
-  const lstart = /^\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/
-  const months = 'JanFebMarAprMayJunJulAugSepOctNovDec'
+/** What `ps` prints given `args`, in the C locale; rejects when the host has no `ps`. */
+function ps(args: readonly string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(
-      'ps',
-      ['-o', 'lstart=', '-p', String(pid)],
-      { env: { ...process.env, LC_ALL: 'C' } },
-      (error, stdout) => {
-        if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
-          reject(error as Error)
-          return
-        }
-        const found = lstart.exec(stdout.trim())
-        if (found === null) {
-          resolve(null)
-          return
-        }
-        const [, month, day, hours, minutes, seconds, year] = found
-        const start = new Date(
-          Number(year),
-          months.indexOf(month ?? '') / 3,
-          Number(day),
-          Number(hours),
-          Number(minutes),
-          Number(seconds),
-        )
-        resolve(start.getTime() / 1000)
-      },
-    )
+    execFile('ps', [...args], { env: { ...process.env, LC_ALL: 'C' } }, (error, stdout) => {
+      if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
+        reject(error as Error)
+        return
+      }
+      resolve(stdout)
+    })
   })
+}
+
+/** A start time as `ps -o lstart` prints it, in epoch seconds; throws for other text. */
+function lstart(text: string): number {
+  const found = /^\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/.exec(text)
+  if (found === null) throw new Error(`not a start time: ${text}`)
+  const [, month, day, hours, minutes, seconds, year] = found
+  const start = new Date(
+    Number(year),
+    'JanFebMarAprMayJunJulAugSepOctNovDec'.indexOf(month ?? '') / 3,
+    Number(day),
+    Number(hours),
+    Number(minutes),
+    Number(seconds),
+  )
+  return start.getTime() / 1000
+}
+
+/**
+ * When a host process started, in epoch seconds; null once no process has
+ * the PID. Rejects when the host has no `ps`.
+ */
+async function startedAt(pid: number): Promise<number | null> {
+  const text = (await ps(['-o', 'lstart=', '-p', String(pid)])).trim()
+  return text === '' ? null : lstart(text)
+}
+
+/**
+ * When each process of a process group started, in epoch seconds. Rejects
+ * when the host has no `ps`.
+ */
+async function groupStarted(group: number): Promise<number[]> {
+  const starts: number[] = []
+  for (const line of (await ps(['-A', '-o', 'pgid=,lstart='])).split('\n')) {
+    const [found = '', ...start] = line.trim().split(/\s+/)
+    if (found === String(group)) starts.push(lstart(start.join(' ')))
+  }
+  return starts
 }
 
 /**
@@ -284,9 +303,14 @@ function startedAt(pid: number): Promise<number | null> {
  * and only while its PID still names a process started when the run did, to
  * the second `ps` shows, so a PID the host reused is left alone. A PID that
  * names no process may still name the run's group, whose leader exited
- * before the programs it started: the host gives no new process the id of a
- * group that still has members, so that group gets the signal too. A group
- * this workspace may not signal is not reached while its leader still runs
+ * before the programs it started. That group is the run's while one of its
+ * members started by the last time the group was known to be: when the
+ * leader exited (`exited_at`), else when its workspace last vouched for the
+ * run (`seen_at`), with the leader still unreaped. The host gives no new
+ * process the id of a group that has members, and hands a number out again
+ * only after a full round of the others, so a group that took the id later
+ * has only members started since. A group this workspace may not signal is
+ * not reached while its leader still runs
  * (macOS answers EPERM for one that only exited unreaped). Answers true once
  * the run is stopped or gone, false when this workspace cannot reach it.
  * Mirrors Python's `reap_host_run`.
@@ -305,13 +329,24 @@ export async function reapHostRun(
   )
     return false
   let started: number | null
+  let members: number[] = []
   try {
     started = await startedAt(pid)
+    if (started === null) members = await groupStarted(pid)
   } catch (err) {
     debuglog('mirage')('process %d not checked: %s', pid, err)
     return false
   }
-  if (started !== null && Math.abs(started - recorded) > HOST_START_SLACK_SECONDS) return true
+  if (started !== null) {
+    if (Math.abs(started - recorded) > HOST_START_SLACK_SECONDS) return true
+  } else {
+    const known = run.exited_at ?? run.seen_at
+    if (
+      typeof known !== 'number' ||
+      !members.some((start) => start <= known + HOST_START_SLACK_SECONDS)
+    )
+      return true
+  }
   try {
     process.kill(-pid, signum)
     const deadline = Date.now() + STOP_GRACE_SECONDS * 1000
