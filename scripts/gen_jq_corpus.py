@@ -44,6 +44,12 @@ def main() -> None:
         "jq_test", type=pathlib.Path, help="jq 1.8.2 tests/jq.test"
     )
     parser.add_argument("jq", help="a jq 1.8.2 binary")
+    parser.add_argument(
+        "--out",
+        type=pathlib.Path,
+        default=OUT,
+        help="where to write the corpus (tests/onig.test's goes to onig.json)",
+    )
     args = parser.parse_args()
     cases = []
     for at, group in enumerate(groups(args.jq_test.read_text())):
@@ -61,7 +67,7 @@ def main() -> None:
             continue
         cases.append(
             {
-                "id": f"jq_test_{at:04d}",
+                "id": f"{args.jq_test.stem}_test_{at:04d}",
                 "program": program,
                 "input": document,
                 "outputs": done.stdout.decode().split("\n")[:-1],
@@ -69,8 +75,9 @@ def main() -> None:
                 "exit": done.returncode,
             }
         )
-    OUT.write_text(json.dumps(cases, indent=1, ensure_ascii=False) + "\n")
-    print(f"wrote {len(cases)} cases to {OUT.relative_to(ROOT)}")
+    out = args.out.resolve()
+    out.write_text(json.dumps(cases, indent=1, ensure_ascii=False) + "\n")
+    print(f"wrote {len(cases)} cases to {out.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

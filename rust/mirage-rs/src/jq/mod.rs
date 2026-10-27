@@ -3,7 +3,9 @@ mod compile;
 mod eval;
 mod format;
 mod host;
+mod onig;
 mod parse;
+mod regex;
 mod syntax;
 #[cfg(test)]
 mod tests;

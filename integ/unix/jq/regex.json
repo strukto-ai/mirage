@@ -1,0 +1,148 @@
+{
+  "cases": [
+    {
+      "id": "jq_regex_capture_named_groups",
+      "seq": 18610001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"2023-01-15T10:30:00Z\"' | jq -c 'capture(\"(?<y>\\\\d{4})-(?<m>\\\\d{2})-(?<d>\\\\d{2})\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"y\":\"2023\",\"m\":\"01\",\"d\":\"15\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_match_offsets_count_characters",
+      "seq": 18610002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"\\303\\251t\\303\\251 bar\"' | jq -c '[match(\"\\\\w+\"; \"g\") | [.offset, .length, .string]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[0,3,\"été\"],[4,3,\"bar\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_gsub_with_named_capture_and_flags",
+      "seq": 18610003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"Hello World\"' | jq -r 'gsub(\"(?<c>o)\"; \"[\\(.c)]\"; \"i\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Hell[o] W[o]rld\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_split_splits_and_scan",
+      "seq": 18610004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"a1b22c333\"' | jq -c '[split(\"\\\\d+\"; null), [splits(\"[a-c]\")], [scan(\"\\\\d+\")]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"a\",\"b\",\"c\",\"\"],[\"\",\"1\",\"22\",\"333\"],[\"1\",\"22\",\"333\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_test_on_a_file",
+      "seq": 18610005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq '.name | test(\"^AL\"; \"i\")' /data/user.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_zero_width_matches_advance_one_past",
+      "seq": 18610006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"qux\"' | jq -c '[match(\"(?=u)\"; \"g\")], gsub(\"\"; \"-\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"offset\":1,\"length\":0,\"string\":\"\",\"captures\":[]}]\n\"-q-u-x-\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_invalid_pattern_reports_the_regex_failure",
+      "seq": 18610007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"x\"' | jq 'test(\"(\")'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=5\n",
+        "stderr": "jq: error (at <stdin>:0): Regex failure: end pattern with unmatched parenthesis\n"
+      }
+    },
+    {
+      "id": "jq_regex_invalid_modifier_is_an_error",
+      "seq": 18610008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"x\"' | jq 'test(\"x\"; \"gq\")'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=5\n",
+        "stderr": "jq: error (at <stdin>:0): gq is not a valid modifier string\n"
+      }
+    },
+    {
+      "id": "jq_regex_backtracking_stops_at_the_retry_limit",
+      "seq": 18610009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!\"' | jq 'test(\"^(a+)+$\")'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=5\n",
+        "stderr": "jq: error (at <stdin>:0): Regex failure: retry-limit-in-match over\n"
+      }
+    }
+  ]
+}

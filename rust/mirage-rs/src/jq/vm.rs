@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use super::builtin::{self, Cfunc, Fault};
 use super::host::{self, Answer, Host};
+use super::regex::Matching;
 use super::time::{self, Clock};
 use super::value::{Object, Value, shed};
 
@@ -200,6 +201,8 @@ enum Flow {
     Raise(Raise),
     Yield(Value),
     Input,
+    /// A builtin ran out of steps: the same instruction runs again.
+    Pause,
 }
 
 /// Limits one run is held to.
@@ -237,6 +240,9 @@ pub(crate) struct Vm {
     clock: Clock,
     pub(crate) steps: u64,
     pub(crate) host: Host,
+    /// A regex search that ran out of steps, resumed when its call runs
+    /// again.
+    matching: Option<Box<Matching>>,
 }
 
 impl Vm {
@@ -263,6 +269,7 @@ impl Vm {
             clock: Clock::default(),
             steps: 0,
             host: Host::default(),
+            matching: None,
         };
         vm.curr_frame = vm.arena.push(
             0,
@@ -519,6 +526,7 @@ impl Vm {
                         return next;
                     }
                 }
+                Flow::Pause => return Next::Paused,
             }
             if let Some(halt) = self.halted.take() {
                 self.restore = true;
@@ -743,7 +751,9 @@ impl Vm {
                 for _ in 0..*nargs {
                     args.push(self.pop());
                 }
-                *budget = budget.saturating_sub(builtin::cost(&args));
+                if self.matching.is_none() {
+                    *budget = budget.saturating_sub(builtin::cost(&args));
+                }
                 let result = match f {
                     Cfunc::GetPath => self.getpath(args),
                     Cfunc::Now
@@ -753,6 +763,16 @@ impl Vm {
                     | Cfunc::Strftime
                     | Cfunc::StrfLocaltime
                     | Cfunc::Strptime => time::call(*f, &args, &self.clock),
+                    Cfunc::MatchImpl => match self.matching(&args, budget) {
+                        Some(result) => result,
+                        None => {
+                            for arg in args.into_iter().rev() {
+                                self.push(arg);
+                            }
+                            self.pc = pc;
+                            return Flow::Pause;
+                        }
+                    },
                     _ => builtin::call(*f, args, self.limits),
                 };
                 match result {
@@ -897,6 +917,23 @@ impl Vm {
         self.save(pc, spos);
         self.push(value);
         Flow::Go
+    }
+
+    /// `_match_impl`: starts the search, or resumes the one that paused;
+    /// None when it paused again.
+    fn matching(&mut self, args: &[Value], budget: &mut u64) -> Option<Result<Value, Fault>> {
+        let mut matching = match self.matching.take() {
+            Some(matching) => matching,
+            None => match Matching::begin(args) {
+                Ok(matching) => Box::new(matching),
+                Err(fault) => return Some(Err(fault)),
+            },
+        };
+        let result = matching.run(budget, self.limits);
+        if result.is_none() {
+            self.matching = Some(matching);
+        }
+        result
     }
 
     fn getpath(&mut self, mut args: Vec<Value>) -> Result<Value, Fault> {

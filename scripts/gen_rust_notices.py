@@ -12,6 +12,7 @@ RULE = "-" * 72
 ADAPTED = [
     ROOT / "licenses/third_party/jq.txt",
     ROOT / "licenses/third_party/nfsserve.txt",
+    ROOT / "licenses/third_party/oniguruma.txt",
     ROOT / "licenses/third_party/pcre2.txt",
     ROOT / "licenses/third_party/uutils-coreutils.txt",
     ROOT / "licenses/third_party/regex-automata.txt",

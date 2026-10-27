@@ -35,6 +35,7 @@ regex-syntax = { version = "=0.8.11", default-features = false, features = [
   "unicode-bool",
   "unicode-case",
   "unicode-gencat",
+  "unicode-script",
 ] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
