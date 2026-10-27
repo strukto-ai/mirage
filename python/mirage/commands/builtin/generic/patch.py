@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import UINTMAX
-from mirage.commands.builtin.utils.links import mount_root
+from mirage.commands.builtin.utils.links import links_of, mount_root
 from mirage.commands.builtin.utils.size_suffix import decimal_value
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.config import Context
@@ -21,8 +21,9 @@ from mirage.rs.stream import Served, open_stream, serve_requests
 from mirage.shell.bytes import byte_view, text_view
 from mirage.types import FileStat, FileType, JsonValue, PathSpec
 from mirage.utils.key_prefix import mount_key
-from mirage.utils.path import resolve_path
+from mirage.utils.path import CycleError, resolve_path
 from mirage.utils.quote import shell_quote
+from mirage.view.types import LinkView
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,8 @@ class _PatchFiles:
         read_bytes (Callable): bound reader.
         write_bytes (Callable): bound writer.
         stat (Callable): stat refusing a directory with EISDIR.
+        links (LinkView | None): the namespace's links, which a stat
+            follows, as GNU's does.
         changes (Mapping[str, Callable]): ``mkdir``, ``unlink`` and
             ``rmdir``.
     """
@@ -105,6 +108,7 @@ class _PatchFiles:
         read_bytes: Callable[..., Awaitable[bytes]],
         write_bytes: Callable[..., Awaitable[None]],
         stat: Callable[[PathSpec], Awaitable[FileStat]],
+        links: LinkView | None,
         changes: PatchChanges,
     ) -> None:
         self.errors = ByteSpool()
@@ -116,6 +120,7 @@ class _PatchFiles:
         self.read_bytes = read_bytes
         self.write_bytes = write_bytes
         self.stat = stat
+        self.links = links
         self.changes = changes
 
     def _spec(self, path: str) -> PathSpec:
@@ -128,11 +133,15 @@ class _PatchFiles:
         return PathSpec.from_str_path(virtual, mount_key(virtual, self.root))
 
     async def _kind(self, path: str) -> dict[str, JsonValue]:
+        spec = self._spec(path)
         try:
-            found = await self.stat(self._spec(path))
+            if self.links is not None:
+                real = self.links.resolve(spec.virtual)
+                spec = PathSpec.from_str_path(real, mount_key(real, self.root))
+            found = await self.stat(spec)
         except IsADirectoryError:
             return {"kind": "dir"}
-        except (FileNotFoundError, NotADirectoryError) as exc:
+        except (FileNotFoundError, NotADirectoryError, CycleError) as exc:
             logger.debug("nothing stands at %r: %s", path, exc)
             return {}
         return {"kind": "dir" if found.type == FileType.DIRECTORY else "file"}
@@ -262,6 +271,7 @@ async def patch_generic(
         read_bytes,
         write_bytes,
         stat,
+        links_of(ctx),
         changes,
     )
     engine = open_stream(

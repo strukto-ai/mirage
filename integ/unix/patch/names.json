@@ -69,6 +69,41 @@
         "stdout": "patching file d1/d2/new.txt\nrc=0\nn\nThe next patch would create the file d1/d2/new.txt,\nwhich already exists!  Assume -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored\nrc=1\npatching file d1/d2/new.txt\nrc=0\nc.diff\npatching file k.txt\nNot deleting file k.txt as content differs from patch\nrc=1\nc\nThe next patch would delete the file gone.txt,\nwhich does not exist!  Assume -R? [n] \nApply anyway? [n] \nSkipping patch.\n1 out of 1 hunk ignored\nrc=1\npatching file r.txt\nrc=0\nc.diff\nk.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "patch_follows_links_and_refuses_dangerous_names",
+      "seq": 9941419,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941419 && touch /data/patch_9941419/.keep; cd /data/patch_9941419 || exit 1; mkdir d; ln -s d link; printf -- '--- /dev/null\\n+++ link/new.txt\\n@@ -0,0 +1 @@\\n+n\\n' | patch -p0; echo rc=$?; cat d/new.txt; printf 'q\\n' > file; ln -s file flink; printf -- '--- /dev/null\\n+++ flink/new.txt\\n@@ -0,0 +1 @@\\n+n\\n' | patch -p0; echo rc=$?; printf -- '--- /dev/null\\n+++ e/./f\\n@@ -0,0 +1 @@\\n+n\\n' | patch -p0; echo rc=$?; cat e/f; printf -- '--- /dev/null\\n+++ g/../h\\n@@ -0,0 +1 @@\\n+n\\n' | patch -p0; echo rc=$?; ls; cd /; rm -r /data/patch_9941419",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file link/new.txt\nrc=0\nn\nInvalid file name flink/new.txt -- skipping patch\nrc=1\npatching file e/./f\nrc=0\nn\nIgnoring potentially dangerous file name g/../h\ncan't find file to patch at input line 3\nPerhaps you used the wrong -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|--- /dev/null\n|+++ g/../h\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\nrc=1\nd\ne\nfile\nflink\nlink\n",
+        "stderr": ""
+      }
     }
   ]
 }

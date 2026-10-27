@@ -107,13 +107,29 @@ impl Files {
             .await
     }
 
+    /// Whether something stands at a name, as stat would find it: a `..`
+    /// leads out of the name before it only when that stands as a
+    /// directory.
+    async fn stands(&self, name: &[u8]) -> bool {
+        for (at, _) in name.iter().enumerate().filter(|&(_, &b)| b == b'/') {
+            let (dir, rest) = name.split_at(at);
+            let up = rest[1..].split(|&b| b == b'/').next() == Some(&b".."[..]);
+            if up && !dir.is_empty() && self.host.stat(dir).await.as_deref() != Some("dir") {
+                return false;
+            }
+        }
+        self.host.stat(name).await.is_some()
+    }
+
     /// The directories above a name that do not stand yet, outermost
-    /// first; none when one of them stands as a file.
+    /// first; none when one of them stands as a file. A `.` or `..`
+    /// component names no directory of its own to make.
     async fn missing(&self, name: &[u8]) -> Option<Vec<Vec<u8>>> {
         let mut missing = Vec::new();
         for (at, _) in name.iter().enumerate().filter(|&(_, &b)| b == b'/') {
             let dir = &name[..at];
-            if dir.ends_with(b"/") {
+            let last = dir.rsplit(|&b| b == b'/').next().unwrap_or(dir);
+            if matches!(last, b"" | b"." | b"..") {
                 continue;
             }
             if missing.is_empty() {
@@ -196,14 +212,33 @@ fn best<'n>(names: impl IntoIterator<Item = &'n Vec<u8>>) -> Option<Vec<u8>> {
         .map(|(name, _)| name.clone())
 }
 
-/// The file a section patches by its own names: the best of those that
-/// stand, else, for a patch that creates its file, the best of those that
-/// need the fewest new directories, else, for one that deletes its file,
-/// the best of them; none when GNU would ask.
+/// A name GNU refuses to touch: an absolute one, or one with a `..`.
+fn dangerous(name: &[u8]) -> bool {
+    name.starts_with(b"/") || name.split(|&b| b == b'/').any(|part| part == b"..")
+}
+
+/// The file a section patches by its own names, as GNU picks it: the
+/// first choice that is not dangerous, each dangerous one said and left
+/// out before choosing again; none when GNU would ask.
 async fn pick(files: &Files, section: &Section<'_>, fresh: bool, deletes: bool) -> Option<Vec<u8>> {
+    let mut names = section.names.clone();
+    loop {
+        let name = choose(files, &names, fresh, deletes).await?;
+        if !dangerous(&name) {
+            return Some(name);
+        }
+        files.say(&[b"Ignoring potentially dangerous file name ", &name]);
+        names.retain(|other| *other != name);
+    }
+}
+
+/// The best of the names that stand, else, for a patch that creates its
+/// file, the best of those that need the fewest new directories, else,
+/// for one that deletes its file, the best of them.
+async fn choose(files: &Files, names: &[Vec<u8>], fresh: bool, deletes: bool) -> Option<Vec<u8>> {
     let mut standing = Vec::new();
-    for name in &section.names {
-        if files.host.stat(name).await.is_some() {
+    for name in names {
+        if files.stands(name).await {
             standing.push(name);
         }
     }
@@ -213,7 +248,7 @@ async fn pick(files: &Files, section: &Section<'_>, fresh: bool, deletes: bool) 
     if fresh {
         let mut fewest = Vec::new();
         let mut least = usize::MAX;
-        for name in &section.names {
+        for name in names {
             let missing = files
                 .missing(name)
                 .await
@@ -229,7 +264,7 @@ async fn pick(files: &Files, section: &Section<'_>, fresh: bool, deletes: bool) 
         return best(fewest);
     }
     if deletes {
-        return best(&section.names);
+        return best(names);
     }
     None
 }
