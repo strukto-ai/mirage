@@ -78,21 +78,23 @@ async def test_root_context_memoizes_drive_lookup(
     assert calls == 1
 
 
+@eacces_on_denied
+async def _denied(accessor, path: PathSpec) -> None:
+    raise GoogleApiError("denied", 403)
+
+
+@eacces_on_denied
+async def _server_error(accessor, path: PathSpec) -> None:
+    raise GoogleApiError("boom", 500)
+
+
 @pytest.mark.asyncio
 async def test_eacces_on_denied_maps_403():
-    @eacces_on_denied
-    async def denied(accessor, path: PathSpec) -> None:
-        raise GoogleApiError("denied", 403)
-
-    @eacces_on_denied
-    async def server_error(accessor, path: PathSpec) -> None:
-        raise GoogleApiError("boom", 500)
-
     spec = PathSpec.from_str_path("/gd/a.txt", "a.txt")
     with pytest.raises(PermissionError, match="/gd/a.txt"):
-        await denied(None, spec)
+        await _denied(None, spec)
     with pytest.raises(GoogleApiError):
-        await server_error(None, spec)
+        await _server_error(None, spec)
 
 
 @pytest.mark.asyncio
