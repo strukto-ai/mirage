@@ -1702,13 +1702,15 @@ fn to_text(v: &Value) -> FormatInput<'_> {
 
 const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+pub(super) fn format_name(name: &str) -> &str {
+    name.split_once('\0').map_or(name, |(prefix, _)| prefix)
+}
+
 fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
     let Value::String(name) = fmt else {
         return Err(type_error(fmt, "is not a valid format"));
     };
-    let dispatch = name
-        .split_once('\0')
-        .map_or(name.as_str(), |(prefix, _)| prefix);
+    let dispatch = format_name(name);
     let text = match dispatch {
         "json" => StringBuffer::from(input.dump()),
         "text" => match input {

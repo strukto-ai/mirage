@@ -2451,6 +2451,39 @@ fn key_reads_share_large_text_through_arrays_and_paths() {
 }
 
 #[test]
+fn nul_dump_format_names_keep_sliced_progress_and_output() {
+    for (name, input) in [
+        ("json", Value::string("é".repeat(100000))),
+        ("json", Value::array(vec![Value::Null; 20000])),
+        ("text", Value::array(vec![Value::Null; 20000])),
+    ] {
+        let expected = input.dump();
+        for suffix in ["", "\\u0000tail"] {
+            let source = format!("format(\"{name}{suffix}\")");
+            let program = Arc::new(compile(&source, &HashMap::new()).unwrap());
+            let meter = Arc::new(Meter::default());
+            let _installed = meter::install(&meter);
+            let mut vm = Vm::start(program, input.clone(), LIMITS, Arc::clone(&meter));
+            for _ in 0..100 {
+                assert!(
+                    matches!(vm.next(&mut 7), Next::Paused),
+                    "{source} yielded early"
+                );
+            }
+            while !vm.retire(7) {}
+            drop(vm);
+            assert_eq!(meter.live(), 0);
+            for steps in [7, u64::MAX] {
+                assert_eq!(
+                    run(&source, &expected, steps),
+                    vec![Frame::Out(serde_json::to_string(&expected).unwrap())]
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn retirement_releases_cancelled_and_completed_pending_tasks() {
     for (program, input, drains) in [
         (

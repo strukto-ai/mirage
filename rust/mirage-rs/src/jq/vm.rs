@@ -239,7 +239,7 @@ impl Pending {
         let input = &args[0];
         let dump = || Ok(Pending::Dump(Box::new(Dumping::begin(input.clone()))));
         let format = match args.get(1) {
-            Some(Value::String(name)) if f == Cfunc::Format => Some(name.as_str()),
+            Some(Value::String(name)) if f == Cfunc::Format => Some(builtin::format_name(name)),
             _ => None,
         };
         Some(match f {
