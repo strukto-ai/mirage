@@ -286,11 +286,12 @@ async def _put_stream(
             return meta
     upload: str | None = None
     parts: list[dict[str, Any]] = []
+    # TODO(MIRAGE-38): spool parts past 64 MiB; this holds a whole part.
     buffer = bytearray()
     size = 0
     args = {"Bucket": conn.config.bucket, "Key": key}
 
-    async def send_part(body: bytes) -> None:
+    async def send_part(body: bytearray) -> None:
         if len(parts) >= MAX_PARTS:
             raise ValueError("s3: streamed upload exceeds 10000 parts")
         number = len(parts) + 1
@@ -302,10 +303,15 @@ async def _put_stream(
     try:
         async with aclosing(chunks(data)) as source:
             async for chunk in source:
-                buffer.extend(chunk)
                 size += len(chunk)
-                part = PART_SIZE << (len(parts) // PART_DOUBLING)
-                if len(buffer) >= part:
+                view = memoryview(chunk)
+                while view:
+                    part = PART_SIZE << (len(parts) // PART_DOUBLING)
+                    take = part - len(buffer)
+                    buffer += view[:take]
+                    view = view[take:]
+                    if len(buffer) < part:
+                        continue
                     if upload is None:
                         content_type = conn.config.default_content_type
                         opened = await conn.client.create_multipart_upload(
@@ -317,14 +323,14 @@ async def _put_stream(
                             ),
                         )
                         upload = opened["UploadId"]
-                    await send_part(bytes(buffer[:part]))
-                    del buffer[:part]
+                    await send_part(buffer)
+                    buffer = bytearray()
         if upload is None:
             meta = await _put_if(conn, key, bytes(buffer), cond)
             assert meta is not None
             return meta
         if buffer:
-            await send_part(bytes(buffer))
+            await send_part(buffer)
         response = await _guarded(
             key,
             conn.client.complete_multipart_upload(

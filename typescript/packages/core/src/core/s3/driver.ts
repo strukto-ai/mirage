@@ -294,6 +294,7 @@ async function putStream(
   }
   let upload: string | null = null
   const parts: { PartNumber: number; ETag: string }[] = []
+  // TODO(MIRAGE-38): spool parts past 64 MiB; this holds a whole part.
   let buffer = new Uint8Array(PART_SIZE)
   let used = 0
   let size = 0
@@ -335,7 +336,8 @@ async function putStream(
             if (typeof opened.UploadId !== 'string') throw new Error('s3: upload returned no id')
             upload = opened.UploadId
           }
-          await sendPart(buffer.slice(0, used))
+          // Each send ends before the buffer fills again, so it goes as is.
+          await sendPart(buffer)
           used = 0
           const part = PART_SIZE * 2 ** Math.floor(parts.length / PART_DOUBLING)
           if (part > buffer.length) buffer = new Uint8Array(part)
@@ -345,7 +347,7 @@ async function putStream(
     if (upload === null) {
       return await putIf(conn, key, buffer.slice(0, used), cond)
     }
-    if (used > 0) await sendPart(buffer.slice(0, used))
+    if (used > 0) await sendPart(buffer.subarray(0, used))
     const response = (await guarded(
       key,
       conn.send(

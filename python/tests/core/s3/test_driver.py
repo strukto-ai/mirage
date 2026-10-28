@@ -206,6 +206,34 @@ async def test_streamed_upload_uses_bounded_parts_and_conditions(size):
 
 
 @pytest.mark.asyncio
+async def test_streamed_parts_carry_their_bytes_as_they_went():
+    client = Mock()
+    client.create_multipart_upload = AsyncMock(
+        return_value={"UploadId": "upload"}
+    )
+    bodies = []
+
+    async def upload_part(**kwargs):
+        bodies.append(bytes(kwargs["Body"]))
+        return {"ETag": '"part"'}
+
+    client.upload_part = upload_part
+    client.complete_multipart_upload = AsyncMock(return_value={})
+    part = 8 * 1024 * 1024
+    data = (bytes(range(251)) * (2 * part // 251 + 1))[: 2 * part + 37]
+
+    async def source():
+        for offset in range(0, len(data), 65521):
+            yield data[offset : offset + 65521]
+
+    await DRIVER.put_stream(
+        S3Conn(client, S3Config(bucket="b")), "k", source(), WriteCondition()
+    )
+    assert [len(body) for body in bodies] == [part, part, 37]
+    assert b"".join(bodies) == data
+
+
+@pytest.mark.asyncio
 async def test_streamed_parts_double_past_the_part_cap(monkeypatch):
     monkeypatch.setattr("mirage.core.s3.driver.PART_SIZE", 16)
     client = Mock()

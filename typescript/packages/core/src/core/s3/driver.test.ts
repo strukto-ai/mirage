@@ -181,6 +181,28 @@ describe('streamed uploads', () => {
     },
   )
 
+  it('sends each part as its bytes stood when it went', async () => {
+    const base = uploadConnection([])
+    const bodies: Uint8Array[] = []
+    const conn: S3Conn = {
+      ...base,
+      async send(raw) {
+        if (raw instanceof UploadPart) bodies.push((raw.input.Body as Uint8Array).slice())
+        return base.send(raw)
+      },
+    }
+    const part = 8 * 1024 * 1024
+    const data = Uint8Array.from({ length: 2 * part + 37 }, (_, i) => i % 251)
+    async function* source(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      for (let offset = 0; offset < data.length; offset += 65521)
+        yield data.slice(offset, offset + 65521)
+    }
+    await DRIVER.putStream?.(conn, 'k', source(), {})
+    expect(bodies.map((body) => body.length)).toEqual([part, part, 37])
+    expect(Buffer.compare(Buffer.concat(bodies), data)).toBe(0)
+  })
+
   it('doubles its parts past the part cap', async () => {
     vi.resetModules()
     vi.doMock('./constants.ts', async (original) => ({
