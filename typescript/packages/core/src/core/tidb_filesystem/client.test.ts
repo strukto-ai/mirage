@@ -15,7 +15,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
 import { makeAccessor, serve, type FakeDrive9 } from '../../../tests/core/tidb_filesystem/drive9.ts'
+import { runWithEvaluation } from '../../context/session_context.ts'
 import { ByteSpool } from '../../io/spool.ts'
+import { EvaluationContext } from '../../workspace/evaluation.ts'
+import { SessionState } from '../../workspace/session/session.ts'
 import { appendTo, download, move, removeTree, statEntries, upload } from './client.ts'
 import { MAX_UPLOAD_WORKERS } from './constants.ts'
 
@@ -57,6 +60,22 @@ describe('upload', () => {
     await expect(upload(accessor, '/root/big.bin', new Uint8Array(60_000))).rejects.toThrow()
     expect(drive9.count('POST', '/v2/uploads/abort')).toBe(1)
     expect(drive9.files.has('/root/big.bin')).toBe(false)
+  })
+
+  it('still aborts the upload once its call stops', async () => {
+    drive9.partSize = 20_000
+    drive9.partDelay = 5_000
+    const stop = new AbortController()
+    const evaluation = new EvaluationContext(new SessionState({ sessionId: 's' }))
+    evaluation.frame.abortSignal = stop.signal
+    const pending = runWithEvaluation(evaluation, () =>
+      upload(accessor, '/root/big.bin', new Uint8Array(60_000)),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    stop.abort()
+    await expect(pending).rejects.toThrow()
+    expect(drive9.count('POST', '/v2/uploads/abort')).toBe(1)
+    expect(drive9.uploads.size).toBe(0)
   })
 
   it('sends a few parts at a time', async () => {

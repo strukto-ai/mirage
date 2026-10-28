@@ -32,6 +32,7 @@ import {
   TOKEN_URL,
   WRITE_RETRY_STATUSES,
 } from './constants.ts'
+import { callerSignal } from '../../context/session_context.ts'
 import { apiRequest, apiStream } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
@@ -191,10 +192,10 @@ export class TokenManager extends OAuthTokenManager {
    * and caching its answer here would outlive the refresh it just performed.
    * Mirrors python's `TokenManager.get_token`.
    */
-  override async getToken(): Promise<string> {
+  override async getToken(signal?: AbortSignal): Promise<string> {
     const supplied = this.config.accessToken
     if (supplied !== undefined) return typeof supplied === 'function' ? await supplied() : supplied
-    return super.getToken()
+    return super.getToken(signal)
   }
 
   protected async refreshPair(): Promise<[string, number]> {
@@ -210,7 +211,7 @@ export class TokenManager extends OAuthTokenManager {
 }
 
 export async function googleHeaders(tm: TokenManager): Promise<Record<string, string>> {
-  const token = await tm.getToken()
+  const token = await tm.getToken(callerSignal())
   return { Authorization: `Bearer ${token}` }
 }
 

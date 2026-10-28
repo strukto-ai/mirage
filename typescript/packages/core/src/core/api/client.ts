@@ -353,6 +353,10 @@ export interface ApiRequestOptions {
   /** The wait between attempts, in seconds, injectable so a test or a
    * simulated clock spends no real time; absent is a real timer. */
   sleep?: ((seconds: number) => Promise<void>) | undefined
+  /** The signal the request answers to in place of the call's. Cleanup that
+   * must still run once the call stopped, as aborting an upload does,
+   * passes a bounded one of its own. */
+  signal?: AbortSignal | undefined
 }
 
 /**
@@ -475,7 +479,7 @@ export async function apiRequest(
   }
   // The call's signal (a line's stop, a job's kill or limit), so a stopped
   // command ends its request as Python's cancelled task does.
-  const signal = callerSignal()
+  const signal = options.signal ?? callerSignal()
   const retry = options.retry ?? NO_RETRY
   const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000, signal))
   const read = options.read ?? 'json'

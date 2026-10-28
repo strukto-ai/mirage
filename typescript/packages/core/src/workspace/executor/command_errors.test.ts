@@ -92,6 +92,21 @@ it.each(['find', 'du', 'ls -R'])('keeps nested %s failure inside the line', asyn
   }
 })
 
+// A command's own timeout ends a job as it ends a line: 124 and its message.
+it("ends a job at its command's own timeout", async () => {
+  const ws = new Workspace({ '/bad': new RAMVFS() }, { mode: 'exec' })
+  for (const cmd of failingCommand('cat', new CommandTimeoutError('cat', 1), false))
+    ws.registry.mountFor('/bad/f').register(cmd)
+  try {
+    await ws.shell('echo data >/bad/f')
+    const result = await ws.shell('cat /bad/f & wait %1; echo status=$?')
+    expect(DEC.decode(result.stdout)).toBe('status=124\n')
+    expect(DEC.decode(result.stderr)).toBe('cat: timed out after 1s\n')
+  } finally {
+    await ws.close()
+  }
+})
+
 it('does not convert a lazy timeout into a normal failure', async () => {
   const vfs = new RAMVFS()
   const mount = new MountEntry({ prefix: '/bad/', vfs })

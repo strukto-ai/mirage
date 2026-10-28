@@ -364,8 +364,17 @@ export async function handleBackground(
       try {
         result = await run()
       } catch (err) {
-        if (seconds === null || !expiry.signal.aborted || abort.signal.aborted) throw err
-        const msg = encodeText(`${new CommandTimeoutError(LINE_NAME, seconds).message}\n`)
+        // Past its own limit, or stopped by a command's own timeout, the job
+        // answers as a line does, 124 and the message; a killed job ends as
+        // killed.
+        const timedOut =
+          seconds !== null && expiry.signal.aborted
+            ? new CommandTimeoutError(LINE_NAME, seconds)
+            : err instanceof CommandTimeoutError
+              ? err
+              : null
+        if (timedOut === null || abort.signal.aborted) throw err
+        const msg = encodeText(`${timedOut.message}\n`)
         // The job's own console keeps the notice; the shell's output gets it
         // unless a reader that stopped reading holds it past the wait a
         // stopped job is given, so the job still ends.

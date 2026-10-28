@@ -15,6 +15,7 @@
 import { z } from 'zod'
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
 import { boundedMap } from '../../concurrency/limiter.ts'
+import { DEFAULT_TIMEOUT } from '../api/constants.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
@@ -255,8 +256,11 @@ async function abort(
   method: string,
   target: string,
 ): Promise<void> {
+  // A stopped upload still sends its abort, under a deadline of its own
+  // rather than the stopped call's signal.
+  const signal = AbortSignal.timeout((accessor.config.timeout ?? DEFAULT_TIMEOUT) * 1000)
   try {
-    await request(accessor, method, target, { read: 'none' })
+    await request(accessor, method, target, { read: 'none', signal })
   } catch (err) {
     console.debug(`tidb_filesystem: abort ${target} failed:`, err)
   }

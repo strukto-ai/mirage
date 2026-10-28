@@ -1073,4 +1073,20 @@ describe("the call's signal", () => {
     await expect(pending).rejects.toThrow()
     expect(calls).toBe(1)
   })
+
+  it('a request with a signal of its own outlives a stopped call', async () => {
+    const stop = new AbortController()
+    stop.abort()
+    const evaluation = new EvaluationContext(new SessionState({ sessionId: 's' }))
+    evaluation.frame.abortSignal = stop.signal
+    const answer: typeof fetch = (_input, init) =>
+      init?.signal?.aborted === true
+        ? Promise.reject(init.signal.reason as Error)
+        : Promise.resolve(Response.json({ ok: true }))
+    const own = new AbortController().signal
+    const got = await runWithEvaluation(evaluation, () =>
+      apiRequest('GET', TARGET, { errorOf, fetchFn: answer, signal: own }),
+    )
+    expect(got).toEqual({ ok: true })
+  })
 })
