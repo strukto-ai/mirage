@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { CapacityState, FileType, MountMode, PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
+import { SharedStorageError } from '@struktoai/mirage-core/workspace/mount/errors'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { copy as copyCore } from '../../core/disk/copy.ts'
 import { exists as existsCore } from '../../core/disk/exists.ts'
@@ -77,7 +78,9 @@ describe('DiskVFS — one folder at one prefix', () => {
     ],
   ])('refuses %s on a folder already mounted', (_name, pair, message) => {
     const [first, second] = pair()
-    expect(() => new Workspace({ '/a': first, '/b': second })).toThrow(new Error(message()))
+    const build = (): Workspace => new Workspace({ '/a': first, '/b': second })
+    expect(build).toThrow(SharedStorageError)
+    expect(build).toThrow(message())
   })
 
   it('mounts a folder inside one already mounted', async () => {

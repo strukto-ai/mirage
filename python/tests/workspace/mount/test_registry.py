@@ -44,9 +44,10 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 from mirage.view.types import SessionAccess
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
-from mirage.workspace.mount.errors import MountCommandAmbiguous
-
-SharedStorageError = ValueError
+from mirage.workspace.mount.errors import (
+    MountCommandAmbiguous,
+    SharedStorageError,
+)
 
 # ── mount_for ──────────────────────────────────
 

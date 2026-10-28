@@ -38,7 +38,11 @@ import {
 } from '@struktoai/mirage-node'
 import { makeBrief, makeDetail } from '../summary.ts'
 import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from '../multipart.ts'
-import { MountOverrideError, WritePolicyError } from '@struktoai/mirage-core/workspace/mount/errors'
+import {
+  MountOverrideError,
+  SharedStorageError,
+  WritePolicyError,
+} from '@struktoai/mirage-core/workspace/mount/errors'
 
 export interface WorkspaceRoutesDeps {
   registry: WorkspaceRegistry
@@ -528,7 +532,8 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
             e instanceof z.ZodError ||
             e instanceof VFSConfigError ||
             e instanceof WritePolicyError ||
-            e instanceof MountOverrideError
+            e instanceof MountOverrideError ||
+            e instanceof SharedStorageError
           ) {
             // An override naming a source the host cannot resolve, or a
             // block the schema refuses, is the caller's mistake -- the
