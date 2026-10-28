@@ -185,6 +185,27 @@ fn a_directory_is_refused_whole() {
 }
 
 #[test]
+fn a_link_is_refused_whole_even_by_a_deletion() {
+    let diff = "--- link\n+++ /dev/null\n@@ -1 +0,0 @@\n-a\n";
+    let mut host = Host::with(&[("link", "a\n")], diff);
+    host.faults.insert(
+        "link".to_owned(),
+        crate::host::Fault {
+            after: 0,
+            errno: "ELOOP",
+            text: "Too many levels of symbolic links",
+        },
+    );
+    let (status, out, _) = patch(&mut host, "{}");
+    assert_eq!(status, 1);
+    assert_eq!(
+        out,
+        "File link is not a regular file -- refusing to patch\n1 out of 1 hunk ignored -- saving rejects to file link.rej\n"
+    );
+    assert_eq!(file(&host, "link").as_deref(), Some("a\n"));
+}
+
+#[test]
 fn a_missing_file_is_made_only_by_a_patch_that_creates_it() {
     let diff = "--- /dev/null\n+++ b/d/new.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n";
     let mut host = Host::with(&[], diff);

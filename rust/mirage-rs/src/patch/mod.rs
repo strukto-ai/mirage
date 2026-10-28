@@ -352,7 +352,7 @@ fn skip(files: &Files, section: &Section<'_>) -> Result<bool, i32> {
 /// is backed up to `.orig` the first time this run writes it, and the
 /// hunks that did not go in are saved to `.rej`, after those an earlier
 /// section of this run saved for it. A file that is not there is not made
-/// unless a hunk applied, and a directory is refused whole.
+/// unless a hunk applied, and a directory or a link is refused whole.
 async fn patch_file(
     files: &mut Files,
     config: &Config,
@@ -381,7 +381,7 @@ async fn patch_file(
     };
     let original = match files.whole(&name, Opening::File).await {
         Ok(original) => Some(original),
-        Err(reply) if reply.names(&["EISDIR"]) => {
+        Err(reply) if reply.names(&["EISDIR", "ELOOP"]) => {
             files.say(&[
                 b"File ",
                 &name,

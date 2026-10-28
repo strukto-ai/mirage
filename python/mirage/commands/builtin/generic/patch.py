@@ -4,7 +4,11 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import UINTMAX
-from mirage.commands.builtin.utils.links import links_of, mount_root
+from mirage.commands.builtin.utils.links import (
+    links_of,
+    mount_root,
+    name_location,
+)
 from mirage.commands.builtin.utils.size_suffix import decimal_value
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.config import Context
@@ -78,8 +82,8 @@ class _PatchFiles:
     and ``.rej`` after either name its companions. It stats the names it
     picks the file among, makes the directories a file it creates needs,
     and removes a file it empties with the directories that leaves empty.
-    A file that is not there or is a directory is the engine's to report;
-    any other failure is the command's.
+    A file that is not there, is a directory or is a link is the engine's
+    to report; any other failure is the command's.
 
     Args:
         source (PathSpec | None): the patch file, None for stdin.
@@ -93,7 +97,9 @@ class _PatchFiles:
         write_bytes (Callable): bound writer.
         stat (Callable): stat refusing a directory with EISDIR.
         links (LinkView | None): the namespace's links, which a stat
-            follows, as GNU's does.
+            follows, as GNU's does; a link a name ends in stands even
+            when it dangles, its file is refused and its companions
+            stand beside it, as GNU's lstat finds it.
         changes (Mapping[str, Callable]): ``mkdir``, ``unlink`` and
             ``rmdir``.
     """
@@ -140,7 +146,14 @@ class _PatchFiles:
             typed = byte_view(self.orig.raw_path or self.orig.virtual)
             if path.startswith(typed):
                 suffix = text_view(path[len(typed) :])
-                return _companion(self.orig, suffix) if suffix else self.orig
+                if not suffix:
+                    return self.orig
+                where = self._linked(self.orig)
+                if where is None:
+                    return _companion(self.orig, suffix)
+                return PathSpec.from_str_path(
+                    where + suffix, mount_key(where + suffix, self.root)
+                )
         name = text_view(path)
         virtual = resolve_path(name, self.cwd)
         key = mount_key(virtual, self.root)
@@ -148,6 +161,23 @@ class _PatchFiles:
             parts = [part for part in name.split("/") if part not in ("", ".")]
             name = "/" * name.startswith("/") + "/".join(parts)
         return PathSpec.from_str_path(name, key, cwd=self.cwd)
+
+    def _linked(self, spec: PathSpec) -> str | None:
+        """Where the link a name ends in stands, None when it ends in none.
+
+        Args:
+            spec (PathSpec): the name, as the engine gave it.
+        """
+        if self.links is None:
+            return None
+        try:
+            where = name_location(self.links, spec, self.cwd)
+        except CycleError as exc:
+            logger.debug("no link ends %r: %s", spec.virtual, exc)
+            return None
+        if where is None or self.links.stat_at(where) is None:
+            return None
+        return where
 
     async def _kind(self, path: str) -> dict[str, JsonValue]:
         spec = self._spec(path)
@@ -160,6 +190,8 @@ class _PatchFiles:
         except IsADirectoryError:
             return {"kind": "dir"}
         except (FileNotFoundError, NotADirectoryError, CycleError) as exc:
+            if self._linked(self._spec(path)) is not None:
+                return {"kind": "file"}
             logger.debug("nothing stands at %r: %s", path, exc)
             return {}
         return {"kind": "dir" if found.type == FileType.DIRECTORY else "file"}
@@ -200,10 +232,11 @@ class _PatchFiles:
             if isinstance(patch, str):
                 return Served({"line": byte_view(patch)})
             return Served({"end": True}, patch)
+        spec = self._spec(path)
         try:
-            return Served(
-                {"end": True}, await self.read_bytes(self._spec(path))
-            )
+            if self._linked(spec) is not None:
+                return Served({"errno": "ELOOP"})
+            return Served({"end": True}, await self.read_bytes(spec))
         except IsADirectoryError:
             return Served({"errno": "EISDIR"})
         except (FileNotFoundError, NotADirectoryError) as exc:
