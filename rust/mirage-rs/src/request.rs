@@ -100,6 +100,11 @@ pub(crate) enum Request {
     Rmdir {
         path: Vec<u8>,
     },
+    /// Set a file's permission bits.
+    Chmod {
+        path: Vec<u8>,
+        mode: u32,
+    },
     Write {
         path: Vec<u8>,
         mode: WriteMode,
@@ -216,6 +221,11 @@ impl Request {
             Request::Rmdir { path } => {
                 put("op", "rmdir".into());
                 put("path", latin1(path));
+            }
+            Request::Chmod { path, mode } => {
+                put("op", "chmod".into());
+                put("path", latin1(path));
+                put("mode", (*mode).into());
             }
             Request::Write {
                 path,

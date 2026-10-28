@@ -74,13 +74,44 @@ pub(super) enum End {
     Fatal(Vec<u8>, bool),
 }
 
+/// A rename or copy a git header asks for, its names as `-p` leaves them,
+/// none for a name it strips away.
+#[derive(Clone)]
+pub(super) struct Move {
+    pub(super) copy: bool,
+    pub(super) from: Option<Vec<u8>>,
+    pub(super) to: Option<Vec<u8>>,
+}
+
+/// What a git diff's extended header asks beyond its hunks: a rename or
+/// copy, the modes before and after, and whether it carries a binary
+/// patch, which GNU does not apply.
+#[derive(Clone, Default)]
+pub(super) struct Git {
+    pub(super) moved: Option<Move>,
+    pub(super) old_mode: Option<u32>,
+    pub(super) new_mode: Option<u32>,
+    pub(super) binary: bool,
+}
+
+impl Git {
+    /// The rename or copy being read, begun on its first line.
+    fn moved(&mut self, copy: bool) -> &mut Move {
+        self.moved.get_or_insert(Move {
+            copy,
+            from: None,
+            to: None,
+        })
+    }
+}
+
 /// One file's part of a patch: what its reject file's `---` and `+++`
 /// lines say; the names GNU picks the file among, in its order (old, new,
 /// then `Index:` when both of those are left out), `-p` applied and a name
 /// it strips away or `/dev/null` left out; which header names `/dev/null`;
 /// the lines since the last section and the first hunk's line number,
 /// which GNU shows when it finds no file; whether its CRs were stripped;
-/// its hunks in order, and how reading them ended.
+/// its hunks in order, how reading them ended, and its git header.
 pub(super) struct Section<'a> {
     pub(super) old_label: Vec<u8>,
     pub(super) new_label: Vec<u8>,
@@ -92,6 +123,7 @@ pub(super) struct Section<'a> {
     pub(super) crlf: bool,
     pub(super) hunks: Vec<Hunk<'a>>,
     pub(super) end: End,
+    pub(super) git: Option<Git>,
 }
 
 /// A patch's sections, and whether a last line it left without a newline
@@ -370,8 +402,126 @@ fn hunks<'a>(
     (hunks, index, End::Done)
 }
 
+/// A `diff --git` header being read: its two names as `-p` leaves them,
+/// what its extended lines ask, which of them create or delete the file,
+/// and the line after the last of them.
+struct GitHead {
+    names: Vec<Vec<u8>>,
+    git: Git,
+    creates: bool,
+    deletes: bool,
+    end: usize,
+}
+
+/// A `diff --git a/x b/y` line's two names. git quotes a name only for
+/// bytes a blank is not, so where the halves name one file the line is
+/// cut between them; otherwise it is cut before the new name's `b/`.
+fn git_names(rest: &[u8]) -> (&[u8], &[u8]) {
+    let rest = chomp(rest);
+    let half = rest.len() / 2;
+    if rest.len() % 2 == 1 && rest[half] == b' ' {
+        let (old, new) = (&rest[..half], &rest[half + 1..]);
+        if old.get(2..) == new.get(2..) {
+            return (old, new);
+        }
+    }
+    match memchr::memmem::find(rest, b" b/") {
+        Some(at) => (&rest[..at], &rest[at + 1..]),
+        None => match memchr::memchr(b' ', rest) {
+            Some(at) => (&rest[..at], &rest[at + 1..]),
+            None => (rest, rest),
+        },
+    }
+}
+
+/// A mode as git writes it, in octal.
+fn mode(text: &[u8]) -> Option<u32> {
+    std::str::from_utf8(chomp(text))
+        .ok()
+        .and_then(|digits| u32::from_str_radix(digits.trim(), 8).ok())
+}
+
+impl GitHead {
+    fn read(rest: &[u8], strip: Option<usize>, end: usize) -> GitHead {
+        let (old, new) = git_names(rest);
+        GitHead {
+            names: [old, new]
+                .into_iter()
+                .filter_map(|name| candidate(name, strip))
+                .collect(),
+            git: Git::default(),
+            creates: false,
+            deletes: false,
+            end,
+        }
+    }
+
+    /// Take one extended header line; false for a line that is none. A
+    /// rename or copy names its files without git's `a/` and `b/`, so one
+    /// component less is stripped from them than `-p` says.
+    fn take(&mut self, line: &[u8], strip: Option<usize>) -> bool {
+        let moved_name = |rest: &[u8]| {
+            let name = name_and_stamp(rest).0;
+            match strip {
+                Some(0) => None,
+                Some(strip) => candidate(name, Some(strip - 1)),
+                None => candidate(name, None),
+            }
+        };
+        if let Some(rest) = line.strip_prefix(b"old mode ") {
+            self.git.old_mode = mode(rest);
+        } else if let Some(rest) = line.strip_prefix(b"new mode ") {
+            self.git.new_mode = mode(rest);
+        } else if let Some(rest) = line.strip_prefix(b"new file mode ") {
+            self.git.new_mode = mode(rest);
+            self.creates = true;
+        } else if let Some(rest) = line.strip_prefix(b"deleted file mode ") {
+            self.git.old_mode = mode(rest);
+            self.deletes = true;
+        } else if let Some(rest) = line.strip_prefix(b"rename from ") {
+            self.git.moved(false).from = moved_name(rest);
+        } else if let Some(rest) = line.strip_prefix(b"rename to ") {
+            self.git.moved(false).to = moved_name(rest);
+        } else if let Some(rest) = line.strip_prefix(b"copy from ") {
+            self.git.moved(true).from = moved_name(rest);
+        } else if let Some(rest) = line.strip_prefix(b"copy to ") {
+            self.git.moved(true).to = moved_name(rest);
+        } else if chomp(line) == b"GIT binary patch" {
+            self.git.binary = true;
+        } else if !(line.starts_with(b"index ")
+            || line.starts_with(b"similarity index ")
+            || line.starts_with(b"dissimilarity index ")
+            || line.starts_with(b"Binary files "))
+        {
+            return false;
+        }
+        self.end += 1;
+        true
+    }
+
+    /// The section a header with no hunks of its own stands for.
+    fn section<'a>(self, since: usize) -> Section<'a> {
+        let label = self.names.last().cloned().unwrap_or_default();
+        Section {
+            old_label: label.clone(),
+            new_label: label,
+            names: self.names,
+            old_null: self.creates,
+            new_null: self.deletes,
+            leading: since..self.end,
+            at: self.end,
+            crlf: false,
+            hunks: Vec::new(),
+            end: End::Done,
+            git: Some(self.git),
+        }
+    }
+}
+
 /// The patch's file sections in the order it gives them; a pair of headers
-/// with no hunk after them gives none. Two sections may name one file, and
+/// with no hunk after them gives none, but a `diff --git` header does: a
+/// rename, a copy, a mode change, a binary patch or an empty file made or
+/// deleted needs no hunk. Two sections may name one file, and
 /// each is applied in turn, as GNU does; a section is never folded into
 /// another by its name. A last line the patch left without a newline is
 /// read as no line at all, as GNU reads it, and reading stops at the first
@@ -387,11 +537,32 @@ pub(super) fn sections<'a>(
     let mut sections = Vec::new();
     let mut old = Side::none();
     let mut index_name = None;
+    let mut git: Option<GitHead> = None;
     let mut since = 0;
     let mut index = 0;
     let mut read = false;
     while let Some(&line) = lines.get(index) {
         index += 1;
+        if let Some(rest) = line.strip_prefix(b"diff --git ") {
+            if let Some(head) = git.take() {
+                let end = head.end;
+                sections.push(head.section(since));
+                since = end;
+            }
+            git = Some(GitHead::read(rest, strip, index));
+            continue;
+        }
+        if let Some(head) = git.as_mut() {
+            if head.take(line, strip) {
+                continue;
+            }
+            if !(line.starts_with(b"--- ") || line.starts_with(b"+++ ")) {
+                let head = git.take().expect("a git header");
+                let end = head.end;
+                sections.push(head.section(since));
+                since = end;
+            }
+        }
         if line.starts_with(b"--- ") {
             old = Side::read(line, strip);
             continue;
@@ -411,6 +582,7 @@ pub(super) fn sections<'a>(
         read = read || matches!(end, End::Cut) || hunks.last().is_some_and(|hunk| hunk.cut);
         let old = std::mem::replace(&mut old, Side::none());
         let index_name = index_name.take();
+        let head = git.take();
         let fatal = matches!(end, End::Fatal(..));
         if hunks.is_empty() && !fatal {
             continue;
@@ -430,6 +602,7 @@ pub(super) fn sections<'a>(
             crlf: asked,
             hunks,
             end,
+            git: head.map(|head| head.git),
         });
         since = index;
         if fatal {
@@ -438,6 +611,9 @@ pub(super) fn sections<'a>(
                 cut: false,
             };
         }
+    }
+    if let Some(head) = git {
+        sections.push(head.section(since));
     }
     Patch {
         sections,

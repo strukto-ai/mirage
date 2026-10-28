@@ -1,6 +1,7 @@
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from functools import partial
 from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import UINTMAX
@@ -35,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 # What patch changes on a path besides writing it.
 PatchChanges = Mapping[str, Callable[[PathSpec], Awaitable[None]]]
+# How patch sets a file's permission bits.
+PatchChmod = Callable[[PathSpec, int], Awaitable[None]]
 
 
 def _companion(spec: PathSpec, suffix: str) -> PathSpec:
@@ -103,6 +106,7 @@ class _PatchFiles:
             stand beside it, as GNU's lstat finds it.
         changes (Mapping[str, Callable]): ``mkdir``, ``unlink`` and
             ``rmdir``.
+        chmod (PatchChmod): sets the mode a git header gives a file.
     """
 
     def __init__(
@@ -117,6 +121,7 @@ class _PatchFiles:
         stat: Callable[[PathSpec], Awaitable[FileStat]],
         links: LinkView | None,
         changes: PatchChanges,
+        chmod: PatchChmod,
     ) -> None:
         self.errors = ByteSpool()
         self.source = source
@@ -129,6 +134,7 @@ class _PatchFiles:
         self.stat = stat
         self.links = links
         self.changes = changes
+        self.chmod = chmod
 
     def _spec(self, path: str, change: bool = False) -> PathSpec:
         """The file a name the engine gives stands for.
@@ -203,9 +209,11 @@ class _PatchFiles:
             return {}
         return {"kind": "dir" if found.type == FileType.DIRECTORY else "file"}
 
-    async def _change(self, op: str, path: str) -> dict[str, JsonValue]:
+    async def _change(
+        self, run: Callable[[PathSpec], Awaitable[None]], path: str
+    ) -> dict[str, JsonValue]:
         try:
-            await self.changes[op](self._spec(path, change=True))
+            await run(self._spec(path, change=True))
         except OSError as exc:
             if (condition := classify(exc)) is None:
                 raise
@@ -231,7 +239,13 @@ class _PatchFiles:
         if request["op"] == "stat":
             return Served(await self._kind(path))
         if request["op"] in self.changes:
-            return Served(await self._change(str(request["op"]), path))
+            run = self.changes[str(request["op"])]
+            return Served(await self._change(run, path))
+        if request["op"] == "chmod":
+            mode = int(str(request["mode"]))
+            return Served(
+                await self._change(partial(self.chmod, mode=mode), path)
+            )
         if request.get("file") is not True:
             patch = await _load_patch_data(
                 self.source, self.stdin, self.read_bytes
@@ -285,6 +299,8 @@ class PatchFlags:
     reverse: bool = False
     input_path: PathSpec | None = None
     forward: bool = False
+    directories: tuple[str, ...] = ()
+    dry_run: bool = False
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> PatchFlags:
@@ -298,6 +314,55 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> PatchFlags:
         reverse=fl.as_bool("R"),
         input_path=input_flag if isinstance(input_flag, PathSpec) else None,
         forward=fl.as_bool("N"),
+        directories=tuple(fl.as_list("directory")),
+        dry_run=fl.as_bool("dry_run"),
+    )
+
+
+async def _directory(
+    typed: str,
+    cwd: str,
+    root: str,
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+) -> str | bytes:
+    """The directory ``-d`` moves to from ``cwd``, or GNU patch's fatal
+    line when it cannot move there.
+
+    Args:
+        typed (str): the value as typed.
+        cwd (str): where the ``-d`` before it left the run.
+        root (str): the root of the mount the command runs on.
+        stat (Callable): stat refusing a directory with EISDIR.
+    """
+    target = resolve_path(typed, cwd)
+    why = "No such file or directory"
+    if typed:
+        try:
+            await stat(PathSpec.from_str_path(target, mount_key(target, root)))
+            why = "Not a directory"
+        except IsADirectoryError:
+            return target
+        except NotADirectoryError:
+            why = "Not a directory"
+        except FileNotFoundError as exc:
+            logger.debug("no directory at %r: %s", target, exc)
+    label = shell_quote(typed)
+    return f"patch: **** Can't change to directory {label} : {why}\n".encode()
+
+
+def _moved(spec: PathSpec, cwd: str, root: str) -> PathSpec:
+    """An operand typed relative, read from the directory ``-d`` left.
+
+    Args:
+        spec (PathSpec): the operand as the shell resolved it.
+        cwd (str): the directory ``-d`` left the run in.
+        root (str): the root of the mount the command runs on.
+    """
+    typed = spec.raw_path or spec.virtual
+    if typed.startswith("/") or typed == "-":
+        return spec
+    return PathSpec.from_str_path(
+        typed, mount_key(resolve_path(typed, cwd), root), cwd=cwd
     )
 
 
@@ -309,28 +374,41 @@ async def patch_generic(
     write_bytes: Callable[..., Awaitable[None]],
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     changes: PatchChanges,
+    chmod: PatchChmod,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(ctx.flags)
     if len(paths) > 2:
         raise extra_operand_error(
             CommandName.PATCH, paths[2].raw_path or paths[2].virtual
         )
+    root = mount_root(ctx)
+    cwd = ctx.cwd.virtual
+    for typed in parsed.directories:
+        moved = await _directory(typed, cwd, root, stat)
+        if isinstance(moved, bytes):
+            return None, IOResult(exit_code=2, stderr=moved)
+        cwd = moved
+    source = paths[1] if len(paths) > 1 else parsed.input_path
+    if parsed.directories:
+        paths = [_moved(path, cwd, root) for path in paths]
+        source = None if source is None else _moved(source, cwd, root)
     # `patch [ORIGFILE [PATCHFILE]]`: the second operand is the patch
     # file, ahead of -i, and the first is the one file every hunk goes to
     # in place of the names the patch's headers carry, which otherwise
     # resolve against the working directory.
     orig = paths[0] if paths else None
     files = _PatchFiles(
-        paths[1] if len(paths) > 1 else parsed.input_path,
+        source,
         ctx.stdin,
         orig,
-        ctx.cwd.virtual,
-        mount_root(ctx),
+        cwd,
+        root,
         read_bytes,
         write_bytes,
         stat,
         links_of(ctx),
         changes,
+        chmod,
     )
     engine = open_stream(
         "patch",
@@ -338,6 +416,7 @@ async def patch_generic(
             "strip": parsed.strip,
             "reverse": parsed.reverse,
             "forward": parsed.forward,
+            "dry_run": parsed.dry_run,
             "file": (
                 None
                 if orig is None

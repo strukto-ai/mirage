@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "id": "patch_git_renames_copies_and_modes",
+      "seq": 9941424,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_git && cd /data/patch_git || exit 1; printf 'one\\n' > old; printf 'a\\nb\\nc\\n' > f; printf 'diff --git a/old b/renamed\\nsimilarity index 100%%\\nrename from old\\nrename to renamed\\n' > r.diff; patch -p1 < r.diff; patch -p1 < r.diff; patch -p1 -R --dry-run < r.diff; printf 'diff --git a/renamed b/copied\\nsimilarity index 100%%\\ncopy from renamed\\ncopy to copied\\n' | patch -p1; printf 'diff --git a/f b/f\\nold mode 100644\\nnew mode 100755\\nindex 1..2\\n--- a/f\\n+++ b/f\\n@@ -1,3 +1,3 @@\\n a\\n-b\\n+B\\n c\\n' | patch -p1; stat -c '%a' f; printf 'diff --git a/e b/e\\nnew file mode 100644\\nindex 0000000..e69de29\\n' | patch -p1; printf 'diff --git a/e b/e\\ndeleted file mode 100644\\nindex e69de29..0000000\\n' | patch -p1; printf 'diff --git a/f b/f\\nindex 1..2\\nGIT binary patch\\nliteral 1\\nIcmZ?d00001\\n\\n' | patch -p1; echo rc=$?; printf 'diff --git a/x b/y\\nsimilarity index 100%%\\nrename from x\\nrename to y\\n' | patch -p1; echo rc=$?; ls; cat f renamed copied; cd /; rm -r /data/patch_git",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file renamed (renamed from old)\npatching file renamed (already renamed from old)\nchecking file old (renamed from renamed)\npatching file copied (copied from renamed)\npatching file f\n755\npatching file e\npatching file e\nFile f: git binary diffs are not supported.\nrc=1\nCannot rename file without two valid file names\nrc=1\ncopied\nf\nr.diff\nrenamed\na\nB\nc\none\none\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
+    }
+  ]
+}

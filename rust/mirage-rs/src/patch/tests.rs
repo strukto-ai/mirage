@@ -9,7 +9,8 @@ fn seq(n: usize) -> String {
 }
 
 fn patch(host: &mut Host, options: &str) -> (i32, String, String) {
-    let defaults = r#"{"strip": 0, "reverse": false, "forward": false, "file": null}"#;
+    let defaults =
+        r#"{"strip": 0, "reverse": false, "forward": false, "file": null, "dry_run": false}"#;
     let config = crate::config(defaults, options);
     let mut stream = crate::open("patch", config.as_bytes()).expect("opens");
     let status = host.drive(stream.as_mut());
@@ -306,4 +307,124 @@ fn the_search_knows_every_line_it_reaches() {
             }
         }
     }
+}
+
+#[test]
+fn a_dry_run_checks_each_file_and_writes_nothing() {
+    let cases = [
+        (POEM_DIFF, 0, "checking file poem.txt\n"),
+        (
+            "--- a/poem.txt\n+++ b/poem.txt\n@@ -1,3 +1,3 @@\n-x\n+y\n z\n w\n",
+            1,
+            "checking file poem.txt\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED\n",
+        ),
+        (
+            "--- /dev/null\n+++ b/new/n\n@@ -0,0 +1 @@\n+x\n",
+            0,
+            "checking file new/n\n",
+        ),
+        (
+            "--- a/poem.txt\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-roses are red\n-violets are blue\n-sugar is sweet\n",
+            0,
+            "checking file poem.txt\n",
+        ),
+    ];
+    for (diff, code, report) in cases {
+        let mut host = Host::with(&[("poem.txt", POEM)], diff);
+        let (status, out, _) = patch(&mut host, r#"{"strip": 1, "dry_run": true}"#);
+        assert_eq!((status, out.as_str()), (code, report), "{diff}");
+        assert_eq!(host.files.len(), 1, "{diff}");
+        assert_eq!(file(&host, "poem.txt").as_deref(), Some(POEM));
+        assert!(host.directories.is_empty());
+    }
+}
+
+#[test]
+fn git_headers_move_files_set_modes_and_refuse_binary_patches() {
+    let rename =
+        "diff --git a/old b/renamed\nsimilarity index 100%\nrename from old\nrename to renamed\n";
+    let mut host = Host::with(&[("old", "one\n")], rename);
+    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(
+        (status, out.as_str()),
+        (0, "patching file renamed (renamed from old)\n")
+    );
+    assert_eq!(file(&host, "renamed").as_deref(), Some("one\n"));
+    assert!(!host.files.contains_key("old"));
+    // Taken as done once the target stands, the other way round too.
+    host.stdin = rename.as_bytes().to_vec();
+    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(
+        (status, out.as_str()),
+        (0, "patching file renamed (already renamed from old)\n")
+    );
+    host.stdin = rename.as_bytes().to_vec();
+    let (_, out, _) = patch(&mut host, r#"{"strip": 1, "reverse": true}"#);
+    assert_eq!(out, "patching file old (renamed from renamed)\n");
+    let mut host = Host::with(&[], rename);
+    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(
+        (status, out.as_str()),
+        (1, "Cannot rename file without two valid file names\n")
+    );
+
+    let edited = "diff --git a/old b/renamed\nsimilarity index 50%\nrename from old\nrename to renamed\nindex 1..2 100644\n--- a/old\n+++ b/renamed\n@@ -1 +1 @@\n-one\n+two\n";
+    let mut host = Host::with(&[("old", "one\n")], edited);
+    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(
+        (status, out.as_str()),
+        (0, "patching file renamed (renamed from old)\n")
+    );
+    assert_eq!(file(&host, "renamed").as_deref(), Some("two\n"));
+
+    let copy = "diff --git a/old b/other\nsimilarity index 100%\ncopy from old\ncopy to other\n";
+    let mut host = Host::with(&[("old", "one\n"), ("other", "x\n")], copy);
+    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(out, "patching file other (copied from old)\n");
+    assert_eq!(file(&host, "other").as_deref(), Some("one\n"));
+    assert_eq!(file(&host, "old").as_deref(), Some("one\n"));
+
+    let modes = "diff --git a/f b/f\nold mode 100644\nnew mode 100755\n";
+    let mut host = Host::with(&[("f", "a\n")], modes);
+    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!((status, out.as_str()), (0, "patching file f\n"));
+    assert_eq!(host.modes.get("f"), Some(&0o755));
+    host.stdin = modes.as_bytes().to_vec();
+    let (_, out, _) = patch(&mut host, r#"{"strip": 1, "dry_run": true}"#);
+    assert_eq!(out, "checking file f\n");
+    let mut host = Host::with(&[], modes);
+    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(status, 1);
+    assert!(
+        out.starts_with("can't find file to patch at input line 3\n"),
+        "{out}"
+    );
+    assert!(out.ends_with("Skipping patch.\n"), "{out}");
+
+    let empty = "diff --git a/new b/new\nnew file mode 100755\nindex 0000000..e69de29\n";
+    let mut host = Host::with(&[], empty);
+    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(out, "patching file new\n");
+    assert_eq!(file(&host, "new").as_deref(), Some(""));
+    assert_eq!(host.modes.get("new"), Some(&0o755));
+    let gone = "diff --git a/f b/f\ndeleted file mode 100644\nindex e69de29..0000000\n";
+    let mut host = Host::with(&[("f", "")], gone);
+    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(out, "patching file f\n");
+    assert!(!host.files.contains_key("f"));
+
+    let binary =
+        "diff --git a/f b/f\nindex 1234567..89abcde\nGIT binary patch\nliteral 1\nIcmZ?d00001\n\n";
+    let mut host = Host::with(&[("f", "a\n")], binary);
+    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(
+        (status, out.as_str()),
+        (1, "File f: git binary diffs are not supported.\n")
+    );
+    let differ =
+        "diff --git a/f b/f\nindex 1234567..89abcde 100644\nBinary files a/f and b/f differ\n";
+    let mut host = Host::with(&[("f", "a\n")], differ);
+    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!((status, out.as_str()), (0, "patching file f\n"));
+    assert_eq!(file(&host, "f").as_deref(), Some("a\n"));
 }

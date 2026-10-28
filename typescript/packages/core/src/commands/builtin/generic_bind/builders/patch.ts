@@ -35,6 +35,9 @@ const patch: CommandFn = async (_accessor, paths, _texts, ctx) => {
     (p, d) => files.write(p, d),
     stat,
     { mkdir: (p) => files.mkdir(p), unlink: (p) => files.unlink(p), rmdir: (p) => files.rmdir(p) },
+    async (p, mode) => {
+      await files.setAttrs(p, { mode })
+    },
   )
 }
 

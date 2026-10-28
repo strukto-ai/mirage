@@ -96,6 +96,10 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-R", action="store_true"),
             Argument("-i", type="path"),
             Argument("-N", action="store_true"),
+            # Each -d changes directory from where the one before left it,
+            # before anything is read, the operands and -i included.
+            Argument("-d", "--directory", action="append"),
+            Argument("--dry-run", action="store_true"),
             PATH_OPERAND,
             PATH2_OPERAND,
         )

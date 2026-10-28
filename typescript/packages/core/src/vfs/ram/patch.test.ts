@@ -68,6 +68,7 @@ it.each(['', '/data', '/nested/data'])(
           write,
           stat,
           { mkdir: unexpected, unlink: unexpected, rmdir: unexpected },
+          unexpected,
         ),
       )
       expect(seen).toContain('hello.txt')
