@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+use super::meter::Charge;
 use crate::{Stream, StreamError};
 
 pub(super) const BLOCK: usize = 4096;
@@ -14,6 +15,7 @@ pub(super) struct Bytes {
     blocks: BTreeMap<usize, Vec<u8>>,
     base: usize,
     len: usize,
+    charge: Charge,
 }
 
 impl Bytes {
@@ -38,6 +40,7 @@ impl Bytes {
             .or_insert_with(|| Vec::with_capacity(BLOCK))
             .push(byte);
         self.len += 1;
+        self.charge.set(self.blocks.len() * (BLOCK + 64));
     }
 
     pub(super) fn extend(&mut self, bytes: &[u8]) {
@@ -53,6 +56,7 @@ impl Bytes {
         if self.blocks.get(&block).is_some_and(Vec::is_empty) {
             self.blocks.remove(&block);
         }
+        self.charge.set(self.blocks.len() * (BLOCK + 64));
         Some(value)
     }
 
@@ -65,6 +69,7 @@ impl Bytes {
         {
             self.blocks.remove(&(self.base / BLOCK));
             self.base += BLOCK;
+            self.charge.set(self.blocks.len() * (BLOCK + 64));
         }
     }
 
@@ -72,6 +77,7 @@ impl Bytes {
         if let Some((id, _)) = self.blocks.pop_first() {
             self.base = ((id + 1) * BLOCK).min(self.len);
         }
+        self.charge.set(self.blocks.len() * (BLOCK + 64));
         self.blocks.is_empty()
     }
 

@@ -1,0 +1,144 @@
+{
+  "cases": [
+    {
+      "id": "jq_slice_stable_sort",
+      "seq": 18612001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[range(2000) | {k:(. % 11),v:.}] | sort_by(.k) | [.[0].v,.[-1].v,length]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[0,1990,2000]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_slice_long_group_keys",
+      "seq": 18612002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[range(1000) | {k:(\"x\" * 1024 + ((. % 7) | tostring)),v:.}] | group_by(.k) | map(length)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[143,143,143,143,143,143,142]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_slice_json_unicode_roundtrip",
+      "seq": 18612003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '(\"a\\n雪\" * 20000) | tojson | fromjson | [length,.[-1:]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[60000,\"雪\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_slice_long_number",
+      "seq": 18612004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '(\"1.\" + (\"0\" * 5000) + \"1\") | fromjson | [(tostring | length),(. + 0)]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[5003,1]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_slice_container_dump",
+      "seq": 18612005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[range(1000) | [.,(\"x\" * 128)]] | tojson | fromjson | .[-1][0]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "999\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_slice_nested_subtraction",
+      "seq": 18612006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[range(1000)] as $a | [$a, [$a[] | . + 1], $a] - [$a] | map(length)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1000]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_slice_nan_equality_and_grouping",
+      "seq": 18612007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[[nan] == [nan], ([nan] as $a | $a == $a), ([1,nan,nan] | group_by(.) | map(length)), ([[nan],[nan],[1]] - [[nan]])]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[false,true,[1,1,1],[[null],[null],[1]]]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    }
+  ]
+}

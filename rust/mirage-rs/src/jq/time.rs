@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use super::builtin::{Cfunc, Fault};
-use super::value::Value;
+use super::meter::Charge;
+use super::value::{Text, Value};
 
 type Answer = Result<Value, Fault>;
 
@@ -70,7 +71,7 @@ pub(crate) struct Zone {
 
 #[derive(Debug, PartialEq)]
 struct Offset {
-    name: String,
+    name: Arc<Text>,
     east: i64,
 }
 
@@ -97,7 +98,7 @@ enum Day {
 struct Fix {
     east: i64,
     dst: bool,
-    name: String,
+    name: Arc<Text>,
 }
 
 impl Zone {
@@ -155,7 +156,7 @@ impl Zone {
     fn fixed(name: &str) -> Zone {
         Zone {
             std: Offset {
-                name: name.to_string(),
+                name: Arc::new(Text::new(name.into())),
                 east: 0,
             },
             dst: None,
@@ -252,7 +253,7 @@ impl Cursor<'_> {
         found
     }
 
-    fn name(&mut self) -> Option<String> {
+    fn name(&mut self) -> Option<Arc<Text>> {
         let rest = &self.text[self.at..];
         if let Some(quoted) = rest.strip_prefix('<') {
             let end = quoted.find('>')?;
@@ -261,14 +262,14 @@ impl Cursor<'_> {
                 return None;
             }
             self.at += end + 2;
-            return Some(name.to_string());
+            return Some(Arc::new(Text::new(name.into())));
         }
         let len = rest.bytes().take_while(u8::is_ascii_alphabetic).count();
         if len < 3 {
             return None;
         }
         self.at += len;
-        Some(rest[..len].to_string())
+        Some(Arc::new(Text::new(rest[..len].into())))
     }
 
     fn number(&mut self) -> Option<i64> {
@@ -382,7 +383,7 @@ struct Tm {
     wday: i64,
     yday: i64,
     east: i64,
-    zone: String,
+    zone: Arc<Text>,
     epoch: i64,
 }
 
@@ -394,7 +395,7 @@ impl Tm {
             Fix {
                 east: 0,
                 dst: false,
-                name: "UTC".to_string(),
+                name: Arc::new(Text::new("UTC".into())),
             },
             |z| z.at(t),
         );
@@ -531,9 +532,11 @@ fn strftime(input: &Value, format: &Value, local: Option<&Zone>, name: &str) -> 
     let format = until_nul(format);
     let mut out = String::new();
     render(format, &tm, &mut out, format.len() + 100);
+    let mut charge = Charge::open(out.capacity());
     if (out.is_empty() && !format.is_empty()) || out.len() >= format.len() + 100 {
         return Err(fail(format!("{name}/1: unknown system failure")));
     }
+    charge.set(0);
     Ok(Value::string(out))
 }
 
@@ -934,7 +937,10 @@ impl Reader<'_> {
                 let len = rest.iter().take_while(|b| b.is_ascii_uppercase()).count();
                 let name = std::str::from_utf8(&rest[..len]).ok()?;
                 let local = self.zone.is_some_and(|z| {
-                    name == z.std.name || z.dst.as_ref().is_some_and(|d| name == d.offset.name)
+                    name == z.std.name.as_str()
+                        || z.dst
+                            .as_ref()
+                            .is_some_and(|d| name == d.offset.name.as_str())
                 });
                 if !(matches!(name, "UTC" | "GMT") || local) {
                     return None;

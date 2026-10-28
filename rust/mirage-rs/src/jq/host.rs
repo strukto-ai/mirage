@@ -1,7 +1,9 @@
 // Adapted from jq 1.8.2 (MIT), src/builtin.c, src/main.c and src/util.c. See licenses/third_party/jq.txt.
 
-use super::builtin::Cfunc;
-use super::value::{Object, Value};
+use super::builtin::{self, Cfunc, Fault};
+use super::meter::{self, Charge};
+use super::value::{Dumping, Object, Value};
+use super::vm::Limits;
 
 /// What the host answered the `input` builtin with: the next document,
 /// the end of the stream, or the reader's parse error.
@@ -25,6 +27,13 @@ pub(crate) enum Answer {
     Wait(Value),
 }
 
+/// What the run waits on the host for: the next document or the clock.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Request {
+    Input,
+    Now,
+}
+
 /// What jq's host keeps for a run behind its callbacks (main.c, util.c):
 /// the environment `env` reads, where the input reader stands, the reply
 /// `input` waits on, and what `debug` and `stderr` wrote since the host
@@ -35,9 +44,12 @@ pub(crate) struct Host {
     pub(crate) line: f64,
     pub(crate) reply: Option<Reply>,
     pub(crate) now: Option<f64>,
-    pub(crate) asking: Option<&'static str>,
+    pub(crate) asking: Option<Request>,
     pub(crate) messages: Vec<Message>,
     pub(crate) queued: usize,
+    message_bytes: usize,
+    message_charge: Charge,
+    reply_charge: Charge,
 }
 
 impl Default for Host {
@@ -51,6 +63,9 @@ impl Default for Host {
             asking: None,
             messages: Vec::new(),
             queued: 0,
+            message_bytes: 0,
+            message_charge: Charge::open(0),
+            reply_charge: Charge::open(0),
         }
     }
 }
@@ -69,23 +84,116 @@ pub(crate) fn is_host(f: Cfunc) -> bool {
     )
 }
 
+pub(crate) struct Messaging {
+    input: Value,
+    debug: bool,
+    dumping: Dumping,
+    text: Option<String>,
+    charge: Charge,
+}
+
+impl Messaging {
+    pub(crate) fn begin(f: Cfunc, input: Value) -> Self {
+        let debug = f == Cfunc::Debug;
+        let dumping = if debug {
+            Dumping::begin(Value::array(vec![Value::string("DEBUG:"), input.clone()]))
+        } else if let Value::String(text) = &input {
+            Dumping::raw(text.clone())
+        } else {
+            Dumping::begin(input.clone())
+        };
+        Self {
+            input,
+            debug,
+            dumping,
+            text: None,
+            charge: Charge::open(0),
+        }
+    }
+
+    pub(crate) fn run(&mut self, budget: &mut u64, limits: Limits) -> Option<Result<Value, Fault>> {
+        if self.text.is_none() {
+            let text = self.dumping.run(budget)?;
+            self.charge.set(text.capacity());
+            self.text = Some(text);
+        }
+        if meter::exceeded() {
+            return Some(Err(builtin::fail(format!(
+                "jq memory limit of {} bytes exceeded",
+                limits.memory
+            ))));
+        }
+        Some(Ok(self.input.clone()))
+    }
+
+    pub(crate) fn message(&mut self) -> Option<Message> {
+        let text = self.text.take()?;
+        self.charge.set(0);
+        Some(if self.debug {
+            Message::Debug(text)
+        } else {
+            Message::Stderr(text)
+        })
+    }
+
+    pub(crate) fn retire(&mut self) -> Option<Value> {
+        self.dumping.retire().or_else(|| {
+            if matches!(self.input, Value::Null) {
+                None
+            } else {
+                Some(std::mem::replace(&mut self.input, Value::Null))
+            }
+        })
+    }
+}
+
 impl Host {
+    pub(crate) fn set_reply(&mut self, reply: Reply) {
+        let bytes = match &reply {
+            Reply::Error(text) => text.capacity(),
+            _ => 0,
+        };
+        self.reply_charge.set(bytes);
+        self.reply = Some(reply);
+    }
+
+    pub(crate) fn queue(&mut self, message: Message) {
+        let text = match &message {
+            Message::Debug(text) | Message::Stderr(text) => text,
+        };
+        self.queued += text.len();
+        self.message_bytes += text.capacity();
+        self.messages.push(message);
+        self.message_charge
+            .set(self.message_bytes + self.messages.capacity() * std::mem::size_of::<Message>());
+    }
+
+    pub(crate) fn reset_messages(&mut self) {
+        self.queued = 0;
+        self.message_bytes = 0;
+        self.message_charge
+            .set(self.messages.capacity() * std::mem::size_of::<Message>());
+    }
+
     /// Run host builtin `f` on `input`. `input` or `now` with no answer
     /// waiting pauses the run on a request for one, so `now` reads the
     /// host's clock at each call; the end of the stream is jq's `break`
     /// error.
     pub(crate) fn call(&mut self, f: Cfunc, input: Value) -> Answer {
+        if f == Cfunc::Input {
+            self.reply_charge.set(0);
+        }
         match f {
             Cfunc::Now => match self.now.take() {
                 Some(seconds) => Answer::Value(Value::number(seconds)),
                 None => {
-                    self.asking = Some("now");
+                    self.asking = Some(Request::Now);
                     Answer::Wait(input)
                 }
             },
             Cfunc::Input => match self.reply.take() {
                 None => {
-                    self.asking = Some("input");
+                    self.asking = Some(Request::Input);
                     Answer::Wait(input)
                 }
                 Some(Reply::Value(value)) => Answer::Value(value),
@@ -94,8 +202,7 @@ impl Host {
             },
             Cfunc::Debug => {
                 let line = Value::array(vec![Value::string("DEBUG:"), input.clone()]).dump();
-                self.queued += line.len();
-                self.messages.push(Message::Debug(line));
+                self.queue(Message::Debug(line));
                 Answer::Value(input)
             }
             Cfunc::Stderr => {
@@ -103,8 +210,7 @@ impl Host {
                     Value::String(text) => text.to_string(),
                     other => other.dump(),
                 };
-                self.queued += text.len();
-                self.messages.push(Message::Stderr(text));
+                self.queue(Message::Stderr(text));
                 Answer::Value(input)
             }
             Cfunc::Env => Answer::Value(self.env.clone()),

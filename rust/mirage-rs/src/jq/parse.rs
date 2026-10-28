@@ -4,9 +4,11 @@ use std::collections::{BTreeMap, VecDeque};
 
 use serde::Deserialize;
 
+use super::meter::{self, Charge};
 use super::unicode::{BLOCK, Bytes, DecodeCursor, JsonString, WORK};
-use super::value::{Value, parse_json};
+use super::value::{Parsing, Text, Value};
 use crate::{Stream, StreamError};
+use std::sync::Arc;
 
 const DEPTH: usize = 10000;
 const RS: u8 = 0x1e;
@@ -54,6 +56,7 @@ enum Path {
 #[derive(Default)]
 struct Paths {
     entries: BTreeMap<usize, Path>,
+    charge: Charge,
 }
 
 impl Paths {
@@ -67,10 +70,15 @@ impl Paths {
 
     fn push(&mut self, path: Path) {
         self.entries.insert(self.entries.len(), path);
+        self.charge
+            .set(self.entries.len() * (std::mem::size_of::<Path>() + 64));
     }
 
     fn pop(&mut self) -> Option<Path> {
-        self.entries.pop_last().map(|(_, path)| path)
+        let path = self.entries.pop_last().map(|(_, path)| path);
+        self.charge
+            .set(self.entries.len() * (std::mem::size_of::<Path>() + 64));
+        path
     }
 
     fn last(&self) -> Option<&Path> {
@@ -1476,62 +1484,299 @@ fn frame(tag: u8, payload: &[u8], out: &mut Vec<u8>) {
 /// jq reads its inputs with, or jq's message for why it holds none, more
 /// than one, or a bad one, naming the text up to its first NUL.
 pub(crate) fn parse_value(text: &[u8]) -> Result<Value, String> {
-    let mut scanner = Scanner::new(Config::default());
-    let mut docs: Vec<Vec<u8>> = Vec::new();
-    let mut doc = Vec::new();
-    let mut error = None;
-    let mut wire = Vec::new();
-    let mut fold = |wire: &mut Vec<u8>, docs: &mut Vec<Vec<u8>>, error: &mut Option<String>| {
+    let _recording = meter::record_only();
+    let mut budget = u64::MAX;
+    Decoding::begin(text)
+        .run(&mut budget)
+        .unwrap_or_else(|| unreachable!("an unbounded budget finishes the decode"))
+}
+
+struct Wrapping {
+    message: String,
+    at: usize,
+    out: String,
+    charge: Charge,
+}
+
+impl Wrapping {
+    fn begin(message: String) -> Self {
+        let charge = Charge::open(message.capacity());
+        Self {
+            message,
+            at: 0,
+            out: String::new(),
+            charge,
+        }
+    }
+
+    fn step(&mut self, text: &[u8]) -> Option<String> {
+        if self.out.is_empty() {
+            self.out.push_str(&self.message);
+            self.out.push_str(" (while parsing '");
+        }
+        let start = self.at;
+        let mut ended = false;
+        while self.at < text.len() && self.at - start < 64 {
+            let byte = text[self.at];
+            if byte == 0 {
+                ended = true;
+                break;
+            }
+            let len = match byte {
+                0..=0x7f => 1,
+                0xc2..=0xdf => 2,
+                0xe0..=0xef => 3,
+                0xf0..=0xf4 => 4,
+                _ => 1,
+            };
+            let piece = &text[self.at..(self.at + len).min(text.len())];
+            match std::str::from_utf8(piece) {
+                Ok(piece) => {
+                    self.out.push_str(piece);
+                    self.at += piece.len();
+                }
+                Err(error) => {
+                    self.out.push('\u{fffd}');
+                    self.at += error.error_len().unwrap_or(piece.len());
+                }
+            }
+        }
+        self.charge
+            .set(self.message.capacity() + self.out.capacity());
+        if ended || self.at == text.len() {
+            self.out.push_str("')");
+            self.charge.set(self.message.capacity());
+            Some(std::mem::take(&mut self.out))
+        } else {
+            None
+        }
+    }
+}
+
+enum DecodeText {
+    Shared(Arc<Text>),
+    Raw { bytes: Vec<u8>, _charge: Charge },
+}
+
+impl DecodeText {
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::Shared(text) => text.as_bytes(),
+            Self::Raw { bytes, .. } => bytes,
+        }
+    }
+    fn len(&self) -> usize {
+        self.as_bytes().len()
+    }
+}
+
+/// One `fromjson` in progress: jq's scanner over the text, a chunk per
+/// step, then the reader over the one document it found, so a long text
+/// is decoded a bounded slice at a time.
+pub(crate) struct Decoding {
+    text: DecodeText,
+    scanner: Scanner,
+    fed: usize,
+    finished: bool,
+    wire: Vec<u8>,
+    docs: Vec<Vec<u8>>,
+    doc: Vec<u8>,
+    error: Option<String>,
+    parsing: Option<Parsing>,
+    charge: Charge,
+    retiring: bool,
+    wrapping: Option<Wrapping>,
+}
+
+impl Decoding {
+    pub(crate) fn retire(&mut self) -> Option<Value> {
+        if let Some(value) = self.parsing.as_mut().and_then(Parsing::retire) {
+            return Some(value);
+        }
+        if !self.retiring {
+            self.scanner.begin_discard();
+            self.retiring = true;
+        }
+        let mut budget = BLOCK;
+        self.scanner.cleanup(&mut budget);
+        if !self.scanner.trash.is_empty() || !self.scanner.old_paths.is_empty() {
+            return Some(Value::Null);
+        }
+        None
+    }
+
+    pub(crate) fn begin(text: &[u8]) -> Self {
+        let bytes = text.to_vec();
+        let charge = Charge::open(bytes.capacity());
+        Self::open(DecodeText::Raw {
+            bytes,
+            _charge: charge,
+        })
+    }
+
+    pub(crate) fn from_text(text: Arc<Text>) -> Self {
+        Self::open(DecodeText::Shared(text))
+    }
+
+    fn open(text: DecodeText) -> Self {
+        Self {
+            text,
+            scanner: Scanner::new(Config::default()),
+            fed: 0,
+            finished: false,
+            wire: Vec::new(),
+            docs: Vec::new(),
+            doc: Vec::new(),
+            error: None,
+            parsing: None,
+            charge: Charge::open(0),
+            retiring: false,
+            wrapping: None,
+        }
+    }
+
+    /// Works on, a scanner chunk or a token per step plus one per 64
+    /// bytes it moved: the value or jq's message once the text is read,
+    /// None when `budget` ran out first.
+    pub(crate) fn run(&mut self, budget: &mut u64) -> Option<Result<Value, String>> {
+        while *budget > 0 {
+            self.recharge();
+            if let Some(wrapping) = &mut self.wrapping {
+                *budget -= 1;
+                let message = wrapping.step(self.text.as_bytes());
+                if meter::should_pause() {
+                    *budget = 0;
+                    return None;
+                }
+                if let Some(message) = message {
+                    return Some(Err(message));
+                }
+                continue;
+            }
+            if let Some(parsing) = &mut self.parsing {
+                match parsing.run(budget) {
+                    Some(Ok(value)) => return Some(Ok(value)),
+                    Some(Err(message)) => {
+                        self.wrapping = Some(Wrapping::begin(message));
+                        continue;
+                    }
+                    None => return None,
+                }
+            }
+            let moved = match self.scan() {
+                Ok(Some(moved)) => moved,
+                Ok(None) => match self.decide() {
+                    Ok(parsing) => {
+                        self.parsing = Some(parsing);
+                        continue;
+                    }
+                    Err(message) => {
+                        self.wrapping = Some(Wrapping::begin(message));
+                        continue;
+                    }
+                },
+                Err(message) => return Some(Err(message)),
+            };
+            self.recharge();
+            *budget = budget.saturating_sub(1 + moved as u64 / 64);
+            if meter::should_pause() {
+                *budget = 0;
+                return None;
+            }
+        }
+        None
+    }
+
+    fn recharge(&mut self) {
+        self.charge.set(
+            self.wire.capacity()
+                + self.doc.capacity()
+                + self.docs.capacity() * std::mem::size_of::<Vec<u8>>()
+                + self.docs.iter().map(Vec::capacity).sum::<usize>()
+                + self.scanner.input.capacity()
+                + self.scanner.stack.capacity() * std::mem::size_of::<Container>(),
+        );
+    }
+
+    fn scan(&mut self) -> Result<Option<usize>, String> {
+        if self.scanner.busy() {
+            self.scanner.drain(&mut self.wire).map_err(|e| e.message)?;
+            return Ok(Some(self.fold()));
+        }
+        if self.docs.len() > 1 || self.error.is_some() {
+            return Ok(None);
+        }
+        if self.fed < self.text.len() {
+            let end = (self.fed + WORK).min(self.text.len());
+            self.scanner
+                .feed(&self.text.as_bytes()[self.fed..end], &mut self.wire)
+                .map_err(|e| e.message)?;
+            let chunk = end - self.fed;
+            self.fed = end;
+            return Ok(Some(chunk + self.fold()));
+        }
+        if !self.finished {
+            self.finished = true;
+            self.scanner.finish(&mut self.wire).map_err(|e| e.message)?;
+            return Ok(Some(self.fold()));
+        }
+        Ok(None)
+    }
+
+    fn fold(&mut self) -> usize {
         let mut at = 0;
-        while at + 5 <= wire.len() {
+        while at + 5 <= self.wire.len() {
             let size =
-                u32::from_le_bytes(wire[at + 1..at + 5].try_into().expect("4 bytes")) as usize;
-            let payload = &wire[at + 5..at + 5 + size];
-            match wire[at] {
-                1 => doc.extend_from_slice(payload),
-                2 => docs.push(std::mem::take(&mut doc)),
-                _ => *error = Some(String::from_utf8_lossy(payload).into_owned()),
+                u32::from_le_bytes(self.wire[at + 1..at + 5].try_into().expect("4 bytes")) as usize;
+            let payload = &self.wire[at + 5..at + 5 + size];
+            match self.wire[at] {
+                1 => self.doc.extend_from_slice(payload),
+                2 => self.docs.push(std::mem::take(&mut self.doc)),
+                _ => self.error = Some(String::from_utf8_lossy(payload).into_owned()),
             }
             at += 5 + size;
         }
-        wire.clear();
-        docs.len() > 1 || error.is_some()
-    };
-    let mut stop = false;
-    for chunk in text.chunks(WORK) {
-        scanner.feed(chunk, &mut wire).map_err(|e| e.message)?;
-        while scanner.busy() {
-            scanner.drain(&mut wire).map_err(|e| e.message)?;
-        }
-        if fold(&mut wire, &mut docs, &mut error) {
-            stop = true;
-            break;
+        self.wire.clear();
+        at
+    }
+
+    fn decide(&mut self) -> Result<Parsing, String> {
+        match (self.docs.len(), self.error.take()) {
+            (0, Some(message)) | (1, Some(message)) => Err(message),
+            (0, None) => Err("Expected JSON value".to_string()),
+            (1, None) => {
+                let document = self.docs.pop().expect("one document");
+                self.recharge();
+                Ok(Parsing::from_bytes(document))
+            }
+            _ => Err("Unexpected extra JSON values".to_string()),
         }
     }
-    if !stop {
-        scanner.finish(&mut wire).map_err(|e| e.message)?;
-        while scanner.busy() {
-            scanner.drain(&mut wire).map_err(|e| e.message)?;
-        }
-        fold(&mut wire, &mut docs, &mut error);
-    }
-    let shown = text.split(|b| *b == 0).next().unwrap_or_default();
-    let shown = String::from_utf8_lossy(shown);
-    let message = match (docs.len(), error) {
-        (0, Some(message)) | (1, Some(message)) => message,
-        (0, None) => "Expected JSON value".to_string(),
-        (1, None) => {
-            let text = String::from_utf8_lossy(&docs[0]);
-            return parse_json(&text).map_err(|e| format!("{e} (while parsing '{shown}')"));
-        }
-        _ => "Unexpected extra JSON values".to_string(),
-    };
-    Err(format!("{message} (while parsing '{shown}')"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoded_document_transfer_stays_within_the_cap_and_releases() {
+        let meter = Arc::new(meter::Meter::limited(60000));
+        let _installed = meter::install(&meter);
+        let text = format!("\"{}\"", r"\u0061".repeat(1666));
+        let mut decoding = Decoding::begin(text.as_bytes());
+        let value = loop {
+            let result = decoding.run(&mut 1);
+            assert!(!meter.exceeded(), "{} retained bytes", meter.live());
+            if let Some(result) = result {
+                break result.unwrap();
+            }
+        };
+        drop(decoding);
+        assert_eq!(value.dump(), format!("\"{}\"", "a".repeat(1666)));
+        assert!(!meter.exceeded());
+        drop(value);
+        assert_eq!(meter.live(), 0);
+    }
 
     fn collect(
         data: &[u8],

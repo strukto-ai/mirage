@@ -1,35 +1,29 @@
-// Adapted from jq 1.8.2 (MIT), src/compile.c, src/parser.y and src/builtin.c. See licenses/third_party/jq.txt.
+// Adapted from jq 1.8.2 (MIT), src/compile.c, src/parser.y, src/builtin.c and src/linker.c. See licenses/third_party/jq.txt.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::OnceLock;
 
 use super::builtin::{self, Cfunc, Fault};
 use super::check;
-use super::syntax::{self, Ast, BinOp, Def, Loc, Parsed, Pattern, PatternKey, Update};
+use super::syntax::{self, Ast, BinOp, Def, Parsed, Pattern, PatternKey, Update};
 use super::value::{Object, Value};
 use super::vm::{Bytecode, ClosureRef, Limits, Op, Program, Target, Var};
 
 const PRELUDE: &str = include_str!("builtin.jq");
 
-const FORMATS: &[&str] = &[
-    "text", "json", "csv", "tsv", "html", "uri", "sh", "base64", "base64d",
-];
-
 type Library = HashMap<(String, usize), Def>;
 
-fn library() -> Result<&'static Library, String> {
-    static LIBRARY: OnceLock<Result<Library, String>> = OnceLock::new();
-    LIBRARY
-        .get_or_init(|| {
-            let defs = syntax::parse_defs(PRELUDE)?;
-            Ok(defs
-                .into_iter()
-                .map(|def| ((def.name.clone(), def.params.len()), def))
-                .collect())
-        })
-        .as_ref()
-        .map_err(Clone::clone)
+fn library() -> &'static Library {
+    static LIBRARY: OnceLock<Library> = OnceLock::new();
+    LIBRARY.get_or_init(|| {
+        let _unmetered = super::meter::suspend();
+        syntax::parse_defs(PRELUDE)
+            .unwrap_or_else(|report| panic!("builtin.jq is jq's library: {report}"))
+            .into_iter()
+            .map(|def| ((def.name.clone(), def.params.len()), def))
+            .collect()
+    })
 }
 
 enum Bind {
@@ -52,6 +46,18 @@ struct Scope {
 }
 
 type Env = Option<Rc<Scope>>;
+
+impl Drop for Scope {
+    fn drop(&mut self) {
+        let mut next = self.next.take();
+        while let Some(scope) = next {
+            match Rc::try_unwrap(scope) {
+                Ok(mut scope) => next = scope.next.take(),
+                Err(_) => break,
+            }
+        }
+    }
+}
 
 fn with(env: &Env, bind: Bind) -> Env {
     Some(Rc::new(Scope {
@@ -100,53 +106,132 @@ struct Builder {
     parent: Option<usize>,
 }
 
+#[derive(Clone)]
+enum Node<'a> {
+    Ast(&'a Ast),
+    Identity,
+    Const(Value),
+    /// The local `index` of bytecode `owner`.
+    Local(usize, usize),
+    /// `. op $local`, the update `_modify` applies for `lhs op= rhs`.
+    Binop(BinOp, usize, usize),
+    /// `. // $local`, the update `_modify` applies for `lhs //= rhs`.
+    Default(usize, usize),
+}
+
+type Slots = Vec<(String, usize)>;
+
+/// One step of the code generator, run from an explicit stack so a
+/// program nested as deep as Bison's stack let it compiles on a shallow
+/// native stack. A sequence is pushed in order and runs in order; a
+/// node's steps run before the steps that follow the node.
+enum Step<'a> {
+    Emit(Op),
+    Mark(Op),
+    Patch(usize),
+    Code(Node<'a>, Env),
+    Subexp(Node<'a>, Env),
+    Call(&'a str, Vec<Node<'a>>, Env),
+    Bind(&'a [Pattern], Env),
+    Body(Node<'a>),
+    Unbind,
+    Match(&'a Pattern, Option<Rc<Slots>>),
+    MatchVar(&'a str, Option<Rc<Slots>>),
+    Key(&'a Ast),
+    /// Set the bytecode whose STOREVs become STOREVNs until Restore;
+    /// None keeps a stretch out of the rewrite, as jq's closures are.
+    Storevn(Option<usize>),
+    Restore,
+    Library(bool),
+}
+
 struct Compiler<'a> {
     bcs: Vec<Builder>,
     globals: &'a HashMap<String, Value>,
     library: &'static Library,
     linked: HashMap<(String, usize), usize>,
+    referenced: HashSet<usize>,
     /// The bytecode whose STOREVs become STOREVNs, while a `?//`
     /// alternative other than the last is compiled into it.
     storevn: Option<usize>,
-    /// How deep the compiler is in builtin.jq's definitions, whose regex
-    /// calls pass their callers' patterns on.
+    tasks: Vec<(usize, Step<'a>)>,
+    marks: Vec<(usize, usize)>,
+    envs: Vec<Env>,
+    saved: Vec<Option<usize>>,
     in_library: usize,
+    unsupported: Option<String>,
+    unavailable_config: bool,
 }
 
-/// Why a program does not compile here.
 #[derive(Debug)]
 pub(crate) enum Refusal {
-    /// jq refuses it too: its report, as jq prints it.
     Invalid(String),
-    /// jq runs it, but this engine cannot yet: what it lacks.
     Unsupported(String),
 }
 
+/// The variables jq's main binds before the command line's: `$ENV`,
+/// `$ARGS`, and `$JQ_BUILD_CONFIGURATION`, which names a configure line
+/// this engine never had.
+fn builtin_globals() -> [(&'static str, Value); 3] {
+    let mut args = Object::default();
+    args.insert("positional".into(), Value::array(Vec::new()));
+    args.insert("named".into(), Value::object(Object::default()));
+    [
+        ("ENV", Value::object(Object::default())),
+        ("ARGS", Value::object(args)),
+        ("JQ_BUILD_CONFIGURATION", Value::string("")),
+    ]
+}
+
+/// jq's linker reads a program's imports last first and stops at the
+/// first it cannot load. mirage's jq has no `-L` and reads no files, so
+/// no module is ever found: an import refuses the program with jq's
+/// report unless its metadata marks it optional, which lets jq go on
+/// without the module.
 /// Compile `source` against jq's builtin library. `globals` are the
 /// `$name` bindings jq's command line makes (`--arg`, `--argjson`,
-/// `$ARGS`). A program jq refuses is reported in jq's words, before
-/// anything this engine lacks is.
+/// `$ARGS`, `$ENV`); the ones jq's main binds by itself default. A
+/// program jq refuses is refused with jq's report. Work requiring the
+/// host evaluator is refused before execution.
 pub(crate) fn compile(source: &str, globals: &HashMap<String, Value>) -> Result<Program, Refusal> {
-    let ast = match syntax::parse(source) {
-        Parsed::Program(ast) => ast,
+    let (ast, imports) = match syntax::parse(source) {
+        Parsed::Program(ast, imports) => (ast, imports),
         Parsed::Invalid(messages) => return Err(Refusal::Invalid(syntax::report(&messages))),
         Parsed::Unsupported(why) => return Err(Refusal::Unsupported(why.into())),
     };
-    let errors = check::check(&ast, globals, source);
-    if !errors.is_empty() {
-        return Err(Refusal::Invalid(syntax::report(&errors)));
+    if let Some(import) = imports.iter().rev().find(|import| !import.optional) {
+        let message = builtin::module_error(&import.path);
+        return Err(Refusal::Invalid(syntax::report(&[format!(
+            "jq: error: {message}\n"
+        )])));
     }
+    let unavailable_config = !globals.contains_key("JQ_BUILD_CONFIGURATION");
+    let mut globals = globals.clone();
+    for (name, value) in builtin_globals() {
+        globals.entry(name.to_string()).or_insert(value);
+    }
+    let referenced = check::check(&ast, &globals, source)
+        .map_err(|errors| Refusal::Invalid(syntax::report(&errors)))?;
     let mut compiler = Compiler {
         bcs: vec![Builder::default()],
-        globals,
-        library: library().map_err(Refusal::Unsupported)?,
+        globals: &globals,
+        library: library(),
         linked: HashMap::new(),
+        referenced,
         storevn: None,
+        tasks: Vec::new(),
+        marks: Vec::new(),
+        envs: Vec::new(),
+        saved: Vec::new(),
         in_library: 0,
+        unsupported: None,
+        unavailable_config,
     };
-    compiler
-        .code(0, &ast, &None)
-        .map_err(Refusal::Unsupported)?;
+    compiler.seq(0, vec![Step::Code(Node::Ast(&ast), None)]);
+    compiler.run();
+    if let Some(why) = compiler.unsupported.take() {
+        return Err(Refusal::Unsupported(why));
+    }
     compiler.emit(0, Op::Ret);
     Ok(compiler.finish())
 }
@@ -176,7 +261,7 @@ fn constant(ast: &Ast) -> Option<Value> {
                 let (Ast::Literal(Value::String(key)), Ast::Literal(value)) = (k, v) else {
                     return None;
                 };
-                object.insert(key.clone(), value.clone());
+                object.insert(key.clone().into(), value.clone());
             }
             Some(Value::object(object))
         }
@@ -184,7 +269,48 @@ fn constant(ast: &Ast) -> Option<Value> {
     }
 }
 
-impl Compiler<'_> {
+fn constant_node(node: &Node) -> Option<Value> {
+    match node {
+        Node::Ast(ast) => constant(ast),
+        Node::Const(v) => Some(v.clone()),
+        _ => None,
+    }
+}
+
+/// gen_condbranch: JUMP_F over the true branch, which jumps over the
+/// false one.
+fn condbranch<'a>(iftrue: Vec<Step<'a>>, iffalse: Vec<Step<'a>>) -> Vec<Step<'a>> {
+    let mut steps = vec![Step::Mark(Op::JumpF(0))];
+    steps.extend(iftrue);
+    steps.push(Step::Mark(Op::Jump(0)));
+    steps.push(Step::Patch(1));
+    steps.extend(iffalse);
+    steps.push(Step::Patch(0));
+    steps
+}
+
+fn boolean<'a>() -> Vec<Step<'a>> {
+    condbranch(
+        vec![Step::Emit(Op::LoadK(Value::True))],
+        vec![Step::Emit(Op::LoadK(Value::False))],
+    )
+}
+
+/// Steps jq keeps in a closure, out of reach of the STOREV to STOREVN
+/// rewrite: a C function's arguments, which jq inlines only after
+/// parsing, and the bodies of `path`, `last` and `range`.
+fn closed(inner: Vec<Step<'_>>) -> Vec<Step<'_>> {
+    let mut steps = vec![Step::Storevn(None)];
+    steps.extend(inner);
+    steps.push(Step::Restore);
+    steps
+}
+
+fn index_op(opt: bool) -> Op {
+    if opt { Op::IndexOpt } else { Op::Index }
+}
+
+impl<'a> Compiler<'a> {
     fn emit(&mut self, bc: usize, op: Op) -> usize {
         let op = match op {
             Op::StoreV(var) if self.storevn == Some(bc) => Op::StoreVN(var),
@@ -243,367 +369,438 @@ impl Compiler<'_> {
         }
     }
 
-    /// Compile code jq keeps in a closure, out of reach of the STOREV to
-    /// STOREVN rewrite: a C function's arguments, which jq inlines only
-    /// after parsing, and the bodies of `path`, `last` and `range`.
-    fn closed(&mut self, f: impl FnOnce(&mut Self) -> Result<(), String>) -> Result<(), String> {
-        let storevn = self.storevn.take();
-        let result = f(self);
-        self.storevn = storevn;
-        result
+    fn seq(&mut self, bc: usize, steps: Vec<Step<'a>>) {
+        self.tasks
+            .extend(steps.into_iter().rev().map(|step| (bc, step)));
     }
 
-    fn subexp(&mut self, bc: usize, ast: &Ast, env: &Env) -> Result<(), String> {
-        match ast {
-            Ast::Identity => {
-                self.emit(bc, Op::Dup);
+    fn scope(&self) -> Env {
+        self.envs.last().cloned().expect("a Bind left its scope")
+    }
+
+    fn run(&mut self) {
+        while let Some((bc, step)) = self.tasks.pop() {
+            if self.unsupported.is_some() {
+                break;
             }
-            Ast::Literal(v) => {
-                self.emit(bc, Op::PushKUnder(v.clone()));
-            }
-            _ => {
-                self.emit(bc, Op::SubexpBegin);
-                self.code(bc, ast, env)?;
-                self.emit(bc, Op::SubexpEnd);
+            match step {
+                Step::Library(enter) => {
+                    if enter {
+                        self.in_library += 1;
+                    } else {
+                        self.in_library -= 1;
+                    }
+                }
+                Step::Emit(op) => {
+                    self.emit(bc, op);
+                }
+                Step::Mark(op) => {
+                    let at = self.emit(bc, op);
+                    self.marks.push((bc, at));
+                }
+                Step::Patch(k) => {
+                    let (mbc, at) = self.marks.remove(self.marks.len() - 1 - k);
+                    self.patch(mbc, at);
+                }
+                Step::Code(node, env) => self.code(bc, node, &env),
+                Step::Subexp(node, env) => self.subexp(bc, node, &env),
+                Step::Call(name, args, env) => self.call(bc, name, &args, &env),
+                Step::Bind(patterns, env) => self.bind(bc, patterns, env),
+                Step::Body(node) => {
+                    let env = self.scope();
+                    self.code(bc, node, &env);
+                }
+                Step::Unbind => {
+                    self.envs.pop();
+                }
+                Step::Match(pattern, slots) => self.matcher(bc, pattern, slots),
+                Step::MatchVar(name, slots) => self.match_var(bc, name, slots),
+                Step::Key(e) => {
+                    let env = self.scope();
+                    self.subexp(bc, Node::Ast(e), &env);
+                }
+                Step::Storevn(to) => {
+                    self.saved.push(self.storevn);
+                    self.storevn = to;
+                }
+                Step::Restore => {
+                    self.storevn = self.saved.pop().expect("a Storevn to restore");
+                }
             }
         }
-        Ok(())
     }
 
-    /// gen_condbranch: JUMP_F over the true branch, which jumps over the
-    /// false one.
-    fn condbranch(
-        &mut self,
-        bc: usize,
-        iftrue: impl FnOnce(&mut Self) -> Result<(), String>,
-        iffalse: impl FnOnce(&mut Self) -> Result<(), String>,
-    ) -> Result<(), String> {
-        let jumpf = self.emit(bc, Op::JumpF(0));
-        iftrue(self)?;
-        let jump = self.emit(bc, Op::Jump(0));
-        self.patch(bc, jumpf);
-        iffalse(self)?;
-        self.patch(bc, jump);
-        Ok(())
-    }
-
-    fn code(&mut self, bc: usize, ast: &Ast, env: &Env) -> Result<(), String> {
-        match ast {
-            Ast::Identity => {}
-            Ast::Recurse => self.call(bc, "recurse", &[], env)?,
-            Ast::Literal(v) => {
-                self.emit(bc, Op::LoadK(v.clone()));
-            }
-            Ast::Format(name) => self.call(
-                bc,
-                "format",
-                &[Ast::Literal(Value::string(name.as_str()))],
-                env,
-            )?,
-            Ast::Index(term, key, opt) => {
-                self.subexp(bc, key, env)?;
-                self.code(bc, term, env)?;
-                self.emit(bc, if *opt { Op::IndexOpt } else { Op::Index });
-            }
-            Ast::Slice(term, from, to, opt) => {
-                self.emit(bc, Op::PushKUnder(Value::object(Object::default())));
-                for (name, bound) in [("start", from), ("end", to)] {
-                    self.emit(bc, Op::PushKUnder(Value::string(name)));
-                    match bound {
-                        Some(e) => self.subexp(bc, e, env)?,
-                        None => {
-                            self.emit(bc, Op::PushKUnder(Value::Null));
-                        }
-                    }
-                    self.emit(bc, Op::Insert);
-                }
-                self.code(bc, term, env)?;
-                self.emit(bc, if *opt { Op::IndexOpt } else { Op::Index });
-            }
-            Ast::Each(term, opt) => {
-                self.code(bc, term, env)?;
-                self.emit(bc, if *opt { Op::EachOpt } else { Op::Each });
-            }
-            Ast::Try(body, handler) => {
-                let begin = self.emit(bc, Op::TryBegin(0));
-                self.code(bc, body, env)?;
-                self.emit(bc, Op::TryEnd);
-                let jump = self.emit(bc, Op::Jump(0));
-                self.patch(bc, begin);
-                match handler {
-                    Some(h) => self.code(bc, h, env)?,
-                    None => {
-                        self.emit(bc, Op::Backtrack);
-                    }
-                }
-                self.patch(bc, jump);
-            }
-            Ast::Neg(e) => {
-                self.code(bc, e, env)?;
-                self.emit(bc, Op::CallBuiltin(Cfunc::Negate, 1));
-            }
-            Ast::Pipe(a, b) => {
-                self.code(bc, a, env)?;
-                self.code(bc, b, env)?;
-            }
-            Ast::Comma(a, b) => {
-                let fork = self.emit(bc, Op::Fork(0));
-                self.code(bc, a, env)?;
-                let jump = self.emit(bc, Op::Jump(0));
-                self.patch(bc, fork);
-                self.code(bc, b, env)?;
-                self.patch(bc, jump);
-            }
-            Ast::Binop(op, a, b) => self.binop(bc, *op, a, b, env)?,
-            Ast::And(a, b) => {
+    fn subexp(&mut self, bc: usize, node: Node<'a>, env: &Env) {
+        match node {
+            Node::Identity | Node::Ast(Ast::Identity) => {
                 self.emit(bc, Op::Dup);
-                self.code(bc, a, env)?;
-                self.condbranch(
-                    bc,
-                    |c| {
-                        c.emit(bc, Op::Pop);
-                        c.code(bc, b, env)?;
-                        c.boolean(bc)
-                    },
-                    |c| {
-                        c.emit(bc, Op::Pop);
-                        c.emit(bc, Op::LoadK(Value::False));
-                        Ok(())
-                    },
-                )?;
+            }
+            Node::Const(v) => {
+                self.emit(bc, Op::PushKUnder(v));
+            }
+            Node::Ast(Ast::Literal(v)) => {
+                self.emit(bc, Op::PushKUnder(v.clone()));
+            }
+            node => self.seq(
+                bc,
+                vec![
+                    Step::Emit(Op::SubexpBegin),
+                    Step::Code(node, env.clone()),
+                    Step::Emit(Op::SubexpEnd),
+                ],
+            ),
+        }
+    }
+
+    /// gen_try: the body, then the handler the TRY_BEGIN jumps to on an
+    /// error raised from inside it.
+    fn try_catch(&mut self, bc: usize, body: Node<'a>, handler: Vec<Step<'a>>, env: &Env) {
+        let mut steps = vec![
+            Step::Mark(Op::TryBegin(0)),
+            Step::Code(body, env.clone()),
+            Step::Emit(Op::TryEnd),
+            Step::Mark(Op::Jump(0)),
+            Step::Patch(1),
+        ];
+        steps.extend(handler);
+        steps.push(Step::Patch(0));
+        self.seq(bc, steps);
+    }
+
+    fn code(&mut self, bc: usize, node: Node<'a>, env: &Env) {
+        let ast = match node {
+            Node::Identity => return,
+            Node::Const(v) => {
+                self.emit(bc, Op::LoadK(v));
+                return;
+            }
+            Node::Local(owner, index) => {
+                let var = self.var(bc, owner, index);
+                self.emit(bc, Op::LoadV(var));
+                return;
+            }
+            Node::Binop(op, owner, index) => {
+                return self.binop(bc, op, Node::Identity, Node::Local(owner, index), env);
+            }
+            Node::Default(owner, index) => {
+                return self.definedor(bc, Node::Identity, Node::Local(owner, index), env);
+            }
+            Node::Ast(ast) => ast,
+        };
+        let steps = match ast {
+            Ast::Identity => return,
+            Ast::Recurse => return self.call(bc, "recurse", &[], env),
+            Ast::Literal(v) => vec![Step::Emit(Op::LoadK(v.clone()))],
+            Ast::Format(name) => {
+                let name = Node::Const(Value::string(name.as_str()));
+                return self.call(bc, "format", &[name], env);
+            }
+            Ast::Index(term, key, opt) => vec![
+                Step::Subexp(Node::Ast(key), env.clone()),
+                Step::Code(Node::Ast(term), env.clone()),
+                Step::Emit(index_op(*opt)),
+            ],
+            Ast::Slice(term, from, to, opt) => {
+                let mut steps = vec![Step::Emit(Op::PushKUnder(Value::object(Object::default())))];
+                for (name, bound) in [("start", from), ("end", to)] {
+                    steps.push(Step::Emit(Op::PushKUnder(Value::string(name))));
+                    steps.push(match bound {
+                        Some(e) => Step::Subexp(Node::Ast(e), env.clone()),
+                        None => Step::Emit(Op::PushKUnder(Value::Null)),
+                    });
+                    steps.push(Step::Emit(Op::Insert));
+                }
+                steps.push(Step::Code(Node::Ast(term), env.clone()));
+                steps.push(Step::Emit(index_op(*opt)));
+                steps
+            }
+            Ast::Each(term, opt) => vec![
+                Step::Code(Node::Ast(term), env.clone()),
+                Step::Emit(if *opt { Op::EachOpt } else { Op::Each }),
+            ],
+            Ast::Try(body, handler) => {
+                let handler = match handler {
+                    Some(h) => vec![Step::Code(Node::Ast(h), env.clone())],
+                    None => vec![Step::Emit(Op::Backtrack)],
+                };
+                return self.try_catch(bc, Node::Ast(body), handler, env);
+            }
+            Ast::Neg(e) => vec![
+                Step::Code(Node::Ast(e), env.clone()),
+                Step::Emit(Op::CallBuiltin(Cfunc::Negate, 1)),
+            ],
+            Ast::Pipe(a, b) => vec![
+                Step::Code(Node::Ast(a), env.clone()),
+                Step::Code(Node::Ast(b), env.clone()),
+            ],
+            Ast::Comma(a, b) => vec![
+                Step::Mark(Op::Fork(0)),
+                Step::Code(Node::Ast(a), env.clone()),
+                Step::Mark(Op::Jump(0)),
+                Step::Patch(1),
+                Step::Code(Node::Ast(b), env.clone()),
+                Step::Patch(0),
+            ],
+            Ast::Binop(op, a, b) => {
+                return self.binop(bc, *op, Node::Ast(a), Node::Ast(b), env);
+            }
+            Ast::And(a, b) => {
+                let mut steps = vec![Step::Emit(Op::Dup), Step::Code(Node::Ast(a), env.clone())];
+                let mut iftrue = vec![Step::Emit(Op::Pop), Step::Code(Node::Ast(b), env.clone())];
+                iftrue.extend(boolean());
+                let iffalse = vec![Step::Emit(Op::Pop), Step::Emit(Op::LoadK(Value::False))];
+                steps.extend(condbranch(iftrue, iffalse));
+                steps
             }
             Ast::Or(a, b) => {
-                self.emit(bc, Op::Dup);
-                self.code(bc, a, env)?;
-                self.condbranch(
-                    bc,
-                    |c| {
-                        c.emit(bc, Op::Pop);
-                        c.emit(bc, Op::LoadK(Value::True));
-                        Ok(())
-                    },
-                    |c| {
-                        c.emit(bc, Op::Pop);
-                        c.code(bc, b, env)?;
-                        c.boolean(bc)
-                    },
-                )?;
+                let mut steps = vec![Step::Emit(Op::Dup), Step::Code(Node::Ast(a), env.clone())];
+                let iftrue = vec![Step::Emit(Op::Pop), Step::Emit(Op::LoadK(Value::True))];
+                let mut iffalse = vec![Step::Emit(Op::Pop), Step::Code(Node::Ast(b), env.clone())];
+                iffalse.extend(boolean());
+                steps.extend(condbranch(iftrue, iffalse));
+                steps
             }
-            Ast::Alternative(a, b) => self.definedor(bc, a, b, env)?,
+            Ast::Alternative(a, b) => {
+                return self.definedor(bc, Node::Ast(a), Node::Ast(b), env);
+            }
             Ast::Update(kind, lhs, rhs) => match kind {
                 Update::Assign => {
-                    self.call(bc, "_assign", &[(**lhs).clone(), (**rhs).clone()], env)?
+                    return self.call(bc, "_assign", &[Node::Ast(lhs), Node::Ast(rhs)], env);
                 }
                 Update::Modify => {
-                    self.call(bc, "_modify", &[(**lhs).clone(), (**rhs).clone()], env)?
+                    return self.call(bc, "_modify", &[Node::Ast(lhs), Node::Ast(rhs)], env);
                 }
                 Update::Arith(_) | Update::Alternative => {
-                    self.emit(bc, Op::Dup);
-                    self.code(bc, rhs, env)?;
                     let tmp = self.local(bc);
-                    self.emit(
-                        bc,
-                        Op::StoreV(Var {
+                    let update = match kind {
+                        Update::Arith(op) => Node::Binop(*op, bc, tmp),
+                        _ => Node::Default(bc, tmp),
+                    };
+                    vec![
+                        Step::Emit(Op::Dup),
+                        Step::Code(Node::Ast(rhs), env.clone()),
+                        Step::Emit(Op::StoreV(Var {
                             level: 0,
                             index: tmp,
-                        }),
-                    );
-                    let inner = with(
-                        env,
-                        Bind::Var {
-                            name: "*tmp".into(),
-                            bc,
-                            index: tmp,
-                        },
-                    );
-                    let value = Box::new(Ast::Var("*tmp".into(), Loc::default()));
-                    let update = match kind {
-                        Update::Arith(op) => Ast::Binop(*op, Box::new(Ast::Identity), value),
-                        _ => Ast::Alternative(Box::new(Ast::Identity), value),
-                    };
-                    self.call(bc, "_modify", &[(**lhs).clone(), update], &inner)?;
+                        })),
+                        Step::Call("_modify", vec![Node::Ast(lhs), update], env.clone()),
+                    ]
                 }
             },
             Ast::If(cond, then, otherwise) => {
-                self.emit(bc, Op::Dup);
-                self.subexp(bc, cond, env)?;
-                self.emit(bc, Op::Pop);
-                self.condbranch(
-                    bc,
-                    |c| {
-                        c.emit(bc, Op::Pop);
-                        c.code(bc, then, env)
-                    },
-                    |c| {
-                        c.emit(bc, Op::Pop);
-                        match otherwise {
-                            Some(e) => c.code(bc, e, env),
-                            None => Ok(()),
-                        }
-                    },
-                )?;
+                let mut steps = vec![
+                    Step::Emit(Op::Dup),
+                    Step::Subexp(Node::Ast(cond), env.clone()),
+                    Step::Emit(Op::Pop),
+                ];
+                let iftrue = vec![
+                    Step::Emit(Op::Pop),
+                    Step::Code(Node::Ast(then), env.clone()),
+                ];
+                let mut iffalse = vec![Step::Emit(Op::Pop)];
+                iffalse.extend(
+                    otherwise
+                        .iter()
+                        .map(|e| Step::Code(Node::Ast(e), env.clone())),
+                );
+                steps.extend(condbranch(iftrue, iffalse));
+                steps
             }
             Ast::Reduce(source, patterns, init, body) => {
-                self.emit(bc, Op::Dup);
-                self.code(bc, init, env)?;
                 let res = Var {
                     level: 0,
                     index: self.local(bc),
                 };
-                self.emit(bc, Op::StoreV(res));
-                let fork = self.emit(bc, Op::Fork(0));
-                self.emit(bc, Op::DupN);
-                self.code(bc, source, env)?;
-                let inner = self.matchers(bc, patterns, env)?;
-                self.emit(bc, Op::LoadVN(res));
-                self.code(bc, body, &inner)?;
-                self.emit(bc, Op::StoreV(res));
-                self.emit(bc, Op::Backtrack);
-                self.patch(bc, fork);
-                self.emit(bc, Op::LoadVN(res));
+                vec![
+                    Step::Emit(Op::Dup),
+                    Step::Code(Node::Ast(init), env.clone()),
+                    Step::Emit(Op::StoreV(res)),
+                    Step::Mark(Op::Fork(0)),
+                    Step::Emit(Op::DupN),
+                    Step::Code(Node::Ast(source), env.clone()),
+                    Step::Bind(patterns, env.clone()),
+                    Step::Emit(Op::LoadVN(res)),
+                    Step::Body(Node::Ast(body)),
+                    Step::Unbind,
+                    Step::Emit(Op::StoreV(res)),
+                    Step::Emit(Op::Backtrack),
+                    Step::Patch(0),
+                    Step::Emit(Op::LoadVN(res)),
+                ]
             }
             Ast::Foreach(source, patterns, init, update, extract) => {
-                self.emit(bc, Op::Dup);
-                self.code(bc, init, env)?;
                 let state = Var {
                     level: 0,
                     index: self.local(bc),
                 };
-                self.emit(bc, Op::StoreV(state));
-                self.emit(bc, Op::Dup);
-                self.code(bc, source, env)?;
-                let inner = self.matchers(bc, patterns, env)?;
-                self.emit(bc, Op::LoadVN(state));
-                self.code(bc, update, &inner)?;
-                self.emit(bc, Op::Dup);
-                self.emit(bc, Op::StoreV(state));
-                if let Some(extract) = extract {
-                    self.code(bc, extract, &inner)?;
-                }
+                let mut steps = vec![
+                    Step::Emit(Op::Dup),
+                    Step::Code(Node::Ast(init), env.clone()),
+                    Step::Emit(Op::StoreV(state)),
+                    Step::Emit(Op::Dup),
+                    Step::Code(Node::Ast(source), env.clone()),
+                    Step::Bind(patterns, env.clone()),
+                    Step::Emit(Op::LoadVN(state)),
+                    Step::Body(Node::Ast(update)),
+                    Step::Emit(Op::Dup),
+                    Step::Emit(Op::StoreV(state)),
+                ];
+                steps.extend(extract.iter().map(|e| Step::Body(Node::Ast(e))));
+                steps.push(Step::Unbind);
+                steps
             }
             Ast::Bind(source, patterns, body) => {
-                if patterns.len() > 1 {
-                    self.emit(bc, Op::SubexpBegin);
-                    self.code(bc, source, env)?;
-                    self.emit(bc, Op::Dup);
-                    self.emit(bc, Op::SubexpEnd);
+                let mut steps = if patterns.len() > 1 {
+                    vec![
+                        Step::Emit(Op::SubexpBegin),
+                        Step::Code(Node::Ast(source), env.clone()),
+                        Step::Emit(Op::Dup),
+                        Step::Emit(Op::SubexpEnd),
+                    ]
                 } else {
-                    self.emit(bc, Op::Dup);
-                    self.subexp(bc, source, env)?;
-                }
-                self.emit(bc, Op::Pop);
-                let inner = self.matchers(bc, patterns, env)?;
-                self.code(bc, body, &inner)?;
+                    vec![
+                        Step::Emit(Op::Dup),
+                        Step::Subexp(Node::Ast(source), env.clone()),
+                    ]
+                };
+                steps.extend([
+                    Step::Emit(Op::Pop),
+                    Step::Bind(patterns, env.clone()),
+                    Step::Body(Node::Ast(body)),
+                    Step::Unbind,
+                ]);
+                steps
             }
             Ast::Label(name, body) => {
                 self.emit(bc, Op::Dup);
                 self.emit(bc, Op::GenLabel);
                 let index = self.local(bc);
                 self.emit(bc, Op::StoreV(Var { level: 0, index }));
-                let label = format!("*label-{name}");
                 let inner = with(
                     env,
                     Bind::Var {
-                        name: label.clone(),
+                        name: format!("*label-{name}"),
                         bc,
                         index,
                     },
                 );
                 self.emit(bc, Op::Pop);
-                let handler = Ast::If(
-                    Box::new(Ast::Binop(
-                        BinOp::Equal,
-                        Box::new(Ast::Identity),
-                        Box::new(Ast::Var(label, Loc::default())),
-                    )),
-                    Box::new(Ast::Call("empty".into(), Vec::new(), Loc::default())),
-                    Some(Box::new(Ast::Call(
-                        "error".into(),
-                        Vec::new(),
-                        Loc::default(),
-                    ))),
-                );
-                self.code(bc, &Ast::Try(body.clone(), Some(Box::new(handler))), &inner)?;
+                let handler = self.label_handler(bc, index, &inner);
+                return self.try_catch(bc, Node::Ast(body), handler, &inner);
             }
             Ast::Break(name, _) => {
-                let Some((owner, index)) = find_var(env, &format!("*label-{name}")) else {
-                    return Err(format!("$*label-{name} is not defined"));
-                };
+                let (owner, index) = find_var(env, &format!("*label-{name}"))
+                    .expect("checked: the label is in scope");
                 let var = self.var(bc, owner, index);
-                self.emit(bc, Op::LoadV(var));
-                self.emit(bc, Op::CallBuiltin(Cfunc::Error, 1));
+                vec![
+                    Step::Emit(Op::LoadV(var)),
+                    Step::Emit(Op::CallBuiltin(Cfunc::Error, 1)),
+                ]
             }
             Ast::Def(def, rest) => {
-                let inner = self.define(bc, def, env)?;
-                self.code(bc, rest, &inner)?;
+                if !self
+                    .referenced
+                    .contains(&(def.as_ref() as *const Def as usize))
+                {
+                    return self.seq(bc, vec![Step::Code(Node::Ast(rest), env.clone())]);
+                }
+                let outer = self.define(bc, def, env);
+                vec![Step::Code(Node::Ast(rest), outer)]
             }
-            Ast::Call(name, args, _) => self.call(bc, name, args, env)?,
+            Ast::Call(name, args, _) => {
+                let args: Vec<Node> = args.iter().map(Node::Ast).collect();
+                return self.call(bc, name, &args, env);
+            }
+            Ast::Var(name, _)
+                if self.unavailable_config
+                    && name == "JQ_BUILD_CONFIGURATION"
+                    && find_var(env, name).is_none() =>
+            {
+                self.unsupported = Some("build configuration requires the host evaluator".into());
+                Vec::new()
+            }
             Ast::Var(name, _) => match find_var(env, name) {
                 Some((owner, index)) => {
                     let var = self.var(bc, owner, index);
-                    self.emit(bc, Op::LoadV(var));
-                }
-                None => match self.globals.get(name) {
-                    Some(value) => {
-                        self.emit(bc, Op::LoadK(value.clone()));
-                    }
-                    None => return Err(format!("${name} is not defined")),
-                },
-            },
-            Ast::Collect(inner) => match constant(ast) {
-                Some(value) => {
-                    self.emit(bc, Op::LoadK(value));
+                    vec![Step::Emit(Op::LoadV(var))]
                 }
                 None => {
+                    let value = self
+                        .globals
+                        .get(name)
+                        .expect("checked: the variable is bound")
+                        .clone();
+                    vec![Step::Emit(Op::LoadK(value))]
+                }
+            },
+            Ast::LoadVn(name, _) => {
+                let (owner, index) = find_var(env, name).expect("checked: the variable is bound");
+                let var = self.var(bc, owner, index);
+                vec![Step::Emit(Op::LoadVN(var))]
+            }
+            Ast::Collect(inner) => match constant(ast) {
+                Some(value) => vec![Step::Emit(Op::LoadK(value))],
+                None => {
                     let Some(inner) = inner else { unreachable!() };
-                    self.emit(bc, Op::Dup);
-                    self.emit(bc, Op::LoadK(Value::array(Vec::new())));
                     let array = Var {
                         level: 0,
                         index: self.local(bc),
                     };
-                    self.emit(bc, Op::StoreV(array));
-                    let fork = self.emit(bc, Op::Fork(0));
-                    self.code(bc, inner, env)?;
-                    self.emit(bc, Op::Append(array));
-                    self.emit(bc, Op::Backtrack);
-                    self.patch(bc, fork);
-                    self.emit(bc, Op::LoadVN(array));
+                    vec![
+                        Step::Emit(Op::Dup),
+                        Step::Emit(Op::LoadK(Value::array(Vec::new()))),
+                        Step::Emit(Op::StoreV(array)),
+                        Step::Mark(Op::Fork(0)),
+                        Step::Code(Node::Ast(inner), env.clone()),
+                        Step::Emit(Op::Append(array)),
+                        Step::Emit(Op::Backtrack),
+                        Step::Patch(0),
+                        Step::Emit(Op::LoadVN(array)),
+                    ]
                 }
             },
             Ast::Object(pairs) => match constant(ast) {
-                Some(value) => {
-                    self.emit(bc, Op::LoadK(value));
-                }
+                Some(value) => vec![Step::Emit(Op::LoadK(value))],
                 None => {
-                    self.emit(bc, Op::PushKUnder(Value::object(Object::default())));
+                    let mut steps =
+                        vec![Step::Emit(Op::PushKUnder(Value::object(Object::default())))];
                     for (k, v) in pairs {
-                        self.subexp(bc, k, env)?;
-                        self.subexp(bc, v, env)?;
-                        self.emit(bc, Op::Insert);
+                        steps.push(Step::Subexp(Node::Ast(k), env.clone()));
+                        steps.push(Step::Subexp(Node::Ast(v), env.clone()));
+                        steps.push(Step::Emit(Op::Insert));
                     }
-                    self.emit(bc, Op::Pop);
+                    steps.push(Step::Emit(Op::Pop));
+                    steps
                 }
             },
-        }
-        Ok(())
+            Ast::AtKey => vec![
+                Step::Emit(Op::Pop),
+                Step::Emit(Op::Dup2),
+                Step::Emit(Op::Dup2),
+                Step::Emit(Op::Index),
+            ],
+        };
+        self.seq(bc, steps);
     }
 
-    fn boolean(&mut self, bc: usize) -> Result<(), String> {
-        self.condbranch(
-            bc,
-            |c| {
-                c.emit(bc, Op::LoadK(Value::True));
-                Ok(())
-            },
-            |c| {
-                c.emit(bc, Op::LoadK(Value::False));
-                Ok(())
-            },
-        )
+    /// The handler gen_label gives a `label`'s try: an error equal to the
+    /// label's value is the break and backtracks, any other is raised on.
+    fn label_handler(&self, bc: usize, index: usize, env: &Env) -> Vec<Step<'a>> {
+        let mut steps = vec![
+            Step::Emit(Op::Dup),
+            Step::Subexp(Node::Binop(BinOp::Equal, bc, index), env.clone()),
+            Step::Emit(Op::Pop),
+        ];
+        let iftrue = vec![Step::Emit(Op::Pop), Step::Emit(Op::Backtrack)];
+        let iffalse = vec![
+            Step::Emit(Op::Pop),
+            Step::Call("error", Vec::new(), env.clone()),
+        ];
+        steps.extend(condbranch(iftrue, iffalse));
+        steps
     }
 
-    fn binop(&mut self, bc: usize, op: BinOp, a: &Ast, b: &Ast, env: &Env) -> Result<(), String> {
+    fn binop(&mut self, bc: usize, op: BinOp, a: Node<'a>, b: Node<'a>, env: &Env) {
         let f = builtin::lookup(op.function(), 2).expect("binop builtin");
         let folds = |x: &Value, y: &Value| {
             !(op == BinOp::Multiply
@@ -612,7 +809,7 @@ impl Compiler<'_> {
                     && matches!(x, Value::Array(_))
                     && matches!(y, Value::Array(_)))
         };
-        let constants = match (constant(a), constant(b)) {
+        let constants = match (constant_node(&a), constant_node(&b)) {
             (Some(x), Some(y)) if folds(&x, &y) => Some((x, y)),
             _ => None,
         };
@@ -621,8 +818,9 @@ impl Compiler<'_> {
                 blocks: usize::MAX,
                 items: usize::MAX,
                 bytes: usize::MAX,
+                memory: usize::MAX,
             };
-            match builtin::call(f, vec![Value::Null, x, y], limits) {
+            match builtin::call(f, &[Value::Null, x, y], limits) {
                 Ok(v) => {
                     self.emit(bc, Op::LoadK(v));
                 }
@@ -631,67 +829,72 @@ impl Compiler<'_> {
                 }
                 Err(_) => unreachable!("binops neither halt nor backtrack"),
             }
-            return Ok(());
+            return;
         }
-        self.closed(|c| {
-            c.subexp(bc, b, env)?;
-            c.subexp(bc, a, env)
-        })?;
-        self.emit(bc, Op::CallBuiltin(f, 3));
-        Ok(())
+        let mut steps = closed(vec![
+            Step::Subexp(b, env.clone()),
+            Step::Subexp(a, env.clone()),
+        ]);
+        steps.push(Step::Emit(Op::CallBuiltin(f, 3)));
+        self.seq(bc, steps);
     }
 
     /// gen_definedor: the outputs of `a` that are neither null nor false,
     /// or `b`'s when there are none.
-    fn definedor(&mut self, bc: usize, a: &Ast, b: &Ast, env: &Env) -> Result<(), String> {
+    fn definedor(&mut self, bc: usize, a: Node<'a>, b: Node<'a>, env: &Env) {
         let found = Var {
             level: 0,
             index: self.local(bc),
         };
-        self.emit(bc, Op::Dup);
-        self.emit(bc, Op::LoadK(Value::False));
-        self.emit(bc, Op::StoreV(found));
-        let fork = self.emit(bc, Op::Fork(0));
-        self.code(bc, a, env)?;
-        let skip_found = self.emit(bc, Op::JumpF(0));
-        self.emit(bc, Op::Dup);
-        self.emit(bc, Op::LoadK(Value::True));
-        self.emit(bc, Op::StoreV(found));
-        let to_end = self.emit(bc, Op::Jump(0));
-        self.patch(bc, skip_found);
-        self.emit(bc, Op::Backtrack);
-        self.patch(bc, fork);
-        self.emit(bc, Op::Dup);
-        self.emit(bc, Op::LoadV(found));
-        let skip_backtrack = self.emit(bc, Op::JumpF(0));
-        self.emit(bc, Op::Backtrack);
-        self.patch(bc, skip_backtrack);
-        self.emit(bc, Op::Pop);
-        self.code(bc, b, env)?;
-        self.patch(bc, to_end);
-        Ok(())
+        self.seq(
+            bc,
+            vec![
+                Step::Emit(Op::Dup),
+                Step::Emit(Op::LoadK(Value::False)),
+                Step::Emit(Op::StoreV(found)),
+                Step::Mark(Op::Fork(0)),
+                Step::Code(a, env.clone()),
+                Step::Mark(Op::JumpF(0)),
+                Step::Emit(Op::Dup),
+                Step::Emit(Op::LoadK(Value::True)),
+                Step::Emit(Op::StoreV(found)),
+                Step::Mark(Op::Jump(0)),
+                Step::Patch(1),
+                Step::Emit(Op::Backtrack),
+                Step::Patch(1),
+                Step::Emit(Op::Dup),
+                Step::Emit(Op::LoadV(found)),
+                Step::Mark(Op::JumpF(0)),
+                Step::Emit(Op::Backtrack),
+                Step::Patch(0),
+                Step::Emit(Op::Pop),
+                Step::Code(b, env.clone()),
+                Step::Patch(0),
+            ],
+        );
     }
 
     /// bind_alternation_matchers: destructure the value on top of the
     /// stack by the first of `patterns` that neither fails nor leads to an
-    /// error, popping it, and answer the scope that sees their variables.
-    /// Every variable an alternative names starts out null, and each
-    /// alternative but the last sits behind a DESTRUCTURE_ALT that tries
-    /// the next one on an error.
-    fn matchers(&mut self, bc: usize, patterns: &[Pattern], env: &Env) -> Result<Env, String> {
+    /// error, popping it, and leave the scope that sees their variables
+    /// on the env stack. Every variable an alternative names starts out
+    /// null, and each alternative but the last sits behind a
+    /// DESTRUCTURE_ALT that tries the next one on an error.
+    fn bind(&mut self, bc: usize, patterns: &'a [Pattern], env: Env) {
         let Some((last, alternatives)) = patterns.split_last() else {
             unreachable!("a binding has a pattern");
         };
         if alternatives.is_empty() {
-            return self.matcher(bc, last, env, None);
+            self.envs.push(env);
+            self.seq(bc, vec![Step::Match(last, None)]);
+            return;
         }
-        let mut names = Vec::new();
-        for pattern in patterns {
-            pattern_names(pattern, &mut names);
-        }
-        let mut slots = Vec::with_capacity(names.len());
-        let mut inner = env.clone();
-        for name in names {
+        let mut slots = Vec::new();
+        let mut inner = env;
+        for name in check::pattern_names(patterns) {
+            if slots.iter().any(|(slot, _)| *slot == name) {
+                continue;
+            }
             let index = self.local(bc);
             self.emit(bc, Op::Dup);
             self.emit(bc, Op::LoadK(Value::Null));
@@ -706,107 +909,96 @@ impl Compiler<'_> {
             );
             slots.push((name, index));
         }
-        let mut jumps = Vec::with_capacity(alternatives.len());
+        self.envs.push(inner);
+        let slots = Rc::new(slots);
+        let mut steps = Vec::new();
         for pattern in alternatives {
-            let alt = self.emit(bc, Op::DestructureAlt(0));
-            let storevn = self.storevn.replace(bc);
-            let matched = self.matcher(bc, pattern, &inner, Some(&slots));
-            self.storevn = storevn;
-            matched?;
-            jumps.push(self.emit(bc, Op::Jump(0)));
-            self.patch(bc, alt);
+            steps.extend([
+                Step::Mark(Op::DestructureAlt(0)),
+                Step::Storevn(Some(bc)),
+                Step::Match(pattern, Some(Rc::clone(&slots))),
+                Step::Restore,
+                Step::Mark(Op::Jump(0)),
+                Step::Patch(1),
+            ]);
         }
-        self.matcher(bc, last, &inner, Some(&slots))?;
-        for jump in jumps {
-            self.patch(bc, jump);
-        }
-        Ok(inner)
+        steps.push(Step::Match(last, Some(slots)));
+        steps.extend(alternatives.iter().map(|_| Step::Patch(0)));
+        self.seq(bc, steps);
     }
 
     /// Destructure the value on top of the stack into the pattern's
-    /// variables, popping it, and answer the scope that sees them. With
+    /// variables, popping it, extending the scope on the env stack. With
     /// `slots`, each variable is stored into the local named there.
-    fn matcher(
-        &mut self,
-        bc: usize,
-        pattern: &Pattern,
-        env: &Env,
-        slots: Option<&[(String, usize)]>,
-    ) -> Result<Env, String> {
+    fn matcher(&mut self, bc: usize, pattern: &'a Pattern, slots: Option<Rc<Slots>>) {
         match pattern {
-            Pattern::Var(name) => {
-                let index = match slots {
-                    Some(slots) => slots
-                        .iter()
-                        .find(|(slot, _)| slot == name)
-                        .map(|(_, index)| *index)
-                        .expect("every pattern variable has a slot"),
-                    None => self.local(bc),
-                };
-                self.emit(bc, Op::StoreV(Var { level: 0, index }));
-                Ok(with(
-                    env,
-                    Bind::Var {
-                        name: name.clone(),
-                        bc,
-                        index,
-                    },
-                ))
-            }
+            Pattern::Var(name) => self.match_var(bc, name, slots),
             Pattern::Array(items) => {
-                let mut inner = env.clone();
+                let mut steps = Vec::new();
                 for (i, item) in items.iter().enumerate().rev() {
-                    self.emit(bc, Op::Dup);
-                    self.emit(bc, Op::PushKUnder(Value::number(i as f64)));
-                    self.emit(bc, Op::Index);
-                    inner = self.matcher(bc, item, &inner, slots)?;
+                    steps.extend([
+                        Step::Emit(Op::Dup),
+                        Step::Emit(Op::PushKUnder(Value::number(i as f64))),
+                        Step::Emit(Op::Index),
+                        Step::Match(item, slots.clone()),
+                    ]);
                 }
-                self.emit(bc, Op::Pop);
-                Ok(inner)
+                steps.push(Step::Emit(Op::Pop));
+                self.seq(bc, steps);
             }
             Pattern::Object(fields) => {
-                let mut inner = env.clone();
+                let mut steps = Vec::new();
                 for (key, sub) in fields {
-                    self.emit(bc, Op::Dup);
+                    steps.push(Step::Emit(Op::Dup));
                     match key {
                         PatternKey::Var(name) => {
-                            self.emit(bc, Op::PushKUnder(Value::string(name.as_str())));
-                            self.emit(bc, Op::Index);
+                            steps.push(Step::Emit(Op::PushKUnder(Value::string(name.as_str()))));
+                            steps.push(Step::Emit(Op::Index));
                             if sub.is_some() {
-                                self.emit(bc, Op::Dup);
+                                steps.push(Step::Emit(Op::Dup));
                             }
-                            inner = self.matcher(bc, &Pattern::Var(name.clone()), &inner, slots)?;
+                            steps.push(Step::MatchVar(name, slots.clone()));
                         }
                         PatternKey::Expr(e) => {
-                            self.subexp(bc, e, &inner)?;
-                            self.emit(bc, Op::Index);
+                            steps.push(Step::Key(e));
+                            steps.push(Step::Emit(Op::Index));
                         }
                     }
                     if let Some(sub) = sub {
-                        inner = self.matcher(bc, sub, &inner, slots)?;
+                        steps.push(Step::Match(sub, slots.clone()));
                     }
                 }
-                self.emit(bc, Op::Pop);
-                Ok(inner)
+                steps.push(Step::Emit(Op::Pop));
+                self.seq(bc, steps);
             }
         }
     }
 
-    fn body(def: &Def) -> Ast {
-        let mut body = def.body.clone();
-        for (name, is_var) in def.params.iter().rev() {
-            if *is_var {
-                body = Ast::Bind(
-                    Box::new(Ast::Call(name.clone(), Vec::new(), Loc::default())),
-                    vec![Pattern::Var(name.clone())],
-                    Box::new(body),
-                );
-            }
-        }
-        body
+    fn match_var(&mut self, bc: usize, name: &str, slots: Option<Rc<Slots>>) {
+        let index = match slots {
+            Some(slots) => slots
+                .iter()
+                .find(|(slot, _)| slot == name)
+                .map(|(_, index)| *index)
+                .expect("every pattern variable has a slot"),
+            None => self.local(bc),
+        };
+        self.emit(bc, Op::StoreV(Var { level: 0, index }));
+        let top = self.envs.last_mut().expect("a Bind left its scope");
+        *top = with(
+            top,
+            Bind::Var {
+                name: name.to_string(),
+                bc,
+                index,
+            },
+        );
     }
 
-    fn params(def: &Def, bc: usize, env: &Env) -> Env {
+    /// Schedule a definition's body into `fbc`: its `$param` parameters
+    /// are bound first, as gen_function wraps the body in a binding of
+    /// each, in order, then the body in their scope.
+    fn body(&mut self, fbc: usize, def: &'a Def, env: &Env) {
         let mut inner = env.clone();
         for (i, (name, _)) in def.params.iter().enumerate() {
             inner = with(
@@ -814,15 +1006,42 @@ impl Compiler<'_> {
                 Bind::Func {
                     name: name.clone(),
                     arity: 0,
-                    bc,
+                    bc: fbc,
                     target: Target::Param(i),
                 },
             );
         }
-        inner
+        for (i, (name, is_var)) in def.params.iter().enumerate() {
+            if !is_var {
+                continue;
+            }
+            let callee = ClosureRef {
+                level: 0,
+                target: Target::Param(i),
+            };
+            self.emit(fbc, Op::Dup);
+            self.emit(fbc, Op::SubexpBegin);
+            self.emit(fbc, Op::CallJq(callee, Vec::new()));
+            self.emit(fbc, Op::SubexpEnd);
+            self.emit(fbc, Op::Pop);
+            let index = self.local(fbc);
+            self.emit(fbc, Op::StoreV(Var { level: 0, index }));
+            inner = with(
+                &inner,
+                Bind::Var {
+                    name: name.clone(),
+                    bc: fbc,
+                    index,
+                },
+            );
+        }
+        self.seq(
+            fbc,
+            vec![Step::Code(Node::Ast(&def.body), inner), Step::Emit(Op::Ret)],
+        );
     }
 
-    fn define(&mut self, bc: usize, def: &Def, env: &Env) -> Result<Env, String> {
+    fn define(&mut self, bc: usize, def: &'a Def, env: &Env) -> Env {
         let (fbc, index) = self.function(bc);
         let outer = with(
             env,
@@ -833,41 +1052,34 @@ impl Compiler<'_> {
                 target: Target::New(index),
             },
         );
-        let inner = Self::params(def, fbc, &outer);
-        self.code(fbc, &Self::body(def), &inner)?;
-        self.emit(fbc, Op::Ret);
-        Ok(outer)
+        self.body(fbc, def, &outer);
+        outer
     }
 
     /// A builtin.jq definition, compiled the first time it is called as a
     /// subfunction of the top level, in a scope of its parameters alone.
-    fn link(&mut self, name: &str, arity: usize) -> Result<Option<usize>, String> {
+    fn link(&mut self, name: &str, arity: usize) -> Option<usize> {
         let key = (name.to_string(), arity);
         if let Some(index) = self.linked.get(&key) {
-            return Ok(Some(*index));
+            return Some(*index);
         }
-        let library = self.library;
-        let Some(def) = library.get(&key) else {
-            return Ok(None);
-        };
+        let def = self.library.get(&key)?;
+        self.referenced.extend(check::references(&def.body));
         let (fbc, index) = self.function(0);
         self.linked.insert(key, index);
-        let inner = Self::params(def, fbc, &None);
-        self.in_library += 1;
-        let compiled = self.code(fbc, &Self::body(def), &inner);
-        self.in_library -= 1;
-        compiled?;
-        self.emit(fbc, Op::Ret);
-        Ok(Some(index))
+        self.tasks.push((fbc, Step::Library(false)));
+        self.body(fbc, def, &None);
+        self.tasks.push((fbc, Step::Library(true)));
+        Some(index)
     }
 
     /// What a regex call's pattern or modifiers are at compile time: a
     /// literal, or a `--arg`-style global nothing in scope shadows. None
     /// when only the run knows.
-    fn known<'v>(&'v self, ast: &'v Ast, env: &Env) -> Option<&'v Value> {
-        match ast {
-            Ast::Literal(value) => Some(value),
-            Ast::Var(name, _) if find_var(env, name).is_none() => self.globals.get(name),
+    fn known<'v>(&'v self, node: &'v Node, env: &Env) -> Option<&'v Value> {
+        match node {
+            Node::Const(value) | Node::Ast(Ast::Literal(value)) => Some(value),
+            Node::Ast(Ast::Var(name, _)) if find_var(env, name).is_none() => self.globals.get(name),
             _ => None,
         }
     }
@@ -877,7 +1089,7 @@ impl Compiler<'_> {
     /// needs syntax the matcher lacks, or is only known at run time, when
     /// a pattern the matcher lacks could no longer go to libjq. The
     /// compiler then refuses the program, which the host runs on libjq.
-    fn unsupported_regex(&self, name: &str, args: &[Ast], env: &Env) -> Option<String> {
+    fn unsupported_regex(&self, name: &str, args: &[Node], env: &Env) -> Option<String> {
         if self.in_library > 0 {
             return None;
         }
@@ -892,7 +1104,7 @@ impl Compiler<'_> {
         };
         let modifiers = match modifiers.map(|m| self.known(m, env)) {
             None | Some(Some(Value::Null)) => None,
-            Some(Some(Value::String(m))) => Some(&**m),
+            Some(Some(Value::String(m))) => Some(m.as_str()),
             Some(Some(_)) => return None,
             Some(None) => return Some("modifiers known only at run time".into()),
         };
@@ -910,42 +1122,34 @@ impl Compiler<'_> {
         }
     }
 
-    fn closure(&mut self, bc: usize, arg: &Ast, env: &Env) -> Result<ClosureRef, String> {
-        if let Ast::Call(name, args, _) = arg {
+    fn closure(&mut self, bc: usize, arg: Node<'a>, env: &Env) -> ClosureRef {
+        if let Node::Ast(Ast::Call(name, args, _)) = &arg {
             if args.is_empty() {
                 if let Some((owner, target @ Target::Param(_))) = find_func(env, name, 0) {
-                    return Ok(ClosureRef {
+                    return ClosureRef {
                         level: self.level(bc, owner),
                         target,
-                    });
+                    };
                 }
             }
         }
         let (fbc, index) = self.function(bc);
-        self.code(fbc, arg, env)?;
-        self.emit(fbc, Op::Ret);
-        Ok(ClosureRef {
+        self.seq(fbc, vec![Step::Code(arg, env.clone()), Step::Emit(Op::Ret)]);
+        ClosureRef {
             level: 0,
             target: Target::New(index),
-        })
-    }
-
-    fn call_jq(
-        &mut self,
-        bc: usize,
-        callee: ClosureRef,
-        args: &[Ast],
-        env: &Env,
-    ) -> Result<(), String> {
-        let mut refs = Vec::with_capacity(args.len());
-        for arg in args {
-            refs.push(self.closure(bc, arg, env)?);
         }
-        self.emit(bc, Op::CallJq(callee, refs));
-        Ok(())
     }
 
-    fn call(&mut self, bc: usize, name: &str, args: &[Ast], env: &Env) -> Result<(), String> {
+    fn call_jq(&mut self, bc: usize, callee: ClosureRef, args: &[Node<'a>], env: &Env) {
+        let refs: Vec<ClosureRef> = args
+            .iter()
+            .map(|arg| self.closure(bc, arg.clone(), env))
+            .collect();
+        self.emit(bc, Op::CallJq(callee, refs));
+    }
+
+    fn call(&mut self, bc: usize, name: &str, args: &[Node<'a>], env: &Env) {
         let arity = args.len();
         if let Some((owner, target)) = find_func(env, name, arity) {
             let callee = ClosureRef {
@@ -954,65 +1158,79 @@ impl Compiler<'_> {
             };
             return self.call_jq(bc, callee, args, env);
         }
+        if matches!(
+            name,
+            "erf"
+                | "erfc"
+                | "gamma"
+                | "lgamma"
+                | "lgamma_r"
+                | "tgamma"
+                | "j0"
+                | "j1"
+                | "jn"
+                | "y0"
+                | "y1"
+                | "yn"
+                | "remainder"
+                | "drem"
+        ) {
+            self.unsupported = Some("this math builtin requires the host evaluator".into());
+            return;
+        }
+        if matches!((name, arity), ("get_jq_origin" | "get_prog_origin", 0)) {
+            self.unsupported =
+                Some("program and evaluator paths require the host evaluator".into());
+            return;
+        }
         match (name, arity) {
             ("empty", 0) => {
                 self.emit(bc, Op::Backtrack);
-                return Ok(());
+                return;
             }
             ("not", 0) => {
-                return self.condbranch(
-                    bc,
-                    |c| {
-                        c.emit(bc, Op::LoadK(Value::False));
-                        Ok(())
-                    },
-                    |c| {
-                        c.emit(bc, Op::LoadK(Value::True));
-                        Ok(())
-                    },
+                let steps = condbranch(
+                    vec![Step::Emit(Op::LoadK(Value::False))],
+                    vec![Step::Emit(Op::LoadK(Value::True))],
                 );
+                return self.seq(bc, steps);
             }
             ("path", 1) => {
-                return self.closed(|c| {
-                    c.emit(bc, Op::PathBegin);
-                    c.code(bc, &args[0], env)?;
-                    c.emit(bc, Op::PathEnd);
-                    Ok(())
-                });
+                let steps = closed(vec![
+                    Step::Emit(Op::PathBegin),
+                    Step::Code(args[0].clone(), env.clone()),
+                    Step::Emit(Op::PathEnd),
+                ]);
+                return self.seq(bc, steps);
             }
-            ("last", 1) => return self.closed(|c| c.last(bc, &args[0], env)),
-            ("range", 2) => return self.closed(|c| c.range(bc, &args[0], &args[1], env)),
-            ("format", 1) => match &args[0] {
-                Ast::Literal(Value::String(f)) if FORMATS.contains(&&**f) => {}
-                Ast::Literal(Value::String(f)) => return Err(format!("unsupported format @{f}")),
-                _ => return Err("unsupported: a format named at run time".into()),
-            },
+            ("last", 1) => return self.last(bc, args[0].clone(), env),
+            ("range", 2) => return self.range(bc, args[0].clone(), args[1].clone(), env),
             _ => {}
         }
         if let Some(reason) = self.unsupported_regex(name, args, env) {
-            return Err(format!("unsupported regex: {reason}"));
+            self.unsupported = Some(format!("unsupported regex: {reason}"));
+            return;
         }
-        if let Some(index) = self.link(name, arity)? {
+        if let Some(index) = self.link(name, arity) {
             let callee = ClosureRef {
                 level: self.level(bc, 0),
                 target: Target::New(index),
             };
             return self.call_jq(bc, callee, args, env);
         }
-        if let Some(f) = builtin::lookup(name, arity) {
-            self.closed(|c| {
-                for arg in args.iter().rev() {
-                    c.subexp(bc, arg, env)?;
-                }
-                Ok(())
-            })?;
-            self.emit(bc, Op::CallBuiltin(f, arity + 1));
-            return Ok(());
-        }
-        Err(format!("{name}/{arity} is not defined"))
+        let f = builtin::lookup(name, arity)
+            .unwrap_or_else(|| unreachable!("checked: {name}/{arity} is a builtin"));
+        let mut steps = closed(
+            args.iter()
+                .rev()
+                .map(|arg| Step::Subexp(arg.clone(), env.clone()))
+                .collect(),
+        );
+        steps.push(Step::Emit(Op::CallBuiltin(f, arity + 1)));
+        self.seq(bc, steps);
     }
 
-    fn last(&mut self, bc: usize, f: &Ast, env: &Env) -> Result<(), String> {
+    fn last(&mut self, bc: usize, f: Node<'a>, env: &Env) {
         let last = Var {
             level: 0,
             index: self.local(bc),
@@ -1021,45 +1239,50 @@ impl Compiler<'_> {
             level: 0,
             index: self.local(bc),
         };
+        let mut steps = Vec::new();
         for (var, init) in [(last, Value::Null), (empty, Value::True)] {
-            self.emit(bc, Op::Dup);
-            self.emit(bc, Op::LoadK(init));
-            self.emit(bc, Op::StoreV(var));
+            steps.push(Step::Emit(Op::Dup));
+            steps.push(Step::Emit(Op::LoadK(init)));
+            steps.push(Step::Emit(Op::StoreV(var)));
         }
-        let fork = self.emit(bc, Op::Fork(0));
-        self.code(bc, f, env)?;
-        self.emit(bc, Op::Dup);
-        self.emit(bc, Op::StoreV(last));
-        self.emit(bc, Op::LoadK(Value::False));
-        self.emit(bc, Op::StoreV(empty));
-        self.emit(bc, Op::Backtrack);
-        self.patch(bc, fork);
-        self.emit(bc, Op::LoadVN(empty));
-        let found = self.emit(bc, Op::JumpF(0));
-        self.emit(bc, Op::Backtrack);
-        self.patch(bc, found);
-        self.emit(bc, Op::LoadVN(last));
-        Ok(())
+        steps.extend([
+            Step::Mark(Op::Fork(0)),
+            Step::Code(f, env.clone()),
+            Step::Emit(Op::Dup),
+            Step::Emit(Op::StoreV(last)),
+            Step::Emit(Op::LoadK(Value::False)),
+            Step::Emit(Op::StoreV(empty)),
+            Step::Emit(Op::Backtrack),
+            Step::Patch(0),
+            Step::Emit(Op::LoadVN(empty)),
+            Step::Mark(Op::JumpF(0)),
+            Step::Emit(Op::Backtrack),
+            Step::Patch(0),
+            Step::Emit(Op::LoadVN(last)),
+        ]);
+        self.seq(bc, closed(steps));
     }
 
-    fn range(&mut self, bc: usize, from: &Ast, upto: &Ast, env: &Env) -> Result<(), String> {
-        self.emit(bc, Op::Dup);
-        self.code(bc, from, env)?;
+    fn range(&mut self, bc: usize, from: Node<'a>, upto: Node<'a>, env: &Env) {
         let start = Var {
             level: 0,
             index: self.local(bc),
         };
-        self.emit(bc, Op::StoreV(start));
-        self.code(bc, upto, env)?;
-        self.emit(bc, Op::Dup);
-        self.emit(bc, Op::LoadV(start));
         let var = Var {
             level: 0,
             index: self.local(bc),
         };
-        self.emit(bc, Op::StoreV(var));
-        self.emit(bc, Op::Range(var));
-        Ok(())
+        let steps = closed(vec![
+            Step::Emit(Op::Dup),
+            Step::Code(from, env.clone()),
+            Step::Emit(Op::StoreV(start)),
+            Step::Code(upto, env.clone()),
+            Step::Emit(Op::Dup),
+            Step::Emit(Op::LoadV(start)),
+            Step::Emit(Op::StoreV(var)),
+            Step::Emit(Op::Range(var)),
+        ]);
+        self.seq(bc, steps);
     }
 
     fn finish(self) -> Program {
@@ -1106,32 +1329,5 @@ fn optimize(ops: &mut [Op]) {
             };
             ops[pc] = Op::TailCallJq(callee, args);
         }
-    }
-}
-
-fn pattern_names(pattern: &Pattern, names: &mut Vec<String>) {
-    match pattern {
-        Pattern::Var(name) => add_name(name, names),
-        Pattern::Array(items) => {
-            for item in items {
-                pattern_names(item, names);
-            }
-        }
-        Pattern::Object(fields) => {
-            for (key, sub) in fields {
-                if let PatternKey::Var(name) = key {
-                    add_name(name, names);
-                }
-                if let Some(sub) = sub {
-                    pattern_names(sub, names);
-                }
-            }
-        }
-    }
-}
-
-fn add_name(name: &str, names: &mut Vec<String>) {
-    if !names.iter().any(|n| n == name) {
-        names.push(name.to_string());
     }
 }
