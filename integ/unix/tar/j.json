@@ -185,7 +185,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/tgj && cd /data/tgj && mkdir src && printf hi > src/a && tar -cjf a.tbz src && cat a.tbz > g.tbz && printf garbage >> g.tbz && tar -tjf g.tbz; echo rc=$?; tar -tjf g.tbz nosuch; echo rc=$?; cd / && rm -r /data/tgj)",
+      "command": "(mkdir -p /data/tgj && touch /data/tgj/.keep; cd /data/tgj && mkdir src && printf hi > src/a && tar -cjf a.tbz src && cat a.tbz > g.tbz && printf garbage >> g.tbz && tar -tjf g.tbz; echo rc=$?; tar -tjf g.tbz nosuch; echo rc=$?; cd / && rm -r /data/tgj)",
       "expect": {
         "exit": 0,
         "stdout": "src/\nsrc/a\nrc=0\nrc=2\n",
