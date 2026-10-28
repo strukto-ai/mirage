@@ -350,6 +350,7 @@ impl Compiler<'_> {
                 self.sets.push((**set).clone());
                 Unit::Set(self.sets.len() - 1)
             }
+            Node::Options(body) => return self.unit(body),
             _ => return None,
         })
     }
