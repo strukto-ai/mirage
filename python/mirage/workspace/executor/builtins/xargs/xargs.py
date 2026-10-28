@@ -25,6 +25,7 @@ from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
@@ -136,20 +137,6 @@ _CANCELLED: dict[_Grouping, str] = {
 }
 
 
-class _Refusal(Exception):
-    """An option xargs will not run with, refused before any input is read.
-
-    Args:
-        text (str): the diagnostic.
-        code (int): the exit status.
-    """
-
-    def __init__(self, text: str, code: int = 1) -> None:
-        super().__init__(text)
-        self.text = text
-        self.code = code
-
-
 def _refusal(stderr: str | bytes, code: int = 1) -> Result:
     data = encode_text(stderr) if isinstance(stderr, str) else stderr
     return (
@@ -196,19 +183,21 @@ def _whole_number(
     """
     hint = usage_hint("xargs")
     if not _INTEGER.fullmatch(raw):
-        raise _Refusal(
-            f'xargs: invalid number "{raw}" for -{letter} option\n{hint}\n'
+        raise UsageError(
+            f'xargs: invalid number "{raw}" for -{letter} option\n{hint}\n', 1
         )
     value = int(raw)
     if value < floor:
-        raise _Refusal(
+        raise UsageError(
             f"xargs: value {raw} for -{letter} option should be "
-            f">= {floor}\n{hint}\n"
+            f">= {floor}\n{hint}\n",
+            1,
         )
     if ceiling is not None and value > ceiling:
-        raise _Refusal(
+        raise UsageError(
             f"xargs: value {raw} for -{letter} option should be "
-            f"<= {ceiling}\n{hint}\n"
+            f"<= {ceiling}\n{hint}\n",
+            1,
         )
     return value
 
@@ -227,10 +216,11 @@ def _separator(spec: str) -> int:
     if len(raw) == 1:
         return raw[0]
     if not raw.startswith(b"\\"):
-        raise _Refusal(
+        raise UsageError(
             f"xargs: Invalid input delimiter specification {spec}: the "
             "delimiter must be either a single character or an escape "
-            "sequence starting with \\.\n"
+            "sequence starting with \\.\n",
+            1,
         )
     lead = raw[1]
     if lead in _LETTER_ESCAPES:
@@ -240,24 +230,27 @@ def _separator(spec: str) -> int:
     elif 0x30 <= lead <= 0x39:
         digits, body, top = _OCTAL_DIGITS, raw[1:], ("377", 8)
     else:
-        raise _Refusal(
+        raise UsageError(
             f"xargs: Invalid escape sequence {spec} in input delimiter "
-            "specification.\n"
+            "specification.\n",
+            1,
         )
     width = 0
     while width < len(body) and body[width] in digits:
         width += 1
     value = int(body[:width], top[1]) if width else 0
     if value > 0xFF:
-        raise _Refusal(
+        raise UsageError(
             f"xargs: Invalid escape sequence {spec} in input delimiter "
-            f"specification; character values must not exceed {top[0]}.\n"
+            f"specification; character values must not exceed {top[0]}.\n",
+            1,
         )
     if width < len(body):
-        raise _Refusal(
+        raise UsageError(
             f"xargs: Invalid escape sequence {spec} in input delimiter "
             "specification; trailing characters "
-            f"{decode_text(body[width:])} not recognised.\n"
+            f"{decode_text(body[width:])} not recognised.\n",
+            1,
         )
     return value
 
@@ -380,11 +373,12 @@ class _Plan:
 
     def take_width(self, value: str) -> None:
         if self.crowded:
-            raise _Refusal(_CROWDED)
+            raise UsageError(_CROWDED, 1)
         if not _INTEGER.fullmatch(value):
-            raise _Refusal(
+            raise UsageError(
                 f'xargs: invalid number "{value}" for -s option\n'
-                f"{usage_hint('xargs')}\n"
+                f"{usage_hint('xargs')}\n",
+                1,
             )
         width = int(value)
         if width < 1:
@@ -402,14 +396,16 @@ class _Plan:
 
     def take_slot_var(self, value: str) -> None:
         if "=" in value:
-            raise _Refusal(
+            raise UsageError(
                 "xargs: option --process-slot-var may not be set to a value "
-                "which includes `='\n"
+                "which includes `='\n",
+                1,
             )
         if not value:
-            raise _Refusal(
+            raise UsageError(
                 "xargs: failed to unset environment variable : Invalid "
-                "argument\n"
+                "argument\n",
+                1,
             )
         self.slot_var = value
 
@@ -1164,8 +1160,8 @@ async def handle_xargs(
             if name in ("help", "version"):
                 return _answer(name, plan.notes)
             plan.take(name, value if isinstance(value, str) else None)
-    except _Refusal as refused:
-        return _refusal(plan.notes + refused.text, refused.code)
+    except UsageError as refused:
+        return _refusal(plan.notes + str(refused), refused.exit_code)
     notes = encode_text(plan.notes)
     if parse.invalid is not None:
         stderr, code = (

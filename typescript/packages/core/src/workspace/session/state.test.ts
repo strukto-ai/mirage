@@ -22,7 +22,7 @@ import type { SessionView } from '../../view/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { Policies } from '../../policy/policies.ts'
 import type { Action, SessionContext } from '../../policy/types.ts'
-import { ReadonlyVariableError } from './errors.ts'
+import { ReadonlyVariableError } from '../../shell/errors.ts'
 import { SessionState } from './session.ts'
 import {
   envSnapshot,

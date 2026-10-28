@@ -40,12 +40,11 @@ import {
   RANDOM_UNSET,
 } from '../../shell/constants.ts'
 import { encodeText, joinBytes } from '../../shell/bytes.ts'
-import { ArithError, ExitSignal, ReadonlyError } from '../../shell/errors.ts'
+import { ArithError, ExitSignal, ReadonlyVariableError } from '../../shell/errors.ts'
 import type { ArithResult, ArithWrite, ElementOps } from '../../shell/types.ts'
 import { varHidden } from '../../utils/hidden.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { ReadonlyVariableError } from './errors.ts'
 import { draw, initialSeed } from './rng.ts'
 import { ownRecord, sessionEntry, setSessionEntry } from './session.ts'
 import type { ShellValue, ShellVar } from '../../shell/variable.ts'
@@ -370,7 +369,7 @@ async function landWrites(
     try {
       await store(name, value, true, assigned)
     } catch (err) {
-      if (err instanceof ReadonlyVariableError) throw new ReadonlyError(err.varName).signal(true)
+      if (err instanceof ReadonlyVariableError) throw err.signal(true)
       throw err
     }
   }
@@ -402,13 +401,13 @@ export async function subscriptIndex(
   const reader = randomReader(session)
   let idx = 0
   let writes: readonly ArithWrite[]
-  let error: ArithError | ReadonlyError | null = null
+  let error: ArithError | ReadonlyVariableError | null = null
   try {
     const result = sessionArith(session, subscript, reader, session.shellOptions.nounset === true)
     idx = Number(result.value)
     writes = result.writes
   } catch (err) {
-    if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
+    if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
     error = err
     writes = err.writes
   }
@@ -421,7 +420,7 @@ export async function subscriptIndex(
     writes,
   )
   reader.settle()
-  if (error instanceof ReadonlyError) throw error.signal(true)
+  if (error instanceof ReadonlyVariableError) throw error.signal(true)
   if (error !== null) throw error
   return idx
 }
@@ -598,7 +597,7 @@ export function randomReader(session: SessionState): RandomReader {
  * the visible env and the session's elements, drawing through `reader`, and
  * stopping at a write to a readonly name, as bash's evaluation does
  * (`(( X=5, R=3 ))` binds X and refuses R). Throws ArithError when the text
- * does not evaluate, and ReadonlyError, carrying the writes made before it,
+ * does not evaluate, and ReadonlyVariableError, carrying the writes made before it,
  * for a readonly name. `added` is an integer `+=`'s added text, read after
  * `text` in the same evaluation and added to it.
  */
@@ -658,14 +657,14 @@ class IntegerCoercion {
     try {
       return this.evaluate(text, added)
     } catch (err) {
-      if (err instanceof ReadonlyError) throw err.signal(true)
+      if (err instanceof ReadonlyVariableError) throw err.signal(true)
       throw err
     }
   }
 
   /**
    * The value `text` evaluates to, keeping the writes it made before an
-   * ArithError or a ReadonlyError. With `added`, the two sides of an
+   * ArithError or a ReadonlyVariableError. With `added`, the two sides of an
    * integer `+=` (`appended`) evaluate in turn in one evaluation and add:
    * the second sees what the first assigned, and an error names the side
    * that made it, as bash's does (`N+=1+` is `1+: syntax error`).
@@ -680,7 +679,7 @@ class IntegerCoercion {
     try {
       result = sessionArith(session, text, this.reader, false, added)
     } catch (err) {
-      if (err instanceof ArithError || err instanceof ReadonlyError) {
+      if (err instanceof ArithError || err instanceof ReadonlyVariableError) {
         for (const item of err.writes) this.writes.push(item)
       }
       throw err
@@ -828,9 +827,9 @@ async function setVar(
       session.randomState = Number(((value % modulus) + modulus) % modulus)
     } catch (err) {
       if (err instanceof ExitSignal) await landCoercion(session, store, coercion)
-      if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
+      if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
       await landCoercion(session, store, coercion)
-      if (err instanceof ReadonlyError && (err.inSubscript || diagnostics === undefined)) {
+      if (err instanceof ReadonlyVariableError && (err.inSubscript || diagnostics === undefined)) {
         throw err.signal()
       }
       if (diagnostics === undefined) throw err

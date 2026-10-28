@@ -62,12 +62,13 @@ from mirage.commands.builtin.utils.wrap import (
     to_pathspec,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError, WalkLimitError
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import walk_refusal
+from mirage.errors.types import WalkLimitError
 from mirage.io.stream import close_quietly, yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn, ShellFn

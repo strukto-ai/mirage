@@ -30,8 +30,6 @@ import { FileVersionTracker } from '@struktoai/mirage-core/workspace/tools/file_
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { decode, refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
 
-export { StaleMirageFileError } from '@struktoai/mirage-core/workspace/tools/file_version'
-
 /**
  * Options for `mirageOperations`: `staleWriteProtection` (default `true`)
  * and `sessionId`, the Mirage session the operations act as.

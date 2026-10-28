@@ -19,7 +19,8 @@ import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { GITHUB_API_BASE } from '../../../../core/github/client.ts'
 import { parseRepo, repoHost, type RepoRef } from '../../../../core/github/repo.ts'
 import { jqRaised, jqRun, type JqRun } from '../../../../core/jq/index.ts'
-import { PartialOutputError, UsageError } from '../../../errors.ts'
+import { UsageError } from '../../../errors.ts'
+import { StreamRefusal } from '../../../../rs/errors.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
@@ -393,7 +394,7 @@ async function jqFailure(value: unknown, program: string, run: JqRun): Promise<s
  * The lines `--jq` prints for each value in turn, the way go-gh's jq
  * evaluates them. `halt`, and `halt_error` on null, end that value's output
  * there. An error, or any other `halt_error`, fails the command after the
- * lines printed before it (see jqFailure): a PartialOutputError carries them.
+ * lines printed before it (see jqFailure): a StreamRefusal carries them.
  */
 export async function jqLines(values: readonly unknown[], program: string): Promise<string> {
   const lines: string[] = []
@@ -402,7 +403,7 @@ export async function jqLines(values: readonly unknown[], program: string): Prom
     for (const item of run.outputs) lines.push(`${jqLine(item)}\n`)
     const failure = await jqFailure(value, program, run)
     if (failure !== null) {
-      throw new PartialOutputError(failure, new TextEncoder().encode(lines.join('')))
+      throw new StreamRefusal(failure, new TextEncoder().encode(lines.join('')))
     }
   }
   return lines.join('')

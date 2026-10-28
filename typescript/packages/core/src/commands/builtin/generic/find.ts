@@ -26,7 +26,7 @@ import {
 } from '../../../errors/fs.ts'
 import { dotRefusal, linkFollow, statOrEnoent, vfsStatPath } from '../utils/paths.ts'
 import { IOResult, type PathRecord } from '../../../io/types.ts'
-import { FindParseError } from '../../errors.ts'
+import { UsageError } from '../../errors.ts'
 import { parseDepth, parseFindExpression, parseMtime, parseSize } from '../find_parse.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
@@ -315,7 +315,7 @@ export function findGeneric(
     ;[minSize, maxSize] = sizeFlag !== null ? parseSize(sizeFlag) : [null, null]
     ;[mtimeMin, mtimeMax] = mtimeFlag !== null ? parseMtime(mtimeFlag) : [null, null]
   } catch (err) {
-    if (err instanceof FindParseError) return Promise.resolve(invalidFindArg(err.message))
+    if (err instanceof UsageError) return Promise.resolve(invalidFindArg(err.message))
     throw err
   }
   const emptyFlag = parsed.empty

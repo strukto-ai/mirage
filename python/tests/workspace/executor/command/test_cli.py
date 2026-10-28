@@ -23,7 +23,6 @@ from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Context, command
-from mirage.commands.errors import PartialOutputError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
@@ -32,6 +31,7 @@ from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import Action, Deny, Policy
 from mirage.policy.types import SessionContext
+from mirage.rs.errors import StreamRefusal
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.python.base import PythonRuntime
@@ -88,7 +88,7 @@ def raise_sync(config: TokenConfig, paths, texts, ctx: Context):
 
 
 def raise_after_output(config: TokenConfig, paths, texts, ctx: Context):
-    raise PartialOutputError("late boom", b"first\n")
+    raise StreamRefusal("late boom", b"first\n")
 
 
 def make_sync_install(fn) -> CLIInstall:

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy import PolicyDenied
-from mirage.shell.errors import ArithError, ReadonlyError
+from mirage.shell.errors import ArithError, ReadonlyVariableError
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.shared import (
     fail,
@@ -60,10 +60,10 @@ async def handle_let(
             value = await landed_arith(session, view, expr)
         except PolicyDenied as exc:
             return refusal("let", exc)
-        except (ArithError, ReadonlyError) as exc:
+        except (ArithError, ReadonlyVariableError) as exc:
             if exc.in_subscript:
                 raise exc.signal() from exc
-            if isinstance(exc, ReadonlyError):
+            if isinstance(exc, ReadonlyVariableError):
                 return readonly_refusal("let", exc.name)
             return fail("let", f"bash: let: {exc}\n")
     return result("let", exit_code=0 if value != 0 else 1)

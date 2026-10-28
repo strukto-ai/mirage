@@ -26,7 +26,7 @@ from mirage.commands.builtin.types import (
     PrintfAction,
     RowAction,
 )
-from mirage.commands.errors import FindParseError
+from mirage.commands.errors import UsageError
 from mirage.core.generic.find_eval import (
     Action,
     ActionKind,
@@ -58,8 +58,8 @@ def parse_depth(value: str, flag: str) -> int:
     try:
         return int(value)
     except ValueError:
-        raise FindParseError(
-            f"find: invalid argument '{value}' to '{flag}'"
+        raise UsageError(
+            f"find: invalid argument '{value}' to '{flag}'", 1
         ) from None
 
 
@@ -80,20 +80,20 @@ def parse_size(spec: str) -> tuple[int | None, int | None]:
     """
     units = {"b": 512, "c": 1, "w": 2, "k": 1024, "M": 1024**2, "G": 1024**3}
     if not spec:
-        raise FindParseError("find: invalid null argument to -size")
+        raise UsageError("find: invalid null argument to -size", 1)
     if spec[-1] in string.digits:
         unit, body = units["b"], spec
     elif spec[-1] in units:
         unit, body = units[spec[-1]], spec[:-1]
     else:
-        raise FindParseError(f"find: invalid -size type `{spec[-1]}'")
+        raise UsageError(f"find: invalid -size type `{spec[-1]}'", 1)
     sign = body[:1] if body.startswith(("+", "-")) else ""
     number = body[len(sign) :]
     if (
         not re.fullmatch(rf"{constants.C_SPACE}\+?[0-9]+", number)
         or int(number) > constants.UINTMAX
     ):
-        raise FindParseError(f"find: Invalid argument `{spec}' to -size")
+        raise UsageError(f"find: Invalid argument `{spec}' to -size", 1)
     n = int(number)
     if sign == "+":
         return n * unit + 1, None
@@ -113,8 +113,8 @@ def parse_mtime(spec: str) -> tuple[float | None, float | None]:
     try:
         n = int(spec.lstrip("+-"))
     except ValueError:
-        raise FindParseError(
-            f"find: invalid argument '{spec}' to '-mtime'"
+        raise UsageError(
+            f"find: invalid argument '{spec}' to '-mtime'", 1
         ) from None
     if spec.startswith("+"):
         return None, now - n * day
@@ -255,9 +255,10 @@ def parse_newermt(value: str) -> float:
     except (ValueError, OverflowError, OSError):
         ts = None
     if ts is None:
-        raise FindParseError(
+        raise UsageError(
             "find: I cannot figure out how to interpret "
-            f"'{value}' as a date or time"
+            f"'{value}' as a date or time",
+            1,
         )
     return ts.timestamp()
 
@@ -278,7 +279,7 @@ def _parse_exec(state: _State) -> ExecAction:
     while True:
         tok = _advance(state)
         if tok is None:
-            raise FindParseError("find: missing argument to `-exec'")
+            raise UsageError("find: missing argument to `-exec'", 1)
         if tok == constants.EXEC_END:
             break
         if (
@@ -290,29 +291,32 @@ def _parse_exec(state: _State) -> ExecAction:
             break
         argv.append(tok)
     if not argv:
-        raise FindParseError("find: missing argument to `-exec'")
+        raise UsageError("find: missing argument to `-exec'", 1)
     if batch:
         for word in argv:
             if (
                 constants.EXEC_PLACEHOLDER in word
                 and word != constants.EXEC_PLACEHOLDER
             ):
-                raise FindParseError(
+                raise UsageError(
                     "find: In '-exec ... {} +' the '{}' must appear by "
-                    f"itself, but you specified '{word}'"
+                    f"itself, but you specified '{word}'",
+                    1,
                 )
         if argv.count(constants.EXEC_PLACEHOLDER) > 1:
-            raise FindParseError(
-                "find: Only one instance of {} is supported with -exec ... +"
+            raise UsageError(
+                "find: Only one instance of {} is supported with -exec ... +",
+                1,
             )
     return ExecAction(argv=tuple(argv), batch=batch)
 
 
 def _check_window_placement(state: _State, token: str) -> None:
     if state.nested > 0 or state.in_or:
-        raise FindParseError(
+        raise UsageError(
             f"find: {token} is supported only in a top-level -a chain, "
-            "not under -o, ! or parentheses"
+            "not under -o, ! or parentheses",
+            1,
         )
 
 
@@ -357,16 +361,17 @@ def _check_positional(node: PredNode) -> None:
     """
     if isinstance(node, Not):
         if tree_has_action(node.kid):
-            raise FindParseError(
-                f"find: {_first_action(node.kid)} is not supported under !"
+            raise UsageError(
+                f"find: {_first_action(node.kid)} is not supported under !", 1
             )
         _check_positional(node.kid)
     elif isinstance(node, And):
         for kid in node.kids[:-1]:
             if tree_has_action(kid):
-                raise FindParseError(
+                raise UsageError(
                     f"find: {_first_action(kid)} must end its -a chain "
-                    f"{_POSITIONAL}"
+                    f"{_POSITIONAL}",
+                    1,
                 )
         for kid in node.kids:
             _check_positional(kid)
@@ -403,8 +408,8 @@ def _check_exec_result(node: PredNode) -> None:
     if isinstance(node, Or):
         for kid in node.kids[:-1]:
             if _holds_exec_result(kid):
-                raise FindParseError(
-                    f"find: -exec must end the expression {_POSITIONAL}"
+                raise UsageError(
+                    f"find: -exec must end the expression {_POSITIONAL}", 1
                 )
     if isinstance(node, Not):
         _check_exec_result(node.kid)
@@ -448,19 +453,20 @@ def _settle_actions(state: _State) -> None:
     if len(distinct) > 1:
         first, second = distinct[0], distinct[1]
         if isinstance(first, ExecAction) and isinstance(second, ExecAction):
-            raise FindParseError(
-                f"find: -exec may run only one command {_POSITIONAL}"
+            raise UsageError(
+                f"find: -exec may run only one command {_POSITIONAL}", 1
             )
         if isinstance(first, PrintfAction) and isinstance(
             second, PrintfAction
         ):
-            raise FindParseError(
-                f"find: -printf may print only one format {_POSITIONAL}"
+            raise UsageError(
+                f"find: -printf may print only one format {_POSITIONAL}", 1
             )
-        raise FindParseError(
+        raise UsageError(
             f"find: {_action_word(first)} and "
             f"{_action_word(second)} cannot be combined "
-            f"{_POSITIONAL}"
+            f"{_POSITIONAL}",
+            1,
         )
     _check_exec_result(state.expr.tree)
     state.expr.actions = distinct
@@ -507,10 +513,10 @@ def _after_operator(state: _State, op: str) -> None:
     """
     tok = _peek(state)
     if tok is None:
-        raise FindParseError(f"find: expected an expression after '{op}'")
+        raise UsageError(f"find: expected an expression after '{op}'", 1)
     if tok == ")":
-        raise FindParseError(
-            f"find: expected an expression between '{op}' and ')'"
+        raise UsageError(
+            f"find: expected an expression between '{op}' and ')'", 1
         )
 
 
@@ -521,22 +527,22 @@ def _type_node(value: str) -> Type:
         return Type("d")
     if value in constants.FIND_VALID_TYPES:
         return Type(value)
-    raise FindParseError(f"find: Unknown argument to -type: {value}")
+    raise UsageError(f"find: Unknown argument to -type: {value}", 1)
 
 
 def _mtime_arg(value: str) -> tuple[float | None, float | None]:
     try:
         return parse_mtime(value)
     except (ValueError, IndexError) as exc:
-        raise FindParseError(
-            f"find: invalid argument '{value}' to '-mtime'"
+        raise UsageError(
+            f"find: invalid argument '{value}' to '-mtime'", 1
         ) from exc
 
 
 def _parse_primary(state: _State) -> PredNode:
     tok = _advance(state)
     if tok is None:
-        raise FindParseError("find: expected predicate")
+        raise UsageError("find: expected predicate", 1)
     if (
         state.expr.actions
         and (state.nested == 0 or state.chain_action)
@@ -552,13 +558,13 @@ def _parse_primary(state: _State) -> PredNode:
         # row the tree kept, so a test after one, even under ! or
         # parentheses, would apply to the actions before it too.
         # Elsewhere the tree itself decides (`_check_positional`).
-        raise FindParseError(
-            f"find: {tok}: tests after actions are not supported"
+        raise UsageError(
+            f"find: {tok}: tests after actions are not supported", 1
         )
     if tok in constants.FIND_VALUE_PREDICATES:
         value = _advance(state)
         if value is None:
-            raise FindParseError(f"find: missing argument to '{tok}'")
+            raise UsageError(f"find: missing argument to '{tok}'", 1)
         if tok == "-name":
             return Name(value)
         if tok == "-iname":
@@ -619,13 +625,13 @@ def _parse_primary(state: _State) -> PredNode:
         return TrueNode()
     if tok in constants.FIND_BARE_PREDICATES:
         return TrueNode()
-    raise FindParseError(f"find: unknown predicate '{tok}'")
+    raise UsageError(f"find: unknown predicate '{tok}'", 1)
 
 
 def _parse_factor(state: _State) -> PredNode:
     state.depth += 1
     if state.depth > constants.FIND_MAX_DEPTH:
-        raise FindParseError("find: expression too deeply nested")
+        raise UsageError("find: expression too deeply nested", 1)
     try:
         tok = _peek(state)
         if tok is not None and tok in ("-not", "!"):
@@ -644,7 +650,7 @@ def _parse_factor(state: _State) -> PredNode:
             finally:
                 state.nested -= 1
             if _peek(state) != ")":
-                raise FindParseError("find: unbalanced parentheses")
+                raise UsageError("find: unbalanced parentheses", 1)
             _advance(state)
             return node
         return _parse_primary(state)
@@ -752,7 +758,7 @@ def parse_find_expression(tokens: list[str]) -> FindExpr:
     state = _State(tokens=tokens)
     tree = _parse_or(state)
     if _peek(state) is not None:
-        raise FindParseError(f"find: unexpected token '{_peek(state)}'")
+        raise UsageError(f"find: unexpected token '{_peek(state)}'", 1)
     state.expr.tree = tree
     _settle_actions(state)
     if tree_has_prune(tree) and state.expr.depth_first:
@@ -760,6 +766,6 @@ def parse_find_expression(tokens: list[str]) -> FindExpr:
         # is a no-op the line surely did not mean; spelling -depth out
         # takes the no-op knowingly.
         if not state.depth_option:
-            raise FindParseError(_DELETE_PRUNE)
+            raise UsageError(_DELETE_PRUNE, 1)
         state.expr.tree = without_prune(tree)
     return state.expr

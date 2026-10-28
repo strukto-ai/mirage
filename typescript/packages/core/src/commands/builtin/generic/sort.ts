@@ -29,7 +29,6 @@ import { stripSlash } from '../../../utils/slash.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
-import { SortKeyError } from '../errors.ts'
 import {
   buildConfig,
   parseKeydef,
@@ -209,9 +208,6 @@ function refusalOf(error: unknown): IOResult {
   // word, so `--check=x` is 1 where sort's other usage errors are 2.
   if (error instanceof UsageError) {
     return new IOResult({ exitCode: error.exitCode, stderr: ENC.encode(`${error.message}\n`) })
-  }
-  if (error instanceof SortKeyError) {
-    return new IOResult({ exitCode: 2, stderr: ENC.encode(`sort: ${error.message}\n`) })
   }
   throw error
 }

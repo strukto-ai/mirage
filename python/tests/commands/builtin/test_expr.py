@@ -19,12 +19,12 @@ import pytest
 
 from mirage.commands.builtin.general.expr import (
     DIGIT_CHUNK,
-    ExprError,
     _expr_eval,
     digits_of_int,
     int_of_digits,
     is_null,
 )
+from mirage.commands.errors import UsageError
 from mirage.shell.bytes import byte_view, from_byte_view
 from tests.commands.builtin.conftest import output_bytes as _bytes
 from tests.commands.builtin.conftest import ram_workspace as _ws
@@ -137,7 +137,7 @@ def test_expr_refuses_an_operand_with_a_trailing_newline():
     # python's `$` also matches immediately before a trailing newline, so
     # `^-?[0-9]+$` with `match` read `12\n` as 12. GNU's scanner stops at
     # the first non-digit and refuses the word.
-    with pytest.raises(ExprError) as caught:
+    with pytest.raises(UsageError) as caught:
         _evaluate(["12\n", "+", "1"])
     assert str(caught.value) == "expr: non-integer argument"
     # The same word in a comparison is a string, not a number, so
@@ -167,7 +167,7 @@ def test_expr_rejects_operands_python_int_would_accept():
         "abc",
         "1.5",
     ):
-        with pytest.raises(ExprError) as caught:
+        with pytest.raises(UsageError) as caught:
             _evaluate([operand, "+", "1"])
         assert str(caught.value) == "expr: non-integer argument"
 
@@ -180,7 +180,7 @@ def test_expr_comparison_falls_back_to_strings_for_a_bad_operand():
 
 def test_expr_zero_divisor_raises_gnu_wording():
     for op in ("/", "%"):
-        with pytest.raises(ExprError) as caught:
+        with pytest.raises(UsageError) as caught:
             _evaluate(["1", op, "0"])
         assert str(caught.value) == "expr: division by zero"
 
@@ -250,7 +250,7 @@ def test_expr_does_not_know_caret_angle_or_bang():
         (["1", "<>", "2"], "unexpected argument '<>'"),
         (["!", "0"], "unexpected argument '0'"),
     ):
-        with pytest.raises(ExprError) as caught:
+        with pytest.raises(UsageError) as caught:
             _evaluate(list(args))
         assert str(caught.value) == f"expr: syntax error: {detail}"
 
@@ -301,7 +301,7 @@ def test_expr_reads_a_chain_of_two_thousand_keywords():
     assert _evaluate([*chain, "abc"]) == ("1", 0)
     assert _evaluate(["substr", *chain, "abcdef", "1", "1"]) == ("1", 0)
     assert _evaluate([*chain[1:], "+", "length"]) == ("1", 0)
-    with pytest.raises(ExprError) as caught:
+    with pytest.raises(UsageError) as caught:
         _evaluate([*chain, "length"])
     assert str(caught.value) == (
         "expr: syntax error: missing argument after 'length'"
@@ -312,7 +312,7 @@ def test_expr_refuses_nesting_past_our_own_limit():
     # GNU declares no limit and segfaults with nothing on stderr, so the
     # limit and its wording are ours, not a GNU string.
     assert _evaluate(["("] * 64 + ["1"] + [")"] * 64) == ("1", 0)
-    with pytest.raises(ExprError) as caught:
+    with pytest.raises(UsageError) as caught:
         _evaluate(["("] * 65 + ["1"] + [")"] * 65)
     assert str(caught.value) == (
         "expr: expression nesting too deep (limit 64)"
@@ -353,7 +353,7 @@ def test_expr_plus_does_not_recurse():
         (["+", "+", "hello"], "unexpected argument 'hello'"),
         (["+", "length", "abcde"], "unexpected argument 'abcde'"),
     ):
-        with pytest.raises(ExprError) as caught:
+        with pytest.raises(UsageError) as caught:
             _evaluate(list(args))
         assert str(caught.value) == f"expr: syntax error: {detail}"
 
@@ -403,7 +403,7 @@ def test_expr_keyword_missing_operand_names_the_last_word_seen():
         (["match", "abc"], "missing argument after 'abc'"),
         (["substr", "abc", "1", "2", "3"], "unexpected argument '3'"),
     ):
-        with pytest.raises(ExprError) as caught:
+        with pytest.raises(UsageError) as caught:
             _evaluate(list(args))
         assert str(caught.value) == f"expr: syntax error: {detail}"
 
@@ -459,7 +459,7 @@ def test_expr_bad_regex_uses_glibc_regerror_wording():
         ("[", "expr: Invalid regular expression"),
         (r"a\{1,", "expr: Unmatched \\{"),
     ):
-        with pytest.raises(ExprError) as caught:
+        with pytest.raises(UsageError) as caught:
             _evaluate(["abc", ":", pattern])
         assert str(caught.value) == message
 
@@ -533,7 +533,7 @@ QUOTED_CLAUSES = [
 @pytest.mark.parametrize("words,detail", QUOTED_CLAUSES)
 def test_expr_quotes_the_word_in_every_clause(words, detail):
     texts = [w.decode("utf-8", "surrogateescape") for w in words]
-    with pytest.raises(ExprError) as caught:
+    with pytest.raises(UsageError) as caught:
         _evaluate([byte_view(t) for t in texts])
     assert str(caught.value) == f"expr: syntax error: {detail}"
 
@@ -572,7 +572,7 @@ CLOSE_CLAUSES = [
 
 @pytest.mark.parametrize("args,detail", CLOSE_CLAUSES)
 def test_expr_unclosed_paren_picks_after_or_instead_of(args, detail):
-    with pytest.raises(ExprError) as caught:
+    with pytest.raises(UsageError) as caught:
         _evaluate(list(args))
     assert str(caught.value) == f"expr: syntax error: {detail}"
 
@@ -650,7 +650,7 @@ def test_expr_syntax_error_wordings():
         # The one detail clause with no `argument` noun in it.
         (["(", ")"], "unexpected ')'"),
     ):
-        with pytest.raises(ExprError) as caught:
+        with pytest.raises(UsageError) as caught:
             _evaluate(list(args))
         assert str(caught.value) == f"expr: syntax error: {detail}"
 

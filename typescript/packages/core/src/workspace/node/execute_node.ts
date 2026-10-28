@@ -72,7 +72,7 @@ import {
 import { expandRedirect } from '../expand/redirects.ts'
 import { expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
-import { ExitSignal, ArithError, PipeClosed, ReadonlyError } from '../../shell/errors.ts'
+import { ExitSignal, ArithError, PipeClosed, ReadonlyVariableError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import { landedArith } from '../session/elements.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -220,7 +220,7 @@ async function slotText(
  * or the default for an empty slot (1 for the condition so `for
  * ((;;))` loops, 0 for init/update). Throws the slot's ArithError, which
  * the loop prints as bash's `((: expr: reason` diagnostic, and
- * ReadonlyError when the expression assigns to a readonly variable, once
+ * ReadonlyVariableError when the expression assigns to a readonly variable, once
  * the writes before it land (ExitSignal for one inside a subscript).
  */
 async function evalCforExpr(
@@ -236,7 +236,7 @@ async function evalCforExpr(
   try {
     return Number(await landedArith(context.session, view ?? null, text))
   } catch (err) {
-    if (err instanceof ReadonlyError && err.inSubscript) throw err.signal()
+    if (err instanceof ReadonlyVariableError && err.inSubscript) throw err.signal()
     throw err
   }
 }
@@ -1371,7 +1371,7 @@ async function executeNodeBody(
       value = await landedArith(session, view, expr)
     } catch (err) {
       if (err instanceof PolicyDenied) return fail(text, `bash: ${err.message}\n`)
-      if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
+      if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
       if (err.inSubscript) throw err.signal()
       return fail(text, `bash: ${err instanceof ArithError ? '((: ' : ''}${err.message}\n`)
     }

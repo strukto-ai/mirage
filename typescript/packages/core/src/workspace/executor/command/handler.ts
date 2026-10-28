@@ -14,7 +14,8 @@
 
 import type { CommandFnResult } from '../../../commands/config.ts'
 import { currentCaller } from '../../../context/session_context.ts'
-import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
+import { UsageError } from '../../../commands/errors.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
 import { errorVirtualPath, fsStrerror } from '../../../errors/fs.ts'
 import { formatFsError } from '../../../errors/render.ts'
@@ -127,7 +128,7 @@ function mountFailure(name: string, paths: readonly PathSpec[], err: unknown): F
  * printed before it failed kept. Mirrors Python's `_leaf_failure`.
  */
 function leafFailure(prog: string, err: unknown): Failure {
-  const printed = err instanceof PartialOutputError ? err.stdout : null
+  const printed = err instanceof StreamRefusal ? err.output : null
   if (err instanceof UsageError) return [printed, encodeText(`${err.message}\n`), err.exitCode]
   return [printed, encodeText(`${prog}: ${leafMessage(err)}\n`), 1]
 }

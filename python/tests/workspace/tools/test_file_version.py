@@ -3,11 +3,8 @@ import asyncio
 import pytest
 
 from mirage import RAMVFS, MountMode, Session, Workspace
-from mirage.workspace.tools.file_version import (
-    FileVersionTracker,
-    StaleMirageFileError,
-    fingerprint,
-)
+from mirage.errors.types import StaleWriteError
+from mirage.workspace.tools.file_version import FileVersionTracker, fingerprint
 from mirage.workspace.tools.tool_operations import MirageToolOperations
 
 
@@ -107,7 +104,7 @@ async def test_writes_during_both_fetches_keep_the_shown_stamp(workspace):
     await tracker.write("/a.txt", "three")
     held.release[2].set()
     assert await reading == b"two"
-    with pytest.raises(StaleMirageFileError):
+    with pytest.raises(StaleWriteError):
         await tracker.write("/a.txt", "four")
     assert await workspace.vfs.read("/a.txt") == b"three"
 
@@ -127,7 +124,7 @@ async def test_write_refuses_after_outside_change(workspace):
     await workspace.vfs.write("/a.txt", b"one")
     await tracker.read("/a.txt")
     await workspace.vfs.write("/a.txt", b"moved underneath")
-    with pytest.raises(StaleMirageFileError):
+    with pytest.raises(StaleWriteError):
         await tracker.write("/a.txt", "two")
     assert await workspace.vfs.read("/a.txt") == b"moved underneath"
 
@@ -138,7 +135,7 @@ async def test_edit_refuses_after_outside_change(workspace):
     await workspace.vfs.write("/a.txt", b"one")
     await tracker.read("/a.txt")
     await workspace.vfs.write("/a.txt", b"moved underneath")
-    with pytest.raises(StaleMirageFileError):
+    with pytest.raises(StaleWriteError):
         await tracker.read_for_edit("/a.txt")
 
 
@@ -180,7 +177,7 @@ async def test_alias_and_target_share_one_stamp(workspace):
     assert (await workspace.shell("ln -s /a.txt /alias.txt")).exit_code == 0
     await tracker.read("/alias.txt")
     await workspace.vfs.write("/a.txt", b"moved underneath")
-    with pytest.raises(StaleMirageFileError):
+    with pytest.raises(StaleWriteError):
         await tracker.write("/a.txt", "two")
     assert await workspace.vfs.read("/a.txt") == b"moved underneath"
 
@@ -192,7 +189,7 @@ async def test_edit_through_an_alias_sees_the_read_of_the_target(workspace):
     assert (await workspace.shell("ln -s /a.txt /alias.txt")).exit_code == 0
     await tracker.read("/a.txt")
     await workspace.vfs.write("/a.txt", b"moved underneath")
-    with pytest.raises(StaleMirageFileError):
+    with pytest.raises(StaleWriteError):
         await tracker.read_for_edit("/alias.txt")
 
 
@@ -214,7 +211,10 @@ async def test_edit_tool_reports_a_stale_file(workspace):
     await workspace.vfs.write("/a.txt", b"hello there")
     result = await ops.edit("/a.txt", "hello", "goodbye")
     assert result.is_error is True
-    assert "changed since it was last read" in result.text
+    assert (
+        result.text
+        == "Error: /a.txt: changed since it was read; read it again before writing"
+    )
     assert await workspace.vfs.read("/a.txt") == b"hello there"
 
 

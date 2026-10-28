@@ -32,7 +32,7 @@ from mirage.commands.cli.builtin.gh.constants import (
     INVALID_LIMIT,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import PartialOutputError, UsageError
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.core.github.constants import API_BASE
@@ -42,6 +42,7 @@ from mirage.core.render.json import compact_json_text
 from mirage.errors.fs import fs_strerror
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.errors import StreamRefusal
 from mirage.types import JsonValue, PathSpec
 
 
@@ -506,7 +507,7 @@ def jq_lines(values: Iterable[JsonValue], program: str) -> str:
         program (str): the `--jq` program.
 
     Raises:
-        PartialOutputError: the failure, carrying the lines before it.
+        StreamRefusal: the failure, carrying the lines before it.
     """
     lines: list[str] = []
     for value in values:
@@ -514,7 +515,7 @@ def jq_lines(values: Iterable[JsonValue], program: str) -> str:
         lines.extend(f"{jq_line(item)}\n" for item in run.outputs)
         failure = _jq_failure(value, program, run)
         if failure is not None:
-            raise PartialOutputError(failure, "".join(lines).encode())
+            raise StreamRefusal(failure, "".join(lines).encode())
     return "".join(lines)
 
 

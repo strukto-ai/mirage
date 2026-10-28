@@ -25,12 +25,11 @@ import {
   buildAssocLiteral,
   buildIndexedLiteral,
 } from '../../shell/array.ts'
-import { ArithError, DiscardSignal } from '../../shell/errors.ts'
+import { ArithError, DiscardSignal, ReadonlyVariableError } from '../../shell/errors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { type ShellValue, VarAttr } from '../../shell/variable.ts'
 import { sessionEntry } from '../session/session.ts'
-import { ReadonlyVariableError } from '../session/errors.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../view/types.ts'
@@ -110,8 +109,9 @@ async function assignVar(
   try {
     await view.set(key, value, true, assigned, added)
   } catch (err) {
-    if (err instanceof PolicyDenied || err instanceof ReadonlyVariableError) {
-      throw new DiscardSignal(encodeText(`${err.message}\n`))
+    if (err instanceof PolicyDenied) throw new DiscardSignal(encodeText(`${err.message}\n`))
+    if (err instanceof ReadonlyVariableError) {
+      throw new DiscardSignal(encodeText(`bash: ${err.message}\n`))
     }
     if (err instanceof ArithError) throw err.signal('', true)
     throw err

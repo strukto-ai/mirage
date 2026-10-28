@@ -14,7 +14,7 @@
 
 import logging
 
-from mirage.commands.errors import FindParseError, UsageError
+from mirage.commands.errors import UsageError
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
@@ -67,8 +67,6 @@ def failure_result(exc: BaseException, command: str) -> IOResult:
         return IOResult(
             exit_code=TIMEOUT_STATUS, stderr=encode_text(str(exc) + "\n")
         )
-    if isinstance(exc, FindParseError):
-        return IOResult(exit_code=1, stderr=encode_text(f"{exc}\n"))
     if isinstance(exc, UsageError):
         return IOResult(
             exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")

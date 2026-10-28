@@ -54,7 +54,7 @@ Omit `--no-context-files` when you intentionally want Pi to combine host-project
 
 Pi serializes its own mutations and its `edit` tool checks that the requested old text still exists in the current file. It does not, however, retain a file revision from an earlier agent read.
 
-The Mirage extension records a content fingerprint whenever Pi reads or greps a file. A later `edit` or full-file `write` fails with `StaleMirageFileError` if that content changed in the meantime. Reading the file again refreshes the fingerprint, so the agent can reconsider the new content and retry. The `edit` adapter also checks again immediately before writing.
+The Mirage extension records a content fingerprint whenever Pi reads or greps a file. A later `edit` or full-file `write` fails with a `STALE_WRITE` [error](/home/access/errors#file-calls) if that content changed in the meantime. Reading the file again refreshes the fingerprint, so the agent can reconsider the new content and retry. The `edit` adapter also checks again immediately before writing.
 
 This protection is enabled by default. It observes the content returned by the mounted VFS, so a remote backend's cache and invalidation policy still determines when an external change becomes visible to Mirage.
 
@@ -66,7 +66,6 @@ This protection is enabled by default. It observes the content returned by the m
 | <code style={{ whiteSpace: 'nowrap' }}>mirageExtension</code> | Returns a Pi `InlineExtension` named `mirage` that registers all seven tools against `ws` and appends a mount-aware system prompt. |
 | <code style={{ whiteSpace: 'nowrap' }}>MirageExtensionOptions</code> | Options for `mirageExtension`: `cwd` (default `/`), `systemPrompt` (a string to append, or `false` for none), plus `staleWriteProtection` and `sessionId` from `MirageOperationsOptions`. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirageOperations</code> | Returns the lower-level `{ read, write, edit, bash, grep, find, ls }` operation bundle backed by `ws`, for wiring Pi tools by hand. |
-| <code style={{ whiteSpace: 'nowrap' }}>StaleMirageFileError</code> | Thrown when a write or edit targets a file that changed after the agent last read it; `path` names the file. |
 | <code style={{ whiteSpace: 'nowrap' }}>MirageOperationsBundle</code> | The operations `mirageOperations` returns, one per Pi tool: `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`. |
 | <code style={{ whiteSpace: 'nowrap' }}>MirageOperationsOptions</code> | Options for `mirageOperations`: `staleWriteProtection` (default `true`) and `sessionId`, the Mirage session the operations act as. |
 | <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |

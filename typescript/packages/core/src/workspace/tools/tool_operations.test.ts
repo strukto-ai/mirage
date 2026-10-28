@@ -197,7 +197,7 @@ describe('write', () => {
     await ws.vfs.write('/exists.txt', 'moved')
     const result = await ops.write('/exists.txt', 'second')
     expect(result.isError).toBe(true)
-    expect(result.content[0]?.text).toContain('changed since it was last read')
+    expect(result.content[0]?.text).toContain('changed since it was read')
     expect(DEC.decode(await ws.vfs.read('/exists.txt'))).toBe('moved')
   })
 })
@@ -232,7 +232,7 @@ describe('a relative path', () => {
     const stale = await ops.edit('./a.txt', 'moved', 'x')
     const rewritten = await ops.write('/w/./b.txt', 'three\n')
     expect(stale.isError).toBe(true)
-    expect(stale.content[0]?.text).toContain('changed since it was last read')
+    expect(stale.content[0]?.text).toContain('changed since it was read')
     expect(rewritten.isError).not.toBe(true)
   })
 
@@ -244,7 +244,7 @@ describe('a relative path', () => {
     await ws.vfs.write('/data/config.txt', 'moved\n')
     const linked = await ops.edit('link/../config.txt', 'moved', 'x')
     expect(linked.isError).toBe(true)
-    expect(linked.content[0]?.text).toContain('changed since it was last read')
+    expect(linked.content[0]?.text).toContain('changed since it was read')
   })
 })
 

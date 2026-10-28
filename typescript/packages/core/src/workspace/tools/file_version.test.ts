@@ -17,7 +17,7 @@ import type { Files } from '../files.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { FileVersionTracker, StaleMirageFileError, fingerprint } from './file_version.ts'
+import { FileVersionTracker, fingerprint } from './file_version.ts'
 
 const DEC = new TextDecoder()
 
@@ -125,7 +125,7 @@ describe('FileVersionTracker', () => {
     await tracker.write('/a.txt', 'three')
     held.release.get(2)?.()
     expect(new TextDecoder().decode(await reading)).toBe('two')
-    await expect(tracker.write('/a.txt', 'four')).rejects.toThrow(StaleMirageFileError)
+    await expect(tracker.write('/a.txt', 'four')).rejects.toMatchObject({ code: 'STALE_WRITE' })
     expect(DEC.decode(await ws.vfs.read('/a.txt'))).toBe('three')
   })
 
@@ -142,7 +142,7 @@ describe('FileVersionTracker', () => {
     await ws.vfs.write('/a.txt', 'one')
     await tracker.read('/a.txt')
     await ws.vfs.write('/a.txt', 'moved underneath')
-    await expect(tracker.write('/a.txt', 'two')).rejects.toThrow(StaleMirageFileError)
+    await expect(tracker.write('/a.txt', 'two')).rejects.toMatchObject({ code: 'STALE_WRITE' })
   })
 
   it('allows a write that follows its own write', async () => {
@@ -179,7 +179,7 @@ describe('FileVersionTracker', () => {
     expect((await ws.shell('ln -s /a.txt /alias.txt')).exitCode).toBe(0)
     await tracker.read('/alias.txt')
     await ws.vfs.write('/a.txt', 'moved underneath')
-    await expect(tracker.write('/a.txt', 'two')).rejects.toThrow(StaleMirageFileError)
+    await expect(tracker.write('/a.txt', 'two')).rejects.toMatchObject({ code: 'STALE_WRITE' })
     expect(DEC.decode(await ws.vfs.read('/a.txt'))).toBe('moved underneath')
   })
 
@@ -189,7 +189,7 @@ describe('FileVersionTracker', () => {
     expect((await ws.shell('ln -s /a.txt /alias.txt')).exitCode).toBe(0)
     await tracker.read('/a.txt')
     await ws.vfs.write('/a.txt', 'moved underneath')
-    await expect(tracker.readForEdit('/alias.txt')).rejects.toThrow(StaleMirageFileError)
+    await expect(tracker.readForEdit('/alias.txt')).rejects.toMatchObject({ code: 'STALE_WRITE' })
   })
 
   it('serves every call unchecked when disabled', async () => {

@@ -35,7 +35,7 @@ import {
   DiscardSignal,
   ExitSignal,
   named,
-  ReadonlyError,
+  ReadonlyVariableError,
   UnboundVariable,
 } from '../../shell/errors.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
@@ -737,7 +737,7 @@ class ArithOperand {
         await landedArith(this.session, this.view ?? null, text, landArithWrites, nounset),
       )
     } catch (err) {
-      if (err instanceof ReadonlyError) throw err.signal()
+      if (err instanceof ReadonlyVariableError) throw err.signal()
       if (err instanceof ArithError) throw err.signal(this.ref)
       throw err
     }

@@ -22,7 +22,7 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.commands.config import CommandFnResult, Context
-from mirage.commands.errors import PartialOutputError, UsageError
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.concurrency.limiter import run_blocking
 from mirage.errors.fs import error_path, fs_strerror
@@ -32,6 +32,7 @@ from mirage.io.cooperative import chunks
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, CommandOutput, IOResult
+from mirage.rs.errors import StreamRefusal
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.types import PathSpec, Producer
@@ -131,7 +132,7 @@ def _leaf_failure(prog: str, exc: Exception) -> Failure:
         prog (str): the program and its verb path.
         exc (Exception): the failure.
     """
-    printed = exc.stdout if isinstance(exc, PartialOutputError) else None
+    printed = exc.output if isinstance(exc, StreamRefusal) else None
     if isinstance(exc, UsageError):
         return printed, encode_text(f"{exc}\n"), exc.exit_code
     return printed, encode_text(f"{prog}: {_leaf_message(exc)}\n"), 1

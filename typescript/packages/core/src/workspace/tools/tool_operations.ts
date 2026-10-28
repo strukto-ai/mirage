@@ -18,7 +18,7 @@ import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { patternMatches } from '../../policy/match/pattern.ts'
 import { MOUNT_MODE_RANK, MountMode } from '../../types.ts'
-import { isEacces } from '../../errors/fs.ts'
+import { isEacces, isStaleWrite } from '../../errors/fs.ts'
 import { TooManyMatches } from '../../shell/errors.ts'
 import { pathVisible } from '../../utils/hidden.ts'
 import { gnuDirname } from '../../utils/path.ts'
@@ -28,7 +28,7 @@ import type { MountEntry } from '../mount/mount.ts'
 import { DEV_PREFIX } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecuteResult, SessionExecuteOptions } from '../workspace/types.ts'
-import { FileVersionTracker, StaleMirageFileError } from './file_version.ts'
+import { FileVersionTracker } from './file_version.ts'
 import { decode, errorText, ioToStr, replaceText } from './io_text.ts'
 import { mediaOf, type WorkspaceMediaRead } from './read_file.ts'
 
@@ -373,7 +373,7 @@ export class MirageToolOperations {
       try {
         content = decode(await versions.readForEdit(path))
       } catch (err) {
-        if (err instanceof StaleMirageFileError) return errorResult(`Error: ${err.message}`)
+        if (isStaleWrite(err)) return errorResult(errorText(err))
         if (await missing(versions.vfs, path)) {
           return errorResult(`Error: file '${path}' not found`)
         }

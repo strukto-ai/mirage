@@ -15,7 +15,6 @@
 export { mirageExtension, type MirageExtensionOptions } from './extension.ts'
 export {
   mirageOperations,
-  StaleMirageFileError,
   type MirageOperationsBundle,
   type MirageOperationsOptions,
 } from './operations.ts'

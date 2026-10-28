@@ -111,7 +111,7 @@ async def test_write_refuses_a_file_changed_since_read(ops, workspace):
     await workspace.vfs.write("/exists.txt", b"moved")
     result = await ops.write("/exists.txt", "second")
     assert result.is_error is True
-    assert "changed since it was last read" in result.text
+    assert "changed since it was read" in result.text
     assert await workspace.vfs.read("/exists.txt") == b"moved"
 
 
@@ -205,7 +205,7 @@ async def test_another_spelling_keeps_the_read_history(ops, workspace):
     await workspace.vfs.write("/w/a.txt", b"moved\n")
     stale = await ops.edit("./a.txt", "moved", "x")
     rewritten = await ops.write("/w/./b.txt", "three\n")
-    assert stale.is_error and "changed since it was last read" in stale.text
+    assert stale.is_error and "changed since it was read" in stale.text
     assert rewritten.is_error is False
 
 
@@ -218,7 +218,7 @@ async def test_a_link_spelling_keeps_the_read_history(ops, workspace):
     await ops.read("/data/config.txt")
     await workspace.vfs.write("/data/config.txt", b"moved\n")
     linked = await ops.edit("link/../config.txt", "moved", "x")
-    assert linked.is_error and "changed since it was last read" in linked.text
+    assert linked.is_error and "changed since it was read" in linked.text
 
 
 @pytest.mark.asyncio

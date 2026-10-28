@@ -1,7 +1,11 @@
 import pytest
 
 from mirage.shell.arith import evaluate_arith
-from mirage.shell.errors import ArithError, ReadonlyError, UnboundVariable
+from mirage.shell.errors import (
+    ArithError,
+    ReadonlyVariableError,
+    UnboundVariable,
+)
 from mirage.shell.types import ArithResult, ElementOps
 
 
@@ -352,11 +356,11 @@ def test_a_frozen_name_stops_the_evaluation_after_the_writes_before_it():
     def frozen(name: str) -> str | None:
         return name if name == "R" else None
 
-    with pytest.raises(ReadonlyError) as exc:
+    with pytest.raises(ReadonlyVariableError) as exc:
         evaluate_arith("X=5, R=3, X=6", {}, frozen=frozen)
     assert (exc.value.name, exc.value.in_subscript) == ("R", False)
     assert [(w.name, w.value) for w in exc.value.writes] == [("X", "5")]
-    with pytest.raises(ReadonlyError) as exc:
+    with pytest.raises(ReadonlyVariableError) as exc:
         evaluate_arith(
             "x=1, arr[R=3]", {}, elements=_fake_elements(), frozen=frozen
         )

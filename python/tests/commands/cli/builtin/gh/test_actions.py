@@ -24,12 +24,13 @@ from mirage.commands.cli.builtin.gh.actions import (
     workflow_view_cmd,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import PartialOutputError, UsageError
+from mirage.commands.errors import UsageError
 from mirage.core.github.actions import list_jobs, run_log_archive
 from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GhConfig
 from mirage.core.github.paginate import github_pages
 from mirage.io.types import materialize
+from mirage.rs.errors import StreamRefusal
 from mirage.types import PathSpec
 
 ACCOUNT = GitHubAccount(GhConfig(token="t", repo="o/r"))
@@ -197,10 +198,10 @@ async def test_run_log_fetches_a_missing_job_and_names_one_with_no_log():
     }
     ROUTES[f"GET {RUN}/logs"] = _zip([])
     ROUTES["GET /repos/o/r/actions/jobs/1/logs"] = "from the api\n"
-    with pytest.raises(PartialOutputError) as caught:
+    with pytest.raises(StreamRefusal) as caught:
         await run_view_cmd(*_args(["7"], {"log": True}))
     assert str(caught.value) == "log not found: 2"
-    assert caught.value.stdout == b"a\tUNKNOWN STEP\tfrom the api\n"
+    assert caught.value.output == b"a\tUNKNOWN STEP\tfrom the api\n"
 
 
 @pytest.mark.asyncio

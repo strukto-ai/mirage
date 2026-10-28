@@ -66,7 +66,7 @@ import {
 } from '../../../commands/builtin/find_parse.ts'
 import { resolveNewerRefs } from '../find_refs.ts'
 import type { ExecuteFn } from '../../expand/types.ts'
-import { FindParseError } from '../../../commands/errors.ts'
+import { UsageError } from '../../../commands/errors.ts'
 import {
   type JobHandlerResult,
   handleDisown,
@@ -633,12 +633,12 @@ export async function handleCommand(
     try {
       findExpr = parseFindExpression(findExprTokens)
     } catch (err) {
-      if (err instanceof FindParseError) {
+      if (err instanceof UsageError) {
         const errBytes = encodeText(`${err.message}\n`)
         return [
           null,
-          new IOResult({ exitCode: 1, stderr: errBytes }),
-          new ExecutionNode({ command: cmdStr, stderr: errBytes, exitCode: 1 }),
+          new IOResult({ exitCode: err.exitCode, stderr: errBytes }),
+          new ExecutionNode({ command: cmdStr, stderr: errBytes, exitCode: err.exitCode }),
         ]
       }
       throw err

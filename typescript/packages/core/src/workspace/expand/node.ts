@@ -28,7 +28,7 @@ import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { splitBacktickRegion } from '../../shell/backticks.ts'
-import { ArithError, BadSubstitution, ReadonlyError, named } from '../../shell/errors.ts'
+import { ArithError, BadSubstitution, ReadonlyVariableError, named } from '../../shell/errors.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from '../../shell/escapes.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
 import { scanParameter } from '../../shell/parameter.ts'
@@ -462,7 +462,7 @@ async function arithValue(
   try {
     return (await landedArith(session, view ?? null, expr, landArithWrites)).toString()
   } catch (err) {
-    if (err instanceof ArithError || err instanceof ReadonlyError) throw err.signal()
+    if (err instanceof ArithError || err instanceof ReadonlyVariableError) throw err.signal()
     throw err
   }
 }

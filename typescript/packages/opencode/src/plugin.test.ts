@@ -103,7 +103,7 @@ describe('opencode mirageTools.write', () => {
 
     const out = await callTool(tools.write, { filePath: '/out.txt', content: 'replacement' })
 
-    expect(out).toContain('File changed since it was last read')
+    expect(out).toContain('changed since it was read')
     expect(DEC.decode(await ws.vfs.read('/out.txt'))).toBe('changed elsewhere')
   })
 
@@ -181,7 +181,7 @@ describe('opencode mirageTools.edit', () => {
       newString: 'updated',
     })
 
-    expect(out).toContain('File changed since it was last read')
+    expect(out).toContain('changed since it was read')
     expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('changed elsewhere')
   })
 })
@@ -320,7 +320,7 @@ describe('opencode resolver (per-session workspace)', () => {
     await exec(tools.write)({ filePath: '/note.txt', content: 'two' }, ctxB)
     const out = await exec(tools.write)({ filePath: '/note.txt', content: 'three' }, ctxA)
 
-    expect(out).toContain('File changed since it was last read')
+    expect(out).toContain('changed since it was read')
     expect(DEC.decode(await ws.vfs.read('/note.txt'))).toBe('two')
   })
 })

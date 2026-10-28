@@ -47,7 +47,3 @@ class HttpTimeoutError(HttpConnectError):
     def __init__(self, host: str, port: int, elapsed_ms: int) -> None:
         super().__init__(host, port)
         self.elapsed_ms = elapsed_ms
-
-
-class SortKeyError(ValueError):
-    """An invalid -k field specification or ordering letter (GNU sort)."""
