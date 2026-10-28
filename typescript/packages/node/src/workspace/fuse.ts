@@ -15,6 +15,7 @@
 import { rmdirSync } from 'node:fs'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { forceUnmount, mount, type FuseHandle, type MountOptions } from '../fuse/mount.ts'
+import { SERVED } from '../runtime/sandbox/program.ts'
 
 const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
 type Signal = (typeof SIGNALS)[number]
@@ -121,6 +122,7 @@ export class FuseManager {
       ownsMountpoint: handle.ownsMountpoint,
     }
     CLEANUP.register(this.cleanupEntry)
+    SERVED.add(handle.mountpoint)
     return handle.mountpoint
   }
 
@@ -130,6 +132,7 @@ export class FuseManager {
     }
     const mp = this.handle.mountpoint
     await this.handle.unmount()
+    SERVED.delete(mp)
     const cleanupEntry = this.cleanupEntry
     if (cleanupEntry !== null) {
       CLEANUP.unregister(cleanupEntry)

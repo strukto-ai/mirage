@@ -165,6 +165,40 @@ async def test_a_missing_cli_raises_its_hint():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("served", [True, False])
+async def test_a_child_in_a_served_folder_starts_outside_it(
+    tmp_path, monkeypatch, served
+):
+    # A folder a kernel mount here serves answers on the loop spawning the
+    # child, which waits inside the spawn until the child runs, so the
+    # child starts outside and the prelude takes it in.
+    started = []
+    loop = asyncio.get_running_loop()
+    real = loop.subprocess_exec
+
+    async def subprocess_exec(factory, program, *args, cwd=None, **kwargs):
+        started.append((program, cwd))
+        return await real(factory, program, *args, cwd=cwd, **kwargs)
+
+    monkeypatch.setattr(loop, "subprocess_exec", subprocess_exec)
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.program.SERVED",
+        {str(tmp_path)} if served else set(),
+    )
+    ran = await run_program(
+        sys.executable,
+        None,
+        ["-c", "import os; print(os.getcwd())"],
+        None,
+        cwd=str(tmp_path),
+    )
+    assert ran.stdout.decode().strip() == os.path.realpath(tmp_path)
+    assert started == [
+        ("/bin/sh", None) if served else (sys.executable, str(tmp_path))
+    ]
+
+
+@pytest.mark.asyncio
 async def test_cancelling_a_call_kills_the_child(tmp_path):
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(

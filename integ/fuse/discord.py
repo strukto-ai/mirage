@@ -84,7 +84,11 @@ class Driver:
         self.ws, self.backend = ws, backend
         session = ws.create_session("reader")
         self.fuse = (
-            MirageFS(ws.vfs, session=session) if adapter == "fuse" else None
+            MirageFS(
+                ws.vfs, session=session, owner=lambda: ws._sync_bridge.loop
+            )
+            if adapter == "fuse"
+            else None
         )
         self.core = (
             self.fuse.core
@@ -131,23 +135,9 @@ class Driver:
                 await self.release(fh)
         finally:
             session = self.backend.accessor.pool._session
-            try:
-                if self.fuse is not None:
-                    await asyncio.wrap_future(
-                        asyncio.run_coroutine_threadsafe(
-                            self.backend.accessor.close(), self.fuse._loop
-                        )
-                    )
-                await self.ws.close()
-                assert session is None or session.closed
-                assert not self.opened
-            finally:
-                if self.fuse is not None:
-                    loop = self.fuse._loop
-                    loop.call_soon_threadsafe(loop.stop)
-                    while loop.is_running():
-                        await asyncio.sleep(0)
-                    loop.close()
+            await self.ws.close()
+            assert session is None or session.closed
+            assert not self.opened
 
 
 async def refused(pending, code):

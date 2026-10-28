@@ -31,6 +31,7 @@ from mirage.fuse.mount import mount_background, resolve_fusermount_binary
 from mirage.io.types import ByteSource
 from mirage.policy import Policy
 from mirage.policy.types import Deny, VfsContext, VfsResultContext
+from mirage.runtime.python import LocalRuntime
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
@@ -465,27 +466,43 @@ def run_big_write_probe(result: dict[str, ProbeValue]) -> None:
             )
 
 
+def _land(path: str, data: bytes) -> None:
+    """Write ``data`` to ``path`` and sync it, so a refusal surfaces here.
+
+    Args:
+        path (str): the file to write.
+        data (bytes): its new content.
+    """
+    with open(path, "wb") as fh:
+        fh.write(data)
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
 def run_capacity_probe(result: dict[str, ProbeValue]) -> None:
     """Record that a capped RAM store refuses a kernel write past its cap.
 
-    Served through ``mount_background`` itself, past ``add_fuse_mount``'s
-    refusal, with one writer at a time: the probe pins the kernel's errno
-    and that a shell write after the kernel's counts the kernel's bytes.
+    The workspace runs on this probe's loop, and so do its mount's ops, so
+    the kernel's writes go through threads rather than block the loop that
+    answers them. A shell write after the kernel's counts the kernel's
+    bytes.
 
     Args:
         result (dict[str, ProbeValue]): the probe result to extend.
     """
+    asyncio.run(_capacity_probe(result))
+
+
+async def _capacity_probe(result: dict[str, ProbeValue]) -> None:
     ws = Workspace({"/data": (RAMVFS(capacity=10), MountMode.WRITE)})
-    mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-cap-")
-    mount_background(ws.vfs, mountpoint)
-    data = f"{mountpoint}/data"
+    await ws.shell("true")
+    mountpoint = ws.add_fuse_mount(
+        "/data", tempfile.mkdtemp(prefix="mirage-fuse-cap-")
+    )
     try:
         code = None
         try:
-            with open(f"{data}/big", "wb") as fh:
-                fh.write(b"x" * 100)
-                fh.flush()
-                os.fsync(fh.fileno())
+            await asyncio.to_thread(_land, f"{mountpoint}/big", b"x" * 100)
         except OSError as err:
             code = err.errno
         result["capacity_kernel_write_refused"] = code is not None
@@ -493,26 +510,51 @@ def run_capacity_probe(result: dict[str, ProbeValue]) -> None:
         result["capacity_kernel_errno_edquot"] = (
             code == errno.EDQUOT or sys.platform == "win32"
         )
-        result["capacity_kernel_size_zero"] = (
-            os.path.getsize(f"{data}/big") == 0
-        )
+        size = await asyncio.to_thread(os.path.getsize, f"{mountpoint}/big")
+        result["capacity_kernel_size_zero"] = size == 0
         # Landed before the shell runs: WinFsp closes after its cleanup.
-        with open(f"{data}/a", "wb") as fh:
-            fh.write(b"12345678")
-            fh.flush()
-            os.fsync(fh.fileno())
-        shell = asyncio.run(ws.shell("printf 123 > /data/b"))
+        await asyncio.to_thread(_land, f"{mountpoint}/a", b"12345678")
+        shell = await ws.shell("printf 123 > /data/b")
         result["capacity_shared_with_shell"] = shell.exit_code == 1
     finally:
-        if sys.platform == "darwin":
-            subprocess.run(
-                ["diskutil", "unmount", "force", mountpoint],
-                capture_output=True,
-            )
-        elif sys.platform != "win32":
-            subprocess.run(
-                ["fusermount", "-u", mountpoint], capture_output=True
-            )
+        await ws.close()
+
+
+def run_local_program_probe(result: dict[str, ProbeValue]) -> None:
+    """Record that a host program runs in a folder this process serves.
+
+    The folder sits at the mount's own path, as the local runtime's guide
+    advises, so the program starts in it: its start must not wait on the
+    loop that answers the folder.
+
+    Args:
+        result (dict[str, ProbeValue]): the probe result to extend.
+    """
+    if sys.platform == "win32":
+        # No /bin/sh to start the program from outside the folder.
+        result["local_program_in_folder"] = "a.txt"
+        return
+    asyncio.run(_local_program_probe(result))
+
+
+async def _local_program_probe(result: dict[str, ProbeValue]) -> None:
+    folder = tempfile.mkdtemp(prefix="mirage-fuse-same-")
+    data = RAMVFS()
+    data._store.dirs.add("/")
+    data._store.files["/a.txt"] = b"alpha\n"
+    ws = Workspace(
+        {folder: (data, MountMode.EXEC)},
+        runtimes=[LocalRuntime(captures=["@external"])],
+    )
+    await ws.shell("true")
+    ws.add_fuse_mount(folder, folder)
+    try:
+        ran = await ws.shell(f"cd {folder} && nice ls")
+        result["local_program_in_folder"] = (
+            (ran.stdout or b"").decode().strip()
+        )
+    finally:
+        await ws.close()
 
 
 def run_external_unmount_probe(result: dict[str, ProbeValue]) -> None:
@@ -699,6 +741,7 @@ def main() -> None:
     run_link_probe(result)
     run_session_probe(result)
     run_capacity_probe(result)
+    run_local_program_probe(result)
     run_external_unmount_probe(result)
     print(json.dumps(result))
 

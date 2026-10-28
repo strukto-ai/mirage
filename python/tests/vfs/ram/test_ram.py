@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.types import CapacityResult, CapacityState, MountBackend
+from mirage.types import CapacityResult, CapacityState
 from mirage.vfs.dev import DevVFS
 from mirage.vfs.errors import VFSConfigError
 from mirage.vfs.ram import RAMVFS
@@ -160,19 +160,3 @@ async def test_a_nested_store_keeps_its_own_cap():
 def test_a_backend_that_cannot_count_refuses_a_capacity():
     with pytest.raises(VFSConfigError, match="capacity"):
         build_vfs("s3", {"bucket": "b", "capacity": "1K"})
-
-
-def test_a_capped_store_is_not_served_over_fuse_yet():
-    ws = Workspace({"/d": (RAMVFS(capacity=10), MountMode.WRITE)})
-    with pytest.raises(ValueError, match="cannot be served over fuse yet"):
-        ws.add_fuse_mount("/d")
-    with pytest.raises(ValueError, match="cannot be served over fskit yet"):
-        ws.add_fuse_mount("/", backend="fskit")
-
-
-def test_a_capped_store_added_under_a_fuse_mount_is_refused():
-    ws = Workspace({"/d": (RAMVFS(), MountMode.WRITE)})
-    ws._kernel_mounts._writable["/"] = ("/", MountBackend.FUSE)
-    with pytest.raises(ValueError, match="cannot be served over fuse yet"):
-        ws.add_mount("/e", RAMVFS(capacity=10), MountMode.WRITE)
-    ws.add_mount("/f", RAMVFS(), MountMode.WRITE)

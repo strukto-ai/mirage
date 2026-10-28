@@ -367,7 +367,13 @@ class _DiscordReader:
         self.ws = ws
         self.http = http
         session = ws.create_session("reader")
-        self.fuse = MirageFS(ws.vfs, session=session) if use_fuse else None
+        self.fuse = (
+            MirageFS(
+                ws.vfs, session=session, owner=lambda: ws._sync_bridge.loop
+            )
+            if use_fuse
+            else None
+        )
         self.core = (
             self.fuse.core
             if self.fuse is not None
@@ -419,20 +425,8 @@ class _DiscordReader:
                 assert session.connector is not None
                 assert not session.connector._acquired
         finally:
-            if self.fuse is not None:
-                await asyncio.wrap_future(
-                    asyncio.run_coroutine_threadsafe(
-                        self.backend.accessor.close(), self.fuse._loop
-                    )
-                )
             await self.ws.close()
             assert session is None or session.closed
-            if self.fuse is not None:
-                loop = self.fuse._loop
-                loop.call_soon_threadsafe(loop.stop)
-                while loop.is_running():
-                    await asyncio.sleep(0)
-                loop.close()
 
 
 @pytest_asyncio.fixture(params=["core", "fuse"])

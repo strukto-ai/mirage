@@ -12,14 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 import os
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from threading import Thread
 from uuid import uuid4
 
+from mirage.bridge.sync import blocking
 from mirage.fuse.backend import (
     FSKIT_MOUNT_ROOT,
     MountBackend,
@@ -31,6 +34,7 @@ from mirage.fuse.mount import (
     mount_background,
     unmount_with_fusermount,
 )
+from mirage.runtime.sandbox.program import SERVED
 from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.session.session import SessionState
 
@@ -58,6 +62,7 @@ class FuseManager:
         mountpoint: str | None = None,
         session: SessionState | None = None,
         backend: str | MountBackend = MountBackend.FUSE,
+        owner: Callable[[], asyncio.AbstractEventLoop | None] = lambda: None,
     ) -> str:
         """Mount the workspace's files and return the live mountpoint.
 
@@ -68,6 +73,8 @@ class FuseManager:
                 directory appropriate for the backend.
             session (SessionState | None): bind ops to this session's grants.
             backend (str | MountBackend): kernel interface to use.
+            owner (Callable[[], asyncio.AbstractEventLoop | None]): the
+                workspace's owner loop, which the mount's ops run on.
 
         Returns:
             str: the mountpoint now serving the tree.
@@ -111,23 +118,27 @@ class FuseManager:
             root_prefix=prefix,
             session=session,
             backend=resolved,
+            owner=owner,
         )
+        SERVED.add(self._mountpoint)
         return self._mountpoint
 
     def unmount(self) -> None:
         if not self._mountpoint or self._kernel_mountpoint is None:
             return
-        if sys.platform == "darwin":
-            subprocess.run(
-                ["diskutil", "unmount", "force", self._mountpoint],
-                capture_output=True,
-            )
-        elif sys.platform == "win32":
-            # No fusermount equivalent: WinFsp tears the mount down when the
-            # serving process exits.
-            pass
-        else:
-            unmount_with_fusermount(self._kernel_mountpoint)
+        with blocking():
+            if sys.platform == "darwin":
+                subprocess.run(
+                    ["diskutil", "unmount", "force", self._mountpoint],
+                    capture_output=True,
+                )
+            elif sys.platform == "win32":
+                # No fusermount equivalent: WinFsp tears the mount down
+                # when the serving process exits.
+                pass
+            else:
+                unmount_with_fusermount(self._kernel_mountpoint)
+        SERVED.discard(self._mountpoint)
         # An FSKit /Volumes entry is created and removed by the system, and
         # is not ours to rmdir (nor could we: /Volumes is root-owned).
         if self._owns_mountpoint and not self._mountpoint.startswith(

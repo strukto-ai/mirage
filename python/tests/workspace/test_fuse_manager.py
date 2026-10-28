@@ -21,6 +21,7 @@ import tempfile
 import pytest
 
 from mirage import FuseManager, Mount, MountBackend, MountMode, Workspace
+from mirage.runtime.sandbox.program import SERVED
 from mirage.vfs.ram import RAMVFS
 
 
@@ -32,9 +33,7 @@ class _FakeThread:
 def _fake_mount(monkeypatch):
     monkeypatch.setattr(
         "mirage.workspace.fuse.mount_background",
-        lambda ops, mountpoint, root_prefix="", session=None, backend=None: (
-            _FakeThread()
-        ),
+        lambda *_args, **_kwargs: _FakeThread(),
     )
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -77,7 +76,7 @@ def test_collision_rejected_before_mount(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "mirage.workspace.fuse.mount_background",
-        lambda ops, mountpoint, root_prefix="", session=None, backend=None: (
+        lambda _files, mountpoint, *_args, **_kwargs: (
             calls.append(mountpoint) or _FakeThread()
         ),
     )
@@ -200,9 +199,12 @@ def _capture_mount(monkeypatch):
     """Record what FuseManager hands to mount_background."""
     seen = {}
 
-    def _fake(ops, mountpoint, root_prefix="", session=None, backend=None):
+    def _fake(
+        ops, mountpoint, root_prefix="", session=None, backend=None, owner=None
+    ):
         seen["mountpoint"] = mountpoint
         seen["backend"] = backend
+        seen["owner"] = owner
         return _FakeThread()
 
     monkeypatch.setattr("mirage.workspace.fuse.mount_background", _fake)
@@ -212,6 +214,21 @@ def _capture_mount(monkeypatch):
         lambda _mountpoint: None,
     )
     return seen
+
+
+def test_a_mount_runs_on_the_owner_and_is_served_until_it_unmounts(
+    monkeypatch, tmp_path
+):
+    seen = _capture_mount(monkeypatch)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    mp = ws.add_fuse_mount("/", str(tmp_path / "mp"))
+    loop = asyncio.new_event_loop()
+    ws._sync_bridge.observe(loop)
+    assert seen["owner"]() is loop
+    assert mp in SERVED
+    ws.remove_fuse_mount("/")
+    assert mp not in SERVED
+    loop.close()
 
 
 def _as_macos(monkeypatch):

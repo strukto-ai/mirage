@@ -41,6 +41,23 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
 
 /**
+ * Host folders a kernel mount in this process serves. A child started in
+ * one, or from one, would wait inside its spawn on the loop that answers
+ * for the folder, the very loop spawning it, so it starts outside and
+ * EXEC_PRELUDE takes it in once the spawn has returned. Mirrors Python's
+ * `SERVED`.
+ */
+export const SERVED = new Set<string>()
+
+/** Whether `path` lies in a folder a kernel mount here serves. */
+function served(path: string): boolean {
+  for (const folder of SERVED) {
+    if (path === folder || path.startsWith(`${folder.replace(/\/+$/, '')}/`)) return true
+  }
+  return false
+}
+
+/**
  * Where the host's own PATH finds a program, as Python's `shutil.which`
  * does, as an absolute path: a child's environment may carry no host PATH,
  * and a relative entry would be read against the child's directory, so the
@@ -125,7 +142,8 @@ async function untilInputCloses<T>(
  * with the runner. A missing executable rejects with `hint` when one is given, else with
  * spawn's own error. EPIPE means the command exited without draining its
  * stdin (`head`-like), so it is not an error. An input pull still pending
- * when the child exits is left to close on its own. Mirrors Python's
+ * when the child exits is left to close on its own. One in or from a
+ * `SERVED` folder starts through `EXEC_PRELUDE`. Mirrors Python's
  * `run_program`.
  */
 export async function runProgram(
@@ -139,12 +157,19 @@ export async function runProgram(
   signal?.throwIfAborted()
   // Read now: an abort's listener runs as the caller that aborted.
   const runner = currentCaller().process
-  const child = spawn(executable, args, {
-    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-    ...(options.env !== undefined ? { env: options.env } : {}),
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: process.platform !== 'win32',
-  })
+  const { cwd } = options
+  const prelude =
+    process.platform !== 'win32' && (served(executable) || (cwd !== undefined && served(cwd)))
+  const child = spawn(
+    prelude ? '/bin/sh' : executable,
+    prelude ? ['-c', EXEC_PRELUDE, 'sh', cwd ?? '.', executable, ...args] : args,
+    {
+      ...(cwd !== undefined && !prelude ? { cwd } : {}),
+      ...(options.env !== undefined ? { env: options.env } : {}),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
+    },
+  )
   // Set by the abort listener, which flow analysis does not follow.
   let stopping = null as Promise<void> | null
   const abort = (): void => {

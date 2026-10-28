@@ -18,7 +18,14 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { closeChildren, hostRun, openProgramPipe, reapHostRun, runProgram } from './program.ts'
+import {
+  SERVED,
+  closeChildren,
+  hostRun,
+  openProgramPipe,
+  reapHostRun,
+  runProgram,
+} from './program.ts'
 import { ProcessTable } from '@struktoai/mirage-core/process/table'
 import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
@@ -98,6 +105,32 @@ function shRunner(
 }
 
 describe('runProgram', () => {
+  // A folder a kernel mount here serves answers on the loop spawning the
+  // child, which waits inside the spawn until the child runs, so the child
+  // starts outside and the prelude takes it in: its `cd` sets PWD.
+  it('starts a child in a served folder outside it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-served-'))
+    const pwd = async (): Promise<string> =>
+      new TextDecoder().decode(
+        (
+          await runProgram(
+            process.execPath,
+            null,
+            ['-e', 'process.stdout.write(process.env.PWD ?? "")'],
+            null,
+            { cwd: dir, env: {} },
+          )
+        ).stdout,
+      )
+    SERVED.add(dir)
+    try {
+      expect(await pwd()).toBe(dir)
+    } finally {
+      SERVED.delete(dir)
+    }
+    expect(await pwd()).toBe('')
+  })
+
   // A kill that names TERM reaches the program as TERM, so its handler
   // runs, and the runner's status is bash's 143 for a child TERM ended.
   it('lets the child handle the TERM a kill sent its runner', async () => {

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 import importlib
 import os
@@ -19,15 +20,20 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
 
+from mirage.bridge.sync import blocking
 from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
 from mirage.fuse.fs import MirageFS
 from mirage.types import FileType, HiddenPaths, MountMode, Visibility
+from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -601,3 +607,94 @@ async def test_session_bound_fs_read_narrowing():
     bound.release("/data/f.txt", fh)
     with pytest.raises(Exception):
         bound.create("/data/new.txt", 0o644)
+
+
+@contextmanager
+def _owner_loop() -> Iterator[asyncio.AbstractEventLoop]:
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    try:
+        yield loop
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join()
+        loop.close()
+
+
+def _loops_of(fs: MirageFS) -> list[asyncio.AbstractEventLoop]:
+    seen: list[asyncio.AbstractEventLoop] = []
+    real = fs.core.readdir
+
+    async def readdir(path: str) -> list[str]:
+        seen.append(asyncio.get_running_loop())
+        return await real(path)
+
+    fs.core.readdir = readdir  # type: ignore[method-assign]
+    return seen
+
+
+def test_ops_run_on_the_owner_loop_while_it_runs():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    with _owner_loop() as owner:
+        fs = MirageFS(ws.vfs, owner=lambda: owner)
+        seen = _loops_of(fs)
+        fs.readdir("/", 0)
+    assert seen == [owner]
+
+
+def test_ops_run_on_the_mounts_own_loop_until_an_owner_runs():
+    fs = MirageFS(Workspace({"/": RAMVFS()}, mode=MountMode.WRITE).vfs)
+    seen = _loops_of(fs)
+    fs.readdir("/", 0)
+    assert seen == [fs._loop]
+    assert not fs._loop.is_running()
+
+
+def test_ops_run_on_the_mounts_own_loop_while_the_owner_is_blocked():
+    # A mount coming up on the owner's own thread blocks the owner until
+    # the kernel's first ops are answered, so they must not wait for it.
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    entered, release = threading.Event(), threading.Event()
+
+    async def block() -> None:
+        with blocking():
+            entered.set()
+            release.wait(5)
+
+    with _owner_loop() as owner:
+        fs = MirageFS(ws.vfs, owner=lambda: owner)
+        seen = _loops_of(fs)
+        held = asyncio.run_coroutine_threadsafe(block(), owner)
+        entered.wait(5)
+        fs.readdir("/", 0)
+        release.set()
+        held.result(5)
+    assert seen == [fs._loop]
+
+
+@pytest.mark.asyncio
+async def test_a_capped_store_takes_writes_through_the_mount_and_the_shell(
+    tmp_path,
+):
+    ws = Workspace(
+        {"/": DiskVFS(str(tmp_path), capacity=8)}, mode=MountMode.WRITE
+    )
+    fs = MirageFS(ws.vfs, owner=lambda: ws._sync_bridge.loop)
+
+    def write(data: bytes) -> None:
+        fh = fs.open("/f", os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        try:
+            fs.write("/f", data, 0, fh)
+            fs.flush("/f", fh)
+        finally:
+            fs.release("/f", fh)
+
+    await asyncio.to_thread(write, b"1234")
+    assert (await ws.shell("printf 567 >> /f")).exit_code == 0
+    await asyncio.to_thread(write, b"8")
+    with pytest.raises(OSError) as exc:
+        await asyncio.to_thread(write, b"9")
+    assert exc.value.errno == errno.EDQUOT
+    assert (tmp_path / "f").read_bytes() == b"12345678"
+    await ws.close()

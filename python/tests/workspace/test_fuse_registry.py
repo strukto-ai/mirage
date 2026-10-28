@@ -16,9 +16,7 @@ class _FakeThread:
 def _fake_mount(monkeypatch):
     monkeypatch.setattr(
         "mirage.workspace.fuse.mount_background",
-        lambda ops, mountpoint, root_prefix="", session=None, backend=None: (
-            _FakeThread()
-        ),
+        lambda *_args, **_kwargs: _FakeThread(),
     )
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(

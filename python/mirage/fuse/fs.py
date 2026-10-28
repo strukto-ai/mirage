@@ -14,13 +14,12 @@
 
 import asyncio
 import os
-import threading
 import time
 from collections.abc import Awaitable, Callable
 from functools import partial
 from typing import Any, ParamSpec, TypeVar
 
-from mirage.bridge.sync import on_auxiliary_loop, run_async_from_sync
+from mirage.bridge.sync import BLOCKED, on_auxiliary_loop, run_async_from_sync
 from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
 from mirage.fuse.darwin import rename_flags_check
 from mirage.mount.core import MountCore
@@ -58,17 +57,24 @@ class MirageFS:
     """libfuse adapter over MountCore.
 
     Owns exactly the FUSE-specific concerns: the mfusepy callback method
-    signatures, the sync bridge libfuse's callbacks force (a loop thread
-    of its own that every core op runs on), and the translation of
-    mirage-native exceptions into ``OSError``. All filesystem semantics
-    live in MountCore, so an FSKit or File Provider adapter can reuse them
-    unchanged.
+    signatures, the sync bridge libfuse's callbacks force, and the
+    translation of mirage-native exceptions into ``OSError``. Every core
+    op runs on the workspace's owner loop, the one its foreground calls
+    run on, so a store's checks and the writes they guard never race a
+    second loop. Until an owner runs, or while it is blocked on a mount
+    itself, an op runs on the mount's own loop, driven by the calling
+    FUSE thread, so it never runs beside the owner. All filesystem
+    semantics live in MountCore, so an FSKit or File Provider adapter can
+    reuse them unchanged.
 
     Args:
         files (Files): the workspace's ``ws.vfs`` every callback routes to.
         root_prefix (str): mount root; non-empty scopes the tree to one mount.
         session (SessionState | None): bind every op to this
             session's mount grants.
+        owner (Callable[[], asyncio.AbstractEventLoop | None]): the
+            workspace's owner loop, read at each call; None until a
+            foreground call claims one.
     """
 
     use_ns = True
@@ -78,10 +84,18 @@ class MirageFS:
         files: Files,
         root_prefix: str = "",
         session: SessionState | None = None,
+        owner: Callable[[], asyncio.AbstractEventLoop | None] = lambda: None,
     ) -> None:
         self.core = MountCore(files, root_prefix=root_prefix, session=session)
+        self._owner = owner
         self._loop = asyncio.new_event_loop()
-        threading.Thread(target=self._loop.run_forever, daemon=True).start()
+
+    def _serving(self) -> asyncio.AbstractEventLoop:
+        """The loop the next op runs on: the owner when it can answer."""
+        owner = self._owner()
+        if owner is not None and owner.is_running() and owner not in BLOCKED:
+            return owner
+        return self._loop
 
     def _call(
         self, fn: Callable[P, Awaitable[T]], *args: P.args, **kwargs: P.kwargs
@@ -104,7 +118,8 @@ class MirageFS:
         """
         try:
             return run_async_from_sync(
-                on_auxiliary_loop(partial(fn, *args, **kwargs)), self._loop
+                on_auxiliary_loop(partial(fn, *args, **kwargs)),
+                self._serving(),
             )
         except Exception as err:
             code = classify_error(err)
@@ -147,7 +162,8 @@ class MirageFS:
         # reaching userspace.
         try:
             run_async_from_sync(
-                on_auxiliary_loop(partial(self.core.getattr, new)), self._loop
+                on_auxiliary_loop(partial(self.core.getattr, new)),
+                self._serving(),
             )
             new_exists = True
         except (FileNotFoundError, ValueError):

@@ -14,6 +14,7 @@
 
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { SERVED } from '../runtime/sandbox/program.ts'
 import { FuseManager } from './fuse.ts'
 
 const mocks = vi.hoisted(() => ({
@@ -96,6 +97,22 @@ describe('FuseManager (without a real mount)', () => {
     expect(unmount).toHaveBeenCalledOnce()
     expect(mocks.rmdirSync).toHaveBeenCalledWith('/tmp/generated')
     expect(mocks.rmSync).not.toHaveBeenCalled()
+  })
+
+  // A program the runtime starts in the folder must not wait inside its
+  // spawn on the loop answering the folder (runProgram's prelude).
+  it('serves the mounted folder until it unmounts', async () => {
+    mocks.mount.mockResolvedValueOnce({
+      mountpoint: '/tmp/served',
+      ownsMountpoint: false,
+      unmount: () => Promise.resolve(),
+    })
+    const fm = new FuseManager()
+
+    await fm.setup(workspaceStub())
+    expect(SERVED.has('/tmp/served')).toBe(true)
+    await fm.unmount()
+    expect(SERVED.has('/tmp/served')).toBe(false)
   })
 
   it('keeps the mountpoint when unmount fails', async () => {

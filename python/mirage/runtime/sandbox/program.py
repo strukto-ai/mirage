@@ -54,6 +54,12 @@ Children = dict[
 # What a pipe's reader buffers, as asyncio.create_subprocess_exec sets it.
 STREAM_LIMIT = 2**16
 
+# Host folders a kernel mount in this process serves. A child started in
+# one, or from one, would wait inside its spawn on the loop that answers
+# for the folder, the very loop spawning it, so it starts outside and
+# EXEC_PRELUDE takes it in once the spawn has returned.
+SERVED: set[str] = set()
+
 
 async def run_program(
     executable: str,
@@ -432,7 +438,8 @@ async def _spawn(
     exited: Callable[[], None] | None = None,
 ) -> tuple[asyncio.subprocess.Process, asyncio.SubprocessTransport]:
     """Start a child leading a process group of its own, keeping the
-    transport that closes our ends of its pipes (``stop_tree``).
+    transport that closes our ends of its pipes (``stop_tree``). One in
+    or from a ``SERVED`` folder starts through ``EXEC_PRELUDE``.
 
     Args:
         executable (str): the program.
@@ -446,6 +453,11 @@ async def _spawn(
         exited (Callable[[], None] | None): called the moment the child
             exits, which ``wait`` answers only once its pipes closed.
     """
+    if sys.platform != "win32" and (
+        _served(executable) or (cwd is not None and _served(cwd))
+    ):
+        args = ["-c", EXEC_PRELUDE, "sh", cwd or ".", executable, *args]
+        executable, cwd = "/bin/sh", None
     loop = asyncio.get_running_loop()
     transport, protocol = await loop.subprocess_exec(
         lambda: _ExitWatch(exited, limit=STREAM_LIMIT, loop=loop),
@@ -459,6 +471,18 @@ async def _spawn(
         start_new_session=True,
     )
     return asyncio.subprocess.Process(transport, protocol, loop), transport
+
+
+def _served(path: str) -> bool:
+    """Whether ``path`` lies in a folder a kernel mount here serves.
+
+    Args:
+        path (str): a host path.
+    """
+    return any(
+        path == folder or path.startswith(folder.rstrip("/") + "/")
+        for folder in SERVED
+    )
 
 
 def reported_state(
