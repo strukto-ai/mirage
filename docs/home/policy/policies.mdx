@@ -62,8 +62,10 @@ ws.policies.remove(noForcePush)
 
 A policy implements any of eight methods, in pairs. The `pre_` method runs
 before an action, while the `post_` method runs after it with the same context
-and the execution result. A `post_` hook cannot undo executed actions, but it
-can inspect, modify, or suppress the returned output or error.
+and the execution result. A `post_` hook cannot undo executed actions. It can
+inspect results and return `Deny` or `Ask`; only `post_execute` can also return
+`Limit` to cap output. These responses do not replace returned output or
+suppress existing error text.
 
 ```mermaid
 flowchart LR
