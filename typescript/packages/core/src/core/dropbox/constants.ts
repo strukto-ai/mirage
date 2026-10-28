@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConditionSupport } from '../../cache/types.ts'
+
 export const DROPBOX_TOKEN_URL = 'https://api.dropboxapi.com/oauth2/token'
 export const DROPBOX_API_BASE = 'https://api.dropboxapi.com/2'
 export const DROPBOX_CONTENT_BASE = 'https://content.dropboxapi.com/2'
@@ -37,8 +39,6 @@ export const REV = 'rev'
 export const MISSING_SOURCE = 'from_lookup/not_found'
 export const TAKEN = 'to/conflict'
 export const TAKEN_BY_FOLDER = 'to/conflict/folder'
-
-import type { ConditionSupport } from '../../cache/types.ts'
 
 export const CONDITION_SUPPORT: ConditionSupport = {
   put: ['match'],

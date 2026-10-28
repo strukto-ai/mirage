@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConditionSupport } from '../../cache/types.ts'
+
 export const BOX_TOKEN_URL = 'https://api.box.com/oauth2/token'
 export const BOX_API_BASE = 'https://api.box.com/2.0'
 export const BOX_UPLOAD_BASE = 'https://upload.box.com/api/2.0'
@@ -53,8 +55,6 @@ export const TRASH_FOLDER_ID = '1'
 // The space_amount Box reports for an account with unlimited storage, a
 // placeholder rather than a size.
 export const UNLIMITED_SPACE = 999_999_999_999_999
-
-import type { ConditionSupport } from '../../cache/types.ts'
 
 export const CONDITION_SUPPORT: ConditionSupport = {
   put: ['match'],

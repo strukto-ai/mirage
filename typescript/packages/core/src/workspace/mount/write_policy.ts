@@ -43,8 +43,8 @@ export function coerceWritePolicy(value: unknown): WritePolicy {
 }
 
 export function writeConditions(vfs: BaseVFS): readonly WriteKind[] {
-  return (['put', 'copy', 'delete'] satisfies WriteKind[]).filter(
-    (kind) => (vfs.conditionSupport[kind]?.length ?? 0) > 0,
+  return (['put', 'copy', 'delete'] satisfies WriteKind[]).filter((kind) =>
+    (vfs.conditionSupport[kind] ?? []).includes('match'),
   )
 }
 

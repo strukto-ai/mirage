@@ -21,7 +21,7 @@ import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 
 export type ReadFn = (path: PathSpec) => Promise<Uint8Array>
-export type WriteFn<Written = unknown> = (path: PathSpec, data: Uint8Array) => Promise<Written>
+export type WriteFn<Written = unknown> = RewriteWriteFn<Written>
 
 /**
  * Append by reading the file and writing it back whole.
