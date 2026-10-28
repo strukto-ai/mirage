@@ -94,3 +94,24 @@ describe('live version history', () => {
     ).toBeNull()
   })
 })
+
+it.each(['v1', null])('unstarted reads preserve the previous observation %s', (initial) => {
+  const history = new VersionHistory()
+  const scope = new VersionScope()
+  scope.pins.set('/f', 'snapshot')
+  history.keep(scope, '/f', initial)
+  let pending = record('read', null)
+  for (let i = 0; i < 3; i++) {
+    pending = record('read', null)
+    pending.bytes = 0
+    history.observe(scope, '/f', pending)
+    expect(history.read(scope, '/f')).toBe(initial)
+  }
+  pending.fingerprint = 'empty-file-token'
+  expect(history.read(scope, '/f')).toBe('empty-file-token')
+  pending = record('read', null)
+  pending.bytes = 0
+  history.observe(scope, '/f', pending)
+  pending.bytes = 1
+  expect(history.read(scope, '/f')).toBeNull()
+})

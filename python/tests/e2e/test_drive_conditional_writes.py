@@ -728,3 +728,31 @@ async def test_an_append_keeps_a_file_created_after_the_listing(
     code, _, err = await _run(ws, f"echo x >> {drive.root}/n")
     assert (code, err) == (0, "")
     assert drive.fake.read("n") == b"v1\nx\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("peer", [b"peer\n", b""])
+async def test_failed_stream_rereads_keep_the_refused_session_version(
+    drive, workspace, peer
+):
+    ws = workspace()
+    a, b = await ws.session("a"), await ws.session("b")
+    path = f"{drive.root}/f"
+    await a.vfs.read(path)
+    await b.vfs.write(path, peer)
+    with pytest.raises(StaleWriteError):
+        await a.vfs.write(path, b"mine\n")
+    for _ in range(2):
+        await ws.cache.clear()
+        drive.fake.hooks[drive.download] = _fail
+        with pytest.raises(Exception, match="500|injected server error"):
+            stream = await a.vfs.read(path, stream=True)
+            async for chunk in stream:
+                pytest.fail(f"failed download returned bytes: {chunk!r}")
+        with pytest.raises(StaleWriteError):
+            await a.vfs.write(path, b"mine\n")
+        assert drive.fake.read("f") == peer
+    stream = await a.vfs.read(path, stream=True)
+    assert b"".join([chunk async for chunk in stream]) == peer
+    await a.vfs.write(path, b"mine\n")
+    assert drive.fake.read("f") == b"mine\n"

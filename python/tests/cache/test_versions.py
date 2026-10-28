@@ -80,3 +80,22 @@ def test_live_history_is_shared_by_shell_forks_but_not_serialized():
     assert "versions" not in fields
     restored = SessionState.from_dict(fields)
     assert restored.versions.read(scope, "/f") is None
+
+
+@pytest.mark.parametrize("initial", ["v1", None])
+def test_unstarted_reads_preserve_the_previous_observation(initial):
+    history, scope = VersionHistory(), VersionScope()
+    scope.pins["/f"] = "snapshot"
+    history.keep(scope, "/f", initial)
+    for _ in range(3):
+        pending = record(version=None)
+        pending.bytes = 0
+        history.observe(scope, "/f", pending)
+        assert history.read(scope, "/f") == initial
+    pending.fingerprint = "empty-file-token"
+    assert history.read(scope, "/f") == "empty-file-token"
+    pending = record(version=None)
+    pending.bytes = 0
+    history.observe(scope, "/f", pending)
+    pending.bytes = 1
+    assert history.read(scope, "/f") is None

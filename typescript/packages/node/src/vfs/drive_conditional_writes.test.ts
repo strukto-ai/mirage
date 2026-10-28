@@ -195,6 +195,42 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
     expect(drive.text('f')).toBe('C\n')
   })
 
+  it.each(['peer\n', ''])(
+    'failed stream rereads keep the refused session version (%j)',
+    async (peer) => {
+      const ws = await workspace()
+      const a = await ws.session('a')
+      const b = await ws.session('b')
+      const path = `${drive.root}/f`
+      await a.vfs.read(path)
+      await b.vfs.write(path, ENC.encode(peer))
+      await expect(a.vfs.write(path, ENC.encode('mine\n'))).rejects.toMatchObject({
+        code: 'STALE_WRITE',
+      })
+      for (let i = 0; i < 2; i++) {
+        await ws.cache.clear()
+        drive.hook(drive.download, fail)
+        let bytes = 0
+        await expect(
+          (async () => {
+            const stream = await a.vfs.read(path, { stream: true })
+            for await (const chunk of stream) bytes += chunk.byteLength
+          })(),
+        ).rejects.toThrow(/500|injected server error/)
+        expect(bytes).toBe(0)
+        await expect(a.vfs.write(path, ENC.encode('mine\n'))).rejects.toMatchObject({
+          code: 'STALE_WRITE',
+        })
+        expect(drive.text('f')).toBe(peer)
+      }
+      const chunks: Uint8Array[] = []
+      for await (const chunk of await a.vfs.read(path, { stream: true })) chunks.push(chunk)
+      expect(chunks.map((c) => DEC.decode(c)).join('')).toBe(peer)
+      await a.vfs.write(path, ENC.encode('mine\n'))
+      expect(drive.text('f')).toBe('mine\n')
+    },
+  )
+
   it('pins rm of an unread file to its lookup', async () => {
     const r = drive.root
     const ws = await workspace()

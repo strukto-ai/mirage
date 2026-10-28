@@ -36,7 +36,7 @@ class VersionHistory:
 
     def __init__(self) -> None:
         self._scopes: WeakKeyDictionary[
-            VersionScope, dict[str, OpRecord | str | None]
+            VersionScope, dict[str, tuple[OpRecord, str | None] | str | None]
         ] = WeakKeyDictionary()
 
     def read(self, scope: VersionScope, key: str) -> str | None:
@@ -47,7 +47,12 @@ class VersionHistory:
             key (str): resolved mount-relative file name.
         """
         held = self._scopes.get(scope, {}).get(key, scope.pins.get(key))
-        return held.fingerprint if isinstance(held, OpRecord) else held
+        if not isinstance(held, tuple):
+            return held
+        rec, previous = held
+        if rec.op == "read" and rec.bytes == 0 and rec.fingerprint is None:
+            return previous
+        return rec.fingerprint
 
     def keep(self, scope: VersionScope, key: str, version: str | None) -> None:
         """Retain a refused condition until this session reads again.
@@ -79,6 +84,8 @@ class VersionHistory:
                 if under_path(name, key):
                     held[name] = None
         if rec.op in STAMP_FINGERPRINT_OPS:
-            held[key] = rec
+            # An unopened or failed stream has observed neither bytes nor a
+            # token. Keep the prior condition until its record proves a read.
+            held[key] = (rec, self.read(scope, key))
         else:
             held[key] = None
