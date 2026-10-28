@@ -25,7 +25,7 @@ from mirage.vfs.secrets import reveal_secret
 def response_error(response: aiohttp.ClientResponse, text: str) -> Exception:
     if response.status in (401, 403):
         return PermissionError("W&B authentication or authorization failed")
-    return WandbAPIError(f"W&B HTTP {response.status}")
+    return WandbAPIError(f"W&B HTTP {response.status}", response.status)
 
 
 def origin_key(url: SplitResult) -> tuple[str, str | None, int | None]:

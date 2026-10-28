@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic.diff import (
     quote_header_name,
     switch_words,
 )
+from mirage.core.api.errors import ApiError
 from mirage.io.types import materialize
 from mirage.rs.diff_pool import DiffPool
 from mirage.types import FileStat, FileType, PathSpec
@@ -240,3 +241,21 @@ async def test_unified_headers_read_in_the_tz_zone_with_every_digit():
         b"--- a\t2026-03-04 13:06:07.123456789 +0800",
         b"+++ gone\t1970-01-01 08:00:00.000000000 +0800",
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_service_failure_is_trouble_not_a_difference():
+    async def unreachable(path: PathSpec) -> FileStat:
+        raise ApiError("HTTP 503 Service Unavailable", 503)
+
+    out, io = await diff(
+        [_operand("a", "/d/a"), _operand("b", "/d/b")],
+        stream=_readdir,
+        readdir_fn=_readdir,
+        stat_fn=unreachable,
+        flags=DiffFlags(recursive=True),
+    )
+    assert (out, io.exit_code) == (None, 2)
+    assert (
+        await materialize(io.stderr) == b"diff: HTTP 503 Service Unavailable\n"
+    )

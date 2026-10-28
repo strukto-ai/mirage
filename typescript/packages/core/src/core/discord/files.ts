@@ -15,6 +15,7 @@
 import { apiRequest, apiStream } from '../api/client.ts'
 import { fileIdName } from '../../utils/naming.ts'
 import { windowFor } from '../../utils/ranges.ts'
+import { ApiError } from '../api/errors.ts'
 
 export interface DiscordAttachment {
   id: string
@@ -48,9 +49,10 @@ export function fileBlobName(att: DiscordAttachment): string {
   return fileIdName(att.id, att.filename, att.title)
 }
 
-function downloadError(response: Response): Error {
-  return new Error(
+function downloadError(response: Response): ApiError {
+  return new ApiError(
     `discord download_file failed: ${String(response.status)} ${response.statusText}`,
+    response.status,
   )
 }
 

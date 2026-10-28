@@ -30,8 +30,9 @@ export class SlackApiError extends ApiError {
     public readonly slackError: string,
     public readonly needed: string | null = null,
     public readonly provided: string | null = null,
+    status: number | null = null,
   ) {
-    super(formatSlackErrorMessage(endpoint, slackError, needed, provided))
+    super(formatSlackErrorMessage(endpoint, slackError, needed, provided), status)
     this.name = 'SlackApiError'
   }
 }
@@ -64,9 +65,10 @@ function slackHttpError(endpoint: string, response: Response, text: string): Sla
       payload.error ?? 'unknown_error',
       payload.needed ?? null,
       payload.provided ?? null,
+      response.status,
     )
   }
-  return new SlackApiError(endpoint, `HTTP ${String(response.status)}`)
+  return new SlackApiError(endpoint, `HTTP ${String(response.status)}`, null, null, response.status)
 }
 
 export interface SlackTransport {
@@ -134,7 +136,10 @@ export abstract class HttpSlackTransport implements SlackTransport {
     const window = windowFor(offset, size)
     const data = await apiRequest('GET', url, {
       errorOf: (response) =>
-        new Error(`slack: download failed (${String(response.status)}): ${url}`),
+        new ApiError(
+          `slack: download failed (${String(response.status)}): ${url}`,
+          response.status,
+        ),
       headers: auth,
       read: 'bytes',
       ...(window === undefined ? {} : { window }),
@@ -147,7 +152,10 @@ export abstract class HttpSlackTransport implements SlackTransport {
   async *downloadFileStream(url: string, signal?: AbortSignal): AsyncGenerator<Uint8Array, void> {
     yield* apiStream(url, {
       errorOf: (response) =>
-        new Error(`slack: download failed (${String(response.status)}): ${url}`),
+        new ApiError(
+          `slack: download failed (${String(response.status)}): ${url}`,
+          response.status,
+        ),
       headers: await this.authHeaders(),
       fetchFn: this.fetch,
       timeout: this.timeout,

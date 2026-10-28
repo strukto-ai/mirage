@@ -12,10 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 import pytest
-from multidict import CIMultiDict, CIMultiDictProxy
-from yarl import URL
 
 from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.resolve import (
@@ -83,13 +80,6 @@ async def test_root_context_memoizes_drive_lookup(
 
 @pytest.mark.asyncio
 async def test_eacces_on_denied_maps_403():
-    aiohttp.RequestInfo(
-        url=URL("https://x"),
-        method="POST",
-        headers=CIMultiDictProxy(CIMultiDict()),
-        real_url=URL("https://x"),
-    )
-
     @eacces_on_denied
     async def denied(accessor, path: PathSpec) -> None:
         raise GoogleApiError("denied", 403)

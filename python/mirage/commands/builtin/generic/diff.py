@@ -31,6 +31,7 @@ from mirage.commands.spec.usage import (
     missing_operand_error,
     usage_hint,
 )
+from mirage.core.api.errors import ApiError
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
@@ -560,7 +561,7 @@ async def diff(
             walk.status = max(walk.status, result.status)
             if result.stderr:
                 walk.trouble.extend(result.stderr)
-    except RuntimeError as exc:
+    except (ApiError, RuntimeError) as exc:
         return None, IOResult(exit_code=2, stderr=f"diff: {exc}\n".encode())
     except StreamRefusal as exc:
         return exc.output, IOResult(
