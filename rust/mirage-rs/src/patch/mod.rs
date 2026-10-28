@@ -107,9 +107,9 @@ impl Files {
             .await
     }
 
-    /// Whether something stands at a name, as stat would find it: a `..`
-    /// leads out of the name before it only when that stands as a
-    /// directory.
+    /// Whether something stands at a name, as lstat would find it: a link
+    /// that leads nowhere stands, and a `..` leads out of the name before
+    /// it only when that stands as a directory.
     async fn stands(&self, name: &[u8]) -> bool {
         for (at, _) in name.iter().enumerate().filter(|&(_, &b)| b == b'/') {
             let (dir, rest) = name.split_at(at);
@@ -123,7 +123,8 @@ impl Files {
 
     /// The directories above a name that do not stand yet, outermost
     /// first; none when one of them stands as a file. A `.` or `..`
-    /// component names no directory of its own to make.
+    /// component names no directory of its own to make, and a link that
+    /// leads to nothing found is made through.
     async fn missing(&self, name: &[u8]) -> Option<Vec<Vec<u8>>> {
         let mut missing = Vec::new();
         for (at, _) in name.iter().enumerate().filter(|&(_, &b)| b == b'/') {
@@ -135,8 +136,8 @@ impl Files {
             if missing.is_empty() {
                 match self.host.stat(dir).await.as_deref() {
                     Some("dir") => continue,
+                    Some("link") | None => {}
                     Some(_) => return None,
-                    None => {}
                 }
             }
             missing.push(dir.to_vec());
