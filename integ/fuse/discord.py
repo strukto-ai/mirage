@@ -17,11 +17,11 @@ import errno
 import json
 from pathlib import Path
 
-import aiohttp
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from mirage import Workspace
+from mirage.core.api.errors import ApiError
 from mirage.fuse.fs import MirageFS
 from mirage.mount.core import MountCore
 from mirage.mount.errors import classify_error
@@ -190,7 +190,7 @@ async def run(case):
                     assert isinstance(error, RuntimeError)
                     assert str(error) == "Rate limited after 3 retries"
                 else:
-                    assert isinstance(error, aiohttp.ClientResponseError)
+                    assert isinstance(error, ApiError)
                     assert error.status == case["status"]
                 if case["recover"]:
                     http.status = 200
