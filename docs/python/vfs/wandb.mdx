@@ -35,9 +35,9 @@ display names remain separate runs.
 {/* generated: config-table wandb start */}
 | Field | Description |
 | --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30.0` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>entities</code><br />required | W&B entities (users or teams) the mount shows as top-level directories; no other entity is reachable. |
-| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />default `''`, secret | W&B API key, sent as HTTP Basic auth. Empty sends no credentials. |
+| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />default `SecretStr('')`, secret | W&B API key, sent as HTTP Basic auth. Empty sends no credentials. |
 | <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />default `'https://api.wandb.ai'` | W&B API root. Queries go to its `/graphql`, and only downloads from the same origin carry the key. |
 | <code style={{ whiteSpace: 'nowrap' }}>page_size</code><br />default `100` | Items per GraphQL page, and steps per window when reading `history.jsonl`. |
 | <code style={{ whiteSpace: 'nowrap' }}>max_pages</code><br />default `10000` | The most pages one listing or history read fetches. Past it the read fails rather than return a partial result. |
