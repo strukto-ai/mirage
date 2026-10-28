@@ -30,6 +30,10 @@ from tests.fixtures.gridfs_store import FakeStore, make_accessor
 A_TXT = PathSpec(vfs_path="a.txt", virtual="/mnt/a.txt", directory="/mnt")
 
 
+async def _refuse_condition_resolution(*args, **kwargs):
+    raise RuntimeError("condition lookup failed")
+
+
 @pytest.mark.asyncio
 async def test_direct_protected_stream_refuses_before_upload_and_closes_source(
     store,
@@ -95,10 +99,9 @@ async def test_write_closes_source_when_condition_resolution_fails(
         finally:
             closed.append(True)
 
-    async def refuse(*args, **kwargs):
-        raise RuntimeError("condition lookup failed")
-
-    monkeypatch.setattr(object_write, "write_condition", refuse)
+    monkeypatch.setattr(
+        object_write, "write_condition", _refuse_condition_resolution
+    )
     body = source()
     await anext(body)
     with pytest.raises(RuntimeError, match="condition lookup failed"):
