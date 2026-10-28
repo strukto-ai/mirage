@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ConditionLostError } from '../object_store/errors.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { LOST_CODES, sdkError } from '../../../tests/core/s3/_test_util.ts'
 import type { S3Module } from './types.ts'
+import { MAX_PARTS, PART_DOUBLING } from './constants.ts'
 import { DRIVER } from './driver.ts'
 import type { S3Conn } from './types.ts'
 
@@ -179,6 +180,38 @@ describe('streamed uploads', () => {
       expect(sent.some((c) => c instanceof AbortMultipart)).toBe(false)
     },
   )
+
+  it('doubles its parts past the part cap', async () => {
+    vi.resetModules()
+    vi.doMock('./constants.ts', async (original) => ({
+      ...(await original<Record<string, unknown>>()),
+      PART_SIZE: 16,
+    }))
+    try {
+      const { DRIVER: small } = await import('./driver.ts')
+      const sent: Command[] = []
+      const size = MAX_PARTS * 16 + 1
+      async function* source(): AsyncGenerator<Uint8Array> {
+        await Promise.resolve()
+        for (let offset = 0; offset < size; offset += 16)
+          yield new Uint8Array(Math.min(16, size - offset))
+      }
+      const result = await small.putStream?.(uploadConnection(sent), 'k', source(), {})
+      const sizes = sent
+        .filter((c) => c instanceof UploadPart)
+        .map((c) => (c.input.Body as Uint8Array).length)
+      expect(result?.size).toBe(size)
+      expect(sizes.reduce((a, b) => a + b, 0)).toBe(size)
+      expect(sizes.slice(0, 2 * PART_DOUBLING)).toEqual([
+        ...Array<number>(PART_DOUBLING).fill(16),
+        ...Array<number>(PART_DOUBLING).fill(32),
+      ])
+      expect(sizes.length).toBeLessThan(MAX_PARTS)
+    } finally {
+      vi.doUnmock('./constants.ts')
+      vi.resetModules()
+    }
+  })
 
   it.each(['source', 'part', 'condition', 'cancel'])('aborts after %s failure', async (failure) => {
     const sent: Command[] = []

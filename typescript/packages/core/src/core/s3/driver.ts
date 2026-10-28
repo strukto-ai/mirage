@@ -43,12 +43,15 @@ import {
   streamToBuffer,
 } from './client.ts'
 import type { S3Conn, S3SendClient } from './types.ts'
-import { CONDITION_LOST_CODES, SCOPE_ERROR } from './constants.ts'
+import {
+  CONDITION_LOST_CODES,
+  MAX_PARTS,
+  PART_DOUBLING,
+  PART_SIZE,
+  SCOPE_ERROR,
+} from './constants.ts'
 
 const DELETE_BATCH = 1000
-// TODO(MIRAGE-37): grow parts past 10,000 x 8 MiB (about 78 GiB).
-const PART_SIZE = 8 * 1024 * 1024
-const MAX_PARTS = 10000
 
 interface Listing {
   CommonPrefixes?: { Prefix?: string }[]
@@ -291,7 +294,7 @@ async function putStream(
   }
   let upload: string | null = null
   const parts: { PartNumber: number; ETag: string }[] = []
-  const buffer = new Uint8Array(PART_SIZE)
+  let buffer = new Uint8Array(PART_SIZE)
   let used = 0
   let size = 0
   const args = { Bucket: conn.config.bucket, Key: key }
@@ -314,11 +317,11 @@ async function putStream(
       size += chunk.byteLength
       let offset = 0
       while (offset < chunk.byteLength) {
-        const count = Math.min(PART_SIZE - used, chunk.byteLength - offset)
+        const count = Math.min(buffer.length - used, chunk.byteLength - offset)
         buffer.set(chunk.subarray(offset, offset + count), used)
         offset += count
         used += count
-        if (used === PART_SIZE) {
+        if (used === buffer.length) {
           if (upload === null) {
             const contentType = conn.config.defaultContentType
             const opened = await conn.send(
@@ -334,6 +337,8 @@ async function putStream(
           }
           await sendPart(buffer.slice(0, used))
           used = 0
+          const part = PART_SIZE * 2 ** Math.floor(parts.length / PART_DOUBLING)
+          if (part > buffer.length) buffer = new Uint8Array(part)
         }
       }
     }

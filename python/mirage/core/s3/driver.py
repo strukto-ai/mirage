@@ -34,7 +34,13 @@ from mirage.core.s3.client import (
     is_key_gone,
     is_not_found,
 )
-from mirage.core.s3.constants import CONDITION_LOST_CODES, SCOPE_ERROR
+from mirage.core.s3.constants import (
+    CONDITION_LOST_CODES,
+    MAX_PARTS,
+    PART_DOUBLING,
+    PART_SIZE,
+    SCOPE_ERROR,
+)
 from mirage.core.s3.types import S3Conn
 from mirage.errors.fs import enoent
 from mirage.io.cooperative import chunks
@@ -45,9 +51,6 @@ from mirage.utils.dates import to_iso_z
 logger = logging.getLogger(__name__)
 
 DELETE_BATCH = 1000
-# TODO(MIRAGE-37): grow parts past 10,000 x 8 MiB (about 78 GiB).
-PART_SIZE = 8 * 1024 * 1024
-MAX_PARTS = 10000
 
 
 def _key_prefix_of(accessor: S3Accessor) -> str:
@@ -301,7 +304,8 @@ async def _put_stream(
             async for chunk in source:
                 buffer.extend(chunk)
                 size += len(chunk)
-                if len(buffer) >= PART_SIZE:
+                part = PART_SIZE << (len(parts) // PART_DOUBLING)
+                if len(buffer) >= part:
                     if upload is None:
                         content_type = conn.config.default_content_type
                         opened = await conn.client.create_multipart_upload(
@@ -313,8 +317,8 @@ async def _put_stream(
                             ),
                         )
                         upload = opened["UploadId"]
-                    await send_part(bytes(buffer[:PART_SIZE]))
-                    del buffer[:PART_SIZE]
+                    await send_part(bytes(buffer[:part]))
+                    del buffer[:part]
         if upload is None:
             meta = await _put_if(conn, key, bytes(buffer), cond)
             assert meta is not None

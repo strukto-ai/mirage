@@ -21,6 +21,14 @@ export const CONDITION_LOST_CODES: ReadonlySet<string> = new Set([
 ])
 export const DENIED_CODES: ReadonlySet<string> = new Set(['403', 'AccessDenied'])
 
+// A streamed upload's parts start at PART_SIZE and double every
+// PART_DOUBLING parts, so an upload under 8 GiB sends the parts it always
+// did and S3's 10,000 parts reach past its 5 TiB object cap; the last
+// doubling (4 GiB) stays under its 5 GiB part cap.
+export const PART_SIZE = 8 * 1024 * 1024
+export const PART_DOUBLING = 1024
+export const MAX_PARTS = 10000
+
 // The stores whose ETag is an object's MD5 for a single-part upload kept
 // unencrypted, so md5sum can take it instead of reading the object.
 export const MD5_ETAG_STORES: ReadonlySet<string> = new Set([

@@ -18,6 +18,14 @@ CONDITION_LOST_CODES = frozenset(
 )
 DENIED_CODES = frozenset({"403", "AccessDenied"})
 
+# A streamed upload's parts start at PART_SIZE and double every
+# PART_DOUBLING parts, so an upload under 8 GiB sends the parts it always
+# did and S3's 10,000 parts reach past its 5 TiB object cap; the last
+# doubling (4 GiB) stays under its 5 GiB part cap.
+PART_SIZE = 8 * 1024 * 1024
+PART_DOUBLING = 1024
+MAX_PARTS = 10000
+
 # The stores whose ETag is an object's MD5 for a single-part upload kept
 # unencrypted, so md5sum can take it instead of reading the object.
 MD5_ETAG_STORES = frozenset(
