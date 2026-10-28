@@ -19,7 +19,9 @@ import { encodeBase64 } from '../../utils/base64.ts'
 import type { ApiResponse } from '../api/client.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
+import { callerSignal } from '../../context/session_context.ts'
 import { apiRequest, stallTimeout } from '../api/client.ts'
+import { DEFAULT_TIMEOUT } from '../api/constants.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { BOX_API_BASE, BOX_TOKEN_URL, BOX_UPLOAD_BASE, TOKEN_BUFFER_SECONDS } from './constants.ts'
 
@@ -236,7 +238,7 @@ export class BoxTokenManager extends OAuthTokenManager {
 }
 
 async function boxAuthHeaders(tm: BoxTokenManager): Promise<Record<string, string>> {
-  const token = await tm.getToken()
+  const token = await tm.getToken(callerSignal())
   return { Authorization: `Bearer ${token}` }
 }
 
@@ -336,8 +338,10 @@ export async function boxDelete(
   url: string,
   params?: Record<string, string | number>,
   headers: Record<string, string> = {},
+  signal?: AbortSignal,
 ): Promise<void> {
   await apiRequest('DELETE', url, {
+    signal,
     timeout: tm.timeout,
     errorOf: errorOf('DELETE', url),
     headers: { ...(await boxAuthHeaders(tm)), ...headers },
@@ -435,7 +439,11 @@ export async function boxUploadSession(
     throw new Error('Box upload commit did not complete')
   } catch (error) {
     try {
-      await boxDelete(tm, endpoints.abort)
+      // A stopped upload still ends its session, under a deadline of its
+      // own rather than the stopped call's signal; a timer takes whole
+      // milliseconds.
+      const signal = AbortSignal.timeout(Math.ceil((tm.timeout ?? DEFAULT_TIMEOUT) * 1000))
+      await boxDelete(tm, endpoints.abort, undefined, {}, signal)
     } catch (cleanup) {
       console.debug('Could not abort Box upload session', cleanup)
     }

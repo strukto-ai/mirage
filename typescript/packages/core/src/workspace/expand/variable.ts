@@ -28,6 +28,7 @@ import {
   arrayValues,
 } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { YieldBudget } from '../../io/yield_budget.ts'
 import { RANDOM } from '../../shell/constants.ts'
 import {
   ArithError,
@@ -233,17 +234,17 @@ export function ifsValue(session: SessionState, callStack: CallStack | null): st
  * `$*`; inside double quotes `$*` is the parameters joined on the first
  * character of IFS.
  */
-export function parameterChunks(
+export async function parameterChunks(
   name: string,
   session: SessionState,
   callStack: CallStack | null,
   quoted: boolean,
-): Chunk[] {
+): Promise<Chunk[]> {
   if (name !== '@' && name !== '*') return [valuePiece(lookupVar(name, session, callStack), quoted)]
   const params = positionalParams(session, callStack)
   const joiner = name === '@' ? ' ' : ifsJoiner(ifsValue(session, callStack))
   if (name === '*' && quoted) return [valuePiece(params.join(joiner), true)]
-  return splatChunks(params, joiner, quoted)
+  return await splatChunks(params, joiner, quoted)
 }
 
 /**
@@ -492,13 +493,13 @@ async function patternGroup(
  * Literal operand text as pieces; the rules are `wordChunks`'. `home` is
  * what a leading `~` names, null where no tilde prefix can stand.
  */
-function operandLiteral(
+async function operandLiteral(
   text: string,
   quoted: boolean,
   session: SessionState,
   callStack: CallStack | null,
   home: string | null,
-): Chunk[] {
+): Promise<Chunk[]> {
   if (!quoted && home !== null && !text.includes('\\') && !text.includes('$')) {
     const tilde = expandTilde(text, home)
     if (tilde !== text) return [piece(tilde)]
@@ -529,7 +530,7 @@ function operandLiteral(
     const ref = char === '$' ? scanParameter(text, index) : null
     if (ref !== null) {
       flush()
-      for (const c of parameterChunks(ref[0], session, callStack, quoted)) out.push(c)
+      for (const c of await parameterChunks(ref[0], session, callStack, quoted)) out.push(c)
       index = ref[1]
       continue
     }
@@ -620,7 +621,7 @@ async function wordChunks(
       literal += typeof part === 'string' ? part : part.text
       continue
     }
-    for (const c of operandLiteral(
+    for (const c of await operandLiteral(
       literal,
       quoted,
       session,
@@ -638,7 +639,7 @@ async function wordChunks(
       for (const c of chunks) out.push(c)
     }
   }
-  for (const c of operandLiteral(
+  for (const c of await operandLiteral(
     literal,
     quoted,
     session,
@@ -685,9 +686,14 @@ async function globReplace(
     const chars = Array.from(value)
     const out: string[] = []
     let cursor = 0
+    // A pattern that matches every character of a long value is millions
+    // of spans: the rebuild yields between them, as the search that found
+    // them did.
+    const budget = new YieldBudget(signal)
     for (const [start, end] of spans) {
       out.push(chars.slice(cursor, start).join(''), replacement)
       cursor = end
+      await budget.run()
     }
     out.push(chars.slice(cursor).join(''))
     return out.join('')
@@ -1347,7 +1353,7 @@ async function expandSplat(
         ? values.length === 0
         : values.join(joiner) === ''
     if (op === '+' || op === ':+') {
-      if (triggered) return values.length > 0 ? splatChunks([''], joiner, quoted) : []
+      if (triggered) return values.length > 0 ? await splatChunks([''], joiner, quoted) : []
       return wordResult(await operatorWord(p, expandChild, quoted, session, callStack), quoted)
     }
     if (triggered && (op === '-' || op === ':-')) {
@@ -1362,5 +1368,5 @@ async function expandSplat(
     }
   }
   if (star && quoted) return [valuePiece(items.join(joiner), true)]
-  return splatChunks(items, joiner, quoted)
+  return await splatChunks(items, joiner, quoted)
 }

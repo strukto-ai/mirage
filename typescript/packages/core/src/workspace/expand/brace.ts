@@ -63,14 +63,17 @@ function parseStep(stepText: string | undefined, descending: boolean): bigint | 
   return step === 0n ? 1n : step
 }
 
-function seqValues(lo: bigint, hi: bigint, step: bigint): bigint[] {
-  const out: bigint[] = []
+function* seqValues(
+  lo: bigint,
+  hi: bigint,
+  step: bigint,
+  word: (v: bigint) => string,
+): Generator<string> {
   if (lo <= hi) {
-    for (let v = lo; v <= hi; v += step) out.push(v)
+    for (let v = lo; v <= hi; v += step) yield word(v)
   } else {
-    for (let v = lo; v >= hi; v -= step) out.push(v)
+    for (let v = lo; v >= hi; v -= step) yield word(v)
   }
-  return out
 }
 
 function padValue(v: bigint, width: number): string {
@@ -84,8 +87,8 @@ function padValue(v: bigint, width: number): string {
 // endpoints with leading zeros zero-pad every output to the widest
 // endpoint, the minus sign counting toward the width ({-05..5..5} yields
 // -05 000 005). Step direction follows the endpoints; the step's own
-// sign is ignored and 0 acts as 1.
-function genSequence(body: string): string[] | null {
+// sign is ignored and 0 acts as 1. The words are made as they are read.
+function genSequence(body: string): Iterable<string> | null {
   if (body.includes(INERT_OPEN) || body.includes('\\')) return null
   const num = NUM_SEQ.exec(body)
   if (num !== null && num[0] === body) {
@@ -98,20 +101,20 @@ function genSequence(body: string): string[] | null {
     // Pinned Bash leaves these directed spans literal, even with a large step.
     const maxSpan = (1n << 63n) - 3n
     if ((lo < 0n && hi - lo > maxSpan) || (lo > 0n && lo - hi > maxSpan)) return null
-    const values = seqValues(lo, hi, step)
     if (isPadded(loText) || isPadded(hiText)) {
       const width = Math.max(loText.length, hiText.length)
-      return values.map((v) => padValue(v, width))
+      return seqValues(lo, hi, step, (v) => padValue(v, width))
     }
-    return values.map((v) => String(v))
+    return seqValues(lo, hi, step, (v) => String(v))
   }
   const chr = CHAR_SEQ.exec(body)
   if (chr !== null && chr[0] === body) {
     const [, loText = '', hiText = '', stepText] = chr
     const step = parseStep(stepText, loText >= hiText)
     if (step === null) return null
-    const values = seqValues(BigInt(loText.charCodeAt(0)), BigInt(hiText.charCodeAt(0)), step)
-    return values.map((v) => String.fromCharCode(Number(v)))
+    return seqValues(BigInt(loText.charCodeAt(0)), BigInt(hiText.charCodeAt(0)), step, (v) =>
+      String.fromCharCode(Number(v)),
+    )
   }
   return null
 }
@@ -169,7 +172,7 @@ function splitAlternatives(body: string): string[] | null {
   return alts
 }
 
-function expand(template: string): string[] {
+function* expand(template: string): Generator<string> {
   let i = 0
   const n = template.length
   while (i < n) {
@@ -192,8 +195,9 @@ function expand(template: string): string[] {
       continue
     }
     const body = template.slice(i + 1, close)
-    let alternatives = genSequence(body)
-    if (alternatives === null) {
+    const sequence = genSequence(body)
+    let groups: Iterable<string>[]
+    if (sequence === null) {
       const alts = splitAlternatives(body)
       if (alts === null) {
         // `{abc}` and friends stay literal; the next `{` (even one
@@ -201,21 +205,41 @@ function expand(template: string): string[] {
         i += 1
         continue
       }
-      alternatives = alts.flatMap((alt) => expand(alt))
+      groups = alts.map((alt) => expand(alt))
+    } else {
+      groups = [sequence]
     }
     const prefix = template.slice(0, i)
-    const suffixes = expand(template.slice(close + 1))
-    return alternatives.flatMap((alt) => suffixes.map((suffix) => prefix + alt + suffix))
+    // The suffix words are made once, as the first alternative takes them,
+    // and kept for the rest.
+    const suffixes: string[] = []
+    let tail: Generator<string> | null = expand(template.slice(close + 1))
+    for (const group of groups) {
+      for (const alt of group) {
+        if (tail !== null) {
+          for (const suffix of tail) {
+            suffixes.push(suffix)
+            yield prefix + alt + suffix
+          }
+          tail = null
+          continue
+        }
+        for (const suffix of suffixes) yield prefix + alt + suffix
+      }
+    }
+    return
   }
-  return [template]
+  yield template
 }
 
 // Brace-expand a template word into its word list. Returns the expanded
 // words (inert atoms preserved), or null when the template contains
 // nothing brace-expandable so callers can fall back to plain
-// concatenation.
-export function expandTemplate(template: string): string[] | null {
-  const words = expand(template)
-  if (words.length === 1 && words[0] === template) return null
-  return words
+// concatenation. The words are made as they are read, so a caller that
+// yields as it reads them stops inside a long range. A word an expansion
+// makes is shorter than the template it came from, so a first word equal
+// to the template means nothing expanded.
+export function expandTemplate(template: string): Iterable<string> | null {
+  if (expand(template).next().value === template) return null
+  return expand(template)
 }

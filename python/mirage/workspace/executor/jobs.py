@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -21,6 +22,7 @@ from datetime import datetime, tzinfo
 from typing import Any
 
 from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
+from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.context import (
     bind_caller,
@@ -34,6 +36,7 @@ from mirage.io.async_line_iterator import SharedInput, hold_inputs
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
+from mirage.policy.builtin.output_cap import LINE_NAME
 from mirage.policy.decisions import Decisions, is_pending
 from mirage.policy.types import HandOff
 from mirage.process.types import ProcessInfo, ProcessState
@@ -59,6 +62,7 @@ from mirage.shell.constants import (
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
+from mirage.shell.job_table.constants import STOP_WAIT_SECONDS
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs
@@ -82,6 +86,8 @@ from mirage.workspace.session import (
     SessionState,
 )
 from mirage.workspace.types import ExecutionNode
+
+logger = logging.getLogger(__name__)
 
 
 async def pump(
@@ -336,7 +342,8 @@ async def handle_background(
                 refusals=note if line_sink is not None else None,
             )
         )
-        try:
+
+        async def run_job() -> tuple[IOResult, ExecutionNode]:
             try:
                 # Handing the console down as a sink is what makes
                 # compound bodies stream: each statement writes as it
@@ -360,13 +367,6 @@ async def handle_background(
                         execution_id=job.execution_id
                     ),
                     ends_shell=True,
-                )
-            except CommandTimeoutError as exc:
-                msg = encode_text(str(exc) + "\n")
-                stdout = b""
-                io = IOResult(exit_code=TIMEOUT_STATUS, stderr=msg)
-                exec_node = ExecutionNode(
-                    command=cmd_str_inner, stderr=msg, exit_code=TIMEOUT_STATUS
                 )
             except ExitSignal as sig:
                 # A background job is its own shell: exit ends the job
@@ -403,6 +403,34 @@ async def handle_background(
             stderr = await io.materialize_stderr()
             if stderr:
                 await console.emit(Channel.STDERR, stderr)
+            return io, exec_node
+
+        try:
+            try:
+                # The job runs under the `@line` limit of the line that
+                # started it, from its own start, its output included: a
+                # job is past it as a line is, 124 and the line's message.
+                io, exec_node = await run_with_timeout(
+                    run_job(), child_evaluation.frame.line_timeout, LINE_NAME
+                )
+            except CommandTimeoutError as exc:
+                msg = encode_text(str(exc) + "\n")
+                io = IOResult(exit_code=TIMEOUT_STATUS)
+                exec_node = ExecutionNode(
+                    command=cmd_str_inner, stderr=msg, exit_code=TIMEOUT_STATUS
+                )
+                # The job's own console keeps the notice; the shell's
+                # output gets it unless a reader that stopped reading
+                # holds it past the wait a stopped job is given, so the
+                # job still ends.
+                await job.console.emit(Channel.STDERR, msg)
+                try:
+                    async with asyncio.timeout(STOP_WAIT_SECONDS):
+                        await output.emit(Channel.STDERR, msg)
+                except TimeoutError:
+                    logger.debug(
+                        "job %d: its timeout notice found no reader", job.pid
+                    )
             ended_held = held or is_pending(io.refusal)
             return io, exec_node
         finally:

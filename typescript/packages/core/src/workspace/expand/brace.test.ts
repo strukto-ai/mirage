@@ -16,6 +16,11 @@ import { describe, expect, it } from 'vitest'
 import { expandTemplate, makeInert, substitute } from './brace.ts'
 import { piece } from './types.ts'
 
+function words(template: string): string[] | null {
+  const out = expandTemplate(template)
+  return out === null ? null : [...out]
+}
+
 const EXPAND_CASES: [string, string[]][] = [
   ['{a,b,c}', ['a', 'b', 'c']],
   ['x{a,b}y', ['xay', 'xby']],
@@ -69,23 +74,35 @@ const LITERAL_CASES = [
 
 describe('expandTemplate', () => {
   it.each(EXPAND_CASES)('expands %s', (template, expected) => {
-    expect(expandTemplate(template)).toEqual(expected)
+    expect(words(template)).toEqual(expected)
   })
 
   it.each(LITERAL_CASES)('returns null for literal %s', (template) => {
-    expect(expandTemplate(template)).toBeNull()
+    expect(words(template)).toBeNull()
   })
 
   it('inert atoms alternate but never form a range', () => {
     const atom = makeInert(0)
-    expect(expandTemplate(`{a,${atom}}`)).toEqual(['a', atom])
-    expect(expandTemplate(`{1..${atom}}`)).toBeNull()
+    expect(words(`{a,${atom}}`)).toEqual(['a', atom])
+    expect(words(`{1..${atom}}`)).toBeNull()
   })
 
   it('inert prefix and suffix stitch', () => {
     const atom = makeInert(0)
-    expect(expandTemplate(`${atom}{a,b}`)).toEqual([`${atom}a`, `${atom}b`])
-    expect(expandTemplate(`{a,b}${atom}`)).toEqual([`a${atom}`, `b${atom}`])
+    expect(words(`${atom}{a,b}`)).toEqual([`${atom}a`, `${atom}b`])
+    expect(words(`{a,b}${atom}`)).toEqual([`a${atom}`, `b${atom}`])
+  })
+
+  it.each([
+    ['{1..1000000000000}', ['1', '2', '3']],
+    ['{a,b}{1..1000000000000}', ['a1', 'a2', 'a3']],
+  ])('makes the words of %s as they are read', (template, expected) => {
+    const first: string[] = []
+    for (const word of expandTemplate(template) ?? []) {
+      first.push(word)
+      if (first.length === 3) break
+    }
+    expect(first).toEqual(expected)
   })
 })
 
@@ -136,7 +153,7 @@ describe('exact decimal ranges', () => {
     ['{0..-9223372036854775808..-9223372036854775808}', ['0', '-9223372036854775808']],
   ]
   it.each(cases)('expands %s exactly', (template, expected) => {
-    expect(expandTemplate(template)).toEqual(expected)
+    expect(words(template)).toEqual(expected)
   })
   it.each([
     '{9223372036854775808..9223372036854775808..9223372036854775807}',
@@ -150,7 +167,7 @@ describe('exact decimal ranges', () => {
     '{1..3\n}',
     '{a..c\n}',
   ])('leaves invalid range %s literal', (template) => {
-    expect(expandTemplate(template)).toBeNull()
+    expect(words(template)).toBeNull()
   })
 })
 
@@ -164,14 +181,14 @@ describe('explicit signed ranges', () => {
     ['{1..5..+02}', ['1', '3', '5']],
   ]
   it.each(cases)('expands %s', (template, expected) => {
-    expect(expandTemplate(template)).toEqual(expected)
+    expect(words(template)).toEqual(expected)
   })
   it('leaves oversized decimal ranges literal without converting them', () => {
-    expect(expandTemplate('{' + '9'.repeat(5000) + '..3}')).toBeNull()
+    expect(words('{' + '9'.repeat(5000) + '..3}')).toBeNull()
   })
   it('preserves many leading zeros', () => {
     const zeros = '0'.repeat(5000)
-    expect(expandTemplate(`{${zeros}1..${zeros}2}`)).toEqual([`${zeros}1`, `${zeros}2`])
+    expect(words(`{${zeros}1..${zeros}2}`)).toEqual([`${zeros}1`, `${zeros}2`])
   })
 })
 
@@ -210,6 +227,6 @@ describe('extreme range admission', () => {
     ['{9223372036854775807..1..4611686018427387903}', null],
   ]
   it.each(cases)('matches Bash for %s', (template, expected) => {
-    expect(expandTemplate(template)).toEqual(expected)
+    expect(words(template)).toEqual(expected)
   })
 })

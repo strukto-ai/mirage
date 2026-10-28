@@ -84,6 +84,11 @@ top-level line, loops, pipelines and the lines it runs (`sh -c`, `eval`,
 `xargs`) included, and is 600 seconds unless an entry sets it; `0` or `None`
 lifts it. A line past it exits 124 with `line: timed out after Ns`.
 
+A background job (`cmd &`) runs under the same limit, counted from its own
+start. The line that started it can end or time out and leave it running; past
+its own limit the job ends with status 124 and the same message. `kill` stops it
+sooner.
+
 No other entry takes `timeout_seconds`, an `@line` entry takes nothing else, and
 a mount has no `@line` entry, since a line spans mounts; each is refused when the
 workspace, mount or profile is built. To bound one command inside a line, use
@@ -96,8 +101,8 @@ limit from those mounts.
 
 - `max_lines` and `max_bytes` cap output. Use `None` in Python or `null` in
   TypeScript for no cap.
-- `timeout_seconds`, on the `@line` entry only, sets the line's deadline. A line
-  that passes it exits 124.
+- `timeout_seconds`, on the `@line` entry only, sets the deadline of a line and
+  of each background job. A line or job that passes it exits 124.
 - `walk_limit` caps the entries one walk lists on a mount, `-1` for no cap; see
   [walks](/home/integration/walks).
 - `on_exceed=TRUNCATE`, the default, returns the capped output, writes a notice

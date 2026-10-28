@@ -15,6 +15,8 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from mirage.io import IOResult
 from mirage.shell import parse
 from mirage.shell.call_stack import CallStack
@@ -516,18 +518,20 @@ def test_classify_relative_glob_no_mount_returns_text():
 # ══════════════════════════════════════════════
 
 
-def test_classify_parts_command_name_stays_str():
+@pytest.mark.asyncio
+async def test_classify_parts_command_name_stays_str():
     reg = _mock_registry(["/data/"])
-    result = classify_parts(["cat", "/data/file.txt"], reg, "/")
+    result = await classify_parts(["cat", "/data/file.txt"], reg, "/")
     assert result[0] == "cat"
     assert isinstance(result[0], str)
     assert isinstance(result[1], PathSpec)
     assert result[1].virtual == "/data/file.txt"
 
 
-def test_classify_parts_mixed():
+@pytest.mark.asyncio
+async def test_classify_parts_mixed():
     reg = _mock_registry(["/data/"])
-    result = classify_parts(
+    result = await classify_parts(
         ["grep", "-n", "pattern", "/data/file.txt"], reg, "/"
     )
     assert result[0] == "grep"
@@ -536,31 +540,37 @@ def test_classify_parts_mixed():
     assert isinstance(result[3], PathSpec)
 
 
-def test_classify_parts_multiple_paths():
+@pytest.mark.asyncio
+async def test_classify_parts_multiple_paths():
     reg = _mock_registry(["/data/"])
-    result = classify_parts(["diff", "/data/a.txt", "/data/b.txt"], reg, "/")
+    result = await classify_parts(
+        ["diff", "/data/a.txt", "/data/b.txt"], reg, "/"
+    )
     assert isinstance(result[1], PathSpec)
     assert isinstance(result[2], PathSpec)
     assert result[1].virtual == "/data/a.txt"
     assert result[2].virtual == "/data/b.txt"
 
 
-def test_classify_parts_glob_in_args():
+@pytest.mark.asyncio
+async def test_classify_parts_glob_in_args():
     reg = _mock_registry(["/data/"])
-    result = classify_parts(["cat", "/data/*.csv"], reg, "/")
+    result = await classify_parts(["cat", "/data/*.csv"], reg, "/")
     assert isinstance(result[1], PathSpec)
     assert result[1].pattern == "*.csv"
 
 
-def test_classify_parts_no_paths():
+@pytest.mark.asyncio
+async def test_classify_parts_no_paths():
     reg = _mock_registry(["/data/"])
-    result = classify_parts(["echo", "hello", "world"], reg, "/")
+    result = await classify_parts(["echo", "hello", "world"], reg, "/")
     assert all(isinstance(r, str) for r in result)
 
 
-def test_classify_parts_empty():
+@pytest.mark.asyncio
+async def test_classify_parts_empty():
     reg = _mock_registry()
-    result = classify_parts([], reg, "/")
+    result = await classify_parts([], reg, "/")
     assert result == []
 
 

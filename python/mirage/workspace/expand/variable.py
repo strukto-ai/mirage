@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from functools import partial
 
+from mirage.io.yield_budget import YieldBudget
 from mirage.policy import PolicyDenied
 from mirage.rs.glob import Glob
 from mirage.shell.array import (
@@ -386,7 +387,7 @@ def ifs_value(
     return visible_env(session).get("IFS")
 
 
-def parameter_chunks(
+async def parameter_chunks(
     name: str,
     session: SessionState,
     call_stack: CallStack | None,
@@ -410,7 +411,7 @@ def parameter_chunks(
     joiner = " " if name == "@" else ifs_joiner(ifs_value(session, call_stack))
     if name == "*" and quoted:
         return [value_piece(joiner.join(params), True)]
-    return splat_chunks(params, joiner, quoted)
+    return await splat_chunks(params, joiner, quoted)
 
 
 @dataclass(frozen=True, slots=True)
@@ -687,7 +688,7 @@ async def _pattern_group(
     return "".join(pieces)
 
 
-def _operand_literal(
+async def _operand_literal(
     text: str,
     quoted: bool,
     session: SessionState,
@@ -736,7 +737,9 @@ def _operand_literal(
         ref = scan_parameter(text, index) if char == "$" else None
         if ref is not None:
             flush()
-            out.extend(parameter_chunks(ref[0], session, call_stack, quoted))
+            out.extend(
+                await parameter_chunks(ref[0], session, call_stack, quoted)
+            )
             index = ref[1]
             continue
         run.append(char)
@@ -843,7 +846,7 @@ async def _word_chunks(
             literal.append(part if isinstance(part, str) else get_text(part))
             continue
         out.extend(
-            _operand_literal(
+            await _operand_literal(
                 "".join(literal),
                 quoted,
                 session,
@@ -859,7 +862,7 @@ async def _word_chunks(
         else:
             out.extend(await expand_child(part, quoted))
     out.extend(
-        _operand_literal(
+        await _operand_literal(
             "".join(literal),
             quoted,
             session,
@@ -900,9 +903,14 @@ async def _glob_replace(
         spans = await glob.spans(value, replace_all, anchor)
         out: list[str] = []
         cursor = 0
+        # A pattern that matches every character of a long value is
+        # millions of spans: the rebuild yields between them, as the
+        # search that found them did.
+        budget = YieldBudget()
         for start, end in spans:
             out.extend((value[cursor:start], replacement))
             cursor = end
+            await budget.run()
         out.append(value[cursor:])
         return "".join(out)
     finally:
@@ -1555,7 +1563,9 @@ async def _expand_splat(
         )
         if p.op in ("+", ":+"):
             if triggered:
-                return splat_chunks([""], joiner, quoted) if values else []
+                return (
+                    await splat_chunks([""], joiner, quoted) if values else []
+                )
             return _word_result(
                 await _operator_word(
                     p, expand_child, quoted, session, call_stack
@@ -1581,7 +1591,7 @@ async def _expand_splat(
             )
     if star and quoted:
         return [value_piece(joiner.join(items), True)]
-    return splat_chunks(items, joiner, quoted)
+    return await splat_chunks(items, joiner, quoted)
 
 
 async def _slice_array(

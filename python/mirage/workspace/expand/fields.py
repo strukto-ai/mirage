@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from collections.abc import Iterable, Sequence
 
+from mirage.io.yield_budget import YieldBudget
 from mirage.shell.bytes import join_bytes
 from mirage.shell.constants import IFS_DEFAULT
 from mirage.utils.glob_walk import mark_globs, unmark_globs
@@ -45,10 +47,12 @@ def value_piece(text: str, quoted: bool) -> Piece:
     return Piece(mark_globs(text), False) if quoted else Piece(text, True)
 
 
-def splat_chunks(
+async def splat_chunks(
     elements: Sequence[str], joiner: str, quoted: bool
 ) -> list[Chunk]:
-    """The elements of a splat, a field boundary between each two.
+    """The elements of a splat, a field boundary between each two. A
+    long splat yields between its elements, so a cancel or the line's
+    deadline lands mid-list.
 
     Args:
         elements (Sequence[str]): the element values, in order.
@@ -56,10 +60,12 @@ def splat_chunks(
         quoted (bool): whether the splat sits inside double quotes.
     """
     out: list[Chunk] = []
+    budget = YieldBudget()
     for index, element in enumerate(elements):
         if index:
             out.append(FieldBreak(joiner))
         out.append(value_piece(element, quoted))
+        await budget.run()
     return out
 
 
@@ -86,7 +92,7 @@ def chunks_text(chunks: Iterable[Chunk]) -> str:
     return unmark_globs(join_chunks(chunks))
 
 
-def split_fields(chunks: Iterable[Chunk], ifs: str | None) -> list[str]:
+async def split_fields(chunks: Iterable[Chunk], ifs: str | None) -> list[str]:
     """Split a word's pieces into fields on IFS, as bash does.
 
     Only split pieces are split. An IFS whitespace run delimits a field
@@ -95,7 +101,10 @@ def split_fields(chunks: Iterable[Chunk], ifs: str | None) -> list[str]:
     ``IFS=,`` is three fields and ``a,`` is one. A splat boundary always
     ends a field. A field exists once literal or quoted text, or a
     non-empty split, opened it, so an unquoted expansion that comes
-    back empty is no word at all while ``""`` is an empty one.
+    back empty is no word at all while ``""`` is an empty one. A word of
+    many pieces, or a value that splits into many fields, yields between
+    them, so a cancel or the line's deadline lands mid-split; a run with
+    no separator is found in one search.
 
     Args:
         chunks (Iterable[Chunk]): the word's pieces.
@@ -106,22 +115,24 @@ def split_fields(chunks: Iterable[Chunk], ifs: str | None) -> list[str]:
     fields: list[str] = []
     current: list[str] = []
     started = False
+    budget = YieldBudget()
+    stop = re.compile(f"[{re.escape(separators)}]") if separators else None
     for chunk in chunks:
+        await budget.run()
         if isinstance(chunk, FieldBreak):
             if started:
                 fields.append("".join(current))
             current, started = [], False
             continue
         text = chunk.text
-        if not chunk.split or not separators:
+        if not chunk.split or stop is None:
             current.append(text)
             started = started or not chunk.split or bool(text)
             continue
         index = 0
         while index < len(text):
-            end = index
-            while end < len(text) and text[end] not in separators:
-                end += 1
+            found = stop.search(text, index)
+            end = len(text) if found is None else found.start()
             if end > index:
                 current.append(text[index:end])
                 started = True
@@ -136,6 +147,7 @@ def split_fields(chunks: Iterable[Chunk], ifs: str | None) -> list[str]:
                     end += 1
             if started or hard:
                 fields.append("".join(current))
+                await budget.run()
             current, started = [], False
             index = end
     if started:

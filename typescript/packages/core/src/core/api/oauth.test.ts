@@ -31,6 +31,29 @@ class FakeManager extends TokenManager {
   }
 }
 
+// The first refresh answers to the call that started it and ends when that
+// call stops; any later one succeeds.
+class StoppedFirst extends TokenManager {
+  calls = 0
+  constructor(private readonly first: AbortSignal) {
+    super(300)
+  }
+
+  protected refreshPair(): Promise<[string, number]> {
+    this.calls += 1
+    if (this.calls > 1) return Promise.resolve([`tok${String(this.calls)}`, 3600])
+    return new Promise((_resolve, reject) => {
+      this.first.addEventListener(
+        'abort',
+        () => {
+          reject(this.first.reason as Error)
+        },
+        { once: true },
+      )
+    })
+  }
+}
+
 describe('TokenManager', () => {
   it('caches until expiry', async () => {
     const tm = new FakeManager(3600, 300)
@@ -53,6 +76,21 @@ describe('TokenManager', () => {
     const tokens = await Promise.all([tm.getToken(), tm.getToken(), tm.getToken()])
     expect(tokens).toEqual(['tok1', 'tok1', 'tok1'])
     expect(tm.calls).toBe(1)
+  })
+
+  it('a stopped call ends its own wait and leaves the others their token', async () => {
+    const starter = new AbortController()
+    const tm = new StoppedFirst(starter.signal)
+    const started = tm.getToken(starter.signal)
+    const waiting = tm.getToken()
+    const leaving = new AbortController()
+    const left = tm.getToken(leaving.signal)
+    leaving.abort()
+    await expect(left).rejects.toThrow()
+    starter.abort()
+    await expect(started).rejects.toThrow()
+    expect(await waiting).toBe('tok2')
+    expect(tm.calls).toBe(2)
   })
 })
 

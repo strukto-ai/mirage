@@ -19,6 +19,7 @@ import posixpath
 from mirage.context import current_caller, session_visibility
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.types import GlobLimitError
+from mirage.io.yield_budget import YieldBudget
 from mirage.policy.builtin.output_cap import walk_bound
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -639,7 +640,9 @@ async def resolve_globs(
         return [literal_word(item) for item in classified]
     opts = options if options is not None else GlobOptions()
     result: list[str | PathSpec] = []
+    budget = YieldBudget()
     for item in classified:
+        await budget.run()
         if isinstance(item, PathSpec) and item.pattern:
             pattern = item.pattern
             # A pattern word no mount owns cannot match anything, so it

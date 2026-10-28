@@ -101,6 +101,21 @@ async def test_nested_mount_failure_keeps_the_line(name, caplog):
 
 
 @pytest.mark.asyncio
+async def test_a_job_ends_at_its_command_s_own_timeout():
+    ws = Workspace({"/bad": RAMVFS()}, mode="exec")
+    ws.mount("/bad").register_commands(
+        [failing_command("cat", CommandTimeoutError("cat", 1), lazy=False)]
+    )
+    try:
+        await ws.shell("echo data >/bad/f")
+        result = await ws.shell("cat /bad/f & wait %1; echo status=$?")
+        assert result.stdout == b"status=124\n"
+        assert result.stderr == b"cat: timed out after 1s\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_lazy_timeout_still_reaches_the_timeout_handler():
     vfs = RAMVFS()
     mount = MountEntry("/bad/", vfs)
