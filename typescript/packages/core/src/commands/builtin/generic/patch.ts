@@ -29,7 +29,7 @@ import { fsStrerror, isEisdir, isEnoent, isFsError } from '../../../errors/fs.ts
 import { shellQuote } from '../../../utils/quote.ts'
 import { openStream, serveRequests, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
-import { linksOf, mountRoot, nameLocation } from '../utils/links.ts'
+import { linkLocation, linksOf, mountRoot, nameLocation } from '../utils/links.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import type { LinkView } from '../../../view/types.ts'
 import { UINTMAX } from '../constants.ts'
@@ -122,17 +122,21 @@ class PatchFiles {
   }
 
   /**
-   * Where the link a name ends in stands, null when it ends in none. Mirrors
-   * Python's `_linked`.
+   * Where the link a name ends in stands, null when it ends in none. A name
+   * with dots walks its parent as the kernel does, each link followed before
+   * the `..` after it, so `link/../f` looks for `f` beside where `link` leads.
+   * Mirrors Python's `_linked`.
    */
   private linked(spec: PathSpec): string | null {
     if (this.links === undefined) return null
     let where: string | null
     try {
       where = nameLocation(this.links, spec, this.cwd)
+      if (where !== null && spec.dotted !== null) where = linkLocation(this.links, spec.dotted)
     } catch (err) {
-      if (err instanceof CycleError) return null
-      throw err
+      if (!(err instanceof CycleError)) throw err
+      console.debug(`patch: no link ends ${spec.virtual}: ${String(err)}`)
+      return null
     }
     return where !== null && this.links.statAt(where) !== null ? where : null
   }
@@ -147,7 +151,9 @@ class PatchFiles {
     } catch (err) {
       if (isEisdir(err)) return { kind: 'dir' }
       if (err instanceof CycleError || isEnoent(err) || classify(err) === 'ENOTDIR') {
-        return this.linked(this.spec(path)) === null ? {} : { kind: 'link' }
+        if (this.linked(this.spec(path)) !== null) return { kind: 'link' }
+        console.debug(`patch: nothing stands at ${path}: ${String(err)}`)
+        return {}
       }
       throw err
     }

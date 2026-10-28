@@ -139,6 +139,41 @@
         "stdout": "File link is not a regular file -- refusing to patch\n1 out of 1 hunk ignored -- saving rejects to file link.rej\nrc=1\nFile link is not a regular file -- refusing to patch\n1 out of 1 hunk ignored -- saving rejects to file link.rej\nrc=1\nFile dead is not a regular file -- refusing to patch\n1 out of 1 hunk ignored -- saving rejects to file dead.rej\nrc=1\na\n--- x\n+++ x\n@@ -1 +1 @@\n-a\n+b\ndead\ndead.rej\nlink\nlink.rej\ntarget\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "patch_walks_a_dotted_origfile_through_its_links",
+      "seq": 9941421,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941421 && touch /data/patch_9941421/.keep; cd /data/patch_9941421 || exit 1; mkdir -p d/sub; printf 'a\\n' > d/f; printf 'z\\n' > other; ln -s d/sub link; ln -s other f; printf -- '--- x\\n+++ x\\n@@ -1 +1 @@\\n-a\\n+b\\n' > p.diff; patch link/../f p.diff; echo rc=$?; cat d/f other; cd /; rm -r /data/patch_9941421",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file link/../f\nrc=0\nb\nz\n",
+        "stderr": ""
+      }
     }
   ]
 }
