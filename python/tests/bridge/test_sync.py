@@ -8,7 +8,9 @@ from contextvars import ContextVar
 import pytest
 
 from mirage.bridge.sync import (
+    BLOCKED,
     SyncBridge,
+    blocking,
     on_auxiliary_loop,
     run_async_from_sync,
 )
@@ -367,3 +369,13 @@ def test_cancelled_close_finishes_before_the_owned_loop_stops():
         asyncio.run(caller())
     finally:
         bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_blocking_marks_the_running_loop_for_its_call():
+    loop = asyncio.get_running_loop()
+    with blocking():
+        with blocking():
+            assert loop in BLOCKED
+        assert loop in BLOCKED
+    assert loop not in BLOCKED

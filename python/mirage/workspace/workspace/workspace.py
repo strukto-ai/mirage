@@ -139,7 +139,6 @@ from mirage.utils.abort import MirageAbortError, run_cancellable
 from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.hidden import path_visible
 from mirage.utils.ids import IdSource, SystemIdSource
-from mirage.utils.path import norm_dir
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.history import HISTORY_PREFIX, HistoryViewVFS
@@ -584,7 +583,9 @@ class Workspace:
             bind=self._bind_session,
             clock=self._clock,
         )
-        self._kernel_mounts = KernelMounts(self._files, self._session_mgr)
+        self._kernel_mounts = KernelMounts(
+            self._files, self._session_mgr, lambda: self._sync_bridge.loop
+        )
         self._documents = Documents(
             self._registry,
             self._files,
@@ -1017,8 +1018,7 @@ class Workspace:
         Raises:
             SharedStorageError: the VFS is already mounted, or it is a
                 disk on a folder a mounted disk already has.
-            ValueError: the backend cannot honour the declared policy, or
-                a capped store would land under a FUSE or FSKit mount.
+            ValueError: the backend cannot honour the declared policy.
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
@@ -1039,14 +1039,6 @@ class Workspace:
             self._cache.cache_limit > 0 and vfs.caches_reads,
         )
         self._registry.check_vfs_available(vfs)
-        if vfs.usage is not None:
-            at = norm_dir(prefix)
-            for exposed, backend in self._kernel_mounts.writable():
-                if at.startswith(exposed) or exposed.startswith(at):
-                    raise ValueError(
-                        f"mount {at!r}: a store with a capacity cannot "
-                        f"be served over {backend.value} yet"
-                    )
         previous = self._registry.mounts()
         entry = self._registry.mount(
             prefix,
@@ -1100,23 +1092,7 @@ class Workspace:
             session_id (str | None): session whose mount grants scope
                 every op served through this mountpoint.
             backend (str | MountBackend): fuse, fskit or nfs.
-
-        Raises:
-            ValueError: a capped store would be written through FUSE or
-                FSKit, whose loop thread of its own could race the
-                workspace's writes past the cap; NFS is read-only.
         """
-        if MountBackend(backend) is not MountBackend.NFS:
-            exposed = norm_dir(prefix)
-            for m in self._registry.mounts():
-                inside = m.prefix.startswith(exposed)
-                if m.vfs.usage is not None and (
-                    inside or exposed.startswith(m.prefix)
-                ):
-                    raise ValueError(
-                        f"mount {m.prefix!r}: a store with a capacity cannot "
-                        f"be served over {MountBackend(backend).value} yet"
-                    )
         return self._kernel_mounts.add(
             prefix, mountpoint, session_id, backend=backend
         )

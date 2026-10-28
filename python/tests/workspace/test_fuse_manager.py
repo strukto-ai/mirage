@@ -21,6 +21,8 @@ import tempfile
 import pytest
 
 from mirage import FuseManager, Mount, MountBackend, MountMode, Workspace
+from mirage.bridge.sync import BLOCKED
+from mirage.runtime.sandbox.program import SERVED
 from mirage.vfs.ram import RAMVFS
 
 
@@ -32,9 +34,7 @@ class _FakeThread:
 def _fake_mount(monkeypatch):
     monkeypatch.setattr(
         "mirage.workspace.fuse.mount_background",
-        lambda ops, mountpoint, root_prefix="", session=None, backend=None: (
-            _FakeThread()
-        ),
+        lambda *_args, **_kwargs: _FakeThread(),
     )
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -77,7 +77,7 @@ def test_collision_rejected_before_mount(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "mirage.workspace.fuse.mount_background",
-        lambda ops, mountpoint, root_prefix="", session=None, backend=None: (
+        lambda _files, mountpoint, *_args, **_kwargs: (
             calls.append(mountpoint) or _FakeThread()
         ),
     )
@@ -200,9 +200,12 @@ def _capture_mount(monkeypatch):
     """Record what FuseManager hands to mount_background."""
     seen = {}
 
-    def _fake(ops, mountpoint, root_prefix="", session=None, backend=None):
+    def _fake(
+        ops, mountpoint, root_prefix="", session=None, backend=None, owner=None
+    ):
         seen["mountpoint"] = mountpoint
         seen["backend"] = backend
+        seen["owner"] = owner
         return _FakeThread()
 
     monkeypatch.setattr("mirage.workspace.fuse.mount_background", _fake)
@@ -212,6 +215,57 @@ def _capture_mount(monkeypatch):
         lambda _mountpoint: None,
     )
     return seen
+
+
+def test_a_mount_runs_on_the_owner_and_is_served_until_it_unmounts(
+    monkeypatch, tmp_path
+):
+    seen = _capture_mount(monkeypatch)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    mp = ws.add_fuse_mount("/", str(tmp_path / "mp"))
+    loop = asyncio.new_event_loop()
+    ws._sync_bridge.observe(loop)
+    assert seen["owner"]() is loop
+    assert mp in SERVED
+    ws.remove_fuse_mount("/")
+    assert mp not in SERVED
+    loop.close()
+
+
+@pytest.mark.asyncio
+async def test_setup_and_unmount_touch_paths_with_their_loop_blocked(
+    monkeypatch, tmp_path
+):
+    # A mountpoint inside another mount of the workspace is answered by
+    # that mount, which must not wait on the loop doing the setup.
+    loop = asyncio.get_running_loop()
+    blocked: list[tuple[str, bool]] = []
+
+    def record(step: str) -> None:
+        blocked.append((step, loop in BLOCKED))
+
+    def mkdtemp(prefix: str = "") -> str:
+        record("mkdtemp")
+        (tmp_path / "mp").mkdir()
+        return str(tmp_path / "mp")
+
+    def mount(*_args, **_kwargs) -> _FakeThread:
+        record("mount")
+        return _FakeThread()
+
+    monkeypatch.setattr(tempfile, "mkdtemp", mkdtemp)
+    monkeypatch.setattr("mirage.workspace.fuse.mount_background", mount)
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "mirage.workspace.fuse.unmount_with_fusermount",
+        lambda _mountpoint: None,
+    )
+    monkeypatch.setattr(os, "rmdir", lambda _path: record("rmdir"))
+    manager = FuseManager()
+    manager.setup(Workspace({"/": RAMVFS()}).vfs)
+    manager.unmount()
+    assert blocked == [("mkdtemp", True), ("mount", True), ("rmdir", True)]
+    assert loop not in BLOCKED
 
 
 def _as_macos(monkeypatch):

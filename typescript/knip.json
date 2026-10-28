@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "ignoreBinaries": ["diskutil", "fmt", "openssl", "ps"],
+  "ignoreBinaries": ["diskutil", "fmt", "mkfifo", "openssl", "ps"],
   "workspaces": {
     ".": {
       "entry": []

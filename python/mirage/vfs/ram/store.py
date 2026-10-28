@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Iterable, Iterator, MutableMapping
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Protocol, TypeVar, overload
 
@@ -55,8 +56,8 @@ class RAMFiles(MutableMapping[str, bytes]):
 
     Counting here, rather than at each op, means no change to the table
     can miss the count. It does not refuse anything: an op checks growth
-    with ``check_capacity`` before it stores, in the same synchronous
-    step. Mirrors the TS ``RAMFiles``.
+    with ``check_capacity`` before it stores, under ``RAMStore.lock``, as
+    one step. Mirrors the TS ``RAMFiles``.
     """
 
     def __init__(self, usage: StorageUsage | None = None) -> None:
@@ -64,8 +65,8 @@ class RAMFiles(MutableMapping[str, bytes]):
         self.usage = usage
 
     def _count(self, delta: int) -> None:
-        if self.usage is not None and self.usage.used is not None:
-            self.usage.used += delta
+        if self.usage is not None:
+            self.usage.land(0, delta)
 
     def __getitem__(self, key: str) -> bytes:
         return self._data[key]
@@ -85,8 +86,11 @@ class RAMFiles(MutableMapping[str, bytes]):
         return len(self._data)
 
     def clear(self) -> None:
-        self._data.clear()
-        if self.usage is not None:
+        if self.usage is None:
+            self._data.clear()
+            return
+        with self.usage.lock:
+            self._data.clear()
             self.usage.used = 0
 
 
@@ -100,3 +104,10 @@ class RAMStore:
     attrs: dict[str, dict[str, Any]] = field(default_factory=dict[str, Any])
     # The store's capacity and counted bytes, None when uncapped.
     usage: StorageUsage | None = None
+
+    @property
+    def lock(self) -> AbstractContextManager[bool | None]:
+        """What a step that reads a key, checks its growth and stores it
+        holds, so the three run as one across threads: the count's lock
+        when a capacity caps the store, nothing otherwise."""
+        return self.usage.lock if self.usage is not None else nullcontext()

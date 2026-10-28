@@ -33,6 +33,7 @@ import {
   BaseVFS,
   FileType,
   fuseMount,
+  LocalRuntime,
   Mount,
   MountBackend,
   MountMode,
@@ -422,6 +423,29 @@ async function runCapacityProbe(
   }
 }
 
+// Local-program probe: the folder sits at the mount's own path, as the local
+// runtime's guide advises, so the program starts in it; its start must not
+// wait on the loop that answers the folder. Mirrors python's.
+async function runLocalProgramProbe(
+  result: Record<string, string | number | boolean | null>,
+): Promise<void> {
+  const folder = mkdtempSync(join(tmpdir(), 'mirage-fuse-same-'))
+  const data = new RAMVFS()
+  data.store.dirs.add('/')
+  data.store.files.set('/a.txt', new TextEncoder().encode('alpha\n'))
+  const ws = new Workspace(
+    { [folder]: [data, MountMode.EXEC] },
+    { runtimes: [new LocalRuntime({ captures: ['@external'] })] },
+  )
+  try {
+    await ws.addFuseMount(folder, folder)
+    const ran = await ws.shell(`cd ${folder} && nice ls`)
+    result.local_program_in_folder = new TextDecoder().decode(ran.stdout).trim()
+  } finally {
+    await ws.close()
+  }
+}
+
 // Outside-unmount probe: an outside unmount leaves nothing to release, so
 // removing the mount must succeed with no unmount helper on PATH, and a new
 // mount at the same path must serve again.
@@ -585,6 +609,7 @@ async function main(): Promise<void> {
   await runLinkProbe(result)
   await runSessionProbe(result)
   await runCapacityProbe(result)
+  await runLocalProgramProbe(result)
   await runExternalUnmountProbe(result)
   process.stdout.write(JSON.stringify(result) + '\n')
 }

@@ -20,6 +20,7 @@ import signal
 import socket
 import sys
 import time
+from collections import Counter
 from collections.abc import AsyncIterator
 
 import pytest
@@ -29,11 +30,14 @@ from mirage.process.table import ProcessTable
 from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
 from mirage.runtime.sandbox.program import (
     Children,
+    _served,
     close_children,
     host_run,
     open_program_pipe,
     reap_host_run,
     run_program,
+    serve,
+    unserve,
 )
 from mirage.types import PathSpec
 
@@ -162,6 +166,64 @@ async def test_an_exited_command_does_not_wait_on_a_pending_input_pull():
 async def test_a_missing_cli_raises_its_hint():
     with pytest.raises(RuntimeError, match="install it"):
         await run_program("mirage-no-such-program", "install it", [], None)
+
+
+def test_a_served_folder_is_known_by_its_absolute_and_resolved_names(
+    tmp_path, monkeypatch
+):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "link").symlink_to(real)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mirage.runtime.sandbox.program.SERVED", Counter())
+    assert serve("link/mp") == [
+        str(tmp_path / "link" / "mp"),
+        os.path.join(os.path.realpath(real), "mp"),
+    ]
+
+
+def test_a_folder_stays_served_while_another_mount_records_it(monkeypatch):
+    # A lazily released mount may end after a new one took its path.
+    monkeypatch.setattr("mirage.runtime.sandbox.program.SERVED", Counter())
+    old, new = serve("/tmp/mirage-mp"), serve("/tmp/mirage-mp")
+    unserve(old)
+    assert _served("/tmp/mirage-mp/a")
+    unserve(new)
+    assert not _served("/tmp/mirage-mp/a")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("served", [True, False])
+async def test_a_child_in_a_served_folder_starts_outside_it(
+    tmp_path, monkeypatch, served
+):
+    # A folder a kernel mount here serves answers on the loop spawning the
+    # child, which waits inside the spawn until the child runs, so the
+    # child starts outside and the prelude takes it in.
+    started = []
+    loop = asyncio.get_running_loop()
+    real = loop.subprocess_exec
+
+    async def subprocess_exec(factory, program, *args, cwd=None, **kwargs):
+        started.append((program, cwd))
+        return await real(factory, program, *args, cwd=cwd, **kwargs)
+
+    monkeypatch.setattr(loop, "subprocess_exec", subprocess_exec)
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.program.SERVED",
+        Counter([str(tmp_path)] if served else []),
+    )
+    ran = await run_program(
+        sys.executable,
+        None,
+        ["-c", "import os; print(os.getcwd())"],
+        None,
+        cwd=str(tmp_path),
+    )
+    assert ran.stdout.decode().strip() == os.path.realpath(tmp_path)
+    assert started == [
+        ("/bin/sh", None) if served else (sys.executable, str(tmp_path))
+    ]
 
 
 @pytest.mark.asyncio
