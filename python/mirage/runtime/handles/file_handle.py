@@ -12,12 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 from collections.abc import AsyncIterator, Iterable
 
 from mirage.io.spool import MEMORY_LIMIT, ByteSlice
-
-logger = logging.getLogger(__name__)
 
 
 def write_runs(
@@ -114,9 +111,9 @@ async def window_writes(
     """Buffered writes as ``overlaid`` lays them over a read window: a
     write waiting in a spool is read for the part of the window it
     covers, and past that keeps only where it ends, so the read still
-    reaches as far as the file does. A spool closed meanwhile was a
-    handle's that has gone and landed what it held, so its writes are
-    left out, as a buffer that landed under a read is.
+    reaches as far as the file does. Each spool stays open until the
+    window is read, so a handle that lands and goes meanwhile still
+    shows what it held to a read that took its writes.
 
     Args:
         writes (Iterable[tuple[int, bytes | bytearray | ByteSlice]]): the
@@ -124,30 +121,40 @@ async def window_writes(
         offset (int): where the window starts.
         size (int): the window's length.
     """
-    out: list[tuple[int, bytes | bytearray]] = []
-    for at, run in writes:
-        if not isinstance(run, ByteSlice):
-            out.append((at, run))
-            continue
-        low, high = max(at, offset), min(at + len(run), offset + size)
-        if low < high:
-            try:
-                data = await run.source.read(run.offset + low - at, high - low)
-            except ValueError:
-                if not run.source.closed:
-                    raise
-                logger.debug("a spooled write at %d landed under a read", at)
+    writes = list(writes)
+    spools = {run.source for _, run in writes if isinstance(run, ByteSlice)}
+    for spool in spools:
+        spool.hold()
+    try:
+        out: list[tuple[int, bytes | bytearray]] = []
+        for at, run in writes:
+            if not isinstance(run, ByteSlice):
+                out.append((at, run))
                 continue
-            out.append((low, data))
-        out.append((at + len(run), b""))
-    return out
+            low, high = max(at, offset), min(at + len(run), offset + size)
+            if low < high:
+                out.append(
+                    (
+                        low,
+                        await run.source.read(
+                            run.offset + low - at, high - low
+                        ),
+                    )
+                )
+            out.append((at + len(run), b""))
+        return out
+    finally:
+        for spool in spools:
+            await spool.unhold()
 
 
 async def run_stream(
     group: list[tuple[int, bytearray | ByteSlice]],
 ) -> AsyncIterator[bytes]:
     """The bytes one group of buffered writes leaves, from where it
-    starts to where it reaches, a window at a time.
+    starts to where it reaches, a window at a time. Each window lays
+    only the writes that reach it, so a flush costs the writes plus the
+    windows, however many small edits a large file has.
 
     Args:
         group (list[tuple[int, bytearray | ByteSlice]]): one of
@@ -155,8 +162,17 @@ async def run_stream(
     """
     start = group[0][0]
     end = max(at + len(run) for at, run in group)
-    for offset in range(start, end, MEMORY_LIMIT):
+    windows: list[list[tuple[int, bytearray | ByteSlice]]] = [
+        [] for _ in range(-(-(end - start) // MEMORY_LIMIT))
+    ]
+    for at, run in group:
+        first = (at - start) // MEMORY_LIMIT
+        last = (at + len(run) - 1 - start) // MEMORY_LIMIT
+        for index in range(first, last + 1):
+            windows[index].append((at, run))
+    for index, writes in enumerate(windows):
+        offset = start + index * MEMORY_LIMIT
         size = min(MEMORY_LIMIT, end - offset)
         yield overlaid(
-            b"", offset, size, await window_writes(group, offset, size)
+            b"", offset, size, await window_writes(writes, offset, size)
         )

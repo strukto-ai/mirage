@@ -7,7 +7,7 @@ export const MEMORY_LIMIT = 1024 * 1024
 const IO_BUFFER_SIZE = 256 * 1024
 
 export interface SpoolStore {
-  append(data: Uint8Array): Promise<void>
+  write(offset: number, data: Uint8Array): Promise<void>
   read(offset: number, size: number): Promise<Uint8Array>
   close(): Promise<void>
   body?(kind: 'fetch' | 'sdk'): Promise<Blob | AsyncIterable<Uint8Array>>
@@ -25,7 +25,10 @@ export function setSpoolFactory(value: SpoolFactory | null): void {
  * Retain replayable bytes, spilling through the host's scratch storage. An
  * append that fails leaves no telling which of its bytes were kept, so every
  * call after it fails too, rather than read bytes from where the append never
- * put them.
+ * put them. Bytes waiting for the store go at the offset they end up at, so a
+ * flush that failed writes them there again rather than after what it got
+ * through. A reader that `hold`s the spool keeps it open: a `close` while it
+ * is held takes effect at the last `unhold`.
  */
 export class ByteSpool {
   size = 0
@@ -34,6 +37,9 @@ export class ByteSpool {
   private store: SpoolStore | null = null
   private lost: unknown = undefined
   private pendingSize = 0
+  private stored = 0
+  private holders = 0
+  private closing = false
   private cache: Uint8Array = new Uint8Array()
   private cacheOffset = 0
   private turn: Promise<unknown> = Promise.resolve()
@@ -77,7 +83,10 @@ export class ByteSpool {
     this.cache = new Uint8Array()
     if (this.store === null && this.size + data.length > this.memoryLimit && factory !== null) {
       this.store = await factory()
-      for (const part of this.memory) await this.store.append(part)
+      for (const part of this.memory) {
+        await this.store.write(this.stored, part)
+        this.stored += part.length
+      }
       this.memory = []
       this.pendingSize = 0
     }
@@ -105,7 +114,8 @@ export class ByteSpool {
 
   private async flush(): Promise<void> {
     if (this.store !== null && this.pendingSize > 0) {
-      await this.store.append(concat(this.memory))
+      await this.store.write(this.stored, concat(this.memory))
+      this.stored += this.pendingSize
       this.memory = []
       this.pendingSize = 0
     }
@@ -178,7 +188,22 @@ export class ByteSpool {
     })
   }
 
+  /** Keep the spool open until `unhold`, for a reader that took windows of it. */
+  hold(): void {
+    this.holders++
+  }
+
+  /** Let go of a `hold`; the last one runs a `close` it held off. */
+  async unhold(): Promise<void> {
+    this.holders--
+    if (this.closing && this.holders === 0) await this.close()
+  }
+
   close(): Promise<void> {
+    if (this.holders > 0) {
+      this.closing = true
+      return Promise.resolve()
+    }
     return this.locked(() => this.closeNow())
   }
 

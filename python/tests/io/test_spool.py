@@ -67,6 +67,39 @@ async def test_a_spool_that_lost_a_write_fails_every_call_after(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_read_whose_flush_failed_writes_the_bytes_again_in_place(
+    monkeypatch,
+):
+    async with ByteSpool(0) as spool:
+        await spool.append(b"abc")
+        write = spool._write
+
+        def partial(data: bytes, offset: int) -> None:
+            monkeypatch.undo()
+            write(data[:1], offset)
+            raise OSError("scratch full")
+
+        monkeypatch.setattr(spool, "_write", partial)
+        with pytest.raises(OSError, match="scratch full"):
+            await spool.read(0, 3)
+        assert await spool.read(0, 3) == b"abc"
+        assert await spool.read(3, 3) == b""
+
+
+@pytest.mark.asyncio
+async def test_a_held_spool_closes_at_its_last_unhold():
+    spool = ByteSpool()
+    await spool.append(b"kept")
+    spool.hold()
+    spool.hold()
+    await spool.close()
+    await spool.unhold()
+    assert await spool.read(0, 4) == b"kept"
+    await spool.unhold()
+    assert spool.closed
+
+
+@pytest.mark.asyncio
 async def test_a_byte_slice_sizes_and_slices_as_its_window():
     async with ByteSpool() as spool:
         await spool.append(b"0123456789")

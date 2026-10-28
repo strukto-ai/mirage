@@ -21,6 +21,7 @@ from dataclasses import replace
 from typing import Any, TypeVar, cast
 from weakref import WeakKeyDictionary
 
+from mirage.concurrency.limiter import owned_task
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, classify
 from mirage.errors.fs import ebadf, eexist, einval, eisdir, enoent, enotdir
@@ -884,6 +885,8 @@ class MountCore:
         one run; any other starts a run of its own, laid over the earlier
         ones in order. Past ``MEMORY_LIMIT`` held in memory, the handle's
         runs move to its spool, and a stream goes on at the spool's end.
+        A spool append starts before this yields, so it is queued in the
+        spool ahead of any read of the window it publishes.
 
         Args:
             ctx (Handle): the handle writing.
@@ -910,7 +913,7 @@ class MountCore:
                     ByteSlice(last.source, last.offset, len(last) + len(data)),
                 )
                 ctx.spooled += len(data)
-                await asyncio.shield(last.source.append(data))
+                await asyncio.shield(owned_task(last.source.append(data)))
                 return
         ctx.write_buf.append((offset, bytearray(data)))
         await MountCore._spill(ctx)
@@ -942,7 +945,7 @@ class MountCore:
             )
             ctx.spooled += len(run)
         await asyncio.shield(
-            ctx.spool.append(b"".join(run for _, run in held))
+            owned_task(ctx.spool.append(b"".join(run for _, run in held)))
         )
 
     def _supersede(
@@ -1359,14 +1362,20 @@ class MountCore:
 
     async def _ends_by(self, path: str, end: int) -> bool:
         """Whether the stored file at ``path`` is missing or ends at or
-        before ``end``.
+        before ``end``, by a fresh stat, which waits out a write already
+        landing on the path, so an append under way is counted.
 
         Args:
             path (str): mount path of the file.
             end (int): the offset it may reach.
         """
-        row = await self._row_or_none(path)
-        return row is None or (row.size is not None and row.size <= end)
+        try:
+            row = await self._op(
+                self._files.stat(self.resolve(path), fresh=True)
+            )
+        except FileNotFoundError:
+            return True
+        return row.size is not None and row.size <= end
 
     @staticmethod
     async def _free_spool(ctx: Handle) -> None:
@@ -1387,7 +1396,9 @@ class MountCore:
         """Land a handle's writes on a file whose name went: on the bytes
         it holds, which every handle open on that file reads, as writes
         to an unlinked file stay with it. A handle reading a rendering
-        the stored bytes differ from keeps its own.
+        the stored bytes differ from keeps its own. The writes and their
+        spool leave the handle before the spool is read, so a write
+        arriving meanwhile stays for the next landing.
 
         Args:
             ctx (Handle): a detached handle with writes buffered.
@@ -1395,11 +1406,17 @@ class MountCore:
         """
         held = ctx.data or b""
         end = self._end(ctx)
-        data = overlaid(
-            held, 0, end, await window_writes(ctx.write_buf, 0, end)
-        )
-        ctx.write_buf = []
-        await self._free_spool(ctx)
+        writes, ctx.write_buf = ctx.write_buf, []
+        spool, ctx.spool = ctx.spool, None
+        try:
+            data = overlaid(held, 0, end, await window_writes(writes, 0, end))
+        except BaseException:
+            ctx.write_buf = [*writes, *ctx.write_buf]
+            if ctx.spool is None:
+                ctx.spool = spool
+            raise
+        if spool is not None:
+            await spool.close()
         landed = row.model_copy(update={"size": len(data)})
         for other in self._open_on(ctx.key):
             if other is ctx or other.data is held:
@@ -2030,20 +2047,27 @@ class MountCore:
             raise ebadf(ctx.path)
         if length < 0:
             raise einval(ctx.path)
-        if ctx.detached is None:
+        row = ctx.detached
+        if row is None:
             await self.truncate(ctx.path, length)
             return
-        if ctx.write_buf:
-            await self._land_held(ctx, ctx.detached)
-        held = ctx.data or b""
-        data = held[:length] + bytes(max(0, length - len(held)))
-        landed = ctx.detached.model_copy(update={"size": length})
-        for other in self._open_on(ctx.key):
-            if other is ctx or other.data is held:
-                other.data = data
-                other.detached = landed
-                other.write_buf = [
-                    (at, run[: length - at])
-                    for at, run in other.write_buf
-                    if at < length
-                ]
+
+        # In the file's turn, as a flush lands, so a read waits for the
+        # writes this lands first.
+        async def cut() -> None:
+            if ctx.write_buf:
+                await self._land_held(ctx, ctx.detached or row)
+            held = ctx.data or b""
+            data = held[:length] + bytes(max(0, length - len(held)))
+            landed = (ctx.detached or row).model_copy(update={"size": length})
+            for other in self._open_on(ctx.key):
+                if other is ctx or other.data is held:
+                    other.data = data
+                    other.detached = landed
+                    other.write_buf = [
+                        (at, run[: length - at])
+                        for at, run in other.write_buf
+                        if at < length
+                    ]
+
+        await self._mutate(ctx.key, cut)

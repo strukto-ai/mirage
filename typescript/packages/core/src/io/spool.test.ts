@@ -7,13 +7,20 @@ afterEach(() => {
   setSpoolFactory(null)
 })
 
+function placed(stored: Uint8Array, at: number, part: Uint8Array): Uint8Array {
+  const out = new Uint8Array(Math.max(stored.length, at + part.length))
+  out.set(stored)
+  out.set(part, at)
+  return out
+}
+
 it.each([0, 13, 2000000])('spills, replays and reads windows with budget %s', async (limit) => {
   let closed = 0
   let stored: Uint8Array = new Uint8Array()
   setSpoolFactory(() =>
     Promise.resolve({
-      append: (part) => {
-        stored = concat([stored, part])
+      write: (at, part) => {
+        stored = placed(stored, at, part)
         return Promise.resolve()
       },
       read: (offset, size) => Promise.resolve(stored.slice(offset, offset + size)),
@@ -51,9 +58,9 @@ it('answers concurrent reads of a spilled spool each from its own window', async
   let stored: Uint8Array = new Uint8Array()
   setSpoolFactory(() =>
     Promise.resolve({
-      append: async (part) => {
+      write: async (at, part) => {
         await later()
-        stored = concat([stored, part])
+        stored = placed(stored, at, part)
       },
       read: async (offset, size) => {
         await later()
@@ -108,7 +115,7 @@ it('fails every call after an append it lost', async () => {
   let fail = false
   setSpoolFactory(() =>
     Promise.resolve({
-      append: () => (fail ? Promise.reject(new Error('scratch full')) : Promise.resolve()),
+      write: () => (fail ? Promise.reject(new Error('scratch full')) : Promise.resolve()),
       read: (_offset, size) => Promise.resolve(new Uint8Array(size)),
       close: () => Promise.resolve(),
     }),
@@ -124,6 +131,47 @@ it('fails every call after an append it lost', async () => {
   } finally {
     await spool.close()
   }
+})
+
+it('writes the bytes of a flush that failed again in place', async () => {
+  let stored: Uint8Array = new Uint8Array()
+  let fail = true
+  setSpoolFactory(() =>
+    Promise.resolve({
+      write: (at, part) => {
+        if (!fail) {
+          stored = placed(stored, at, part)
+          return Promise.resolve()
+        }
+        fail = false
+        stored = placed(stored, at, part.subarray(0, 1))
+        return Promise.reject(new Error('scratch full'))
+      },
+      read: (offset, size) => Promise.resolve(stored.slice(offset, offset + size)),
+      close: () => Promise.resolve(),
+    }),
+  )
+  const spool = new ByteSpool(0)
+  try {
+    await spool.append(new TextEncoder().encode('abc'))
+    await expect(spool.read(0, 3)).rejects.toThrow('scratch full')
+    expect(new TextDecoder().decode(await spool.read(0, 3))).toBe('abc')
+    expect(stored.byteLength).toBe(3)
+  } finally {
+    await spool.close()
+  }
+})
+
+it('closes a held spool at its last unhold', async () => {
+  const spool = new ByteSpool()
+  await spool.append(new TextEncoder().encode('kept'))
+  spool.hold()
+  spool.hold()
+  await spool.close()
+  await spool.unhold()
+  expect(new TextDecoder().decode(await spool.read(0, 4))).toBe('kept')
+  await spool.unhold()
+  expect(spool.closed).toBe(true)
 })
 
 it('sizes and slices a byte slice as its window', async () => {

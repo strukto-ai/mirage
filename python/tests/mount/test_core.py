@@ -1964,6 +1964,84 @@ async def test_another_handles_write_cuts_what_one_holds_in_its_spool():
     assert store._store.files["/f"] == want
 
 
+@pytest.mark.asyncio
+async def test_a_read_ready_before_a_spill_waits_for_the_spilled_bytes():
+    core, store = _streamed_core()
+    fh = await core.open("/f", open_mode(os.O_RDWR | os.O_CREAT | os.O_TRUNC))
+    reader = await core.open("/f", open_mode(os.O_RDONLY))
+    assert await core.read("/f", 8, 0, reader) == b""
+    for i in range(16):
+        await core.write("/f", BLOCK, i * len(BLOCK), fh)
+    read = asyncio.create_task(core.read("/f", 8, 0, reader))
+    await core.write("/f", BLOCK, 16 * len(BLOCK), fh)
+    assert await read == BLOCK[:8]
+    await core.release(reader)
+    await core.release(fh)
+
+
+@pytest.mark.asyncio
+async def test_a_write_while_an_unlinked_handle_lands_its_spool_stays():
+    core, store = _streamed_core()
+    fh = await core.open("/f", open_mode(os.O_RDWR | os.O_CREAT | os.O_TRUNC))
+    for i in range(24):
+        await core.write("/f", BLOCK, i * len(BLOCK), fh)
+    await core.unlink("/f")
+    spool = core.handles.get(fh).spool
+    reading, go = asyncio.Event(), asyncio.Event()
+    read = spool.read
+
+    async def held_up(offset: int, size: int) -> bytes:
+        reading.set()
+        await go.wait()
+        return await read(offset, size)
+
+    spool.read = held_up
+    landing = asyncio.create_task(core.flush("/f", fh))
+    await reading.wait()
+    await core.write("/f", b"LATE", 0, fh)
+    go.set()
+    await landing
+    assert spool.closed
+    assert await core.read("/f", 6, 0, fh) == b"LATE" + BLOCK[4:6]
+    await core.release(fh)
+
+
+@pytest.mark.asyncio
+async def test_a_covering_landing_keeps_an_append_already_under_way(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    core, store = _streamed_core()
+    end = 24 * len(BLOCK)
+    store._store.files["/f"] = b"a" * end
+    fh = await core.open("/f", open_mode(os.O_WRONLY))
+    for i in range(24):
+        await core.write("/f", BLOCK, i * len(BLOCK), fh)
+    entered, go, statted = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    append, stat = store.append, core._files.stat
+
+    async def held_up(path: PathSpec, data: bytes) -> None:
+        entered.set()
+        await go.wait()
+        await append(path, data)
+
+    async def watched(
+        path: str | PathSpec, *, nofollow: bool = False, fresh: bool = False
+    ) -> FileStat:
+        statted.set()
+        return await stat(path, nofollow=nofollow, fresh=fresh)
+
+    monkeypatch.setattr(store, "append", held_up)
+    appending = asyncio.create_task(core._files.append("/f", b"TAIL"))
+    await entered.wait()
+    monkeypatch.setattr(core._files, "stat", watched)
+    releasing = asyncio.create_task(core.release(fh))
+    await statted.wait()
+    go.set()
+    await appending
+    await releasing
+    assert store._store.files["/f"] == BLOCK * 24 + b"TAIL"
+
+
 class _DigestRAM(_StreamedRAM):
     """Keeps a written stream's digest rather than its bytes."""
 

@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { ByteSlice, ByteSpool } from '../../io/spool.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { ByteSlice, ByteSpool, MEMORY_LIMIT } from '../../io/spool.ts'
 import { materialize } from '../../io/types.ts'
 import { overlaid, runGroups, runStream, windowWrites, writeRuns } from './file_handle.ts'
 
@@ -99,7 +99,31 @@ describe('windowWrites', () => {
     ])
     expect(overlaid(new Uint8Array(), 96, 2, laid)).toEqual(new Uint8Array(2))
     await spool.close()
-    expect(await windowWrites(writes, 102, 4)).toEqual([[104, enc.encode('XY')]])
+  })
+
+  it('keeps a spool open until the window is read', async () => {
+    const spool = new ByteSpool()
+    await spool.append(enc.encode('abcdef'))
+    const read = spool.read.bind(spool)
+    let reading = (): void => undefined
+    const started = new Promise<void>((resolve) => (reading = resolve))
+    let go = (): void => undefined
+    const gate = new Promise<void>((resolve) => (go = resolve))
+    vi.spyOn(spool, 'read').mockImplementationOnce(async (offset, size) => {
+      reading()
+      await gate
+      return read(offset, size)
+    })
+    const window = windowWrites([[0, new ByteSlice(spool, 0, 6)]], 0, 6)
+    await started
+    await spool.close()
+    expect(spool.closed).toBe(false)
+    go()
+    expect(await window).toEqual([
+      [0, enc.encode('abcdef')],
+      [6, new Uint8Array()],
+    ])
+    expect(spool.closed).toBe(true)
   })
 })
 
@@ -119,6 +143,24 @@ describe('runStream', () => {
       [data.byteLength, enc.encode('tail')],
     ])
     const want = folded[0]?.[1] ?? new Uint8Array()
+    expect(Buffer.compare(await materialize(runStream(group)), want)).toBe(0)
+    await spool.close()
+  })
+
+  it('lays the edits of every window over it', async () => {
+    const data = new Uint8Array(3 * MEMORY_LIMIT).map((_, i) => i % 256)
+    const spool = new ByteSpool()
+    await spool.append(data)
+    const edits: [number, Uint8Array][] = [
+      [10, enc.encode('a')],
+      [MEMORY_LIMIT - 1, enc.encode('bc')],
+      [2 * MEMORY_LIMIT + 5, enc.encode('d')],
+    ]
+    const group: [number, Uint8Array | ByteSlice][] = [
+      [0, new ByteSlice(spool, 0, data.byteLength)],
+      ...edits,
+    ]
+    const want = writeRuns([[0, data], ...edits])[0]?.[1] ?? new Uint8Array()
     expect(Buffer.compare(await materialize(runStream(group)), want)).toBe(0)
     await spool.close()
   })

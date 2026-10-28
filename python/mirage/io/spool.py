@@ -19,7 +19,11 @@ class ByteSpool:
 
     An append that fails leaves no telling which of its bytes were kept,
     so every call after it fails too, rather than read bytes from where
-    the append never put them.
+    the append never put them. Bytes waiting for the file go at the
+    offset they end up at, so a flush that failed or was cancelled
+    writes them there again rather than after what it got through.
+    A reader that ``hold``s the spool keeps it open: a ``close`` while
+    it is held takes effect at the last ``unhold``.
 
     Args:
         memory_limit (int): maximum bytes retained in memory before spilling.
@@ -35,6 +39,9 @@ class ByteSpool:
         self._lock = asyncio.Lock()
         self._closed = False
         self._lost: BaseException | None = None
+        self._stored = 0
+        self._holders = 0
+        self._closing = False
         self._cache = b""
         self._cache_offset = 0
 
@@ -69,6 +76,7 @@ class ByteSpool:
                     self._file.write(self._memory)
 
                 await run_blocking(open_file)
+                self._stored = len(self._memory)
                 self._memory.clear()
             self._memory.extend(data)
             if len(self._memory) >= IO_BUFFER_SIZE:
@@ -77,12 +85,13 @@ class ByteSpool:
 
     async def _flush(self) -> None:
         if self._memory:
-            await run_blocking(self._write, bytes(self._memory))
+            await run_blocking(self._write, bytes(self._memory), self._stored)
+            self._stored += len(self._memory)
             self._memory.clear()
 
-    def _write(self, data: bytes) -> None:
+    def _write(self, data: bytes, offset: int) -> None:
         assert self._file is not None
-        self._file.seek(0, 2)
+        self._file.seek(offset)
         self._file.write(data)
 
     async def fill(self, source: ByteSource) -> None:
@@ -149,7 +158,21 @@ class ByteSpool:
             return data
         return OutputStream(self.stream(), self.close)
 
+    def hold(self) -> None:
+        """Keep the spool open until ``unhold``, for a reader that took
+        windows of it."""
+        self._holders += 1
+
+    async def unhold(self) -> None:
+        """Let go of a ``hold``; the last one runs a ``close`` it held off."""
+        self._holders -= 1
+        if self._closing and not self._holders:
+            await self.close()
+
     async def close(self) -> None:
+        if self._holders:
+            self._closing = True
+            return
         async with self._lock:
             self._closed = True
             self._memory.clear()

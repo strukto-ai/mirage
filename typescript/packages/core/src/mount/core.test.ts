@@ -2049,4 +2049,87 @@ describe('MountCore past the memory limit', () => {
     want.set(enc.encode('SECOND'), MiB)
     landed(store, want)
   })
+
+  it('keeps an append already under way when a covering landing lands', async () => {
+    const store = new StreamedRAM()
+    const ws = new Workspace({ '/data/': store }, { mode: MountMode.WRITE })
+    const core = new MountCore(ws.vfs)
+    const end = 24 * BLOCK.byteLength
+    store.store.files.set('/f', new Uint8Array(end).fill(97))
+    const fh = await core.open('/data/f', flags(fsConstants.O_WRONLY))
+    for (let i = 0; i < 24; i++) await core.write('/data/f', fh, BLOCK, i * BLOCK.byteLength)
+    const append = store.append.bind(store)
+    let entered = (): void => undefined
+    const appendStarted = new Promise<void>((resolve) => (entered = resolve))
+    let go = (): void => undefined
+    const gate = new Promise<void>((resolve) => (go = resolve))
+    vi.spyOn(store, 'append').mockImplementationOnce(async (...args) => {
+      entered()
+      await gate
+      return append(...args)
+    })
+    const appending = ws.vfs.append('/data/f', enc.encode('TAIL'))
+    await appendStarted
+    const stat = ws.vfs.stat.bind(ws.vfs)
+    let statted = (): void => undefined
+    const statStarted = new Promise<void>((resolve) => (statted = resolve))
+    vi.spyOn(ws.vfs, 'stat').mockImplementation((...args) => {
+      statted()
+      return stat(...args)
+    })
+    const releasing = core.release(fh)
+    await statStarted
+    go()
+    await appending
+    await releasing
+    landed(store, new Uint8Array([...repeat(24), ...enc.encode('TAIL')]))
+  })
+
+  it('has a read ready before a spill wait for the spilled bytes', async () => {
+    const { core } = streamed()
+    const fh = await core.open(
+      '/data/f',
+      flags(fsConstants.O_RDWR | fsConstants.O_CREAT | fsConstants.O_TRUNC),
+    )
+    const reader = await core.open('/data/f', flags(fsConstants.O_RDONLY))
+    expect(await core.read('/data/f', reader, 0, 8)).toEqual(new Uint8Array())
+    for (let i = 0; i < 16; i++) await core.write('/data/f', fh, BLOCK, i * BLOCK.byteLength)
+    const read = core.read('/data/f', reader, 0, 8)
+    await core.write('/data/f', fh, BLOCK, 16 * BLOCK.byteLength)
+    expect(await read).toEqual(BLOCK.subarray(0, 8))
+    await core.release(reader)
+    await core.release(fh)
+  })
+
+  it('keeps a write made while an unlinked handle lands its spool', async () => {
+    const { core } = streamed()
+    const fh = await core.open(
+      '/data/f',
+      flags(fsConstants.O_RDWR | fsConstants.O_CREAT | fsConstants.O_TRUNC),
+    )
+    for (let i = 0; i < 24; i++) await core.write('/data/f', fh, BLOCK, i * BLOCK.byteLength)
+    await core.unlink('/data/f')
+    const spool = core.handles.get(fh)?.spool
+    if (spool === undefined) throw new Error('expected a spool')
+    const read = spool.read.bind(spool)
+    let reading = (): void => undefined
+    const started = new Promise<void>((resolve) => (reading = resolve))
+    let go = (): void => undefined
+    const gate = new Promise<void>((resolve) => (go = resolve))
+    vi.spyOn(spool, 'read').mockImplementationOnce(async (offset, size) => {
+      reading()
+      await gate
+      return read(offset, size)
+    })
+    const landing = core.flush('/data/f', fh)
+    await started
+    await core.write('/data/f', fh, enc.encode('LATE'), 0)
+    go()
+    await landing
+    expect(spool.closed).toBe(true)
+    expect(await core.read('/data/f', fh, 0, 6)).toEqual(
+      new Uint8Array([...enc.encode('LATE'), ...BLOCK.subarray(4, 6)]),
+    )
+    await core.release(fh)
+  })
 })

@@ -750,7 +750,9 @@ export class MountCore {
    * any other starts a run of its own, laid over the earlier ones in order,
    * and every 64 of those fold together while none waits in the spool. Past
    * `MEMORY_LIMIT` held in memory, the handle's runs move to its spool, and
-   * a stream goes on at the spool's end. Mirrors Python's `_buffer`.
+   * a stream goes on at the spool's end. A spool append is queued as it is
+   * called, ahead of any read of the window it publishes. Mirrors Python's
+   * `_buffer`.
    */
   private static async buffer(ctx: Handle, pos: number, data: Uint8Array): Promise<void> {
     if (data.byteLength === 0) return
@@ -1023,24 +1025,29 @@ export class MountCore {
     const ctx = this.openHandle(fd)
     if (!ctx.mode.writable) throw ebadf(ctx.path)
     if (length < 0) throw einval(ctx.path)
-    if (ctx.detached === undefined) {
+    const row = ctx.detached
+    if (row === undefined) {
       await this.truncate(ctx.path, length)
       return
     }
-    if (ctx.writeBuf !== undefined && ctx.writeBuf.length > 0)
-      await this.landHeld(ctx, ctx.detached)
-    const held = ctx.data ?? new Uint8Array()
-    const data = new Uint8Array(length)
-    data.set(held.subarray(0, length))
-    const landed = ctx.detached.with({ size: length })
-    for (const other of this.openOn(ctx.key)) {
-      if (other !== ctx && other.data !== held) continue
-      other.data = data
-      other.detached = landed
-      other.writeBuf = (other.writeBuf ?? [])
-        .filter(([at]) => at < length)
-        .map(([at, run]) => [at, run.subarray(0, length - at)])
-    }
+    // In the file's turn, as a flush lands, so a read waits for the
+    // writes this lands first.
+    await this.mutate(ctx.key, async () => {
+      if (ctx.writeBuf !== undefined && ctx.writeBuf.length > 0)
+        await this.landHeld(ctx, ctx.detached ?? row)
+      const held = ctx.data ?? new Uint8Array()
+      const data = new Uint8Array(length)
+      data.set(held.subarray(0, length))
+      const landed = (ctx.detached ?? row).with({ size: length })
+      for (const other of this.openOn(ctx.key)) {
+        if (other !== ctx && other.data !== held) continue
+        other.data = data
+        other.detached = landed
+        other.writeBuf = (other.writeBuf ?? [])
+          .filter(([at]) => at < length)
+          .map(([at, run]) => [at, run.subarray(0, length - at)])
+      }
+    })
   }
 
   async rename(src: string, dst: string): Promise<void> {
@@ -1164,14 +1171,26 @@ export class MountCore {
    * Land a handle's writes on a file whose name went: on the bytes it holds,
    * which every handle open on that file reads, as writes to an unlinked
    * file stay with it. A handle reading a rendering the stored bytes differ
-   * from keeps its own. Mirrors Python's `_land_held`.
+   * from keeps its own. The writes and their spool leave the handle before
+   * the spool is read, so a write arriving meanwhile stays for the next
+   * landing. Mirrors Python's `_land_held`.
    */
   private async landHeld(ctx: Handle, row: FileStat): Promise<void> {
     const held = ctx.data ?? new Uint8Array()
     const end = MountCore.end(ctx)
-    const data = overlaid(held, 0, end, await windowWrites(ctx.writeBuf ?? [], 0, end))
+    const writes = ctx.writeBuf ?? []
+    const spool = ctx.spool
     ctx.writeBuf = []
-    await MountCore.freeSpool(ctx)
+    delete ctx.spool
+    let data: Uint8Array
+    try {
+      data = overlaid(held, 0, end, await windowWrites(writes, 0, end))
+    } catch (err) {
+      ctx.writeBuf = [...writes, ...ctx.writeBuf]
+      if (spool !== undefined && !('spool' in ctx)) ctx.spool = spool
+      throw err
+    }
+    await spool?.close()
     const landed = row.with({ size: data.byteLength })
     for (const other of this.openOn(ctx.key)) {
       if (other !== ctx && other.data !== held) continue
@@ -1283,10 +1302,20 @@ export class MountCore {
     }
   }
 
-  /** Whether the stored file at `path` is missing or ends at or before `end`. Mirrors Python's `_ends_by`. */
+  /**
+   * Whether the stored file at `path` is missing or ends at or before `end`,
+   * by a fresh stat, which waits out a write already landing on the path, so
+   * an append under way is counted. Mirrors Python's `_ends_by`.
+   */
   private async endsBy(path: string, end: number): Promise<boolean> {
-    const row = await this.rowOrNull(path)
-    return row === null || (row.size !== null && row.size <= end)
+    let row: FileStat
+    try {
+      row = await this.op(() => this.files.stat(this.resolve(path), undefined, { fresh: true }))
+    } catch (err) {
+      if (classify(err) !== 'ENOENT') throw err
+      return true
+    }
+    return row.size !== null && row.size <= end
   }
 
   /** Close a handle's spool once none of its writes wait there. Mirrors Python's `_free_spool`. */

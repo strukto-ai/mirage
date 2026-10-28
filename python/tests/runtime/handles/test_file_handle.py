@@ -12,10 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
-from mirage.io.spool import ByteSlice, ByteSpool
+from mirage.io.spool import MEMORY_LIMIT, ByteSlice, ByteSpool
 from mirage.io.types import materialize
+from mirage.runtime.handles import file_handle
 from mirage.runtime.handles.file_handle import (
     overlaid,
     run_groups,
@@ -74,7 +77,30 @@ async def test_window_writes_read_a_spooled_write_for_the_window_alone():
         laid = await window_writes(writes, 96, 2)
         assert laid == [(110, b""), (104, b"XY")]
         assert overlaid(b"", 96, 2, laid) == bytes(2)
-    assert await window_writes(writes, 102, 4) == [(104, b"XY")]
+
+
+@pytest.mark.asyncio
+async def test_window_writes_keep_a_spool_open_until_the_window_is_read():
+    spool = ByteSpool()
+    await spool.append(b"abcdef")
+    reading, go = asyncio.Event(), asyncio.Event()
+    read = spool.read
+
+    async def held_up(offset: int, size: int) -> bytes:
+        reading.set()
+        await go.wait()
+        return await read(offset, size)
+
+    spool.read = held_up  # type: ignore[method-assign]
+    window = asyncio.create_task(
+        window_writes([(0, ByteSlice(spool, 0, 6))], 0, 6)
+    )
+    await reading.wait()
+    await spool.close()
+    assert not spool.closed
+    go.set()
+    assert await window == [(0, b"abcdef"), (6, b"")]
+    assert spool.closed
 
 
 @pytest.mark.asyncio
@@ -89,3 +115,29 @@ async def test_run_stream_leaves_what_the_folded_run_holds():
         ]
         folded = write_runs([(0, data), (2, b"XY"), (len(data), b"tail")])
         assert await materialize(run_stream(group)) == folded[0][1]
+
+
+@pytest.mark.asyncio
+async def test_run_stream_lays_each_window_with_the_writes_that_reach_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = bytes(range(256)) * (3 * MEMORY_LIMIT // 256)
+    seen: list[int] = []
+
+    async def counted(
+        writes: list[tuple[int, bytearray | ByteSlice]], offset: int, size: int
+    ) -> list[tuple[int, bytes | bytearray]]:
+        seen.append(len(writes))
+        return await window_writes(writes, offset, size)
+
+    monkeypatch.setattr(file_handle, "window_writes", counted)
+    async with ByteSpool() as spool:
+        await spool.append(data)
+        edits = [(10, b"a"), (2 * MEMORY_LIMIT + 5, b"b")]
+        group = [
+            (0, ByteSlice(spool, 0, len(data))),
+            *((at, bytearray(edit)) for at, edit in edits),
+        ]
+        folded = write_runs([(0, data), *edits])
+        assert await materialize(run_stream(group)) == folded[0][1]
+    assert seen == [2, 1, 2]

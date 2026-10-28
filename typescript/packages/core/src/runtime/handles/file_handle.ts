@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ByteSlice, MEMORY_LIMIT } from '../../io/spool.ts'
+import { ByteSlice, MEMORY_LIMIT, type ByteSpool } from '../../io/spool.ts'
 import { concat } from '../../utils/bytes.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 
@@ -116,9 +116,9 @@ export function runGroups(
  * Buffered writes as `overlaid` lays them over a read window: a write
  * waiting in a spool is read for the part of the window it covers, and past
  * that keeps only where it ends, so the read still reaches as far as the
- * file does. A spool closed meanwhile was a handle's that has gone and
- * landed what it held, so its writes are left out, as a buffer that landed
- * under a read is. Mirrors Python's `window_writes`.
+ * file does. Each spool stays open until the window is read, so a handle
+ * that lands and goes meanwhile still shows what it held to a read that took
+ * its writes. Mirrors Python's `window_writes`.
  *
  * Args:
  *   writes: the buffered writes, in arrival order.
@@ -130,33 +130,32 @@ export async function windowWrites(
   offset: number,
   size: number,
 ): Promise<[number, Uint8Array][]> {
-  const out: [number, Uint8Array][] = []
-  for (const [at, run] of writes) {
-    if (!(run instanceof ByteSlice)) {
-      out.push([at, run])
-      continue
-    }
-    const low = Math.max(at, offset)
-    const high = Math.min(at + run.size, offset + size)
-    if (low < high) {
-      let data: Uint8Array
-      try {
-        data = await run.source.read(run.offset + low - at, high - low)
-      } catch (err) {
-        if (!run.source.closed) throw err
-        console.debug(`a spooled write at ${String(at)} landed under a read`)
+  const spools = new Set<ByteSpool>()
+  for (const [, run] of writes) if (run instanceof ByteSlice) spools.add(run.source)
+  for (const spool of spools) spool.hold()
+  try {
+    const out: [number, Uint8Array][] = []
+    for (const [at, run] of writes) {
+      if (!(run instanceof ByteSlice)) {
+        out.push([at, run])
         continue
       }
-      out.push([low, data])
+      const low = Math.max(at, offset)
+      const high = Math.min(at + run.size, offset + size)
+      if (low < high) out.push([low, await run.source.read(run.offset + low - at, high - low)])
+      out.push([at + run.size, new Uint8Array()])
     }
-    out.push([at + run.size, new Uint8Array()])
+    return out
+  } finally {
+    for (const spool of spools) await spool.unhold()
   }
-  return out
 }
 
 /**
  * The bytes one group of buffered writes leaves, from where it starts to
- * where it reaches, a window at a time. Mirrors Python's `run_stream`.
+ * where it reaches, a window at a time. Each window lays only the writes
+ * that reach it, so a flush costs the writes plus the windows, however many
+ * small edits a large file has. Mirrors Python's `run_stream`.
  *
  * Args:
  *   group: one of `runGroups`.
@@ -166,10 +165,22 @@ export async function* runStream(
 ): AsyncGenerator<Uint8Array> {
   const first = group[0]
   if (first === undefined) return
-  let end = first[0]
+  const start = first[0]
+  let end = start
   for (const [at, run] of group) end = Math.max(end, at + run.byteLength)
-  for (let offset = first[0]; offset < end; offset += MEMORY_LIMIT) {
+  const windows = Array.from(
+    { length: Math.ceil((end - start) / MEMORY_LIMIT) },
+    (): [number, Uint8Array | ByteSlice][] => [],
+  )
+  for (const write of group) {
+    const [at, run] = write
+    const last = Math.floor((at + run.byteLength - 1 - start) / MEMORY_LIMIT)
+    for (let index = Math.floor((at - start) / MEMORY_LIMIT); index <= last; index++)
+      windows[index]?.push(write)
+  }
+  for (const [index, writes] of windows.entries()) {
+    const offset = start + index * MEMORY_LIMIT
     const size = Math.min(MEMORY_LIMIT, end - offset)
-    yield overlaid(new Uint8Array(), offset, size, await windowWrites(group, offset, size))
+    yield overlaid(new Uint8Array(), offset, size, await windowWrites(writes, offset, size))
   }
 }
