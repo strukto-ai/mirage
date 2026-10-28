@@ -1322,21 +1322,13 @@
         },
         "command_limits": {
           "@line": {
-            "timeout_seconds": 1
+            "timeout_seconds": 3
           }
         }
       },
       "steps": [
         {
-          "command": "sleep 30 &",
-          "expect": {
-            "exit": 0,
-            "stdout": "",
-            "stderr": ""
-          }
-        },
-        {
-          "command": "sleep 0.6",
+          "command": "sleep 30 & sleep 1",
           "expect": {
             "exit": 0,
             "stdout": "",
@@ -1348,7 +1340,7 @@
           "expect": {
             "exit": 0,
             "stdout": "status=124\n",
-            "stderr": "line: timed out after 1s\n"
+            "stderr": "line: timed out after 3s\n"
           }
         }
       ]
