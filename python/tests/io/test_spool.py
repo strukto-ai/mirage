@@ -1,6 +1,8 @@
+import errno
+
 import pytest
 
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSlice, ByteSpool
 from mirage.io.types import materialize
 
 
@@ -44,3 +46,34 @@ async def test_fill_closes_source_when_spill_fails(monkeypatch):
         with pytest.raises(OSError, match="scratch full"):
             await spool.fill(source())
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_a_spool_that_lost_a_write_fails_every_call_after(monkeypatch):
+    def fail(**kwargs):
+        raise OSError("scratch full")
+
+    async with ByteSpool(4) as spool:
+        await spool.append(b"kept")
+        monkeypatch.setattr("mirage.io.spool.tempfile.TemporaryFile", fail)
+        with pytest.raises(OSError, match="scratch full"):
+            await spool.append(b"lost")
+        monkeypatch.undo()
+        with pytest.raises(OSError) as lost:
+            await spool.append(b"more")
+        assert lost.value.errno == errno.EIO
+        with pytest.raises(OSError):
+            await spool.read(0, 4)
+
+
+@pytest.mark.asyncio
+async def test_a_byte_slice_sizes_and_slices_as_its_window():
+    async with ByteSpool() as spool:
+        await spool.append(b"0123456789")
+        window = ByteSlice(spool, 2, 6)
+        head, tail = window[:2], window[4:]
+        assert len(window) == 6
+        assert (head.offset, len(head)) == (2, 2)
+        assert (tail.offset, len(tail)) == (6, 2)
+        assert len(window[10:]) == 0
+        assert await materialize(tail.stream()) == b"67"

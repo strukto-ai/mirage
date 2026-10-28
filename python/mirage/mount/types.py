@@ -14,11 +14,12 @@
 
 from dataclasses import dataclass, field
 
+from mirage.io.spool import ByteSlice, ByteSpool
 from mirage.runtime.handles import ChunkedHandle
 from mirage.runtime.handles.mode import READ, OpenMode
 from mirage.types import FileStat
 
-WriteBuf = list[tuple[int, bytearray]]
+WriteBuf = list[tuple[int, bytearray | ByteSlice]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +67,11 @@ class Handle:
     live: bool = False
     data: bytes | None = None
     write_buf: WriteBuf = field(default_factory=list)
+    # Where its writes wait past what memory holds, and how many bytes it
+    # has been handed, there yet or not, so a write knows its place in it
+    # before the spool has it.
+    spool: ByteSpool | None = None
+    spooled: int = 0
     # A large file reads a chunk at a time rather than hydrating whole.
     chunked: ChunkedHandle | None = None
     # Bumped whenever the file changes, so a first read that was out

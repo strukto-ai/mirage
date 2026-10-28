@@ -30,6 +30,7 @@ import { constants as osConstants, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import {
+  BaseVFS,
   FileType,
   fuseMount,
   Mount,
@@ -90,6 +91,52 @@ async function runSizelessProbe(
     result.api_stat_preopen_ok = pre === expectedPre
     result.api_cat = (await readFile(apiFile, 'utf8')).trim()
     result.api_size_postread = (await stat(apiFile)).size
+  } finally {
+    await handle.unmount()
+  }
+}
+
+/** A store with no pwrite, as S3, that keeps which kind of body each write came with. */
+class StreamedRAM extends RAMVFS {
+  bodies: string[] = []
+
+  constructor() {
+    super()
+    Object.defineProperty(this, 'pwrite', { value: Reflect.get(BaseVFS.prototype, 'pwrite') })
+  }
+
+  override write(...args: Parameters<RAMVFS['write']>): ReturnType<RAMVFS['write']> {
+    this.bodies.push(args[1] instanceof Uint8Array ? 'bytes' : 'stream')
+    return super.write(...args)
+  }
+}
+
+// Big-write probe: a file larger than a handle keeps in memory, written
+// through the kernel with its head rewritten last, lands whole as one
+// streamed write on a store with no pwrite.
+async function runBigWriteProbe(
+  result: Record<string, string | number | boolean | null>,
+): Promise<void> {
+  const store = new StreamedRAM()
+  store.store.dirs.add('/')
+  const ws = new Workspace({ '/store': new Mount(store, { mode: MountMode.WRITE }) })
+  const handle = await fuseMount(ws)
+  const path = join(handle.mountpoint, 'store', 'big.bin')
+  const block = Uint8Array.from({ length: 65536 }, (_, i) => i % 256)
+  const want = new Uint8Array(block.byteLength * 48)
+  for (let i = 0; i < 48; i++) want.set(block, i * block.byteLength)
+  want.set(new TextEncoder().encode('HEAD'), 0)
+  try {
+    const fh = await open(path, 'w')
+    try {
+      for (let i = 0; i < 48; i++) await fh.write(block, 0, block.byteLength, i * block.byteLength)
+      await fh.write(want, 0, 4, 0)
+    } finally {
+      await fh.close()
+    }
+    result.big_write_body_matches = Buffer.compare(await readFile(path), want) === 0
+    result.big_write_lands_as_one_stream =
+      store.bodies.length === 1 && store.bodies[0] === 'stream'
   } finally {
     await handle.unmount()
   }
@@ -520,6 +567,7 @@ async function main(): Promise<void> {
     await ws.close()
   }
   await runSizelessProbe(result)
+  await runBigWriteProbe(result)
   await runPolicyProbe(result)
   await runLinkProbe(result)
   await runSessionProbe(result)

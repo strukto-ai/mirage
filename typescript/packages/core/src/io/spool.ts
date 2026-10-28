@@ -21,12 +21,18 @@ export function setSpoolFactory(value: SpoolFactory | null): void {
   factory = value
 }
 
-/** Retain replayable bytes, spilling through the host's scratch storage. */
+/**
+ * Retain replayable bytes, spilling through the host's scratch storage. An
+ * append that fails leaves no telling which of its bytes were kept, so every
+ * call after it fails too, rather than read bytes from where the append never
+ * put them.
+ */
 export class ByteSpool {
   size = 0
+  closed = false
   private memory: Uint8Array[] = []
   private store: SpoolStore | null = null
-  private closed = false
+  private lost: unknown = undefined
   private pendingSize = 0
   private cache: Uint8Array = new Uint8Array()
   private cacheOffset = 0
@@ -49,11 +55,25 @@ export class ByteSpool {
   }
 
   append(data: Uint8Array): Promise<void> {
-    return this.locked(() => this.appendNow(data))
+    return this.locked(async () => {
+      this.usable()
+      try {
+        await this.appendNow(data)
+      } catch (error) {
+        this.lost = error
+        throw error
+      }
+    })
+  }
+
+  private usable(): void {
+    if (this.closed) throw new Error('spool is closed')
+    if (this.lost !== undefined) {
+      throw Object.assign(new Error('spool lost a write', { cause: this.lost }), { code: 'EIO' })
+    }
   }
 
   private async appendNow(data: Uint8Array): Promise<void> {
-    if (this.closed) throw new Error('spool is closed')
     this.cache = new Uint8Array()
     if (this.store === null && this.size + data.length > this.memoryLimit && factory !== null) {
       this.store = await factory()
@@ -102,7 +122,7 @@ export class ByteSpool {
   }
 
   private async readNow(offset: number, size: number): Promise<Uint8Array> {
-    if (this.closed) throw new Error('spool is closed')
+    this.usable()
     if (this.store !== null) {
       await this.flush()
       if (size > CHUNK_SIZE) return this.store.read(offset, size)
@@ -150,7 +170,7 @@ export class ByteSpool {
 
   body(kind: 'fetch' | 'sdk'): Promise<Uint8Array | Blob | AsyncIterable<Uint8Array>> {
     return this.locked(async () => {
-      if (this.closed) throw new Error('spool is closed')
+      this.usable()
       await this.flush()
       if (this.store?.body !== undefined) return this.store.body(kind)
       if (this.store !== null) throw new Error('scratch storage cannot provide an upload body')
@@ -214,12 +234,23 @@ export async function spooledPair(
   }
 }
 
+/** A window of a spool, sized and sliced as the bytes it stands for. */
 export class ByteSlice {
   constructor(
     readonly source: ByteSpool,
     readonly offset: number,
     readonly size: number,
   ) {}
+
+  get byteLength(): number {
+    return this.size
+  }
+
+  /** As `Uint8Array.subarray`, for the nonnegative bounds a buffer slices by. */
+  subarray(start = 0, end = this.size): ByteSlice {
+    const from = Math.min(start, this.size)
+    return new ByteSlice(this.source, this.offset + from, Math.max(0, Math.min(end, this.size) - from))
+  }
   stream(): AsyncGenerator<Uint8Array> {
     return this.source.stream(this.offset, this.size)
   }

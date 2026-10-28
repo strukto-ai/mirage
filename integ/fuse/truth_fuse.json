@@ -21,6 +21,8 @@
   "api_stat_preopen_ok": true,
   "api_cat": "{\"messages\": 2}",
   "api_size_postread": 16,
+  "big_write_body_matches": true,
+  "big_write_lands_as_one_stream": true,
   "policy_clean_read": "hello",
   "policy_sealed_eacces": true,
   "policy_redact_eacces": true,

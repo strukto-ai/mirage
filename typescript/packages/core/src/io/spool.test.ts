@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest'
-import { ByteSpool, setSpoolFactory } from './spool.ts'
+import { ByteSlice, ByteSpool, setSpoolFactory } from './spool.ts'
 import { materialize } from './types.ts'
 import { concat } from '../utils/bytes.ts'
 
@@ -102,4 +102,43 @@ it('closes its source when spilling fails', async () => {
     await spool.close()
   }
   expect(closed).toBe(true)
+})
+
+it('fails every call after an append it lost', async () => {
+  let fail = false
+  setSpoolFactory(() =>
+    Promise.resolve({
+      append: () => (fail ? Promise.reject(new Error('scratch full')) : Promise.resolve()),
+      read: (_offset, size) => Promise.resolve(new Uint8Array(size)),
+      close: () => Promise.resolve(),
+    }),
+  )
+  const spool = new ByteSpool(0)
+  try {
+    await spool.append(new Uint8Array(300000))
+    fail = true
+    await expect(spool.append(new Uint8Array(300000))).rejects.toThrow('scratch full')
+    fail = false
+    await expect(spool.append(new Uint8Array(1))).rejects.toMatchObject({ code: 'EIO' })
+    await expect(spool.read(0, 4)).rejects.toMatchObject({ code: 'EIO' })
+  } finally {
+    await spool.close()
+  }
+})
+
+it('sizes and slices a byte slice as its window', async () => {
+  const spool = new ByteSpool()
+  try {
+    await spool.append(new TextEncoder().encode('0123456789'))
+    const window = new ByteSlice(spool, 2, 6)
+    const head = window.subarray(0, 2)
+    const tail = window.subarray(4)
+    expect(window.byteLength).toBe(6)
+    expect([head.offset, head.byteLength]).toEqual([2, 2])
+    expect([tail.offset, tail.byteLength]).toEqual([6, 2])
+    expect(window.subarray(10).byteLength).toBe(0)
+    expect(new TextDecoder().decode(await materialize(tail.stream()))).toBe('67')
+  } finally {
+    await spool.close()
+  }
 })

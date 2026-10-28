@@ -21,6 +21,9 @@ import type { PathSpec } from '../types.ts'
 import type { Action, Policy, VfsContext } from '../policy/index.ts'
 import { enotsup, erofs, unnamedFsError } from '../errors/fs.ts'
 import { DIR_SIZE } from '../utils/stat_view.ts'
+import { ByteSlice, MEMORY_LIMIT } from '../io/spool.ts'
+import type { ByteSource } from '../io/types.ts'
+import type { Handed } from '../vfs/types.ts'
 import { READ_CHUNK } from '../runtime/handles/constants.ts'
 import { openMode } from '../runtime/handles/index.ts'
 import {
@@ -1930,5 +1933,117 @@ describe('MountCore opens', () => {
     await core.release(fh)
     expect(dec.decode(await core.read(path, -1, 0, 100))).toBe('hel')
     await expect(core.fstat(fh)).rejects.toMatchObject({ code: 'EBADF' })
+  })
+})
+
+/** A store with no pwrite, as S3, that keeps which kind of body each write came with. */
+class StreamedRAM extends RAMVFS {
+  bodies: string[] = []
+
+  constructor() {
+    super()
+    Object.defineProperty(this, 'pwrite', { value: Reflect.get(BaseVFS.prototype, 'pwrite') })
+  }
+
+  override write(
+    path: PathSpec,
+    data: ByteSource,
+    signal?: AbortSignal,
+    handed?: Handed,
+    atomic = false,
+  ): Promise<void> {
+    this.bodies.push(data instanceof Uint8Array ? 'bytes' : 'stream')
+    return super.write(path, data, signal, handed, atomic)
+  }
+}
+
+describe('MountCore past the memory limit', () => {
+  const BLOCK = Uint8Array.from({ length: 65536 }, (_, i) => i % 256)
+  const repeat = (count: number): Uint8Array => {
+    const out = new Uint8Array(BLOCK.byteLength * count)
+    for (let i = 0; i < count; i++) out.set(BLOCK, i * BLOCK.byteLength)
+    return out
+  }
+  const streamed = (): { core: MountCore; store: StreamedRAM } => {
+    const store = new StreamedRAM()
+    const ws = new Workspace({ '/data/': store }, { mode: MountMode.WRITE })
+    return { core: new MountCore(ws.vfs), store }
+  }
+  const flags = (value: number) => openMode(value, fsConstants)
+  const enc = new TextEncoder()
+  const MiB = 1024 * 1024
+
+  it('keeps the writes in a spool and lands them as one streamed write', async () => {
+    const { core, store } = streamed()
+    const fh = await core.open(
+      '/data/f',
+      flags(fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC),
+    )
+    for (let i = 0; i < 48; i++) await core.write('/data/f', fh, BLOCK, i * BLOCK.byteLength)
+    await core.write('/data/f', fh, enc.encode('HEAD'), 0)
+    const ctx = core.handles.get(fh)
+    const writes = ctx?.writeBuf ?? []
+    let held = 0
+    for (const [, run] of writes) if (run instanceof Uint8Array) held += run.byteLength
+    expect(writes[0]?.[1]).toBeInstanceOf(ByteSlice)
+    expect(held).toBeLessThanOrEqual(MEMORY_LIMIT)
+    const reader = await core.open('/data/f', flags(fsConstants.O_RDONLY))
+    expect(await core.read('/data/f', reader, 2 * MiB, 8)).toEqual(BLOCK.subarray(0, 8))
+    expect(await core.read('/data/f', reader, 0, 6)).toEqual(
+      new Uint8Array([...enc.encode('HEAD'), ...BLOCK.subarray(4, 6)]),
+    )
+    store.bodies.length = 0
+    await core.release(fh)
+    expect(store.bodies).toEqual(['stream'])
+    expect(ctx?.spool).toBeUndefined()
+    const want = repeat(48)
+    want.set(enc.encode('HEAD'), 0)
+    expect(store.store.files.get('/f')).toEqual(want)
+  })
+
+  it('keeps the tail of a longer file a spooled write lands in', async () => {
+    const { core, store } = streamed()
+    store.store.files.set('/f', new Uint8Array(4 * MiB).fill(97))
+    const fh = await core.open('/data/f', flags(fsConstants.O_WRONLY))
+    for (let i = 0; i < 32; i++) await core.write('/data/f', fh, BLOCK, i * BLOCK.byteLength)
+    await core.release(fh)
+    const want = new Uint8Array(4 * MiB).fill(97)
+    want.set(repeat(32), 0)
+    expect(store.store.files.get('/f')).toEqual(want)
+  })
+
+  it('lands an appending handle\'s spooled writes at the end', async () => {
+    const { core, store } = streamed()
+    store.store.files.set('/f', enc.encode('head'))
+    const fh = await core.open('/data/f', flags(fsConstants.O_WRONLY | fsConstants.O_APPEND))
+    for (let i = 0; i < 24; i++) await core.write('/data/f', fh, BLOCK, 0)
+    await core.release(fh)
+    expect(store.store.files.get('/f')).toEqual(new Uint8Array([...enc.encode('head'), ...repeat(24)]))
+  })
+
+  it('keeps the spooled writes of a landing that fails for the retry', async () => {
+    const { core, store } = streamed()
+    const fh = await core.open('/data/f', flags(fsConstants.O_WRONLY | fsConstants.O_CREAT))
+    for (let i = 0; i < 24; i++) await core.write('/data/f', fh, BLOCK, i * BLOCK.byteLength)
+    vi.spyOn(store, 'write').mockRejectedValueOnce(unnamedFsError('EACCES', 'denied'))
+    await expect(core.flush('/data/f', fh)).rejects.toMatchObject({ code: 'EACCES' })
+    await core.release(fh)
+    expect(store.store.files.get('/f')).toEqual(repeat(24))
+  })
+
+  it('cuts what one handle holds in its spool where another writes', async () => {
+    const { core, store } = streamed()
+    const first = await core.open(
+      '/data/f',
+      flags(fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC),
+    )
+    for (let i = 0; i < 24; i++) await core.write('/data/f', first, BLOCK, i * BLOCK.byteLength)
+    const second = await core.open('/data/f', flags(fsConstants.O_WRONLY))
+    await core.write('/data/f', second, enc.encode('SECOND'), MiB)
+    await core.release(second)
+    await core.release(first)
+    const want = repeat(24)
+    want.set(enc.encode('SECOND'), MiB)
+    expect(store.store.files.get('/f')).toEqual(want)
   })
 })

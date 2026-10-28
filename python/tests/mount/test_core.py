@@ -14,9 +14,11 @@
 
 import asyncio
 import errno
+import hashlib
 import logging
 import os
 import stat
+import tracemalloc
 from dataclasses import replace
 from unittest.mock import AsyncMock
 
@@ -25,6 +27,7 @@ import pytest_asyncio
 
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.types import OperationNotSupportedError, ReadOnlyError
+from mirage.io.spool import MEMORY_LIMIT, ByteSlice
 from mirage.mount import core as core_module
 from mirage.mount.constants import LISTING_CONCURRENCY
 from mirage.mount.core import MountCore
@@ -1854,3 +1857,143 @@ async def test_an_open_lands_its_modes_effect_before_any_byte_moves(
     assert landed == effects
     if world == "file":
         assert (await ws.vfs.read("/data/f") == b"body") == kept
+
+
+class _StreamedRAM(RAMVFS):
+    """A store with no pwrite, as S3, that keeps which kind of body each
+    write came with."""
+
+    pwrite = BaseVFS.pwrite
+
+    def __init__(self):
+        super().__init__()
+        self.bodies: list[str] = []
+
+    async def write(self, path, data, *, atomic=False):
+        self.bodies.append("bytes" if isinstance(data, bytes) else "stream")
+        await super().write(path, data, atomic=atomic)
+
+
+def _streamed_core() -> tuple[MountCore, _StreamedRAM]:
+    store = _StreamedRAM()
+    ws = Workspace({"/": store}, mode=MountMode.WRITE)
+    return MountCore(ws.vfs), store
+
+
+BLOCK = bytes(range(256)) * 256
+
+
+@pytest.mark.asyncio
+async def test_a_write_past_the_memory_limit_waits_in_a_spool_and_streams():
+    core, store = _streamed_core()
+    fh = await core.open(
+        "/f", open_mode(os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    )
+    for i in range(48):
+        await core.write("/f", BLOCK, i * len(BLOCK), fh)
+    await core.write("/f", b"HEAD", 0, fh)
+    ctx = core.handles.get(fh)
+    held = [run for _, run in ctx.write_buf if isinstance(run, bytearray)]
+    assert isinstance(ctx.write_buf[0][1], ByteSlice)
+    assert sum(len(run) for run in held) <= MEMORY_LIMIT
+    reader = await core.open("/f", open_mode(os.O_RDONLY))
+    assert await core.read("/f", 8, 2 * 1024 * 1024, reader) == BLOCK[:8]
+    assert await core.read("/f", 6, 0, reader) == b"HEAD" + BLOCK[4:6]
+    store.bodies.clear()
+    await core.release(fh)
+    assert store.bodies == ["stream"]
+    assert ctx.spool is None
+    assert store._store.files["/f"] == b"HEAD" + (BLOCK * 48)[4:]
+
+
+@pytest.mark.asyncio
+async def test_a_spooled_write_into_a_longer_file_keeps_its_tail():
+    core, store = _streamed_core()
+    store._store.files["/f"] = b"a" * (4 * 1024 * 1024)
+    fh = await core.open("/f", open_mode(os.O_WRONLY))
+    for i in range(32):
+        await core.write("/f", BLOCK, i * len(BLOCK), fh)
+    await core.release(fh)
+    assert store._store.files["/f"] == BLOCK * 32 + b"a" * (2 * 1024 * 1024)
+
+
+@pytest.mark.asyncio
+async def test_an_appending_handle_lands_its_spooled_writes_at_the_end():
+    core, store = _streamed_core()
+    store._store.files["/f"] = b"head"
+    fh = await core.open("/f", open_mode(os.O_WRONLY | os.O_APPEND))
+    for _ in range(24):
+        await core.write("/f", BLOCK, 0, fh)
+    await core.release(fh)
+    assert store._store.files["/f"] == b"head" + BLOCK * 24
+
+
+@pytest.mark.asyncio
+async def test_a_spooled_landing_that_fails_keeps_its_writes_for_the_retry():
+    core, store = _streamed_core()
+    fh = await core.open("/f", open_mode(os.O_WRONLY | os.O_CREAT))
+    for i in range(24):
+        await core.write("/f", BLOCK, i * len(BLOCK), fh)
+    real = store.write
+
+    async def refused(path, data, *, atomic=False):
+        raise PermissionError(errno.EACCES, "denied", path)
+
+    store.write = refused
+    with pytest.raises(PermissionError):
+        await core.flush("/f", fh)
+    store.write = real
+    await core.release(fh)
+    assert store._store.files["/f"] == BLOCK * 24
+
+
+@pytest.mark.asyncio
+async def test_another_handles_write_cuts_what_one_holds_in_its_spool():
+    core, store = _streamed_core()
+    first = await core.open(
+        "/f", open_mode(os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    )
+    for i in range(24):
+        await core.write("/f", BLOCK, i * len(BLOCK), first)
+    second = await core.open("/f", open_mode(os.O_WRONLY))
+    await core.write("/f", b"SECOND", 1024 * 1024, second)
+    await core.release(second)
+    await core.release(first)
+    want = bytearray(BLOCK * 24)
+    want[1024 * 1024 : 1024 * 1024 + 6] = b"SECOND"
+    assert store._store.files["/f"] == want
+
+
+class _DigestRAM(_StreamedRAM):
+    """Keeps a written stream's digest rather than its bytes."""
+
+    digest = ""
+
+    async def write(self, path, data, *, atomic=False):
+        if isinstance(data, bytes):
+            return await super().write(path, data, atomic=atomic)
+        digest = hashlib.sha256()
+        async for part in data:
+            digest.update(part)
+        self.digest = digest.hexdigest()
+        await super().write(path, b"", atomic=atomic)
+
+
+@pytest.mark.asyncio
+async def test_a_large_write_holds_a_bounded_amount_of_memory():
+    store = _DigestRAM()
+    core = MountCore(Workspace({"/": store}, mode=MountMode.WRITE).vfs)
+    block = BLOCK * 4
+    fh = await core.open(
+        "/f", open_mode(os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    )
+    tracemalloc.start()
+    try:
+        for i in range(64):
+            await core.write("/f", block, i * len(block), fh)
+        await core.release(fh)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert store.digest == hashlib.sha256(block * 64).hexdigest()
+    assert peak < 8 * 1024 * 1024

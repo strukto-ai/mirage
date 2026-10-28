@@ -12,7 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.handles.file_handle import overlaid, write_runs
+import pytest
+
+from mirage.io.spool import ByteSlice, ByteSpool
+from mirage.io.types import materialize
+from mirage.runtime.handles.file_handle import (
+    overlaid,
+    run_groups,
+    run_stream,
+    window_writes,
+    write_runs,
+)
 
 
 def test_write_runs_fold_a_sequential_stream_into_one():
@@ -38,3 +48,44 @@ def test_overlaid_lays_writes_over_the_stored_window_in_arrival_order():
 def test_overlaid_grows_the_file_and_reads_a_gap_as_zeros():
     assert overlaid(b"ab", 0, 10, [(4, b"Q")]) == b"ab\x00\x00Q"
     assert overlaid(b"", 8, 4, [(4, b"Q")]) == b""
+
+
+def test_run_groups_hold_the_writes_each_run_folds():
+    writes = [(0, b"ab"), (1, b"X"), (2, b"cd"), (10, b"q"), (0, b"z")]
+    groups = run_groups(writes)
+    assert groups == [
+        [(0, b"ab"), (1, b"X"), (2, b"cd")],
+        [(10, b"q")],
+        [(0, b"z")],
+    ]
+    assert [write_runs(group)[0] for group in groups] == write_runs(writes)
+
+
+@pytest.mark.asyncio
+async def test_window_writes_read_a_spooled_write_for_the_window_alone():
+    async with ByteSpool() as spool:
+        await spool.append(b"0123456789")
+        writes = [(100, ByteSlice(spool, 0, 10)), (104, b"XY")]
+        assert await window_writes(writes, 102, 4) == [
+            (102, b"2345"),
+            (110, b""),
+            (104, b"XY"),
+        ]
+        laid = await window_writes(writes, 96, 2)
+        assert laid == [(110, b""), (104, b"XY")]
+        assert overlaid(b"", 96, 2, laid) == bytes(2)
+    assert await window_writes(writes, 102, 4) == [(104, b"XY")]
+
+
+@pytest.mark.asyncio
+async def test_run_stream_leaves_what_the_folded_run_holds():
+    data = bytes(range(256)) * 10240
+    async with ByteSpool() as spool:
+        await spool.append(data)
+        group = [
+            (0, ByteSlice(spool, 0, len(data))),
+            (2, bytearray(b"XY")),
+            (len(data), bytearray(b"tail")),
+        ]
+        folded = write_runs([(0, data), (2, b"XY"), (len(data), b"tail")])
+        assert await materialize(run_stream(group)) == folded[0][1]

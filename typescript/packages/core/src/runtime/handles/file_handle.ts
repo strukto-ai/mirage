@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSlice, MEMORY_LIMIT } from '../../io/spool.ts'
 import { concat } from '../../utils/bytes.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 
@@ -81,4 +82,94 @@ export function overlaid(
     if (low < high) out.set(data.subarray(low - start, high - start), low - offset)
   }
   return out
+}
+
+/**
+ * Buffered writes in the groups `writeRuns` folds into one run each,
+ * unfolded, for a buffer some of whose writes wait in a spool. Mirrors
+ * Python's `run_groups`.
+ *
+ * Args:
+ *   writes: the buffered writes, in arrival order.
+ */
+export function runGroups(
+  writes: readonly [number, Uint8Array | ByteSlice][],
+): [number, Uint8Array | ByteSlice][][] {
+  const groups: [number, Uint8Array | ByteSlice][][] = []
+  let start = 0
+  let end = 0
+  for (const [offset, chunk] of writes) {
+    const last = groups.at(-1)
+    if (last !== undefined && start <= offset && offset <= end) {
+      last.push([offset, chunk])
+      end = Math.max(end, offset + chunk.byteLength)
+      continue
+    }
+    groups.push([[offset, chunk]])
+    start = offset
+    end = offset + chunk.byteLength
+  }
+  return groups
+}
+
+/**
+ * Buffered writes as `overlaid` lays them over a read window: a write
+ * waiting in a spool is read for the part of the window it covers, and past
+ * that keeps only where it ends, so the read still reaches as far as the
+ * file does. A spool closed meanwhile was a handle's that has gone and
+ * landed what it held, so its writes are left out, as a buffer that landed
+ * under a read is. Mirrors Python's `window_writes`.
+ *
+ * Args:
+ *   writes: the buffered writes, in arrival order.
+ *   offset: where the window starts.
+ *   size: the window's length.
+ */
+export async function windowWrites(
+  writes: readonly [number, Uint8Array | ByteSlice][],
+  offset: number,
+  size: number,
+): Promise<[number, Uint8Array][]> {
+  const out: [number, Uint8Array][] = []
+  for (const [at, run] of writes) {
+    if (!(run instanceof ByteSlice)) {
+      out.push([at, run])
+      continue
+    }
+    const low = Math.max(at, offset)
+    const high = Math.min(at + run.size, offset + size)
+    if (low < high) {
+      let data: Uint8Array
+      try {
+        data = await run.source.read(run.offset + low - at, high - low)
+      } catch (err) {
+        if (!run.source.closed) throw err
+        console.debug(`a spooled write at ${String(at)} landed under a read`)
+        continue
+      }
+      out.push([low, data])
+    }
+    out.push([at + run.size, new Uint8Array()])
+  }
+  return out
+}
+
+/**
+ * The bytes one group of buffered writes leaves, from where it starts to
+ * where it reaches, a window at a time. Mirrors Python's `run_stream`.
+ *
+ * Args:
+ *   group: one of `runGroups`.
+ */
+export async function* runStream(
+  group: readonly [number, Uint8Array | ByteSlice][],
+): AsyncGenerator<Uint8Array> {
+  const first = group[0]
+  if (first === undefined) return
+  let end = first[0]
+  for (const [at, run] of group) end = Math.max(end, at + run.byteLength)
+  for (let offset = first[0]; offset < end; offset += MEMORY_LIMIT) {
+    const size = Math.min(MEMORY_LIMIT, end - offset)
+    yield overlaid(new Uint8Array(), offset, size, await windowWrites(group, offset, size))
+  }
 }

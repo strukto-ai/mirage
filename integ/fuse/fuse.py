@@ -28,9 +28,11 @@ from typing import IO
 
 from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.fuse.mount import mount_background, resolve_fusermount_binary
+from mirage.io.types import ByteSource
 from mirage.policy import Policy
 from mirage.policy.types import Deny, VfsContext, VfsResultContext
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 
 # What a probe records: a captured file body or stat string, a byte
@@ -395,6 +397,60 @@ def run_sizeless_probe(result: dict[str, ProbeValue]) -> None:
             )
 
 
+class StreamedRAM(RAMVFS):
+    """A store with no pwrite, as S3, that keeps which kind of body each
+    write came with."""
+
+    pwrite = BaseVFS.pwrite
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.bodies: list[str] = []
+
+    async def write(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
+    ) -> None:
+        self.bodies.append("bytes" if isinstance(data, bytes) else "stream")
+        await super().write(path, data, atomic=atomic)
+
+
+def run_big_write_probe(result: dict[str, ProbeValue]) -> None:
+    """Record that a file larger than a handle keeps in memory, written
+    through the kernel with its head rewritten last, lands whole as one
+    streamed write on a store with no pwrite.
+
+    Args:
+        result (dict[str, ProbeValue]): the probe result to extend.
+    """
+    store = StreamedRAM()
+    store._store.dirs.add("/")
+    ws = Workspace({"/store": Mount(store, mode=MountMode.WRITE)})
+    mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-big-")
+    mount_background(ws.vfs, mountpoint)
+    block = bytes(range(256)) * 256
+    path = f"{mountpoint}/store/big.bin"
+    try:
+        with open(path, "wb") as fh:
+            for _ in range(48):
+                fh.write(block)
+            fh.seek(0)
+            fh.write(b"HEAD")
+        with open(path, "rb") as fh:
+            body = fh.read()
+        result["big_write_body_matches"] = body == b"HEAD" + (block * 48)[4:]
+        result["big_write_lands_as_one_stream"] = store.bodies == ["stream"]
+    finally:
+        if sys.platform == "darwin":
+            subprocess.run(
+                ["diskutil", "unmount", "force", mountpoint],
+                capture_output=True,
+            )
+        elif sys.platform != "win32":
+            subprocess.run(
+                ["fusermount", "-u", mountpoint], capture_output=True
+            )
+
+
 def run_capacity_probe(result: dict[str, ProbeValue]) -> None:
     """Record that a capped RAM store refuses a kernel write past its cap.
 
@@ -624,6 +680,7 @@ def main() -> None:
         result["collision_rejected"] = collision
 
     run_sizeless_probe(result)
+    run_big_write_probe(result)
     run_policy_probe(result)
     run_link_probe(result)
     run_session_probe(result)
