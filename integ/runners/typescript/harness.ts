@@ -85,7 +85,9 @@ export type TargetRunner = (
   emit: EmitRow[] | null,
 ) => Promise<void>
 
-export interface EmitRow {
+export type EmitRow = { target: string; skip: 'non_root' } | EmitCase
+
+interface EmitCase {
   target: string
   id: string
   exit: number

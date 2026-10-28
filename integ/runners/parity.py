@@ -39,7 +39,7 @@ MEMORY_TARGETS = ["mem0"]
 
 def load(path: str) -> dict[tuple[str, str], dict]:
     rows = json.loads(Path(path).read_text())
-    return {(r["target"], r["id"]): r for r in rows}
+    return {(r["target"], "" if "skip" in r else r["id"]): r for r in rows}
 
 
 def emit_python(out: str, target_args: list[str]) -> int:
@@ -72,6 +72,10 @@ def emit_typescript(out: str, target_args: list[str]) -> int:
 
 
 def diff_row(a: dict, b: dict) -> list[str]:
+    if "skip" in a or "skip" in b:
+        if a.get("skip") == b.get("skip"):
+            return []
+        return [f"skip py={a.get('skip')!r} ts={b.get('skip')!r}"]
     diffs: list[str] = []
     if a["exit"] != b["exit"]:
         diffs.append(f"exit py={a['exit']} ts={b['exit']}")
@@ -167,16 +171,20 @@ def main() -> None:
         if diffs:
             mismatches += 1
             print(f"DIFF [{target}] {case_id}: {'; '.join(diffs)}")
+        elif "skip" in a:
+            print(f"SKIP [{target}]: {a['skip']}")
 
-    compared = len(py.keys() & ts.keys())
+    pairs = py.keys() & ts.keys()
+    skipped = sum("skip" in py[k] and "skip" in ts[k] for k in pairs)
+    compared = len(pairs) - skipped
     print(
         f"\n{compared} case/target pairs compared, {mismatches} mismatch(es)"
         f" across targets: {', '.join(targets)}"
+        f"; {skipped} target skip(s) compared"
     )
-    # Both emit runs skip a target whose service never came up, and a run
-    # that compared nothing agrees with itself trivially. Zero pairs is a
-    # broken run, never a clean one.
-    if compared == 0:
+    # Empty emits can hide a service that never came up. Only an explicit
+    # skip shared by both hosts can stand in for compared case rows.
+    if compared == 0 and skipped == 0:
         print("no case/target pairs compared", file=sys.stderr)
         sys.exit(2)
     # Each runner checks its own goldens too, and a case that misses its

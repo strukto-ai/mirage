@@ -1710,17 +1710,31 @@ def selftest_non_root_targets() -> None:
     err = io.StringIO()
     run = AsyncMock()
     with (
+        tempfile.TemporaryDirectory() as tmp,
         patch.object(os, "geteuid", return_value=0),
         patch.object(
             sys,
             "argv",
-            [str(MAIN), "--target", "disk-capacity-permissions", "--strict"],
+            [
+                str(MAIN),
+                "--target",
+                "disk-capacity-permissions",
+                "--strict",
+                "--emit",
+                str(Path(tmp) / "py.json"),
+            ],
         ),
         patch.object(runner_main, "run_target", run),
         contextlib.redirect_stdout(out),
         contextlib.redirect_stderr(err),
     ):
         asyncio.run(runner_main.main())
+        rows = json.loads((Path(tmp) / "py.json").read_text())
+    check(
+        "non-root target (py): emits an explicit skip",
+        rows == [{"target": "disk-capacity-permissions", "skip": "non_root"}],
+        str(rows),
+    )
     check(
         "non-root target (py): root skips without opening it",
         run.await_count == 0 and "requires a non-root user" in err.getvalue(),
@@ -1737,12 +1751,25 @@ def selftest_non_root_targets() -> None:
     script = (
         "process.geteuid = () => 0; "
         "process.argv = ['node', 'main.ts', '--target', "
-        "'disk-capacity-permissions', '--strict']; "
+        "'disk-capacity-permissions', '--strict', '--emit', process.env.SKIP_EMIT]; "
         "import('./runners/typescript/main.ts')"
     )
-    proc = subprocess.run(
-        [str(TSX), "--eval", script], cwd=ROOT, capture_output=True, text=True
-    )
+    with tempfile.TemporaryDirectory() as tmp:
+        emit = Path(tmp) / "ts.json"
+        proc = subprocess.run(
+            [str(TSX), "--eval", script],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "SKIP_EMIT": str(emit)},
+        )
+        check(
+            "non-root target (ts): emits an explicit skip",
+            emit.is_file()
+            and json.loads(emit.read_text())
+            == [{"target": "disk-capacity-permissions", "skip": "non_root"}],
+            proc.stdout + proc.stderr,
+        )
     check(
         "non-root target (ts): root skips the permission fixture",
         proc.returncode == 0
@@ -1769,6 +1796,56 @@ def selftest_non_root_targets() -> None:
     )
 
 
+def selftest_saved_skips() -> None:
+    """Saved comparisons distinguish explicit skips from missing results."""
+    skip = {"target": "disk-capacity-permissions", "skip": "non_root"}
+    row = {
+        "target": "disk-capacity-permissions",
+        "id": "write",
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "check": None,
+    }
+    ram_row = {**row, "target": "ram"}
+    cases = [
+        ("matching skips", [skip], [skip], 0),
+        ("missing outputs", [], [], 2),
+        ("missing host", [skip], [], 2),
+        ("different reasons", [skip], [{**skip, "skip": "other"}], 1),
+        ("skip versus cases", [skip], [row], 2),
+        ("matching cases", [row], [row], 0),
+        ("skips alongside cases", [skip, ram_row], [skip, ram_row], 0),
+        ("one-sided skip alongside cases", [skip, ram_row], [ram_row], 1),
+        ("missing target alongside cases", [ram_row], [ram_row], 2),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for host in ("python", "typescript"):
+            (root / host).mkdir()
+        for name, py, ts, code in cases:
+            (root / "python" / "emit.json").write_text(json.dumps(py))
+            (root / "typescript" / "emit.json").write_text(json.dumps(ts))
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "runners" / "parity.py"),
+                    "--from",
+                    str(root),
+                    "disk-capacity-permissions",
+                    *(["ram"] if ram_row in py or ram_row in ts else []),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            check(
+                f"saved skips: {name}",
+                proc.returncode == code,
+                proc.stdout + proc.stderr,
+            )
+
+
 def main() -> None:
     selftest_services_table()
     selftest_case_validation()
@@ -1783,6 +1860,7 @@ def main() -> None:
     selftest_case_targets()
     selftest_shard()
     selftest_non_root_targets()
+    selftest_saved_skips()
     selftest_typescript_gates("--require-ts" in sys.argv)
     print()
     if FAILURES:

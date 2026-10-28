@@ -441,6 +441,7 @@ async function main(): Promise<void> {
     }
     if (target.non_root === true && process.geteuid?.() === 0) {
       process.stderr.write(`skip [${id}]: requires a non-root user\n`)
+      emit?.push({ target: id, skip: 'non_root' })
       continue
     }
     if (!(target.mounts[0].vfs in ADAPTERS)) {

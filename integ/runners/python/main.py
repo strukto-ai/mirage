@@ -544,6 +544,8 @@ async def main() -> None:
                 f"skip [{target_id}]: requires a non-root user",
                 file=sys.stderr,
             )
+            if emit is not None:
+                emit.append({"target": target_id, "skip": "non_root"})
             continue
         if target["mounts"][0]["vfs"] not in adapters.BUILDERS:
             print(f"skip [{target_id}]: no {HOST} adapter", file=sys.stderr)
