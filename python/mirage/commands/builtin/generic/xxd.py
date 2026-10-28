@@ -66,9 +66,14 @@ def _dump(
     )
 
 
-def _plain(source: AsyncIterator[bytes], uppercase: bool) -> OutputStream:
+def _plain(
+    source: AsyncIterator[bytes], uppercase: bool, cols: int
+) -> OutputStream:
     return stream_output(
-        open_stream("xxd", {"mode": "plain", "uppercase": uppercase}), source
+        open_stream(
+            "xxd", {"mode": "plain", "uppercase": uppercase, "cols": cols}
+        ),
+        source,
     )
 
 
@@ -388,7 +393,7 @@ async def xxd(
     if reverse:
         return _xxd_reverse_stream(source, io, plain), io
     if plain:
-        return _plain(source, uppercase), io
+        return _plain(source, uppercase, cols), io
     return _dump(source, cols, group, uppercase, base), io
 
 
@@ -438,7 +443,7 @@ async def _write_output(
             segments = await _reverse_segments(source, plain)
         else:
             data = await prime_stream(
-                _plain(source, uppercase)
+                _plain(source, uppercase, cols)
                 if plain
                 else _dump(source, cols, group, uppercase, base),
                 failed,
@@ -551,7 +556,8 @@ def _group_of(text: str | None, cols: int) -> int:
 def parse_flags(flags: Mapping[str, FlagValue]) -> XxdFlags:
     fl = FlagView(flags, spec=SPECS["xxd"])
     plain = fl.as_bool("p")
-    # -c 0 is the default, and only a dump outside -p caps the count.
+    # Only a dump outside -p caps the count. -c 0 is a dump's default 16,
+    # and puts all of a -p dump on one line, whose default is 30.
     cols = fl.as_number(
         "c",
         _octets,
@@ -559,7 +565,10 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> XxdFlags:
         low=0,
         high=None if plain else COLS_MAX,
     )
-    cols = 16 if cols is None or cols == 0 else cols
+    if plain:
+        cols = 30 if cols is None else cols
+    else:
+        cols = cols or 16
     return XxdFlags(
         reverse=fl.as_bool("r"),
         plain=plain,

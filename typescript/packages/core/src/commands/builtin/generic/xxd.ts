@@ -63,8 +63,9 @@ function dumpStream(
 function plainStream(
   source: AsyncIterable<Uint8Array>,
   uppercase: boolean,
+  cols: number,
 ): Promise<AsyncIterable<Uint8Array>> {
-  return openStream('xxd', { mode: 'plain', uppercase }).then((stream) =>
+  return openStream('xxd', { mode: 'plain', uppercase, cols }).then((stream) =>
     streamOutput(stream, source),
   )
 }
@@ -390,12 +391,14 @@ function groupOf(text: string | undefined, cols: number): number {
 function parseFlags(bag: Record<string, FlagValue>): XxdFlags {
   const fl = new FlagView(bag, specOf('xxd'))
   const plain = fl.asBool('p')
-  // -c 0 is the default, and only a dump outside -p caps the count.
   const typedCols = fl.asNumber('c', octets, colsRefusal, {
     low: 0n,
     ...(plain ? {} : { high: BigInt(COLS_MAX) }),
   })
-  const cols = typedCols === undefined || typedCols === 0n ? 16 : Number(typedCols)
+  // Only a dump outside -p caps the count. -c 0 is a dump's default 16, and
+  // puts all of a -p dump on one line, whose default is 30.
+  const typed = typedCols === undefined ? undefined : Number(typedCols)
+  const cols = plain ? (typed ?? 30) : typed || 16
   return {
     reverse: fl.asBool('r'),
     plain,
@@ -445,7 +448,7 @@ export async function xxdGeneric(
   }
   const render = async (): Promise<AsyncIterable<Uint8Array> | null> => {
     if (parsed.reverse) return null
-    if (parsed.plain) return plainStream(source, uppercase)
+    if (parsed.plain) return plainStream(source, uppercase, parsed.cols)
     return dumpStream(source, parsed.cols, parsed.group, uppercase, base)
   }
   const target = paths[1]
