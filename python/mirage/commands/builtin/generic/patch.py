@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import UINTMAX
 from mirage.commands.builtin.utils.links import (
+    link_location,
     links_of,
     mount_root,
     name_location,
@@ -165,6 +166,10 @@ class _PatchFiles:
     def _linked(self, spec: PathSpec) -> str | None:
         """Where the link a name ends in stands, None when it ends in none.
 
+        A name with dots walks its parent as the kernel does, each link
+        followed before the ``..`` after it, so ``link/../f`` looks for
+        ``f`` beside where ``link`` leads.
+
         Args:
             spec (PathSpec): the name, as the engine gave it.
         """
@@ -172,6 +177,8 @@ class _PatchFiles:
             return None
         try:
             where = name_location(self.links, spec, self.cwd)
+            if where is not None and spec.dotted is not None:
+                where = link_location(self.links, spec.dotted)
         except CycleError as exc:
             logger.debug("no link ends %r: %s", spec.virtual, exc)
             return None
