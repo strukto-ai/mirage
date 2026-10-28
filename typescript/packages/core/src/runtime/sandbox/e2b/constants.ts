@@ -19,5 +19,5 @@ export const PTY_MARK = new Uint8Array([1, ...new TextEncoder().encode('mirage-s
 export const PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; "
 
 // envd reports a write to an input the command has closed (head) as the
-// EPIPE text inside a generic INTERNAL error, with no class of its own.
-export const BROKEN_PIPE = 'broken pipe'
+// broken-pipe or closed-file text inside a generic INTERNAL error.
+export const CLOSED_INPUT = ['broken pipe', 'file already closed'] as const

@@ -19,5 +19,5 @@ PTY_MARK = b"\x01mirage-sftp\x02"
 PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; "
 
 # envd reports a write to an input the command has closed (head) as the
-# EPIPE text inside a generic INTERNAL error, with no class of its own.
-BROKEN_PIPE = "broken pipe"
+# broken-pipe or closed-file text inside a generic INTERNAL error.
+CLOSED_INPUT = ("broken pipe", "file already closed")

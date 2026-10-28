@@ -88,9 +88,10 @@ class FakeHandle {
   async wait(): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     if (this.command === 'sleep' || this.command === 'native-sleep')
       return new Promise<{ stdout: string; stderr: string; exitCode: number }>(() => undefined)
-    if (this.command === 'exit 3') {
+    if (this.command === 'exit 3' || this.command === 'exit 0') {
       if (!this.eof) await Promise.race([this.sent.promise, this.closed.promise])
       await new Promise((resolve) => setTimeout(resolve, 0))
+      if (this.command === 'exit 0') return { stdout: 'partial', stderr: 'boom-err', exitCode: 0 }
       throw new FakeExitError(3, 'partial', 'boom-err')
     }
     const hex = (): string => Buffer.from(this.input).toString('hex')
@@ -289,25 +290,30 @@ describe('E2BRuntime', () => {
     new FakeSandboxError(
       "13: [internal] error writing to stdin of process '2815': write |1: broken pipe",
     ),
-  ])('preserves a nonzero exit when stdin races exit: %s', async (inputError) => {
-    const runtime = makeRuntime()
-    await runtime.connect()
-    FakeSandbox.last.commands.inputError = inputError
-    const result = await runtime.execLine(
-      'exit 3',
-      new TextEncoder().encode('input'),
-      {},
-      '/workspace',
-    )
-    expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
-      3,
-      'partial',
-      'boom-err',
-    ])
-    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
-      disconnected: true,
-      killed: false,
-    })
+    new FakeSandboxError(
+      "13: [internal] error writing to stdin: error writing to stdin of process '2822': write |1: file already closed",
+    ),
+  ])('preserves the command exit when stdin races exit: %s', async (inputError) => {
+    for (const exitCode of [0, 3]) {
+      const runtime = makeRuntime()
+      await runtime.connect()
+      FakeSandbox.last.commands.inputError = inputError
+      const result = await runtime.execLine(
+        `exit ${String(exitCode)}`,
+        new TextEncoder().encode('input'),
+        {},
+        '/workspace',
+      )
+      expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
+        exitCode,
+        'partial',
+        'boom-err',
+      ])
+      expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
+        disconnected: true,
+        killed: false,
+      })
+    }
   })
   it('connects once and keeps parallel input separate', async () => {
     const runtime = makeRuntime()

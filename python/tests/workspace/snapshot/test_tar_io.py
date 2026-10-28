@@ -12,7 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import bz2
+import gzip
 import io
+import json
+import lzma
 import tarfile
 
 import pytest
@@ -110,3 +114,122 @@ def test_a_staged_blob_stays_inside_the_staging_directory(tmp_path):
     with pytest.raises(ValueError, match="Unsafe blob path"):
         read_tar(buffer, staging)
     assert not (outside / "f").exists()
+
+
+@pytest.mark.parametrize(
+    "compressor", [None, gzip.compress, bz2.compress, lzma.compress]
+)
+@pytest.mark.parametrize("staging", [False, True])
+def test_snapshot_budget_limits_decoded_members(tmp_path, compressor, staging):
+    manifest = (
+        _disk_manifest("b/f") if staging else {"blob": {BLOB_REF_KEY: "b/f"}}
+    )
+    buffer = io.BytesIO()
+    write_tar(buffer, manifest, {"b/f": b"x" * 128_000})
+    raw = buffer.getvalue()
+    data = raw if compressor is None else compressor(raw)
+    with pytest.raises(
+        ValueError, match="snapshot exceeds expanded size limit"
+    ):
+        read_tar(
+            io.BytesIO(data), tmp_path if staging else None, max_bytes=32_768
+        )
+
+
+@pytest.mark.parametrize(
+    "compressor", [None, gzip.compress, bz2.compress, lzma.compress]
+)
+def test_snapshot_budget_limits_the_manifest(compressor):
+    buffer = io.BytesIO()
+    write_tar(buffer, {"padding": "x" * 128_000}, {})
+    raw = buffer.getvalue()
+    data = raw if compressor is None else compressor(raw)
+    with pytest.raises(
+        ValueError, match="snapshot exceeds expanded size limit"
+    ):
+        read_tar(io.BytesIO(data), max_bytes=32_768)
+
+
+def test_repeated_references_share_the_restore_budget(tmp_path):
+    for staging in (None, tmp_path):
+        manifest = _disk_manifest("b/f") if staging else {}
+        manifest["references"] = [{BLOB_REF_KEY: "./b//f"}] * 16
+        buffer = io.BytesIO()
+        write_tar(buffer, manifest, {"b/f": b"x" * 16_384})
+        assert len(buffer.getvalue()) <= 32_768
+        buffer.seek(0)
+        with pytest.raises(
+            ValueError, match="snapshot exceeds expanded size limit"
+        ):
+            read_tar(buffer, staging, max_bytes=32_768)
+
+
+def test_restore_budget_boundary_and_valid_repeated_references():
+    manifest = {"references": [{BLOB_REF_KEY: "b/f"}] * 16}
+    buffer = io.BytesIO()
+    write_tar(buffer, manifest, {"b/f": b"x" * 1024})
+    budget = len(json.dumps(manifest, indent=2).encode()) + 16 * 1024
+    buffer.seek(0)
+    assert (
+        read_tar(buffer, max_bytes=budget)["references"] == [b"x" * 1024] * 16
+    )
+    buffer.seek(0)
+    with pytest.raises(
+        ValueError, match="snapshot exceeds expanded size limit"
+    ):
+        read_tar(buffer, max_bytes=budget - 1)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        tarfile.GNUTYPE_LONGNAME,
+        tarfile.GNUTYPE_LONGLINK,
+        tarfile.XHDTYPE,
+        tarfile.XGLTYPE,
+    ],
+)
+@pytest.mark.parametrize(
+    "compressor", [None, gzip.compress, bz2.compress, lzma.compress]
+)
+def test_metadata_bodies_cannot_bypass_the_decoded_budget(kind, compressor):
+    buffer = io.BytesIO()
+    with tarfile.open(
+        fileobj=buffer, mode="w", format=tarfile.USTAR_FORMAT
+    ) as tar:
+        info = tarfile.TarInfo("././@LongLink")
+        info.type = kind
+        info.size = 128_000
+        payload = (
+            b"manifest.json\x00".ljust(info.size, b"\x00")
+            if kind == tarfile.GNUTYPE_LONGNAME
+            else bytes(info.size)
+        )
+        tar.addfile(info, io.BytesIO(payload))
+        info = tarfile.TarInfo("manifest.json")
+        info.size = 2
+        tar.addfile(info, io.BytesIO(b"{}"))
+    raw = buffer.getvalue()
+    data = raw if compressor is None else compressor(raw)
+    with pytest.raises(
+        ValueError, match="snapshot exceeds expanded size limit"
+    ):
+        read_tar(io.BytesIO(data), max_bytes=32_768)
+
+
+@pytest.mark.parametrize(
+    "path", ["manifest.json", "./manifest.json", "././manifest.json"]
+)
+@pytest.mark.parametrize("limit", [None, 32_768])
+def test_manifest_cannot_be_a_blob_target(path, limit):
+    buffer = io.BytesIO()
+    manifest = {
+        "padding": "x" * 16_384,
+        "references": [{BLOB_REF_KEY: path}] * 16,
+    }
+    write_tar(buffer, manifest, {})
+    buffer.seek(0)
+    with pytest.raises(
+        ValueError, match="Manifest cannot reference itself as a blob"
+    ):
+        read_tar(buffer, max_bytes=limit)

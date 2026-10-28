@@ -2119,16 +2119,24 @@ export class Workspace {
   static async load<T extends typeof Workspace>(
     this: T,
     source: string | Uint8Array,
-    options: WorkspaceOptions & { s3?: S3Config } = {},
+    options: WorkspaceOptions & {
+      s3?: S3Config
+      maxSnapshotBytes?: number
+      maxSnapshotEncodedBytes?: number
+    } = {},
     overrides: Record<string, BaseVFS | Mount> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
-    const { s3, ...rest } = options
+    const { s3, maxSnapshotBytes, maxSnapshotEncodedBytes, ...rest } = options
     // A tar file's disk mount files are staged on disk, not held in
     // memory, until the restored mounts have copied them in.
     const staging = typeof source === 'string' && s3 === undefined ? await makeStagingDir() : null
     try {
       const state = (await readSnapshot(source, {
+        ...(maxSnapshotBytes !== undefined ? { maxBytes: maxSnapshotBytes } : {}),
+        ...(maxSnapshotEncodedBytes !== undefined
+          ? { maxEncodedBytes: maxSnapshotEncodedBytes }
+          : {}),
         ...(s3 !== undefined ? { s3 } : {}),
         ...(staging !== null ? { staging } : {}),
       })) as WorkspaceStateDict

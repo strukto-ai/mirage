@@ -25,6 +25,7 @@ import { Workspace } from './workspace/workspace.ts'
 import { programs } from './lookup/lookup.ts'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
+import { PipeRecorder } from './executor/redirect.ts'
 import { Channel } from '../shell/console/index.ts'
 import type * as Brace from './expand/brace.ts'
 
@@ -242,6 +243,28 @@ describe('background job at the line limit', () => {
       }
     },
   )
+
+  it('output cleanup failure preserves the job timeout', async () => {
+    const failure = Object.assign(new Error('spool lost a write'), { code: 'EIO' })
+    const take = vi.spyOn(PipeRecorder.prototype, 'take').mockRejectedValueOnce(failure)
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    const ws = jobWs(0.05)
+    try {
+      expect((await ws.shell('sleep 5 > /data/g &')).exitCode).toBe(0)
+      const done = await ws.jobTable.wait(1, ws.defaultSessionId)
+      expect(done.exitCode).toBe(124)
+      expect(DEC.decode(await done.console.snapshot(Channel.STDERR))).toBe(
+        'line: timed out after 0.05s\n',
+      )
+      expect(take).toHaveBeenCalledTimes(1)
+      expect(debug).toHaveBeenCalledWith('kept output not written: Error: spool lost a write')
+      expect(ws.processes.live()).toHaveLength(0)
+    } finally {
+      take.mockRestore()
+      debug.mockRestore()
+      await ws.close()
+    }
+  })
 
   it('a job runs to its own limit past the job that started it', async () => {
     const ws = jobWs(0.6)

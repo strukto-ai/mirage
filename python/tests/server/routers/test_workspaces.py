@@ -13,9 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import bz2
+import gzip
 import io
 import json
+import lzma
 import os
+import tarfile
 import time
 import uuid
 from collections.abc import Iterator
@@ -38,6 +42,8 @@ from mirage.server.registry import WorkspaceRegistry
 from mirage.server.routers import workspaces as workspaces_router
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3.config import S3Config
+from mirage.workspace.snapshot.tar_io import write_tar
+from mirage.workspace.snapshot.utils import BLOB_REF_KEY
 
 
 class HeldSourceConfig(BaseModel):
@@ -857,6 +863,69 @@ async def test_load_refuses_a_snapshot_over_the_limit(monkeypatch):
         r = await _upload(client, b"x" * 9)
     assert r.status_code == 413, r.text
     assert r.json()["detail"] == "snapshot part too large"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("compress", [None, "gz", "bz2", "xz"])
+async def test_load_caps_expanded_snapshot_and_releases_id(
+    monkeypatch, compress
+):
+    monkeypatch.setattr(
+        workspaces_router, "MAX_SNAPSHOT_BYTES", 32_768, raising=False
+    )
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        source = await client.post("/v1/workspaces", json=_minimal_config())
+        original = await _download(client, source.json()["id"])
+        with tarfile.open(fileobj=io.BytesIO(original)) as tar:
+            manifest = json.load(tar.extractfile("manifest.json"))
+        manifest["padding"] = "x" * 128_000
+        buffer = io.BytesIO()
+        write_tar(buffer, manifest, {})
+        if compress is not None:
+            buffer = io.BytesIO(
+                {
+                    "gz": gzip.compress,
+                    "bz2": bz2.compress,
+                    "xz": lzma.compress,
+                }[compress](buffer.getvalue())
+            )
+        r = await _upload(client, buffer.getvalue(), {"id": "limited"})
+        assert r.status_code == 400, r.text
+        assert "snapshot exceeds expanded size limit" in r.json()["detail"]
+        assert "limited" not in app.state.registry
+        r = await _upload(client, original, {"id": "limited"})
+        assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_load_refuses_repeated_blob_allocations_and_releases_id(
+    monkeypatch,
+):
+    monkeypatch.setattr(workspaces_router, "MAX_SNAPSHOT_BYTES", 32_768)
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        source = await client.post("/v1/workspaces", json=_minimal_config())
+        original = await _download(client, source.json()["id"])
+        with tarfile.open(fileobj=io.BytesIO(original)) as tar:
+            manifest = json.load(tar.extractfile("manifest.json"))
+        ram = next(
+            m["vfs_state"] for m in manifest["mounts"] if m["prefix"] == "/"
+        )
+        ram["files"] = {f"/f{i}": {BLOB_REF_KEY: "b/f"} for i in range(16)}
+        buffer = io.BytesIO()
+        write_tar(buffer, manifest, {"b/f": b"x" * 16_384})
+        buffer = io.BytesIO(bz2.compress(buffer.getvalue()))
+        r = await _upload(client, buffer.getvalue(), {"id": "repeated"})
+        assert r.status_code == 400, r.text
+        assert "snapshot exceeds expanded size limit" in r.json()["detail"]
+        assert "repeated" not in app.state.registry
+        r = await _upload(client, original, {"id": "repeated"})
+        assert r.status_code == 201, r.text
 
 
 @pytest.mark.asyncio

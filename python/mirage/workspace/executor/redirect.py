@@ -1026,7 +1026,10 @@ async def _handle_redirect(
             else:
                 session.descriptors.pop(fd, None)
     if cancelled is not None:
-        await _keep_output(recorder, outputs, dispatch, session)
+        try:
+            await _keep_output(recorder, outputs, dispatch, session)
+        except Exception as exc:
+            logger.debug("kept output not written: %s", exc)
         raise cancelled
     stdout: ByteSource | None = None
     route.recorder = Recorder()

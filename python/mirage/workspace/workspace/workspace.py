@@ -1830,6 +1830,8 @@ class Workspace:
         s3: S3Config | None = None,
         clock: Clock | None = None,
         ids: IdSource | None = None,
+        max_snapshot_bytes: int | None = None,
+        max_snapshot_encoded_bytes: int | None = None,
     ) -> "Workspace":
         """Reconstruct a Workspace from a tar.
 
@@ -1888,6 +1890,8 @@ class Workspace:
                 keep the narrowing the caller's document gives them, as
                 a checkout's do.
             s3 (S3Config | None): the S3-like store the tar is in.
+            max_snapshot_bytes (int | None): decoded and restored member bytes.
+            max_snapshot_encoded_bytes (int | None): maximum encoded S3 bytes.
             clock (Clock | None): the clock the restored workspace reads
                 time through; None means the system clock. A restored
                 entry ages on it from the ``cached_at`` the snapshot
@@ -1904,7 +1908,13 @@ class Workspace:
         )
         try:
             return await cls.from_state(
-                await read_snapshot(source, s3=s3, staging=staging),
+                await read_snapshot(
+                    source,
+                    s3=s3,
+                    staging=staging,
+                    max_bytes=max_snapshot_bytes,
+                    max_encoded_bytes=max_snapshot_encoded_bytes,
+                ),
                 mounts=mounts,
                 clis=clis,
                 secrets=secrets,
