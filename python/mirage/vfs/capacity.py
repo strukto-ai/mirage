@@ -41,7 +41,9 @@ class StorageUsage:
     writers safe without a lock. Two writes in flight on overlapping paths
     (a file and its folder) can both measure the same bytes, so they lose
     the credit for the bytes they replace and mark the count for a
-    recount, which waits until no write is in flight. The
+    recount, which waits until no write is in flight. It serves one
+    running event loop at a time: a store whose loop still runs refuses
+    another, whose check could race it from a second thread. The
     count lives in this object: another process, or another VFS on the
     same disk folder or Redis prefix, counts on its own, so together they
     can pass the limit. Mirrors the TS ``StorageUsage``.
@@ -54,6 +56,7 @@ class StorageUsage:
         self.active: list[Charge] = []
         self.dirty = False
         self._counting: asyncio.Future[None] | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def counted(self, count: CountAll) -> None:
         """Count the store when it is uncounted, or marked for a recount
@@ -62,6 +65,7 @@ class StorageUsage:
         Args:
             count (CountAll): the bytes the whole store holds.
         """
+        self._bind()
         while (
             self.used is None
             or self._counting is not None
@@ -81,6 +85,16 @@ class StorageUsage:
         finally:
             self._counting = None
 
+    def _bind(self) -> None:
+        loop = asyncio._get_running_loop()
+        if loop is None or loop is self._loop:
+            return
+        if self._loop is not None and self._loop.is_running():
+            raise RuntimeError(
+                "a store with a capacity serves one event loop at a time"
+            )
+        self._loop = loop
+
     def stale(self) -> None:
         """Count the store again once no write is in flight, as bytes
         written past mirage (a native program on a disk folder) went
@@ -94,6 +108,7 @@ class StorageUsage:
         Args:
             held (Charge): the write's charge.
         """
+        self._bind()
         for other in self.active:
             if _overlaps(other.path, held.path):
                 other.contended = held.contended = self.dirty = True
@@ -115,6 +130,7 @@ class StorageUsage:
             growth (int): bytes the change adds; zero or less always passes,
                 and reaching the limit exactly passes.
         """
+        self._bind()
         if growth <= 0:
             return
         assert self.used is not None
@@ -216,6 +232,12 @@ class Charge:
             self.usage.hold(self.path, size)
             self.held += size
 
+    @property
+    def reserved(self) -> int:
+        """The length the operand may reach within what this charge
+        holds and is credited with."""
+        return (0 if self.contended else self.before) + self.held
+
     def grow_to(self, size: int) -> None:
         """Reserve what growing the operand to ``size`` bytes adds past
         what this charge already holds.
@@ -223,8 +245,7 @@ class Charge:
         Args:
             size (int): the operand's length after the write.
         """
-        credit = 0 if self.contended else self.before
-        self.hold(size - credit - self.held)
+        self.hold(size - self.reserved)
 
     def stream(self, data: ByteSource, append: bool = False) -> ByteSource:
         """``data``, each chunk reserved as the writer takes it.
@@ -293,7 +314,7 @@ async def charge(
         finally:
             try:
                 after = await size_of(path)
-            except Exception:
+            except BaseException:
                 logger.debug(
                     "re-measuring %s failed; recounting", path.virtual
                 )

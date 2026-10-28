@@ -181,11 +181,16 @@ export class Charge {
     this.held += size
   }
 
+  /** The length the operand may reach within what this charge holds and is
+   * credited with. */
+  get reserved(): number {
+    return (this.contended ? 0 : this.before) + this.held
+  }
+
   /** Reserve what growing the operand to `size` bytes adds past what this
    * charge already holds. */
   growTo(size: number): void {
-    const credit = this.contended ? 0 : this.before
-    this.hold(size - credit - this.held)
+    this.hold(size - this.reserved)
   }
 
   /** `data`, each chunk reserved as the writer takes it. With `append`

@@ -44,6 +44,7 @@ from mirage.core.disk.utils import (
     walk_entries,
 )
 from mirage.core.disk.write import write as _write
+from mirage.errors.fs import edquot
 from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
@@ -182,6 +183,11 @@ class DiskVFS(BaseVFS):
             if self.usage is not None:
                 held.grow_to(await _size_of(self.accessor, src))
             await _copy(self.accessor, src, dst)
+            if self.usage is not None:
+                copied = await _size_of(self.accessor, dst)
+                if copied > held.reserved:
+                    await _truncate(self.accessor, dst, held.reserved, True)
+                    raise edquot(dst)
 
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False

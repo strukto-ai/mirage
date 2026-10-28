@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { edquot } from '@struktoai/mirage-core/errors/fs'
 import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import {
@@ -242,8 +243,13 @@ export class DiskVFS extends BaseVFS {
 
   override copy(src: PathSpec, dst: PathSpec): Promise<void> {
     return this.charge(dst, async (held) => {
-      if (this.usage !== null) held.growTo(await sizeOf(this.accessor, src))
+      if (this.usage === null) return diskCopy(this.accessor, src, dst)
+      held.growTo(await sizeOf(this.accessor, src))
       await diskCopy(this.accessor, src, dst)
+      if ((await sizeOf(this.accessor, dst)) > held.reserved) {
+        await diskTruncate(this.accessor, dst, held.reserved, true)
+        throw edquot(dst)
+      }
     })
   }
 

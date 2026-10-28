@@ -95,8 +95,8 @@ A write past it fails with `EDQUOT` ("Disk quota exceeded", the same message
 for every store). Stored data stays readable and removable, and `df` shows
 the capacity as the store's size.
 
-In Python, a store with a capacity cannot be exposed through FUSE or FSKit
-yet. Two workspaces on one disk folder, Redis key prefix or OPFS directory
+In Python, a store with a capacity serves one event loop at a time, so it
+cannot be exposed through FUSE or FSKit yet. Two workspaces on one disk folder, Redis key prefix or OPFS directory
 each count only their own writes.
 
 ## Read and write policies
