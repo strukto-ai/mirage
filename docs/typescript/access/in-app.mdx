@@ -102,7 +102,7 @@ const ws = new Workspace(
 ws.session(sessionId, { profile?, mounts?, permissions? }): Promise<Session>
 ```
 
-The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and throw for an existing session. `permissions` adds rules for this session only, on top of its profile: ask and deny rules, hides and weaker mount modes. It cannot add an allow list or a policy. `ws.createSession` is the same call without the handle.
+The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and throw for an existing session. `permissions` adds rules for this session only, on top of its profile: ask and deny rules, hides and weaker mount modes. It cannot add an allow list or a policy. `ws.createSession` is the synchronous version that initializes the session and returns its `SessionState` without returning an executable `Session` client.
 
 ```ts
 const session = await ws.session('agent')

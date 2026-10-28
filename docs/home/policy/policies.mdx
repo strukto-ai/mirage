@@ -60,10 +60,10 @@ ws.policies.remove(noForcePush)
 
 ## Lifecycle
 
-A policy implements any of eight methods, in pairs. The `pre_` one runs
-before an action, the `post_` one after it, with the same context plus
-what came back. A `post_` method never undoes what ran; it holds back
-what came back.
+A policy implements any of eight methods, in pairs. The `pre_` method runs
+before an action, while the `post_` method runs after it with the same context
+and the execution result. A `post_` hook cannot undo executed actions, but it
+can inspect, modify, or suppress the returned output or error.
 
 ```mermaid
 flowchart LR

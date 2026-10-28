@@ -92,17 +92,18 @@ f8f8ed:3	python3 train.py
 -	└ host 19443: python3 train.py
 ```
 
-When an instance goes away without stopping what it ran, the next instance
-to start stops what it left: a sandbox run through a runtime of the same
-name, and a host program on the same machine while its PID still names the
-process that was started. An instance counts as gone 30 seconds after it was
-last seen, so a new instance looks again 30 seconds after it starts. An
-instance already running stops what a gone one left when it next lists
-processes or waits on one of its jobs.
+When an instance exits unexpectedly without stopping running processes,
+subsequent instances clean up the orphaned processes: a sandbox run through
+a runtime of the same name, or a host program on the same machine whose PID
+still matches the original process. An instance is marked inactive 30 seconds
+after its last heartbeat; a newly started instance re-checks for abandoned
+processes 30 seconds after launch. Any currently running instance also cleans
+up orphaned processes from inactive instances whenever it lists processes or
+waits on a job.
 
 ### Per-session mount modes
 
-Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, `rwx`). Unlisted mounts keep their configured modes. Interpreters such as `python3` and `js` require `exec`; shell scripts run with the permissions of each command they contain. Use a [agent profile](/home/profiles) to hide paths or restrict commands.
+Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, `rwx`). Unlisted mounts keep their configured modes. Interpreters such as `python3` and `js` require `exec`; shell scripts run with the permissions of each command they contain. Use an [agent profile](/home/profiles) to hide paths or restrict commands.
 
 ## Limits
 
