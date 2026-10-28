@@ -33,6 +33,7 @@ import {
   OwnRead,
   type WriteCondition,
   type WriteContext,
+  type WriteBinding,
   type WriteKind,
 } from './types.ts'
 
@@ -128,12 +129,6 @@ export function publishRead(path: string, data: Uint8Array, fingerprint: string 
     tokens.push(fingerprint)
     capture.facts.set(data, tokens)
   }
-}
-
-/** The write context of the mount at `prefix`. */
-export interface WriteBinding {
-  prefix: string
-  context: WriteContext | null
 }
 
 // The cache a backend's writes report to, and what its reads and writes
