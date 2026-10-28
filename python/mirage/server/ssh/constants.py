@@ -65,9 +65,7 @@ CODEX_RETAINED_OUTPUT = 1024 * 1024
 CODEX_INTERRUPT_SIGNAL = "interrupt"
 CODEX_CTRL_C = b"\x03"
 CODEX_CTRL_D = b"\x04"
-# Exit statuses the protocol reports for a stopped process: an
-# interrupt reads as 128 + SIGINT, a terminated process as no status.
-CODEX_INTERRUPTED = 130
+# The status the protocol reports for a terminated process: none.
 CODEX_TERMINATED = -1
 
 SSH_ENV_KEYS = {

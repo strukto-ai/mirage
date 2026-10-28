@@ -31,7 +31,7 @@ from mirage.commands.cli.builtin.gh.accessor import (
     typed_out,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import PartialOutputError, UsageError
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.actions import (
     dispatch_workflow,
@@ -50,6 +50,7 @@ from mirage.core.github.client import GitHubApiError, GitHubConnectionError
 from mirage.core.github.repo import RepoRef, view_repo
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.errors import StreamRefusal
 from mirage.types import JsonValue, PathSpec
 
 RUN_FIELDS = (
@@ -374,7 +375,7 @@ async def _run_log(
         ) as exc:
             if not printed:
                 raise
-            raise PartialOutputError(str(exc), b"".join(printed)) from exc
+            raise StreamRefusal(str(exc), b"".join(printed)) from exc
         prefix = f"{segment.job}\t{segment.step}\t".encode()
         for line in _log_lines(log):
             printed.extend((prefix, line, b"\n"))

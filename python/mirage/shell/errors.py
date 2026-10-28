@@ -79,12 +79,15 @@ class ArithError(ValueError):
         return DiscardSignal(stderr)
 
 
-class ReadonlyError(Exception):
-    """An arithmetic assignment to a readonly shell variable.
+class ReadonlyVariableError(Exception):
+    """An assignment to a readonly shell variable: a session write to a
+    name ``readonly`` marked, or one an arithmetic expression made.
 
-    The evaluation stops at it, as bash's does: ``writes`` carries the
-    assignments made before it, which bind (``(( X=5, R=3 ))`` leaves X
-    at 5), and nothing after it runs.
+    Its message is bash's ``<name>: readonly variable``, which each
+    caller renders in its own voice. An arithmetic evaluation stops at
+    it, as bash's does: ``writes`` carries the assignments made before
+    it, which bind (``(( X=5, R=3 ))`` leaves X at 5), and nothing after
+    it runs.
 
     Args:
         name (str): variable that was assigned to.

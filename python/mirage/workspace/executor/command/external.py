@@ -33,6 +33,7 @@ from mirage.runtime.types import (
 )
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.types import PathSpec, Producer
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.executor.command.run import admission_denial
@@ -70,7 +71,9 @@ async def run_external(
         return (
             None,
             denied,
-            ExecutionNode(command=command, exit_code=126, stderr=err),
+            ExecutionNode(
+                command=command, exit_code=CANNOT_EXECUTE_STATUS, stderr=err
+            ),
         )
     runtime = Runtime.require(entry)
     # A runtime that runs an argv gets one; a line runtime gets the

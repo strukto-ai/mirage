@@ -21,6 +21,7 @@ import { refusalOf, renderDeny } from '../../policy/policies.ts'
 import type { Deny, Pending } from '../../policy/types.ts'
 import { ExecuteResult } from './types.ts'
 import { commandName } from './utils.ts'
+import { INTERRUPTED_STATUS, TIMEOUT_STATUS } from '../../shell/constants.ts'
 
 /**
  * True for the errors that are the caller's problem, not the line's:
@@ -41,10 +42,10 @@ export function isControlFlowError(err: unknown): boolean {
  */
 export function failureResult(err: unknown): { stderr: Uint8Array; exitCode: number } {
   if (err instanceof DOMException && err.name === 'AbortError') {
-    return { stderr: encodeText(`${err.message}\n`), exitCode: 130 }
+    return { stderr: encodeText(`${err.message}\n`), exitCode: INTERRUPTED_STATUS }
   }
   if (err instanceof CommandTimeoutError) {
-    return { stderr: encodeText(`${err.message}\n`), exitCode: 124 }
+    return { stderr: encodeText(`${err.message}\n`), exitCode: TIMEOUT_STATUS }
   }
   if (err instanceof UsageError) {
     return { stderr: encodeText(`${err.message}\n`), exitCode: err.exitCode }

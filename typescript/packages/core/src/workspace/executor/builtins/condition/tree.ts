@@ -18,7 +18,7 @@ import { randomReader, seedVar, sessionArith, visibleEnv } from '../../../sessio
 import { byteView, textView, utf8Locale } from '../../../../shell/bytes.ts'
 import type { ArithResult, ArithWrite } from '../../../../shell/types.ts'
 import { assignElement } from '../../../session/elements.ts'
-import { ArithError, ReadonlyError } from '../../../../shell/errors.ts'
+import { ArithError, ReadonlyVariableError } from '../../../../shell/errors.ts'
 import { makeArray } from '../../../../shell/array.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { FILE_PAIR_BINARY, INT_COMPARATORS } from './constants.ts'
@@ -136,7 +136,7 @@ async function evalCondBinary(
     const reader = randomReader(ctx.session)
     const values: bigint[] = []
     for (const operand of [node.left, node.right]) {
-      let error: ArithError | ReadonlyError | null = null
+      let error: ArithError | ReadonlyVariableError | null = null
       let value = 0n
       let writes: readonly ArithWrite[]
       try {
@@ -144,7 +144,7 @@ async function evalCondBinary(
         writes = result.writes
         value = result.value
       } catch (exc) {
-        if (!(exc instanceof ArithError || exc instanceof ReadonlyError)) throw exc
+        if (!(exc instanceof ArithError || exc instanceof ReadonlyVariableError)) throw exc
         // bash bound what the operand assigned before it failed
         // (`y='x=6,1/0'; [[ 0 -eq y ]]` leaves x at 6, and a RANDOM seed
         // in it is drawn from); they land, and the reader settles, before

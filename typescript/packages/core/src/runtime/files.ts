@@ -14,7 +14,7 @@
 
 import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { classify } from '../errors/index.ts'
-import { ebadf, einval, eloop, isMissingOp, isMissingPath } from '../errors/fs.ts'
+import { ebadf, einval, eloop, exdev, isMissingOp, isMissingPath } from '../errors/fs.ts'
 import {
   atimeMs,
   contentSize,
@@ -27,7 +27,6 @@ import {
   posixMode,
 } from '../utils/stat_view.ts'
 import { ABSENT_PATH, LISTING_ENTRY_CONCURRENCY } from './constants.ts'
-import { CrossMountError } from './errors.ts'
 import { normDir, rstripSlash } from '../utils/slash.ts'
 import { CycleError, resolvePath } from '../utils/path.ts'
 import { READ_CHUNK } from './handles/constants.ts'
@@ -756,10 +755,10 @@ export class RuntimeFiles {
    *   dst: guest-absolute destination path.
    *
    * Throws:
-   *   CrossMountError: the two ends resolve to different mounts.
+   *   EXDEV: the two ends resolve to different mounts.
    */
   async rename(src: string, dst: string): Promise<void> {
-    if (this.mountOf(src) !== this.mountOf(dst)) throw new CrossMountError(src, dst)
+    if (this.mountOf(src) !== this.mountOf(dst)) throw exdev(src)
     if (this.core === null) await this.dispatch('rename', src, undefined, dst)
     else await this.onCore((core) => core.rename(src, dst))
   }

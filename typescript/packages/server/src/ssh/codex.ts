@@ -17,14 +17,14 @@ import { constants as fsConstants } from 'node:fs'
 import { posix } from 'node:path'
 import { linkView, mountView } from '@struktoai/mirage-core/commands/builtin/utils/links'
 import { WalkBudget } from '@struktoai/mirage-core/commands/builtin/utils/tree'
-import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
+import { classify } from '@struktoai/mirage-core/errors/classify'
 import { JobOutput } from '@struktoai/mirage-core/shell/console/terminal'
 import { PathSpec, type JsonValue } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { MountCore, type MountAttrs } from '@struktoai/mirage-node'
 import { OWNER } from '@struktoai/mirage-node/mount/constants'
 import type { OpenMode } from '@struktoai/mirage-core/runtime/handles/index'
-import { eexist, enoent } from '@struktoai/mirage-core/errors/fs'
+import { eexist, enoent, strerrorOf } from '@struktoai/mirage-core/errors/fs'
 import type { ServerChannel } from 'ssh2'
 import type { WebSocket } from 'ws'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
@@ -39,7 +39,6 @@ import {
 import {
   CODEX_CTRL_C,
   CODEX_CTRL_D,
-  CODEX_INTERRUPTED,
   CODEX_INTERRUPT_SIGNAL,
   CODEX_MAX_MESSAGE,
   CODEX_READ_SIZE,
@@ -52,6 +51,7 @@ import {
 import { CodexRPCError } from './errors.ts'
 import { newSessionId, openLogin, openSession, type ChannelRequest } from './session.ts'
 import { ChannelInput, ChannelOutput, Mark, deliver } from './stream.ts'
+import { INTERRUPTED_STATUS } from '@struktoai/mirage-core/shell/constants'
 
 type Message = Record<string, JsonValue>
 type Handler = (params: Message) => Promise<JsonValue>
@@ -204,7 +204,7 @@ function rpcError(err: unknown): CodexRPCError {
     console.warn(`codex: unclassified error: ${String(err)}`)
   }
   const rpc = condition === 'ENOENT' ? RPC_NOT_FOUND : RPC_INTERNAL_ERROR
-  return new CodexRPCError(rpc, failureText(err))
+  return new CodexRPCError(rpc, strerrorOf(err))
 }
 
 function notAFile(path: string): CodexRPCError {
@@ -696,7 +696,7 @@ class CodexChannel {
       }
     } catch (err) {
       if (controller.signal.aborted) {
-        code = CODEX_INTERRUPTED
+        code = INTERRUPTED_STATUS
       } else {
         const message = err instanceof Error ? err.message : String(err)
         console.warn(`codex: process failed on ${this.entry.id}: ${message}`)
@@ -704,7 +704,7 @@ class CodexChannel {
         code = 1
       }
     }
-    if (controller.signal.aborted) code = proc.stopCode ?? CODEX_INTERRUPTED
+    if (controller.signal.aborted) code = proc.stopCode ?? INTERRUPTED_STATUS
     proc.exitCode = code
     proc.stdin?.close()
     await this.send({
@@ -775,7 +775,7 @@ class CodexChannel {
     if (proc === undefined) return Promise.resolve({ status: 'unknownProcess' })
     const data = unb64(arg(params, 'chunk', 'string', ''), 'chunk')
     if (proc.stdin === null || proc.stdin.closed) return Promise.resolve({ status: 'stdinClosed' })
-    if (proc.tty && data.includes(CODEX_CTRL_C)) this.stop(proc, CODEX_INTERRUPTED)
+    if (proc.tty && data.includes(CODEX_CTRL_C)) this.stop(proc, INTERRUPTED_STATUS)
     else if (proc.tty && data.length === 1 && data[0] === CODEX_CTRL_D) proc.stdin.close()
     else if (data.byteLength > 0) proc.stdin.write(data)
     return Promise.resolve({ status: 'accepted' })
@@ -790,7 +790,7 @@ class CodexChannel {
         `unknown variant \`${signal}\`, expected \`${CODEX_INTERRUPT_SIGNAL}\``,
       )
     }
-    this.stop(proc, CODEX_INTERRUPTED)
+    this.stop(proc, INTERRUPTED_STATUS)
     return Promise.resolve({})
   }
 

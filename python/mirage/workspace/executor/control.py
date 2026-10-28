@@ -29,7 +29,7 @@ from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import (
     ArithError,
     ExitSignal,
-    ReadonlyError,
+    ReadonlyVariableError,
     ReturnSignal,
 )
 from mirage.shell.job_table import JobTable
@@ -533,7 +533,7 @@ async def handle_cfor(
             and returning the expression's integer value, or the
             default when the slot is empty; raises ArithError with the
             offending expression text on an invalid expression, or
-            ReadonlyError when it assigns to a readonly variable.
+            ReadonlyVariableError when it assigns to a readonly variable.
         session (SessionState): the shell running the loop.
     """
     merged_io = IOResult()
@@ -559,7 +559,7 @@ async def handle_cfor(
             await eval_expr(exprs[2], 0)
         else:
             _capped(merged_io, "for")
-    except (ArithError, PolicyDenied, ReadonlyError) as exc:
+    except (ArithError, PolicyDenied, ReadonlyVariableError) as exc:
         if isinstance(exc, ArithError) and exc.in_subscript:
             stdout = _chain_streams(all_stdout)
             raise await carried(exc.signal(), stdout, merged_io) from exc

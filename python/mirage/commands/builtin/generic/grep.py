@@ -50,7 +50,7 @@ from mirage.commands.builtin.utils.wrap import (
     mount_parent_stat,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError, WalkLimitError
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.synopsis import SYNOPSES
@@ -63,7 +63,7 @@ from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.posix import posix_phrase
-from mirage.errors.types import FsCondition
+from mirage.errors.types import FsCondition, WalkLimitError
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.regex import LineRegex
 from mirage.shell.bytes import utf8_locale

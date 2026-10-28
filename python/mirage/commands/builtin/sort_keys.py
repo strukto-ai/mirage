@@ -14,7 +14,6 @@
 
 from dataclasses import dataclass
 
-from mirage.commands.builtin.errors import SortKeyError
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 
@@ -77,7 +76,7 @@ def _field_count(spec: str, pos: int, what: str) -> tuple[int, int]:
         tuple[int, int]: the number and the index just past it.
 
     Raises:
-        SortKeyError: no number starts at ``pos``.
+        UsageError: no number starts at ``pos``.
     """
     end = pos
     while end < len(spec) and spec[end] in _BLANKS:
@@ -88,15 +87,15 @@ def _field_count(spec: str, pos: int, what: str) -> tuple[int, int]:
     while end < len(spec) and "0" <= spec[end] <= "9":
         end += 1
     if end == digits:
-        raise SortKeyError(
-            f"{what}: invalid count at start of '{quote_text(spec[pos:])}'"
+        raise UsageError(
+            f"sort: {what}: invalid count at start of '{quote_text(spec[pos:])}'"
         )
     return int(spec[digits:end]), end
 
 
-def _bad_field_spec(spec: str, why: str) -> SortKeyError:
-    return SortKeyError(
-        f"{why}: invalid field specification '{quote_text(spec)}'"
+def _bad_field_spec(spec: str, why: str) -> UsageError:
+    return UsageError(
+        f"sort: {why}: invalid field specification '{quote_text(spec)}'"
     )
 
 
@@ -139,7 +138,7 @@ def parse_keydef(spec: str, global_mods: KeyMods, global_skip: bool) -> Key:
         global_skip (bool): the global ``-b``.
 
     Raises:
-        SortKeyError: a KEYDEF GNU refuses, in its words.
+        UsageError: a KEYDEF GNU refuses, in its words.
     """
     start_field, pos = _field_count(spec, 0, "invalid number at field start")
     if start_field == 0:
@@ -293,7 +292,7 @@ def build_config(
         ignore_nonprinting (bool): ``-i``.
 
     Raises:
-        SortKeyError: a KEYDEF GNU refuses, or a key whose orderings are
+        UsageError: a KEYDEF GNU refuses, or a key whose orderings are
             incompatible.
     """
     global_mods = KeyMods(
@@ -318,7 +317,7 @@ def build_config(
     for key in keys:
         letters = _incompatible_letters(key.mods)
         if letters:
-            raise SortKeyError(f"options '-{letters}' are incompatible")
+            raise UsageError(f"sort: options '-{letters}' are incompatible")
     return SortConfig(
         keys=keys,
         field_sep=None if field_sep is None else tab_byte(field_sep),

@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.types import PathSpec
-
 
 class UsageError(ValueError):
     """Command-line usage error (GNU semantics: stderr message + exit code).
@@ -29,41 +27,3 @@ class UsageError(ValueError):
     def __init__(self, message: str, exit_code: int = 2) -> None:
         super().__init__(message)
         self.exit_code = exit_code
-
-
-class FindParseError(ValueError):
-    """Invalid numeric argument to a find predicate (GNU find: exit 1)."""
-
-
-class PartialOutputError(Exception):
-    """A command's failure after it had already printed output, which a
-    program that writes as it goes leaves on stdout ahead of the
-    diagnostic.
-
-    Args:
-        message (str): the diagnostic.
-        stdout (bytes): what the command printed before it failed.
-    """
-
-    def __init__(self, message: str, stdout: bytes) -> None:
-        super().__init__(message)
-        self.stdout = stdout
-
-
-class WalkLimitError(Exception):
-    """A walk past its mount's ``walk_limit``. The message is the line
-    the command prints where it stopped; grep and rg raise it to stop
-    reading a directory, keep what they printed and exit 2.
-
-    Args:
-        directory (PathSpec): the operand, or the mount root below it,
-            where the walk stopped.
-        limit (int): the mount's ``walk_limit``.
-    """
-
-    def __init__(self, directory: PathSpec, limit: int) -> None:
-        super().__init__(
-            f"{directory.raw_path or '.'}: stopped after {limit} files "
-            "(walk_limit); narrow the path"
-        )
-        self.directory = directory

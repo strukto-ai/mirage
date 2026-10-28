@@ -22,7 +22,7 @@ import type { HandOff } from '../../policy/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { type Policies } from '../../policy/index.ts'
-import { ArithError, ExitSignal, ReadonlyError, ReturnSignal } from '../../shell/errors.ts'
+import { ArithError, ExitSignal, ReadonlyVariableError, ReturnSignal } from '../../shell/errors.ts'
 import {
   errexitActs,
   fd0Binding,
@@ -466,7 +466,7 @@ export type CforEval = (exprs: readonly TSNodeLike[], dflt: number) => Promise<n
  *
  * `evalExpr` evaluates one expression slot to its integer value (the
  * default when the slot is empty) and throws ArithError with the
- * offending expression text on an invalid expression, or ReadonlyError
+ * offending expression text on an invalid expression, or ReadonlyVariableError
  * when it assigns to a readonly variable; bash aborts the loop with
  * status 1, keeping the output of iterations that ran. The update
  * expression still runs after `continue`, per bash. A PolicyDenied is a
@@ -505,7 +505,7 @@ export async function handleCfor(
   } catch (err) {
     if (
       !(err instanceof ArithError) &&
-      !(err instanceof ReadonlyError) &&
+      !(err instanceof ReadonlyVariableError) &&
       !(err instanceof PolicyDenied)
     ) {
       throw err

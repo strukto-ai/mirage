@@ -57,13 +57,8 @@ import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapsh
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import { decode, withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
-import {
-  DEFAULT_EXEC_YIELD_MS,
-  DEFAULT_WRITE_YIELD_MS,
-  INTERRUPT,
-  INTERRUPTED_EXIT_CODE,
-  NO_STDIN,
-} from './constants.ts'
+import { DEFAULT_EXEC_YIELD_MS, DEFAULT_WRITE_YIELD_MS, INTERRUPT, NO_STDIN } from './constants.ts'
+import { INTERRUPTED_STATUS } from '@struktoai/mirage-core/shell/constants'
 
 /**
  * The serializable state of a `MirageSandboxSession`: the SDK's sandbox
@@ -96,7 +91,7 @@ class Line {
       },
       (error: unknown) => {
         if (this.controller.signal.aborted) {
-          this.outcome = { stdout: '', stderr: '', exitCode: INTERRUPTED_EXIT_CODE }
+          this.outcome = { stdout: '', stderr: '', exitCode: INTERRUPTED_STATUS }
         } else {
           this.failure = error instanceof Error ? error : new Error(String(error))
         }

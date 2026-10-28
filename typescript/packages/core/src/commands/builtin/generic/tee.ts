@@ -24,7 +24,6 @@ import { eisdir, enotdir, fsError, isEnoent, isFsError } from '../../../errors/f
 import { fsErrorLine } from '../../../errors/render.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { type FsError } from '../../../errors/types.ts'
-import { SIGPIPE_EXIT } from '../constants.ts'
 import { absentDestError, entryKind } from '../utils/paths.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readStdinAsync } from '../utils/stream.ts'
@@ -34,6 +33,7 @@ import { type FlagValue } from '../../spec/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { linksOf, mountRoot } from '../utils/links.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
+import { SIGPIPE_STATUS } from '../../../shell/constants.ts'
 
 /**
  * How tee answers a write into a pipe whose reader has gone: SIGPIPE without
@@ -324,7 +324,7 @@ export async function writeOutput(
         // reported, unless -p or --output-error say otherwise.
         if (parsed.pipeErrors === PipeErrors.SIGNAL) {
           const stderr = errors.length > 0 ? encodeText(errors.join('')) : null
-          return [null, new IOResult({ exitCode: SIGPIPE_EXIT, stderr })]
+          return [null, new IOResult({ exitCode: SIGPIPE_STATUS, stderr })]
         }
         if (parsed.pipeErrors === PipeErrors.IGNORE) continue
         errors.push(errorLine(path, fsError(path, 'EPIPE'), root))
@@ -380,7 +380,7 @@ async function* teeStream(
   const failed = (path: PathSpec, error: unknown): boolean => {
     if (error instanceof PipeClosed) {
       if (parsed.pipeErrors === PipeErrors.SIGNAL) {
-        io.exitCode = SIGPIPE_EXIT
+        io.exitCode = SIGPIPE_STATUS
         return true
       }
       if (parsed.pipeErrors === PipeErrors.IGNORE) return false

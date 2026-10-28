@@ -31,6 +31,7 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OutputFn, Program, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
 import { closeChildren, cwdRefusal, onHostPath, runProgram } from '../../sandbox/program.ts'
+import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '@struktoai/mirage-core/shell/constants'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
 
@@ -67,8 +68,8 @@ async function unrunnable(name: string, path: string): Promise<RunResult | null>
     debuglog('mirage')('local: cannot stat %s: %s', path, code)
     return null
   })
-  if (found === null) return notRun(`${name}: No such file or directory\n`, 127)
-  if (found.isDirectory()) return notRun(`${name}: Is a directory\n`, 126)
+  if (found === null) return notRun(`${name}: No such file or directory\n`, NOT_FOUND_STATUS)
+  if (found.isDirectory()) return notRun(`${name}: Is a directory\n`, CANNOT_EXECUTE_STATUS)
   const runs = await access(path, constants.X_OK).then(
     () => true,
     (err: unknown) => {
@@ -78,7 +79,7 @@ async function unrunnable(name: string, path: string): Promise<RunResult | null>
       return false
     },
   )
-  return runs ? null : notRun(`${name}: Permission denied\n`, 126)
+  return runs ? null : notRun(`${name}: Permission denied\n`, CANNOT_EXECUTE_STATUS)
 }
 
 /** A program that never started: its message and exit code. */
@@ -186,7 +187,8 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
       if (refusal !== null) return refusal
     } else {
       program = await onHostPath(name)
-      if (!(await isExecutable(program))) return notRun(`${name}: command not found\n`, 127)
+      if (!(await isExecutable(program)))
+        return notRun(`${name}: command not found\n`, NOT_FOUND_STATUS)
     }
     // A program that cannot start (its script's interpreter missing, say)
     // fails as the shell's would, so `tool || fallback` goes on.
@@ -202,7 +204,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     ).catch((err: unknown) => {
       const { code, syscall } = err as NodeJS.ErrnoException
       if (code === undefined || syscall?.startsWith('spawn') !== true) throw err
-      return notRun(`${name}: cannot execute: ${fsStrerror(err) ?? code}\n`, 126)
+      return notRun(`${name}: cannot execute: ${fsStrerror(err) ?? code}\n`, CANNOT_EXECUTE_STATUS)
     })
   }
 

@@ -25,11 +25,7 @@ if TYPE_CHECKING:
         resolve_limit,
         resolve_producer,
     )
-    from mirage.policy.constants import (
-        DEFAULT_ASK_REASON,
-        DEFAULT_DENY_REASON,
-        POLICY_DENIED_EXIT,
-    )
+    from mirage.policy.constants import DEFAULT_ASK_REASON, DEFAULT_DENY_REASON
     from mirage.policy.decisions import (
         AskHandler,
         Decisions,
@@ -116,7 +112,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.policy.constants": (
         "DEFAULT_ASK_REASON",
         "DEFAULT_DENY_REASON",
-        "POLICY_DENIED_EXIT",
     ),
     "mirage.policy.decisions": (
         "AskHandler",
@@ -233,7 +228,6 @@ __all__ = [
     "PermissionsPolicy",
     "Policies",
     "Policy",
-    "POLICY_DENIED_EXIT",
     "PolicyDenied",
     "PolicyError",
     "post_command_gate",

@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CrossMountError } from '../runtime/errors.ts'
 import { enoent, enotsup, noMount } from './fs.ts'
 import { CycleError } from '../utils/path.ts'
 import { classify } from './classify.ts'
@@ -48,11 +47,6 @@ describe('classify', () => {
     // vocabulary it carried no code and every boundary degraded it to
     // EIO ("Input/output error" for a loop the message even names).
     expect(classify(new CycleError('/a'))).toBe('ELOOP')
-  })
-
-  it('names a cross-mount rename its own condition', () => {
-    // The per-boundary number is each dialect table's decision.
-    expect(classify(new CrossMountError('/a/x', '/b/x'))).toBe('EXDEV')
   })
 
   it('reads the constructors built by errors/fs', () => {

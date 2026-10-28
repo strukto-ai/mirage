@@ -130,6 +130,7 @@ import {
 import { linkView } from '../../commands/builtin/utils/links.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { NOT_FOUND_STATUS } from '../../shell/constants.ts'
 
 type CmdKey = string
 
@@ -1675,7 +1676,7 @@ export class MountEntry {
         return [
           null,
           new IOResult({
-            exitCode: 127,
+            exitCode: NOT_FOUND_STATUS,
             stderr: encodeText(`${cmdName}: command not found`),
           }),
         ]
@@ -1895,7 +1896,7 @@ export class MountEntry {
   ): IOResult | null {
     if (this.isUserCommand(served ?? cmd) && !pathVisible(sessionVisibility(access), this.prefix)) {
       return new IOResult({
-        exitCode: 127,
+        exitCode: NOT_FOUND_STATUS,
         stderr: encodeText(`${cmdName}: command not found\n`),
       })
     }

@@ -22,7 +22,7 @@ import {
   arrayWith,
   type ShellArray,
 } from '../../shell/array.ts'
-import { ArithError, ReadonlyError } from '../../shell/errors.ts'
+import { ArithError, ReadonlyVariableError } from '../../shell/errors.ts'
 import type { ArithResult, ArithWrite } from '../../shell/types.ts'
 import type { ShellValue } from '../../shell/variable.ts'
 import type { SessionState } from './session.ts'
@@ -199,7 +199,7 @@ export async function landedArith(
   try {
     result = sessionArith(session, text, reader, nounset)
   } catch (err) {
-    if (err instanceof ArithError || err instanceof ReadonlyError) {
+    if (err instanceof ArithError || err instanceof ReadonlyVariableError) {
       await land(session, view, err.writes, reader)
     }
     throw err

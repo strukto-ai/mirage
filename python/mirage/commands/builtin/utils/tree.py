@@ -17,12 +17,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from mirage.commands.errors import UsageError, WalkLimitError
+from mirage.commands.errors import UsageError
 from mirage.errors.classify import classify
 from mirage.errors.types import (
     FsCondition,
     OperationNotSupportedError,
     WalkDeclinedError,
+    WalkLimitError,
 )
 from mirage.io.yield_budget import YieldBudget
 from mirage.runtime.types import DispatchFn

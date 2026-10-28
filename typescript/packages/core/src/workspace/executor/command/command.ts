@@ -66,7 +66,7 @@ import {
 } from '../../../commands/builtin/find_parse.ts'
 import { resolveNewerRefs } from '../find_refs.ts'
 import type { ExecuteFn } from '../../expand/types.ts'
-import { FindParseError } from '../../../commands/errors.ts'
+import { UsageError } from '../../../commands/errors.ts'
 import {
   type JobHandlerResult,
   handleDisown,
@@ -103,6 +103,7 @@ import {
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
 
 // One handler per JOB_BUILTINS member but ps, which also takes the workspace
 // user; lookup already narrowed the name.
@@ -406,8 +407,8 @@ export async function handleCommand(
     const errBytes = encodeText(`${typed}: command not found\n`)
     return [
       null,
-      new IOResult({ exitCode: 127, stderr: errBytes }),
-      new ExecutionNode({ command: cmdStr, exitCode: 127, stderr: errBytes }),
+      new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: errBytes }),
+      new ExecutionNode({ command: cmdStr, exitCode: NOT_FOUND_STATUS, stderr: errBytes }),
     ]
   }
 
@@ -632,12 +633,12 @@ export async function handleCommand(
     try {
       findExpr = parseFindExpression(findExprTokens)
     } catch (err) {
-      if (err instanceof FindParseError) {
+      if (err instanceof UsageError) {
         const errBytes = encodeText(`${err.message}\n`)
         return [
           null,
-          new IOResult({ exitCode: 1, stderr: errBytes }),
-          new ExecutionNode({ command: cmdStr, stderr: errBytes, exitCode: 1 }),
+          new IOResult({ exitCode: err.exitCode, stderr: errBytes }),
+          new ExecutionNode({ command: cmdStr, stderr: errBytes, exitCode: err.exitCode }),
         ]
       }
       throw err
@@ -870,8 +871,8 @@ export async function handleCommand(
     const err = encodeText(`${cmdName}: command not found`)
     return [
       null,
-      new IOResult({ exitCode: 127, stderr: err }),
-      new ExecutionNode({ command: cmdStr, exitCode: 127 }),
+      new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: err }),
+      new ExecutionNode({ command: cmdStr, exitCode: NOT_FOUND_STATUS }),
     ]
   }
   const selectedTree = mount.cliFor(cmdName)

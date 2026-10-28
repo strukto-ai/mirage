@@ -38,6 +38,7 @@ from mirage.io.stream import ensure_stream, materialize, yield_bytes
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
+from mirage.shell.constants import NOT_FOUND_STATUS, TIMEOUT_STATUS
 from mirage.shell.join import shell_join
 from mirage.workspace.executor.builtins.timeout.constants import (
     CONTINUE_SIGNALS,
@@ -302,7 +303,9 @@ async def handle_timeout(
 
     command = parse.operands[1:]
     if registry is not None and not execs(command[0], session, registry):
-        return _refuse(encode_text(timeout_missing(command[0])), 127)
+        return _refuse(
+            encode_text(timeout_missing(command[0])), NOT_FOUND_STATUS
+        )
     return await _supervise(
         execute_fn,
         shell_join(command),
@@ -441,14 +444,16 @@ async def _deadline(
             await _cancel(task)
             say(SIGKILL)
             return await _ended(console, held, said, 137)
-        code = task.result()[1].exit_code if preserve else 124
+        code = task.result()[1].exit_code if preserve else TIMEOUT_STATUS
         return await _ended(console, held, said, code, finished=True)
     await _cancel(task)
     if signal in SELF_KILLING_SIGNALS and (
         not foreground or signal == SIGKILL
     ):
         return await _ended(console, held, said, 128 + signal)
-    return await _ended(console, held, said, 128 + signal if preserve else 124)
+    return await _ended(
+        console, held, said, 128 + signal if preserve else TIMEOUT_STATUS
+    )
 
 
 async def _cancel(task: _Run) -> None:

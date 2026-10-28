@@ -14,7 +14,8 @@
 
 import type { CommandFnResult } from '../../../commands/config.ts'
 import { currentCaller } from '../../../context/session_context.ts'
-import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
+import { UsageError } from '../../../commands/errors.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
 import { errorVirtualPath, fsStrerror } from '../../../errors/fs.ts'
 import { formatFsError } from '../../../errors/render.ts'
@@ -29,6 +30,7 @@ import type { PathSpec, Producer } from '../../../types.ts'
 import { ABORT_JOIN_MS, joinOrAbort, stopSignal } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { readerOf, type Files } from '../../files.ts'
+import { CANNOT_EXECUTE_STATUS } from '../../../shell/constants.ts'
 
 /**
  * What a voice says for one failure: the bytes the handler printed before
@@ -114,7 +116,8 @@ export function argumentListTooLong(command: string, reason: string): Uint8Array
  * error with the path as typed. Mirrors Python's `_mount_failure`.
  */
 function mountFailure(name: string, paths: readonly PathSpec[], err: unknown): Failure {
-  if (err instanceof GlobLimitError) return [null, argumentListTooLong(name, err.message), 126]
+  if (err instanceof GlobLimitError)
+    return [null, argumentListTooLong(name, err.message), CANNOT_EXECUTE_STATUS]
   const code = err instanceof UsageError ? err.exitCode : readFailExitCode(name, err)
   return [null, formatFsError(name, err, paths), code]
 }
@@ -125,7 +128,7 @@ function mountFailure(name: string, paths: readonly PathSpec[], err: unknown): F
  * printed before it failed kept. Mirrors Python's `_leaf_failure`.
  */
 function leafFailure(prog: string, err: unknown): Failure {
-  const printed = err instanceof PartialOutputError ? err.stdout : null
+  const printed = err instanceof StreamRefusal ? err.output : null
   if (err instanceof UsageError) return [printed, encodeText(`${err.message}\n`), err.exitCode]
   return [printed, encodeText(`${prog}: ${leafMessage(err)}\n`), 1]
 }

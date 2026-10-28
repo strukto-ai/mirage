@@ -18,6 +18,7 @@ import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { byteView, fromByteView, utf8Locale } from '../../../shell/bytes.ts'
+import { UsageError } from '../../errors.ts'
 import { RegexError } from '../../../rs/errors.ts'
 import { posixRegex, type PosixRegex } from '../../../rs/regex.ts'
 import { quoteWord } from '../../quote.ts'
@@ -65,9 +66,6 @@ const MISSING_OPERAND = "expr: missing operand\nTry 'expr --help' for more infor
 // frames per level) and is far past any expression written by hand.
 const MAX_NESTING = 64
 const NESTING_TOO_DEEP = `expr: expression nesting too deep (limit ${String(MAX_NESTING)})`
-
-// An operand or operation GNU expr refuses, worded as GNU words it.
-export class ExprError extends Error {}
 
 // GNU's wording for an operator with nothing to its right. The word is
 // the last one the parser consumed, which is what GNU names here rather
@@ -117,7 +115,7 @@ function intOperandOrNone(s: string): bigint | null {
 // The same read for an arithmetic operand, which GNU refuses outright.
 function parseIntOperand(s: string): bigint {
   const n = intOperandOrNone(s)
-  if (n === null) throw new ExprError(NON_INTEGER)
+  if (n === null) throw new UsageError(NON_INTEGER)
   return n
 }
 
@@ -140,7 +138,7 @@ export function isNull(value: string): boolean {
 // zero divisor is GNU's `division by zero`, which is also why this cannot
 // be left to the operator (`bigint` raises `RangeError` instead).
 function truncDiv(a: bigint, b: bigint): bigint {
-  if (b === 0n) throw new ExprError(DIVISION_BY_ZERO)
+  if (b === 0n) throw new UsageError(DIVISION_BY_ZERO)
   return a / b
 }
 
@@ -149,7 +147,7 @@ function truncDiv(a: bigint, b: bigint): bigint {
 // already answers. GNU reports a zero divisor here with the same
 // `division by zero` message it uses for `/`, not a modulo variant.
 function truncMod(a: bigint, b: bigint): bigint {
-  if (b === 0n) throw new ExprError(DIVISION_BY_ZERO)
+  if (b === 0n) throw new UsageError(DIVISION_BY_ZERO)
   return a % b
 }
 
@@ -186,7 +184,7 @@ function compileOrRefuse(pattern: string, utf8: boolean): PosixRegex {
   try {
     return posixRegex(pattern, false, 'posix', false, utf8)
   } catch (err) {
-    if (err instanceof RegexError) throw new ExprError(`expr: ${err.message}`, { cause: err })
+    if (err instanceof RegexError) throw new UsageError(`expr: ${err.message}`, 2, { cause: err })
     throw err
   }
 }
@@ -311,7 +309,7 @@ class ExprReader {
   // the word before.
   readWord(): string {
     const word = this.words[this.next]
-    if (word === undefined) throw new ExprError(missingArgumentAfter(this.lastRead(), this.utf8))
+    if (word === undefined) throw new UsageError(missingArgumentAfter(this.lastRead(), this.utf8))
     this.next++
     return word
   }
@@ -426,14 +424,14 @@ class ExprReader {
   // `+ WORD`, `( EXPR )` or a word standing for itself, the word already read.
   async simple(word: string, live: boolean): Promise<string> {
     if (word === '+') return this.readWord()
-    if (word === ')') throw new ExprError(UNEXPECTED_CLOSE)
+    if (word === ')') throw new UsageError(UNEXPECTED_CLOSE)
     if (word !== '(') return word
-    if (this.depth >= MAX_NESTING) throw new ExprError(NESTING_TOO_DEEP)
+    if (this.depth >= MAX_NESTING) throw new UsageError(NESTING_TOO_DEEP)
     this.depth++
     const value = await this.either(live)
     this.depth--
     if (this.takeIf(')') === null) {
-      throw new ExprError(expectingClose(this.ahead(), this.lastRead(), this.utf8))
+      throw new UsageError(expectingClose(this.ahead(), this.lastRead(), this.utf8))
     }
     return value
   }
@@ -452,7 +450,7 @@ export async function exprEval(
   const reader = new ExprReader(args, utf8, signal)
   const value = await reader.either(true)
   const leftover = reader.ahead()
-  if (leftover !== null) throw new ExprError(unexpectedArgument(leftover, utf8))
+  if (leftover !== null) throw new UsageError(unexpectedArgument(leftover, utf8))
   return [value, isNull(value) ? 1 : 0]
 }
 
@@ -474,7 +472,7 @@ async function expr(
     )
     return [fromByteView(result + '\n', utf8), new IOResult({ exitCode })]
   } catch (err) {
-    if (err instanceof ExprError) {
+    if (err instanceof UsageError) {
       // GNU writes the refusal to stderr, nothing to stdout, and exits
       // 2; exit 1 is reserved for a zero-valued success. The diagnostic
       // quotes a byte view of the offending word, so it leaves through

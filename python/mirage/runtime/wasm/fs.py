@@ -24,7 +24,6 @@ from typing import Any, Callable, Literal
 
 from mirage.errors.fs import enoent, enotdir
 from mirage.errors.wasi import errno_for
-from mirage.runtime.errors import CrossMountError
 from mirage.runtime.files import Descriptor
 from mirage.runtime.handles import ChunkedHandle, FileTable
 from mirage.runtime.handles.mode import OpenMode
@@ -70,6 +69,7 @@ from mirage.runtime.wasm.stat import (
     pack_prestat,
 )
 from mirage.runtime.wasm.view import WasmView
+from mirage.shell.constants import INTERRUPTED_STATUS
 from mirage.utils.dates import timestamp_iso
 from mirage.utils.stat_view import CHAR_MODE
 
@@ -137,7 +137,7 @@ def _call_guarded(
     """
     try:
         return fn(caller, *args)
-    except (OSError, ValueError, NotImplementedError, CrossMountError) as exc:
+    except (OSError, ValueError, NotImplementedError) as exc:
         return errno_for(exc)
     except Exception as exc:
         logger.debug("wasi host call failed: %r", exc)
@@ -393,7 +393,7 @@ class WasiFs:
             0, min(deadline for deadline, _ in events) - time.monotonic_ns()
         )
         if self._cancelled.wait(delay / 1_000_000_000):
-            self.exit_code = 130
+            self.exit_code = INTERRUPTED_STATUS
             return -1
         now = time.monotonic_ns()
         ready = [event for deadline, event in events if deadline <= now]
@@ -589,12 +589,7 @@ class WasiFs:
                 continue
             try:
                 file.close()
-            except (
-                OSError,
-                ValueError,
-                NotImplementedError,
-                CrossMountError,
-            ) as exc:
+            except (OSError, ValueError, NotImplementedError) as exc:
                 failures.append(f"{entry.opened}: {exc}")
         return failures
 

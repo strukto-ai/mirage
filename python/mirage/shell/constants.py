@@ -108,6 +108,18 @@ IFS_DEFAULT = " \t\n"
 FORK_FAILED = b"bash: fork: Resource temporarily unavailable\n"
 FORK_FAILED_STATUS = 254
 
+# The statuses a command ends with when it did not run its course, as
+# bash and coreutils report them: GNU timeout's 124 (also a line past its
+# timeout budget), 126 for a command found but refused (not executable, a
+# policy deny, a runtime that would not take it, an argument list too
+# long), 127 for one not found, and 128 + the signal for an interrupt
+# (SIGINT) or a write to a closed pipe (SIGPIPE).
+TIMEOUT_STATUS = 124
+CANNOT_EXECUTE_STATUS = 126
+NOT_FOUND_STATUS = 127
+INTERRUPTED_STATUS = 130
+SIGPIPE_STATUS = 141
+
 # The descriptors the shell models: stdin, stdout and stderr, and no
 # table above them. A redirect naming any other number is refused
 # before it does anything (`shell/descriptors.py`), because the old

@@ -15,8 +15,8 @@
 import type { FsCondition } from './types.ts'
 
 // Every code spelling the vocabulary names. Identity for the vocabulary's own
-// names (which is what the errors/fs constructors, CycleError and
-// CrossMountError stamp), plus the aliases other raisers use:
+// names (which is what the errors/fs constructors and CycleError
+// stamp), plus the aliases other raisers use:
 // EOPNOTSUPP is ENOTSUP's second POSIX spelling, and ENODATA/ENOATTR
 // are the two platform names for one "attribute not set" condition.
 export const CODE_ARMS: Record<string, FsCondition> = {

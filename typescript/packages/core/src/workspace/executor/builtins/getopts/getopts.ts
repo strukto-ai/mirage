@@ -15,7 +15,7 @@
 import { IOResult } from '../../../../io/types.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { ReadonlyVariableError } from '../../../session/errors.ts'
+import { ReadonlyVariableError } from '../../../../shell/errors.ts'
 import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { ExecutionNode } from '../../../types.ts'

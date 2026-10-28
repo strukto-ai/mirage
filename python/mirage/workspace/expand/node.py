@@ -23,7 +23,7 @@ from mirage.shell.console import JobConsole
 from mirage.shell.errors import (
     ArithError,
     BadSubstitution,
-    ReadonlyError,
+    ReadonlyVariableError,
     named,
 )
 from mirage.shell.escapes import (
@@ -314,7 +314,7 @@ async def _arith_value(
     """
     try:
         return str(await landed_arith(session, view, expr, land_arith_writes))
-    except (ArithError, ReadonlyError) as exc:
+    except (ArithError, ReadonlyVariableError) as exc:
         raise exc.signal() from exc
 
 

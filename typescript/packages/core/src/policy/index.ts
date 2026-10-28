@@ -18,7 +18,7 @@ export { Decisions, askRule, covers, decisionId, type AskHandler } from './decis
 export { MountRootPolicy } from './builtin/mount_root.ts'
 export { PermissionsPolicy } from './builtin/permissions.ts'
 export { resolveProducer, resolveLimit } from './builtin/output_cap.ts'
-export { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, POLICY_DENIED_EXIT } from './constants.ts'
+export { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 export {
   Policies,
   postCommandGate,

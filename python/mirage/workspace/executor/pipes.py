@@ -39,6 +39,7 @@ from mirage.shell.console.types import Channel
 from mirage.shell.constants import (
     FORK_FAILED,
     FORK_FAILED_STATUS,
+    SIGPIPE_STATUS,
 )
 from mirage.shell.descriptors import Recorder
 from mirage.shell.errors import ExitSignal, PipeClosed, ReturnSignal
@@ -165,7 +166,7 @@ async def handle_pipe(
             if waits is not None:
                 await waits.join(rest)
         except PipeClosed:
-            io.exit_code = 141
+            io.exit_code = SIGPIPE_STATUS
         except UNWINDING as sig:
             # A stage is a subshell: whatever unwinds ends it there, a
             # simple command the top shell forked as that shell would.
@@ -540,7 +541,7 @@ async def handle_subshell(
                 if sink is None or not await answer_closed(io, sink.emit):
                     if not writer_forks(child, session, io):
                         raise
-                    io.exit_code = 141
+                    io.exit_code = SIGPIPE_STATUS
                 record_status(session, io.exit_code)
             merged_io = await merged_io.merge(io)
             merged_io = await land(
@@ -572,7 +573,12 @@ async def handle_subshell(
         except PipeClosed:
             # The subshell's own write met a closed pipe: SIGPIPE ends it.
             merged_io, last_exec = await _subshell_ended(
-                ExitSignal(141), recorder, session, sink, all_stdout, merged_io
+                ExitSignal(SIGPIPE_STATUS),
+                recorder,
+                session,
+                sink,
+                all_stdout,
+                merged_io,
             )
             break
         except BaseException:

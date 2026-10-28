@@ -29,7 +29,7 @@ import { commentsFor, commentsText } from './issue.ts'
 import { GH } from './index.ts'
 import { PathSpec } from '../../../../types.ts'
 import { Files } from '../../../../workspace/files.ts'
-import { PartialOutputError } from '../../../errors.ts'
+import { StreamRefusal } from '../../../../rs/errors.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import { api } from './api.ts'
 import { deleteCmd, editCmd, fork, listCmd, rename, summary, view } from './repo.ts'
@@ -890,9 +890,9 @@ describe('gh api --jq', () => {
     const failure = await api(...args(['repos/o/r'], { jq: program })).catch(
       (error: unknown) => error,
     )
-    expect(failure).toBeInstanceOf(PartialOutputError)
-    const partial = failure as PartialOutputError
-    expect([partial.message, new TextDecoder().decode(partial.stdout)]).toEqual([message, ''])
+    expect(failure).toBeInstanceOf(StreamRefusal)
+    const partial = failure as StreamRefusal
+    expect([partial.message, new TextDecoder().decode(partial.output)]).toEqual([message, ''])
   })
 
   it.each([
@@ -904,9 +904,9 @@ describe('gh api --jq', () => {
     const failure = await api(...args(['repos/o/r'], { jq: program })).catch(
       (error: unknown) => error,
     )
-    expect(failure).toBeInstanceOf(PartialOutputError)
-    const partial = failure as PartialOutputError
-    expect([partial.message, new TextDecoder().decode(partial.stdout)]).toEqual([message, 'x\n'])
+    expect(failure).toBeInstanceOf(StreamRefusal)
+    const partial = failure as StreamRefusal
+    expect([partial.message, new TextDecoder().decode(partial.output)]).toEqual([message, 'x\n'])
   })
 })
 
@@ -1112,9 +1112,9 @@ it.each([
     const failure = await api(...args(['page1'], { paginate: true, jq: program })).catch(
       (error: unknown) => error,
     )
-    expect(failure).toBeInstanceOf(PartialOutputError)
-    const partial = failure as PartialOutputError
-    expect([partial.message, DEC.decode(partial.stdout)]).toEqual([message, 'first\n'])
+    expect(failure).toBeInstanceOf(StreamRefusal)
+    const partial = failure as StreamRefusal
+    expect([partial.message, DEC.decode(partial.output)]).toEqual([message, 'first\n'])
   } finally {
     request.mockRestore()
   }

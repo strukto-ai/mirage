@@ -106,6 +106,7 @@ from mirage.observe.context import (
 )
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
+from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.types import (
     FileChangeKind,
     FileStat,
@@ -1095,7 +1096,7 @@ class MountEntry:
             )
             if not handlers:
                 return None, IOResult(
-                    exit_code=127,
+                    exit_code=NOT_FOUND_STATUS,
                     stderr=encode_text(f"{cmd_name}: command not found"),
                 )
             with self._command_scope(ctx):
@@ -1354,7 +1355,7 @@ class MountEntry:
         user = self._is_user_command(served or cmd)
         if user and not path_visible(session_visibility(), self.prefix):
             return IOResult(
-                exit_code=127,
+                exit_code=NOT_FOUND_STATUS,
                 stderr=encode_text(f"{cmd_name}: command not found\n"),
             )
         info_only = (

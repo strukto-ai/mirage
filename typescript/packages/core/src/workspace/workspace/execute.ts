@@ -22,7 +22,7 @@ import { ExecutionScope } from '../execution.ts'
 import { newExecutionId } from '../../execution/context.ts'
 import { PathSpec } from '../../types.ts'
 import { literalTree } from '../../shell/literal.ts'
-import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
+import { FORK_FAILED, FORK_FAILED_STATUS, INTERRUPTED_STATUS } from '../../shell/constants.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -1097,7 +1097,7 @@ async function runParsedLine(
         if (isLine) {
           const aborted = killed?.aborted === true
           const failed = failureResult(aborted ? makeAbortError(killed) : error)
-          if (aborted) failed.exitCode = 130
+          if (aborted) failed.exitCode = INTERRUPTED_STATUS
           await logLine(new IOResult(failed))
         }
         throw error
@@ -1229,7 +1229,7 @@ async function runParsedLine(
               : error,
         }
         const failed = failureResult(executionFailure.error)
-        if (aborted) failed.exitCode = 130
+        if (aborted) failed.exitCode = INTERRUPTED_STATUS
         return [null, new IOResult(failed), new ExecutionNode({ command, ...failed })]
       } finally {
         disarm?.()
@@ -1298,7 +1298,7 @@ async function runParsedLine(
       // An aborted invocation is the caller's outcome, not the shell's.
       if (isLine) restoreStatus(targetSession, statusBefore, lineStatusWriter(targetSession))
       executionFailure = { error: makeAbortError(killed) }
-      io.exitCode = 130
+      io.exitCode = INTERRUPTED_STATUS
       stdoutBytes = new Uint8Array()
     } else {
       // Lazy reads can fail while draining (e.g. head/tail that open the

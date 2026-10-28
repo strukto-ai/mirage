@@ -28,6 +28,7 @@ from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.console import JobConsole
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.shell.job_table import JobTable
 from mirage.shell.join import shell_join
 from mirage.utils.path import resolve_path
@@ -143,11 +144,17 @@ async def handle_exec_path(
         strerror = fs_strerror(exc)
         if strerror is None:
             raise
-        code = 127 if isinstance(exc, FileNotFoundError) else 126
+        code = (
+            NOT_FOUND_STATUS
+            if isinstance(exc, FileNotFoundError)
+            else CANNOT_EXECUTE_STATUS
+        )
         return script_error(path, strerror, code)
     if is_binary(data):
         return script_error(
-            path, "cannot execute binary file: Exec format error", 126
+            path,
+            "cannot execute binary file: Exec format error",
+            CANNOT_EXECUTE_STATUS,
         )
     script = decode_text(data)
     target = namespace.session_links(session).follow(

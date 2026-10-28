@@ -33,6 +33,7 @@ from mirage.runtime.types import (
 )
 from mirage.runtime.wasm import WasmExecution, WasmView
 from mirage.runtime.wasm.loader import wasmtime
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 
 WASI_HOME_ENV = "MIRAGE_WASI_HOME"
 
@@ -161,7 +162,7 @@ class WasiRuntime(PythonRuntime[WasmExecution]):
                     f"at '{hiding}', which hides the interpreter's standard "
                     "library at /lib\n"
                 ).encode(),
-                exit_code=126,
+                exit_code=CANNOT_EXECUTE_STATUS,
             )
         # Mount prefixes route to the workspace bridge; everything else
         # is served from the build directory, so a mount at "/" never

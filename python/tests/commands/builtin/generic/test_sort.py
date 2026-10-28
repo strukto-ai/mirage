@@ -3,7 +3,6 @@ from collections.abc import Awaitable, Callable
 import pytest
 
 import mirage.commands.builtin.generic.sort as sort_module
-from mirage.commands.builtin.errors import SortKeyError
 from mirage.commands.builtin.generic.sort import (
     parse_flags,
     sort_generic,
@@ -189,7 +188,7 @@ def test_the_first_bad_option_on_the_line_is_the_one_refused():
     outputs = [_spec("/data/p1"), _spec("/data/p2")]
     with pytest.raises(UsageError):
         parse_flags({"output": outputs, "key": ["0"]})
-    with pytest.raises(SortKeyError):
+    with pytest.raises(UsageError):
         parse_flags({"key": ["0"], "output": outputs})
     with pytest.raises(UsageError) as exc:
         parse_flags({"c": True, "C": True, "output": outputs})

@@ -35,7 +35,7 @@ from mirage.shell.errors import (
     BadSubstitution,
     DiscardSignal,
     ExitSignal,
-    ReadonlyError,
+    ReadonlyVariableError,
     UnboundVariable,
     named,
 )
@@ -956,7 +956,7 @@ class _ArithOperand:
             return await landed_arith(
                 self.session, self.view, text, land_arith_writes, nounset
             )
-        except ReadonlyError as exc:
+        except ReadonlyVariableError as exc:
             raise exc.signal() from exc
         except ArithError as exc:
             raise exc.signal(self.ref) from exc

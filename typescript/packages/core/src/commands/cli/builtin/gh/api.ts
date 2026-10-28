@@ -21,7 +21,7 @@ import type { PathSpec } from '../../../../types.ts'
 import { expand } from '../../../../core/github/placeholder.ts'
 import { GRAPHQL_PATH } from '../../../../core/github/constants.ts'
 import { GitHubApiError, type GitHubResponse } from '../../../../core/github/client.ts'
-import { PartialOutputError } from '../../../errors.ts'
+import { StreamRefusal } from '../../../../rs/errors.ts'
 import { ghBool, jqLines, readCliFile } from './accessor.ts'
 import { HTTP_REASONS } from './constants.ts'
 
@@ -457,9 +457,9 @@ async function renderPages(pages: Printed[], fl: FlagView, failure?: Failure): P
       try {
         parts.push([page.head, await jqLines([page.data], program)])
       } catch (err) {
-        if (!(err instanceof PartialOutputError)) throw err
-        const done = bytesOf([...joined([...parts, [page.head]], between), err.stdout])
-        throw new PartialOutputError(err.message, done)
+        if (!(err instanceof StreamRefusal)) throw err
+        const done = bytesOf([...joined([...parts, [page.head]], between), err.output])
+        throw new StreamRefusal(err.message, done)
       }
     }
     return bytesOf(joined([...parts, ...failed], between))

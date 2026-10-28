@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.errors import FindParseError, UsageError
+from mirage.commands.errors import UsageError
 from mirage.errors.types import CommandTimeoutError
 from mirage.policy import Deny
 from mirage.types import Refusal
@@ -42,12 +42,6 @@ def test_usage_error_keeps_its_own_exit_code():
     io = failure_result(UsageError("ls: bad option", exit_code=2), "ls -Z")
     assert io.exit_code == 2
     assert io.stderr == b"ls: bad option\n"
-
-
-def test_find_parse_error_exits_1():
-    io = failure_result(FindParseError("find: bad expression"), "find . -nope")
-    assert io.exit_code == 1
-    assert io.stderr == b"find: bad expression\n"
 
 
 def test_os_error_is_formatted_as_a_filesystem_diagnostic():

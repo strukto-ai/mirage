@@ -348,9 +348,9 @@ def fatal(exc: GitError) -> tuple[ByteSource | None, IOResult]:
     body = f"{exc}\n" if exc.prefix is None else f"{exc.prefix}: {exc}\n"
     data = body.encode()
     if exc.stream == STDOUT:
-        return data, IOResult(exit_code=exc.code)
+        return data, IOResult(exit_code=exc.exit_code)
     told = exc.report.encode() if exc.report else None
-    return told, IOResult(exit_code=exc.code, stderr=data)
+    return told, IOResult(exit_code=exc.exit_code, stderr=data)
 
 
 def git_bool(values: Sequence[bytes], key: str, default: bool) -> bool:

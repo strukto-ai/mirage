@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classify } from './classify.ts'
 import { CODE_ARMS, OPERAND_CONDITIONS } from './constants.ts'
 import { posixPhrase } from './posix.ts'
 import { CommandTimeoutError } from './types.ts'
@@ -347,14 +348,16 @@ export function isMissingOp(err: unknown, op: string): boolean {
 }
 
 /**
- * The reason a failed write's line ends with, whatever threw it: the shared
- * phrase for a filesystem condition, and a store's own error (an SDK's, an
- * HTTP status on upload) by its message, the only cause it carries. Mirrors
- * Python's `strerror_of`.
+ * What a diagnostic says about a failure, whatever threw it: the strerror
+ * text for a condition the vocabulary names (EIO reads 'Input/output
+ * error', a path no mount owns 'No such file or directory'), and a store's
+ * own error (an SDK's, an HTTP status on upload) by its message, the only
+ * cause it carries. Never the message of a stamped error, which may name a
+ * real host path. Mirrors Python's `strerror_of`.
  */
 export function strerrorOf(err: unknown): string {
-  const phrase = fsStrerror(err)
-  if (phrase !== null) return phrase
+  const condition = classify(err)
+  if (condition !== null) return posixPhrase(condition)
   if (err instanceof Error) return err.message || err.name
   return String(err)
 }

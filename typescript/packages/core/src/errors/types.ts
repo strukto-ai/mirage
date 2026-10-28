@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '../types.ts'
+
 /**
  * A filesystem condition mirage can report, named once.
  *
@@ -154,6 +156,23 @@ export class GlobLimitError extends Error {
   constructor(word: string, limit: number) {
     super(`${word}: matches more than ${String(limit)} files (walk_limit); narrow the path`)
     this.name = 'GlobLimitError'
+  }
+}
+
+// A walk past its mount's `walkLimit`. The message is the line the command
+// prints where it stopped (`directory` is the operand, or the mount root
+// below it); grep and rg throw it to stop reading a directory, keep what
+// they printed and exit 2.
+// Mirrors Python's mirage.errors.types.WalkLimitError.
+export class WalkLimitError extends Error {
+  readonly directory: PathSpec
+  constructor(directory: PathSpec, limit: number) {
+    super(
+      `${directory.rawPath === '' ? '.' : directory.rawPath}: stopped after ${String(limit)} files ` +
+        '(walk_limit); narrow the path',
+    )
+    this.name = 'WalkLimitError'
+    this.directory = directory
   }
 }
 
