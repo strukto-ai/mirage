@@ -81,7 +81,44 @@ A file the session cannot see is never printed.
 | [Qdrant](/python/vfs/qdrant#semantic-search) | Qdrant's vector query | Qdrant's score |
 | [LanceDB](/python/vfs/lancedb#semantic-search) | LanceDB's vector search | The largest distance kept |
 
-A [custom VFS](/python/vfs/new) joins the list by implementing `search`.
+
+## Answer from a custom VFS
+
+A [custom VFS](/python/vfs/new) joins the list by defining `search`. It gets
+the path the line names and a `SearchQuery`: the text in `query`, and in
+`options` the `top_k`, `threshold` and `method` the line gives. It returns
+one `(path, record)` pair per hit, the hit's workspace path and the text
+`search` prints; `[]` means no match and `None` declines. A VFS that ranks
+several paths together defines `search_many(paths, query)` as well.
+
+```python
+from mirage import BaseVFS, PathSpec, SearchQuery
+from mirage.utils.key_prefix import mounted_path
+
+
+class NotesVFS(BaseVFS):
+    async def search(self, path: PathSpec, query: SearchQuery) -> list[tuple[str, str]] | None:
+        hits = await self.accessor.client.search(query.query, limit=int(query.options.get("top_k", 10)))
+        return [(mounted_path(path, "/" + hit.key).virtual, hit.text) for hit in hits]
+```
+
+A search never passes the file cache. To keep results, the accessor holds a
+`ResponseCache` and returns it from `caches()`; the mount then expires it
+with its read policy and drops it after a write from outside Mirage.
+
+```python
+from mirage import Accessor, ResponseCache
+
+
+class NotesAccessor(Accessor):
+    def __init__(self) -> None:
+        self.searches = ResponseCache[str, list[tuple[str, str]]]()
+
+    def caches(self):
+        return (self.searches,)
+```
+
+`await self.searches.get(key, fetch)` answers from the cache or calls `fetch`.
 
 ## Errors
 
