@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from collections.abc import Iterable, Sequence
 
 from mirage.io.yield_budget import YieldBudget
@@ -100,9 +101,10 @@ async def split_fields(chunks: Iterable[Chunk], ifs: str | None) -> list[str]:
     ``IFS=,`` is three fields and ``a,`` is one. A splat boundary always
     ends a field. A field exists once literal or quoted text, or a
     non-empty split, opened it, so an unquoted expansion that comes
-    back empty is no word at all while ``""`` is an empty one. A value
-    that splits into many fields yields between them, so a cancel or
-    the line's deadline lands mid-split.
+    back empty is no word at all while ``""`` is an empty one. A word of
+    many pieces, or a value that splits into many fields, yields between
+    them, so a cancel or the line's deadline lands mid-split; a run with
+    no separator is found in one search.
 
     Args:
         chunks (Iterable[Chunk]): the word's pieces.
@@ -114,22 +116,23 @@ async def split_fields(chunks: Iterable[Chunk], ifs: str | None) -> list[str]:
     current: list[str] = []
     started = False
     budget = YieldBudget()
+    stop = re.compile(f"[{re.escape(separators)}]") if separators else None
     for chunk in chunks:
+        await budget.run()
         if isinstance(chunk, FieldBreak):
             if started:
                 fields.append("".join(current))
             current, started = [], False
             continue
         text = chunk.text
-        if not chunk.split or not separators:
+        if not chunk.split or stop is None:
             current.append(text)
             started = started or not chunk.split or bool(text)
             continue
         index = 0
         while index < len(text):
-            end = index
-            while end < len(text) and text[end] not in separators:
-                end += 1
+            found = stop.search(text, index)
+            end = len(text) if found is None else found.start()
             if end > index:
                 current.append(text[index:end])
                 started = True

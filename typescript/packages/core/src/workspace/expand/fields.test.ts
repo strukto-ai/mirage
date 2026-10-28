@@ -105,3 +105,26 @@ describe('chunk helpers', () => {
     expect(joinChunks([piece('a', true), fieldBreak(','), piece('b', true)])).toBe('a,b')
   })
 })
+
+describe('splitFields and a stop', () => {
+  it('yields across a long quoted splat', async () => {
+    const chunks = await splatChunks(
+      Array.from({ length: 200_000 }, (_, i) => String(i)),
+      ' ',
+      true,
+    )
+    let turns = 0
+    let on = true
+    const tick = (): void => {
+      turns += 1
+      if (on) setImmediate(tick)
+    }
+    setImmediate(tick)
+    await new Promise((resolve) => setImmediate(resolve))
+    const before = turns
+    const fields = await splitFields(chunks, null)
+    on = false
+    expect(fields).toHaveLength(200_000)
+    expect(turns).toBeGreaterThan(before)
+  })
+})

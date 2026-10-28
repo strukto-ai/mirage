@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.utils.glob_walk import mark_globs
@@ -113,3 +115,23 @@ def test_value_piece_marks_only_quoted_values():
 def test_join_chunks_reads_each_break_as_its_joiner():
     chunks = [Piece("a", True), FieldBreak(","), Piece("b", True)]
     assert join_chunks(chunks) == "a,b"
+
+
+@pytest.mark.asyncio
+async def test_split_fields_yields_across_a_long_quoted_splat():
+    chunks = await splat_chunks([str(i) for i in range(200000)], " ", True)
+    turns = 0
+
+    async def tick() -> None:
+        nonlocal turns
+        while True:
+            turns += 1
+            await asyncio.sleep(0)
+
+    ticker = asyncio.create_task(tick())
+    await asyncio.sleep(0)
+    before = turns
+    fields = await split_fields(chunks, None)
+    ticker.cancel()
+    assert len(fields) == 200000
+    assert turns > before

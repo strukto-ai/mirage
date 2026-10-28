@@ -35,6 +35,7 @@ import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
+import { STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
 import {
@@ -44,7 +45,7 @@ import {
   runWithCaller,
 } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { abortable, atDeadline, mergeSignals } from '../../utils/abort.ts'
+import { abortable, atDeadline } from '../../utils/abort.ts'
 import type { SessionView } from '../../view/types.ts'
 import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
 import { type Decisions, isPending } from '../../policy/decisions.ts'
@@ -258,20 +259,33 @@ export async function handleBackground(
   const abort = new AbortController()
   // `kill %n` aborts this controller; the signal rides the forked
   // session so the job's whole subtree (builtins, mounts, runtimes)
-  // observes the kill, merged with any enclosing job's channel.
-  const killed = mergeSignals(context.frame.abortSignal, abort.signal) ?? abort.signal
+  // observes the kill, merged with any enclosing job's channel. An
+  // enclosing job's limit is not part of that channel: it aborts with a
+  // CommandTimeoutError, which this job does not answer to, so a job runs
+  // to its own limit as a line's deadline leaves the line's jobs alone.
+  const enclosing = context.frame.abortSignal
+  const inherited = new AbortController()
+  if (enclosing !== null) {
+    const follow = (): void => {
+      if (!(enclosing.reason instanceof CommandTimeoutError)) inherited.abort(enclosing.reason)
+    }
+    if (enclosing.aborted) follow()
+    else enclosing.addEventListener('abort', follow, { once: true })
+  }
+  const killed = AbortSignal.any([inherited.signal, abort.signal])
   // The job runs under the `@line` limit of the line that started it, from
   // its own start, its output included: past it the subtree is stopped as a
-  // kill stops it and the job answers 124 and the line's message, as a line
-  // does. Its copy to the shell's output stays open for that message.
+  // kill stops it, a write a reader holds included, and the job answers 124
+  // and the line's message, as a line does.
   const expiry = new AbortController()
-  childEvaluation.frame.abortSignal = AbortSignal.any([killed, expiry.signal])
+  const stopped = AbortSignal.any([killed, expiry.signal])
+  childEvaluation.frame.abortSignal = stopped
   const cmdStrInner = left.text
   const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
     // What the job writes stays in its console and goes where its shell
     // writes as it is written: the terminal, or the substitution or pipe
     // it was started in.
-    const console_ = new Tee(job.console, new JobCopy(output, killed))
+    const console_ = new Tee(job.console, new JobCopy(output, stopped))
     const hold = { held: false, ended: false }
     const lineSink = currentCaller().refusals
     // The line still hears of every refusal; a question left waiting also
@@ -340,7 +354,7 @@ export async function handleBackground(
       const disarm =
         seconds !== null && seconds > 0
           ? atDeadline(seconds, () => {
-              expiry.abort()
+              expiry.abort(new CommandTimeoutError(LINE_NAME, seconds))
             })
           : undefined
       let result: [IOResult, ExecutionNode]
@@ -349,7 +363,18 @@ export async function handleBackground(
       } catch (err) {
         if (seconds === null || !expiry.signal.aborted || abort.signal.aborted) throw err
         const msg = encodeText(`${new CommandTimeoutError(LINE_NAME, seconds).message}\n`)
-        await console_.emit(Channel.STDERR, msg)
+        // The job's own console keeps the notice; the shell's output gets it
+        // unless a reader that stopped reading holds it past the wait a
+        // stopped job is given, so the job still ends.
+        await job.console.emit(Channel.STDERR, msg)
+        try {
+          await abortable(
+            output.emit(Channel.STDERR, msg),
+            AbortSignal.any([killed, AbortSignal.timeout(STOP_WAIT_SECONDS * 1000)]),
+          )
+        } catch (err) {
+          console.debug('job: its timeout notice found no reader', err)
+        }
         result = [
           new IOResult({ exitCode: TIMEOUT_STATUS }),
           new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: TIMEOUT_STATUS }),

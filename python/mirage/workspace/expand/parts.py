@@ -141,8 +141,10 @@ async def expand_words(
                 p, context, execute_fn, call_stack, view=view
             )
             if brace_words is not None:
+                budget = YieldBudget()
                 for chunks in brace_words:
                     result.extend(await split_fields(chunks, ifs))
+                    await budget.run()
                 continue
         chunks = await expand_chunks(
             p, context, execute_fn, call_stack, view=view

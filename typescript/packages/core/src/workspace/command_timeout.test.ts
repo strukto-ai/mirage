@@ -214,6 +214,18 @@ describe('background job at the line limit', () => {
     },
   )
 
+  it('a job runs to its own limit past the job that started it', async () => {
+    const ws = jobWs(0.6)
+    try {
+      await ws.shell('{ sleep 0.4; { sleep 0.4; echo inner > /data/a; } & sleep 2; } &')
+      expect((await ws.jobTable.wait(1, ws.defaultSessionId)).exitCode).toBe(124)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect((await ws.shell('cat /data/a')).stdoutText).toBe('inner\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it("a lifted line limit lifts a job's too", async () => {
     const ws = jobWs(0)
     try {

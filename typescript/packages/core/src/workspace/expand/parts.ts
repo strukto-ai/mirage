@@ -109,8 +109,11 @@ export async function expandWords(
     if (BRACE_WORD_TYPES.has(p.type) && session.shellOptions.braceexpand !== false) {
       const braceWords = await expandBraceWord(p, context, executeFn, callStack, view)
       if (braceWords !== null) {
-        for (const chunks of braceWords)
+        const budget = new YieldBudget(callerSignal())
+        for (const chunks of braceWords) {
           for (const w of await splitFields(chunks, ifs)) result.push(w)
+          await budget.run()
+        }
         continue
       }
     }

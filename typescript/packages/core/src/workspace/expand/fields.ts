@@ -82,8 +82,9 @@ export function chunksText(chunks: Iterable<Chunk>): string {
  * a field. A field exists once literal or quoted text, or a non-empty
  * split, opened it, so an unquoted expansion that comes back empty is
  * no word at all while `""` is an empty one. `ifs` is null when unset. A
- * value that splits into many fields yields between them, so a cancel or
- * the line's deadline lands mid-split.
+ * word of many pieces, or a value that splits into many fields, yields
+ * between them, so a cancel or the line's deadline lands mid-split; a run
+ * with no separator is found in one search.
  */
 export async function splitFields(chunks: Iterable<Chunk>, ifs: string | null): Promise<string[]> {
   const separators = ifs ?? IFS_DEFAULT
@@ -93,7 +94,10 @@ export async function splitFields(chunks: Iterable<Chunk>, ifs: string | null): 
   let current = ''
   let started = false
   const budget = new YieldBudget(callerSignal())
+  const stop =
+    separators === '' ? null : new RegExp(`[${separators.replace(/[\\\]^-]/g, '\\$&')}]`, 'g')
   for (const chunk of chunks) {
+    await budget.run()
     if (chunk.kind === 'break') {
       if (started) fields.push(current)
       current = ''
@@ -101,15 +105,15 @@ export async function splitFields(chunks: Iterable<Chunk>, ifs: string | null): 
       continue
     }
     const text = chunk.text
-    if (!chunk.split || separators === '') {
+    if (!chunk.split || stop === null) {
       current += text
       started = started || !chunk.split || text !== ''
       continue
     }
     let index = 0
     while (index < text.length) {
-      let end = index
-      while (end < text.length && !separators.includes(text[end] ?? '')) end++
+      stop.lastIndex = index
+      let end = stop.exec(text)?.index ?? text.length
       if (end > index) {
         current += text.slice(index, end)
         started = true

@@ -23,10 +23,11 @@ from mirage.policy.profile import SessionProfile
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.job_table import table as job_table_module
-from mirage.types import MountMode, PathSpec
+from mirage.types import Limit, MountMode, PathSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.executor import jobs as jobs_executor
 from mirage.workspace.executor.jobs import (
     _owner_tags,
     handle_disown,
@@ -1545,3 +1546,30 @@ async def test_child_shells_reach_anothers_processes(monkeypatch):
     finally:
         await a.close()
         await b.close()
+
+
+class _Held(JobConsole):
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_a_job_past_its_limit_ends_while_a_reader_holds_its_output(
+    monkeypatch,
+):
+    monkeypatch.setattr(jobs_executor, "STOP_WAIT_SECONDS", 0.2)
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits={"@line": Limit(timeout_seconds=0.2)},
+    )
+    ws.get_session(ws.default_session_id).tty.jobs = _Held()
+    await ws.shell("seq 1 1000000000 &")
+    async with asyncio.timeout(5):
+        await ws.job_table.wait(1, ws.default_session_id)
+    job = ws.job_table.get(1, ws.default_session_id)
+    assert job.exit_code == 124
+    assert (
+        await job.console.snapshot(Channel.STDERR)
+    ) == b"line: timed out after 0.2s\n"
+    await ws.close()

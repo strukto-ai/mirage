@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -61,6 +62,7 @@ from mirage.shell.constants import (
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
+from mirage.shell.job_table.constants import STOP_WAIT_SECONDS
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs
@@ -84,6 +86,8 @@ from mirage.workspace.session import (
     SessionState,
 )
 from mirage.workspace.types import ExecutionNode
+
+logger = logging.getLogger(__name__)
 
 
 async def pump(
@@ -415,7 +419,18 @@ async def handle_background(
                 exec_node = ExecutionNode(
                     command=cmd_str_inner, stderr=msg, exit_code=TIMEOUT_STATUS
                 )
-                await console.emit(Channel.STDERR, msg)
+                # The job's own console keeps the notice; the shell's
+                # output gets it unless a reader that stopped reading
+                # holds it past the wait a stopped job is given, so the
+                # job still ends.
+                await job.console.emit(Channel.STDERR, msg)
+                try:
+                    async with asyncio.timeout(STOP_WAIT_SECONDS):
+                        await output.emit(Channel.STDERR, msg)
+                except TimeoutError:
+                    logger.debug(
+                        "job %d: its timeout notice found no reader", job.pid
+                    )
             ended_held = held or is_pending(io.refusal)
             return io, exec_node
         finally:

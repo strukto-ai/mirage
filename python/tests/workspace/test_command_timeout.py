@@ -184,6 +184,19 @@ async def test_a_job_runs_under_the_line_limit_from_its_own_start(job):
 
 
 @pytest.mark.asyncio
+async def test_a_job_runs_to_its_own_limit_past_the_job_that_started_it():
+    ws = _ws(line=0.6)
+    await ws.shell(
+        "{ sleep 0.4; { sleep 0.4; echo inner > /data/a; } & sleep 2; } &"
+    )
+    await ws.job_table.wait(1, ws.default_session_id)
+    assert ws.job_table.get(1, ws.default_session_id).exit_code == 124
+    await asyncio.sleep(0.3)
+    r = await ws.shell("cat /data/a")
+    assert (await r.stdout_str()) == "inner\n"
+
+
+@pytest.mark.asyncio
 async def test_a_lifted_line_limit_lifts_a_job_s_too():
     ws = Workspace(
         {"/data": RAMVFS()},
