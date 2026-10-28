@@ -100,16 +100,18 @@ async def test_an_append_cancelled_while_it_flushes_leaves_the_spool_whole(
 
         def held(data: bytes, offset: int) -> None:
             started.set()
-            go.wait()
+            assert go.wait(5)
             write(data, offset)
 
         monkeypatch.setattr(spool, "_write", held)
         appending = asyncio.create_task(spool.append(block))
-        await asyncio.to_thread(started.wait)
-        appending.cancel()
-        go.set()
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            appending.cancel()
+        finally:
+            go.set()
         with pytest.raises(asyncio.CancelledError):
-            await appending
+            await asyncio.wait_for(appending, 5)
         monkeypatch.undo()
         await spool.append(b"tail")
         assert spool.size == len(block) + 8
