@@ -843,6 +843,6 @@ def listing_result(
             else f"{stopped.prefix}: {stopped}\n"
         )
     return encode_text(out), IOResult(
-        exit_code=stopped.code if stopped is not None else 0,
+        exit_code=stopped.exit_code if stopped is not None else 0,
         stderr=stderr.encode(),
     )

@@ -31,17 +31,14 @@ from agents.sandbox.errors import ExecTimeoutError
 from agents.sandbox.manifest import Environment
 from agents.sandbox.session.sandbox_session_state import SandboxSessionState
 
-from mirage.agents.openai_agents.constants import (
-    INTERRUPT,
-    INTERRUPTED_EXIT_CODE,
-    NO_STDIN,
-)
+from mirage.agents.openai_agents.constants import INTERRUPT, NO_STDIN
 from mirage.agents.openai_agents.sandbox import (
     MirageSandboxClient,
     combined_output,
     shell_line,
 )
 from mirage.policy import CommandContext, Deny, Policy
+from mirage.shell.constants import INTERRUPTED_STATUS
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -342,7 +339,7 @@ def test_interrupt_cancels_a_background_command():
         stopped = await session.pty_write_stdin(
             session_id=started.process_id, chars=INTERRUPT
         )
-        assert stopped.exit_code == INTERRUPTED_EXIT_CODE
+        assert stopped.exit_code == INTERRUPTED_STATUS
         assert stopped.process_id is None
 
     asyncio.run(_run())

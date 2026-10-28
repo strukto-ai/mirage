@@ -34,8 +34,7 @@ from mirage import Workspace
 from mirage.commands.builtin.utils.links import link_view, mount_view
 from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.errors import FsCondition, classify
-from mirage.errors.classify import failure_text
-from mirage.errors.fs import eexist, enoent
+from mirage.errors.fs import eexist, enoent, strerror_of
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import NoMountError
 from mirage.io.types import ByteSource
@@ -67,6 +66,7 @@ from mirage.server.ssh.stream import (
     encode,
 )
 from mirage.shell.console.terminal import JobOutput
+from mirage.shell.constants import INTERRUPTED_STATUS
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.abort import MirageAbortError
 
@@ -214,7 +214,7 @@ def rpc_error(err: Exception) -> CodexRPCError:
         if condition is FsCondition.ENOENT
         else RPC_INTERNAL_ERROR
     )
-    return CodexRPCError(rpc, failure_text(err))
+    return CodexRPCError(rpc, strerror_of(err))
 
 
 def not_a_file(path: str) -> CodexRPCError:
@@ -858,7 +858,7 @@ class CodexChannel:
             task = asyncio.current_task()
             if task is not None and task.cancelling():
                 raise
-            code = proc.stop_code or constants.CODEX_INTERRUPTED
+            code = proc.stop_code or INTERRUPTED_STATUS
         except Exception as exc:
             logger.warning(
                 "codex: process failed on %s: %r", self._entry.id, exc
@@ -947,7 +947,7 @@ class CodexChannel:
         if proc.stdin is None or proc.stdin.closed:
             return {"status": "stdinClosed"}
         if proc.tty and constants.CODEX_CTRL_C in data:
-            self._stop(proc, constants.CODEX_INTERRUPTED)
+            self._stop(proc, INTERRUPTED_STATUS)
         elif proc.tty and data == constants.CODEX_CTRL_D:
             proc.stdin.close()
         elif data:
@@ -963,7 +963,7 @@ class CodexChannel:
                 f"unknown variant `{signal}`, expected "
                 f"`{constants.CODEX_INTERRUPT_SIGNAL}`",
             )
-        self._stop(proc, constants.CODEX_INTERRUPTED)
+        self._stop(proc, INTERRUPTED_STATUS)
         return {}
 
     async def _process_terminate(self, params: Message) -> JsonValue:

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { abortable } from '../../utils/abort.ts'
 import { isSystemClock, SystemClock, type Clock } from '../../utils/clock.ts'
 
 /**
@@ -30,7 +31,7 @@ import { isSystemClock, SystemClock, type Clock } from '../../utils/clock.ts'
 export abstract class TokenManager {
   private accessToken: string | null = null
   private expiresAt = 0
-  private inflight: Promise<string> | null = null
+  private inflight: { token: Promise<string>; signal: AbortSignal | undefined } | null = null
   private readonly bufferSeconds: number
   clock: Clock
   /** Seconds a call the manager signs may stall; absent is the client default. */
@@ -90,17 +91,33 @@ export abstract class TokenManager {
     this.expiresAt = expiresAt
   }
 
-  async getToken(): Promise<string> {
-    if (this.accessToken !== null && this.clock.now() < this.expiresAt) {
-      return this.accessToken
+  /**
+   * The token, refreshed when it is due. `signal` is the waiting call's: its
+   * stop ends its own wait, and a refresh it started answers to it.
+   */
+  async getToken(signal?: AbortSignal): Promise<string> {
+    for (;;) {
+      if (this.accessToken !== null && this.clock.now() < this.expiresAt) {
+        return this.accessToken
+      }
+      const shared = this.inflight
+      if (shared === null) break
+      // A waiter's own stop ends its wait alone. The refresh answers to the
+      // call that started it: when that call stopped, a waiter still running
+      // refreshes for itself, as the next one to take Python's lock does.
+      try {
+        return await abortable(shared.token, signal)
+      } catch (err) {
+        if (shared.signal?.aborted !== true || signal?.aborted === true) throw err
+        if (this.inflight === shared) this.inflight = null
+      }
     }
-    if (this.inflight !== null) return this.inflight
-    const p = this.refresh()
-    this.inflight = p
+    const own = { token: this.refresh(), signal }
+    this.inflight = own
     try {
-      return await p
+      return await own.token
     } finally {
-      this.inflight = null
+      if (this.inflight === own) this.inflight = null
     }
   }
 

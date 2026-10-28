@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it, vi } from 'vitest'
 import type { CommandFnResult } from '../../../commands/config.ts'
-import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
+import { UsageError } from '../../../commands/errors.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
 import { enoent } from '../../../errors/fs.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import { IOResult, materialize, type ByteSource, type Rows } from '../../../io/types.ts'
@@ -110,7 +111,7 @@ describe('runHandler', () => {
 
   it.each([
     ['as a mount', MOUNT, new Error('lost'), 'a\n', 'cat: lost\n'],
-    ['as a leaf', LEAF, new PartialOutputError('cut', ENC.encode('b\n')), 'a\nb\n', 'gh: cut\n'],
+    ['as a leaf', LEAF, new StreamRefusal('cut', ENC.encode('b\n')), 'a\nb\n', 'gh: cut\n'],
   ])(
     'stamps the producer on an answer and words a deferred failure %s',
     async (_, voice, error, stdout, stderr) => {

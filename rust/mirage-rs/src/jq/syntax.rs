@@ -9,10 +9,6 @@ use super::parse::parse_value;
 use super::value::{Number, Object, Value};
 use super::vm::Limits;
 
-/// How deep the tree of a program may nest before jq_eval leaves it to
-/// libjq: checking, compiling and dropping it recurse.
-const DEPTH: usize = 512;
-
 /// Bison's YYMAXDEPTH: the parser stack jq's parser grows up to.
 const STACK: usize = 10000;
 
@@ -540,7 +536,10 @@ pub(crate) enum Update {
     Alternative,
 }
 
-#[derive(Clone, Debug)]
+/// A program's tree. It is never cloned: a program nests as deep as
+/// Bison's stack allows (thousands of levels), so every walk over it,
+/// its teardown included, runs from an explicit stack.
+#[derive(Debug)]
 pub(crate) enum Ast {
     Identity,
     Recurse,
@@ -567,37 +566,162 @@ pub(crate) enum Ast {
     Def(Box<Def>, Box<Ast>),
     Call(String, Vec<Ast>, Loc),
     Var(String, Loc),
+    /// `$$$$name`: jq's LOADVN, which reads a variable and leaves it null.
+    LoadVn(String, Loc),
     Collect(Option<Box<Ast>>),
     Object(Vec<(Ast, Ast)>),
+    /// The value of a `{"key"}` pair: the input indexed by the key just
+    /// computed, which jq's parser spells POP DUP2 DUP2 INDEX.
+    AtKey,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) enum Pattern {
     Var(String),
     Array(Vec<Pattern>),
     Object(Vec<(PatternKey, Option<Pattern>)>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) enum PatternKey {
     Var(String),
     Expr(Ast),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct Def {
     pub(crate) name: String,
     pub(crate) params: Vec<(String, bool)>,
     pub(crate) body: Ast,
 }
 
+fn shed_ast(ast: &mut Ast, asts: &mut Vec<Ast>, patterns: &mut Vec<Pattern>) {
+    let mut take = |child: &mut Ast| asts.push(std::mem::replace(child, Ast::Identity));
+    match ast {
+        Ast::Identity
+        | Ast::Recurse
+        | Ast::Literal(_)
+        | Ast::Format(_)
+        | Ast::Break(..)
+        | Ast::Var(..)
+        | Ast::LoadVn(..)
+        | Ast::Collect(None)
+        | Ast::AtKey => {}
+        Ast::Index(a, b, _)
+        | Ast::Pipe(a, b)
+        | Ast::Comma(a, b)
+        | Ast::Binop(_, a, b)
+        | Ast::And(a, b)
+        | Ast::Or(a, b)
+        | Ast::Alternative(a, b)
+        | Ast::Update(_, a, b) => {
+            take(a);
+            take(b);
+        }
+        Ast::Slice(term, from, to, _) => {
+            take(term);
+            from.iter_mut().for_each(|e| take(e));
+            to.iter_mut().for_each(|e| take(e));
+        }
+        Ast::Each(e, _) | Ast::Neg(e) | Ast::Collect(Some(e)) | Ast::Label(_, e) => take(e),
+        Ast::Try(body, handler) => {
+            take(body);
+            handler.iter_mut().for_each(|e| take(e));
+        }
+        Ast::If(cond, then, otherwise) => {
+            take(cond);
+            take(then);
+            otherwise.iter_mut().for_each(|e| take(e));
+        }
+        Ast::Reduce(source, pats, init, body) => {
+            take(source);
+            take(init);
+            take(body);
+            patterns.append(pats);
+        }
+        Ast::Foreach(source, pats, init, update, extract) => {
+            take(source);
+            take(init);
+            take(update);
+            extract.iter_mut().for_each(|e| take(e));
+            patterns.append(pats);
+        }
+        Ast::Bind(source, pats, body) => {
+            take(source);
+            take(body);
+            patterns.append(pats);
+        }
+        Ast::Def(def, rest) => {
+            take(&mut def.body);
+            take(rest);
+        }
+        Ast::Call(_, args, _) => asts.append(args),
+        Ast::Object(pairs) => {
+            for (k, v) in pairs.drain(..) {
+                asts.push(k);
+                asts.push(v);
+            }
+        }
+    }
+}
+
+fn shed_pattern(pattern: &mut Pattern, asts: &mut Vec<Ast>, patterns: &mut Vec<Pattern>) {
+    match pattern {
+        Pattern::Var(_) => {}
+        Pattern::Array(items) => patterns.append(items),
+        Pattern::Object(fields) => {
+            for (key, sub) in fields.drain(..) {
+                if let PatternKey::Expr(e) = key {
+                    asts.push(e);
+                }
+                patterns.extend(sub);
+            }
+        }
+    }
+}
+
+fn teardown(mut asts: Vec<Ast>, mut patterns: Vec<Pattern>) {
+    loop {
+        if let Some(mut ast) = asts.pop() {
+            shed_ast(&mut ast, &mut asts, &mut patterns);
+        } else if let Some(mut pattern) = patterns.pop() {
+            shed_pattern(&mut pattern, &mut asts, &mut patterns);
+        } else {
+            return;
+        }
+    }
+}
+
+impl Drop for Ast {
+    fn drop(&mut self) {
+        let (mut asts, mut patterns) = (Vec::new(), Vec::new());
+        shed_ast(self, &mut asts, &mut patterns);
+        teardown(asts, patterns);
+    }
+}
+
+impl Drop for Pattern {
+    fn drop(&mut self) {
+        let (mut asts, mut patterns) = (Vec::new(), Vec::new());
+        shed_pattern(self, &mut asts, &mut patterns);
+        teardown(asts, patterns);
+    }
+}
+
+/// An `import` or `include` directive: the module path it names, and
+/// whether its metadata marks it optional, which lets jq go on without
+/// the module.
+pub(crate) struct Import {
+    pub(crate) path: String,
+    pub(crate) optional: bool,
+}
+
 /// What jq's parser makes of a program.
 pub(crate) enum Parsed {
-    /// The program's main query.
-    Program(Ast),
+    /// The program's main query, and its imports in source order.
+    Program(Ast, Vec<Import>),
     /// jq refuses it: each message as jq reports it.
     Invalid(Vec<String>),
-    /// Valid, but uses what jq_eval leaves to libjq.
     Unsupported(&'static str),
 }
 
@@ -605,19 +729,14 @@ pub(crate) enum Parsed {
 pub(crate) fn parse(source: &str) -> Parsed {
     let mut parser = Parser::new(source);
     let top = parser.run();
-    if let Some(why) = parser.unworded {
+    if let Some(why) = parser.unsupported {
         return Parsed::Unsupported(why);
     }
     if !parser.errors.is_empty() {
         return Parsed::Invalid(parser.errors);
     }
     match top {
-        Some(Sem::Ast(ast)) => {
-            if let Some(why) = parser.unsupported {
-                return Parsed::Unsupported(why);
-            }
-            Parsed::Program(ast)
-        }
+        Some(Sem::Ast(ast)) => Parsed::Program(ast, parser.imports),
         _ => Parsed::Invalid(vec![
             "jq: error: Top-level program not given (try \".\")".into(),
         ]),
@@ -972,7 +1091,8 @@ impl Lexer<'_> {
                 quoted.push(b'"');
                 quoted.extend_from_slice(&self.src[loc.start..end]);
                 quoted.push(b'"');
-                (QQSTRING_TEXT, Sem::Lit(parse_value(&quoted)))
+                let quoted = replace_bad(&quoted);
+                (QQSTRING_TEXT, Sem::Lit(parse_value(quoted.as_bytes())))
             }
             (b'\\', None) => {
                 self.take(1);
@@ -988,6 +1108,55 @@ impl Lexer<'_> {
             }
         }
     }
+}
+
+/// jv_string_sized's copy of bytes that may not be UTF-8, which the lexer
+/// makes of an escape's text before jv_parse reads it: each sequence
+/// jvp_utf8_next rejects becomes U+FFFD, and a lead byte the text ends
+/// inside takes the rest of the text with it (the closing quote
+/// included, which is how `"\é"` and `"\€"` come to differ).
+fn replace_bad(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let first = bytes[at];
+        let length = match first {
+            0..=0x7f => {
+                out.push(char::from(first));
+                at += 1;
+                continue;
+            }
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => 1,
+        };
+        let remaining = bytes.len() - at;
+        let mut point = u32::from(first & (0xff >> (length + 1)));
+        let mut taken = length;
+        let mut decoded = None;
+        if length > 1 && length <= remaining {
+            let mut complete = true;
+            for k in 1..length {
+                let byte = bytes[at + k];
+                if !(0x80..=0xbf).contains(&byte) {
+                    taken = k;
+                    complete = false;
+                    break;
+                }
+                point = (point << 6) | u32::from(byte & 0x3f);
+            }
+            let minimum = [0, 0, 0x80, 0x800, 0x10000][length];
+            if complete && point >= minimum {
+                decoded = char::from_u32(point);
+            }
+        } else if length > remaining {
+            taken = remaining;
+        }
+        out.push(decoded.unwrap_or('\u{fffd}'));
+        at += taken;
+    }
+    out
 }
 
 /// A grammar symbol's semantic value.
@@ -1054,11 +1223,8 @@ struct Parser<'a> {
     source: &'a str,
     lexer: Lexer<'a>,
     errors: Vec<String>,
-    /// What a valid program uses that jq_eval leaves to libjq.
+    imports: Vec<Import>,
     unsupported: Option<&'static str>,
-    /// What leaves even the program's errors to libjq: an escape this
-    /// lexer cannot word, or a tree too deep to keep.
-    unworded: Option<&'static str>,
 }
 
 impl<'a> Parser<'a> {
@@ -1073,8 +1239,8 @@ impl<'a> Parser<'a> {
                 last: Loc::default(),
             },
             errors: Vec::new(),
+            imports: Vec::new(),
             unsupported: None,
-            unworded: None,
         }
     }
 
@@ -1089,12 +1255,6 @@ impl<'a> Parser<'a> {
         match sem {
             Sem::Lit(Err(message)) => {
                 let loc = self.lexer.last;
-                if self.lexer.src[loc.start..loc.end]
-                    .iter()
-                    .any(|b| *b >= 0x80)
-                {
-                    self.unworded = Some("an escape of a byte outside ASCII");
-                }
                 self.fail(loc, &message);
                 (token, Sem::Lit(Ok(Value::Null)))
             }
@@ -1135,7 +1295,6 @@ impl<'a> Parser<'a> {
         let mut states: Vec<usize> = vec![0];
         let mut values: Vec<Sem> = vec![Sem::None];
         let mut locs: Vec<Loc> = vec![Loc::default()];
-        let mut depths: Vec<usize> = vec![0];
         let mut lookahead: Option<(usize, Sem)> = None;
         let mut recovering = 0u8;
         loop {
@@ -1165,7 +1324,6 @@ impl<'a> Parser<'a> {
                     states.push(to);
                     values.push(sem);
                     locs.push(self.lexer.last);
-                    depths.push(0);
                     continue;
                 }
                 Action::Reduce(rule) => Some(rule),
@@ -1188,7 +1346,6 @@ impl<'a> Parser<'a> {
                 };
                 let rhs = values.split_off(n - len);
                 let rhs_locs = locs.split_off(n - len);
-                let rhs_depths = depths.split_off(n - len);
                 states.truncate(n - len);
                 let act = RULES[rule - 1].1;
                 let below = values.last();
@@ -1197,23 +1354,10 @@ impl<'a> Parser<'a> {
                     _ => None,
                 };
                 let sem = self.act(act, rhs, &rhs_locs, loc, format);
-                let mut depth = nesting(act, &rhs_depths);
-                let sem = if depth > DEPTH {
-                    self.unworded = Some("the program nests too deeply");
-                    depth = 1;
-                    match sem {
-                        Sem::Ast(_) => Sem::Ast(Ast::Identity),
-                        Sem::Pattern(_) => Sem::Pattern(Pattern::Array(Vec::new())),
-                        other => other,
-                    }
-                } else {
-                    sem
-                };
                 let to = t.goto(*states.last().expect("state 0 stays"), t.rules[rule].lhs);
                 states.push(to);
                 values.push(sem);
                 locs.push(loc);
-                depths.push(depth);
                 continue;
             }
             if recovering == 0 {
@@ -1239,7 +1383,6 @@ impl<'a> Parser<'a> {
                 start = locs.pop().expect("a location per state");
                 states.pop();
                 values.pop();
-                depths.pop();
             };
             states.push(to);
             values.push(Sem::None);
@@ -1247,7 +1390,6 @@ impl<'a> Parser<'a> {
                 start: start.start,
                 end: self.lexer.last.end,
             });
-            depths.push(0);
         }
     }
 
@@ -1264,14 +1406,21 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn metadata(&mut self, meta: &Ast, loc: Loc) {
-        match meta {
-            Ast::Literal(Value::Object(_)) => {}
-            Ast::Literal(_) => self.fail(loc, "Module metadata must be an object"),
-            _ if folds_in_jq(meta) => {
-                self.unsupported = Some("module metadata jq folds at compile time");
+    fn metadata(&mut self, meta: &Ast, loc: Loc) -> Option<Value> {
+        if metadata_needs_runtime(meta) {
+            self.unsupported = Some("module metadata requires run-time limits");
+            return None;
+        }
+        match metadata_constant(meta) {
+            Some(value @ Value::Object(_)) => Some(value),
+            Some(_) => {
+                self.fail(loc, "Module metadata must be an object");
+                None
             }
-            _ => self.fail(loc, "Module metadata must be constant"),
+            None => {
+                self.fail(loc, "Module metadata must be constant");
+                None
+            }
         }
     }
 
@@ -1296,13 +1445,26 @@ impl<'a> Parser<'a> {
             }
             Act::ImportMeta => {
                 let meta = take(1).ast();
-                self.metadata(&meta, locs[1]);
+                let meta = self.metadata(&meta, locs[1]);
+                let optional = match &meta {
+                    Some(Value::Object(fields)) => {
+                        matches!(fields.get("optional"), Some(Value::True))
+                    }
+                    _ => false,
+                };
+                if let Some(import) = self.imports.last_mut() {
+                    import.optional = optional;
+                }
                 return Sem::None;
             }
             Act::ImportFrom => {
-                self.unsupported = Some("modules are loaded by libjq");
-                if !matches!(take(0).ast(), Ast::Literal(_)) {
-                    self.fail(locs[0], "Import path must be constant");
+                match &take(0).ast() {
+                    Ast::Literal(Value::String(path)) => self.imports.push(Import {
+                        path: path.to_string(),
+                        optional: false,
+                    }),
+                    Ast::Literal(_) => {}
+                    _ => self.fail(locs[0], "Import path must be constant"),
                 }
                 return Sem::None;
             }
@@ -1463,10 +1625,7 @@ impl<'a> Parser<'a> {
             }
             Act::TryCatch => Ast::Try(boxed(take(1)), Some(boxed(take(3)))),
             Act::Try => Ast::Try(boxed(take(1)), None),
-            Act::LoadVn => {
-                self.unsupported = Some("$$$$name is jq's private syntax");
-                Ast::Var(take(3).text(), all)
-            }
+            Act::LoadVn => Ast::LoadVn(take(3).text(), all),
             Act::Var => Ast::Var(take(0).text(), all),
             Act::Loc => loc_object(self.source, all),
             Act::Ident => {
@@ -1518,14 +1677,7 @@ impl<'a> Parser<'a> {
                 let key = take(0).ast();
                 return Sem::Pair(key, take(2).ast());
             }
-            Act::PairString => {
-                let key = take(0).ast();
-                if !matches!(key, Ast::Literal(_)) {
-                    self.unsupported = Some("an interpolated key without a value");
-                }
-                let value = Ast::Index(Box::new(Ast::Identity), Box::new(key.clone()), false);
-                return Sem::Pair(key, value);
-            }
+            Act::PairString => return Sem::Pair(take(0).ast(), Ast::AtKey),
             Act::PairVar => {
                 let key = Ast::Var(take(0).text(), all);
                 return Sem::Pair(key, take(2).ast());
@@ -1562,25 +1714,6 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// How deep a rule's value nests, from its parts': one more than the
-/// deepest, except for a value that holds its parts side by side.
-fn nesting(act: Act, depths: &[usize]) -> usize {
-    let deepest = depths.iter().copied().max().unwrap_or(0);
-    match act {
-        Act::Comma
-        | Act::Empty
-        | Act::One
-        | Act::Append
-        | Act::Prepend
-        | Act::Pass
-        | Act::Take(_)
-        | Act::Nothing
-        | Act::TopQuery
-        | Act::TopDefs => deepest,
-        _ => deepest + 1,
-    }
-}
-
 fn literal_string(text: String) -> Ast {
     Ast::Literal(Value::string(text))
 }
@@ -1598,18 +1731,102 @@ fn loc_object(source: &str, loc: Loc) -> Ast {
     Ast::Literal(Value::object(object))
 }
 
-/// Whether jq's parser folds `ast` to a constant: `fold` leaves a string
-/// repeat and an array subtraction to run time, so a program whose module
-/// metadata holds one is left to libjq rather than refused.
-fn folds_in_jq(ast: &Ast) -> bool {
-    match ast {
-        Ast::Literal(_) => true,
-        Ast::Binop(_, a, b) | Ast::Comma(a, b) => folds_in_jq(a) && folds_in_jq(b),
-        Ast::Collect(None) => true,
-        Ast::Collect(Some(items)) => folds_in_jq(items),
-        Ast::Object(pairs) => pairs.iter().all(|(k, v)| folds_in_jq(k) && folds_in_jq(v)),
-        _ => false,
+fn metadata_needs_runtime(ast: &Ast) -> bool {
+    let mut pending = vec![ast];
+    while let Some(ast) = pending.pop() {
+        match ast {
+            Ast::Binop(op, a, b) => {
+                if matches!(
+                    (&**a, &**b),
+                    (Ast::Literal(Value::Array(_) | Value::Object(_)), _)
+                        | (_, Ast::Literal(Value::Array(_) | Value::Object(_)))
+                ) || (*op == BinOp::Multiply
+                    && matches!(
+                        (&**a, &**b),
+                        (Ast::Literal(Value::String(_)), _) | (_, Ast::Literal(Value::String(_)))
+                    ))
+                {
+                    return true;
+                }
+                pending.extend([&**a, &**b]);
+            }
+            Ast::Comma(a, b) => pending.extend([&**a, &**b]),
+            Ast::Collect(Some(inner)) => pending.push(inner),
+            Ast::Object(pairs) => {
+                for (key, value) in pairs {
+                    pending.extend([key, value]);
+                }
+            }
+            _ => {}
+        }
     }
+    false
+}
+
+fn metadata_constant(ast: &Ast) -> Option<Value> {
+    enum Step<'a> {
+        Visit(&'a Ast),
+        Binary(BinOp),
+        Array(usize),
+        Object(usize),
+    }
+    let mut steps = vec![Step::Visit(ast)];
+    let mut values = Vec::new();
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::Visit(Ast::Literal(value)) => values.push(value.clone()),
+            Step::Visit(Ast::Binop(op, a, b)) => {
+                steps.extend([Step::Binary(*op), Step::Visit(b), Step::Visit(a)]);
+            }
+            Step::Visit(Ast::Collect(inner)) => {
+                let mut items = Vec::new();
+                let mut pending: Vec<&Ast> = inner.iter().map(|e| &**e).collect();
+                while let Some(item) = pending.pop() {
+                    if let Ast::Comma(a, b) = item {
+                        pending.extend([&**b, &**a]);
+                    } else {
+                        items.push(item);
+                    }
+                }
+                steps.push(Step::Array(items.len()));
+                steps.extend(items.into_iter().rev().map(Step::Visit));
+            }
+            Step::Visit(Ast::Object(pairs)) => {
+                steps.push(Step::Object(pairs.len()));
+                for (key, value) in pairs.iter().rev() {
+                    steps.extend([Step::Visit(value), Step::Visit(key)]);
+                }
+            }
+            Step::Visit(_) => return None,
+            Step::Binary(op) => {
+                let right = values.pop()?;
+                let left = values.pop()?;
+                let f = builtin::lookup(op.function(), 2).expect("binop builtin");
+                let limits = Limits {
+                    blocks: usize::MAX,
+                    items: usize::MAX,
+                    bytes: usize::MAX,
+                    memory: usize::MAX,
+                };
+                values.push(builtin::call(f, &[Value::Null, left, right], limits).ok()?);
+            }
+            Step::Array(len) => {
+                let items = values.split_off(values.len() - len);
+                values.push(Value::array(items));
+            }
+            Step::Object(len) => {
+                let items = values.split_off(values.len() - 2 * len);
+                let mut object = Object::default();
+                let mut pairs = items.into_iter();
+                while let Some(key) = pairs.next() {
+                    let Value::String(key) = key else { return None };
+                    object.insert(key.clone().into(), pairs.next()?);
+                }
+                values.push(Value::object(object));
+            }
+        }
+    }
+    values.pop()
 }
 
 /// gen_binop's constant folding: two constants fold into their result,
@@ -1635,8 +1852,9 @@ fn fold(op: BinOp, a: Ast, b: Ast) -> Ast {
             blocks: usize::MAX,
             items: usize::MAX,
             bytes: usize::MAX,
+            memory: usize::MAX,
         };
-        match builtin::call(f, vec![Value::Null, x.clone(), y.clone()], limits) {
+        match builtin::call(f, &[Value::Null, x.clone(), y.clone()], limits) {
             Ok(v) => return Ast::Literal(v),
             Err(Fault::Error(_)) => {}
             Err(_) => unreachable!("binops neither halt nor backtrack"),
@@ -1654,9 +1872,9 @@ fn collect(inner: Sem) -> Ast {
     };
     if items.iter().all(|item| matches!(item, Ast::Literal(_))) {
         let values = items
-            .into_iter()
+            .iter()
             .map(|item| match item {
-                Ast::Literal(v) => v,
+                Ast::Literal(v) => v.clone(),
                 _ => unreachable!("every item is a literal"),
             })
             .collect();
@@ -1683,7 +1901,7 @@ fn object(pairs: Vec<(Ast, Ast)>) -> Ast {
         let (Ast::Literal(Value::String(key)), Ast::Literal(value)) = (k, v) else {
             return Ast::Object(pairs);
         };
-        object.insert(key.clone(), value.clone());
+        object.insert(key.clone().into(), value.clone());
     }
     Ast::Literal(Value::object(object))
 }

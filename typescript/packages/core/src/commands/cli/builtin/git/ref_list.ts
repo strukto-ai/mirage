@@ -627,6 +627,6 @@ export function listingResult(
       stopped.prefix === null ? `${stopped.message}\n` : `${stopped.prefix}: ${stopped.message}\n`
   return [
     encodeText(out),
-    new IOResult({ exitCode: stopped?.code ?? 0, stderr: new TextEncoder().encode(stderr) }),
+    new IOResult({ exitCode: stopped?.exitCode ?? 0, stderr: new TextEncoder().encode(stderr) }),
   ]
 }

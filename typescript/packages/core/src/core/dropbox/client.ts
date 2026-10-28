@@ -19,6 +19,7 @@ import {
   TOKEN_BUFFER_SECONDS,
   RESULT_HEADER,
 } from './constants.ts'
+import { callerSignal } from '../../context/session_context.ts'
 import { type ApiResponse, apiRequest, loweredHeaders, stallTimeout } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { ByteSpool } from '../../io/spool.ts'
@@ -128,7 +129,7 @@ export class DropboxTokenManager extends OAuthTokenManager {
 }
 
 async function dropboxAuthHeaders(tm: DropboxTokenManager): Promise<Record<string, string>> {
-  const token = await tm.getToken()
+  const token = await tm.getToken(callerSignal())
   return { Authorization: `Bearer ${token}` }
 }
 

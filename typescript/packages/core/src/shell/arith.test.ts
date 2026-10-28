@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { evaluateArith } from './arith.ts'
-import { ArithError, ReadonlyError, UnboundVariable } from './errors.ts'
+import { ArithError, ReadonlyVariableError, UnboundVariable } from './errors.ts'
 import type { ElementOps } from './types.ts'
 
 describe('evaluateArith', () => {
@@ -184,11 +184,11 @@ describe('evaluateArith elements', () => {
     // bash: `(( X=5, R=3, X=6 ))` with R readonly binds X=5 and stops; a
     // refusal inside a subscript is marked, since it ends the shell.
     const frozen = (name: string) => (name === 'R' ? name : null)
-    const refused = (expr: string): ReadonlyError => {
+    const refused = (expr: string): ReadonlyVariableError => {
       try {
         evaluateArith(expr, {}, fakeElements(), null, null, false, frozen)
       } catch (err) {
-        if (err instanceof ReadonlyError) return err
+        if (err instanceof ReadonlyVariableError) return err
         throw err
       }
       throw new Error(`${expr} was not refused`)

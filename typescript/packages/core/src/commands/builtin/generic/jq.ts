@@ -52,7 +52,7 @@ import { StreamRefusal } from '../../../rs/errors.ts'
 import { closeStream, openStream, type OpenStream } from '../../../rs/stream.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { PathSpec, type JsonValue } from '../../../types.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { type CommandFnResult, type Context } from '../../config.ts'
 import { helpPage, versionLine } from '../../spec/standard.ts'
@@ -155,13 +155,6 @@ export function optionRefusal(word: string): UsageError {
   return new UsageError(`jq: ${line}\n${USAGE_HINT}`, 2)
 }
 
-/** Read a pair option's flattened values back as [name, value]. */
-/**
- * The time zone libjq reads, as a `TZ` rule, for jq_eval: the process's own
- * `TZ` when it sets one, else the zone the runtime resolves. jq_eval
- * carries no zone database, so a program that needs local time in a zone it
- * cannot read runs in libjq.
- */
 export function localZone(): string | undefined {
   const host = globalThis as {
     process?: { env?: Record<string, string | undefined> }
@@ -568,33 +561,48 @@ class Engine {
     const outputs: string[] = []
     const messages: [number, string][] = []
     let stop: JqError | JqHalt | null
+    let safe = true
     try {
       stop = readFrames(stream.feed(ENC.encode(doc)), outputs, messages)
       stop = readFrames(stream.finish(), outputs, messages) ?? stop
-    } catch (error) {
-      if (!(error instanceof StreamRefusal)) throw error
-      console.debug(`jq: jq_eval leaves the document to jq-wasm: ${error.message}`)
-      return null
-    }
-    for (;;) {
-      let wire: Uint8Array
-      if (stream.busy()) {
-        const pending = this.budget.run()
-        if (pending !== undefined) await pending
-        wire = stream.drain()
-      } else {
-        const asked = stream.request()
-        if (asked === null) break
-        // `now` asks the clock at each call; `input` the reader.
-        const [reply, data]: [Record<string, string | number | null>, Uint8Array] =
-          asked[0].op === 'now'
-            ? [{ kind: 'now', now: Date.now() / 1000 }, new Uint8Array()]
-            : await inputReply(reader)
-        wire = stream.respond(reply, data)
+      safe = outputs.length === 0 && messages.length === 0 && stop === null
+      for (;;) {
+        let wire: Uint8Array
+        if (stream.busy()) {
+          const pending = this.budget.run()
+          if (pending !== undefined) await pending
+          wire = stream.drain()
+        } else {
+          const asked = stream.request()
+          if (asked === null) break
+          safe = false
+          let reply: Record<string, JsonValue>
+          let data: Uint8Array = new Uint8Array()
+          if (asked[0].op === 'now') {
+            reply = { kind: 'now', now: Date.now() / 1000 }
+          } else if (asked[0].op === 'input') {
+            ;[reply, data] = await inputReply(reader)
+          } else {
+            throw new Error(`jq_eval: unknown host request ${JSON.stringify(asked[0])}`)
+          }
+          wire = stream.respond(reply, data)
+        }
+        if (wire.byteLength > 0) safe = false
+        stop = readFrames(wire, outputs, messages) ?? stop
+        for (const [tag, text] of messages) report(await this.message(tag, text))
+        messages.length = 0
       }
-      stop = readFrames(wire, outputs, messages) ?? stop
-      for (const [tag, text] of messages) report(await this.message(tag, text))
-      messages.length = 0
+    } catch (error) {
+      if (!(error instanceof StreamRefusal) || !safe || error.output.byteLength > 0) throw error
+      console.debug(`jq: jq_eval leaves the document to jq-wasm: ${error.message}`)
+      if (stream.cancel()) {
+        while (stream.busy()) {
+          const pending = this.budget.run()
+          if (pending !== undefined) await pending
+          stream.drain()
+        }
+      }
+      return null
     }
     return { outputs, stop }
   }

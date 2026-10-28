@@ -30,6 +30,11 @@ import { CommandTimeoutError } from '../../../errors/types.ts'
 import { ABORT_JOIN_MS, hasAborted, joinOrAbort, mergeSignals } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
+import {
+  CANNOT_EXECUTE_STATUS,
+  NOT_FOUND_STATUS,
+  SIGPIPE_STATUS,
+} from '../../../shell/constants.ts'
 
 /**
  * A runtime run as a command's output, handed over as it runs.
@@ -125,7 +130,7 @@ export function runOutput(
           console.debug(`runtime output ended: ${String(error)}`)
         })
       }
-      if (stopped) io.exitCode = 141
+      if (stopped) io.exitCode = SIGPIPE_STATUS
       if (kept.length > 0) io.stderr = concat([await materialize(io.stderr), ...kept])
       await closeQuietly(stdin)
       state.finish()
@@ -179,7 +184,7 @@ export function runtimeVersion(
       return {
         stdout: new Uint8Array(),
         stderr: encodeText(`${label}: ${message}\n`),
-        exitCode: runtimeUnavailable(err) ? 127 : 1,
+        exitCode: runtimeUnavailable(err) ? NOT_FOUND_STATUS : 1,
       }
     }
   }
@@ -198,7 +203,7 @@ function failed(label: string, message: string, exitCode: number): [null, IOResu
  * `command not found`, exit 127, whatever the operands say.
  */
 export function notBound(label: string): CommandFnResult {
-  return failed(label, 'command not found', 127)
+  return failed(label, 'command not found', NOT_FOUND_STATUS)
 }
 
 /**
@@ -227,10 +232,10 @@ export function execRefusal(
     const allowed = placement?.execPathAllowed?.(script.virtual) ?? placement?.execAllowed !== false
     if (allowed) return null
     const display = script.rawPath !== '' ? script.rawPath : script.virtual
-    return failed(label, `${display}: not in EXEC mode`, 126)
+    return failed(label, `${display}: not in EXEC mode`, CANNOT_EXECUTE_STATUS)
   }
   if (placement?.execAllowed !== false) return null
-  return failed(label, "root mount '/' is not in EXEC mode", 126)
+  return failed(label, "root mount '/' is not in EXEC mode", CANNOT_EXECUTE_STATUS)
 }
 
 /**
@@ -273,7 +278,7 @@ export function runInterpreter(
       return {
         stdout: new Uint8Array(),
         stderr: encodeText(`${label}: ${message}\n`),
-        exitCode: runtimeUnavailable(err) ? 127 : 1,
+        exitCode: runtimeUnavailable(err) ? NOT_FOUND_STATUS : 1,
       }
     } finally {
       // The program may have written past the dispatcher.

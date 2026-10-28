@@ -340,6 +340,40 @@ it('group cancellation reaches grandchildren after an intermediate exits', async
   expect(processes.live()).toEqual([])
 })
 
+it('cancellation reaches a grandchild past an exited parent below the group leader', async () => {
+  const processes = new ProcessTable()
+  const init = { sessionId: 'a', command: 'runner', cwd: PathSpec.fromStrPath('/') }
+  const held = (parentPid?: number) => {
+    const release = gate()
+    return processes.start({
+      ...init,
+      ...(parentPid === undefined ? {} : { parentPid }),
+      cancel: () => {
+        release.release()
+      },
+      run: async () => {
+        await release.promise
+        return 0
+      },
+    })
+  }
+  const root = held()
+  const job = held(root.info.pid)
+  const middle = processes.start({
+    ...init,
+    parentPid: job.info.pid,
+    cancel: () => undefined,
+    run: () => Promise.resolve(0),
+  })
+  const leaf = held(middle.info.pid)
+  await middle.join()
+  job.terminate()
+  expect((await leaf.join()).cancellationRequested).toBe(true)
+  expect(root.info.cancellationRequested).toBe(false)
+  root.terminate()
+  await root.join()
+})
+
 // A runner that already exited has nothing left to cancel, but stopping it
 // still stops what it left running (`sh -c 'sleep 100 &'`).
 it('stopping an exited runner stops what it left running', async () => {

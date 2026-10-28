@@ -41,6 +41,7 @@ import {
   FD_STDIN,
   FD_STDOUT,
   OUTPUT_ONLY_BUILTINS,
+  SIGPIPE_STATUS,
 } from '../../shell/constants.ts'
 import {
   FileDescription,
@@ -789,8 +790,8 @@ async function runRedirects(
         if (!(error instanceof PipeClosed)) throw error
         // SIGPIPE ends a forked writer alone; a builtin's write, in a
         // function or a group too, is the shell's, which dies.
-        if (!forked) throw new ExitSignal(141)
-        io = new IOResult({ exitCode: 141 })
+        if (!forked) throw new ExitSignal(SIGPIPE_STATUS)
+        io = new IOResult({ exitCode: SIGPIPE_STATUS })
       }
     }
   } catch (error) {
@@ -877,8 +878,8 @@ async function runRedirects(
           // The deferred open reached a pipe (a link to one): its closed
           // reader is the writer's SIGPIPE, as an open would be.
           if (error instanceof PipeClosed && file === deferred) {
-            if (forked) io.exitCode = 141
-            else unwound ??= new ExitSignal(141)
+            if (forked) io.exitCode = SIGPIPE_STATUS
+            else unwound ??= new ExitSignal(SIGPIPE_STATUS)
             return false
           }
           if (error instanceof PipeClosed || isAborting(error)) throw error

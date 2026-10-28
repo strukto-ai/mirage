@@ -15,9 +15,8 @@
 import { compareCodePoints } from '../../utils/sort.ts'
 import { contentSize } from '../../utils/stat_view.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { enoent } from '../../errors/fs.ts'
+import { enoent, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
-import { failureText } from '../../errors/classify.ts'
 import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
 import {
   expandPrintf,
@@ -224,7 +223,7 @@ async function deleteRow(
  */
 function refusalWhy(err: unknown): string {
   if (err instanceof PolicyDenied) return err.message
-  return failureText(err)
+  return strerrorOf(err)
 }
 
 /**

@@ -30,34 +30,34 @@ function setup(): MountRegistry {
 }
 
 describe('classifyParts', () => {
-  it('first arg (command name) is never classified', () => {
+  it('first arg (command name) is never classified', async () => {
     const reg = setup()
-    const out = classifyParts(['cat', '/ram/x'], reg, '/')
+    const out = await classifyParts(['cat', '/ram/x'], reg, '/')
     expect(out[0]).toBe('cat')
     expect(out[1]).toBeInstanceOf(PathSpec)
   })
 
-  it('TEXT kind forces plain-text classification', () => {
+  it('TEXT kind forces plain-text classification', async () => {
     const reg = setup()
-    const out = classifyParts(['cat', '/ram/x'], reg, '/', ['str'])
+    const out = await classifyParts(['cat', '/ram/x'], reg, '/', ['str'])
     expect(out[1]).toBe('/ram/x')
   })
 
-  it('PATH kind forces bare-path classification', () => {
+  it('PATH kind forces bare-path classification', async () => {
     const reg = setup()
-    const out = classifyParts(['cat', 'file.txt'], reg, '/ram', ['path'])
+    const out = await classifyParts(['cat', 'file.txt'], reg, '/ram', ['path'])
     expect(out[1]).toBeInstanceOf(PathSpec)
   })
 
-  it('duplicate word classifies per slot', () => {
+  it('duplicate word classifies per slot', async () => {
     const reg = setup()
-    const out = classifyParts(['grep', '*.txt', '*.txt'], reg, '/ram', ['str', 'path'])
+    const out = await classifyParts(['grep', '*.txt', '*.txt'], reg, '/ram', ['str', 'path'])
     expect(out[1]).toBe('*.txt')
     expect(out[2]).toBeInstanceOf(PathSpec)
   })
 
-  it('empty parts', () => {
+  it('empty parts', async () => {
     const reg = setup()
-    expect(classifyParts([], reg, '/')).toEqual([])
+    expect(await classifyParts([], reg, '/')).toEqual([])
   })
 })

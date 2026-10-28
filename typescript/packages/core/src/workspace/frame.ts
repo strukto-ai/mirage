@@ -23,10 +23,12 @@ export class ExecutionFrame {
   // one channel. Python needs no equivalent: kill cancels the asyncio task
   // and cancellation is ambient.
   abortSignal: AbortSignal | null = null
+  lineTimeout: number | null = null
 
   fork(): ExecutionFrame {
     const child = new ExecutionFrame()
     child.abortSignal = this.abortSignal
+    child.lineTimeout = this.lineTimeout
     if (this.routing !== undefined) child.routing = this.routing
     return child
   }

@@ -25,6 +25,21 @@ import { Workspace } from './workspace/workspace.ts'
 import { programs } from './lookup/lookup.ts'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
+import { Channel } from '../shell/console/index.ts'
+import type * as Brace from './expand/brace.ts'
+
+const made = vi.hoisted(() => ({ words: 0 }))
+
+vi.mock('./expand/brace.ts', async (importOriginal) => {
+  const brace = await importOriginal<typeof Brace>()
+  return {
+    ...brace,
+    substitute: (...args: Parameters<typeof brace.substitute>) => {
+      made.words += 1
+      return brace.substitute(...args)
+    },
+  }
+})
 
 class SignalProbeRuntime extends LanguageRuntime {
   readonly language = 'python'
@@ -140,6 +155,124 @@ describe('interpreters at the line deadline', () => {
       await ws.close()
     }
   }, 60_000)
+})
+
+// Expanding a word list is a pass over every word: a long one yields as it
+// goes, so the line's deadline lands inside it rather than after it.
+describe('the line deadline inside a long expansion', () => {
+  const x = Array.from({ length: 2_000_000 }, (_, i) => String(i + 1)).join('\n')
+
+  it.each(['set -- $x', 'a=($x); : "${a[@]}"'])('%s stops at the deadline', async (line) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        commandLimits: { '@line': new Limit({ timeoutSeconds: 0.3 }) },
+        env: { x },
+      },
+    )
+    try {
+      const started = performance.now()
+      const r = await ws.shell(line)
+      expect(r.exitCode).toBe(124)
+      expect(performance.now() - started).toBeLessThan(1500)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // A brace range is counted in words rather than time, which a loaded
+  // runner stretches: the deadline stops it partway through.
+  it('stops a brace range partway through its words', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, commandLimits: { '@line': new Limit({ timeoutSeconds: 0.3 }) } },
+    )
+    try {
+      made.words = 0
+      const r = await ws.shell('echo {1..3000000} > /dev/null')
+      expect(r.exitCode).toBe(124)
+      expect(made.words).toBeGreaterThan(0)
+      expect(made.words).toBeLessThan(3_000_000)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+// A job runs under the `@line` limit of the line that started it, from its
+// own start: past it the job answers 124 and the line's message, while the
+// line's own deadline leaves it alone.
+describe('background job at the line limit', () => {
+  function jobWs(seconds: number): Workspace {
+    return new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, commandLimits: { '@line': new Limit({ timeoutSeconds: seconds }) } },
+    )
+  }
+
+  it('the line timing out leaves a job started late in it alone', async () => {
+    const ws = jobWs(0.6)
+    try {
+      const r = await ws.shell('sleep 0.4; { sleep 0.4; echo bg-done; } & sleep 2')
+      expect(r.exitCode).toBe(124)
+      const job = await ws.jobTable.wait(1, ws.defaultSessionId)
+      expect(job.exitCode).toBe(0)
+      expect(DEC.decode(await job.console.snapshot(Channel.STDOUT))).toBe('bg-done\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each(['sleep 5', 'seq 1 1000000000 > /data/g', '{ sleep 5; echo x; }'])(
+    '%s & runs under the limit from its own start',
+    async (job) => {
+      const ws = jobWs(0.2)
+      try {
+        expect((await ws.shell(`${job} &`)).exitCode).toBe(0)
+        const done = await ws.jobTable.wait(1, ws.defaultSessionId)
+        expect(done.exitCode).toBe(124)
+        expect(DEC.decode(await done.console.snapshot(Channel.STDOUT))).toBe('')
+        expect(DEC.decode(await done.console.snapshot(Channel.STDERR))).toBe(
+          'line: timed out after 0.2s\n',
+        )
+        expect(ws.processes.live()).toHaveLength(0)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('a job runs to its own limit past the job that started it', async () => {
+    const ws = jobWs(0.6)
+    try {
+      await ws.shell('{ sleep 0.4; { sleep 0.4; echo inner > /data/a; } & sleep 2; } &')
+      expect((await ws.jobTable.wait(1, ws.defaultSessionId)).exitCode).toBe(124)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect((await ws.shell('cat /data/a')).stdoutText).toBe('inner\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("a lifted line limit lifts a job's too", async () => {
+    const ws = jobWs(0)
+    try {
+      const r = await ws.shell('{ sleep 0.3; echo done; } & wait $!; echo $?')
+      expect(r.stdoutText).toBe('done\n0\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a job keeps its own status inside the limit', async () => {
+    const ws = jobWs(1)
+    try {
+      expect((await ws.shell('(exit 3) & wait $!; echo $?')).stdoutText).toBe('3\n')
+    } finally {
+      await ws.close()
+    }
+  })
 })
 
 describe('background job kill', () => {

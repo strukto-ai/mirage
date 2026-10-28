@@ -18,6 +18,7 @@ import { PipeConsole } from '../../../../shell/console/pipe.ts'
 import { Channel } from '../../../../shell/console/types.ts'
 import { pump } from '../../jobs.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
+import { UsageError } from '../../../../commands/errors.ts'
 import { boundedMapStream } from '../../../../concurrency/limiter.ts'
 import type { EvaluationContext } from '../../../evaluation.ts'
 
@@ -51,6 +52,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { readScriptBytes } from '../script/script.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { concat, findBytes } from '../../../../utils/bytes.ts'
+import { NOT_FOUND_STATUS, SIGPIPE_STATUS } from '../../../../shell/constants.ts'
 
 const SYNOPSIS = 'xargs [OPTION]... COMMAND [INITIAL-ARGS]...'
 
@@ -112,16 +114,6 @@ const CANCELLED: Readonly<Record<Grouping, string>> = Object.freeze({
 type Grouping = 'template' | 'lines' | 'group'
 type XargsEvent = string | Uint8Array[]
 
-/** An option xargs will not run with, refused before any input is read. */
-class Refusal extends Error {
-  constructor(
-    readonly text: string,
-    readonly code = 1,
-  ) {
-    super(text)
-  }
-}
-
 function refusal(stderr: string | Uint8Array, code = 1): Result {
   const data = typeof stderr === 'string' ? encodeText(stderr) : stderr
   return [
@@ -161,17 +153,19 @@ function wholeNumber(
 ): number {
   const hint = usageHint('xargs')
   if (!INTEGER.test(raw)) {
-    throw new Refusal(`xargs: invalid number "${raw}" for -${letter} option\n${hint}\n`)
+    throw new UsageError(`xargs: invalid number "${raw}" for -${letter} option\n${hint}\n`, 1)
   }
   const value = Number(raw.trim())
   if (value < floor) {
-    throw new Refusal(
+    throw new UsageError(
       `xargs: value ${raw} for -${letter} option should be >= ${String(floor)}\n${hint}\n`,
+      1,
     )
   }
   if (ceiling !== null && value > ceiling) {
-    throw new Refusal(
+    throw new UsageError(
       `xargs: value ${raw} for -${letter} option should be <= ${String(ceiling)}\n${hint}\n`,
+      1,
     )
   }
   return value
@@ -188,8 +182,9 @@ function separator(spec: string): number {
   const raw = encodeText(spec)
   if (raw.length === 1) return raw[0] ?? 0
   if (raw[0] !== 0x5c) {
-    throw new Refusal(
+    throw new UsageError(
       `xargs: Invalid input delimiter specification ${spec}: the delimiter must be either a single character or an escape sequence starting with \\.\n`,
+      1,
     )
   }
   const lead = raw[1] ?? 0
@@ -207,18 +202,23 @@ function separator(spec: string): number {
     body = decodeText(raw.subarray(1))
     top = ['377', 8]
   } else {
-    throw new Refusal(`xargs: Invalid escape sequence ${spec} in input delimiter specification.\n`)
+    throw new UsageError(
+      `xargs: Invalid escape sequence ${spec} in input delimiter specification.\n`,
+      1,
+    )
   }
   const width = (digits.exec(body)?.[0] ?? '').length
   const value = width > 0 ? parseInt(body.slice(0, width), top[1]) : 0
   if (value > 0xff) {
-    throw new Refusal(
+    throw new UsageError(
       `xargs: Invalid escape sequence ${spec} in input delimiter specification; character values must not exceed ${top[0]}.\n`,
+      1,
     )
   }
   if (width < body.length) {
-    throw new Refusal(
+    throw new UsageError(
       `xargs: Invalid escape sequence ${spec} in input delimiter specification; trailing characters ${body.slice(width)} not recognised.\n`,
+      1,
     )
   }
   return value
@@ -336,9 +336,12 @@ class Plan {
   }
 
   takeWidth(value: string): void {
-    if (this.crowded) throw new Refusal(CROWDED)
+    if (this.crowded) throw new UsageError(CROWDED, 1)
     if (!INTEGER.test(value)) {
-      throw new Refusal(`xargs: invalid number "${value}" for -s option\n${usageHint('xargs')}\n`)
+      throw new UsageError(
+        `xargs: invalid number "${value}" for -s option\n${usageHint('xargs')}\n`,
+        1,
+      )
     }
     let width = Number(value.trim())
     if (width < 1) {
@@ -353,12 +356,13 @@ class Plan {
 
   takeSlotVar(value: string): void {
     if (value.includes('=')) {
-      throw new Refusal(
+      throw new UsageError(
         "xargs: option --process-slot-var may not be set to a value which includes `='\n",
+        1,
       )
     }
     if (value === '') {
-      throw new Refusal('xargs: failed to unset environment variable : Invalid argument\n')
+      throw new UsageError('xargs: failed to unset environment variable : Invalid argument\n', 1)
     }
     this.slotVar = value
   }
@@ -938,7 +942,7 @@ async function drainChild(
     await pump(pipe, Channel.STDOUT, io.stdout)
   } finally {
     output.stderr = await pipe.snapshot(Channel.STDERR)
-    output.exitCode = io === undefined ? 141 : io.exitCode
+    output.exitCode = io === undefined ? SIGPIPE_STATUS : io.exitCode
   }
 }
 
@@ -1035,8 +1039,10 @@ async function* runLines(
     const name = words[0] ?? ''
     if (opts.trace === true) slot.push(new IOResult({ stderr: encodeText(trace(event)) }))
     if (registry !== null && !execs(name, session, registry)) {
-      slot.push(new IOResult({ stderr: encodeText(xargsMissing(name)), exitCode: 127 }))
-      stop = 127
+      slot.push(
+        new IOResult({ stderr: encodeText(xargsMissing(name)), exitCode: NOT_FOUND_STATUS }),
+      )
+      stop = NOT_FOUND_STATUS
       stopping.abort()
       return Promise.resolve({ results: slot })
     }
@@ -1156,8 +1162,8 @@ export async function handleXargs(
       plan.take(name, typeof value === 'string' ? value : null)
     }
   } catch (error) {
-    if (!(error instanceof Refusal)) throw error
-    return refusal(plan.notes + error.text, error.code)
+    if (!(error instanceof UsageError)) throw error
+    return refusal(plan.notes + error.message, error.exitCode)
   }
   const notes = encodeText(plan.notes)
   if (parse.invalid !== null) {

@@ -42,6 +42,7 @@ from mirage.errors.fs import (
     no_mount,
     readdir_error,
     stale_write,
+    strerror_of,
     walk_refusal,
 )
 from mirage.errors.posix import posix_errno, posix_phrase
@@ -298,3 +299,20 @@ def test_walk_refusal_names_the_operand_as_typed(raw, walk_error, cmd, line):
 )
 def test_only_an_abort_or_a_timeout_ends_the_invocation(exc, aborting):
     assert is_aborting(exc) is aborting
+
+
+@pytest.mark.parametrize(
+    ("exc", "said"),
+    [
+        (OSError(errno.EIO, "socket hang up"), "Input/output error"),
+        (no_mount("/nowhere/x"), "No such file or directory"),
+        (
+            OSError(errno.ENAMETOOLONG, "File name too long"),
+            "File name too long",
+        ),
+        (RuntimeError("upload refused: 503"), "upload refused: 503"),
+        (RuntimeError(""), "RuntimeError"),
+    ],
+)
+def test_a_diagnostic_names_every_condition_by_its_phrase(exc, said):
+    assert strerror_of(exc) == said

@@ -97,6 +97,10 @@ def shell_cmd(
         if not background:
             # Only foreground shell calls need the stream implementation.
             from mirage.cli.stream import stream_shell  # noqa: PLC0415
+            from mirage.shell.constants import (  # noqa: PLC0415
+                INTERRUPTED_STATUS,
+                SIGPIPE_STATUS,
+            )
 
             try:
                 with asyncio.Runner() as runner:
@@ -112,9 +116,9 @@ def shell_cmd(
                         )
                     )
             except KeyboardInterrupt:
-                raise typer.Exit(code=130) from None
+                raise typer.Exit(code=INTERRUPTED_STATUS) from None
             except BrokenPipeError:
-                raise typer.Exit(code=141) from None
+                raise typer.Exit(code=SIGPIPE_STATUS) from None
             except (OSError, RuntimeError, ValueError) as exc:
                 fail(str(exc), exit_code=2)
             raise typer.Exit(code=code)

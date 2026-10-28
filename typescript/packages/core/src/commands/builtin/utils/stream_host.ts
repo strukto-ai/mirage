@@ -14,8 +14,8 @@
 
 import type { util } from 'zod'
 import { currentCaller } from '../../../context/session_context.ts'
-import { classify, failureText } from '../../../errors/classify.ts'
-import { enoent, isWalkError } from '../../../errors/fs.ts'
+import { classify } from '../../../errors/classify.ts'
+import { enoent, isWalkError, strerrorOf } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { ByteSpool, spooledPair } from '../../../io/spool.ts'
@@ -49,7 +49,7 @@ async function close(source: AsyncIterator<Uint8Array>): Promise<void> {
 /** A failed request's reply: the failure's words and the condition it names, when the vocabulary names one. */
 function failure(err: unknown): Record<string, util.JSONType> {
   const errno = classify(err)
-  const error = byteView(failureText(err))
+  const error = byteView(strerrorOf(err))
   return errno === null ? { error } : { error, errno }
 }
 

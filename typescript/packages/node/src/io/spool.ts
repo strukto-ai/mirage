@@ -10,13 +10,13 @@ async function createStore(): Promise<SpoolStore> {
     const file = await open(join(directory, 'data'), 'w+')
     let length = 0
     return {
-      async append(data) {
+      async write(at, data) {
         let offset = 0
         while (offset < data.length) {
-          const { bytesWritten } = await file.write(data, offset, data.length - offset, length)
+          const { bytesWritten } = await file.write(data, offset, data.length - offset, at + offset)
           if (bytesWritten === 0) throw new Error('spool write made no progress')
           offset += bytesWritten
-          length += bytesWritten
+          length = Math.max(length, at + offset)
         }
       },
       async read(offset, size) {

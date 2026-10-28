@@ -37,8 +37,15 @@ export interface FakeHfOperator {
   stat: (key: string) => Promise<FakeMetadata>
   list: (path: string, options?: { recursive?: boolean }) => Promise<FakeEntry[]>
   write: (key: string, data: Buffer | string) => Promise<FakeMetadata>
+  /** A writer that lands its bytes only on close, as opendal's hf writer commits only then. */
+  writer: (key: string) => Promise<FakeWriter>
   delete: (key: string) => Promise<void>
   createDir: (key: string) => Promise<void>
+}
+
+export interface FakeWriter {
+  write: (data: Buffer) => Promise<void>
+  close: () => Promise<void>
 }
 
 interface FakeMetadata {
@@ -177,6 +184,19 @@ export function fakeHfOperator(initial: Record<string, string | Buffer> = {}): F
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data)
       files.set(full(key), buf)
       return Promise.resolve(fileMetadata(full(key), buf))
+    },
+    writer: (key) => {
+      const parts: Buffer[] = []
+      return Promise.resolve({
+        write: (data) => {
+          parts.push(Buffer.from(data))
+          return Promise.resolve()
+        },
+        close: () => {
+          files.set(full(key), Buffer.concat(parts))
+          return Promise.resolve()
+        },
+      })
     },
     delete: (key) => {
       files.delete(full(key))

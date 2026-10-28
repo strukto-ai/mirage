@@ -16,7 +16,8 @@ import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { PartialOutputError, UsageError } from '../../../errors.ts'
+import { UsageError } from '../../../errors.ts'
+import { StreamRefusal } from '../../../../rs/errors.ts'
 import {
   dispatchWorkflow,
   getRun,
@@ -411,7 +412,7 @@ async function runLog(
       }
     } catch (err) {
       if (!(err instanceof Error) || printed.length === 0) throw err
-      throw new PartialOutputError(err.message, concat(printed))
+      throw new StreamRefusal(err.message, concat(printed))
     }
     const prefix = ENC.encode(`${segment.job}\t${segment.step}\t`)
     for (const line of logLines(data)) printed.push(prefix, line, ENC.encode('\n'))

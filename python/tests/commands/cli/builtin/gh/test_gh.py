@@ -37,13 +37,14 @@ from mirage.commands.cli.builtin.gh.repo import (
 )
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.config import Context
-from mirage.commands.errors import PartialOutputError, UsageError
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.api.client import ApiResponse
 from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import RepoRef, edit_repo, repository_fields
 from mirage.io.types import materialize
+from mirage.rs.errors import StreamRefusal
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
@@ -1134,9 +1135,9 @@ async def test_api_jq_ends_the_output_at_halt():
 )
 async def test_api_jq_fails_at_halt_error(program, message):
     _reset({"a": "x"})
-    with pytest.raises(PartialOutputError) as caught:
+    with pytest.raises(StreamRefusal) as caught:
         await api(*_args(["repos/o/r"], {"jq": program}))
-    assert (str(caught.value), caught.value.stdout) == (message, b"")
+    assert (str(caught.value), caught.value.output) == (message, b"")
 
 
 # gojq reports what the program raised with `error` as `error: <value>`,
@@ -1177,9 +1178,9 @@ async def test_api_jq_fails_at_halt_error(program, message):
 )
 async def test_api_jq_fails_the_way_gojq_reports_it(program, message):
     _reset({"a": "x"})
-    with pytest.raises(PartialOutputError) as caught:
+    with pytest.raises(StreamRefusal) as caught:
         await api(*_args(["repos/o/r"], {"jq": program}))
-    assert (str(caught.value), caught.value.stdout) == (message, b"")
+    assert (str(caught.value), caught.value.output) == (message, b"")
 
 
 @pytest.mark.asyncio
@@ -1193,9 +1194,9 @@ async def test_api_jq_fails_the_way_gojq_reports_it(program, message):
 )
 async def test_api_jq_keeps_what_it_printed_before_failing(program, message):
     _reset({"a": "x"})
-    with pytest.raises(PartialOutputError) as caught:
+    with pytest.raises(StreamRefusal) as caught:
         await api(*_args(["repos/o/r"], {"jq": program}))
-    assert (str(caught.value), caught.value.stdout) == (message, b"x\n")
+    assert (str(caught.value), caught.value.output) == (message, b"x\n")
 
 
 # gh prints two tab-separated header lines and then the README verbatim;
@@ -1471,9 +1472,9 @@ async def test_api_jq_failure_on_a_later_page_keeps_the_earlier_pages(
         ]
     )
     monkeypatch.setitem(api.__globals__, "github_request_response", request)
-    with pytest.raises(PartialOutputError) as caught:
+    with pytest.raises(StreamRefusal) as caught:
         await api(*_args(("page1",), {"paginate": True, "jq": program}))
-    assert (str(caught.value), caught.value.stdout) == (message, b"first\n")
+    assert (str(caught.value), caught.value.output) == (message, b"first\n")
 
 
 # A failing response after an array page is still a page to gh, so that

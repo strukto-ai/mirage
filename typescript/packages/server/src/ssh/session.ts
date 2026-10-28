@@ -19,8 +19,8 @@ import type { ServerChannel } from 'ssh2'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { ACCOUNT_OPTION, PROFILE_OPTION } from './constants.ts'
 import { ChannelInput, ChannelOutput, Mark, channelStdin, deliver } from './stream.ts'
+import { INTERRUPTED_STATUS } from '@struktoai/mirage-core/shell/constants'
 
-const INTERRUPTED = 130
 const FALLBACK_PROMPT = 'mirage$ '
 const LOGIN_HOME = '/'
 
@@ -174,7 +174,7 @@ export async function openSession(
  * 128 + SIGINT.
  */
 function stampInterrupt(ws: Workspace, sessionId: string): void {
-  recordStatus(ws.getSession(sessionId), INTERRUPTED)
+  recordStatus(ws.getSession(sessionId), INTERRUPTED_STATUS)
 }
 
 /**
@@ -273,10 +273,10 @@ export class ShellChannel {
       }
     } catch (err) {
       if (controller.signal.aborted) {
-        if (this.lost) return INTERRUPTED
+        if (this.lost) return INTERRUPTED_STATUS
         if (this.live()) stampInterrupt(ws, this.sessionId)
         if (this.tty) await this.output.write(encoder.encode('^C\n'))
-        return INTERRUPTED
+        return INTERRUPTED_STATUS
       }
       if (this.lost) return 1
       const message = err instanceof Error ? err.message : String(err)
@@ -305,7 +305,7 @@ export class ShellChannel {
       }
       if (item === Mark.INTERRUPT) {
         if (this.tty) await this.output.write(encoder.encode('^C\n'))
-        status = INTERRUPTED
+        status = INTERRUPTED_STATUS
         if (this.live()) stampInterrupt(this.entry.runner.ws, this.sessionId)
         continue
       }

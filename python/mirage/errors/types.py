@@ -15,6 +15,8 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+from mirage.types import PathSpec
+
 
 class FsCondition(StrEnum):
     """A filesystem condition mirage can report, named once.
@@ -110,6 +112,25 @@ class GlobLimitError(Exception):
             f"{word}: matches more than {limit} files (walk_limit); "
             "narrow the path"
         )
+
+
+class WalkLimitError(Exception):
+    """A walk past its mount's ``walk_limit``. The message is the line
+    the command prints where it stopped; grep and rg raise it to stop
+    reading a directory, keep what they printed and exit 2.
+
+    Args:
+        directory (PathSpec): the operand, or the mount root below it,
+            where the walk stopped.
+        limit (int): the mount's ``walk_limit``.
+    """
+
+    def __init__(self, directory: PathSpec, limit: int) -> None:
+        super().__init__(
+            f"{directory.raw_path or '.'}: stopped after {limit} files "
+            "(walk_limit); narrow the path"
+        )
+        self.directory = directory
 
 
 class ReadOnlyError(PermissionError):

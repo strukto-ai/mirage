@@ -15,12 +15,6 @@
 import type { ScriptMethod } from './types.ts'
 
 /**
- * A whole-command refusal exits as bash does for a command it found but
- * may not run.
- */
-export const POLICY_DENIED_EXIT = 126
-
-/**
  * The reason a bare command pattern under `commands.deny` carries, and
  * the one a bare pattern under `commands.ask` carries.
  */

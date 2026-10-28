@@ -54,6 +54,10 @@ const CLOCK_IMPORTS: Record<string, ReadonlySet<string>> = {
 }
 
 const KEPT_ON_SYSTEM_CLOCK: Record<string, string> = {
+  'core/box/client.ts AbortSignal.timeout':
+    'bounds the abort a stopped upload session sends, a request that runs on real time; ' +
+    "a manual clock's sleep returns at once and would end the bound before the request " +
+    'is sent',
   'cache/index/listing_memo.ts performance.now':
     'the trust window and row-write times are counted per key prefix across every ' +
     'store sharing it, and those stores may hold different clocks, so they stay on ' +

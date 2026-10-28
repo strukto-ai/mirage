@@ -65,21 +65,24 @@ export class ArithError extends Error {
 }
 
 /**
- * An arithmetic assignment to a readonly shell variable. The evaluation
- * stops at it, as bash's does: `writes` carries the assignments made before
- * it, which bind (`(( X=5, R=3 ))` leaves X at 5), and nothing after it
- * runs. `inSubscript` marks one made while an array subscript evaluated
- * (`${a[R=3]}`, `(( a[R=3] ))`), which ends the shell wherever the
- * subscript is. Mirrors Python's mirage.shell.errors.ReadonlyError.
+ * An assignment to a readonly shell variable: a session write to a name
+ * `readonly` marked, or one an arithmetic expression made. Its message is
+ * bash's `<name>: readonly variable`, which each caller renders in its own
+ * voice. An arithmetic evaluation stops at it, as bash's does: `writes`
+ * carries the assignments made before it, which bind (`(( X=5, R=3 ))`
+ * leaves X at 5), and nothing after it runs. `inSubscript` marks one made
+ * while an array subscript evaluated (`${a[R=3]}`, `(( a[R=3] ))`), which
+ * ends the shell wherever the subscript is. Mirrors Python's
+ * mirage.shell.errors.ReadonlyVariableError.
  */
-export class ReadonlyError extends Error {
+export class ReadonlyVariableError extends Error {
   readonly varName: string
   readonly inSubscript: boolean
   writes: ArithWrite[] = []
 
   constructor(name: string, inSubscript = false) {
     super(`${name}: readonly variable`)
-    this.name = 'ReadonlyError'
+    this.name = 'ReadonlyVariableError'
     this.varName = name
     this.inSubscript = inSubscript
   }

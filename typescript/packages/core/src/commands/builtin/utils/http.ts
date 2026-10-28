@@ -18,6 +18,7 @@
 // earlier version threw on !resp.ok here, which made both tools fail on any
 // 4xx and leaked 'fetch failed' onto stderr for a refused connection.
 
+import { callerSignal } from '../../../context/session_context.ts'
 import { makeAbortError, mergeSignals } from '../../../utils/abort.ts'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import { HTTP_TIMEOUT_SECONDS } from './constants.ts'
@@ -123,6 +124,10 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
     options.timeoutMs === undefined ? HTTP_TIMEOUT_SECONDS * 1000 : options.timeoutMs
   const send = options.verify === false && insecureFetch !== null ? insecureFetch : fetch
   const started = Date.now()
+  // What the invocation answers to: its own signal and the call's (a line's
+  // stop, a job's kill or limit), so a stopped CLI that reaches here (git)
+  // ends its request as Python's cancelled task does.
+  const caller = mergeSignals(options.signal, callerSignal())
   const controller = new AbortController()
   const timer =
     timeoutMs === null
@@ -151,7 +156,7 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
       const init: RequestInit = {
         method,
         headers,
-        signal: mergeSignals(controller.signal, options.signal) ?? controller.signal,
+        signal: mergeSignals(controller.signal, caller) ?? controller.signal,
         redirect: 'manual',
       }
       if (body !== undefined) {
@@ -177,7 +182,7 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
         // invocation, the only abort here is the deadline above, which curl
         // answers with its own code (28), so it is told apart from a
         // connection that never opened.
-        if (options.signal?.aborted === true) throw makeAbortError(options.signal)
+        if (caller?.aborted === true) throw makeAbortError(caller)
         const { host, port } = endpoint(current)
         if (err instanceof DOMException && err.name === 'AbortError') {
           throw new HttpTimeoutError(host, port, Date.now() - started)

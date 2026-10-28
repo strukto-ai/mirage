@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable, Iterator
+
 from mirage.workspace.expand.constants import (
     CHAR_SEQ,
     INERT_CLOSE,
@@ -86,13 +88,13 @@ def _parse_step(step_text: str | None, descending: bool) -> int | None:
     return step if step else 1
 
 
-def _seq_values(lo: int, hi: int, step: int) -> list[int]:
+def _seq_values(lo: int, hi: int, step: int) -> range:
     if lo <= hi:
-        return list(range(lo, hi + 1, step))
-    return list(range(lo, hi - 1, -step))
+        return range(lo, hi + 1, step)
+    return range(lo, hi - 1, -step)
 
 
-def _gen_sequence(body: str) -> list[str] | None:
+def _gen_sequence(body: str) -> Iterable[str] | None:
     """Generate `{x..y[..step]}` sequence words, or None if not a range.
 
     A range body must be pure literal text: an inert atom or escape
@@ -100,7 +102,8 @@ def _gen_sequence(body: str) -> list[str] | None:
     Numeric endpoints with leading zeros zero-pad every output to the
     widest endpoint, the minus sign counting toward the width
     (`{-05..5..5}` yields `-05 000 005`). Step direction follows the
-    endpoints; the step's own sign is ignored and 0 acts as 1.
+    endpoints; the step's own sign is ignored and 0 acts as 1. The
+    words are made as they are read.
 
     Args:
         body (str): text between the braces.
@@ -123,15 +126,15 @@ def _gen_sequence(body: str) -> list[str] | None:
         values = _seq_values(lo, hi, step)
         if _is_padded(lo_text) or _is_padded(hi_text):
             width = max(len(lo_text), len(hi_text))
-            return [f"{v:0{width}d}" for v in values]
-        return [str(v) for v in values]
+            return (f"{v:0{width}d}" for v in values)
+        return map(str, values)
     m = CHAR_SEQ.fullmatch(body)
     if m:
         step = _parse_step(m.group(3), m.group(1) >= m.group(2))
         if step is None:
             return None
         values = _seq_values(ord(m.group(1)), ord(m.group(2)), step)
-        return [chr(v) for v in values]
+        return map(chr, values)
     return None
 
 
@@ -185,7 +188,7 @@ def _split_alternatives(body: str) -> list[str] | None:
     return alts
 
 
-def _expand(template: str) -> list[str]:
+def _expand(template: str) -> Iterator[str]:
     i = 0
     n = len(template)
     while i < n:
@@ -204,38 +207,53 @@ def _expand(template: str) -> list[str]:
             i += 1
             continue
         body = template[i + 1 : close]
-        alternatives = _gen_sequence(body)
-        if alternatives is None:
+        sequence = _gen_sequence(body)
+        if sequence is None:
             alts = _split_alternatives(body)
             if alts is None:
                 # `{abc}` and friends stay literal; the next `{` (even
                 # one inside this body) may still expand, like GNU.
                 i += 1
                 continue
-            alternatives = [w for alt in alts for w in _expand(alt)]
+            groups: list[Iterable[str]] = [_expand(alt) for alt in alts]
+        else:
+            groups = [sequence]
         prefix = template[:i]
-        suffixes = _expand(template[close + 1 :])
-        return [
-            prefix + alt + suffix
-            for alt in alternatives
-            for suffix in suffixes
-        ]
-    return [template]
+        # The suffix words are made once, as the first alternative takes
+        # them, and kept for the rest.
+        suffixes: list[str] = []
+        tail: Iterator[str] | None = _expand(template[close + 1 :])
+        for group in groups:
+            for alt in group:
+                if tail is not None:
+                    for suffix in tail:
+                        suffixes.append(suffix)
+                        yield prefix + alt + suffix
+                    tail = None
+                    continue
+                for suffix in suffixes:
+                    yield prefix + alt + suffix
+        return
+    yield template
 
 
-def expand_template(template: str) -> list[str] | None:
+def expand_template(template: str) -> Iterable[str] | None:
     """Brace-expand a template word into its word list.
+
+    The words are made as they are read, so a caller that yields as it
+    reads them stops inside a long range. A word an expansion makes is
+    shorter than the template it came from, so a first word equal to
+    the template means nothing expanded.
 
     Args:
         template (str): literal shell text where already-expanded
             chunks appear as inert atoms from make_inert.
 
     Returns:
-        list[str] | None: expanded words (inert atoms preserved), or
-        None when the template contains nothing brace-expandable so
+        Iterable[str] | None: expanded words (inert atoms preserved),
+        or None when the template contains nothing brace-expandable so
         callers can fall back to plain concatenation.
     """
-    words = _expand(template)
-    if len(words) == 1 and words[0] == template:
+    if next(_expand(template)) == template:
         return None
-    return words
+    return _expand(template)

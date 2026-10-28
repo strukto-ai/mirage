@@ -17,7 +17,7 @@ from mirage.rs.errors import RegexError
 from mirage.rs.regex import posix_regex
 from mirage.shell.array import make_array
 from mirage.shell.bytes import byte_view, text_view, utf8_locale
-from mirage.shell.errors import ArithError, ReadonlyError
+from mirage.shell.errors import ArithError, ReadonlyVariableError
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY,
@@ -175,12 +175,12 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         reader = random_reader(ctx.session)
         values = []
         for operand in (node.left, node.right):
-            error: ArithError | ReadonlyError | None = None
+            error: ArithError | ReadonlyVariableError | None = None
             value = 0
             try:
                 result = session_arith(ctx.session, operand, reader)
                 writes, value = result.writes, result.value
-            except (ArithError, ReadonlyError) as exc:
+            except (ArithError, ReadonlyVariableError) as exc:
                 # bash bound what the operand assigned before it failed
                 # (`y='x=6,1/0'; [[ 0 -eq y ]]` leaves x at 6, and a
                 # RANDOM seed in it is drawn from); they land, and the

@@ -15,7 +15,6 @@
 import { byteView } from '../../shell/bytes.ts'
 import { UsageError } from '../errors.ts'
 import { quoteText } from '../quote.ts'
-import { SortKeyError } from './errors.ts'
 
 // The ordering letters GNU sort takes after a KEYDEF position. R is
 // recognized, so it still keeps a key off the global options and counts
@@ -71,13 +70,13 @@ function fieldCount(spec: string, pos: number, what: string): [number, number] {
   const digits = end
   while (end < spec.length && isAsciiDigit(spec.charAt(end))) end += 1
   if (end === digits) {
-    throw new SortKeyError(`${what}: invalid count at start of '${quoteText(spec.slice(pos))}'`)
+    throw new UsageError(`sort: ${what}: invalid count at start of '${quoteText(spec.slice(pos))}'`)
   }
   return [Number.parseInt(spec.slice(digits, end), 10), end]
 }
 
-function badFieldSpec(spec: string, why: string): SortKeyError {
-  return new SortKeyError(`${why}: invalid field specification '${quoteText(spec)}'`)
+function badFieldSpec(spec: string, why: string): UsageError {
+  return new UsageError(`sort: ${why}: invalid field specification '${quoteText(spec)}'`)
 }
 
 function ordering(spec: string, pos: number): [string, number] {
@@ -259,7 +258,7 @@ export function buildConfig(globals: SortGlobals): SortConfig {
   }
   for (const key of keys) {
     const letters = incompatibleLetters(key.mods)
-    if (letters !== '') throw new SortKeyError(`options '-${letters}' are incompatible`)
+    if (letters !== '') throw new UsageError(`sort: options '-${letters}' are incompatible`)
   }
   return {
     keys,

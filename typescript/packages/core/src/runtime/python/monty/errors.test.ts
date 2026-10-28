@@ -14,8 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { exdev } from '../../../errors/fs.ts'
 import { FS_CONDITIONS } from '../../../errors/index.ts'
-import { CrossMountError } from '../../errors.ts'
 import { asGuestError, cpythonError, guestError } from './errors.ts'
 
 describe('the CPython table', () => {
@@ -89,12 +89,7 @@ describe('asGuestError', () => {
       '/a',
       "[Errno 40] Too many levels of symbolic links: '/a'",
     ],
-    [
-      'a cross-mount rename',
-      new CrossMountError('/a/x', '/b/x'),
-      '/a/x',
-      "[Errno 18] Invalid cross-device link: '/a/x'",
-    ],
+    ['a cross-mount rename', exdev('/a/x'), '/a/x', "[Errno 18] Invalid cross-device link: '/a/x'"],
     [
       'an unnamed error',
       new Error('transport exploded'),

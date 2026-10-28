@@ -45,7 +45,7 @@ from mirage.shell.constants import (
     RANDOM_MODULUS,
     RANDOM_UNSET,
 )
-from mirage.shell.errors import ArithError, ExitSignal, ReadonlyError
+from mirage.shell.errors import ArithError, ExitSignal, ReadonlyVariableError
 from mirage.shell.types import ArithResult, ArithWrite, ElementOps
 from mirage.shell.variable import (
     ShellValue,
@@ -59,7 +59,6 @@ from mirage.shell.variable import (
 )
 from mirage.utils.hidden import var_hidden
 from mirage.view.types import EnvSet, SessionView
-from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.rng import draw, initial_seed
 from mirage.workspace.session.session import SessionState
 
@@ -391,7 +390,7 @@ async def _land_writes(
         try:
             await store(name, value, assigned=assigned)
         except ReadonlyVariableError as exc:
-            raise ReadonlyError(exc.name).signal(fatal=True) from exc
+            raise exc.signal(fatal=True) from exc
 
 
 async def subscript_index(
@@ -426,7 +425,7 @@ async def subscript_index(
     if plain is not None:
         return plain
     reader = random_reader(session)
-    error: ArithError | ReadonlyError | None = None
+    error: ArithError | ReadonlyVariableError | None = None
     idx = 0
     try:
         result = session_arith(
@@ -436,7 +435,7 @@ async def subscript_index(
             nounset=bool(session.shell_options.get("nounset")),
         )
         idx, writes = result.value, result.writes
-    except (ArithError, ReadonlyError) as exc:
+    except (ArithError, ReadonlyVariableError) as exc:
         error, writes = exc, exc.writes
     await _land_writes(
         session,
@@ -446,7 +445,7 @@ async def subscript_index(
         writes,
     )
     reader.settle()
-    if isinstance(error, ReadonlyError):
+    if isinstance(error, ReadonlyVariableError):
         raise error.signal(fatal=True) from error
     if error is not None:
         raise error
@@ -762,7 +761,7 @@ def session_arith(
 
     Raises:
         ArithError: the text does not evaluate.
-        ReadonlyError: an assignment named a readonly variable; its
+        ReadonlyVariableError: an assignment named a readonly variable; its
             ``writes`` are the ones made before it.
     """
     return evaluate_arith(
@@ -819,12 +818,12 @@ class _IntegerCoercion:
     def __call__(self, text: str, added: str | None = None) -> str:
         try:
             return self.evaluate(text, added)
-        except ReadonlyError as exc:
+        except ReadonlyVariableError as exc:
             raise exc.signal(fatal=True) from exc
 
     def evaluate(self, text: str, added: str | None = None) -> str:
         """The value ``text`` evaluates to, keeping the writes it made
-        before an ``ArithError`` or a ``ReadonlyError``.
+        before an ``ArithError`` or a ``ReadonlyVariableError``.
 
         With ``added``, the two sides of an integer ``+=`` (``appended``)
         evaluate in turn in one evaluation and add: the second sees what
@@ -842,7 +841,7 @@ class _IntegerCoercion:
         reach_again = _step_back(session)
         try:
             result = session_arith(session, text, self.reader, added=added)
-        except (ArithError, ReadonlyError) as exc:
+        except (ArithError, ReadonlyVariableError) as exc:
             self.writes.extend(exc.writes)
             raise
         finally:
@@ -1129,9 +1128,9 @@ async def set_var(
         except ExitSignal:
             await _land_coercion(session, store, coercion)
             raise
-        except (ArithError, ReadonlyError) as exc:
+        except (ArithError, ReadonlyVariableError) as exc:
             await _land_coercion(session, store, coercion)
-            if isinstance(exc, ReadonlyError) and (
+            if isinstance(exc, ReadonlyVariableError) and (
                 exc.in_subscript or diagnostics is None
             ):
                 raise exc.signal() from exc

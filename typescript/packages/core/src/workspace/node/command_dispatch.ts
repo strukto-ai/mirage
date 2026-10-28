@@ -106,6 +106,7 @@ import { ExecutionNode } from '../types.ts'
 import { concat } from '../../utils/bytes.ts'
 import type { ExpandedWords } from './types.ts'
 import { WORD_BREAKS } from '../../shell/parse/constants.ts'
+import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -439,8 +440,8 @@ export async function executeCommand(
     const stderr = argumentListTooLong(name, err.reason)
     return [
       null,
-      new IOResult({ exitCode: 126, stderr }),
-      new ExecutionNode({ command: name, exitCode: 126, stderr }),
+      new IOResult({ exitCode: CANNOT_EXECUTE_STATUS, stderr }),
+      new ExecutionNode({ command: name, exitCode: CANNOT_EXECUTE_STATUS, stderr }),
     ]
   } finally {
     const frames = session.localFrames
@@ -695,7 +696,7 @@ async function runArgv(
   // words read (an env-filled required option lets the walk reach the leaf,
   // whose files are paths), so they are classified again.
   if (name !== '' && (await fillTreeEnv(name, argv.args, session, registry, assigned))) {
-    const words = classifiedWords(name, argv.args, session, registry)
+    const words = await classifiedWords(name, argv.args, session, registry)
     argv = new Argv(argv.name, argv.args, words.slice(1), argv.prefix)
   }
 

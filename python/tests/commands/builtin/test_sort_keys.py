@@ -1,6 +1,5 @@
 import pytest
 
-from mirage.commands.builtin.errors import SortKeyError
 from mirage.commands.builtin.generic.sort import (
     SORT_RUN_BYTES,
     sort_generic,
@@ -11,6 +10,7 @@ from mirage.commands.builtin.sort_keys import (
     build_config,
     parse_keydef,
 )
+from mirage.commands.errors import UsageError
 from mirage.io.types import materialize
 from mirage.rs import open_stream
 
@@ -129,19 +129,19 @@ class TestParseKeydef:
         assert key.start_skip is True
 
     def test_zero_field_raises(self):
-        with pytest.raises(SortKeyError):
+        with pytest.raises(UsageError):
             parse_keydef("0", _G, False)
 
     def test_unknown_order_letter_raises(self):
-        with pytest.raises(SortKeyError):
+        with pytest.raises(UsageError):
             parse_keydef("2x", _G, False)
 
     def test_unicode_digit_field_raises(self):
         # python's \d also matches Unicode digits (int('١') is 1), which
         # JS /\d/ and GNU's C-locale parsers reject.
-        with pytest.raises(SortKeyError):
+        with pytest.raises(UsageError):
             parse_keydef("١", _G, False)
-        with pytest.raises(SortKeyError):
+        with pytest.raises(UsageError):
             parse_keydef("2.٣", _G, False)
 
     def test_h_is_an_ordering_letter(self):
@@ -237,9 +237,9 @@ class TestParseKeydef:
     ],
 )
 def test_a_refused_keydef_in_gnus_words(spec, message):
-    with pytest.raises(SortKeyError) as exc:
+    with pytest.raises(UsageError) as exc:
         parse_keydef(spec, _G, False)
-    assert str(exc.value) == message
+    assert str(exc.value) == f"sort: {message}"
 
 
 class TestOrderingCompatibility:
@@ -274,9 +274,9 @@ class TestOrderingCompatibility:
         ],
     )
     def test_the_global_options_are_the_one_key(self, options, letters):
-        with pytest.raises(SortKeyError) as exc:
+        with pytest.raises(UsageError) as exc:
             _cfg(**options)
-        assert str(exc.value) == f"options '-{letters}' are incompatible"
+        assert str(exc.value) == f"sort: options '-{letters}' are incompatible"
 
     @pytest.mark.parametrize(
         "key_defs,letters",
@@ -294,17 +294,17 @@ class TestOrderingCompatibility:
         ],
     )
     def test_each_key_is_checked_in_the_order_typed(self, key_defs, letters):
-        with pytest.raises(SortKeyError) as exc:
+        with pytest.raises(UsageError) as exc:
             _cfg(key_defs)
-        assert str(exc.value) == f"options '-{letters}' are incompatible"
+        assert str(exc.value) == f"sort: options '-{letters}' are incompatible"
 
     def test_a_key_without_letters_inherits_the_conflict(self):
-        with pytest.raises(SortKeyError) as exc:
+        with pytest.raises(UsageError) as exc:
             _cfg(["1,1"], numeric=True, general_numeric=True)
-        assert str(exc.value) == "options '-gn' are incompatible"
-        with pytest.raises(SortKeyError) as exc:
+        assert str(exc.value) == "sort: options '-gn' are incompatible"
+        with pytest.raises(UsageError) as exc:
             _cfg(["1"], numeric=True, dictionary=True)
-        assert str(exc.value) == "options '-dn' are incompatible"
+        assert str(exc.value) == "sort: options '-dn' are incompatible"
 
     def test_globals_no_key_inherits_are_not_checked(self):
         cfg = _cfg(["1,1n"], numeric=True, general_numeric=True)
@@ -390,7 +390,7 @@ class TestSortKeydef:
         ]
 
     def test_invalid_key_leaves_lines_via_config(self):
-        with pytest.raises(SortKeyError):
+        with pytest.raises(UsageError):
             _cfg(["0"])
 
 

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export const INTERRUPT = '\u0003'
-export const INTERRUPTED_EXIT_CODE = 130
 export const DEFAULT_EXEC_YIELD_MS = 10_000
 export const DEFAULT_WRITE_YIELD_MS = 250
 export const NO_STDIN = 'stdin is not available for this process'

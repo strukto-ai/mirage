@@ -190,6 +190,6 @@ it.each(['stat', 'read'])('preserves the path on pack permission errors (%s)', a
     checkPack(new Files(dispatch), PathSpec.fromStrPath('/repo/denied.pack'), new Uint8Array(20)),
   ).rejects.toMatchObject({
     message: 'cannot read pack /repo/denied.pack: Permission denied',
-    code: new GitError('').code,
+    exitCode: new GitError('').exitCode,
   })
 })

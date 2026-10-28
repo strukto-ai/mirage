@@ -173,7 +173,7 @@ describe('createMirageMcpServer', () => {
       arguments: { path: '/doc.txt', old_string: 'external', new_string: 'changed' },
     })
     expect(stale.isError).toBe(true)
-    expect(firstText(stale.content)).toContain('changed since it was last read')
+    expect(firstText(stale.content)).toContain('changed since it was read')
     await client.callTool({ name: 'read', arguments: { path: '/doc.txt' } })
     const edit = await client.callTool({
       name: 'edit',

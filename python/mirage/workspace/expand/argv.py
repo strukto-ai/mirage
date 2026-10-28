@@ -253,7 +253,7 @@ async def expand_argv(
                 for word, base in zip(expanded[1:], word_bases)
             ]
 
-    classified = classify_parts(
+    classified = await classify_parts(
         expanded,
         registry,
         session.cwd,
@@ -303,7 +303,7 @@ async def expand_argv(
             for item in classified
         ]
     if program and spec:
-        words = _program_words(
+        words = await _program_words(
             words,
             spec,
             name,
@@ -325,7 +325,7 @@ async def expand_argv(
     )
 
 
-def _program_words(
+async def _program_words(
     words: list[str | PathSpec],
     spec: CommandSpec,
     name: str,
@@ -362,7 +362,7 @@ def _program_words(
     kinds += spec_word_kinds(spec, literal[consumed:], name, env)
     bases = spec_word_bases(spec, literal[consumed:], cwd, name, env)
     head: list[str | None] = [None] * (consumed - 1)
-    reread = classify_parts(
+    reread = await classify_parts(
         literal,
         registry,
         cwd,

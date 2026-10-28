@@ -3553,6 +3553,29 @@ async def test_named_outputs_reach_native_stream_writers(
         await ws.close()
 
 
+class _RewrittenRAM(RAMVFS):
+    """A store with no pwrite, as S3, whose pwrite is a rewrite."""
+
+    pwrite = BaseVFS.pwrite
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store", [RAMVFS, _RewrittenRAM])
+async def test_a_streamed_pwrite_lets_its_name_go_while_its_source_waits(
+    store,
+):
+    ws = Workspace({"/d/": store()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/d/f", b"0123456789")
+
+    async def source():
+        yield b"AB"
+        await ws.vfs.append("/d/f", b"tail")
+        yield b"CD"
+
+    await asyncio.wait_for(ws.vfs.pwrite("/d/f", source(), 2), 5)
+    assert await ws.vfs.read("/d/f") == b"01ABCD6789tail"
+
+
 @pytest.mark.asyncio
 async def test_failed_streamed_write_invalidates_old_content_and_closes_input():
     destination = StreamWritingRAM()

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.utils.glob_walk import mark_globs
@@ -50,30 +52,42 @@ def test_ifs_joiner_is_the_first_character(ifs, joiner):
         ("a b", "", ["a b"]),
     ],
 )
-def test_split_fields_reads_ifs_as_bash_does(text, ifs, fields):
-    assert split_fields([Piece(text, True)], ifs) == fields
+@pytest.mark.asyncio
+async def test_split_fields_reads_ifs_as_bash_does(text, ifs, fields):
+    assert await split_fields([Piece(text, True)], ifs) == fields
 
 
-def test_split_fields_joins_literal_text_to_the_split_edges():
+@pytest.mark.asyncio
+async def test_split_fields_joins_literal_text_to_the_split_edges():
     chunks = [Piece("q"), Piece(" a ", True), Piece("r")]
-    assert split_fields(chunks, None) == ["q", "a", "r"]
+    assert await split_fields(chunks, None) == ["q", "a", "r"]
 
 
-def test_split_fields_never_splits_quoted_text():
-    assert split_fields([Piece("a b"), Piece(",c", True)], ",") == ["a b", "c"]
+@pytest.mark.asyncio
+async def test_split_fields_never_splits_quoted_text():
+    assert await split_fields([Piece("a b"), Piece(",c", True)], ",") == [
+        "a b",
+        "c",
+    ]
 
 
-def test_split_fields_empty_unquoted_is_no_word():
-    assert split_fields([Piece("", True)], None) == []
-    assert split_fields([Piece("  ", True)], None) == []
+@pytest.mark.asyncio
+async def test_split_fields_empty_unquoted_is_no_word():
+    assert await split_fields([Piece("", True)], None) == []
+    assert await split_fields([Piece("  ", True)], None) == []
 
 
-def test_split_fields_empty_quoted_is_an_empty_word():
-    assert split_fields([Piece("")], None) == [""]
-    assert split_fields([Piece(""), Piece(" a", True)], None) == ["", "a"]
+@pytest.mark.asyncio
+async def test_split_fields_empty_quoted_is_an_empty_word():
+    assert await split_fields([Piece("")], None) == [""]
+    assert await split_fields([Piece(""), Piece(" a", True)], None) == [
+        "",
+        "a",
+    ]
 
 
-def test_split_fields_breaks_between_splat_elements():
+@pytest.mark.asyncio
+async def test_split_fields_breaks_between_splat_elements():
     chunks = [
         Piece("x"),
         Piece("", True),
@@ -82,12 +96,13 @@ def test_split_fields_breaks_between_splat_elements():
         FieldBreak(" "),
         Piece("b c", True),
     ]
-    assert split_fields(chunks, "") == ["x", "b c"]
+    assert await split_fields(chunks, "") == ["x", "b c"]
 
 
-def test_splat_chunks_keeps_quoted_empty_elements():
-    chunks = splat_chunks(["", "*"], " ", True)
-    assert split_fields(chunks, None) == ["", mark_globs("*")]
+@pytest.mark.asyncio
+async def test_splat_chunks_keeps_quoted_empty_elements():
+    chunks = await splat_chunks(["", "*"], " ", True)
+    assert await split_fields(chunks, None) == ["", mark_globs("*")]
     assert join_chunks(chunks) == " " + mark_globs("*")
     assert chunks_text(chunks) == " *"
 
@@ -100,3 +115,23 @@ def test_value_piece_marks_only_quoted_values():
 def test_join_chunks_reads_each_break_as_its_joiner():
     chunks = [Piece("a", True), FieldBreak(","), Piece("b", True)]
     assert join_chunks(chunks) == "a,b"
+
+
+@pytest.mark.asyncio
+async def test_split_fields_yields_across_a_long_quoted_splat():
+    chunks = await splat_chunks([str(i) for i in range(200000)], " ", True)
+    turns = 0
+
+    async def tick() -> None:
+        nonlocal turns
+        while True:
+            turns += 1
+            await asyncio.sleep(0)
+
+    ticker = asyncio.create_task(tick())
+    await asyncio.sleep(0)
+    before = turns
+    fields = await split_fields(chunks, None)
+    ticker.cancel()
+    assert len(fields) == 200000
+    assert turns > before

@@ -13,6 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { READ, openMode, parseMode, type OpenMode } from './mode.ts'
-export { overlaid, writeRuns } from './file_handle.ts'
+export { overlaid, runGroups, runStream, windowWrites, writeRuns } from './file_handle.ts'
 export { FileTable } from './file_table.ts'
 export { ChunkedHandle } from './chunked.ts'

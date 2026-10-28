@@ -15,13 +15,16 @@
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.core.databricks_volume._helpers import parent_path
 from mirage.core.databricks_volume.client import (
+    MAX_UPLOAD_SIZE,
     get_directory_metadata,
     get_metadata,
     upload,
 )
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
-from mirage.errors.fs import enoent, enotdir
+from mirage.errors.fs import efbig, enoent, enotdir
+from mirage.io.spool import ByteSpool
+from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
@@ -50,17 +53,29 @@ async def _ensure_parent_directory(
 async def write(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    data: bytes,
+    data: ByteSource,
 ) -> None:
+    """Write a file in one PUT streamed from a spool, which knows its
+    length; one past the PUT's cap is refused before any request.
+
+    Args:
+        accessor (DatabricksVolumeAccessor): Databricks accessor.
+        path (PathSpec): the file.
+        data (ByteSource): its new content, consumed once.
+    """
     parent = parent_path(path)
     remote_parent = backend_path(accessor.config, parent)
     remote_path = backend_path(accessor.config, path)
-    timer = start_op()
-    await _ensure_parent_directory(accessor, remote_parent, path.virtual)
-    try:
-        await upload(accessor, remote_path, data, overwrite=True)
-    except Exception as exc:
-        if is_not_found(exc):
-            raise enoent(path) from exc
-        raise
-    record("write", path.virtual, "databricks_volume", len(data), timer)
+    async with ByteSpool() as spool:
+        await spool.fill(data)
+        if spool.size > MAX_UPLOAD_SIZE:
+            raise efbig(path)
+        timer = start_op()
+        await _ensure_parent_directory(accessor, remote_parent, path.virtual)
+        try:
+            await upload(accessor, remote_path, spool, overwrite=True)
+        except Exception as exc:
+            if is_not_found(exc):
+                raise enoent(path) from exc
+            raise
+    record("write", path.virtual, "databricks_volume", spool.size, timer)

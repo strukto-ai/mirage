@@ -12,13 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
+import hashlib
+import tracemalloc
 
+import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
+
+import mirage.core.databricks_volume.write as write_module
+from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.core.databricks_volume.create import create
 from mirage.core.databricks_volume.unlink import unlink
 from mirage.core.databricks_volume.write import write
+from mirage.errors.types import FileTooLargeError
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.databricks_volume import DatabricksVolumeConfig
 
 
 def _path(path: str) -> PathSpec:
@@ -93,6 +102,60 @@ async def test_write_fails_when_parent_is_file(accessor, files, remote_root):
 
     with pytest.raises(NotADirectoryError):
         await write(accessor, _path("/dbx/parent.txt/new.txt"), b"x")
+
+
+@pytest.mark.asyncio
+async def test_a_large_write_holds_a_bounded_amount_of_memory():
+    received = hashlib.sha256()
+    lengths: list[str] = []
+
+    async def respond(request: web.Request) -> web.StreamResponse:
+        if request.method == "PUT":
+            lengths.append(request.headers["Content-Length"])
+            async for piece in request.content.iter_chunked(65536):
+                received.update(piece)
+        return web.Response()
+
+    app = web.Application()
+    app.router.add_route("*", "/{tail:.*}", respond)
+    block = b"x" * (1024 * 1024)
+
+    async def source():
+        for _ in range(64):
+            yield block
+
+    async with TestServer(app) as server:
+        config = DatabricksVolumeConfig(
+            catalog="main",
+            schema="default",
+            volume="files",
+            host=str(server.make_url("")).rstrip("/"),
+            token="secret",
+        )
+        async with DatabricksVolumeAccessor(config) as accessor:
+            tracemalloc.start()
+            try:
+                await write(accessor, _path("/dbx/big.bin"), source())
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+    assert lengths == [str(len(block) * 64)]
+    assert received.hexdigest() == hashlib.sha256(block * 64).hexdigest()
+    assert peak < 8 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_a_write_past_the_put_cap_is_refused_before_any_request(
+    accessor, files, remote_root, monkeypatch
+):
+    _seed_directory(files, remote_root)
+    monkeypatch.setattr(write_module, "MAX_UPLOAD_SIZE", 4)
+
+    with pytest.raises(FileTooLargeError) as caught:
+        await write(accessor, _path("/dbx/big.bin"), b"12345")
+
+    assert caught.value.filename == "/dbx/big.bin"
+    assert files.requests == []
 
 
 @pytest.mark.asyncio

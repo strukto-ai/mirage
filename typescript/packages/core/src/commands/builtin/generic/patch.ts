@@ -24,8 +24,8 @@ import { readStdinAsync } from '../utils/stream.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
-import { classify, failureText } from '../../../errors/classify.ts'
-import { fsStrerror, isEisdir, isEnoent, isFsError } from '../../../errors/fs.ts'
+import { classify } from '../../../errors/classify.ts'
+import { fsStrerror, isEisdir, isEnoent, isFsError, strerrorOf } from '../../../errors/fs.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { openStream, serveRequests, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
@@ -175,7 +175,7 @@ class PatchFiles {
     } catch (err) {
       if (!isFsError(err)) throw err
       const errno = classify(err)
-      const error = byteView(failureText(err))
+      const error = byteView(strerrorOf(err))
       return errno === null ? { error } : { error, errno }
     }
     return {}

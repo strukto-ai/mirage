@@ -137,7 +137,10 @@ export async function clone(
         if (child) await removeTree(vfs, target.join(child))
       }
     const refusal = err.prefix === null ? err.message : `${err.prefix}: ${err.message}`
-    return [null, new IOResult({ exitCode: err.code, stderr: ENC.encode(`${notes}${refusal}\n`) })]
+    return [
+      null,
+      new IOResult({ exitCode: err.exitCode, stderr: ENC.encode(`${notes}${refusal}\n`) }),
+    ]
   }
   return [null, new IOResult({ stderr: ENC.encode(notes) })]
 }

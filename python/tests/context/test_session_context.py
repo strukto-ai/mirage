@@ -41,7 +41,9 @@ from mirage.context.session_context import (
     Caller,
     bind_caller,
     current_caller,
+    in_landing,
     reset_caller,
+    run_landing,
     with_caller,
 )
 from mirage.types import (
@@ -535,3 +537,19 @@ async def test_a_stream_is_pulled_and_closed_as_the_caller_it_was_made_with():
     finally:
         reset_caller(token)
     assert seen == [1, 3, 3]
+
+
+@pytest.mark.asyncio
+async def test_run_landing_marks_its_own_calls_alone():
+    held = asyncio.Event()
+
+    async def landing() -> bool:
+        await held.wait()
+        return in_landing()
+
+    async def beside() -> bool:
+        held.set()
+        return in_landing()
+
+    landed, other = await asyncio.gather(run_landing(landing()), beside())
+    assert (landed, other, in_landing()) == (True, False, False)

@@ -22,7 +22,7 @@ import { ExecutionScope } from '../execution.ts'
 import { newExecutionId } from '../../execution/context.ts'
 import { PathSpec } from '../../types.ts'
 import { literalTree } from '../../shell/literal.ts'
-import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
+import { FORK_FAILED, FORK_FAILED_STATUS, INTERRUPTED_STATUS } from '../../shell/constants.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -439,6 +439,13 @@ async function runPreparedLine(
   // A line run on its caller's evaluation (a CLI's own `ws.shell`) routes
   // itself; the caller's route comes back when it ends.
   const outerRouting = context.frame.routing
+  // The `@line` limit the frame carries to the outermost line's deadline
+  // and to every job the line starts, each from its own start.
+  const outerTimeout = context.frame.lineTimeout
+  context.frame.lineTimeout = lineTimeout(
+    env.registry.commandLimits,
+    effectiveSession.commandLimits,
+  )
   try {
     // The outermost line, recorded or not, runs under its `@line` deadline,
     // which a nested one shares: past it the tree is stopped like an abort
@@ -447,7 +454,7 @@ async function runPreparedLine(
     // nested line (`eval`) still finds the one signal its line answers to.
     const lineSeconds =
       options.record !== false || currentCaller().lineAbort === null
-        ? lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits)
+        ? context.frame.lineTimeout
         : null
     const expiry = lineSeconds !== null && lineSeconds > 0 ? new AbortController() : null
     const lineSignal = mergeSignals(options.signal, context.frame.abortSignal)
@@ -833,6 +840,7 @@ async function runPreparedLine(
     effectiveSession.aliasView = outerView
     if (outerRouting === undefined) delete context.frame.routing
     else context.frame.routing = outerRouting
+    context.frame.lineTimeout = outerTimeout
     if (options.record !== false) {
       // Every read of the line has ended, so what a read kept of the
       // aliases it changed goes with it.
@@ -1097,7 +1105,7 @@ async function runParsedLine(
         if (isLine) {
           const aborted = killed?.aborted === true
           const failed = failureResult(aborted ? makeAbortError(killed) : error)
-          if (aborted) failed.exitCode = 130
+          if (aborted) failed.exitCode = INTERRUPTED_STATUS
           await logLine(new IOResult(failed))
         }
         throw error
@@ -1229,7 +1237,7 @@ async function runParsedLine(
               : error,
         }
         const failed = failureResult(executionFailure.error)
-        if (aborted) failed.exitCode = 130
+        if (aborted) failed.exitCode = INTERRUPTED_STATUS
         return [null, new IOResult(failed), new ExecutionNode({ command, ...failed })]
       } finally {
         disarm?.()
@@ -1298,7 +1306,7 @@ async function runParsedLine(
       // An aborted invocation is the caller's outcome, not the shell's.
       if (isLine) restoreStatus(targetSession, statusBefore, lineStatusWriter(targetSession))
       executionFailure = { error: makeAbortError(killed) }
-      io.exitCode = 130
+      io.exitCode = INTERRUPTED_STATUS
       stdoutBytes = new Uint8Array()
     } else {
       // Lazy reads can fail while draining (e.g. head/tail that open the

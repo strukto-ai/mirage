@@ -248,7 +248,7 @@ describe('MontyFs declining', () => {
   })
 
   it('a rename whose destination leaves the mount raises EXDEV', async () => {
-    // The dispatcher refuses a pair on different mounts (CrossMountError);
+    // The dispatcher refuses a pair on different mounts (EXDEV);
     // half-applying the move would lose the file.
     await expect(
       Promise.resolve(accessOn(noop).handle('Path.rename', ['/ram/x', '/tmp/y'])),

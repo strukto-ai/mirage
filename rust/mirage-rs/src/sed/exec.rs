@@ -15,8 +15,9 @@ const STDERR: &[u8] = b"/dev/stderr";
 const READ_FAILURES: [&str; 3] = ["EISDIR", "EFBIG", "EBADF"];
 /// The failures -i exits 2 on (4 for a directory), every other 1.
 const OPERAND_FAILURES: [&str; 5] = ["ENOENT", "EISDIR", "ENOTDIR", "EFBIG", "ELOOP"];
-/// The conditions a line about a failed operand ends in the phrase of.
-const OPERAND_CONDITIONS: [&str; 15] = [
+/// The conditions a line about a failed operand ends in the phrase of: the
+/// hosts' OPERAND_CONDITIONS.
+const OPERAND_CONDITIONS: [&str; 16] = [
     "EBADF",
     "ENOENT",
     "ENOTDIR",
@@ -30,6 +31,7 @@ const OPERAND_CONDITIONS: [&str; 15] = [
     "ENOTSUP",
     "EXDEV",
     "EFBIG",
+    "EDQUOT",
     "EPIPE",
     "STALE_WRITE",
 ];

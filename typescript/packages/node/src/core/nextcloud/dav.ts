@@ -13,13 +13,30 @@ export function davUrl(accessor: NextcloudAccessor, path: PathSpec, folder = fal
   return folder ? `${url}/` : url
 }
 
+/**
+ * The collection the mount's user uploads chunks into,
+ * `<server>/remote.php/dav/uploads/<user>`, or null for a URL that names no
+ * user. Mirrors Python's `uploads_url`.
+ */
+export function uploadsUrl(accessor: NextcloudAccessor): string | null {
+  const url = new URL(accessor.config.url)
+  let [head, rest] = url.pathname.split('/remote.php/dav/files/', 2)
+  let user = rest?.split('/')[0] ?? ''
+  if (rest === undefined) {
+    ;[head, rest] = url.pathname.split('/remote.php/webdav', 2)
+    user = rest === undefined ? '' : encodeURIComponent(accessor.config.username ?? '')
+  }
+  if (user === '') return null
+  return `${url.origin}${head ?? ''}/remote.php/dav/uploads/${user}`
+}
+
 /** Send one WebDAV request with the mount's credentials. */
 export async function davRequest(
   accessor: NextcloudAccessor,
   method: string,
   url: string,
   headers: Record<string, string> = {},
-  body?: string,
+  body?: string | Uint8Array<ArrayBuffer> | Blob,
 ): Promise<Response> {
   const basic = auth(accessor)
   return fetch(url, {

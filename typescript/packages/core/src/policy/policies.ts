@@ -33,7 +33,6 @@ import { rstripSlash } from '../utils/slash.ts'
 import type { Policy } from './base.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
 import { PermissionsPolicy } from './builtin/permissions.ts'
-import { POLICY_DENIED_EXIT } from './constants.ts'
 import { Explained, PolicyDenied, PolicyError } from './errors.ts'
 import { sourceOf } from './match/decide.ts'
 import { operandPaths } from './match/rule.ts'
@@ -63,6 +62,7 @@ import type { VfsCall } from '../vfs/types.ts'
 import type { RouteContext } from './types.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { posixPhrase } from '../errors/posix.ts'
+import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 
 type Method = keyof typeof VALIDITY
 
@@ -87,7 +87,7 @@ export function renderDeny(subject: string, deny: Deny | Pending): [Uint8Array, 
   if (deny.kind === 'deny' && deny.error !== undefined) {
     return [new TextEncoder().encode(`${subject}: ${deny.reason}\n`), operandExitCode(subject)]
   }
-  return [new TextEncoder().encode(`${subject}: Permission denied\n`), POLICY_DENIED_EXIT]
+  return [new TextEncoder().encode(`${subject}: Permission denied\n`), CANNOT_EXECUTE_STATUS]
 }
 
 /**

@@ -27,6 +27,7 @@ from mirage.core.databricks_volume.errors import (
     error_of,
 )
 from mirage.core.databricks_volume.types import DirectoryEntry, FileMetadata
+from mirage.io.spool import ByteSpool
 from mirage.utils.ranges import ByteWindow
 
 
@@ -46,6 +47,8 @@ class _DirectoryPage(BaseModel):
 
 _LENGTH = TypeAdapter(int)
 _BYTES = TypeAdapter(bytes)
+# The Files API takes a file in one PUT of at most 5 GiB.
+MAX_UPLOAD_SIZE = 5 * 1024**3
 
 
 def _url(
@@ -194,10 +197,24 @@ async def download_stream(
 async def upload(
     accessor: DatabricksVolumeAccessor,
     remote_path: str,
-    data: bytes,
+    data: bytes | ByteSpool,
     *,
     overwrite: bool,
 ) -> None:
+    """Put one file in a single PUT, at most ``MAX_UPLOAD_SIZE`` bytes.
+
+    Args:
+        accessor (DatabricksVolumeAccessor): Databricks accessor.
+        remote_path (str): the file in the volume.
+        data (bytes | ByteSpool): its bytes, or a spool streamed as the
+            body.
+        overwrite (bool): replace a file already there.
+    """
+    body, size = (
+        (data, len(data))
+        if isinstance(data, bytes)
+        else (data.stream(), data.size)
+    )
     await api_request(
         "PUT",
         _url(accessor, "files", remote_path),
@@ -205,9 +222,10 @@ async def upload(
         headers={
             **await _headers(accessor),
             "Content-Type": "application/octet-stream",
+            "Content-Length": str(size),
         },
         params={"overwrite": str(overwrite).lower()},
-        data=data,
+        data=body,
         session=accessor.pool,
         retry=NO_RETRY,
         read="none",

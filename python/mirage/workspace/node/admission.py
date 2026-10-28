@@ -22,6 +22,7 @@ from mirage.commands.cli.walk import walk
 from mirage.commands.spec.types import ValueType
 from mirage.context.session_context import session_access
 from mirage.io.types import ByteSource
+from mirage.io.yield_budget import YieldBudget
 from mirage.policy import (
     Abandoned,
     AdmissionRules,
@@ -597,33 +598,48 @@ async def gate(
     views = registry.policies.views
     handles = views(session.session_id, session) if views is not None else None
     view, vfs, caller = handles or (None, None, None)
+    # Each read of the words is a pass over all of them, so a command of
+    # a million words yields between them: a cancel or the line's
+    # deadline lands before the policies are asked.
+    budget = YieldBudget()
+    await budget.run()
+    paths = _seen(
+        session,
+        policy_scopes(
+            name,
+            args,
+            operands,
+            (
+                namespace.session_links(session)
+                if namespace is not None and namespace.nodes
+                else None
+            ),
+            session.cwd,
+            implied,
+            redirects,
+            tree_path_scopes(registry, name, args, session.cwd, env),
+        ),
+        unread,
+    )
+    await budget.run()
+    words = _seen_words(
+        session,
+        command_words(
+            registry, name, args, operands, redirects, session.cwd, env
+        ),
+        unread,
+    )
+    await budget.run()
+    walks = walks_mounts(name, line_flags(name, [name, *args]))
+    await budget.run()
+    write = _writes(
+        name, args, operands, session, registry, namespace, implied
+    )
+    await budget.run()
     ctx = CommandContext(
         command=name,
-        paths=_seen(
-            session,
-            policy_scopes(
-                name,
-                args,
-                operands,
-                (
-                    namespace.session_links(session)
-                    if namespace is not None and namespace.nodes
-                    else None
-                ),
-                session.cwd,
-                implied,
-                redirects,
-                tree_path_scopes(registry, name, args, session.cwd, env),
-            ),
-            unread,
-        ),
-        words=_seen_words(
-            session,
-            command_words(
-                registry, name, args, operands, redirects, session.cwd, env
-            ),
-            unread,
-        ),
+        paths=paths,
+        words=words,
         argv=tuple(args),
         cwd=session.cwd,
         line=line,
@@ -631,10 +647,8 @@ async def gate(
         tokens=tokens,
         program=program,
         tool=tool,
-        walks=walks_mounts(name, line_flags(name, [name, *args])),
-        write=_writes(
-            name, args, operands, session, registry, namespace, implied
-        ),
+        walks=walks,
+        write=write,
         session=view,
         vfs=vfs,
         caller=caller,
@@ -808,7 +822,7 @@ async def admit_test(
     Raises:
         CondRefused: the gate refused it.
     """
-    classified = classified_words(name, words, session, registry)
+    classified = await classified_words(name, words, session, registry)
     verdict = await admit(
         name,
         words,
@@ -879,7 +893,7 @@ def _word_hints(
     return word_kinds, word_bases
 
 
-def classified_words(
+async def classified_words(
     name: str, args: list[str], session: SessionState, registry: MountRegistry
 ) -> list[str | PathSpec]:
     """One command's literal words, classified the way the runtime would
@@ -893,7 +907,7 @@ def classified_words(
     """
     line = [name, *args]
     word_kinds, word_bases = _word_hints(line, session, registry)
-    return classify_parts(
+    return await classify_parts(
         line,
         registry,
         session.cwd,

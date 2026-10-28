@@ -3,7 +3,6 @@ from contextlib import aclosing
 from dataclasses import asdict, dataclass
 from enum import Enum
 
-from mirage.commands.builtin.errors import SortKeyError
 from mirage.commands.builtin.sort_keys import (
     KeyMods,
     SortConfig,
@@ -182,7 +181,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> SortFlags:
     Raises:
         UsageError: a refused option, exit 1 for a refused ``--check``
             word and 2 for the rest.
-        SortKeyError: a ``-k`` that is not a KEYDEF.
+        UsageError: a ``-k`` that is not a KEYDEF.
     """
     fl = FlagView(flags, spec=SPECS["sort"])
     mode: str | None = None
@@ -583,7 +582,7 @@ async def sort_generic(
             )
         )
         cfg = _config(parsed)
-    except (UsageError, SortKeyError, ValueError) as exc:
+    except ValueError as exc:
         return b"", _refusal_of(exc)
 
     refusal = operand_refusal(paths, parsed)

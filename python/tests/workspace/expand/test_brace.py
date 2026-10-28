@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from itertools import islice
+
 import pytest
 
 from mirage.workspace.expand.brace import (
@@ -20,6 +22,12 @@ from mirage.workspace.expand.brace import (
     substitute,
 )
 from mirage.workspace.expand.types import Piece
+
+
+def _words(template: str) -> list[str] | None:
+    words = expand_template(template)
+    return None if words is None else list(words)
+
 
 EXPAND_CASES = [
     ("{a,b,c}", ["a", "b", "c"]),
@@ -75,7 +83,7 @@ LITERAL_CASES = [
 
 @pytest.mark.parametrize("template,expected", EXPAND_CASES)
 def test_expand_template(template, expected):
-    assert expand_template(template) == expected
+    assert _words(template) == expected
 
 
 @pytest.mark.parametrize("template", LITERAL_CASES)
@@ -85,14 +93,25 @@ def test_literal_templates_return_none(template):
 
 def test_inert_atom_alternates_but_never_forms_a_range():
     atom = make_inert(0)
-    assert expand_template("{a," + atom + "}") == ["a", atom]
+    assert _words("{a," + atom + "}") == ["a", atom]
     assert expand_template("{1.." + atom + "}") is None
 
 
 def test_inert_prefix_and_suffix_stitch():
     atom = make_inert(0)
-    assert expand_template(atom + "{a,b}") == [atom + "a", atom + "b"]
-    assert expand_template("{a,b}" + atom) == ["a" + atom, "b" + atom]
+    assert _words(atom + "{a,b}") == [atom + "a", atom + "b"]
+    assert _words("{a,b}" + atom) == ["a" + atom, "b" + atom]
+
+
+@pytest.mark.parametrize(
+    "template,expected",
+    [
+        ("{1..1000000000000}", ["1", "2", "3"]),
+        ("{a,b}{1..1000000000000}", ["a1", "a2", "a3"]),
+    ],
+)
+def test_words_are_made_as_they_are_read(template, expected):
+    assert list(islice(expand_template(template) or [], 3)) == expected
 
 
 def test_substitute_replaces_atoms_in_order():
@@ -162,7 +181,7 @@ INVALID_RANGE_CASES = [
 
 @pytest.mark.parametrize("template,expected", EXACT_RANGE_CASES)
 def test_exact_decimal_ranges(template, expected):
-    assert expand_template(template) == expected
+    assert _words(template) == expected
 
 
 @pytest.mark.parametrize("template", INVALID_RANGE_CASES)
@@ -182,7 +201,7 @@ def test_invalid_decimal_ranges_stay_literal(template):
     ],
 )
 def test_explicit_signed_ranges(template, expected):
-    assert expand_template(template) == expected
+    assert _words(template) == expected
 
 
 def test_oversized_decimal_range_stays_literal_without_integer_conversion():
@@ -191,7 +210,7 @@ def test_oversized_decimal_range_stays_literal_without_integer_conversion():
 
 def test_many_leading_zeros_preserve_padding():
     zeros = "0" * 5000
-    assert expand_template("{" + zeros + "1.." + zeros + "2}") == [
+    assert _words("{" + zeros + "1.." + zeros + "2}") == [
         zeros + "1",
         zeros + "2",
     ]
@@ -258,4 +277,4 @@ def test_many_leading_zeros_preserve_padding():
     ],
 )
 def test_extreme_range_admission_matches_bash(template, expected):
-    assert expand_template(template) == expected
+    assert _words(template) == expected

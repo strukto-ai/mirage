@@ -45,9 +45,9 @@ from mirage.runtime.types import RunResult
 from mirage.secrets import registry as secrets_registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
-from mirage.shell import parse
 from mirage.shell.console import ConsoleStore
 from mirage.shell.job_table import RAMJobStore
+from mirage.shell.parse import parse
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.node.explain import Judgment, explain_line

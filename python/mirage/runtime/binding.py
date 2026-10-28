@@ -25,9 +25,9 @@ from mirage.context.session_context import (
     current_caller,
     note_refusal,
 )
-from mirage.policy.constants import POLICY_DENIED_EXIT
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, RunResult
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.types import MountMode, Refusal
 from mirage.utils.hidden import is_glob, show_head
 from mirage.workspace.files import Files
@@ -101,7 +101,7 @@ def refused_run(name: str, reason: str) -> RunResult:
     return RunResult(
         stdout=b"",
         stderr=f"{name}: Permission denied\n".encode(),
-        exit_code=POLICY_DENIED_EXIT,
+        exit_code=CANNOT_EXECUTE_STATUS,
     )
 
 

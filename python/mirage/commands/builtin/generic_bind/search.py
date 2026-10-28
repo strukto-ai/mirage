@@ -41,9 +41,10 @@ from mirage.commands.builtin.utils.links import (
     mounts_of,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError, WalkLimitError
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.types import WalkLimitError
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource
 from mirage.observe.context import revision_for

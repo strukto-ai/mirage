@@ -29,7 +29,11 @@ from mirage.shell.array import (
 )
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.errors import ArithError, DiscardSignal
+from mirage.shell.errors import (
+    ArithError,
+    DiscardSignal,
+    ReadonlyVariableError,
+)
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import ShellValue, VarAttr
@@ -44,7 +48,6 @@ from mirage.workspace.expand import expand_and_classify, expand_node
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.state import (
     appended,
     conversion_scalar,
@@ -136,7 +139,7 @@ async def _assign_var(
     except PolicyDenied as exc:
         raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
     except ReadonlyVariableError as exc:
-        raise DiscardSignal(encode_text(f"{exc}\n")) from exc
+        raise DiscardSignal(encode_text(f"bash: {exc}\n")) from exc
     except ArithError as exc:
         raise exc.signal(fatal=True) from exc
 

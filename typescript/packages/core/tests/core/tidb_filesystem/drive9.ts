@@ -507,9 +507,12 @@ export async function serve(): Promise<FakeDrive9> {
   return fake.start()
 }
 
-export function makeAccessor(fake: FakeDrive9): TiDBFilesystemAccessor {
+export function makeAccessor(
+  fake: FakeDrive9,
+  config: Record<string, unknown> = {},
+): TiDBFilesystemAccessor {
   return new TiDBFilesystemAccessor(
-    normalizeTiDBFilesystemConfig({ host: fake.url, token: TOKEN, root_path: '/root' }),
+    normalizeTiDBFilesystemConfig({ host: fake.url, token: TOKEN, root_path: '/root', ...config }),
   )
 }
 

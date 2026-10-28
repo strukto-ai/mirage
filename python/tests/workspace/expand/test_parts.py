@@ -18,8 +18,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.io import IOResult
-from mirage.shell import parse
 from mirage.shell.helpers import get_parts
+from mirage.shell.parse import parse
 from mirage.utils.glob_walk import glob_pattern, unmark_globs
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.parts import expand_words

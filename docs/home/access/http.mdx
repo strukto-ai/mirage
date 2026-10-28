@@ -476,16 +476,8 @@ A failure before the first byte answers like any failed call.
 **Errors**
 
 A failed call answers `{detail, errno}`, plus a `refusal` record when a policy
-refused it. The errno picks the status:
-
-| Status | Errno |
-| --- | --- |
-| `400` | `ENOTDIR`, `EISDIR`, `EINVAL`, `EXDEV`, `ELOOP`, `ENOTSUP` |
-| `403` | `EACCES`, `EPERM`, `EROFS` |
-| `404` | `ENOENT`, `NO_XATTR` |
-| `409` | `EEXIST`, `ENOTEMPTY`, `EBUSY` |
-| `507` | `EDQUOT` |
-| `500` | Anything else, such as `EIO` |
+refused it. The errno picks the status, as [Errors](/home/access/errors#file-calls)
+lists.
 
 ### Call a custom function
 

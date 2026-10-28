@@ -57,6 +57,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.shell.errors import (
     ArithError,
     DiscardSignal,
@@ -522,8 +523,10 @@ async def execute_command(
         err = argument_list_too_long(name, exc.reason)
         return (
             None,
-            IOResult(exit_code=126, stderr=err),
-            ExecutionNode(command=name, exit_code=126, stderr=err),
+            IOResult(exit_code=CANNOT_EXECUTE_STATUS, stderr=err),
+            ExecutionNode(
+                command=name, exit_code=CANNOT_EXECUTE_STATUS, stderr=err
+            ),
         )
     finally:
         frames = session._local_frames
@@ -780,7 +783,9 @@ async def _run_argv(
     if name and await fill_tree_env(
         name, list(argv.args), session, registry, assigned
     ):
-        words = classified_words(name, list(argv.args), session, registry)
+        words = await classified_words(
+            name, list(argv.args), session, registry
+        )
         argv = dataclasses.replace(argv, operands=tuple(words[1:]))
 
     admitted: Admitted | None = None

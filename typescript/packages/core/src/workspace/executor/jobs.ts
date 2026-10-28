@@ -23,11 +23,19 @@ import { IOResult } from '../../io/types.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
-import { FD_BOTH, FD_CLOSE, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
+import {
+  FD_BOTH,
+  FD_CLOSE,
+  FORK_FAILED,
+  FORK_FAILED_STATUS,
+  NOT_FOUND_STATUS,
+  TIMEOUT_STATUS,
+} from '../../shell/constants.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
+import { STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
 import {
@@ -37,8 +45,9 @@ import {
   runWithCaller,
 } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { abortable, mergeSignals } from '../../utils/abort.ts'
+import { abortable, atDeadline } from '../../utils/abort.ts'
 import type { SessionView } from '../../view/types.ts'
+import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
 import { type Decisions, isPending } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import { PathSpec, type JsonValue, type Refusal } from '../../types.ts'
@@ -250,15 +259,36 @@ export async function handleBackground(
   const abort = new AbortController()
   // `kill %n` aborts this controller; the signal rides the forked
   // session so the job's whole subtree (builtins, mounts, runtimes)
-  // observes the kill, merged with any enclosing job's channel.
-  const killed = mergeSignals(context.frame.abortSignal, abort.signal) ?? abort.signal
-  childEvaluation.frame.abortSignal = killed
+  // observes the kill, merged with any enclosing job's channel. An
+  // enclosing job's limit is not part of that channel: it aborts with a
+  // CommandTimeoutError, which this job does not answer to, so a job runs
+  // to its own limit as a line's deadline leaves the line's jobs alone.
+  // The job stops listening once it ends or is killed, so a long-lived
+  // job keeps nothing of the jobs it started.
+  const enclosing = context.frame.abortSignal
+  const inherited = new AbortController()
+  const follow = (): void => {
+    if (!(enclosing?.reason instanceof CommandTimeoutError)) inherited.abort(enclosing?.reason)
+  }
+  const unfollow = (): void => {
+    enclosing?.removeEventListener('abort', follow)
+  }
+  if (enclosing?.aborted === true) follow()
+  else enclosing?.addEventListener('abort', follow, { once: true, signal: abort.signal })
+  const killed = AbortSignal.any([inherited.signal, abort.signal])
+  // The job runs under the `@line` limit of the line that started it, from
+  // its own start, its output included: past it the subtree is stopped as a
+  // kill stops it, a write a reader holds included, and the job answers 124
+  // and the line's message, as a line does.
+  const expiry = new AbortController()
+  const stopped = AbortSignal.any([killed, expiry.signal])
+  childEvaluation.frame.abortSignal = stopped
   const cmdStrInner = left.text
   const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
     // What the job writes stays in its console and goes where its shell
     // writes as it is written: the terminal, or the substitution or pipe
     // it was started in.
-    const console_ = new Tee(job.console, new JobCopy(output, killed))
+    const console_ = new Tee(job.console, new JobCopy(output, stopped))
     const hold = { held: false, ended: false }
     const lineSink = currentCaller().refusals
     // The line still hears of every refusal; a question left waiting also
@@ -267,7 +297,7 @@ export async function handleBackground(
       hold.held ||= isPending(refusal)
       lineSink?.(refusal)
     }
-    const body = async (): Promise<[IOResult, ExecutionNode]> => {
+    const run = async (): Promise<[IOResult, ExecutionNode]> => {
       let stdout: ByteSource | null
       let io: IOResult
       let execNode: ExecutionNode
@@ -278,19 +308,14 @@ export async function handleBackground(
         // job at all, since a promise cannot be cancelled.
         const opts: ExecuteNodeOpts = {
           sink: console_,
-          signal: abort.signal,
+          signal: AbortSignal.any([abort.signal, expiry.signal]),
           executionScope: new ExecutionScope(undefined, job.executionId ?? undefined),
           endsShell: true,
         }
         if (jobHanded !== null) opts.handed = jobHanded
         ;[stdout, io, execNode] = await executeNode(left, childEvaluation, null, bgCallStack, opts)
       } catch (err) {
-        if (err instanceof CommandTimeoutError) {
-          const msg = encodeText(`${err.message}\n`)
-          stdout = new Uint8Array()
-          io = new IOResult({ exitCode: 124, stderr: msg })
-          execNode = new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 })
-        } else if (err instanceof ExitSignal) {
+        if (err instanceof ExitSignal) {
           // A background job is its own shell: exit ends the job only, a
           // simple command the top shell forked with the status that shell
           // would exit with (`: ${U?} &` is 127, `{ : ${U?}; } &` and
@@ -325,8 +350,52 @@ export async function handleBackground(
       if (stderr.byteLength > 0) {
         await console_.emit(Channel.STDERR, stderr)
       }
-      hold.ended = hold.held || isPending(io.refusal)
       return [io, execNode]
+    }
+    const body = async (): Promise<[IOResult, ExecutionNode]> => {
+      const seconds = childEvaluation.frame.lineTimeout
+      const disarm =
+        seconds !== null && seconds > 0
+          ? atDeadline(seconds, () => {
+              expiry.abort(new CommandTimeoutError(LINE_NAME, seconds))
+            })
+          : undefined
+      let result: [IOResult, ExecutionNode]
+      try {
+        result = await run()
+      } catch (err) {
+        // Past its own limit, or stopped by a command's own timeout, the job
+        // answers as a line does, 124 and the message; a killed job ends as
+        // killed.
+        const timedOut =
+          seconds !== null && expiry.signal.aborted
+            ? new CommandTimeoutError(LINE_NAME, seconds)
+            : err instanceof CommandTimeoutError
+              ? err
+              : null
+        if (timedOut === null || abort.signal.aborted) throw err
+        const msg = encodeText(`${timedOut.message}\n`)
+        // The job's own console keeps the notice; the shell's output gets it
+        // unless a reader that stopped reading holds it past the wait a
+        // stopped job is given, so the job still ends.
+        await job.console.emit(Channel.STDERR, msg)
+        try {
+          await abortable(
+            output.emit(Channel.STDERR, msg),
+            AbortSignal.any([killed, AbortSignal.timeout(STOP_WAIT_SECONDS * 1000)]),
+          )
+        } catch (err) {
+          console.debug('job: its timeout notice found no reader', err)
+        }
+        result = [
+          new IOResult({ exitCode: TIMEOUT_STATUS }),
+          new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: TIMEOUT_STATUS }),
+        ]
+      } finally {
+        disarm?.()
+      }
+      hold.ended = hold.held || isPending(result[0].refusal)
+      return result
     }
     // The job's own layer of the caller: its fork, so dispatcher and host
     // callbacks stay in it; its session writes, calls of the job's spent
@@ -349,6 +418,7 @@ export async function handleBackground(
     try {
       return await (asyncContextIsolatesTasks ? runWithCaller(own, body) : body())
     } finally {
+      unfollow()
       releaseProgram()
       await bgSession.closeInputs()
       for (const source of heldInputs) await source.lines.unhold()
@@ -379,6 +449,7 @@ export async function handleBackground(
       simple: oneProgram(left, session),
     })
   } catch (err) {
+    unfollow()
     releaseProgram()
     for (const source of heldInputs) await source.lines.unhold()
 
@@ -657,8 +728,8 @@ export async function handleWait(
     if (candidates.length === 0) {
       return [
         null,
-        new IOResult({ exitCode: 127, stderr: errBytes }),
-        new ExecutionNode({ command: cmdStr, exitCode: 127 }),
+        new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: errBytes }),
+        new ExecutionNode({ command: cmdStr, exitCode: NOT_FOUND_STATUS }),
       ]
     }
     const job = await abortable(waitFirst(jobTable, candidates, signal), signal)
@@ -676,7 +747,7 @@ export async function handleWait(
     // Every spec was refused: bash answers 127 for a job it cannot find
     // and 1 for a word that is not a spec at all, the last one deciding.
     const last = errors[errors.length - 1] ?? ''
-    const code = last.endsWith('not a pid or valid job spec') ? 1 : 127
+    const code = last.endsWith('not a pid or valid job spec') ? 1 : NOT_FOUND_STATUS
     return jobResult(cmdStr, errText, code)
   }
   let lastCode = 0

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FindParseError } from '../errors.ts'
+import { UsageError } from '../errors.ts'
 import { parseDateExpr } from '../../utils/dates.ts'
 import { UTC_ZONE } from '../../utils/timezone.ts'
 import {
@@ -86,7 +86,7 @@ function checkExecResult(node: PredNode): void {
   if (node.op === 'or') {
     for (const kid of node.kids.slice(0, -1)) {
       if (holdsExecResult(kid)) {
-        throw new FindParseError(`find: -exec must end the expression ${POSITIONAL}`)
+        throw new UsageError(`find: -exec must end the expression ${POSITIONAL}`, 1)
       }
     }
   }
@@ -115,13 +115,13 @@ function firstAction(node: PredNode): string {
 function checkPositional(node: PredNode): void {
   if (node.op === 'not') {
     if (treeHasAction(node.kid)) {
-      throw new FindParseError(`find: ${firstAction(node.kid)} is not supported under !`)
+      throw new UsageError(`find: ${firstAction(node.kid)} is not supported under !`, 1)
     }
     checkPositional(node.kid)
   } else if (node.op === 'and') {
     for (const kid of node.kids.slice(0, -1)) {
       if (treeHasAction(kid)) {
-        throw new FindParseError(`find: ${firstAction(kid)} must end its -a chain ${POSITIONAL}`)
+        throw new UsageError(`find: ${firstAction(kid)} must end its -a chain ${POSITIONAL}`, 1)
       }
     }
     for (const kid of node.kids) checkPositional(kid)
@@ -145,13 +145,14 @@ function settleActions(tree: PredNode, actions: readonly FindAction[]): FindActi
   const [first, second] = distinct
   if (first !== undefined && second !== undefined) {
     if (first.kind === 'exec' && second.kind === 'exec') {
-      throw new FindParseError(`find: -exec may run only one command ${POSITIONAL}`)
+      throw new UsageError(`find: -exec may run only one command ${POSITIONAL}`, 1)
     }
     if (first.kind === 'printf' && second.kind === 'printf') {
-      throw new FindParseError(`find: -printf may print only one format ${POSITIONAL}`)
+      throw new UsageError(`find: -printf may print only one format ${POSITIONAL}`, 1)
     }
-    throw new FindParseError(
+    throw new UsageError(
       `find: ${actionWord(first)} and ${actionWord(second)} cannot be combined ${POSITIONAL}`,
+      1,
     )
   }
   checkExecResult(tree)
@@ -209,8 +210,9 @@ export function strictlyAfter(timestamp: number): number {
 export function parseNewermt(value: string): number {
   const ts = parseDateExpr(value, UTC_ZONE)
   if (ts === null || !Number.isFinite(ts.getTime()) || value.trim() === '@') {
-    throw new FindParseError(
+    throw new UsageError(
       `find: I cannot figure out how to interpret '${value}' as a date or time`,
+      1,
     )
   }
   return ts.getTime() / 1000
@@ -266,16 +268,16 @@ function strictInt(value: string): number {
 // N past UINTMAX is invalid in any unit, as GNU find refuses it.
 export function parseSize(spec: string): [number | null, number | null] {
   const units: Record<string, number> = { b: 512, c: 1, w: 2, k: 1024, M: 1024 ** 2, G: 1024 ** 3 }
-  if (spec === '') throw new FindParseError('find: invalid null argument to -size')
+  if (spec === '') throw new UsageError('find: invalid null argument to -size', 1)
   const last = spec[spec.length - 1] ?? ''
   const bare = /[0-9]/.test(last)
   const unit = bare ? units.b : units[last]
-  if (unit === undefined) throw new FindParseError(`find: invalid -size type \`${last}'`)
+  if (unit === undefined) throw new UsageError(`find: invalid -size type \`${last}'`, 1)
   const body = bare ? spec : spec.slice(0, -1)
   const sign = body.startsWith('+') || body.startsWith('-') ? body.slice(0, 1) : ''
   const number = body.slice(sign.length)
   if (!new RegExp(`^${C_SPACE}\\+?[0-9]+$`).test(number) || BigInt(number) > UINTMAX) {
-    throw new FindParseError(`find: Invalid argument \`${spec}' to -size`)
+    throw new UsageError(`find: Invalid argument \`${spec}' to -size`, 1)
   }
   const n = Number.parseInt(number, 10)
   if (sign === '+') return [n * unit + 1, null]
@@ -287,7 +289,7 @@ export function parseMtime(spec: string): [number | null, number | null] {
   const day = 86400
   const now = Date.now() / 1000
   const n = strictInt(spec.replace(/^[+-]+/, ''))
-  if (Number.isNaN(n)) throw new FindParseError(`find: invalid argument '${spec}' to '-mtime'`)
+  if (Number.isNaN(n)) throw new UsageError(`find: invalid argument '${spec}' to '-mtime'`, 1)
   if (spec.startsWith('+')) return [null, now - n * day]
   if (spec.startsWith('-')) return [now - n * day, null]
   return [now - (n + 1) * day, now - n * day]
@@ -297,12 +299,12 @@ function typeNode(value: string): PredNode {
   if (value === 'f' || value === 'file') return { op: 'type', kind: 'f' }
   if (value === 'd' || value === 'directory') return { op: 'type', kind: 'd' }
   if (FIND_VALID_TYPES.has(value)) return { op: 'type', kind: value }
-  throw new FindParseError(`find: Unknown argument to -type: ${value}`)
+  throw new UsageError(`find: Unknown argument to -type: ${value}`, 1)
 }
 
 export function parseDepth(value: string, flag: string): number {
   const n = strictInt(value)
-  if (Number.isNaN(n)) throw new FindParseError(`find: invalid argument '${value}' to '${flag}'`)
+  if (Number.isNaN(n)) throw new UsageError(`find: invalid argument '${value}' to '${flag}'`, 1)
   return n
 }
 
@@ -350,8 +352,9 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   let newerToken: string | null = null
   const checkWindowPlacement = (token: string): void => {
     if (nested > 0 || inOr) {
-      throw new FindParseError(
+      throw new UsageError(
         `find: ${token} is supported only in a top-level -a chain, not under -o, ! or parentheses`,
+        1,
       )
     }
   }
@@ -400,9 +403,8 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   // operand is gone.
   const afterOperator = (op: string): void => {
     const tok = peek()
-    if (tok === undefined) throw new FindParseError(`find: expected an expression after '${op}'`)
-    if (tok === ')')
-      throw new FindParseError(`find: expected an expression between '${op}' and ')'`)
+    if (tok === undefined) throw new UsageError(`find: expected an expression after '${op}'`, 1)
+    if (tok === ')') throw new UsageError(`find: expected an expression between '${op}' and ')'`, 1)
   }
 
   // The words after `-exec` up to `;` or a `{} +`. GNU's rules, in GNU's
@@ -414,7 +416,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     let batch = false
     for (;;) {
       const tok = advance()
-      if (tok === undefined) throw new FindParseError("find: missing argument to `-exec'")
+      if (tok === undefined) throw new UsageError("find: missing argument to `-exec'", 1)
       if (tok === EXEC_END) break
       if (
         tok === EXEC_BATCH_END &&
@@ -426,17 +428,18 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       }
       argv.push(tok)
     }
-    if (argv.length === 0) throw new FindParseError("find: missing argument to `-exec'")
+    if (argv.length === 0) throw new UsageError("find: missing argument to `-exec'", 1)
     if (batch) {
       for (const word of argv) {
         if (word.includes(EXEC_PLACEHOLDER) && word !== EXEC_PLACEHOLDER) {
-          throw new FindParseError(
+          throw new UsageError(
             `find: In '-exec ... {} +' the '{}' must appear by itself, but you specified '${word}'`,
+            1,
           )
         }
       }
       if (argv.filter((w) => w === EXEC_PLACEHOLDER).length > 1) {
-        throw new FindParseError('find: Only one instance of {} is supported with -exec ... +')
+        throw new UsageError('find: Only one instance of {} is supported with -exec ... +', 1)
       }
     }
     return { kind: 'exec', argv, batch }
@@ -444,7 +447,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
 
   function primary(): PredNode {
     const tok = advance()
-    if (tok === undefined) throw new FindParseError('find: expected predicate')
+    if (tok === undefined) throw new UsageError('find: expected predicate', 1)
     if (
       g.actions.length > 0 &&
       (nested === 0 || chainAction) &&
@@ -457,11 +460,11 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       // the tree kept, so a test after one, even under ! or parentheses,
       // would apply to the actions before it too. Elsewhere the tree itself
       // decides (checkPositional).
-      throw new FindParseError(`find: ${tok}: tests after actions are not supported`)
+      throw new UsageError(`find: ${tok}: tests after actions are not supported`, 1)
     }
     if (FIND_VALUE_PREDICATES.has(tok)) {
       const value = advance()
-      if (value === undefined) throw new FindParseError(`find: missing argument to '${tok}'`)
+      if (value === undefined) throw new UsageError(`find: missing argument to '${tok}'`, 1)
       if (tok === '-name') return { op: 'name', pattern: value, icase: false }
       if (tok === '-iname') return { op: 'name', pattern: value, icase: true }
       if (tok === '-path') return { op: 'path', pattern: value }
@@ -527,12 +530,12 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       return { op: 'true' }
     }
     if (FIND_BARE_PREDICATES.has(tok)) return { op: 'true' }
-    throw new FindParseError(`find: unknown predicate '${tok}'`)
+    throw new UsageError(`find: unknown predicate '${tok}'`, 1)
   }
 
   function factor(): PredNode {
     depth += 1
-    if (depth > FIND_MAX_DEPTH) throw new FindParseError('find: expression too deeply nested')
+    if (depth > FIND_MAX_DEPTH) throw new UsageError('find: expression too deeply nested', 1)
     try {
       const tok = peek()
       if (tok === '-not' || tok === '!') {
@@ -554,7 +557,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
         } finally {
           nested -= 1
         }
-        if (peek() !== ')') throw new FindParseError('find: unbalanced parentheses')
+        if (peek() !== ')') throw new UsageError('find: unbalanced parentheses', 1)
         advance()
         return node
       }
@@ -611,10 +614,10 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   if (tokens.length === 0) return { tree: { op: 'true' }, ...g }
   const tree = orExpr()
   const trailing = peek()
-  if (trailing !== undefined) throw new FindParseError(`find: unexpected token '${trailing}'`)
+  if (trailing !== undefined) throw new UsageError(`find: unexpected token '${trailing}'`, 1)
   const actions = shape.positional ? settleActions(tree, g.actions) : g.actions
   if (treeHasPrune(tree) && g.depthFirst) {
-    if (!shape.depthOption) throw new FindParseError(DELETE_PRUNE)
+    if (!shape.depthOption) throw new UsageError(DELETE_PRUNE, 1)
     return { ...g, tree: withoutPrune(tree), actions }
   }
   return { ...g, tree, actions }

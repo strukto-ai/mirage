@@ -31,6 +31,7 @@ import { isBinary, readScriptBytes, scriptError } from './script.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 import type { ExecuteStringFn, Result } from '../types.ts'
 import { stripSlash } from '../../../../utils/slash.ts'
+import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../../../../shell/constants.ts'
 
 /** The interpreter words a script's first line names, env resolved. */
 /**
@@ -122,9 +123,10 @@ export async function handleExecPath(
     const strerror = fsStrerror(exc)
     if (strerror === null) throw exc
     const code = (exc as { code?: string }).code
-    return scriptError(path, strerror, code === 'ENOENT' ? 127 : 126)
+    return scriptError(path, strerror, code === 'ENOENT' ? NOT_FOUND_STATUS : CANNOT_EXECUTE_STATUS)
   }
-  if (isBinary(data)) return scriptError(path, 'cannot execute binary file: Exec format error', 126)
+  if (isBinary(data))
+    return scriptError(path, 'cannot execute binary file: Exec format error', CANNOT_EXECUTE_STATUS)
   const script = decodeText(data)
   const target = namespace.sessionLinks(session).follow(resolvePath(path, session.cwd))
   const [vfs, spec] = registry.resolve(target)

@@ -14,7 +14,7 @@
 
 import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { classify } from '../errors/index.ts'
-import { ebadf, einval, eloop, isMissingOp, isMissingPath } from '../errors/fs.ts'
+import { ebadf, einval, eloop, exdev, isMissingOp, isMissingPath } from '../errors/fs.ts'
 import {
   atimeMs,
   contentSize,
@@ -27,7 +27,6 @@ import {
   posixMode,
 } from '../utils/stat_view.ts'
 import { ABSENT_PATH, LISTING_ENTRY_CONCURRENCY } from './constants.ts'
-import { CrossMountError } from './errors.ts'
 import { normDir, rstripSlash } from '../utils/slash.ts'
 import { CycleError, resolvePath } from '../utils/path.ts'
 import { READ_CHUNK } from './handles/constants.ts'
@@ -38,7 +37,13 @@ import type { BridgeDispatchFn } from './types.ts'
 import { CallerResolver, workspaceBridge, type WorkspaceBinding } from './binding.ts'
 import { linkView } from '../commands/builtin/utils/links.ts'
 import type { Context } from '../commands/config.ts'
-import { awaitsAs, callsAs, currentCaller } from '../context/session_context.ts'
+import {
+  awaitsAs,
+  callsAs,
+  currentCaller,
+  inLanding,
+  runLanding,
+} from '../context/session_context.ts'
 import { type FileStat, PathSpec, type SetAttrFields } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { entryName } from '../utils/remnants.ts'
@@ -329,11 +334,12 @@ export class RuntimeFiles {
         : new MountCore(
             vfs.over(
               // A cancelled guest call sends nothing more, whichever op of
-              // the core's was under way.
+              // the core's was under way; a landing goes however it ended.
               awaitsAs(caller, async (name, path, args, kwargs, report) => {
-                for (const signal of live) signal.throwIfAborted()
+                const guests = inLanding() ? [] : live
+                for (const signal of guests) signal.throwIfAborted()
                 const out = await vfs.dispatch(name, path, args, kwargs, report)
-                for (const signal of live) signal.throwIfAborted()
+                for (const signal of guests) signal.throwIfAborted()
                 return out
               }),
             ),
@@ -363,16 +369,20 @@ export class RuntimeFiles {
   /**
    * Run one op on the run's open-file core; EBADF when this adapter opens
    * nothing. An op that only lands what the guest already wrote (`lands`)
-   * runs however the run ended, as the run's end would land it anyway.
+   * runs however the run ended, as the run's end would land it anyway
+   * (`runLanding`), so a cancelled guest call under way beside it stops only
+   * itself.
    */
   private async onCore<T>(op: (core: MountCore) => Promise<T>, lands = false): Promise<T> {
-    if (this.core === null) throw ebadf('/')
-    const signal = lands ? null : this.signal
-    if (signal === null) return op(this.core)
+    const core = this.core
+    if (core === null) throw ebadf('/')
+    if (lands) return runLanding(() => op(core))
+    const signal = this.signal
+    if (signal === null) return op(core)
     signal.throwIfAborted()
     this.live.push(signal)
     try {
-      const out = await op(this.core)
+      const out = await op(core)
       signal.throwIfAborted()
       return out
     } finally {
@@ -756,10 +766,10 @@ export class RuntimeFiles {
    *   dst: guest-absolute destination path.
    *
    * Throws:
-   *   CrossMountError: the two ends resolve to different mounts.
+   *   EXDEV: the two ends resolve to different mounts.
    */
   async rename(src: string, dst: string): Promise<void> {
-    if (this.mountOf(src) !== this.mountOf(dst)) throw new CrossMountError(src, dst)
+    if (this.mountOf(src) !== this.mountOf(dst)) throw exdev(src)
     if (this.core === null) await this.dispatch('rename', src, undefined, dst)
     else await this.onCore((core) => core.rename(src, dst))
   }

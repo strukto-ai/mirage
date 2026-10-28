@@ -17,7 +17,6 @@ from pathlib import Path
 
 import pytest
 
-from mirage.shell import parse
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.escapes import ends_escaped
 from mirage.shell.helpers import (
@@ -31,7 +30,7 @@ from mirage.shell.helpers import (
     get_text,
     get_while_parts,
 )
-from mirage.shell.parse import syntax_refusal
+from mirage.shell.parse import parse, syntax_refusal
 from mirage.shell.types import NodeType as NT
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace

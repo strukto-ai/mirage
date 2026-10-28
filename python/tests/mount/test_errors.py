@@ -19,10 +19,9 @@ import os
 import pytest
 
 from mirage.errors import FsCondition, posix_errno
-from mirage.errors.fs import edquot, no_mount
+from mirage.errors.fs import edquot, exdev, no_mount
 from mirage.mount.errors import classify_error
 from mirage.policy import PolicyDenied
-from mirage.runtime.errors import CrossMountError
 from mirage.types import Refusal
 from mirage.utils.path import CycleError
 
@@ -96,7 +95,7 @@ def test_symlink_loop_is_eloop_not_eio():
 def test_cross_mount_rename_is_exdev():
     # EXDEV is what tells the kernel "not one filesystem", which is what
     # makes mv fall back to copy+unlink over a FUSE mount.
-    assert classify_error(CrossMountError("/a/x", "/b/x")) == errno.EXDEV
+    assert classify_error(exdev("/a/x")) == errno.EXDEV
 
 
 def test_message_matching_is_case_insensitive():

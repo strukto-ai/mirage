@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ArithError, ReadonlyError } from '../../../../shell/errors.ts'
+import { ArithError, ReadonlyVariableError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { landedArith } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -42,9 +42,9 @@ export async function handleLet(
       value = await landedArith(session, view, expr)
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal('let', err)
-      if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
+      if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
       if (err.inSubscript) throw err.signal()
-      if (err instanceof ReadonlyError) return readonlyRefusal('let', err.varName)
+      if (err instanceof ReadonlyVariableError) return readonlyRefusal('let', err.varName)
       return fail('let', `bash: let: ${err.message}\n`)
     }
   }

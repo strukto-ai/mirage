@@ -38,6 +38,7 @@ from mirage.runtime.sandbox.constants import (
     stop_signal,
 )
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.shell.join import shell_join
 from mirage.types import JsonValue
 
@@ -542,7 +543,7 @@ async def cwd_refusal(name: str, cwd: str) -> RunResult | None:
         stderr=(
             f"{name}: the working directory {cwd} is not on this host\n"
         ).encode(),
-        exit_code=126,
+        exit_code=CANNOT_EXECUTE_STATUS,
     )
 
 

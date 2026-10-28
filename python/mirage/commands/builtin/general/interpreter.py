@@ -30,6 +30,11 @@ from mirage.io.types import (
 )
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import CommandRuntime, OutputFn, RunResult
+from mirage.shell.constants import (
+    CANNOT_EXECUTE_STATUS,
+    NOT_FOUND_STATUS,
+    SIGPIPE_STATUS,
+)
 from mirage.types import PathSpec, Producer
 
 logger = logging.getLogger(__name__)
@@ -115,7 +120,7 @@ def run_output(
                 current = asyncio.current_task()
                 if current is not None and current.cancelling():
                     raise
-                io.exit_code = 141
+                io.exit_code = SIGPIPE_STATUS
             except Exception as exc:
                 logger.debug("runtime output ended: %s", exc)
         if kept:
@@ -188,7 +193,9 @@ def not_bound(label: str, unavailable: str | None) -> CommandOutput:
             None when nothing captures it at all.
     """
     hint = unavailable or "command not found"
-    return None, IOResult(exit_code=127, stderr=f"{label}: {hint}\n".encode())
+    return None, IOResult(
+        exit_code=NOT_FOUND_STATUS, stderr=f"{label}: {hint}\n".encode()
+    )
 
 
 async def runtime_version(
@@ -230,8 +237,8 @@ def exec_refusal(
             return None
         display = script.raw_path or script.virtual
         err = f"{label}: {display}: not in EXEC mode\n".encode()
-        return None, IOResult(exit_code=126, stderr=err)
+        return None, IOResult(exit_code=CANNOT_EXECUTE_STATUS, stderr=err)
     if placement.exec_allowed:
         return None
     err = f"{label}: root mount '/' is not in EXEC mode\n".encode()
-    return None, IOResult(exit_code=126, stderr=err)
+    return None, IOResult(exit_code=CANNOT_EXECUTE_STATUS, stderr=err)

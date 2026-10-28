@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import aclosing
@@ -16,6 +17,14 @@ IO_BUFFER_SIZE = 256 * 1024
 class ByteSpool:
     """Retain replayable bytes, spilling large contents outside the event loop.
 
+    An append that fails leaves no telling which of its bytes were kept,
+    so every call after it fails too, rather than read bytes from where
+    the append never put them. Bytes waiting for the file go at the
+    offset they end up at, so a flush that failed or was cancelled
+    writes them there again rather than after what it got through.
+    A reader that ``hold``s the spool keeps it open: a ``close`` while
+    it is held takes effect at the last ``unhold``.
+
     Args:
         memory_limit (int): maximum bytes retained in memory before spilling.
     """
@@ -29,41 +38,60 @@ class ByteSpool:
         self._file: BinaryIO | None = None
         self._lock = asyncio.Lock()
         self._closed = False
+        self._lost: BaseException | None = None
+        self._stored = 0
+        self._holders = 0
+        self._closing = False
         self._cache = b""
         self._cache_offset = 0
 
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def _usable(self) -> None:
+        if self._closed:
+            raise ValueError("spool is closed")
+        if self._lost is not None:
+            raise OSError(errno.EIO, "spool lost a write") from self._lost
+
     async def append(self, data: bytes) -> None:
         async with self._lock:
-            if self._closed:
-                raise ValueError("spool is closed")
-            self._cache = b""
-            if (
-                self._file is None
-                and self.size + len(data) <= self.memory_limit
-            ):
-                self._memory.extend(data)
-            else:
-                if self._file is None:
+            self._usable()
+            try:
+                await self._append(data)
+            except BaseException as exc:
+                self._lost = exc
+                raise
 
-                    def open_file() -> None:
-                        self._file = tempfile.TemporaryFile(mode="w+b")
-                        self._file.write(self._memory)
+    async def _append(self, data: bytes) -> None:
+        self._cache = b""
+        if self._file is None and self.size + len(data) <= self.memory_limit:
+            self._memory.extend(data)
+        else:
+            if self._file is None:
 
-                    await run_blocking(open_file)
-                    self._memory.clear()
-                self._memory.extend(data)
-                if len(self._memory) >= IO_BUFFER_SIZE:
-                    await self._flush()
-            self.size += len(data)
+                def open_file() -> None:
+                    self._file = tempfile.TemporaryFile(mode="w+b")
+                    self._file.write(self._memory)
+
+                await run_blocking(open_file)
+                self._stored = len(self._memory)
+                self._memory.clear()
+            self._memory.extend(data)
+            if len(self._memory) >= IO_BUFFER_SIZE:
+                await self._flush()
+        self.size += len(data)
 
     async def _flush(self) -> None:
         if self._memory:
-            await run_blocking(self._write, bytes(self._memory))
+            await run_blocking(self._write, bytes(self._memory), self._stored)
+            self._stored += len(self._memory)
             self._memory.clear()
 
-    def _write(self, data: bytes) -> None:
+    def _write(self, data: bytes, offset: int) -> None:
         assert self._file is not None
-        self._file.seek(0, 2)
+        self._file.seek(offset)
         self._file.write(data)
 
     async def fill(self, source: ByteSource) -> None:
@@ -75,8 +103,7 @@ class ByteSpool:
         if offset < 0 or size < 0:
             raise ValueError("spool window must be nonnegative")
         async with self._lock:
-            if self._closed:
-                raise ValueError("spool is closed")
+            self._usable()
             if self._file is None:
                 return bytes(self._memory[offset : offset + size])
             await self._flush()
@@ -114,8 +141,7 @@ class ByteSpool:
     async def file(self) -> BinaryIO:
         """Borrow a seekable file for synchronous codecs run in a worker."""
         async with self._lock:
-            if self._closed:
-                raise ValueError("spool is closed")
+            self._usable()
             if self._file is None:
                 self._file = await run_blocking(
                     tempfile.TemporaryFile, mode="w+b"
@@ -132,7 +158,21 @@ class ByteSpool:
             return data
         return OutputStream(self.stream(), self.close)
 
+    def hold(self) -> None:
+        """Keep the spool open until ``unhold``, for a reader that took
+        windows of it."""
+        self._holders += 1
+
+    async def unhold(self) -> None:
+        """Let go of a ``hold``; the last one runs a ``close`` it held off."""
+        self._holders -= 1
+        if self._closing and not self._holders:
+            await self.close()
+
     async def close(self) -> None:
+        if self._holders:
+            self._closing = True
+            return
         async with self._lock:
             self._closed = True
             self._memory.clear()
@@ -190,8 +230,25 @@ async def spooled_pair(
 
 
 class ByteSlice:
+    """A window of a spool, sized and sliced as the bytes it stands for.
+
+    Args:
+        source (ByteSpool): the spool.
+        offset (int): where the window starts in it.
+        size (int): its length.
+    """
+
     def __init__(self, source: ByteSpool, offset: int, size: int) -> None:
         self.source, self.offset, self.size = source, offset, size
+
+    def __len__(self) -> int:
+        return self.size
+
+    def __getitem__(self, window: slice) -> "ByteSlice":
+        start, stop, _ = window.indices(self.size)
+        return ByteSlice(
+            self.source, self.offset + start, max(0, stop - start)
+        )
 
     def stream(self) -> AsyncIterator[bytes]:
         return self.source.stream(self.offset, self.size)

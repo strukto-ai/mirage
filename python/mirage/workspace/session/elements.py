@@ -23,7 +23,7 @@ from mirage.shell.array import (
     array_has,
     array_with,
 )
-from mirage.shell.errors import ArithError, ReadonlyError
+from mirage.shell.errors import ArithError, ReadonlyVariableError
 from mirage.shell.types import ArithWrite
 from mirage.shell.variable import ShellValue
 from mirage.view.types import SessionView
@@ -242,13 +242,13 @@ async def landed_arith(
 
     Raises:
         ArithError: the text does not evaluate.
-        ReadonlyError: it assigned to a readonly name.
+        ReadonlyVariableError: it assigned to a readonly name.
         PolicyDenied: ``land`` refused a write, which wins over either.
     """
     reader = RandomReader(session)
     try:
         result = session_arith(session, text, reader, nounset=nounset)
-    except (ArithError, ReadonlyError) as exc:
+    except (ArithError, ReadonlyVariableError) as exc:
         await land(session, view, exc.writes, reader)
         raise
     await land(session, view, result.writes, reader)

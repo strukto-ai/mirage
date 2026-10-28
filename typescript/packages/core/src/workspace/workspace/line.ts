@@ -43,6 +43,7 @@ import { concat } from '../../utils/bytes.ts'
 import { isControlFlowError } from './failure.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { TIMEOUT_STATUS } from '../../shell/constants.ts'
 
 /**
  * What a whole line answers: the runtime's own result plus the
@@ -151,7 +152,7 @@ export async function runWholeLine(
     const said = await materialize(io.stderr)
     if (err instanceof CommandTimeoutError) {
       io.stderr = concat([said, encodeText(`${err.message}\n`)])
-      io.exitCode = 124
+      io.exitCode = TIMEOUT_STATUS
     } else {
       io.stderr = concat([said, encodeText(err instanceof Error ? err.message : String(err))])
       io.exitCode = 1

@@ -17,9 +17,9 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error
-from mirage.errors.classify import classify, failure_text
+from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import fs_strerror, strerror_of
 from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.stream import Served, open_stream, serve_requests
@@ -220,7 +220,7 @@ class _PatchFiles:
             if (condition := classify(exc)) is None:
                 raise
             return {
-                "error": byte_view(failure_text(exc)),
+                "error": byte_view(strerror_of(exc)),
                 "errno": condition.name,
             }
         return {}

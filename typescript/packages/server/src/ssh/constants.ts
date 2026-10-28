@@ -63,11 +63,7 @@ export const CODEX_RETAINED_OUTPUT = 1024 * 1024
 export const CODEX_INTERRUPT_SIGNAL = 'interrupt'
 export const CODEX_CTRL_C = 0x03
 export const CODEX_CTRL_D = 0x04
-/**
- * Exit statuses the protocol reports for a stopped process: an interrupt
- * reads as 128 + SIGINT, a terminated process as no status.
- */
-export const CODEX_INTERRUPTED = 130
+// The status the protocol reports for a terminated process: none.
 export const CODEX_TERMINATED = -1
 
 export const SSH_ENV_KEYS = {

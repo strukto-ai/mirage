@@ -30,6 +30,7 @@ from mirage.runtime.types import OutputFn
 from mirage.runtime.wasm.fs import WasiFs, install_wasi_fs
 from mirage.runtime.wasm.loader import wasmtime
 from mirage.runtime.wasm.view import WasmView
+from mirage.shell.constants import INTERRUPTED_STATUS
 
 logger = logging.getLogger(__name__)
 
@@ -358,7 +359,7 @@ class WasmExecution:
             if self._max_memory is not None:
                 store.set_limits(memory_size=self._max_memory)
             if canceled.is_set():
-                return b"", None, 130
+                return b"", None, INTERRUPTED_STATUS
             wasi_fs = WasiFs(fs, stdin, canceled, output, errors)
             install_wasi_fs(linker, store, wasi_fs)
             wasi = wasmtime.WasiConfig()

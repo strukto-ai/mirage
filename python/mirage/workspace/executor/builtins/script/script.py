@@ -19,6 +19,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.types import FileType
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.scope import _to_scope
@@ -132,14 +133,24 @@ async def read_script_file(
         data = await read_script_bytes(dispatch, path, session.cwd)
         if is_binary(data):
             return None, script_error(
-                path, f"{path}: cannot execute binary file", 126, name
+                path,
+                f"{path}: cannot execute binary file",
+                CANNOT_EXECUTE_STATUS,
+                name,
             )
         return decode_text(data), None
     except FS_ERRORS as exc:
         strerror = fs_strerror(exc)
         if isinstance(exc, IsADirectoryError):
             return None, script_error(
-                path, f"{path}: {strerror}", 126, command=name
+                path,
+                f"{path}: {strerror}",
+                CANNOT_EXECUTE_STATUS,
+                command=name,
             )
-        code = 127 if isinstance(exc, FileNotFoundError) else 126
+        code = (
+            NOT_FOUND_STATUS
+            if isinstance(exc, FileNotFoundError)
+            else CANNOT_EXECUTE_STATUS
+        )
         return None, script_error(name, f"{path}: {strerror}", code)
