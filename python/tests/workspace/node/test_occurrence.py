@@ -15,7 +15,7 @@
 from typing import Any
 
 from mirage.policy import HandOff, Occurrence
-from mirage.shell import parse
+from mirage.shell.parse import parse
 from mirage.shell.types import NodeType
 from mirage.workspace.node.occurrence import (
     Frame,

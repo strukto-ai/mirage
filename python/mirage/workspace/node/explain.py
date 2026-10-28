@@ -48,7 +48,6 @@ from mirage.policy.decisions import is_pending
 from mirage.policy.match import Outcome, has_rules, reads_args, scopes_paths
 from mirage.policy.match.decide import source_of
 from mirage.policy.policies import settled
-from mirage.shell import parse
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.helpers import (
     get_parts,
@@ -57,7 +56,7 @@ from mirage.shell.helpers import (
     literal_word,
     split_env_prefix,
 )
-from mirage.shell.parse import opaque_reads, referenced_names
+from mirage.shell.parse import opaque_reads, parse, referenced_names
 from mirage.shell.types import NodeType
 from mirage.shell.variable import VarAttr
 from mirage.types import PathSpec, Refusal

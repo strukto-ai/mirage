@@ -16,9 +16,9 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from mirage.io import IOResult
-from mirage.shell import parse
 from mirage.shell.call_stack import CallStack
 from mirage.shell.helpers import get_parts
+from mirage.shell.parse import parse
 from mirage.types import PathSpec
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.evaluation import EvaluationContext

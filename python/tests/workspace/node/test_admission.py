@@ -24,7 +24,7 @@ from mirage.io import IOResult
 from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.profile import PathsBlock, SessionProfile
 from mirage.policy.types import AdmissionRules, CommandContext, CommandRule
-from mirage.shell import parse
+from mirage.shell.parse import parse
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace

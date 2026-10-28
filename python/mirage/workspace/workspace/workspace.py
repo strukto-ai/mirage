@@ -113,13 +113,13 @@ from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import source_for
 from mirage.secrets.sources import resolve_sources
 from mirage.secrets.types import ResolvedSource
-from mirage.shell import parse
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import JobTable
 from mirage.shell.literal import literal_tree
+from mirage.shell.parse import parse
 from mirage.shell.variable import VarAttr
 from mirage.types import (
     DriftPolicy,
