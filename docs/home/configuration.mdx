@@ -115,21 +115,9 @@ each count only their own writes.
 | `unconditional` | Every write lands; the last write wins. The default. |
 | `conditional` | Send the version the live session last observed, such as `If-Match` on the S3 family, so a write based on a stale read is refused. |
 
-Conditional protection belongs to a live session. If session A reads a file and
-session B changes it in the same workspace, A's overwrite, copy destination,
-move or delete is refused when the backend supports that condition. Retrying
-without reading keeps the same condition; reading the newer content permits
-the next mutation. Clearing the shared cache does not erase this protection.
-
-A file the session has not read keeps the backend's existing no-prior-read
-behavior. Operations such as append and truncate use their own read when
-forming a condition. Sessions shared by several agents share observations too.
-The observation history is in memory only: closing a session or restarting the
-workspace loses it. Existing snapshot replay pins remain supported; this does
-not add persistent session history. Calls without a session retain the mount's
-existing version rules. In browser runtimes without task-isolated async context,
-overlapping sessions whose version ownership is ambiguous are refused; retry
-after the other call finishes.
+Conditional writes and deletes reject changes based on a stale read when the
+backend supports it. Read the file again before retrying. Protection lasts only
+for the live session and does not survive a workspace restart.
 
 `read: pinned` and `write: staged` are reserved names. A mount that declares
 either is refused when it mounts.
