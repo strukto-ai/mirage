@@ -15,7 +15,7 @@
 import asyncio
 import errno
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from typing import Any, Protocol
 from weakref import WeakValueDictionary
 
@@ -50,6 +50,7 @@ from mirage.types import (
     MountMode,
     PathSpec,
     ReadSpec,
+    VFSName,
     WritePolicy,
 )
 from mirage.utils.clock import Clock, SystemClock
@@ -62,7 +63,10 @@ from mirage.view.types import SessionAccess
 from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.lookup.constants import changes_files
 from mirage.workspace.mount.backends import backend_commands
-from mirage.workspace.mount.errors import MountCommandAmbiguous
+from mirage.workspace.mount.errors import (
+    MountCommandAmbiguous,
+    SharedStorageError,
+)
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.types import MountRow
@@ -390,6 +394,35 @@ class MountRegistry:
         if vfs.is_closed or self.retired_mounts.get(id(vfs)) is vfs:
             raise ValueError("VFS is closed; create a new VFS instance")
 
+    def check_storage_unshared(
+        self, prefix: str, vfs: BaseVFS, mounts: Iterable[MountEntry]
+    ) -> None:
+        """Refuse a mount that would expose storage another mount already does.
+
+        Args:
+            prefix (str): the normalized prefix being placed.
+            vfs (BaseVFS): the driver being placed.
+            mounts (Iterable[MountEntry]): the mounts already placed.
+
+        Raises:
+            SharedStorageError: ``vfs`` is already mounted, or it is a disk
+                whose resolved root a mounted disk already has.
+        """
+        location = vfs.storage_location() if vfs.name == VFSName.DISK else None
+        for other in mounts:
+            if other.vfs is vfs or (
+                location is not None
+                and other.vfs.storage_location() == location
+            ):
+                # shortcut: compares realpath'd roots only; another spelling of
+                # one folder (macOS case, bind mount) passes, upgrade to
+                # (st_dev, st_ino) if reported.
+                raise SharedStorageError(
+                    prefix,
+                    other.prefix,
+                    None if other.vfs is vfs else location,
+                )
+
     def mount(
         self,
         prefix: str,
@@ -435,6 +468,7 @@ class MountRegistry:
         for existing in self._mounts:
             if existing.prefix == norm_prefix:
                 raise ValueError(f"duplicate mount prefix: {norm_prefix!r}")
+        self.check_storage_unshared(norm_prefix, vfs, self._mounts)
         alias = next((e for e in self._mounts if e.vfs is vfs), None)
         if self._clocks_bound:
             vfs.accessor.bind_clock(self.clock, self)

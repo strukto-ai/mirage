@@ -44,6 +44,7 @@ import {
   DEFAULT_READ_SPEC,
   MountMode,
   PathSpec,
+  VFSName,
   WritePolicy,
 } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
@@ -57,7 +58,7 @@ import { walk } from '../../commands/cli/walk.ts'
 import { parseCommand } from '../../commands/spec/parser.ts'
 import { pathVisible } from '../../utils/hidden.ts'
 import { MountEntry, type MountInit } from './mount.ts'
-import { MountCommandAmbiguous } from './errors.ts'
+import { MountCommandAmbiguous, SharedStorageError } from './errors.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -365,6 +366,7 @@ export class MountRegistry {
         throw new Error(`duplicate mount prefix: ${prefix}`)
       }
       if (vfs.isClosed) throw new Error('VFS is closed; create a new VFS instance')
+      this.checkStorageUnshared(prefix, vfs, list)
       seen.add(prefix)
       const mode = overrides[prefix] ?? defaultMode
       const read = readByPrefix[prefix] ?? defaultRead
@@ -458,6 +460,25 @@ export class MountRegistry {
     )
   }
 
+  /**
+   * Refuse a mount that would expose storage another mount already does: the
+   * same VFS object, or a disk whose resolved root a mounted disk already has.
+   * Mirrors Python's `check_storage_unshared`.
+   *
+   * @throws SharedStorageError naming the mount already there.
+   */
+  checkStorageUnshared(prefix: string, vfs: BaseVFS, mounts: readonly MountEntry[]): void {
+    const location = vfs.name === VFSName.DISK ? vfs.storageLocation() : null
+    for (const other of mounts) {
+      if (other.vfs === vfs || (location !== null && other.vfs.storageLocation() === location)) {
+        // shortcut: compares realpath'd roots only; another spelling of one
+        // folder (macOS case, bind mount, `..` after a link) passes, upgrade to
+        // (dev, ino) if reported.
+        throw new SharedStorageError(prefix, other.prefix, other.vfs === vfs ? null : location)
+      }
+    }
+  }
+
   /** A removed VFS instance cannot start a second lifecycle. */
   checkVfsAvailable(vfs: BaseVFS): void {
     if (this.retiringMounts.has(vfs) || this.mountList.some((m) => m.vfs === vfs && m.retiring)) {
@@ -491,6 +512,7 @@ export class MountRegistry {
         throw new Error(`duplicate mount prefix: ${norm}`)
       }
     }
+    this.checkStorageUnshared(norm, vfs, this.mountList)
     const alias = this.mountList.some((existing) => existing.vfs === vfs)
     if (this.clocksBound) vfs.accessor.bindClock?.(this.clock, this)
     try {

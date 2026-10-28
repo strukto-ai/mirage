@@ -28,6 +28,18 @@ export class MountOverrideError extends Error {
   }
 }
 
+/** A mount would expose storage another mount of the workspace already does. Mirrors Python's `SharedStorageError`. */
+export class SharedStorageError extends Error {
+  constructor(prefix: string, existing: string, location: string | null) {
+    super(
+      location === null
+        ? `mount ${prefix}: this VFS is already mounted at ${existing}; mount a separate VFS instead`
+        : `mount ${prefix}: ${location} is already mounted at ${existing}`,
+    )
+    this.name = 'SharedStorageError'
+  }
+}
+
 /** A pathless write could reach more than one writable mount. */
 export class MountCommandAmbiguous extends Error {
   constructor(cmdName: string, prefixes: readonly string[]) {

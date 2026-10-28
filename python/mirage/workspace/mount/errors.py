@@ -21,6 +21,19 @@ class MountOverrideError(ValueError):
     """Overrides hand one saved VFS different VFSs, leaving a prefix without one."""
 
 
+class SharedStorageError(ValueError):
+    """A mount would expose storage another mount of the workspace already does."""
+
+    def __init__(
+        self, prefix: str, existing: str, location: str | None
+    ) -> None:
+        what = "this VFS" if location is None else location
+        hint = "; mount a separate VFS instead" if location is None else ""
+        super().__init__(
+            f"mount {prefix}: {what} is already mounted at {existing}{hint}"
+        )
+
+
 class MountCommandAmbiguous(ValueError):
     """A pathless write has more than one eligible mount."""
 

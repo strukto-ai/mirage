@@ -26,7 +26,7 @@ import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { MountEntry } from './mount.ts'
 import { MountCommandUnsupported, MountRegistry, logger } from './registry.ts'
-import { MountCommandAmbiguous } from './errors.ts'
+import { MountCommandAmbiguous, SharedStorageError } from './errors.ts'
 import { SessionState } from '../session/session.ts'
 import { classifyPaths } from '../../utils/hidden.ts'
 import { Accessor } from '../../accessor/base.ts'
@@ -133,8 +133,10 @@ describe('MountRegistry.resolve', () => {
 
   it('refuses one VFS at a second prefix', () => {
     const vfs = new RAMVFS()
-    expect(() => new MountRegistry({ '/a': vfs, '/b': vfs }, MountMode.READ)).toThrow(
-      new Error('mount /b/: this VFS is already mounted at /a/; mount a separate VFS instead'),
+    const build = (): MountRegistry => new MountRegistry({ '/a': vfs, '/b': vfs }, MountMode.READ)
+    expect(build).toThrow(SharedStorageError)
+    expect(build).toThrow(
+      /^mount \/b\/: this VFS is already mounted at \/a\/; mount a separate VFS instead$/,
     )
   })
 })

@@ -15,7 +15,7 @@
 import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { chmod, mkdir, stat as fsStat, statfs as fsStatfs, writeFile } from 'node:fs/promises'
-import { createWriteStream, mkdirSync } from 'node:fs'
+import { createWriteStream, mkdirSync, realpathSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import path from 'node:path'
 import { CapacityState, ListingVersion, PathSpec, VFSName } from '@struktoai/mirage-core/types'
@@ -101,8 +101,10 @@ export class DiskVFS extends BaseVFS {
     super()
     this.folderVersions = folderVersions
     if (!folderVersions) this.listingVersion = ListingVersion.NONE
-    this.root = path.resolve(options.root)
-    mkdirSync(this.root, { recursive: true })
+    const resolved = path.resolve(options.root)
+    mkdirSync(resolved, { recursive: true })
+    // Links resolved, as Python's Path.resolve, so one folder has one location.
+    this.root = realpathSync(resolved)
     this.accessor = new DiskAccessor(this.root, folderVersions)
   }
 
