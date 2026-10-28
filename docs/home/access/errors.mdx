@@ -83,3 +83,8 @@ A command that reaches a service through a mount reports the service's failure
 as the condition it maps to, or in the service's own words after the command's
 name. An [account CLI](/home/setup/clis) such as `gh` or `ntn` reports
 a service error the way the real CLI does, with its wording and exit status.
+
+In code, every backend's service error extends `ApiError` (`mirage.core.api.errors`,
+`@struktoai/mirage-core/core/api/errors`): the service's message and `status`, the
+HTTP status or null. A service's own error code stays on its subclass, since `code`
+on a TypeScript error is always the file condition.
