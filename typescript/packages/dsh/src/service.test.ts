@@ -65,6 +65,31 @@ describe('MirageService', () => {
     await expect(ws.resolve('/scratch/a.txt')).rejects.toThrow('closed')
   })
 
+  it('caps a declarative mount and refuses a key a mount block does not take', async () => {
+    const ctx = new Context()
+    const fiber = ctx.plugin(MirageService, {
+      mounts: { '/c': { vfs: 'ram', mode: 'write', config: { capacity: '10' } } },
+    })
+    await fiber.await()
+    const ws = await ctx.mirage.ready
+    await ws.vfs.write('/c/a.txt', '12345678')
+    let code: string | undefined
+    try {
+      await ws.vfs.write('/c/b.txt', '123')
+    } catch (err) {
+      code = (err as { code?: string }).code
+    }
+    expect(code).toBe('EDQUOT')
+    await fiber.dispose()
+    const stray = new Context()
+    await stray
+      .plugin(MirageService, { mounts: { '/x': { vfs: 'ram', mde: 'write' } as never } })
+      .await()
+    await expect(stray.mirage.ready).rejects.toThrow(
+      'mirage: unknown mount `/x` key `mde` (allowed: vfs, mode, config)',
+    )
+  })
+
   it('hands a runtime block its config and refuses a key no runtime takes', async () => {
     const ctx = new Context()
     const mounts = { '/x': new RAMVFS() }

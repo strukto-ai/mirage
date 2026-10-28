@@ -15,12 +15,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { ops } from '@struktoai/mirage-core/test-utils'
-import { FileType, VFSName } from '@struktoai/mirage-core/types'
+import { FileType, MountMode, VFSName } from '@struktoai/mirage-core/types'
 import { copy as copyCore } from '../../core/opfs/copy.ts'
 import { exists as existsCore } from '../../core/opfs/exists.ts'
 import { rmR as rmRCore } from '../../core/opfs/rm.ts'
 import { readStream as streamCore } from '../../core/opfs/stream.ts'
 import { installFakeNavigator, makeMockRoot, spec } from '../../../tests/test-utils.ts'
+import { Workspace } from '../../workspace.ts'
 import { OPFSVFS } from './opfs.ts'
 
 let res: OPFSVFS
@@ -128,5 +129,31 @@ describe('OPFSVFS — getState / loadState round-trip', () => {
     await res2.loadState(state)
     expect(new TextDecoder().decode(await ops(res2).read(spec('/a')))).toBe('A')
     expect(new TextDecoder().decode(await ops(res2).read(spec('/d/b')))).toBe('B')
+  })
+})
+
+describe('OPFSVFS capacity', () => {
+  it('refuses a capacity that is not a size', () => {
+    expect(() => new OPFSVFS({ capacity: '1.5MB' })).toThrow(
+      'opfs: capacity must be a size like 100MB, got "1.5MB"',
+    )
+  })
+
+  it('refuses growth past the cap and stops parallel writers at it', async () => {
+    const data = new OPFSVFS({ capacity: 10 })
+    const ws = new Workspace({ '/o': [data, MountMode.WRITE] })
+    expect((await ws.shell('printf 1234567 > /o/a')).exitCode).toBe(0)
+    const refused = await ws.shell('printf 1234 > /o/b')
+    expect(refused.exitCode).toBe(1)
+    expect(refused.stderrText).toBe('/o/b: Disk quota exceeded\n')
+    const results = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => ws.shell(`printf 1 > /o/p${String(i)}`)),
+    )
+    expect(results.filter((r) => r.exitCode === 0).length).toBe(3)
+    expect([data.usage?.used, data.usage?.pending]).toEqual([10, 0])
+    expect((await ws.shell('rm /o/a; printf 12345 > /o/b')).exitCode).toBe(0)
+    expect((await data.capacity()).used).toBe(8)
+    expect((await data.getState()).config).toEqual({ capacity: 10 })
+    await ws.close()
   })
 })

@@ -17,7 +17,11 @@ import { UpstashRedisStore, type UpstashRedisStoreOptions } from './store.ts'
 
 export type { RedisVFSState } from '@struktoai/mirage-core/vfs/redis/redis'
 
-export type RedisVFSOptions = UpstashRedisStoreOptions
+export type RedisVFSOptions = UpstashRedisStoreOptions & {
+  /** The most bytes the mount's files may hold: a size like `100MB` or a count
+   * of bytes. */
+  capacity?: number | string | null
+}
 
 /**
  * The browser redis mount: the shared VFS over Upstash's REST api.
@@ -31,6 +35,6 @@ export class RedisVFS extends CoreRedisVFS {
   declare readonly store: UpstashRedisStore
 
   constructor(options: RedisVFSOptions) {
-    super(new UpstashRedisStore(options))
+    super(new UpstashRedisStore(options), options.capacity ?? null)
   }
 }

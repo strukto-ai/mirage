@@ -75,6 +75,12 @@ export function efbig(path: string | { virtual: string }): FsError {
   return fsError(path, 'EFBIG')
 }
 
+/** EDQUOT: a write past its mount's capacity; python's QuotaExceededError.
+ * Per-operand, so a command reports it and moves on. */
+export function edquot(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EDQUOT')
+}
+
 /** A conditional write the backend refused: the file changed since it was
  * read. Per-operand, so a command reports it and moves on; never a read
  * failure. Python's StaleWriteError. */

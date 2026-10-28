@@ -17,6 +17,11 @@ describe.each(['vfs/read', 'glob'])('%s failure responses', (route) => {
       404,
       { detail: 'No such file or directory', errno: 'ENOENT' },
     ],
+    [
+      Object.assign(new Error('backend token=secret'), { code: 'EDQUOT' }),
+      507,
+      { detail: 'Disk quota exceeded', errno: 'EDQUOT' },
+    ],
   ])('keeps private exception details out of HTTP responses (%s)', async (err, status, body) => {
     const app = buildApp()
     try {

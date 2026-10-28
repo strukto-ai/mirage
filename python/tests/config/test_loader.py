@@ -1554,3 +1554,22 @@ async def test_io_buffer_config_reaches_workspace():
 def test_io_buffer_config_rejects_invalid_blocks(block):
     with pytest.raises(ValueError):
         load_config({"mounts": {}, "io": block})
+
+
+@pytest.mark.parametrize(("capacity", "limit"), [("100MB", 100 << 20), (0, 0)])
+def test_a_ram_mount_takes_its_capacity_in_config(capacity, limit):
+    cfg = load_config(
+        {"mounts": {"/a": {"vfs": "ram", "config": {"capacity": capacity}}}}
+    )
+    vfs = cfg.to_workspace_kwargs()["mounts"]["/a"].vfs
+    assert isinstance(vfs, RAMVFS)
+    assert vfs.usage is not None and vfs.usage.limit == limit
+
+
+@pytest.mark.parametrize("capacity", ["-5", "1.5MB", "5T", True, "1_000"])
+def test_a_ram_config_refuses_a_capacity_that_is_not_a_size(capacity):
+    cfg = load_config(
+        {"mounts": {"/a": {"vfs": "ram", "config": {"capacity": capacity}}}}
+    )
+    with pytest.raises(ValueError, match="capacity must be a size like 100MB"):
+        cfg.to_workspace_kwargs()

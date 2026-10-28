@@ -14,6 +14,7 @@
 
 import argparse
 import asyncio
+import io
 import json
 import sys
 import traceback
@@ -26,6 +27,8 @@ import harness
 
 from mirage.concurrency import ConcurrencyLimiter
 from mirage.types import ReadSpec, WritePolicy
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 from mirage.workspace.mount.read_policy import resolve_read_spec
 from mirage.workspace.mount.write_policy import coerce_write_policy
 
@@ -137,6 +140,70 @@ async def run_consistency_case(
         await cleanup()
 
 
+async def run_capacity_case(
+    target: dict,
+    case: dict,
+    root: Path,
+    report: harness.Report | None,
+    emit: list[dict] | None,
+) -> None:
+    """Run one capacity case on a workspace of its own.
+
+    A cap counts what earlier cases wrote, so every capacity case opens
+    and seeds its target fresh, and no golden depends on case order. The
+    ``open`` door caps the mounts as the workspace is built; ``load``
+    seeds uncapped, snapshots, and loads with capped override mounts,
+    the public way a store comes back over its cap.
+
+    Args:
+        target (dict): the target manifest entry.
+        case (dict): the integ case.
+        root (Path): the integ directory.
+        report (harness.Report | None): the report, None when emitting.
+        emit (list[dict] | None): the emit rows, None when reporting.
+    """
+    caps = case["mount_capacity"]
+    load = case.get("capacity_door", "open") == "load"
+    ws, cleanup, faults = await adapters.open_target(
+        target, capacity=None if load else caps
+    )
+    loaded: Workspace | None = None
+    try:
+        for mount in target["mounts"]:
+            await harness.seed_fixture(
+                ws, mount.get("fixture"), mount["path"], root
+            )
+        if load:
+            snapshot = io.BytesIO()
+            await ws.snapshot(snapshot)
+            loaded = await Workspace.load(
+                io.BytesIO(snapshot.getvalue()),
+                mounts={
+                    prefix: RAMVFS(capacity=size)
+                    for prefix, size in caps.items()
+                },
+            )
+        bound = harness.bind_mount(case, target["mounts"][0]["path"])
+        ran = await harness.run_case(loaded or ws, bound, [], faults)
+        exit_code, out, err, elapsed, check_out, notes = ran
+        _emit_or_record(
+            emit,
+            report,
+            target["id"],
+            bound,
+            exit_code,
+            out,
+            err,
+            elapsed,
+            check_out,
+            notes,
+        )
+    finally:
+        if loaded is not None:
+            await loaded.close()
+        await cleanup()
+
+
 async def run_target(
     target: dict,
     cases: list[dict],
@@ -189,7 +256,7 @@ async def run_target(
             }
         )
         for case in selected:
-            if "read" in case:
+            if "read" in case or "mount_capacity" in case:
                 continue
             bound = harness.bind_mount(case, primary)
             ran = await harness.run_case(ws, bound, reasons, faults)
@@ -211,6 +278,8 @@ async def run_target(
     for case in selected:
         if "read" in case:
             await run_consistency_case(target, case, report, emit)
+        elif "mount_capacity" in case:
+            await run_capacity_case(target, case, root, report, emit)
 
 
 async def run_slot(

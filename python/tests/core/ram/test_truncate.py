@@ -19,10 +19,12 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.truncate import truncate
+from mirage.errors.types import QuotaExceededError
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.vfs.dev.store import DevFiles, DevStore
 from mirage.vfs.ram.store import RAMStore
+from tests.fixtures.ram_capacity import capped, ram_path, table_bytes
 
 FD = PathSpec(vfs_path="fd/63", virtual="/dev/fd/63", directory="/dev/fd/")
 
@@ -81,3 +83,49 @@ async def test_truncate_of_a_pipe_is_einval(readable):
         await truncate(RAMAccessor(store), FD, 0)
     assert caught.value.errno == errno.EINVAL
     assert store.files.pipe_of("/fd/63") is endpoint
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("length", [-1, -100, 2.5])
+async def test_an_invalid_length_is_einval_and_charges_nothing(length):
+    accessor, usage = capped(4, {"/f": b"1234"})
+    usage.used = 4
+    with pytest.raises(OSError) as caught:
+        await truncate(accessor, ram_path("/f"), length)
+    assert caught.value.errno == errno.EINVAL
+    assert accessor.store.files["/f"] == b"1234"
+    assert usage.used == table_bytes(accessor) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_capped_length_change_charges_its_growth():
+    accessor, usage = capped(10, {"/f": b"123"})
+    await truncate(accessor, ram_path("/f"), 8)
+    assert usage.used == table_bytes(accessor) == 8
+    with pytest.raises(QuotaExceededError):
+        await truncate(accessor, ram_path("/f"), 11)
+    assert accessor.store.files["/f"] == b"123\0\0\0\0\0"
+
+
+@pytest.mark.asyncio
+async def test_a_shortening_passes_over_the_cap():
+    accessor, usage = capped(2, {"/f": b"1234567890"})
+    await truncate(accessor, ram_path("/f"), 4)
+    assert usage.used == table_bytes(accessor) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_sparse_length_past_the_cap_is_refused_before_it_builds():
+    accessor, usage = capped(10)
+    with pytest.raises(QuotaExceededError):
+        await truncate(accessor, ram_path("/f"), 1 << 40)
+    assert "/f" not in accessor.store.files
+    assert usage.used == 0
+
+
+@pytest.mark.asyncio
+async def test_a_no_create_length_change_on_a_missing_file_charges_nothing():
+    accessor, usage = capped(10)
+    await truncate(accessor, ram_path("/f"), 4, no_create=True)
+    assert "/f" not in accessor.store.files
+    assert usage.used == 0

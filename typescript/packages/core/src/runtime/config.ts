@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { parseLimit } from '../cache/file/utils.ts'
+import { parseLimit } from '../utils/size.ts'
 
 /**
  * A runtime's `maxMemory` in bytes, null for no cap.
@@ -28,13 +28,7 @@ import { parseLimit } from '../cache/file/utils.ts'
  */
 export function memoryLimit(value: string | number | null | undefined): number | null {
   if (value === undefined || value === null) return null
-  const size =
-    typeof value === 'number'
-      ? Number.isSafeInteger(value) && value >= 0
-      : /^\d+([KMG]B?)?$/i.test(value.trim())
-  if (!size)
-    throw new Error(`max_memory must be a size like 10M or 1G, got ${JSON.stringify(value)}`)
-  return parseLimit(value)
+  return parseLimit(value, 'max_memory')
 }
 
 /** Constructor options every runtime accepts (a yaml entry's keys). */

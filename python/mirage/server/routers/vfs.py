@@ -57,6 +57,7 @@ STATUS: dict[FsCondition, int] = {
     FsCondition.EXDEV: 400,
     FsCondition.ELOOP: 400,
     FsCondition.ENOTSUP: 400,
+    FsCondition.EDQUOT: 507,
 }
 
 

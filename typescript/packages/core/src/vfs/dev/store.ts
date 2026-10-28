@@ -18,6 +18,7 @@ import type { DevFileState } from './types.ts'
 import { liveSessions } from '../../context/session_context.ts'
 import { enoent, eacces, einval, fsError } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import type { StorageUsage } from '../capacity.ts'
 import type { RAMAttrs } from '../ram/store.ts'
 
 const DEV_NAMES = new Set(['null', 'zero'])
@@ -233,6 +234,8 @@ class DevDirs extends Set<string> {
 
 export class DevStore {
   readonly dirs: Set<string>
+  /** Never counted: a capacity refuses `/dev`. Read as RAMStore's. */
+  readonly usage: StorageUsage | null = null
   constructor(
     readonly files = new DevFiles(),
     readonly modified = new Map<string, string>(),

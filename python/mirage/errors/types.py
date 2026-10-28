@@ -35,6 +35,8 @@ class FsCondition(StrEnum):
     ``STALE_WRITE`` is a lost conditional write: it carries the host's
     ESTALE number but its own phrase and its own class, so a kernel
     ESTALE from a disk or NFS mount keeps "Stale file handle".
+    ``EDQUOT`` is a write past its mount's capacity; its phrase is fixed
+    as Linux spells it, where macOS's strerror says "Disc".
     """
 
     EBADF = "ebadf"
@@ -53,6 +55,7 @@ class FsCondition(StrEnum):
     EBUSY = "ebusy"
     EROFS = "erofs"
     EFBIG = "efbig"
+    EDQUOT = "edquot"
     EPIPE = "epipe"
     NO_XATTR = "no_xattr"
     STALE_WRITE = "stale_write"
@@ -142,6 +145,15 @@ class FileTooLargeError(OSError):
     a few requests a second. Stamped like the other per-operand errors, so
     a command chokepoint renders ``<cmd>: <path>: File too large`` and
     moves on to its next operand. Mirrors the TS ``efbig``.
+    """
+
+
+class QuotaExceededError(OSError):
+    """EDQUOT: a write past its mount's capacity, "Disk quota exceeded".
+
+    Stamped like the other per-operand errors, so a command renders
+    ``<cmd>: <path>: Disk quota exceeded`` and moves on. Mirrors the TS
+    ``edquot``.
     """
 
 

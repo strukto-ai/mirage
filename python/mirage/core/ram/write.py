@@ -18,7 +18,11 @@ from contextlib import aclosing
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.device import active_device, active_pipe
 from mirage.core.ram.constants import STREAM_PUBLISH_SECONDS
-from mirage.core.ram.dest import check_dest_parents, check_write_target
+from mirage.core.ram.dest import (
+    check_capacity,
+    check_dest_parents,
+    check_write_target,
+)
 from mirage.io.cooperative import chunks
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -90,8 +94,12 @@ async def write(
         if append and p in store.files:
             if not whole:
                 return
+            check_capacity(
+                store, path_spec, p, len(store.files[p]) + len(whole)
+            )
             store.files[p] += whole
         else:
+            check_capacity(store, path_spec, p, len(whole))
             store.files[p] = whole
         store.modified[p] = now_iso()
         record(op, path_spec.virtual, "ram", len(whole), timer)
@@ -104,38 +112,63 @@ async def write(
     loop = asyncio.get_running_loop()
     last = loop.time()
     later: asyncio.TimerHandle | None = None
+    usage = store.usage
+    held = 0
 
     def publish() -> None:
-        nonlocal position, last, later
+        nonlocal position, last, later, held
         if later is not None:
             later.cancel()
             later = None
         last = loop.time()
         if not pending:
             return
-        data = b"".join(pending)
-        pending.clear()
-        current = store.files.get(p, b"")
-        if append:
-            store.files[p] = current + data
-        else:
-            current = current.ljust(position, b"\0")
-            store.files[p] = (
-                current[:position] + data + current[position + len(data) :]
-            )
-            position += len(data)
-        store.modified[p] = now_iso()
+        try:
+            data = b"".join(pending)
+            current = store.files.get(p, b"")
+            if append:
+                store.files[p] = current + data
+            else:
+                current = current.ljust(position, b"\0")
+                store.files[p] = (
+                    current[:position] + data + current[position + len(data) :]
+                )
+                position += len(data)
+            store.modified[p] = now_iso()
+        finally:
+            pending.clear()
+            if usage is not None:
+                usage.land(held, 0)
+            held = 0
+
+    failure: Exception | None = None
+
+    def publish_later() -> None:
+        nonlocal failure
+        try:
+            publish()
+        except Exception as exc:
+            # A timer callback cannot raise to the write; the write raises it.
+            failure = exc
 
     try:
         async with aclosing(chunks(data)) as source:
             async for chunk in source:
+                if failure is not None:
+                    raise failure
+                if usage is not None:
+                    # The whole chunk: bytes another writer put in its way count.
+                    usage.hold(path_spec, len(chunk))
+                    held += len(chunk)
                 pending.append(chunk)
                 size += len(chunk)
                 wait = STREAM_PUBLISH_SECONDS - (loop.time() - last)
                 if wait <= 0:
                     publish()
                 elif later is None:
-                    later = loop.call_later(wait, publish)
+                    later = loop.call_later(wait, publish_later)
     finally:
         publish()
+    if failure is not None:
+        raise failure
     record(op, path_spec.virtual, "ram", size, timer)

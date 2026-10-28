@@ -220,6 +220,15 @@ jobs:
               - 'typescript/packages/core/src/rs/policy.ts'
               - 'python/mirage/{utils/hidden,utils/path,context/session_context}.py'
               - 'typescript/packages/core/src/{utils/hidden,utils/path,context/session_context}.ts'
+              # The store capacity and the RAM code that counts it: the
+              # TypeScript FUSE probe checks that a kernel write is refused
+              # and counted with the shell's on one store.
+              - 'python/mirage/vfs/capacity.py'
+              - 'python/mirage/core/ram/{dest,write,pwrite,truncate,copy}.py'
+              - 'python/mirage/vfs/ram/{ram,store}.py'
+              - 'typescript/packages/core/src/vfs/capacity.ts'
+              - 'typescript/packages/core/src/core/ram/{dest,write,pwrite,truncate,copy}.ts'
+              - 'typescript/packages/core/src/vfs/ram/{ram,store}.ts'
               - 'integ/fuse/**'
               - 'integ/check_json.py'
               - 'integ/package.json'

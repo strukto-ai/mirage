@@ -157,6 +157,31 @@ def selftest_case_validation() -> None:
         *raises(lambda: harness.validate_cases(ROOT, unread), "mount_read"),
     )
 
+    for name, case, needle in [
+        (
+            "a capacity_door without a mount_capacity",
+            {"capacity_door": "load"},
+            "capacity_door needs mount_capacity",
+        ),
+        (
+            "an unknown capacity_door",
+            {"mount_capacity": {"/data": 10}, "capacity_door": "loud"},
+            "capacity_door is open or load",
+        ),
+        (
+            "a mount_capacity on a scenario case",
+            {"mount_capacity": {"/data": 10}, "read": "bounded", "ttl": 5},
+            "mount_capacity rides plain cases only",
+        ),
+    ]:
+        capped = [
+            {"id": "capped", "targets": ["ram"], "_source": "a.json", **case}
+        ]
+        check(
+            f"cases: {name} is rejected",
+            *raises(lambda: harness.validate_cases(ROOT, capped), needle),
+        )
+
     real = harness.load_cases(ROOT)
     check(
         "cases: the shipped battery passes both gates",

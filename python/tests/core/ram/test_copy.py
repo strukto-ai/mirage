@@ -19,10 +19,12 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.copy import copy
+from mirage.errors.types import QuotaExceededError
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.vfs.dev.store import DevFiles, DevStore
 from mirage.vfs.ram.store import RAMStore
+from tests.fixtures.ram_capacity import capped, ram_path, table_bytes
 
 
 def spec(path: str) -> PathSpec:
@@ -123,3 +125,13 @@ async def test_copy_through_a_pipe(from_pipe, to_pipe):
         assert await asyncio.wait_for(consumed, 3) == b"hello"
     if from_pipe:
         assert store.files.pipe_of(src) is source
+
+
+@pytest.mark.asyncio
+async def test_a_capped_copy_charges_the_destinations_growth():
+    accessor, usage = capped(10, {"/a": b"12345", "/b": b"123"})
+    await copy(accessor, ram_path("/a"), ram_path("/b"))
+    assert usage.used == table_bytes(accessor) == 10
+    with pytest.raises(QuotaExceededError):
+        await copy(accessor, ram_path("/a"), ram_path("/c"))
+    assert "/c" not in accessor.store.files

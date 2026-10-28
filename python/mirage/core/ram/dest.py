@@ -204,3 +204,22 @@ def check_mkdir_target(
         if component == key:
             raise eexist(named)
         raise enotdir(named)
+
+
+def check_capacity(
+    store: RAMStore, spec: PathSpec, key: str, size: int
+) -> None:
+    """Refuse with EDQUOT a key growing to ``size`` bytes past its store's
+    capacity; an uncapped store takes any size.
+
+    Called just before the change, with no await between, so the check and
+    the change run as one step on the store's loop.
+
+    Args:
+        store (RAMStore): the RAM store.
+        spec (PathSpec): the operand a refusal names.
+        key (str): its normalized key.
+        size (int): the key's length after the change.
+    """
+    if store.usage is not None:
+        store.usage.admit(spec, size - len(store.files.get(key, b"")))

@@ -75,6 +75,11 @@ export interface Case {
   // Fault plans armed on the target's kit fake for the length of the
   // command, in the shape its /_kit/faults reads; every plan must be spent.
   faults?: Record<string, unknown>[]
+  // Per-mount caps, on a workspace opened for this case alone, and the door
+  // they come through: `open` caps the mounts as it is built, `load` loads a
+  // snapshot with capped override mounts.
+  mount_capacity?: Record<string, number | string>
+  capacity_door?: 'open' | 'load'
   expect: Expect
   _source?: string
 }

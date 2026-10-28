@@ -15,6 +15,7 @@
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.device import active_pipe
 from mirage.core.ram.dest import (
+    check_capacity,
     check_dest_parents,
     check_write_target,
     lookup_error,
@@ -64,5 +65,6 @@ async def copy(
         await target.write(data, dst_spec)
         return
     check_write_target(store, dst_spec, d)
+    check_capacity(store, dst_spec, d, len(data))
     store.files[d] = data
     store.modified[d] = now_iso()

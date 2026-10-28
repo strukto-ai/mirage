@@ -19,6 +19,7 @@ import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
 import { PathSpec } from '../../types.ts'
 import { DevicePipe } from '../dev/pipe.ts'
 import { unlink } from './unlink.ts'
+import { capped, ramPath, tableBytes } from '../../test-utils.ts'
 
 const FD = new PathSpec({ virtual: '/dev/fd/63', directory: '/dev/fd/', vfsPath: 'fd/63' })
 
@@ -32,5 +33,13 @@ describe('unlink', () => {
       virtualPath: '/dev/fd/63',
     })
     expect(store.files.pipeOf('/fd/63')).toBe(endpoint)
+  })
+})
+
+describe('unlink against a capacity', () => {
+  it('takes back the file bytes', async () => {
+    const [acc, usage] = capped(5, { '/a': '1234567890', '/b': '12' })
+    await unlink(acc, ramPath('/a'))
+    expect([usage.used, tableBytes(acc)]).toEqual([2, 2])
   })
 })

@@ -60,6 +60,7 @@ from mirage.utils.clock import ManualClock
 from mirage.vfs.airtable import AirtableConfig, AirtableVFS
 from mirage.vfs.aliyun import AliyunConfig, AliyunVFS
 from mirage.vfs.backblaze import BackblazeConfig, BackblazeVFS
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.box import BoxConfig, BoxVFS
 from mirage.vfs.ceph import CephConfig, CephVFS
 from mirage.vfs.chroma import ChromaConfig, ChromaVFS
@@ -3424,11 +3425,15 @@ def cache_config(target: dict, run_id: str) -> RedisCacheConfig | None:
 
 
 async def open_target(
-    target: dict, read: ReadSpec | None = None
+    target: dict,
+    read: ReadSpec | None = None,
+    capacity: dict[str, int | str] | None = None,
 ) -> tuple[Workspace, Callable[[], Awaitable[None]], str | None]:
     run_id = uuid.uuid4().hex[:8]
     service = await make_service(target, run_id)
     mounts, cleanups = await build_mounts(target, run_id, service)
+    if capacity:
+        mounts = apply_mount_capacity(mounts, capacity)
     env_block = None
     if target.get("secrets") is not None:
         env_block, secrets_cleanup = build_secrets_env(target["secrets"])
@@ -3528,6 +3533,57 @@ def apply_mount_read(
         else:
             out[prefix] = Mount(vfs=entry, read=spec)
     return out
+
+
+def apply_mount_capacity(
+    mounts: dict[str, VFSMount], capacity: dict[str, int | str]
+) -> dict[str, VFSMount]:
+    """The mount table with each named prefix's RAM store built with its
+    capacity, every other mount of that store taking the capped one too.
+
+    The stores are still empty, so swapping one keeps nothing from it.
+
+    Raises:
+        ValueError: a cap names no mount in ``mounts``, or one not on RAM.
+
+    Args:
+        mounts (dict[str, VFSMount]): ``build_mounts`` output.
+        capacity (dict[str, int | str]): the case's per-mount caps.
+    """
+    capped: dict[int, RAMVFS] = {}
+    for prefix, size in capacity.items():
+        entry = mounts.get(prefix)
+        if entry is None:
+            raise ValueError(f"mount_capacity names no mount: {prefix}")
+        vfs = _mount_vfs(entry)
+        if not isinstance(vfs, RAMVFS):
+            raise ValueError(f"mount_capacity needs a RAM mount: {prefix}")
+        capped[id(vfs)] = RAMVFS(capacity=size)
+    out: dict[str, VFSMount] = {}
+    for prefix, entry in mounts.items():
+        swap = capped.get(id(_mount_vfs(entry)))
+        if swap is None:
+            out[prefix] = entry
+        elif isinstance(entry, Mount):
+            out[prefix] = dataclasses.replace(entry, vfs=swap)
+        elif isinstance(entry, tuple):
+            out[prefix] = (swap, *entry[1:])
+        else:
+            out[prefix] = swap
+    return out
+
+
+def _mount_vfs(entry: VFSMount) -> BaseVFS:
+    """The VFS a mount table entry places.
+
+    Args:
+        entry (VFSMount): a VFS, a tuple led by one, or a ``Mount``.
+    """
+    if isinstance(entry, Mount):
+        return entry.vfs
+    if isinstance(entry, tuple):
+        return entry[0]
+    return entry
 
 
 async def open_consistency(

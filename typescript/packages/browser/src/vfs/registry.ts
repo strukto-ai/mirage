@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { resolveConfigSecrets } from '@struktoai/mirage-core/secrets/sources'
+import type { RAMVFSOptions } from '@struktoai/mirage-core/vfs/ram/ram'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { refuseUnknownKeys, z } from '@struktoai/mirage-core/vfs/secrets'
@@ -41,20 +42,22 @@ export type VFSFactory = (config: Record<string, unknown>) => Promise<BaseVFS>
 // The backends that take their options without a schema, and the option
 // names each takes, so a key outside these is refused rather than ignored,
 // the way python refuses a constructor keyword its class does not take.
-const OPFS_OPTIONS: readonly (keyof OPFSVFSOptions)[] = ['root']
+const RAM_OPTIONS: readonly (keyof RAMVFSOptions)[] = ['capacity']
+const OPFS_OPTIONS: readonly (keyof OPFSVFSOptions)[] = ['root', 'capacity']
 const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = [
   'url',
   'token',
   'keyPrefix',
   'fetchImpl',
+  'capacity',
   'maxRequestBytes',
 ]
 
 const REGISTRY: Record<string, VFSFactory> = {
   ram: async (config) => {
-    refuseUnknownKeys(config, [])
+    refuseUnknownKeys(config, RAM_OPTIONS)
     const { RAMVFS } = await import('@struktoai/mirage-core/vfs/ram/ram')
-    return new RAMVFS()
+    return new RAMVFS(normalizeFields(config) as RAMVFSOptions)
   },
   opfs: async (config) => {
     refuseUnknownKeys(config, OPFS_OPTIONS)

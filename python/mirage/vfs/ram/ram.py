@@ -33,10 +33,11 @@ from mirage.core.ram.truncate import truncate as _truncate
 from mirage.core.ram.unlink import unlink as _unlink
 from mirage.core.ram.write import write as _write
 from mirage.io.types import ByteSource
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.capacity import storage_usage
 from mirage.vfs.constants import LOCAL_WALK_LIMIT
-from mirage.vfs.ram.store import RAMStore
+from mirage.vfs.ram.store import RAMFiles, RAMStore
 
 
 class RAMVFS(BaseVFS):
@@ -50,9 +51,20 @@ class RAMVFS(BaseVFS):
     local: bool = True
     walk_limit: int = LOCAL_WALK_LIMIT
 
-    def __init__(self) -> None:
+    def __init__(self, capacity: int | str | None = None) -> None:
+        """A store in process memory.
+
+        Args:
+            capacity (int | str | None): the most bytes the store may hold,
+                a size like ``100MB`` or a count of bytes; None for no
+                limit. Every mount of the store shares it.
+
+        Raises:
+            VFSConfigError: ``capacity`` is not a size.
+        """
         super().__init__()
-        self._store = RAMStore()
+        self.usage = storage_usage(self.name, capacity, used=0)
+        self._store = RAMStore(files=RAMFiles(self.usage), usage=self.usage)
         self.accessor = RAMAccessor(self._store)
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
@@ -130,18 +142,29 @@ class RAMVFS(BaseVFS):
         )
 
     def get_state(self) -> dict[str, Any]:
-        return {
+        state: dict[str, Any] = {
             "type": self.name,
             "files": dict(self._store.files),
             "dirs": list(self._store.dirs),
             "modified": dict(self._store.modified),
             "attrs": {k: dict(v) for k, v in self._store.attrs.items()},
         }
+        if self.usage is not None:
+            state["config"] = {"capacity": self.usage.limit}
+        return state
 
     def load_state(self, state: dict[str, Any]) -> None:
-        self._store.files = dict(state.get("files", {}))
+        self._store.files.clear()
+        for key, data in state.get("files", {}).items():
+            self._store.files[key] = data
         self._store.dirs = set(state.get("dirs", ["/"]))
         self._store.modified = dict(state.get("modified", {}))
         self._store.attrs = {
             k: dict(v) for k, v in state.get("attrs", {}).items()
         }
+
+    async def capacity(self) -> CapacityResult:
+        """df's QUOTA row for a capped store; the base UNKNOWN otherwise."""
+        if self.usage is not None:
+            return self.usage.report()
+        return await super().capacity()

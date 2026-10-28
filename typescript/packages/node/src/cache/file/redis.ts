@@ -21,7 +21,8 @@ import { DEFAULT_KEY_PREFIX } from '@struktoai/mirage-core/cache/file/constants'
 import { Invalidation, withFillGuard } from '@struktoai/mirage-core/cache/file/invalidation'
 import { validateMaxDrainBytes } from '@struktoai/mirage-core/cache/file/mixin'
 import type { FileCache } from '@struktoai/mirage-core/cache/file/mixin'
-import { globEscape, parseLimit, tokenOrNull } from '@struktoai/mirage-core/cache/file/utils'
+import { globEscape, tokenOrNull } from '@struktoai/mirage-core/cache/file/utils'
+import { parseLimit } from '@struktoai/mirage-core/utils/size'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { registerFileCacheStore } from '@struktoai/mirage-core/workspace/workspace/cache'
 import type { RedisClientType } from 'redis'
@@ -85,7 +86,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
       url: options.url ?? 'redis://localhost:6379/0',
       keyPrefix: options.keyPrefix ?? DEFAULT_KEY_PREFIX,
     })
-    this.limit = parseLimit(options.cacheLimit ?? '512MB')
+    this.limit = parseLimit(options.cacheLimit ?? '512MB', 'limit')
     this.dataPrefix = `${this.keyPrefix}data:`
     this.metaPrefix = `${this.keyPrefix}meta:`
     this.entryPattern = `${globEscape(this.keyPrefix)}[dm][ae]ta:`

@@ -782,7 +782,11 @@ async def _build_vfs(spec: dict[str, Any], run_id: str) -> Any:
     if kind == "shortcuts":
         return ShortcutRAMVFS()
     if kind == "ram":
-        vfs = FailingRAMVFS(spec["failing"]) if "failing" in spec else RAMVFS()
+        vfs = (
+            FailingRAMVFS(spec["failing"])
+            if "failing" in spec
+            else RAMVFS(**spec.get("config", {}))
+        )
         if "generated_files" in spec:
             vfs.load_state(
                 {

@@ -19,6 +19,7 @@ import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
 import { PathSpec } from '../../types.ts'
 import { DevicePipe } from '../dev/pipe.ts'
 import { truncate } from './truncate.ts'
+import { capped, ramPath, tableBytes } from '../../test-utils.ts'
 
 const FD = new PathSpec({ virtual: '/dev/fd/63', directory: '/dev/fd/', vfsPath: 'fd/63' })
 
@@ -38,5 +39,45 @@ describe('truncate', () => {
       truncate(new RAMAccessor(store as unknown as RAMStore), FD, 0),
     ).rejects.toMatchObject({ code: 'EINVAL' })
     expect(store.files.pipeOf('/fd/63')).toBe(endpoint)
+  })
+})
+
+describe('length changes against a capacity', () => {
+  it('charges its growth', async () => {
+    const [acc, usage] = capped(10, { '/f': '123' })
+    await truncate(acc, ramPath('/f'), 8)
+    expect([usage.used, tableBytes(acc)]).toEqual([8, 8])
+    await expect(truncate(acc, ramPath('/f'), 11)).rejects.toMatchObject({ code: 'EDQUOT' })
+    expect(acc.store.files.get('/f')?.byteLength).toBe(8)
+  })
+
+  it('passes a shortening over the cap', async () => {
+    const [acc, usage] = capped(2, { '/f': '1234567890' })
+    await truncate(acc, ramPath('/f'), 4)
+    expect([usage.used, tableBytes(acc)]).toEqual([4, 4])
+  })
+
+  it('refuses a sparse length past the cap before it builds', async () => {
+    const [acc, usage] = capped(10)
+    await expect(truncate(acc, ramPath('/f'), 2 ** 40)).rejects.toMatchObject({ code: 'EDQUOT' })
+    expect([acc.store.files.has('/f'), usage.used]).toEqual([false, 0])
+  })
+
+  it.each([-1, -100, 2.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'refuses length %s with EINVAL and charges nothing',
+    async (length) => {
+      const [acc, usage] = capped(4, { '/f': '1234' })
+      usage.used = 4
+      await expect(truncate(acc, ramPath('/f'), length)).rejects.toMatchObject({ code: 'EINVAL' })
+      expect([acc.store.files.get('/f')?.byteLength, usage.used, tableBytes(acc)]).toEqual([
+        4, 4, 4,
+      ])
+    },
+  )
+
+  it('charges nothing for a no-create change on a missing file', async () => {
+    const [acc, usage] = capped(10)
+    await truncate(acc, ramPath('/f'), 4, true)
+    expect([acc.store.files.has('/f'), usage.used]).toEqual([false, 0])
   })
 })

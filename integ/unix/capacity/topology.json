@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "capacity_a_nested_mounts_cap_governs_under_it",
+      "seq": 18600011,
+      "targets": [
+        "ram-nested"
+      ],
+      "mount_capacity": {
+        "/data": 100,
+        "/data/inner": 10
+      },
+      "command": "head -c 50 /dev/zero > /data/inner/x; echo $?; head -c 50 /dev/zero > /data/x; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n0\n",
+        "stderr": "/data/inner/x: Disk quota exceeded\n"
+      }
+    },
+    {
+      "id": "capacity_an_uncapped_child_never_counts_against_its_parent",
+      "seq": 18600012,
+      "targets": [
+        "ram-nested"
+      ],
+      "mount_capacity": {
+        "/data": 10
+      },
+      "command": "head -c 50 /dev/zero > /data/inner/x; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

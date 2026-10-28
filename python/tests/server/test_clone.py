@@ -378,3 +378,14 @@ async def test_a_clone_override_for_the_scratch_root_keeps_it_the_root():
             await cloned.close()
     finally:
         await src.close()
+
+
+@pytest.mark.asyncio
+async def test_an_override_mount_carries_its_capacity_in_config():
+    built = await build_override_mounts(
+        {"mounts": {"/d": {"vfs": "ram", "config": {"capacity": "1KB"}}}},
+        None,
+    )
+    vfs = built["/d/"].vfs
+    assert isinstance(vfs, RAMVFS)
+    assert vfs.usage is not None and vfs.usage.limit == 1024

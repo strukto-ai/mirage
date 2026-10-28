@@ -21,7 +21,8 @@ mounts:
 ```
 
 `ls /data` lists that directory. Set `mode: write` to allow changes to its
-files through Mirage.
+files through Mirage. Add `capacity: 1GB` under `config` to cap the bytes the
+directory holds; see [capacity](/home/configuration#capacity).
 
 A second disk mount whose `root` resolves to a folder already mounted is
 refused; a folder inside one is fine.

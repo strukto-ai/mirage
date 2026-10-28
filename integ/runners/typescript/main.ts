@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { writeFileSync } from 'node:fs'
-import { type ReadSpec } from '@struktoai/mirage-node'
+import { RAMVFS, type ReadSpec, Workspace } from '@struktoai/mirage-node'
 import { resolveReadSpec } from '@struktoai/mirage-core/workspace/mount/read_policy'
 import { coerceWritePolicy } from '@struktoai/mirage-core/workspace/mount/write_policy'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
@@ -190,6 +190,61 @@ export async function runPool(
   return errors.length
 }
 
+/**
+ * Run one capacity case on a workspace of its own. A cap counts what earlier
+ * cases wrote, so every capacity case opens and seeds its target fresh, and no
+ * golden depends on case order. The `open` door caps the mounts as the
+ * workspace is built; `load` seeds uncapped, snapshots, and loads with capped
+ * override mounts. Mirrors Python's `run_capacity_case`.
+ */
+async function runCapacityCase(
+  target: Target,
+  c: Case,
+  root: string,
+  report: Report | null,
+  emit: EmitRow[] | null,
+): Promise<void> {
+  const caps = c.mount_capacity ?? {}
+  const load = c.capacity_door === 'load'
+  const opener = ADAPTERS[target.mounts[0].vfs]
+  if (opener === undefined) throw new Error(`target ${target.id}: no opener`)
+  // Only openRam applies a cap; Python's open_target refuses one elsewhere.
+  if (target.mounts[0].vfs !== 'ram') {
+    throw new Error(`target ${target.id}: mount_capacity needs a RAM target`)
+  }
+  const { ws, cleanup, faults } = await opener(target, load ? {} : { capacity: caps })
+  let loaded: Workspace | null = null
+  try {
+    for (const mount of target.mounts) await seedFixture(ws, mount.fixture, mount.path, root)
+    if (load) {
+      const snapshot = await (ws as unknown as Workspace).snapshot()
+      const overrides = Object.fromEntries(
+        Object.entries(caps).map(([prefix, size]) => [prefix, new RAMVFS({ capacity: size })]),
+      )
+      loaded = await Workspace.load(snapshot, {}, overrides)
+    }
+    const bound = bindMount(c, target.mounts[0].path)
+    const runOn = loaded !== null ? (loaded as unknown as typeof ws) : ws
+    const { exitCode, out, err, elapsed, checkOut, notes } = await runCase(runOn, bound, [], faults)
+    emit?.push({
+      target: target.id,
+      id: bound.id,
+      exit: exitCode,
+      stdout: out,
+      stderr: err,
+      check: checkOut,
+    })
+    report?.record(
+      target.id,
+      bound.id,
+      compare(bound, exitCode, out, err, elapsed, checkOut, notes),
+    )
+  } finally {
+    await loaded?.close()
+    await cleanup()
+  }
+}
+
 export async function runTarget(
   target: Target,
   cases: Case[],
@@ -273,7 +328,7 @@ export async function runTarget(
     const reasons = ruleReasons({ profiles: target.profiles, sessions: target.sessions })
     for (const c of cases) {
       if (!c.targets.includes(target.id)) continue
-      if (c.read !== undefined) continue
+      if (c.read !== undefined || c.mount_capacity !== undefined) continue
       const bound = bindMount(c, target.mounts[0].path)
       const { exitCode, out, err, elapsed, checkOut, notes } = await runCase(
         ws,
@@ -335,6 +390,11 @@ export async function runTarget(
         c.id,
         compare(c, run.exitCode, run.out, run.stderr, 0, null, run.notes),
       )
+    }
+  }
+  for (const c of cases) {
+    if (c.targets.includes(target.id) && c.mount_capacity !== undefined) {
+      await runCapacityCase(target, c, root, report, emit)
     }
   }
 }

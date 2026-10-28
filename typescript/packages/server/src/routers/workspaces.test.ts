@@ -596,6 +596,28 @@ describe('workspaces router', () => {
     }
   })
 
+  it('POST /v1/workspaces/:id/clone 400s for a bad capacity override', async () => {
+    const app = buildApp()
+    try {
+      await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { id: 'src-c', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
+      })
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/src-c/clone',
+        payload: {
+          override: { mounts: { '/': { vfs: 'ram', config: { capacity: '1.5MB' } } } },
+        },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json<{ detail: string }>().detail).toContain('capacity must be a size like 100MB')
+    } finally {
+      await app.close()
+    }
+  })
+
   it('POST /v1/workspaces/:id/clone 400s for an unknown mount config key', async () => {
     const app = buildApp()
     await app.inject({

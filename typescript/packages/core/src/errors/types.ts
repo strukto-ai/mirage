@@ -32,7 +32,8 @@
  * only a standard input that is closed or write-only. `STALE_WRITE` is a
  * lost conditional write: the host's ESTALE number with its own phrase and
  * its own code, so a kernel ESTALE from a disk or NFS mount keeps "Stale
- * file handle".
+ * file handle". `EDQUOT` is a write past its mount's capacity; its phrase
+ * is fixed as Linux spells it, where macOS's strerror says "Disc".
  */
 export type FsCondition =
   | 'EBADF'
@@ -51,6 +52,7 @@ export type FsCondition =
   | 'EBUSY'
   | 'EROFS'
   | 'EFBIG'
+  | 'EDQUOT'
   | 'EPIPE'
   | 'NO_XATTR'
   | 'STALE_WRITE'
@@ -72,6 +74,7 @@ export const FS_CONDITIONS: readonly FsCondition[] = [
   'EBUSY',
   'EROFS',
   'EFBIG',
+  'EDQUOT',
   'EPIPE',
   'NO_XATTR',
   'STALE_WRITE',

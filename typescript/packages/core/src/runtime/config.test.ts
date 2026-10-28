@@ -13,7 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { coerceRuntimeConfig } from './config.ts'
+import { coerceRuntimeConfig, memoryLimit } from './config.ts'
+
+describe('memoryLimit', () => {
+  it('refuses through the shared size parser', () => {
+    expect(() => memoryLimit('lots')).toThrow(
+      new Error('max_memory must be a size like 100MB, got "lots"'),
+    )
+  })
+})
 
 describe('coerceRuntimeConfig', () => {
   it.each([[['A=1']], [{ A: 1 }], [null]])('refuses an env that is not strings: %j', (env) => {

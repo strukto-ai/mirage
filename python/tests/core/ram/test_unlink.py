@@ -21,6 +21,7 @@ from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.unlink import unlink
 from mirage.types import PathSpec
 from mirage.vfs.dev.store import DevFiles, DevStore
+from tests.fixtures.ram_capacity import capped, ram_path, table_bytes
 
 FD = PathSpec(vfs_path="fd/63", virtual="/dev/fd/63", directory="/dev/fd/")
 
@@ -35,3 +36,10 @@ async def test_unlink_of_a_live_descriptor_is_eperm_and_keeps_it():
     assert caught.value.errno == errno.EPERM
     assert caught.value.filename == "/dev/fd/63"
     assert store.files.pipe_of("/fd/63") is endpoint
+
+
+@pytest.mark.asyncio
+async def test_a_capped_unlink_takes_back_the_files_bytes():
+    accessor, usage = capped(5, {"/a": b"1234567890", "/b": b"12"})
+    await unlink(accessor, ram_path("/a"))
+    assert usage.used == table_bytes(accessor) == 2

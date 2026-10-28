@@ -1,0 +1,186 @@
+{
+  "cases": [
+    {
+      "id": "capacity_refusal_exits_one_and_the_line_goes_on",
+      "seq": 18600001,
+      "targets": [
+        "ram"
+      ],
+      "mount_capacity": {
+        "/data2": 10
+      },
+      "note": "GNU: `echo hi > /dev/full; echo $?; echo next` in debian:stable-slim prints bash's `bash: line 1: echo: write error: No space left on device`, then 1 and next. Mirage keeps its redirect voice (workspace/executor/redirect.py); the exit status and the line going on match GNU. A refused `>` of output written at once (printf, echo) creates no file and leaves an existing one as it was, where GNU truncates and creates at open; a streaming command keeps what landed (capacity_a_refused_stream_keeps_what_landed).",
+      "command": "printf 12345678 > /data2/a; echo $?; printf 123 > /data2/b; echo $?; test -e /data2/b; echo $?; echo next",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n1\n1\nnext\n",
+        "stderr": "/data2/b: Disk quota exceeded\n"
+      }
+    },
+    {
+      "id": "capacity_cp_reports_its_own_line",
+      "seq": 18600002,
+      "targets": [
+        "ram"
+      ],
+      "mount_capacity": {
+        "/data2": 10
+      },
+      "note": "GNU cp words a failed write after the open as `cp: error writing '...'`; mirage's cp reports `cannot create regular file` for any write failure, a divergence that predates capacity.",
+      "command": "printf 12345678 > /data2/a; cp /data2/a /data2/c; echo $?; echo next",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\nnext\n",
+        "stderr": "cp: cannot create regular file '/data2/c': Disk quota exceeded\n"
+      }
+    },
+    {
+      "id": "capacity_mv_across_mounts_keeps_the_source",
+      "seq": 18600014,
+      "targets": [
+        "ram"
+      ],
+      "mount_capacity": {
+        "/data2": 10
+      },
+      "note": "A move into a capped mount copies first, so a refused copy keeps the source; mirage leaves an empty destination, where GNU mv keeps the bytes that fit. GNU words the failed write as `mv: error writing '...'`; mirage's mv says `cannot create regular file`, as its cp does.",
+      "command": "printf 123456789012 > /data/big; mv /data/big /data2/big; echo $?; wc -c < /data/big; wc -c < /data2/big",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n12\n0\n",
+        "stderr": "mv: cannot create regular file '/data2/big': Disk quota exceeded\n"
+      }
+    },
+    {
+      "id": "capacity_exactly_at_the_cap_passes_one_more_byte_does_not",
+      "seq": 18600003,
+      "targets": [
+        "ram"
+      ],
+      "mount_capacity": {
+        "/data2": 10
+      },
+      "command": "printf 1234567890 > /data2/a; echo $?; printf 1 >> /data2/a; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n1\n",
+        "stderr": "/data2/a: Disk quota exceeded\n"
+      }
+    },
+    {
+      "id": "capacity_uncapped_mounts_are_unchanged",
+      "seq": 18600004,
+      "targets": [
+        "ram"
+      ],
+      "mount_capacity": {},
+      "command": "printf 12345678 > /data2/a; echo $?; printf 123 > /data2/b; echo $?; echo next",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\nnext\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "capacity_df_reports_the_cap",
+      "seq": 18600005,
+      "targets": [
+        "ram"
+      ],
+      "mount_capacity": {
+        "/data2": "1MB"
+      },
+      "note": "1K blocks, each figure rounded up as GNU df rounds: 1000 bytes used reads 1, the 1047576 bytes left read 1024.",
+      "command": "head -c 1000 /dev/zero > /data2/z; df -P /data2 | awk 'NR == 2 { print $2, $3, $4 }'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1024 1 1024\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "capacity_stat_f_reports_the_cap",
+      "seq": 18600006,
+      "targets": [
+        "ram"
+      ],
+      "mount_capacity": {
+        "/data2": "1MB"
+      },
+      "command": "stat -f -c '%b %S' /data2",
+      "expect": {
+        "exit": 0,
+        "stdout": "1024 1024\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "capacity_a_refused_stream_keeps_what_landed",
+      "seq": 18600007,
+      "targets": [
+        "ram"
+      ],
+      "mount_capacity": {
+        "/data2": "64KB"
+      },
+      "command": "seq 1 1000000 > /data2/s; echo $?; wc -c < /data2/s | awk '{ print ($1 > 0 && $1 <= 65536) }'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n",
+        "stderr": "/data2/s: Disk quota exceeded\n"
+      }
+    },
+    {
+      "id": "capacity_sed_in_place_refused_leaves_the_file",
+      "seq": 18600008,
+      "targets": [
+        "ram"
+      ],
+      "mount_capacity": {
+        "/data2": 10
+      },
+      "note": "GNU sed exits 4 when it cannot write the edit (`couldn't write ... items`); mirage words it as its other refused edit write, `couldn't edit`, and exits 4.",
+      "command": "printf 12345 > /data2/s; sed -i 's/1/1111111/' /data2/s; echo $?; cat /data2/s",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n12345",
+        "stderr": "sed: couldn't edit /data2/s: Disk quota exceeded\n"
+      }
+    },
+    {
+      "id": "capacity_sed_w_file_refused_exits_four",
+      "seq": 18600015,
+      "targets": [
+        "ram"
+      ],
+      "mount_capacity": {
+        "/data2": 10
+      },
+      "note": "GNU sed exits 4 when a w file cannot be written (`couldn't write ... items`); mirage reports the w file in its open-file voice and exits 4.",
+      "command": "seq 1 20 | sed 's/^/x/w /data2/out' > /dev/null; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n",
+        "stderr": "sed: couldn't open file /data2/out: Disk quota exceeded\n"
+      }
+    },
+    {
+      "id": "capacity_a_store_over_its_cap_at_load_keeps_its_data",
+      "seq": 18600010,
+      "targets": [
+        "ram"
+      ],
+      "mount_capacity": {
+        "/data": 1
+      },
+      "capacity_door": "load",
+      "note": "The seeded /data holds far more than 1 byte: the load keeps it, a read and a removal pass, and only growth is refused.",
+      "command": "cat /data/a.txt > /dev/null; echo $?; rm /data/a.txt; echo $?; printf x > /data/new; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\n1\n",
+        "stderr": "/data/new: Disk quota exceeded\n"
+      }
+    }
+  ]
+}

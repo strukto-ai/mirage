@@ -14,6 +14,7 @@
 
 import { z } from 'zod'
 
+import { parseLimit } from '../../utils/size.ts'
 import { parseConfigWithSchema, refuseRepeatedFields, type ConfigOf } from '../../vfs/secrets.ts'
 
 export const CacheType = Object.freeze({
@@ -56,12 +57,16 @@ export type RedisCacheConfig = ConfigOf<typeof RedisCacheConfigSchema>
  * spellings is refused, as python refuses the camelCase one.
  *
  * @param config the cache config as the caller passed it.
+ * @throws Error when `limit` is not a size.
  * @returns the checked config with every key in its camelCase spelling.
  */
 export function normalizeCacheConfig(config: CacheConfig): CacheConfig {
   const input = config as Record<string, unknown>
   refuseRepeatedFields(input)
-  return (input.type ?? CacheType.RAM) === CacheType.RAM
-    ? parseConfigWithSchema(CacheConfigSchema, input)
-    : parseConfigWithSchema(RedisCacheConfigSchema, input)
+  const parsed: CacheConfig =
+    (input.type ?? CacheType.RAM) === CacheType.RAM
+      ? parseConfigWithSchema(CacheConfigSchema, input)
+      : parseConfigWithSchema(RedisCacheConfigSchema, input)
+  if (parsed.limit !== undefined) parseLimit(parsed.limit, 'limit')
+  return parsed
 }

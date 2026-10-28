@@ -1,3 +1,4 @@
+import errno
 import logging
 from unittest.mock import AsyncMock
 
@@ -26,6 +27,11 @@ from mirage.workspace.workspace import Session
             FileNotFoundError("backend token=secret"),
             404,
             {"detail": "No such file or directory", "errno": "ENOENT"},
+        ),
+        (
+            OSError(errno.EDQUOT, "backend token=secret"),
+            507,
+            {"detail": "Disk quota exceeded", "errno": "EDQUOT"},
         ),
     ],
 )

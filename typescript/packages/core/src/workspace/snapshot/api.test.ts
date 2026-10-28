@@ -112,3 +112,44 @@ it('preserves the I/O buffer limit through copy and snapshot', async () => {
     await ws.close()
   }
 })
+
+describe('a snapshot and a RAM capacity', () => {
+  const bytes = (text: string): Uint8Array => new TextEncoder().encode(text)
+  async function refused(ws: Workspace, path: string, text: string): Promise<string | undefined> {
+    try {
+      await ws.vfs.write(path, bytes(text))
+    } catch (err) {
+      return (err as { code?: string }).code
+    }
+    return undefined
+  }
+
+  it('round-trips a cap through copy and load', async () => {
+    const src = new Workspace({ '/a': [new RAMVFS({ capacity: 10 }), MountMode.WRITE] })
+    const tar = await src.snapshot()
+    for (const dst of [await src.copy(), await Workspace.load(tar)]) {
+      const vfs = dst.registry.mountForPrefix('/a/').vfs
+      expect(vfs instanceof RAMVFS ? vfs.usage?.limit : undefined).toBe(10)
+      await dst.vfs.write('/a/f', bytes('12345678'))
+      expect(await refused(dst, '/a/g', '123')).toBe('EDQUOT')
+      await dst.close()
+    }
+    await src.close()
+  })
+
+  it('takes an override with its own capacity', async () => {
+    const src = new Workspace({ '/a': [new RAMVFS({ capacity: 10 }), MountMode.WRITE] })
+    await src.vfs.write('/a/f', bytes('x'.repeat(8)))
+    const tar = await src.snapshot()
+    await src.close()
+    const over = await Workspace.load(tar, {}, { '/a': new RAMVFS({ capacity: 1 }) })
+    const uncapped = new RAMVFS()
+    const free = await Workspace.load(tar, {}, { '/a': uncapped })
+    expect((await over.vfs.read('/a/f')).byteLength).toBe(8)
+    expect(await refused(over, '/a/g', '1')).toBe('EDQUOT')
+    await free.vfs.write('/a/g', bytes('y'.repeat(100)))
+    expect(uncapped.usage).toBeNull()
+    await over.close()
+    await free.close()
+  })
+})

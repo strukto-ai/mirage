@@ -28,6 +28,8 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
             {"type": "ram", "url": "redis://localhost:6379/0"},
             "url",
         ),
+        (CacheConfig, {"limit": True}, "limit"),
+        (RedisCacheConfig, {"limit": False}, "limit"),
         (RedisCacheConfig, {"key_prefx": "w1:"}, "key_prefx"),
         (
             RedisCacheConfig,
@@ -39,3 +41,9 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 def test_cache_config_refuses_a_field_it_does_not_take(model, fields, named):
     with pytest.raises(ValidationError, match=named):
         model(**fields)
+
+
+@pytest.mark.parametrize("model", [CacheConfig, RedisCacheConfig])
+@pytest.mark.parametrize(("limit", "kept"), [(1e6, 1000000), ("1MB", "1MB")])
+def test_cache_config_takes_a_whole_number_float_or_a_size(model, limit, kept):
+    assert model(limit=limit).limit == kept

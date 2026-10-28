@@ -196,6 +196,7 @@ write_world_yaml() {
        mounts: ((.mounts // {"/ram": {"vfs": "ram"}})
          | map_values({vfs: .vfs}
              + (if .mode then {mode: .mode} else {} end)
+             + (if .config then {config: .config} else {} end)
              + (if .limits then {command_limits: .limits} else {} end)))}
       + (if .command_limits then {command_limits: .command_limits} else {} end)
       + (if .profiles then {profiles: .profiles} else {} end)

@@ -17,6 +17,7 @@ import pytest
 from mirage.errors.fs import (
     dot_walk_error,
     ebadf,
+    edquot,
     efbig,
     eisdir,
     enoent,
@@ -117,6 +118,7 @@ def test_wc_and_du_vet_the_empty_name(cmd):
             "/m: Operation not supported",
         ),
         ("cat", efbig("/r"), "/r: File too large"),
+        ("tee", edquot("/q"), "/q: Disk quota exceeded"),
         (
             "rmdir",
             enotempty("/d"),

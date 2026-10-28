@@ -176,6 +176,9 @@ pub(super) struct Machine {
     /// reads files that may be the ones it writes.
     defer: bool,
     write_err: Vec<u8>,
+    /// Whether a `w` file failed: `write_err` is handed on as stderr, so it
+    /// cannot say so once the run is over.
+    write_failed: bool,
     ps: Vec<u8>,
     newline: bool,
     hold: Vec<u8>,
@@ -551,6 +554,7 @@ impl Machine {
             deferred: Vec::new(),
             defer,
             write_err: Vec::new(),
+            write_failed: false,
             ps: Vec::new(),
             newline: true,
             hold: Vec::new(),
@@ -617,12 +621,12 @@ impl Machine {
             .or(self.notes.bad.then_some(2))
             .unwrap_or(self.quit.unwrap_or(0));
         if !self.opts.in_place {
-            return if self.write_err.is_empty() { code } else { 4 };
+            return if self.write_failed { 4 } else { code };
         }
         if let Some(panic) = self.panic {
             return panic;
         }
-        if !self.write_err.is_empty() || self.edit_code == 4 {
+        if self.write_failed || self.edit_code == 4 {
             return 4;
         }
         if self.edit_code != 0 {
@@ -1697,9 +1701,15 @@ impl Machine {
                             self.edit_code = 4;
                         } else {
                             // Any other failure to write the edit ends the
-                            // run there, nothing else committed.
-                            let line = operand_failure(name, &failure, &text);
-                            self.refused = Some(Refusal::new(line, failure_code(&failure)));
+                            // run there, nothing else committed; a full
+                            // quota exits 4, as GNU's failed write does.
+                            let refusal = if failure.names(&["EDQUOT"]) {
+                                Refusal::new(couldnt(b"edit", name, &text), 4)
+                            } else {
+                                let line = operand_failure(name, &failure, &text);
+                                Refusal::new(line, failure_code(&failure))
+                            };
+                            self.refused = Some(refusal);
                             self.io.requests.clear();
                             self.phase = Phase::Done;
                         }
@@ -1716,6 +1726,7 @@ impl Machine {
                     self.refused = Some(Refusal::new(message, 4));
                 } else if !std::mem::replace(&mut file.failed, true) {
                     self.write_err.extend_from_slice(&message);
+                    self.write_failed = true;
                 }
             }
             _ => {}

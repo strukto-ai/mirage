@@ -132,6 +132,7 @@ A `200` means the server ran the line, not that the line succeeded: check
 | `429` | Too many requests. The TypeScript server only; see [its limits](/typescript/access/server#what-is-particular-to-this-server). |
 | `499` | The job was canceled. |
 | `500` | The job failed inside the server. |
+| `507` | A file call's write would pass its store's capacity. |
 
 ## Server
 
@@ -483,6 +484,7 @@ refused it. The errno picks the status:
 | `403` | `EACCES`, `EPERM`, `EROFS` |
 | `404` | `ENOENT`, `NO_XATTR` |
 | `409` | `EEXIST`, `ENOTEMPTY`, `EBUSY` |
+| `507` | `EDQUOT` |
 | `500` | Anything else, such as `EIO` |
 
 ### Call a custom function
