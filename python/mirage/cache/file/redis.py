@@ -18,9 +18,10 @@ from typing import cast
 from mirage.cache.file.constants import DEFAULT_KEY_PREFIX
 from mirage.cache.file.invalidation import Invalidation, with_fill_guard
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
-from mirage.cache.file.utils import glob_escape, parse_limit
+from mirage.cache.file.utils import glob_escape
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import under_path
+from mirage.utils.size import parse_limit
 from mirage.vfs.redis.redis import RedisVFS
 
 VERSION_LUA = (files("mirage.cache.file") / "version.lua").read_text(
@@ -66,7 +67,7 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         key_prefix: str = DEFAULT_KEY_PREFIX,
         max_drain_bytes: int | None = None,
     ) -> None:
-        parsed_limit = parse_limit(cache_limit)
+        parsed_limit = parse_limit(cache_limit, "limit")
         validate_max_drain_bytes(parsed_limit, max_drain_bytes)
         super().__init__(url=url, key_prefix=key_prefix)
         # Advisory only: unlike the RAM store there is no client-side

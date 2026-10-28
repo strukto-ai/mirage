@@ -37,6 +37,7 @@ WASI: dict[FsCondition, int] = {
     FsCondition.EBUSY: 10,
     FsCondition.EROFS: 69,
     FsCondition.EFBIG: 22,
+    FsCondition.EDQUOT: 19,
     FsCondition.EPIPE: 64,
     # preview1 has no xattr syscalls, so this row is unreachable from a
     # guest; ENOTSUP is the honest answer if a future host ever asks.

@@ -305,7 +305,8 @@ export function loadCases(root: string): Case[] {
  * anywhere, which reads as "passing" everywhere. A `mount_read` or a `write`
  * without a `read` is routed as an ordinary case, where the selector is never
  * applied, and `faults` beside a `read` goes to the scenario runner, which
- * never arms them.
+ * never arms them; so does a `mount_capacity`, and a `capacity_door` needs one
+ * to open.
  */
 export function validateCases(root: string, cases: Case[]): void {
   const known = new Set(loadTargets(root).keys())
@@ -329,6 +330,19 @@ export function validateCases(root: string, cases: Case[]): void {
     if (c.faults !== undefined && c.read !== undefined) {
       throw new Error(
         `case ${c.id}: faults ride plain cases only; the scenario runner never arms them`,
+      )
+    }
+    if (c.capacity_door !== undefined && c.mount_capacity === undefined) {
+      throw new Error(`case ${c.id}: capacity_door needs mount_capacity`)
+    }
+    if (!['open', 'load'].includes(c.capacity_door ?? 'open')) {
+      throw new Error(
+        `case ${c.id}: capacity_door is open or load, got '${String(c.capacity_door)}'`,
+      )
+    }
+    if (c.mount_capacity !== undefined && c.read !== undefined) {
+      throw new Error(
+        `case ${c.id}: mount_capacity rides plain cases only; the scenario runner never applies it`,
       )
     }
     const first = seen.get(c.id)

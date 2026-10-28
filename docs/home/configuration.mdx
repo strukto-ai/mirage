@@ -77,6 +77,28 @@ Each mount key is an absolute virtual prefix, such as `/data`.
 | `fskit` | As a local folder through FSKit, on macOS 15.4 or later. |
 | `nfs` | As a local folder through the operating system's NFS client. Mirage serves NFSv3 on a local port and runs the system `mount`, so nothing extra is installed. Linux and macOS; Linux needs root. Read-only. A VFS that cannot size a file without reading it still mounts, with a warning, but those files read as empty; use `fuse` for it. |
 
+## Capacity
+
+A RAM, disk, Redis or OPFS store takes `capacity` in its `config`, as a
+[size](#sizes):
+
+```yaml
+mounts:
+  /data:
+    vfs: ram
+    mode: write
+    config:
+      capacity: 100MB
+```
+
+A write past it fails with `EDQUOT` ("Disk quota exceeded", the same message
+for every store). Stored data stays readable and removable, and `df` shows
+the capacity as the store's size.
+
+In Python, a store with a capacity serves one event loop at a time, so it
+cannot be exposed through FUSE or FSKit yet. Two workspaces on one disk folder, Redis key prefix or OPFS directory
+each count only their own writes.
+
 ## Read and write policies
 
 `read` decides when Mirage serves cached file content:
@@ -131,7 +153,7 @@ defaults `url` to `redis://localhost:6379/0`.
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `limit` | `512MB` | Cache size, in bytes or as a size string. |
+| `limit` | `512MB` | Cache size, as a [size](#sizes). |
 | `max_drain_bytes` | 8 MiB or `limit`, whichever is smaller | Largest file a streamed read copies into the cache. Cannot exceed `limit`. |
 | `url`, `key_prefix` | the workspace's own keys | Redis only. Name one `key_prefix` in several workspaces to share their cache. |
 
@@ -211,3 +233,9 @@ fetched through a source instead.
 Relative script paths and file-based code references resolve from the config
 file's directory. Relative dotenv paths resolve from the Mirage process's
 working directory.
+
+## Sizes
+
+A size is a number of bytes, optionally followed by `K`, `M` or `G` and an
+optional `B`, in any case: `4096`, `512K`, `100MB`, `1g`. The suffixes are
+binary (`K` is 1024 bytes). Anything else is refused.

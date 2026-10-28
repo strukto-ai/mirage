@@ -17,6 +17,7 @@ import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { CapacityState, MountMode } from '../../../../types.ts'
 import type { CapacityResult } from '../../../../types.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
+import { Mount } from '../../../mount/spec.ts'
 
 // RAM backend that reports a fixed quota, standing in for a real filesystem
 // / a provider that exposes storage numbers (real disk free space is
@@ -54,6 +55,22 @@ describe('df', () => {
     const cap = await new RAMVFS().capacity()
     expect(cap.state).toBe(CapacityState.UNKNOWN)
     expect(cap.total).toBeUndefined()
+  })
+
+  it('reports a capped store, df and stat -f alike', async () => {
+    const vfs = new RAMVFS({ capacity: '1MB' })
+    const ws = new Workspace(
+      { '/cap': new Mount(vfs, { mode: MountMode.WRITE }) },
+      { mode: MountMode.WRITE },
+    )
+    await ws.shell('head -c 1000 /dev/zero > /cap/z')
+    expect(await run(ws, 'df /cap')).toEqual([
+      0,
+      'Filesystem     1K-blocks Used Available Use% Mounted on\n' +
+        'ram                 1024    1      1024   1% /cap\n',
+    ])
+    expect(await run(ws, "stat -f -c '%b %S %a' /cap")).toEqual([0, '1024 1024 1024\n'])
+    await ws.close()
   })
 
   it('unknown backend renders dashes', async () => {

@@ -325,13 +325,14 @@ class WalkProbe:
 class CapacityState(StrEnum):
     """How a mount's capacity relates to a df-style report.
 
-    QUOTA: real total/used/available numbers are known (a real disk, or a
-    provider that exposes a storage quota). ELASTIC: the backend has no
-    fixed size (object stores like S3 grow without a quota). NA: the
-    backend has no filesystem-capacity concept (a message/table surface
-    like Slack or Postgres). UNKNOWN: bounded but not cheaply measurable,
-    or simply not reported yet. df renders real numbers for QUOTA and a
-    literal ``-`` for the rest — never a fabricated total.
+    QUOTA: real total/used/available numbers are known (a real disk, a
+    provider that exposes a storage quota, or a store's capacity).
+    ELASTIC: the backend has no fixed size (object stores like S3 grow
+    without a quota). NA: the backend has no filesystem-capacity concept
+    (a message/table surface like Slack or Postgres). UNKNOWN: bounded but
+    not cheaply measurable, or simply not reported yet. df renders real
+    numbers for QUOTA and a literal ``-`` for the rest — never a
+    fabricated total.
     """
 
     QUOTA = "quota"

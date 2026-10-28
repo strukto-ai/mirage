@@ -23,6 +23,7 @@ from mirage.errors.fs import (
     eacces,
     ebadf,
     ebusy,
+    edquot,
     eexist,
     efbig,
     eisdir,
@@ -54,6 +55,7 @@ from mirage.errors.types import (
     FileTooLargeError,
     NoMountError,
     OperationNotSupportedError,
+    QuotaExceededError,
     ReadOnlyError,
     StaleWriteError,
 )
@@ -72,6 +74,7 @@ from mirage.utils.abort import MirageAbortError
         (erofs, FsCondition.EROFS, ReadOnlyError),
         (ebadf, FsCondition.EBADF, BadDescriptorError),
         (efbig, FsCondition.EFBIG, FileTooLargeError),
+        (edquot, FsCondition.EDQUOT, QuotaExceededError),
         (eloop, FsCondition.ELOOP, DotWalkLoop),
         (enotempty, FsCondition.ENOTEMPTY, OSError),
         (exdev, FsCondition.EXDEV, OSError),

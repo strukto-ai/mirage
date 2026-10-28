@@ -15,9 +15,11 @@
 import { describe, expect, it } from 'vitest'
 import { mkdir as coreMkdir } from '../../core/ram/mkdir.ts'
 import { ops } from '../../test-utils.ts'
-import { FileType, MountMode, PathSpec, VFSName } from '../../types.ts'
+import { CapacityState, FileType, MountMode, PathSpec, VFSName } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from './ram.ts'
+import { VFSConfigError } from '../errors.ts'
+import { DevVFS } from '../dev/dev.ts'
 
 function setup(): { ram: RAMVFS; ws: Workspace } {
   const ram = new RAMVFS()
@@ -293,6 +295,96 @@ describe('RAMVFS through Workspace', () => {
     await ws.dispatch('write', '/ram/hello.txt', [payload])
     const read = await ws.dispatch('read', '/ram/hello.txt')
     expect(read).toEqual(payload)
+    await ws.close()
+  })
+})
+
+describe('RAMVFS capacity', () => {
+  it('reports no capacity uncapped', async () => {
+    expect(new RAMVFS().usage).toBeNull()
+    expect(await new RAMVFS().capacity()).toEqual({ state: CapacityState.UNKNOWN })
+    expect(await new DevVFS().capacity()).toEqual({ state: CapacityState.UNKNOWN })
+  })
+
+  it('counts and reports its quota capped', async () => {
+    const vfs = new RAMVFS({ capacity: '1K' })
+    vfs.store.files.set('/a', new TextEncoder().encode('1234'))
+    expect(await vfs.capacity()).toEqual({
+      state: CapacityState.QUOTA,
+      total: 1024,
+      used: 4,
+      available: 1020,
+    })
+    vfs.store.files.delete('/a')
+    expect(vfs.usage?.used).toBe(0)
+  })
+
+  it('refuses a capacity that is not a size, naming the backend', () => {
+    expect(() => new RAMVFS({ capacity: '1.5MB' })).toThrow(
+      new VFSConfigError('ram: capacity must be a size like 100MB, got "1.5MB"'),
+    )
+  })
+
+  it('recounts the store on loadState', async () => {
+    const vfs = new RAMVFS({ capacity: 10 })
+    vfs.store.files.set('/old', new TextEncoder().encode('12345678'))
+    vfs.loadState({ type: 'ram', files: { '/a': new TextEncoder().encode('123') }, dirs: ['/'] })
+    expect((await vfs.capacity()).used).toBe(3)
+  })
+
+  it('saves its capacity in its state only when capped', () => {
+    expect(new RAMVFS().getState().config).toBeUndefined()
+    expect(new RAMVFS({ capacity: 10 }).getState().config).toEqual({ capacity: 10 })
+  })
+
+  it('refuses growth past its cap', async () => {
+    const data = new RAMVFS({ capacity: 10 })
+    const ws = new Workspace({ '/a': [data, MountMode.WRITE] })
+    expect((await ws.shell('printf 12345678 > /a/f')).exitCode).toBe(0)
+    const refused = await ws.shell('printf 123 > /a/g')
+    expect(refused.exitCode).toBe(1)
+    expect(refused.stderrText).toBe('/a/g: Disk quota exceeded\n')
+    expect([data.usage?.limit, data.usage?.used]).toEqual([10, 8])
+    expect((await ws.shell('printf 12 > /a/g')).exitCode).toBe(0)
+    expect((await ws.shell('printf 1 > /a/h')).exitCode).toBe(1)
+    await ws.close()
+  })
+
+  it('shares its cap with a second workspace', async () => {
+    const data = new RAMVFS({ capacity: 4 })
+    const first = new Workspace({ '/a': [data, MountMode.WRITE] })
+    const second = new Workspace({ '/x': [data, MountMode.WRITE] })
+    expect((await first.shell('printf 123 > /a/f')).exitCode).toBe(0)
+    await first.close()
+    expect((await second.shell('printf 12 > /x/g')).exitCode).toBe(1)
+    expect((await second.shell('printf 1 > /x/g')).exitCode).toBe(0)
+    await second.close()
+  })
+
+  it('never passes its cap under parallel writers', async () => {
+    const data = new RAMVFS({ capacity: 10 })
+    const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+    const results = await Promise.all([
+      ...Array.from({ length: 20 }, (_, i) => ws.shell(`printf 123 > /d/f${String(i)}`)),
+      ws.shell('seq 1 1000 > /d/s'),
+    ])
+    expect(results.slice(0, 20).filter((r) => r.exitCode === 0).length).toBeLessThanOrEqual(3)
+    let held = 0
+    for (const bytes of data.store.files.values()) held += bytes.byteLength
+    expect(data.usage?.used).toBe(held)
+    expect(held).toBeLessThanOrEqual(10)
+    expect(data.usage?.pending).toBe(0)
+    await ws.close()
+  })
+
+  it('keeps a store over its cap and refuses only growth', async () => {
+    const data = new RAMVFS({ capacity: 10 })
+    data.loadState({ type: 'ram', files: { '/big': new Uint8Array(20) }, dirs: ['/'] })
+    const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+    expect((await ws.shell('wc -c < /d/big')).exitCode).toBe(0)
+    expect((await ws.shell('printf 1 > /d/new')).exitCode).toBe(1)
+    expect((await ws.shell('truncate -s 5 /d/big')).exitCode).toBe(0)
+    expect((await ws.shell('printf 1234 > /d/new')).exitCode).toBe(0)
     await ws.close()
   })
 })

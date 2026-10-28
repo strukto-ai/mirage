@@ -20,10 +20,12 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.pwrite import pwrite
+from mirage.errors.types import QuotaExceededError
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.vfs.dev.store import DevFiles, DevStore
 from mirage.vfs.ram.store import RAMStore
+from tests.fixtures.ram_capacity import capped, ram_path, table_bytes
 
 PATH = PathSpec(vfs_path="f.txt", virtual="/f.txt", directory="/")
 FD = PathSpec(vfs_path="fd/63", virtual="/dev/fd/63", directory="/dev/fd/")
@@ -81,3 +83,32 @@ async def test_pwrite_into_a_discarding_device_pads_nothing():
         tracemalloc.stop()
     assert peak < 1 << 20
     assert store.files["/null"] == b""
+
+
+@pytest.mark.asyncio
+async def test_a_capped_pwrite_charges_only_its_growth():
+    accessor, usage = capped(10, {"/f": b"12345678"})
+    await pwrite(accessor, ram_path("/f"), b"ab", 2)
+    await pwrite(accessor, ram_path("/f"), b"xyz", 7)
+    assert accessor.store.files["/f"] == b"12ab567xyz"
+    assert usage.used == table_bytes(accessor) == 10
+    with pytest.raises(QuotaExceededError):
+        await pwrite(accessor, ram_path("/f"), b"q", 10)
+    assert accessor.store.files["/f"] == b"12ab567xyz"
+
+
+@pytest.mark.asyncio
+async def test_a_sparse_pwrite_past_the_cap_is_refused_before_it_builds():
+    accessor, usage = capped(10)
+    with pytest.raises(QuotaExceededError):
+        await pwrite(accessor, ram_path("/f"), b"x", 1 << 40)
+    assert "/f" not in accessor.store.files
+    assert usage.used == 0
+
+
+@pytest.mark.asyncio
+async def test_an_empty_pwrite_past_the_end_changes_nothing():
+    accessor, usage = capped(0, {"/f": b""})
+    await pwrite(accessor, ram_path("/f"), b"", 1 << 40)
+    assert accessor.store.files["/f"] == b""
+    assert usage.used == 0

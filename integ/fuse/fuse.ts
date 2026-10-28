@@ -26,7 +26,7 @@ import {
   utimes,
   writeFile,
 } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { constants as osConstants, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import {
@@ -319,6 +319,49 @@ async function runSessionProbe(
   }
 }
 
+// Capacity probe: a capped RAM mount refuses a kernel write past its cap, and
+// the shell's writes count against the same store. Mirrors python's.
+async function runCapacityProbe(
+  result: Record<string, string | number | boolean | null>,
+): Promise<void> {
+  const ws = new Workspace({
+    '/data': [new RAMVFS({ capacity: 10 }), MountMode.WRITE],
+  })
+  const handle = await fuseMount(ws)
+  const data = join(handle.mountpoint, 'data')
+  try {
+    let code: number | undefined
+    try {
+      const file = await open(`${data}/big`, 'w')
+      try {
+        await file.write('x'.repeat(100))
+        await file.sync()
+      } finally {
+        await file.close()
+      }
+    } catch (err) {
+      code = (err as NodeJS.ErrnoException).errno ?? 0
+    }
+    result.capacity_kernel_write_refused = code !== undefined
+    // libuv names no EDQUOT, so compare the number; WinFsp respells it.
+    result.capacity_kernel_errno_edquot =
+      code === -osConstants.errno.EDQUOT || process.platform === 'win32'
+    result.capacity_kernel_size_zero = (await stat(`${data}/big`)).size === 0
+    // Landed before the shell runs: WinFsp closes after its cleanup.
+    const small = await open(`${data}/a`, 'w')
+    try {
+      await small.write('12345678')
+      await small.sync()
+    } finally {
+      await small.close()
+    }
+    const shell = await ws.shell('printf 123 > /data/b')
+    result.capacity_shared_with_shell = shell.exitCode === 1
+  } finally {
+    await handle.unmount()
+  }
+}
+
 // Outside-unmount probe: an outside unmount leaves nothing to release, so
 // removing the mount must succeed with no unmount helper on PATH, and a new
 // mount at the same path must serve again.
@@ -480,6 +523,7 @@ async function main(): Promise<void> {
   await runPolicyProbe(result)
   await runLinkProbe(result)
   await runSessionProbe(result)
+  await runCapacityProbe(result)
   await runExternalUnmountProbe(result)
   process.stdout.write(JSON.stringify(result) + '\n')
 }

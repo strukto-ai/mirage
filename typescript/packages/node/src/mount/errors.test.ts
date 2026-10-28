@@ -45,6 +45,7 @@ describe('classifyErrno', () => {
     // filesystem" and mv falls back to copy+unlink, so this may not
     // degrade to EIO on the way out of the mount.
     ['EXDEV', EXDEV],
+    ['EDQUOT', osConstants.errno.EDQUOT],
   ] as const)('maps the %s code property', (code, expected) => {
     expect(classifyErrno(unnamedFsError(code, 'boom'))).toBe(expected)
   })

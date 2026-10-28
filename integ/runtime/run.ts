@@ -162,6 +162,8 @@ interface MountSpecJson {
   // way an upstream 5xx does while the listing still names them.
   failing?: string[]
   limits?: Record<string, Record<string, unknown>>
+  // The RAM store's own settings, as a mount block's `config` names them.
+  config?: { capacity?: number | string }
 }
 
 interface CliSpecJson {
@@ -788,7 +790,8 @@ class FailingRAMVFS extends RAMVFS {
 async function buildVfs(spec: MountSpecJson, runId: string): Promise<BaseVFS> {
   if (spec.vfs === 'shortcuts') return new ShortcutRAMVFS()
   if (spec.vfs === 'ram') {
-    const vfs = spec.failing !== undefined ? new FailingRAMVFS(spec.failing) : new RAMVFS()
+    const vfs =
+      spec.failing !== undefined ? new FailingRAMVFS(spec.failing) : new RAMVFS(spec.config ?? {})
     if (spec.generated_files !== undefined) {
       vfs.loadState({
         type: 'ram',

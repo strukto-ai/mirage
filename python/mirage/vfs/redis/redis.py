@@ -12,10 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from contextlib import AbstractAsyncContextManager
+from functools import partial
 from typing import Any, cast
 from urllib.parse import quote
 
 from mirage.core.redis.capacity import capacity as _capacity
+from mirage.core.redis.capacity import count as _count
+from mirage.core.redis.capacity import size_of as _size_of
 from mirage.core.redis.copy import copy as _copy
 from mirage.core.redis.create import create as _create
 from mirage.core.redis.exists import exists as _exists
@@ -33,6 +37,7 @@ from mirage.core.redis.stream import read_stream as _read_stream
 from mirage.core.redis.truncate import truncate as _truncate
 from mirage.core.redis.unlink import unlink as _unlink
 from mirage.core.redis.write import write as _write
+from mirage.errors.types import QuotaExceededError
 from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec
 
@@ -47,6 +52,7 @@ except ImportError as _err:
 from mirage.accessor.redis import RedisAccessor
 from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.capacity import Charge, charge, storage_usage
 from mirage.vfs.redis.store import RedisStore, escape_glob
 from mirage.vfs.secrets import REDACTED_SECRET
 
@@ -65,16 +71,30 @@ class RedisVFS(BaseVFS):
         self,
         url: str = "redis://localhost:6379/0",
         key_prefix: str = "mirage:fs:",
+        capacity: int | str | None = None,
     ) -> None:
         """Args:
         url (str): the Redis server.
         key_prefix (str): the prefix every key of the mount starts with.
+        capacity (int | str | None): the most bytes the mount's files may
+            hold, a size like ``100MB`` or a count of bytes; None for no
+            limit. Counted at the first write or ``df``; a writer in
+            another process is counted at the next ``df``.
         """
         super().__init__()
         self.url = url
         self.key_prefix = key_prefix
         self._store = RedisStore(url=url, key_prefix=key_prefix)
         self.accessor = RedisAccessor(self._store)
+        self.usage = storage_usage(self.name, capacity)
+
+    def _charge(self, path: PathSpec) -> AbstractAsyncContextManager[Charge]:
+        return charge(
+            self.usage,
+            path,
+            partial(_size_of, self.accessor),
+            partial(_count, self.accessor),
+        )
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
         return await _readdir(self.accessor, path)
@@ -104,16 +124,25 @@ class RedisVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        await _write(self.accessor, path, data, atomic=atomic)
+        async with self._charge(path) as held:
+            await _write(self.accessor, path, held.stream(data), atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
-        await _write(self.accessor, path, data, append=True)
+        async with self._charge(path) as held:
+            await _write(
+                self.accessor,
+                path,
+                held.stream(data, append=True),
+                append=True,
+            )
 
     async def create(self, path: PathSpec) -> None:
-        await _create(self.accessor, path)
+        async with self._charge(path):
+            await _create(self.accessor, path)
 
     async def unlink(self, path: PathSpec) -> None:
-        await _unlink(self.accessor, path)
+        async with self._charge(path):
+            await _unlink(self.accessor, path)
 
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         await _mkdir(self.accessor, path, parents=parents)
@@ -122,18 +151,33 @@ class RedisVFS(BaseVFS):
         await _rmdir(self.accessor, path)
 
     async def rm_r(self, path: PathSpec) -> Any:
-        return await _rm_r(self.accessor, path)
+        async with self._charge(path):
+            return await _rm_r(self.accessor, path)
 
     async def rename(self, src: PathSpec, dst: PathSpec) -> None:
-        await _rename(self.accessor, src, dst)
+        async with self._charge(src), self._charge(dst):
+            await _rename(self.accessor, src, dst)
 
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
-        await _copy(self.accessor, src, dst)
+        async with self._charge(dst) as held:
+            if self.usage is not None:
+                held.grow_to(await _size_of(self.accessor, src))
+            await _copy(self.accessor, src, dst)
+            if self.usage is not None:
+                copied = await _size_of(self.accessor, dst)
+                try:
+                    held.grow_to(copied)
+                except QuotaExceededError:
+                    await _truncate(self.accessor, dst, held.reserved, True)
+                    raise
 
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
-        await _truncate(self.accessor, path, length, no_create)
+        async with self._charge(path) as held:
+            if not no_create or await self.exists(path):
+                held.grow_to(length)
+            await _truncate(self.accessor, path, length, no_create)
 
     async def setattr(
         self,
@@ -156,6 +200,12 @@ class RedisVFS(BaseVFS):
         )
 
     async def capacity(self) -> CapacityResult:
+        """The mount's own quota when capped, counted afresh so a writer in
+        another process shows; else the server's memory."""
+        if self.usage is not None:
+            self.usage.stale()
+            await self.usage.counted(partial(_count, self.accessor))
+            return self.usage.report()
         return await _capacity(self.accessor)
 
     def storage_location(self) -> str:
@@ -216,6 +266,11 @@ class RedisVFS(BaseVFS):
             "config": {
                 "url": REDACTED_SECRET,
                 "key_prefix": prefix,
+                **(
+                    {"capacity": self.usage.limit}
+                    if self.usage is not None
+                    else {}
+                ),
             },
             "key_prefix": prefix,
             "files": files,
@@ -243,6 +298,8 @@ class RedisVFS(BaseVFS):
             pipe.execute()
         finally:
             client.close()
+        if self.usage is not None:
+            self.usage.stale()
 
     async def close(self) -> None:
         if self._closed:

@@ -16,6 +16,7 @@ import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide/runtime'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { RAMJobStore } from '@struktoai/mirage-core/shell/job_table/ram'
@@ -34,6 +35,7 @@ import { RedisConsoleStore } from './shell/console/redis/index.ts'
 import { RedisJobStore } from './shell/job_table/redis.ts'
 import { RedisFileCacheStore } from './cache/file/redis.ts'
 import { Workspace } from './workspace.ts'
+import { DiskVFS } from './vfs/disk/disk.ts'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -127,6 +129,40 @@ describe('configToWorkspaceArgs', () => {
     const args = await configToWorkspaceArgs(cfg)
     expect(args.mounts['/']).toBeDefined()
     expect(args.options.mode).toBe('write')
+  })
+
+  it('builds a RAM mount with the capacity its config names', async () => {
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts: { '/d': { vfs: 'ram', config: { capacity: '100MB' } }, '/e': { vfs: 'ram' } },
+      }),
+    )
+    const capped = args.mounts['/d']?.vfs
+    const bare = args.mounts['/e']?.vfs
+    expect(capped instanceof RAMVFS ? capped.usage?.limit : undefined).toBe(100 * 2 ** 20)
+    expect(bare instanceof RAMVFS ? bare.usage : undefined).toBeNull()
+  })
+
+  it('builds a disk mount with the capacity its config names', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mirage-cap-'))
+    try {
+      const args = await configToWorkspaceArgs(
+        loadWorkspaceConfig({
+          mounts: { '/d': { vfs: 'disk', config: { root, capacity: '1K' } } },
+        }),
+      )
+      const vfs = args.mounts['/d']?.vfs
+      expect(vfs instanceof DiskVFS ? vfs.usage?.limit : undefined).toBe(1024)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a RAM capacity that is not a size', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/d': { vfs: 'ram', config: { capacity: '5T' } } },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/capacity must be a size like 100MB/)
   })
 
   it('lower-cases mount mode and rejects invalid values', async () => {

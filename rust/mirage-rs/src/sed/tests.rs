@@ -552,6 +552,28 @@ fn w_files_are_emptied_written_and_committed() {
         )
     );
     let run = files_run(
+        "w /brim/o",
+        &["/in"],
+        &[("/in", "a\n")],
+        json!({"in_place": true, "paths": ["/in"]}),
+    );
+    assert_eq!(
+        (run.err.as_str(), run.status),
+        (
+            "sed: couldn't open file /brim/o: No space left on device\n",
+            4
+        )
+    );
+    let run = files_run("w /brim/o", &["/in"], &[("/in", "a\n")], json!({}));
+    assert_eq!(
+        (run.out.as_str(), run.err.as_str(), run.status),
+        (
+            "a\n",
+            "sed: couldn't open file /brim/o: No space left on device\n",
+            4
+        )
+    );
+    let run = files_run(
         "1w /dev/stderr",
         &["/in"],
         &[("/in", "a\nb\n")],
@@ -729,7 +751,12 @@ fn a_failed_edit_stops_the_run() {
             "in_place": true,
         })
     };
-    let files = [("/stale/f", "a\n"), ("/denied/f", "a\n"), ("/g", "a\n")];
+    let files = [
+        ("/stale/f", "a\n"),
+        ("/denied/f", "a\n"),
+        ("/full/f", "a\n"),
+        ("/g", "a\n"),
+    ];
     let run = run_host(config("/stale/"), Host::with(&files, ""));
     assert_eq!(
         (run.err.as_str(), run.status),
@@ -745,6 +772,14 @@ fn a_failed_edit_stops_the_run() {
         (run.err.as_str(), run.status),
         ("sed: can't read /denied/f: Permission denied\n", 1)
     );
+    assert_eq!(run.files["/g"], b"a\n");
+    assert_eq!(run.files["/o"], b"");
+    let run = run_host(config("/full/"), Host::with(&files, ""));
+    assert_eq!(
+        (run.err.as_str(), run.status),
+        ("sed: couldn't edit /full/f: Disk quota exceeded\n", 4)
+    );
+    assert_eq!(run.files["/full/f"], b"a\n");
     assert_eq!(run.files["/g"], b"a\n");
     assert_eq!(run.files["/o"], b"");
 }

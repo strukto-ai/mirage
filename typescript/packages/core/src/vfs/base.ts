@@ -28,6 +28,7 @@ import type {
 import { CapacityState, ListingVersion } from '../types.ts'
 import type { DeltaHook } from '../events/base.ts'
 import { methodName, vfsCall } from './call.ts'
+import type { StorageUsage } from './capacity.ts'
 import { WALK_LIMIT } from './constants.ts'
 import { Effect, type Handed, Target } from './types.ts'
 
@@ -249,6 +250,10 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * aggregate on the host instead of streaming through mirage.
    */
   readonly local: boolean = false
+
+  /** The store's capacity and counted bytes, set by a backend whose config
+   * caps it; null when uncapped. */
+  readonly usage: StorageUsage | null = null
   /**
    * The files `filesContaining` answers for, as mount-relative globs matched
    * segment by segment (a glob naming a directory covers what is below it);

@@ -32,6 +32,7 @@ from mirage.types import (
     SearchQuery,
 )
 from mirage.vfs.call import vfs_call
+from mirage.vfs.capacity import StorageUsage
 from mirage.vfs.constants import WALK_LIMIT
 from mirage.vfs.secrets import redacted_config_dump
 from mirage.vfs.types import (
@@ -158,6 +159,10 @@ class BaseVFS:
     # Whether the data lives on the host filesystem, which lets a command
     # aggregate on the host instead of streaming through mirage.
     local: bool = False
+
+    # The store's capacity and counted bytes, set by a backend whose
+    # config caps it; None when uncapped.
+    usage: StorageUsage | None = None
 
     # The files ``files_containing`` answers for, as mount-relative
     # globs matched segment by segment (a glob naming a directory covers

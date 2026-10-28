@@ -19,8 +19,8 @@ import pytest
 from redis.exceptions import ResponseError
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.core.redis.capacity import capacity
-from mirage.types import CapacityResult, CapacityState
+from mirage.core.redis.capacity import capacity, count, size_of
+from mirage.types import CapacityResult, CapacityState, PathSpec
 from mirage.vfs.redis.store import RedisStore
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
@@ -84,3 +84,14 @@ async def test_a_live_server_reports_its_memory(redis_prefix):
     finally:
         await store.close()
     assert result.state in (CapacityState.QUOTA, CapacityState.ELASTIC)
+
+
+@pytest.mark.asyncio
+async def test_size_of_counts_a_file_a_directory_and_nothing(store):
+    await store.store.set_file("/a", b"123")
+    await store.store.set_file("/d/b", b"4567")
+    await store.store.set_file("/d/e/c", b"89")
+    assert await size_of(store, PathSpec.from_str_path("/a")) == 3
+    assert await size_of(store, PathSpec.from_str_path("/d")) == 6
+    assert await size_of(store, PathSpec.from_str_path("/none")) == 0
+    assert await count(store) == 9

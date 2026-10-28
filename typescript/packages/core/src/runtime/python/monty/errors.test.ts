@@ -48,6 +48,7 @@ describe('the CPython table', () => {
     ['ENOTEMPTY', 'OSError', 39, 'Directory not empty'],
     ['ELOOP', 'OSError', 40, 'Too many levels of symbolic links'],
     ['NO_XATTR', 'OSError', 61, 'No data available'],
+    ['EDQUOT', 'OSError', 122, 'Disk quota exceeded'],
   ] as const)('renders %s as CPython on Linux', (cond, exception, errno, phrase) => {
     // A guest interpreter is platform-neutral, so neither its numbering
     // nor its wording wobbles with the host. Mirrors the python

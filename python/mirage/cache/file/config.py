@@ -13,8 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from mirage.utils.size import parse_limit
 
 
 class CacheType(str, Enum):
@@ -28,6 +31,12 @@ class CacheConfig(BaseModel):
     type: CacheType = CacheType.RAM
     limit: str | int = "512MB"
     max_drain_bytes: int | None = None
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _v_limit(cls, v: Any) -> Any:
+        parse_limit(v, "limit")
+        return v
 
 
 class RedisCacheConfig(CacheConfig):

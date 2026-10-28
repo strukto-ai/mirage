@@ -113,7 +113,7 @@ The bundle's default world is one RAM scratch mount at `/tmp`. Mount real source
       - { name: monty, captures: [python, python3] }
 ```
 
-The same blocks work in code, beside live instances, in `MirageService`'s `mounts`. A runtime row also takes the runtime's own `config`, as a workspace file's does, and refuses a key the runtime does not have.
+A mount block takes `vfs`, `mode` and `config`, and refuses any other key. The same blocks work in code, beside live instances, in `MirageService`'s `mounts`. A runtime row also takes the runtime's own `config`, as a workspace file's does, and refuses a key the runtime does not have.
 
 Both seams tell dsh they are a `workspace-write` sandbox, which is what lets dsh's permission presets compose over them. The claim holds only while every runtime stays inside the VFS (each runtime's `reach` is `workspace`). Add a host-reaching one, such as `local` Python, and both seams drop the claim, since a script could then act outside the mounts: dsh is better told there is no sandbox than a false one.
 

@@ -12,31 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.file.utils import glob_escape, parse_limit
-
-
-def test_parse_limit_bytes():
-    assert parse_limit(1024) == 1024
-
-
-def test_parse_limit_kb():
-    assert parse_limit("1KB") == 1024
-
-
-def test_parse_limit_mb():
-    assert parse_limit("512MB") == 536870912
-
-
-def test_parse_limit_gb():
-    assert parse_limit("1GB") == 1073741824
-
-
-def test_parse_limit_lowercase():
-    assert parse_limit("10mb") == 10485760
-
-
-def test_parse_limit_plain_string():
-    assert parse_limit("1024") == 1024
+from mirage.cache.file.utils import glob_escape
 
 
 def test_glob_escape_leaves_an_ordinary_path_alone():

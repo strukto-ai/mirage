@@ -72,3 +72,12 @@ def test_memory_limit_reads_a_size_or_a_count_of_bytes(value, size):
 def test_memory_limit_refuses_anything_else(value):
     with pytest.raises(ValueError, match="max_memory must be a size"):
         memory_limit(value)
+
+
+def test_memory_limit_refuses_through_the_shared_size_parser():
+    # \d took any Unicode digit; the shared grammar is ASCII.
+    with pytest.raises(ValueError) as err:
+        memory_limit("\u0665")
+    assert (
+        str(err.value) == 'max_memory must be a size like 100MB, got "\u0665"'
+    )

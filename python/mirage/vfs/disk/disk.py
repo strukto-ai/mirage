@@ -15,10 +15,14 @@
 import os
 import shutil
 import stat
+from contextlib import AbstractAsyncContextManager
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.core.disk.capacity import count as _count
+from mirage.core.disk.capacity import size_of as _size_of
 from mirage.core.disk.copy import copy as _copy
 from mirage.core.disk.create import create as _create
 from mirage.core.disk.exists import exists as _exists
@@ -40,6 +44,7 @@ from mirage.core.disk.utils import (
     walk_entries,
 )
 from mirage.core.disk.write import write as _write
+from mirage.errors.types import QuotaExceededError
 from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
@@ -51,6 +56,7 @@ from mirage.types import (
     VFSName,
 )
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.capacity import Charge, charge, storage_usage
 from mirage.vfs.constants import LOCAL_WALK_LIMIT
 from mirage.vfs.errors import VFSConfigError
 
@@ -76,6 +82,7 @@ class DiskVFS(BaseVFS):
         self,
         root: str,
         folder_versions: bool = True,
+        capacity: int | str | None = None,
     ) -> None:
         """Args:
         root (str): the host directory the mount mirrors.
@@ -83,6 +90,10 @@ class DiskVFS(BaseVFS):
             version. Folder versions assume a local POSIX filesystem;
             turn them off for an NFS, SMB or FUSE root, whose change
             times may not move with the folder's entries.
+        capacity (int | str | None): the most bytes the root may hold,
+            a size like ``100MB`` or a count of bytes; None for no limit.
+            The root is counted at its first write or ``df``, and again
+            after a write past mirage (a native program).
         """
         if not isinstance(folder_versions, bool):
             raise VFSConfigError("disk: folder_versions: must be a boolean")
@@ -97,6 +108,16 @@ class DiskVFS(BaseVFS):
         # way GNU does. Mirrors TypeScript's DiskVFS constructor.
         self.root.mkdir(parents=True, exist_ok=True)
         self.accessor = DiskAccessor(self.root, folder_versions)
+        self.usage = storage_usage(self.name, capacity)
+        self.accessor.usage = self.usage
+
+    def _charge(self, path: PathSpec) -> AbstractAsyncContextManager[Charge]:
+        return charge(
+            self.usage,
+            path,
+            partial(_size_of, self.accessor),
+            partial(_count, self.accessor),
+        )
 
     async def readdir(self, path: PathSpec) -> DirListing:
         return await _readdir(self.accessor, path)
@@ -117,19 +138,31 @@ class DiskVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        await _write(self.accessor, path, data, atomic=atomic)
+        async with self._charge(path) as held:
+            await _write(self.accessor, path, held.stream(data), atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
-        await _write(self.accessor, path, data, append=True)
+        async with self._charge(path) as held:
+            await _write(
+                self.accessor,
+                path,
+                held.stream(data, append=True),
+                append=True,
+            )
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
-        await _pwrite(self.accessor, path, data, offset)
+        async with self._charge(path) as held:
+            if data:
+                held.grow_to(offset + len(data))
+            await _pwrite(self.accessor, path, data, offset)
 
     async def create(self, path: PathSpec) -> None:
-        await _create(self.accessor, path)
+        async with self._charge(path):
+            await _create(self.accessor, path)
 
     async def unlink(self, path: PathSpec) -> None:
-        await _unlink(self.accessor, path)
+        async with self._charge(path):
+            await _unlink(self.accessor, path)
 
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         await _mkdir(self.accessor, path, parents=parents)
@@ -138,18 +171,33 @@ class DiskVFS(BaseVFS):
         await _rmdir(self.accessor, path)
 
     async def rm_r(self, path: PathSpec) -> Any:
-        return await _rm_r(self.accessor, path)
+        async with self._charge(path):
+            return await _rm_r(self.accessor, path)
 
     async def rename(self, src: PathSpec, dst: PathSpec) -> None:
-        await _rename(self.accessor, src, dst)
+        async with self._charge(src), self._charge(dst):
+            await _rename(self.accessor, src, dst)
 
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
-        await _copy(self.accessor, src, dst)
+        async with self._charge(dst) as held:
+            if self.usage is not None:
+                held.grow_to(await _size_of(self.accessor, src))
+            await _copy(self.accessor, src, dst)
+            if self.usage is not None:
+                copied = await _size_of(self.accessor, dst)
+                try:
+                    held.grow_to(copied)
+                except QuotaExceededError:
+                    await _truncate(self.accessor, dst, held.reserved, True)
+                    raise
 
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
-        await _truncate(self.accessor, path, length, no_create)
+        async with self._charge(path) as held:
+            if not no_create or await self.exists(path):
+                held.grow_to(length)
+            await _truncate(self.accessor, path, length, no_create)
 
     async def setattr(
         self,
@@ -180,6 +228,11 @@ class DiskVFS(BaseVFS):
         return f"{self.name}:{self.root}"
 
     async def capacity(self) -> CapacityResult:
+        if self.usage is not None:
+            # Counted afresh, so a write past mirage shows.
+            self.usage.stale()
+            await self.usage.counted(partial(_count, self.accessor))
+            return self.usage.report()
         # A real filesystem reports real numbers (QUOTA). GNU df: used counts
         # reserved blocks (f_blocks - f_bfree), available excludes them
         # (f_bavail); both scaled by the fundamental block size.
@@ -218,6 +271,11 @@ class DiskVFS(BaseVFS):
             "config": {
                 "root": str(self.root),
                 "folder_versions": self.folder_versions,
+                **(
+                    {"capacity": self.usage.limit}
+                    if self.usage is not None
+                    else {}
+                ),
             },
             "files": files,
             "modes": modes,
@@ -246,3 +304,5 @@ class DiskVFS(BaseVFS):
             mode = modes.get(rel)
             if mode is not None:
                 os.chmod(target, mode)
+        if self.usage is not None:
+            self.usage.stale()

@@ -21,7 +21,8 @@ import { Invalidation, withFillGuard } from './invalidation.ts'
 import { KeyLock } from '../lock.ts'
 import { CacheEntry, Holds } from './entry.ts'
 import { type FileCache, validateMaxDrainBytes } from './mixin.ts'
-import { parseLimit, tokenOrNull } from './utils.ts'
+import { parseLimit } from '../../utils/size.ts'
+import { tokenOrNull } from './utils.ts'
 
 export class RAMFileCacheStore extends RAMVFS implements FileCache {
   private readonly entries = new Map<string, CacheEntry>()
@@ -41,7 +42,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
     options: { limit?: string | number; maxDrainBytes?: number | null; clock?: Clock } = {},
   ) {
     super()
-    this.limit = parseLimit(options.limit ?? '512MB')
+    this.limit = parseLimit(options.limit ?? '512MB', 'limit')
     this.clock = options.clock ?? new SystemClock()
     this.maxDrainBytes = options.maxDrainBytes ?? null
   }

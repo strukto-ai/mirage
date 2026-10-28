@@ -13,11 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-import re
 from dataclasses import dataclass, fields
 from typing import Any, TypeVar
 
-from mirage.cache.file.utils import parse_limit
+from mirage.utils.size import parse_limit
 
 T = TypeVar("T", bound="RuntimeConfig")
 
@@ -36,17 +35,7 @@ def memory_limit(value: str | int | None) -> int | None:
     """
     if value is None:
         return None
-    if isinstance(value, bool) or not (
-        (isinstance(value, int) and value >= 0)
-        or (
-            isinstance(value, str)
-            and re.fullmatch(r"\d+([KMG]B?)?", value.strip(), re.IGNORECASE)
-        )
-    ):
-        raise ValueError(
-            f"max_memory must be a size like 10M or 1G, got {value!r}"
-        )
-    return parse_limit(value)
+    return parse_limit(value, "max_memory")
 
 
 @dataclass(frozen=True, slots=True)

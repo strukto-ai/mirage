@@ -21,6 +21,9 @@ export type { RedisVFSState } from '@struktoai/mirage-core/vfs/redis/redis'
 export interface RedisVFSOptions {
   url?: string
   keyPrefix?: string
+  /** The most bytes the mount's files may hold: a size like `100MB` or a count
+   * of bytes. */
+  capacity?: number | string | null
 }
 
 export interface RedisModule {
@@ -44,6 +47,7 @@ export class RedisVFS extends CoreRedisVFS {
         url: options.url ?? 'redis://localhost:6379/0',
         keyPrefix: options.keyPrefix ?? 'mirage:fs:',
       }),
+      options.capacity ?? null,
     )
   }
 

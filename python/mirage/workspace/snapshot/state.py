@@ -1021,7 +1021,9 @@ def _construct_vfs(mount_state: dict[str, Any]) -> BaseVFS:
     if ptype in (VFSName.RAM, VFSName.DISK):
         saved = vfs_state.get(VFSStateKey.CONFIG) or {}
         knobs = {
-            key: saved[key] for key in ("folder_versions",) if key in saved
+            key: saved[key]
+            for key in ("folder_versions", "capacity")
+            if key in saved
         }
         for key in unknown_kwargs(cls, knobs):
             del knobs[key]

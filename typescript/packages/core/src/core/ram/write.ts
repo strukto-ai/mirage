@@ -23,7 +23,7 @@ import { VFSName, type PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
-import { checkDestParents, checkWriteTarget } from './dest.ts'
+import { checkCapacity, checkDestParents, checkWriteTarget } from './dest.ts'
 
 /**
  * Replace a file's bytes, or add them to its end. Bytes land at once, as does
@@ -77,6 +77,7 @@ export async function write(
     const whole = data instanceof Uint8Array ? data : await materialize(data)
     const current = append ? files.get(p) : undefined
     if (current !== undefined && whole.byteLength === 0) return
+    checkCapacity(accessor, path, p, (current?.byteLength ?? 0) + whole.byteLength)
     files.set(p, current === undefined ? whole : concat([current, whole]))
     modified.set(p, nowIso())
     record(op, path.virtual, VFSName.RAM, whole.byteLength, timer)
@@ -90,35 +91,58 @@ export async function write(
   let position = 0
   let last = performance.now()
   let later: ReturnType<typeof setTimeout> | null = null
+  const usage = accessor.store.usage
+  let held = 0
   const publish = (): void => {
     if (later !== null) clearTimeout(later)
     later = null
     last = performance.now()
     if (pending.length === 0) return
-    const data = concat(pending)
-    pending = []
-    const current = files.get(p) ?? new Uint8Array()
-    if (append) {
-      files.set(p, concat([current, data]))
-    } else {
-      const next = new Uint8Array(Math.max(current.byteLength, position + data.byteLength))
-      next.set(current)
-      next.set(data, position)
-      files.set(p, next)
-      position += data.byteLength
+    try {
+      const data = concat(pending)
+      const current = files.get(p) ?? new Uint8Array()
+      if (append) {
+        files.set(p, concat([current, data]))
+      } else {
+        const next = new Uint8Array(Math.max(current.byteLength, position + data.byteLength))
+        next.set(current)
+        next.set(data, position)
+        files.set(p, next)
+        position += data.byteLength
+      }
+      modified.set(p, nowIso())
+    } finally {
+      pending = []
+      usage?.land(held, 0)
+      held = 0
     }
-    modified.set(p, nowIso())
+  }
+  const failed: { error?: Error } = {}
+  // A timer callback cannot throw to the write; the write throws it.
+  const publishLater = (): void => {
+    try {
+      publish()
+    } catch (err) {
+      failed.error = err as Error
+    }
   }
   try {
     for await (const chunk of chunks(data)) {
+      if (failed.error !== undefined) throw failed.error
+      if (usage !== null) {
+        // The whole chunk: bytes another writer put in its way count.
+        usage.hold(path, chunk.byteLength)
+        held += chunk.byteLength
+      }
       pending.push(chunk)
       size += chunk.byteLength
       const wait = STREAM_PUBLISH_SECONDS * 1000 - (performance.now() - last)
       if (wait <= 0) publish()
-      else later ??= setTimeout(publish, wait)
+      else later ??= setTimeout(publishLater, wait)
     }
   } finally {
     publish()
   }
+  if (failed.error !== undefined) throw failed.error
   record(op, path.virtual, VFSName.RAM, size, timer)
 }

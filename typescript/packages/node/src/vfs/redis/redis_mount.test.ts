@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountMode } from '@struktoai/mirage-core/types'
+import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 import { RedisVFS } from './redis.ts'
@@ -112,5 +113,33 @@ describe.skipIf(skip)('RedisVFS as mount', () => {
     await vfs.loadState(state)
     const r = await ws.shell('cat /data/one.txt')
     expect(DEC.decode(r.stdout)).toBe('one\n')
+  })
+})
+
+describe('RedisVFS capacity', () => {
+  it('refuses a capacity that is not a size', () => {
+    expect(() => new RedisVFS({ capacity: '5T' })).toThrow(
+      new VFSConfigError('redis: capacity must be a size like 100MB, got "5T"'),
+    )
+  })
+
+  it.skipIf(skip)('refuses growth and stops parallel writers at the cap', async () => {
+    const prefix = `mirage:test:cap:${Math.random().toString(36).slice(2)}:`
+    const data = new RedisVFS({ url: REDIS_URL ?? '', keyPrefix: prefix, capacity: 10 })
+    const ws = new Workspace({ '/r': [data, MountMode.WRITE] })
+    try {
+      expect((await ws.shell('printf 1234567 > /r/a')).exitCode).toBe(0)
+      expect((await ws.shell('printf 1234 > /r/b')).exitCode).toBe(1)
+      const results = await Promise.all(
+        Array.from({ length: 10 }, (_, i) => ws.shell(`printf 1 > /r/p${String(i)}`)),
+      )
+      expect(results.filter((r) => r.exitCode === 0).length).toBe(3)
+      expect([data.usage?.used, data.usage?.pending]).toEqual([10, 0])
+      expect((await data.capacity()).used).toBe(10)
+      expect((await data.getState()).config.capacity).toBe(10)
+    } finally {
+      await data.store.clear()
+      await ws.close()
+    }
   })
 })

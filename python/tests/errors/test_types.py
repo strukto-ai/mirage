@@ -45,6 +45,7 @@ def test_vocabulary_names_the_probed_conditions():
         "EBUSY",
         "EROFS",
         "EFBIG",
+        "EDQUOT",
         "EPIPE",
         "NO_XATTR",
         "STALE_WRITE",

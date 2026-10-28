@@ -156,6 +156,8 @@ export interface OpenOptions {
   mountRead?: Record<string, ReadSpec>
   // The write policy, for both workspaces: the shadow is a second writer.
   write?: WritePolicy
+  // Per-mount caps, as a capacity case opens its target.
+  capacity?: Record<string, number | string>
 }
 
 type MountMap = ConstructorParameters<typeof Workspace>[0]
@@ -352,12 +354,12 @@ function permissionOptions(target: Target): {
   }
 }
 
-async function openRam(target: Target): Promise<Open> {
+async function openRam(target: Target, options?: OpenOptions): Promise<Open> {
   const mounts: Record<string, RAMVFS | [RAMVFS, MountMode]> = {}
   for (const m of target.mounts) {
     const vfs = ['command-service', 'metadata-service'].includes(m.backend ?? '')
       ? new CommandService(m.backend === 'metadata-service')
-      : new RAMVFS()
+      : new RAMVFS({ capacity: options?.capacity?.[m.path] ?? null })
     if (m.caches_reads === true) (vfs as unknown as { cachesReads: boolean }).cachesReads = true
     for (const [relative, text] of Object.entries(m.files ?? {})) {
       const path = PathSpec.fromStrPath('/' + relative)
@@ -367,6 +369,8 @@ async function openRam(target: Target): Promise<Open> {
     mounts[m.path] =
       m.mode === 'read' ? [vfs, MountMode.READ] : m.mode === 'exec' ? [vfs, MountMode.EXEC] : vfs
   }
+  const unknown = Object.keys(options?.capacity ?? {}).filter((p) => !(p in mounts))
+  if (unknown.length > 0) throw new Error(`mount_capacity names no mount: ${unknown.join(', ')}`)
   const secretsEnv = target.secrets !== undefined ? buildSecretsEnv(target.secrets) : null
   const store = jobStoreFor(target)
   const cache = cacheFor(target)

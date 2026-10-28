@@ -38,13 +38,19 @@ import { serverLocation } from '../../core/redis/location.ts'
 import { truncate as redisTruncate } from '../../core/redis/truncate.ts'
 import { setAttrs as redisSetAttrs } from '../../core/redis/set_attrs.ts'
 import { tree as redisTree } from '../../core/redis/readdir.ts'
-import { capacity as redisCapacity } from '../../core/redis/capacity.ts'
+import {
+  capacity as redisCapacity,
+  count as redisCount,
+  sizeOf as redisSizeOf,
+} from '../../core/redis/capacity.ts'
+import { type Charge, type StorageUsage, charge, storageUsage } from '../capacity.ts'
 
 export interface RedisVFSState {
   type: string
   config: {
     url: typeof REDACTED_SECRET
     keyPrefix: string
+    capacity?: number
   }
   keyPrefix: string
   files: Record<string, Uint8Array>
@@ -69,11 +75,30 @@ export class RedisVFS extends BaseVFS {
   override readonly indexTtl: number = 0
   readonly store: RedisStoreLike
   override readonly accessor: RedisAccessor
+  override readonly usage: StorageUsage | null
 
-  constructor(store: RedisStoreLike) {
+  /**
+   * `capacity` is the most bytes the mount's files may hold, a size like
+   * `100MB` or a count of bytes; null for no limit. Counted at the first
+   * write or `df`; a writer in another process is counted at the next `df`.
+   *
+   * @throws VFSConfigError when `capacity` is not a size.
+   */
+  constructor(store: RedisStoreLike, capacity: number | string | null = null) {
     super()
     this.store = store
     this.accessor = new RedisAccessor(store)
+    this.usage = storageUsage(this.name, capacity)
+  }
+
+  private charge<T>(path: PathSpec, write: (held: Charge) => Promise<T>): Promise<T> {
+    return charge(
+      this.usage,
+      path,
+      (p) => redisSizeOf(this.accessor, p),
+      () => redisCount(this.accessor),
+      write,
+    )
   }
 
   get url(): string {
@@ -131,15 +156,19 @@ export class RedisVFS extends BaseVFS {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    return redisWrite(this.accessor, path, data, false, atomic)
+    return this.charge(path, (held) =>
+      redisWrite(this.accessor, path, held.stream(data), false, atomic),
+    )
   }
 
   override append(path: PathSpec, data: ByteSource): Promise<void> {
-    return redisWrite(this.accessor, path, data, true)
+    return this.charge(path, (held) =>
+      redisWrite(this.accessor, path, held.stream(data, true), true),
+    )
   }
 
   override create(path: PathSpec): Promise<void> {
-    return redisCreate(this.accessor, path)
+    return this.charge(path, () => redisCreate(this.accessor, path))
   }
 
   override mkdir(path: PathSpec, parents = false): Promise<void> {
@@ -147,7 +176,7 @@ export class RedisVFS extends BaseVFS {
   }
 
   override unlink(path: PathSpec): Promise<void> {
-    return redisUnlink(this.accessor, path)
+    return this.charge(path, () => redisUnlink(this.accessor, path))
   }
 
   override rmdir(path: PathSpec): Promise<void> {
@@ -155,23 +184,42 @@ export class RedisVFS extends BaseVFS {
   }
 
   override rmR(path: PathSpec): Promise<void> {
-    return redisRmR(this.accessor, path)
+    return this.charge(path, () => redisRmR(this.accessor, path))
   }
 
   override rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    return redisRename(this.accessor, src, dst)
+    return this.charge(src, () => this.charge(dst, () => redisRename(this.accessor, src, dst)))
   }
 
   override copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    return redisCopy(this.accessor, src, dst)
+    return this.charge(dst, async (held) => {
+      if (this.usage === null) return redisCopy(this.accessor, src, dst)
+      held.growTo(await redisSizeOf(this.accessor, src))
+      await redisCopy(this.accessor, src, dst)
+      const copied = await redisSizeOf(this.accessor, dst)
+      try {
+        held.growTo(copied)
+      } catch (err) {
+        await redisTruncate(this.accessor, dst, held.reserved, true)
+        throw err
+      }
+    })
   }
 
   override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
-    return redisTruncate(this.accessor, path, length, noCreate)
+    return this.charge(path, async (held) => {
+      if (!noCreate || (await this.exists(path))) held.growTo(length)
+      await redisTruncate(this.accessor, path, length, noCreate)
+    })
   }
 
-  override capacity(): Promise<CapacityResult> {
-    return redisCapacity(this.accessor)
+  /** The mount's own quota when capped, counted afresh so a writer in
+   * another process shows; else the server's memory. Mirrors Python's. */
+  override async capacity(): Promise<CapacityResult> {
+    if (this.usage === null) return redisCapacity(this.accessor)
+    this.usage.stale()
+    await this.usage.counted(() => redisCount(this.accessor))
+    return this.usage.report()
   }
 
   override setattr(
@@ -193,6 +241,7 @@ export class RedisVFS extends BaseVFS {
       config: {
         url: REDACTED_SECRET,
         keyPrefix: this.keyPrefix,
+        ...(this.usage !== null ? { capacity: this.usage.limit } : {}),
       },
       keyPrefix: this.keyPrefix,
       files,
@@ -202,12 +251,13 @@ export class RedisVFS extends BaseVFS {
     }
   }
 
-  override loadState(state: VFSStateBase & Partial<RedisVFSState>): Promise<void> {
-    return this.store.restore({
+  override async loadState(state: VFSStateBase & Partial<RedisVFSState>): Promise<void> {
+    await this.store.restore({
       files: state.files ?? {},
       dirs: state.dirs ?? ['/'],
       attrs: state.attrs ?? {},
       modified: state.modified ?? {},
     })
+    this.usage?.stale()
   }
 }

@@ -45,6 +45,7 @@ describe('the preview1 wire table', () => {
       EBUSY: 10,
       EROFS: 69,
       EFBIG: 22,
+      EDQUOT: 19,
       EPIPE: 64,
       NO_XATTR: 58,
       STALE_WRITE: 72,

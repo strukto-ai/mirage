@@ -24,6 +24,8 @@ import { mkdir } from './mkdir.ts'
 import { truncate } from './truncate.ts'
 import { write } from './write.ts'
 import { STREAM_PUBLISH_SECONDS } from './constants.ts'
+import { capped, ramPath, tableBytes } from '../../test-utils.ts'
+import { unlink } from './unlink.ts'
 
 const ENC = new TextEncoder()
 
@@ -312,5 +314,139 @@ describe('core/ram write of bytes', () => {
     for (const data of [new Uint8Array(), ENC.encode('x')]) {
       expect(await codeOf(() => write(accessor, mkPath(path.slice(4)), data))).toBe('EBADF')
     }
+  })
+})
+
+async function* streamOf(...parts: string[]): AsyncIterable<Uint8Array> {
+  for (const part of parts) {
+    await Promise.resolve()
+    yield ENC.encode(part)
+  }
+}
+
+describe('core/ram write against a capacity', () => {
+  it('charges what a bytes write adds', async () => {
+    const [acc, usage] = capped(10, { '/old': '123' })
+    await write(acc, ramPath('/f'), ENC.encode('1234'))
+    await write(acc, ramPath('/f'), ENC.encode('12'), true)
+    expect([usage.used, tableBytes(acc)]).toEqual([9, 9])
+  })
+
+  it('leaves the table as it was when a bytes write is refused', async () => {
+    const [acc, usage] = capped(10, { '/f': '12345678' })
+    expect(await codeOf(() => write(acc, ramPath('/g'), ENC.encode('123')))).toBe('EDQUOT')
+    expect(acc.store.files.has('/g')).toBe(false)
+    expect([usage.used, tableBytes(acc)]).toEqual([8, 8])
+  })
+
+  it('passes an overwrite that shrinks over the cap', async () => {
+    const [acc, usage] = capped(5, { '/f': '1234567890' })
+    await write(acc, ramPath('/f'), ENC.encode('123456789'))
+    expect(await codeOf(() => write(acc, ramPath('/f'), ENC.encode('1'), true))).toBe('EDQUOT')
+    expect([usage.used, tableBytes(acc)]).toEqual([9, 9])
+  })
+
+  it('charges an atomic stream its growth once', async () => {
+    const [acc, usage] = capped(10, { '/f': '12345678' })
+    await write(acc, ramPath('/f'), streamOf('12345', '6789'), false, undefined, true)
+    expect([usage.used, tableBytes(acc)]).toEqual([9, 9])
+  })
+
+  it('keeps the chunks before a refused one', async () => {
+    const [acc, usage] = capped(10)
+    expect(await codeOf(() => write(acc, ramPath('/s'), streamOf('1234', '5678', '9abc')))).toBe(
+      'EDQUOT',
+    )
+    expect(new TextDecoder().decode(acc.store.files.get('/s'))).toBe('12345678')
+    expect([usage.used, usage.pending]).toEqual([8, 0])
+  })
+
+  it('counts the change a splice made', async () => {
+    const [acc, usage] = capped(100)
+    let go!: () => void
+    const held = new Promise<void>((resolve) => (go = resolve))
+    async function* source(): AsyncIterable<Uint8Array> {
+      yield ENC.encode('aaaa')
+      await held
+      yield ENC.encode('bb')
+    }
+    const writing = write(acc, ramPath('/s'), source())
+    await settle()
+    await write(acc, ramPath('/s'), ENC.encode('xxxxxxxx'))
+    go()
+    await writing
+    expect(new TextDecoder().decode(acc.store.files.get('/s'))).toBe('xxxxbbxx')
+    expect([usage.used, usage.pending, tableBytes(acc)]).toEqual([8, 0, 8])
+  })
+
+  it('holds nothing after a publish fails to join its chunks', async () => {
+    const [acc, usage] = capped(10)
+    const unjoinable = {
+      byteLength: 4,
+      subarray(): unknown {
+        return unjoinable
+      },
+      get length(): number {
+        throw new Error('cannot join')
+      },
+    } as unknown as Uint8Array
+    async function* source(): AsyncIterable<Uint8Array> {
+      yield ENC.encode('1234')
+      await Promise.resolve()
+      yield unjoinable
+    }
+    await expect(write(acc, ramPath('/s'), source())).rejects.toThrow('cannot join')
+    expect([usage.used, usage.pending]).toEqual([0, 0])
+    await write(acc, ramPath('/t'), ENC.encode('x'.repeat(10)))
+  })
+
+  it.each([true, false])(
+    'fails the write when a timer publish fails (more after: %s)',
+    async (more) => {
+      const [acc, usage] = capped(100)
+      const unjoinable = {
+        byteLength: 4,
+        subarray(): unknown {
+          return unjoinable
+        },
+        get length(): number {
+          throw new Error('cannot join')
+        },
+      } as unknown as Uint8Array
+      async function* source(): AsyncIterable<Uint8Array> {
+        yield ENC.encode('1234')
+        yield unjoinable
+        await settle()
+        if (more) yield ENC.encode('9999')
+      }
+      await expect(write(acc, ramPath('/s'), source())).rejects.toThrow('cannot join')
+      expect([acc.store.files.get('/s')?.byteLength, usage.used, usage.pending]).toEqual([0, 0, 0])
+    },
+  )
+
+  it('pads a shortened stream, counted but not admitted', async () => {
+    const [acc, usage] = capped(5)
+    let go!: () => void
+    const held = new Promise<void>((resolve) => (go = resolve))
+    async function* source(): AsyncIterable<Uint8Array> {
+      yield ENC.encode('aaaa')
+      await held
+      yield ENC.encode('b')
+    }
+    const writing = write(acc, ramPath('/s'), source())
+    await settle()
+    await unlink(acc, ramPath('/s'))
+    go()
+    await writing
+    expect([...(acc.store.files.get('/s') ?? [])]).toEqual([0, 0, 0, 0, 98])
+    expect([usage.used, tableBytes(acc)]).toEqual([5, 5])
+    expect(await codeOf(() => write(acc, ramPath('/t'), ENC.encode('1')))).toBe('EDQUOT')
+  })
+
+  it('gives back the old bytes before a replacing stream lands', async () => {
+    const [acc, usage] = capped(10, { '/s': '12345678' })
+    await write(acc, ramPath('/s'), streamOf('abc', 'def'))
+    expect(new TextDecoder().decode(acc.store.files.get('/s'))).toBe('abcdef')
+    expect([usage.used, usage.pending]).toEqual([6, 0])
   })
 })

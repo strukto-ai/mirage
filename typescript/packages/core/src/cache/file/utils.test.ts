@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { globEscape, parseLimit, tokenOrNull } from './utils.ts'
+import { globEscape, tokenOrNull } from './utils.ts'
 
 describe('tokenOrNull', () => {
   // The `''` arm is the load-bearing one and the reason `??` cannot be
@@ -27,18 +27,6 @@ describe('tokenOrNull', () => {
     ['etag-1', 'etag-1'],
   ])('folds %j to %j', (input, expected) => {
     expect(tokenOrNull(input)).toBe(expected)
-  })
-})
-
-describe('parseLimit', () => {
-  it.each([
-    [1024, 1024],
-    ['1024', 1024],
-    ['1KB', 1024],
-    ['2MB', 2 * 1024 * 1024],
-    ['1GB', 1024 * 1024 * 1024],
-  ])('parses %j as %i bytes', (input, expected) => {
-    expect(parseLimit(input)).toBe(expected)
   })
 })
 

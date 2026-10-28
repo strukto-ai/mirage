@@ -44,10 +44,17 @@ describe('normalizeCacheConfig', () => {
     [{ maxDrainBytes: 1, max_drain_bytes: 2 }, 'maxDrainBytes: unrecognized_keys'],
     [{ type: null }, 'type: custom'],
     [{ limit: {} }, 'limit: invalid_union'],
+    [{ limit: true }, 'limit: invalid_union'],
     [{ max_drain_bytes: '64' }, 'maxDrainBytes: invalid_type'],
     [{ type: CacheType.REDIS, url: 6379 }, 'url: invalid_type'],
   ])('refuses %j', (config, summary) => {
     expect(refusal(() => normalizeCacheConfig(config as unknown as CacheConfig))).toBe(summary)
+  })
+
+  it('refuses a limit that is not a size, as Python does at construction', () => {
+    expect(() => normalizeCacheConfig({ limit: '5T' })).toThrow(
+      'limit must be a size like 100MB, got "5T"',
+    )
   })
 })
 

@@ -44,6 +44,7 @@ POSIX: dict[FsCondition, PosixErrno] = {
     FsCondition.EBUSY: PosixErrno(errno.EBUSY, "Device or resource busy"),
     FsCondition.EROFS: PosixErrno(errno.EROFS, "Read-only file system"),
     FsCondition.EFBIG: PosixErrno(errno.EFBIG, "File too large"),
+    FsCondition.EDQUOT: PosixErrno(errno.EDQUOT, "Disk quota exceeded"),
     FsCondition.EPIPE: PosixErrno(errno.EPIPE, "Broken pipe"),
     FsCondition.NO_XATTR: _NO_XATTR,
     FsCondition.STALE_WRITE: PosixErrno(
@@ -73,6 +74,7 @@ LINUX_ERRNO: dict[FsCondition, int] = {
     FsCondition.EBUSY: 16,
     FsCondition.EROFS: 30,
     FsCondition.EFBIG: 27,
+    FsCondition.EDQUOT: 122,
     FsCondition.EPIPE: 32,
     FsCondition.NO_XATTR: 61,
     FsCondition.STALE_WRITE: 116,

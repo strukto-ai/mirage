@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 
 from redis.exceptions import RedisError
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.types import CapacityResult, CapacityState
+from mirage.types import CapacityResult, CapacityState, PathSpec
+from mirage.utils.path import norm
 
 logger = logging.getLogger(__name__)
 
@@ -51,3 +53,30 @@ async def capacity(accessor: RedisAccessor) -> CapacityResult:
         used=used,
         available=max(limit - used, 0),
     )
+
+
+async def size_of(accessor: RedisAccessor, path: PathSpec) -> int:
+    """The bytes at ``path``, a directory's files included; 0 for none.
+
+    Args:
+        accessor (RedisAccessor): the mount's store.
+        path (PathSpec): the operand.
+    """
+    store = accessor.store
+    key = norm(path.mount_path)
+    if await store.has_file(key):
+        return await store.file_len(key)
+    under = key if key.endswith("/") else key + "/"
+    files = await store.list_files(under)
+    return sum(await asyncio.gather(*(store.file_len(f) for f in files)))
+
+
+async def count(accessor: RedisAccessor) -> int:
+    """The bytes every file of the mount holds.
+
+    Args:
+        accessor (RedisAccessor): the mount's store.
+    """
+    store = accessor.store
+    files = await store.list_files()
+    return sum(await asyncio.gather(*(store.file_len(f) for f in files)))

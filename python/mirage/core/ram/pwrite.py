@@ -14,7 +14,11 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.device import active_device, active_pipe
-from mirage.core.ram.dest import check_dest_parents, check_write_target
+from mirage.core.ram.dest import (
+    check_capacity,
+    check_dest_parents,
+    check_write_target,
+)
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
@@ -51,6 +55,10 @@ async def pwrite(
     check_dest_parents(store, path_spec, p)
     check_write_target(store, path_spec, p)
     if active_device(accessor, p) is None:
-        store.files[p] = splice_window(store.files.get(p, b""), offset, data)
+        current = store.files.get(p, b"")
+        if data:
+            end = max(len(current), offset + len(data))
+            check_capacity(store, path_spec, p, end)
+        store.files[p] = splice_window(current, offset, data)
     store.modified[p] = now_iso()
     record("pwrite", path_spec.virtual, "ram", len(data), timer)
