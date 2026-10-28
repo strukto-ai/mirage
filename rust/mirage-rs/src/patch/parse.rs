@@ -74,8 +74,10 @@ pub(super) enum End {
     Fatal(Vec<u8>, bool),
 }
 
-/// A rename or copy a git header asks for, its names as `-p` leaves them,
-/// none for a name it strips away.
+/// A rename or copy a git header asks for, between the names of its
+/// `diff --git` line as `-p` leaves them, none for a name it strips away:
+/// GNU reads no other names for it, whatever its `rename` or `copy` lines
+/// say.
 #[derive(Clone)]
 pub(super) struct Move {
     pub(super) copy: bool,
@@ -92,17 +94,6 @@ pub(super) struct Git {
     pub(super) old_mode: Option<u32>,
     pub(super) new_mode: Option<u32>,
     pub(super) binary: bool,
-}
-
-impl Git {
-    /// The rename or copy being read, begun on its first line.
-    fn moved(&mut self, copy: bool) -> &mut Move {
-        self.moved.get_or_insert(Move {
-            copy,
-            from: None,
-            to: None,
-        })
-    }
 }
 
 /// One file's part of a patch: what its reject file's `---` and `+++`
@@ -406,31 +397,23 @@ fn hunks<'a>(
 /// what its extended lines ask, which of them create or delete the file,
 /// and the line after the last of them.
 struct GitHead {
-    names: Vec<Vec<u8>>,
+    old: Option<Vec<u8>>,
+    new: Option<Vec<u8>>,
     git: Git,
     creates: bool,
     deletes: bool,
     end: usize,
 }
 
-/// A `diff --git a/x b/y` line's two names. git quotes a name only for
-/// bytes a blank is not, so where the halves name one file the line is
-/// cut between them; otherwise it is cut before the new name's `b/`.
-fn git_names(rest: &[u8]) -> (&[u8], &[u8]) {
-    let rest = chomp(rest);
-    let half = rest.len() / 2;
-    if rest.len() % 2 == 1 && rest[half] == b' ' {
-        let (old, new) = (&rest[..half], &rest[half + 1..]);
-        if old.get(2..) == new.get(2..) {
-            return (old, new);
-        }
-    }
-    match memchr::memmem::find(rest, b" b/") {
-        Some(at) => (&rest[..at], &rest[at + 1..]),
-        None => match memchr::memchr(b' ', rest) {
-            Some(at) => (&rest[..at], &rest[at + 1..]),
-            None => (rest, rest),
-        },
+/// A `diff --git a/x b/y` line's two names, as GNU reads them: the line
+/// must hold just two words, so a name with a blank in it leaves none.
+fn git_names(rest: &[u8]) -> Option<(&[u8], &[u8])> {
+    let mut words = chomp(rest)
+        .split(|&b| b == b' ')
+        .filter(|word| !word.is_empty());
+    match (words.next(), words.next(), words.next()) {
+        (Some(old), Some(new), None) => Some((old, new)),
+        _ => None,
     }
 }
 
@@ -443,12 +426,11 @@ fn mode(text: &[u8]) -> Option<u32> {
 
 impl GitHead {
     fn read(rest: &[u8], strip: Option<usize>, end: usize) -> GitHead {
-        let (old, new) = git_names(rest);
+        let names = git_names(rest);
+        let side = |name: &[u8]| candidate(name, strip);
         GitHead {
-            names: [old, new]
-                .into_iter()
-                .filter_map(|name| candidate(name, strip))
-                .collect(),
+            old: names.and_then(|(old, _)| side(old)),
+            new: names.and_then(|(_, new)| side(new)),
             git: Git::default(),
             creates: false,
             deletes: false,
@@ -456,17 +438,12 @@ impl GitHead {
         }
     }
 
-    /// Take one extended header line; false for a line that is none. A
-    /// rename or copy names its files without git's `a/` and `b/`, so one
-    /// component less is stripped from them than `-p` says.
-    fn take(&mut self, line: &[u8], strip: Option<usize>) -> bool {
-        let moved_name = |rest: &[u8]| {
-            let name = name_and_stamp(rest).0;
-            match strip {
-                Some(0) => None,
-                Some(strip) => candidate(name, Some(strip - 1)),
-                None => candidate(name, None),
-            }
+    /// Take one extended header line; false for a line that is none.
+    fn take(&mut self, line: &[u8]) -> bool {
+        let moved = |copy| Move {
+            copy,
+            from: self.old.clone(),
+            to: self.new.clone(),
         };
         if let Some(rest) = line.strip_prefix(b"old mode ") {
             self.git.old_mode = mode(rest);
@@ -478,14 +455,10 @@ impl GitHead {
         } else if let Some(rest) = line.strip_prefix(b"deleted file mode ") {
             self.git.old_mode = mode(rest);
             self.deletes = true;
-        } else if let Some(rest) = line.strip_prefix(b"rename from ") {
-            self.git.moved(false).from = moved_name(rest);
-        } else if let Some(rest) = line.strip_prefix(b"rename to ") {
-            self.git.moved(false).to = moved_name(rest);
-        } else if let Some(rest) = line.strip_prefix(b"copy from ") {
-            self.git.moved(true).from = moved_name(rest);
-        } else if let Some(rest) = line.strip_prefix(b"copy to ") {
-            self.git.moved(true).to = moved_name(rest);
+        } else if line.starts_with(b"rename from ") || line.starts_with(b"rename to ") {
+            self.git.moved = Some(moved(false));
+        } else if line.starts_with(b"copy from ") || line.starts_with(b"copy to ") {
+            self.git.moved = Some(moved(true));
         } else if chomp(line) == b"GIT binary patch" {
             self.git.binary = true;
         } else if !(line.starts_with(b"index ")
@@ -501,11 +474,12 @@ impl GitHead {
 
     /// The section a header with no hunks of its own stands for.
     fn section<'a>(self, since: usize) -> Section<'a> {
-        let label = self.names.last().cloned().unwrap_or_default();
+        let names: Vec<_> = self.old.into_iter().chain(self.new).collect();
+        let label = names.last().cloned().unwrap_or_default();
         Section {
             old_label: label.clone(),
             new_label: label,
-            names: self.names,
+            names,
             old_null: self.creates,
             new_null: self.deletes,
             leading: since..self.end,
@@ -553,7 +527,7 @@ pub(super) fn sections<'a>(
             continue;
         }
         if let Some(head) = git.as_mut() {
-            if head.take(line, strip) {
+            if head.take(line) {
                 continue;
             }
             if !(line.starts_with(b"--- ") || line.starts_with(b"+++ ")) {

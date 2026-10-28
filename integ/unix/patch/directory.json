@@ -38,6 +38,45 @@
         "directory",
         "i"
       ]
+    },
+    {
+      "id": "patch_d_walks_each_step",
+      "seq": 9941426,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_dwalk/dd && touch /data/patch_dwalk/dd/.keep; cd /data/patch_dwalk || exit 1; echo x > dd/x; printf 'a\\n' > a; cp a f; printf -- '--- a\\n+++ a\\n@@ -1 +1 @@\\n-a\\n+b\\n' > p.diff; patch -d f/.. -i p.diff; echo rc=$?; patch -d nope/.. -i p.diff; echo rc=$?; patch -d f/. -i p.diff; echo rc=$?; patch -d dd/.. -i p.diff; echo rc=$?; cat a; cd /; rm -r /data/patch_dwalk",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\npatching file a\nrc=0\nb\n",
+        "stderr": "patch: **** Can't change to directory f/.. : Not a directory\npatch: **** Can't change to directory nope/.. : No such file or directory\npatch: **** Can't change to directory f/. : Not a directory\n"
+      },
+      "flags": [
+        "directory",
+        "i"
+      ]
     }
   ]
 }

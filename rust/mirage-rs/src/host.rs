@@ -220,7 +220,10 @@ impl Host {
                 let kind = if self.directories.contains(&path) {
                     json!({"kind": "dir"})
                 } else if self.files.contains_key(&path) {
-                    json!({"kind": "file"})
+                    match self.modes.get(&path) {
+                        Some(mode) => json!({"kind": "file", "mode": mode}),
+                        None => json!({"kind": "file"}),
+                    }
                 } else {
                     json!({})
                 };

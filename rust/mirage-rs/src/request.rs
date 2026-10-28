@@ -331,6 +331,8 @@ pub(crate) struct Reply {
     pub(crate) size: u64,
     /// What a stat found: `dir` or `file`; none when nothing stands there.
     pub(crate) kind: Option<String>,
+    /// The permission bits a stat found, where the host keeps them.
+    pub(crate) mode: Option<u32>,
 }
 
 impl Reply {
