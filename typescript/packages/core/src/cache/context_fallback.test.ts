@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SessionState } from '../workspace/session/session.ts'
+import { record, runWithRecording, startOp } from '../observe/context.ts'
 import { OpRecord } from '../observe/record.ts'
 import { CacheManager } from './manager.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
@@ -31,7 +32,7 @@ import type { CacheInvalidator } from './types.ts'
 import { MountMode, PathSpec, WritePolicy } from '../types.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
 import { runInCommandScope } from './index/scope.ts'
-import { currentCaller, runWithCaller } from '../context/session_context.ts'
+import { callsAs, currentCaller, runWithCaller } from '../context/session_context.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
@@ -379,8 +380,59 @@ it("overlapping browser sessions cannot borrow or replace each other's versions"
       await expect(manager.keepVersion(path, 'v3')).rejects.toMatchObject({ code: 'ENOTSUP' })
     }),
   )
+  await expect(
+    runWithCaller({ ...currentCaller(), session: a }, () =>
+      runWithCaller({ ...currentCaller(), session: null }, () =>
+        runWithWriteContext(
+          '/s3/',
+          {
+            vfs: 's3',
+            conditions: ['put'],
+            readVersion: (p) => manager.readVersion(p),
+            readVersions: (paths) => manager.readVersions(paths),
+            drop: () => Promise.resolve(),
+            keep: (p, version) => manager.keepVersion(p, version),
+          },
+          () => {
+            throw new Error('overlap must be refused before the backend runs')
+          },
+        ),
+      ),
+    ),
+  ).rejects.toMatchObject({ code: 'ENOTSUP' })
+  expect(a.versions.read(manager.versionScope, '/f')).toBe('v1')
+  expect(b.versions.read(manager.versionScope, '/f')).toBe('v2')
   await runWithCaller({ ...currentCaller(), session: a }, () =>
-    runWithCaller({ ...currentCaller(), session: null }, () =>
+    runWithCaller({ ...currentCaller(), session: a.fork() }, async () => {
+      expect(await manager.readVersion(path)).toBe('v1')
+    }),
+  )
+})
+
+it.each([false, true])(
+  'rejects a new browser session before it can disrupt an in-flight conditional write (callback: %s)',
+  async (callback) => {
+    const manager = new CacheManager(
+      null,
+      null,
+      '/s3/',
+      true,
+      () => true,
+      600,
+      undefined,
+      undefined,
+      () => [],
+      true,
+    )
+    const a = new SessionState({ sessionId: 'a' })
+    const b = new SessionState({ sessionId: 'b' })
+    const base = currentCaller()
+    const path = PathSpec.fromStrPath('/s3/f', '/f')
+    a.versions.keep(manager.versionScope, '/f', 'v1')
+    const [held, release] = gate()
+    const [started, markStarted] = gate()
+    let sent = false
+    const upload = runWithCaller({ ...base, session: a }, () =>
       runWithWriteContext(
         '/s3/',
         {
@@ -390,18 +442,43 @@ it("overlapping browser sessions cannot borrow or replace each other's versions"
           readVersions: (paths) => manager.readVersions(paths),
           drop: () => Promise.resolve(),
           keep: (p, version) => manager.keepVersion(p, version),
+          observe: (rec) => {
+            manager.observe(rec)
+          },
         },
-        async () => {
-          await expect(manager.readVersion(path)).rejects.toMatchObject({ code: 'ENOTSUP' })
-        },
+        () =>
+          runWithRecording(async () => {
+            expect(await writeCondition(path, 'put')).toEqual({ ifMatch: 'v1' })
+            const timer = startOp()
+            markStarted()
+            await held
+            sent = true
+            record('write', path.virtual, 's3', 1, timer, { fingerprint: 'v2' })
+          }),
       ),
-    ),
-  )
-  expect(a.versions.read(manager.versionScope, '/f')).toBe('v1')
-  expect(b.versions.read(manager.versionScope, '/f')).toBe('v2')
-  await runWithCaller({ ...currentCaller(), session: a }, () =>
-    runWithCaller({ ...currentCaller(), session: a.fork() }, async () => {
-      expect(await manager.readVersion(path)).toBe('v1')
-    }),
-  )
-})
+    )
+    await started
+    let entered = false
+    try {
+      const overlapping = async (): Promise<void> => {
+        entered = true
+        release()
+        await upload
+      }
+      const caller = { ...base, session: b }
+      await expect(
+        (async () => {
+          if (callback) await callsAs(caller, overlapping)()
+          else await runWithCaller(caller, overlapping)
+        })(),
+      ).rejects.toMatchObject({ code: 'ENOTSUP' })
+    } finally {
+      release()
+      await upload
+    }
+    expect(entered).toBe(false)
+    expect(sent).toBe(true)
+    expect(a.versions.read(manager.versionScope, '/f')).toBe('v2')
+    expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
+  },
+)

@@ -25,7 +25,7 @@ import type { SessionState } from '../workspace/session/session.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { leadsHidden, pathVisible } from '../utils/hidden.ts'
-import { eacces, enoent, erofs } from '../errors/fs.ts'
+import { eacces, enoent, enotsup, erofs } from '../errors/fs.ts'
 import { norm, parent } from '../utils/path.ts'
 import type { DecisionOwner, DryRun, EntryGate, HandOff, VfsExplanation } from '../policy/types.ts'
 import type { OpRecord } from '../observe/record.ts'
@@ -206,19 +206,34 @@ export function liveCallers(): readonly Caller[] {
  * stream pulled or a callback run after its command returned was made
  * with.
  */
-export function runWithCaller<T>(caller: Caller, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(callerStorage.run(caller, fn))
+export async function runWithCaller<T>(caller: Caller, fn: () => Promise<T>): Promise<T> {
+  return callsAs(caller, fn)()
 }
 
 /**
  * `fn` run as `caller` wherever it is called from: a runtime's guest asks
  * its questions from a callback of its own, which carries no caller.
+ * Without task isolation, reject conflicting conditional sessions before
+ * binding the caller, so an in-flight mutation can finish under its owner.
  */
 export function callsAs<A extends unknown[], R>(
   caller: Caller,
   fn: (...args: A) => R,
 ): (...args: A) => R {
-  return (...args) => callerStorage.run(caller, () => fn(...args)) as R
+  return (...args) => {
+    if (!asyncContextIsolatesTasks) {
+      for (const held of liveCallers()) {
+        const write = caller.write?.context != null ? caller.write : held.write
+        if (
+          write?.context != null &&
+          (held.session !== null || held.write?.context != null) &&
+          (caller.session?.versions ?? null) !== (held.session?.versions ?? null)
+        )
+          throw enotsup('workspace', 'conditional write (overlapping sessions)', write.prefix)
+      }
+    }
+    return callerStorage.run(caller, () => fn(...args)) as R
+  }
 }
 
 /** `fn` run as `caller` whoever awaits it. */

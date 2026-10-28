@@ -1056,6 +1056,33 @@ describe('conditional writes on an S3 mount', () => {
     expect(mutations()).toEqual([])
   })
 
+  it.each([
+    ['rm -r /s3/d', 'DeleteObjects', 0],
+    ['rm -r /s3/d', 'DeleteObjects', 1],
+    ['mv /s3/d /s3/e', 'CopyObject', 0],
+    ['mv /s3/d /s3/e', 'CopyObject', 1],
+    ['rm /s3/d/b', 'DeleteObject', 0],
+  ] as const)(
+    '%s preserves untouched versions when %s fails after %i requests',
+    async (line, operation, completed) => {
+      const ws = workspace()
+      await run(ws, 'cat /s3/d/b')
+      theirs('d/b')
+      mock.pageSize = 1
+      for (let i = 0; i < completed; i++) mock.before(operation, () => undefined)
+      mock.before(operation, () => {
+        throw new Error('network down')
+      })
+      let [code, , err] = await run(ws, line)
+      expect(code === 1 && err.includes('network down'), err).toBe(true)
+      ;[code, , err] = await run(ws, 'rm /s3/d/b')
+      expect(code === 1 && err.includes(STALE), err).toBe(true)
+      expect(object('d/b')).toBe('theirs\n')
+      await run(ws, 'cat /s3/d/b')
+      expect((await run(ws, 'rm /s3/d/b'))[0]).toBe(0)
+    },
+  )
+
   it('deletes a conditional rm -r page by page', async () => {
     // As the unconditional rm -r: memory stays one page, not the whole prefix.
     for (const name of ['c', 'd', 'e']) mock.store.set('b', `d/${name}`, ENC.encode(name))

@@ -56,7 +56,8 @@ async def settle_after(
     merged some children) has already changed the backend, so its
     record is owed either way. ``settle`` gets the op's result, or None
     when the op failed. After a failed op a settle error is logged, not
-    raised, so the caller still learns why the op failed.
+    raised, so the caller still learns why the op failed. Failure records
+    invalidate shared caches but preserve session versions for untouched files.
 
     Args:
         op (Awaitable[T]): The backend change.
@@ -66,10 +67,13 @@ async def settle_after(
     try:
         result = await op
     except BaseException:
+        token = bind_caller(current_caller().changed({"version_reads": False}))
         try:
             await settle(None)
         except Exception as exc:
             logger.debug("settling after a failed op: %s", exc)
+        finally:
+            reset_caller(token)
         raise
     await settle(result)
     return result

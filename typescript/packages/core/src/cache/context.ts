@@ -70,7 +70,8 @@ export function activeCacheManager(): CacheInvalidator | null {
  * some children) has already changed the backend, so its record is owed
  * either way. `settle` gets the op's result, or undefined when the op
  * failed. After a failed op a settle error is reported, not thrown, so the
- * caller still learns why the op failed. Mirrors Python's `settle_after`.
+ * caller still learns why the op failed. Failure records invalidate shared
+ * caches but preserve session versions for untouched files. Mirrors Python's `settle_after`.
  *
  * Args:
  *   op: the backend change.
@@ -84,9 +85,11 @@ export async function settleAfter<T>(
   try {
     result = await op()
   } catch (error) {
-    await settle(undefined).catch((settleError: unknown) => {
-      console.warn(`settling after a failed op: ${String(settleError)}`)
-    })
+    await runWithCaller({ ...currentCaller(), versionReads: false }, () => settle(undefined)).catch(
+      (settleError: unknown) => {
+        console.warn(`settling after a failed op: ${String(settleError)}`)
+      },
+    )
     throw error
   }
   await settle(result)

@@ -1523,3 +1523,33 @@ async def test_live_session_warm_read_keeps_its_exact_version(
     assert await (await reading).stdout_str() == "one\n"
     assert (await ws.shell("rm /s3/f", session_id="a")).exit_code == 1
     assert fake.buckets["b"]["f"] == b"peer\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, operation, completed",
+    [
+        ("rm -r /s3/d", "delete_objects", 0),
+        ("rm -r /s3/d", "delete_objects", 1),
+        ("mv /s3/d /s3/e", COPY, 0),
+        ("mv /s3/d /s3/e", COPY, 1),
+        ("rm /s3/d/b", "delete_object", 0),
+    ],
+)
+async def test_failed_mutation_keeps_untouched_session_versions(
+    fake, workspaces, line, operation, completed
+):
+    ws = workspaces()
+    await _run(ws, "cat /s3/d/b")
+    _theirs(fake, "d/b")
+    fake.page_size = 1
+    for _ in range(completed):
+        fake.before(operation, lambda: None)
+    fake.before(operation, _network_down)
+    code, _, err = await _run(ws, line)
+    assert code == 1 and "network down" in err, err
+    code, _, err = await _run(ws, "rm /s3/d/b")
+    assert code == 1 and STALE in err, err
+    assert fake.buckets["b"]["d/b"] == b"theirs\n"
+    await _run(ws, "cat /s3/d/b")
+    assert (await _run(ws, "rm /s3/d/b"))[0] == 0
