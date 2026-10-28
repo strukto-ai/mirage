@@ -85,7 +85,7 @@ async def test_a_streamed_builtin_runs_under_the_line_deadline():
     [
         "echo {1..3000000} > /dev/null",
         "set -- $x",
-        "a=($x); : \"${a[@]}\"",
+        'a=($x); : "${a[@]}"',
     ],
 )
 async def test_the_line_deadline_lands_inside_a_long_expansion(line):
