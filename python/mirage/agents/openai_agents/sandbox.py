@@ -44,10 +44,10 @@ from mirage.agents.openai_agents.constants import (
     DEFAULT_EXEC_YIELD_MS,
     DEFAULT_WRITE_YIELD_MS,
     INTERRUPT,
-    INTERRUPTED_EXIT_CODE,
     NO_STDIN,
 )
 from mirage.concurrency.limiter import run_blocking
+from mirage.shell.constants import INTERRUPTED_STATUS
 from mirage.workspace.snapshot import apply_state_dict, read_tar
 from mirage.workspace.tools.io_text import with_refusal_bytes
 from mirage.workspace.workspace import Workspace
@@ -217,7 +217,7 @@ class MirageSandboxSession(BaseSandboxSession):
             return PtyExecUpdate(
                 process_id=None,
                 output=b"",
-                exit_code=INTERRUPTED_EXIT_CODE,
+                exit_code=INTERRUPTED_STATUS,
                 original_token_count=None,
             )
         result = task.result()

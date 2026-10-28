@@ -26,7 +26,6 @@ from mirage.errors.types import (
     ReadOnlyError,
     StaleWriteError,
 )
-from mirage.runtime.errors import CrossMountError
 from mirage.utils.path import CycleError
 
 # Exception class beats OSError.errno beats everything, because mirage
@@ -38,7 +37,6 @@ from mirage.utils.path import CycleError
 CLASS_ARMS: tuple[tuple[type[BaseException], FsCondition], ...] = (
     (CycleError, FsCondition.ELOOP),
     (DotWalkLoop, FsCondition.ELOOP),
-    (CrossMountError, FsCondition.EXDEV),
     (OperationNotSupportedError, FsCondition.ENOTSUP),
     (NotImplementedError, FsCondition.ENOTSUP),
     (BadDescriptorError, FsCondition.EBADF),

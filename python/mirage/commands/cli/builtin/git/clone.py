@@ -223,7 +223,7 @@ async def clone(
                 )
         refusal = str(exc) if exc.prefix is None else f"{exc.prefix}: {exc}"
         return None, IOResult(
-            exit_code=exc.code, stderr=f"{notes}{refusal}\n".encode()
+            exit_code=exc.exit_code, stderr=f"{notes}{refusal}\n".encode()
         )
     return None, IOResult(stderr=notes.encode())
 

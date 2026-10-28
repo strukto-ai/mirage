@@ -33,6 +33,7 @@ from mirage.io.errors import PipeClosed
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.shell.bytes import encode_text
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.types import PathSpec, Producer
 from mirage.workspace.files import Files, reader_of
 
@@ -108,7 +109,11 @@ def _mount_failure(
     """
     logger.debug("%s failed", name, exc_info=exc)
     if isinstance(exc, GlobLimitError):
-        return None, argument_list_too_long(name, str(exc)), 126
+        return (
+            None,
+            argument_list_too_long(name, str(exc)),
+            CANNOT_EXECUTE_STATUS,
+        )
     code = (
         exc.exit_code
         if isinstance(exc, UsageError)

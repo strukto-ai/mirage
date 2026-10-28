@@ -64,7 +64,10 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.constants import GIT_LONG_OPTIONS
+from mirage.commands.cli.constants import (
+    GIT_LONG_OPTIONS,
+    USAGE_EXIT,
+)
 from mirage.commands.cli.refusal import (
     git_option_refusal,
     git_usage,
@@ -346,7 +349,7 @@ async def config(
     origin = fl.as_bool("show_origin")
     if not listing and not texts:
         return None, IOResult(
-            exit_code=129, stderr=b"error: wrong number of arguments\n"
+            exit_code=USAGE_EXIT, stderr=b"error: wrong number of arguments\n"
         )
     key = texts[0] if texts else ""
     # git matches keys by the locale: bytes in C, characters in UTF-8.

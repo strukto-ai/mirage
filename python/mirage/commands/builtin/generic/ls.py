@@ -38,9 +38,9 @@ from mirage.commands.spec.word_choice import (
     WordRefusalKind,
     match_word,
 )
-from mirage.errors.classify import failure_text, is_entry_error
+from mirage.errors.classify import is_entry_error
 from mirage.errors.constants import MISS_ERRORS
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import fs_strerror, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkError, DotWalkLoop, FsCondition
 from mirage.io.types import IOResult
@@ -1045,7 +1045,7 @@ async def _stat_entries(
             warnings.append(
                 LsWarning(
                     f"ls: cannot access '{spell(entry.rstrip('/'))}': "
-                    f"{failure_text(exc)}",
+                    f"{strerror_of(exc)}",
                     False,
                 )
             )

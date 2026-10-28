@@ -1,0 +1,79 @@
+---
+title: Errors
+description: What a failure looks like on each surface, from a file call's POSIX condition to a shell line's exit status.
+icon: triangle-exclamation
+---
+
+Mirage names a failure once and each surface reports it in its own form. A file
+call fails with a POSIX condition, a shell line ends with an exit status and a
+GNU-worded line on stderr, and HTTP, RPC, MCP and the kernel mounts carry one of
+those two.
+
+## File calls
+
+A file call (`read`, `write`, `stat`, `readdir`, `rename`, ...) names its
+failure with one of these conditions, whatever the backend. A service's own
+error becomes the condition it means, such as an object that is not there
+becoming `ENOENT`. One that means none keeps its own message, and HTTP answers
+it `500`.
+
+| Condition | Message | HTTP | Means |
+| --- | --- | --- | --- |
+| `ENOENT` | No such file or directory | `404` | The path is not there, or no mount owns it. |
+| `ENOTDIR` | Not a directory | `400` | A component of the path is a file. |
+| `EISDIR` | Is a directory | `400` | The call needs a file. |
+| `EEXIST` | File exists | `409` | The name is taken. |
+| `ENOTEMPTY` | Directory not empty | `409` | `rmdir` on a directory with entries. |
+| `EACCES` | Permission denied | `403` | A policy refused the call, or the service denied access. |
+| `EPERM` | Operation not permitted | `403` | The call is not allowed on this entry. |
+| `EROFS` | Read-only file system | `403` | The mount's mode stops below write. |
+| `EXDEV` | Invalid cross-device link | `400` | A rename across two mounts. |
+| `ENOTSUP` | Operation not supported | `400` | The backend does not offer the call. |
+| `ELOOP` | Too many levels of symbolic links | `400` | A link loop stands in the path. |
+| `EINVAL` | Invalid argument | `400` | The call's arguments are invalid. |
+| `EBUSY` | Device or resource busy | `409` | A mount root, or the workspace is busy. |
+| `EFBIG` | File too large | `500` | A read the backend will not serve whole. |
+| `EDQUOT` | Disk quota exceeded | `507` | A write past the mount's capacity. |
+| `EPIPE` | Broken pipe | `500` | A write to a closed pipe. |
+| `EIO` | Input/output error | `500` | The backend failed. |
+| `EBADF` | Bad file descriptor | `500` | A read from a closed or write-only descriptor. |
+| `NO_XATTR` | No data available | `404` | The attribute is not set. Python on macOS says `Attribute not found`. |
+| `STALE_WRITE` | changed since it was read; read it again before writing | `500` | A [conditional write](/home/configuration#read-and-write-policies) lost its condition. |
+
+Each surface carries the condition its own way:
+
+| Surface | Form |
+| --- | --- |
+| Python | An `OSError` with `errno` set, raised as the builtin class for it (`FileNotFoundError`, `PermissionError`, ...). A path no mount owns raises `NoMountError`, a `ValueError`. `mirage.errors.classify(exc)` names the condition for either. |
+| TypeScript | An `Error` whose `code` is the condition's name (`ENODATA` for `NO_XATTR`), as Node's `fs` does. A path no mount owns sets `noMount`. `classify(err)` from `@struktoai/mirage-core/errors/classify` names either. |
+| Shell | A line on stderr, `cat: /data/x: No such file or directory`, and the command's exit status. |
+| [HTTP](/home/access/http#errors) | `{detail, errno}` with the status above, plus a `refusal` record when a policy refused the call. |
+| [RPC](/home/access/rpc#errors) | `-32004` for `ENOENT` and `-32603` for the rest, with `{detail, errno}` in `data`. |
+| [MCP](/home/access/mcp#tools) | The tool's answer with `isError` set: `Error: /data/x: No such file or directory`. |
+| [FUSE](/home/setup/fuse), SFTP, NFS | The host's errno number. A failure with no errno reads as `EIO`. |
+| [Runtimes](/home/setup/runtime/overview) | The guest's own error: an `OSError` with its errno in Python, the WASI errno in a WebAssembly guest. |
+
+## Shell lines
+
+A line answers `exit_code`, `stdout` and `stderr`. A non-zero status is the
+line's result, not a failed call: HTTP answers `200`, RPC a result, and MCP sets
+`isError`. A command's stderr follows GNU coreutils, and its status is the one
+the real command exits with. These statuses come from the shell itself:
+
+| Status | Means |
+| --- | --- |
+| `0` | Success. |
+| `1` | The command failed. |
+| `2` | A usage or syntax error. Some commands use their own (`git` exits `128` and `129`). |
+| `124` | The line, or `timeout`, ran past its time limit. |
+| `126` | The command was found but not run: it is not executable, a policy refused it, no runtime takes it, or its argument list is too long, as a glob past a mount's [`walk_limit`](/home/integration/search#walk_limit) is. |
+| `127` | The command was not found, or an unset variable was read under `set -u`. |
+| `128` + n | Signal n ended it: `130` for an interrupt or a canceled line, `141` for a write to a closed pipe. |
+| `254` | The session's `processes.max` refused a fork. |
+
+## Service errors
+
+A command that reaches a service through a mount reports the service's failure
+as the condition it maps to, or in the service's own words after the command's
+name. An [account CLI](/home/setup/clis) such as `gh` or `ntn` reports
+a service error the way the real CLI does, with its wording and exit status.

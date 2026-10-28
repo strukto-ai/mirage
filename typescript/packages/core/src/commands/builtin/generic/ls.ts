@@ -52,8 +52,8 @@ import {
   isMissError,
   isMissingPath,
   isWalkError,
+  strerrorOf,
 } from '../../../errors/fs.ts'
-import { failureText } from '../../../errors/classify.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { followedStat } from '../../../view/namespace_view.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -589,7 +589,7 @@ async function listDir(
       if (!ctx.statNeeded) continue
       // An entry below an operand is never a command-line arg.
       warnings.push({
-        message: `ls: cannot access '${spell(rstripSlash(entry))}': ${failureText(err)}`,
+        message: `ls: cannot access '${spell(rstripSlash(entry))}': ${strerrorOf(err)}`,
         serious: false,
       })
       continue

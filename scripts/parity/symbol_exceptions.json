@@ -643,7 +643,7 @@
    },
    "typescript_only": {
     "CallQuery": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
-    "RouteError": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
+    "HttpError": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "VfsRoutesDeps": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "queryFlag": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "registerVfsRoutes": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access."

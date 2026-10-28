@@ -51,6 +51,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { readScriptBytes } from '../script/script.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { concat, findBytes } from '../../../../utils/bytes.ts'
+import { NOT_FOUND_STATUS, SIGPIPE_STATUS, TIMEOUT_STATUS } from '../../../../shell/constants.ts'
 
 const SYNOPSIS = 'xargs [OPTION]... COMMAND [INITIAL-ARGS]...'
 
@@ -938,7 +939,7 @@ async function drainChild(
     await pump(pipe, Channel.STDOUT, io.stdout)
   } finally {
     output.stderr = await pipe.snapshot(Channel.STDERR)
-    output.exitCode = io === undefined ? 141 : io.exitCode
+    output.exitCode = io === undefined ? SIGPIPE_STATUS : io.exitCode
   }
 }
 
@@ -1035,8 +1036,10 @@ async function* runLines(
     const name = words[0] ?? ''
     if (opts.trace === true) slot.push(new IOResult({ stderr: encodeText(trace(event)) }))
     if (registry !== null && !execs(name, session, registry)) {
-      slot.push(new IOResult({ stderr: encodeText(xargsMissing(name)), exitCode: 127 }))
-      stop = 127
+      slot.push(
+        new IOResult({ stderr: encodeText(xargsMissing(name)), exitCode: NOT_FOUND_STATUS }),
+      )
+      stop = NOT_FOUND_STATUS
       stopping.abort()
       return Promise.resolve({ results: slot })
     }
@@ -1054,7 +1057,7 @@ async function* runLines(
               }),
             )
           ).stderr
-          stop = 124
+          stop = TIMEOUT_STATUS
           stopping.abort()
         }
       } catch (error) {
@@ -1241,7 +1244,7 @@ export async function handleXargs(
     let failed = false
     const torn: IOResult[] = []
     async function record(io: IOResult): Promise<boolean> {
-      if (io.exitCode === 255 && stopped === null) stopped = 124
+      if (io.exitCode === 255 && stopped === null) stopped = TIMEOUT_STATUS
       merged.stderr = (await merged.merge(new IOResult({ stderr: io.stderr }))).stderr
       return io.exitCode !== 0
     }

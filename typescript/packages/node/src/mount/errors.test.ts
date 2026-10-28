@@ -101,7 +101,7 @@ describe('classifyError', () => {
 })
 
 describe('the shared vocabulary', () => {
-  // The stamps below are what CycleError and CrossMountError carry
+  // The stamps below are what CycleError and exdev() carry
   // (pinned by core's errors/classify.test.ts); the adapter's contract
   // is the code, so the tests construct stamped errors rather than
   // reaching into core's unexported classes.

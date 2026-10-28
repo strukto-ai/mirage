@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from functools import partial
 
-from mirage.commands.builtin.constants import SIGPIPE_EXIT
 from mirage.commands.builtin.utils.paths import (
     absent_dest_error,
     entry_kind,
@@ -25,6 +24,7 @@ from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, ClosedPipe, IOResult, materialize
 from mirage.io.writer import ByteWriter
 from mirage.shell.bytes import encode_text
+from mirage.shell.constants import SIGPIPE_STATUS
 from mirage.types import PathSpec, StatFn
 from mirage.utils.key_prefix import mount_key
 
@@ -285,7 +285,7 @@ async def write_output(
             # what it reported, unless -p or --output-error say otherwise.
             if parsed.pipe_errors is PipeErrors.SIGNAL:
                 return None, IOResult(
-                    exit_code=SIGPIPE_EXIT, stderr=b"".join(errors) or None
+                    exit_code=SIGPIPE_STATUS, stderr=b"".join(errors) or None
                 )
             if parsed.pipe_errors is PipeErrors.REPORT:
                 errors.append(
@@ -414,7 +414,7 @@ async def _tee_stream(
     def failed(path: PathSpec, exc: Exception) -> bool:
         if isinstance(exc, PipeClosed):
             if parsed.pipe_errors is PipeErrors.SIGNAL:
-                io.exit_code = SIGPIPE_EXIT
+                io.exit_code = SIGPIPE_STATUS
                 return True
             if parsed.pipe_errors is PipeErrors.IGNORE:
                 return False

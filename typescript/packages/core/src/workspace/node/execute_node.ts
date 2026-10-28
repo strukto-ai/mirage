@@ -58,7 +58,7 @@ import {
   getWhileParts,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
+import { FORK_FAILED, FORK_FAILED_STATUS, SIGPIPE_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
 import type { ExpandedWords } from './types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
@@ -1224,8 +1224,8 @@ async function executeNodeBody(
         throw err
       return [
         null,
-        new IOResult({ exitCode: 141 }),
-        new ExecutionNode({ command: getText(node), exitCode: 141 }),
+        new IOResult({ exitCode: SIGPIPE_STATUS }),
+        new ExecutionNode({ command: getText(node), exitCode: SIGPIPE_STATUS }),
       ]
     }
   }

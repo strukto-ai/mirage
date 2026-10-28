@@ -33,6 +33,7 @@ import { admissionDenial } from './run.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { Channel, type JobConsole } from '../../../shell/console/index.ts'
+import { CANNOT_EXECUTE_STATUS } from '../../../shell/constants.ts'
 
 /**
  * Execute one admitted program; its surrounding shell stays in Mirage.
@@ -60,7 +61,7 @@ export async function runExternal(
   if (runtime == null) {
     const denied = admissionDenial(argv.name)
     const stderr = await denied.materializeStderr()
-    return [null, denied, new ExecutionNode({ command, exitCode: 126, stderr })]
+    return [null, denied, new ExecutionNode({ command, exitCode: CANNOT_EXECUTE_STATUS, stderr })]
   }
   // A runtime that runs an argv gets one; a line runtime gets the program
   // as one quoted line.

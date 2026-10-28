@@ -15,25 +15,3 @@
 
 class UnsupportedExecutionError(ValueError):
     """The runtime does not support this execution kind or language."""
-
-
-class CrossMountError(Exception):
-    """A rename whose two ends do not live on the same mount.
-
-    The dispatcher picks the mount from the source and addresses the
-    destination against that same backend, so applying one would drop
-    the source and write the target into the wrong store.
-
-    The condition is decided once, in `RuntimeFiles.rename`, and names
-    EXDEV, what rename(2) answers across two file systems; each encoder
-    renders it in its own number for that condition.
-
-    Args:
-        src (str): the rename source, in virtual path space.
-        dst (str): the rename destination, in virtual path space.
-    """
-
-    def __init__(self, src: str, dst: str) -> None:
-        super().__init__(f"cross-mount rename: {src} -> {dst}")
-        self.src = src
-        self.dst = dst

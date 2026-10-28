@@ -45,7 +45,11 @@ from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
 from mirage.secrets.types import ResolvedSource
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
-from mirage.shell.constants import FORK_FAILED, FORK_FAILED_STATUS
+from mirage.shell.constants import (
+    FORK_FAILED,
+    FORK_FAILED_STATUS,
+    INTERRUPTED_STATUS,
+)
 from mirage.shell.errors import DiscardSignal, ExitSignal
 from mirage.shell.helpers import input_substitution_redirect
 from mirage.shell.job_table import JobTable, JobWaits
@@ -1137,7 +1141,9 @@ async def run_prepared_line(
     except (MirageAbortError, asyncio.CancelledError):
         # An aborted invocation is the caller's outcome, not the shell's;
         # the record says so, and ``Workspace.shell`` restores `$?`.
-        io = IOResult(exit_code=130, stderr=b"execute aborted\n")
+        io = IOResult(
+            exit_code=INTERRUPTED_STATUS, stderr=b"execute aborted\n"
+        )
         raise
     except (ContentDriftError, RouteError) as exc:
         io = failure_result(exc, command)

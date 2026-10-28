@@ -29,6 +29,7 @@ import type { PathSpec, Producer } from '../../../types.ts'
 import { ABORT_JOIN_MS, joinOrAbort, stopSignal } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { readerOf, type Files } from '../../files.ts'
+import { CANNOT_EXECUTE_STATUS } from '../../../shell/constants.ts'
 
 /**
  * What a voice says for one failure: the bytes the handler printed before
@@ -114,7 +115,8 @@ export function argumentListTooLong(command: string, reason: string): Uint8Array
  * error with the path as typed. Mirrors Python's `_mount_failure`.
  */
 function mountFailure(name: string, paths: readonly PathSpec[], err: unknown): Failure {
-  if (err instanceof GlobLimitError) return [null, argumentListTooLong(name, err.message), 126]
+  if (err instanceof GlobLimitError)
+    return [null, argumentListTooLong(name, err.message), CANNOT_EXECUTE_STATUS]
   const code = err instanceof UsageError ? err.exitCode : readFailExitCode(name, err)
   return [null, formatFsError(name, err, paths), code]
 }

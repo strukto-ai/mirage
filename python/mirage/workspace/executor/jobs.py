@@ -53,6 +53,8 @@ from mirage.shell.constants import (
     FD_CLOSE,
     FORK_FAILED,
     FORK_FAILED_STATUS,
+    NOT_FOUND_STATUS,
+    TIMEOUT_STATUS,
 )
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
@@ -362,9 +364,9 @@ async def handle_background(
             except CommandTimeoutError as exc:
                 msg = encode_text(str(exc) + "\n")
                 stdout = b""
-                io = IOResult(exit_code=124, stderr=msg)
+                io = IOResult(exit_code=TIMEOUT_STATUS, stderr=msg)
                 exec_node = ExecutionNode(
-                    command=cmd_str_inner, stderr=msg, exit_code=124
+                    command=cmd_str_inner, stderr=msg, exit_code=TIMEOUT_STATUS
                 )
             except ExitSignal as sig:
                 # A background job is its own shell: exit ends the job
@@ -786,7 +788,7 @@ async def handle_wait(
         if not candidates:
             # Nothing to wait for: the specs were all bad, or there are
             # no jobs. bash reports any bad spec and answers 127.
-            code = 127
+            code = NOT_FOUND_STATUS
             return (
                 None,
                 IOResult(exit_code=code, stderr=encode_text(err_text) or None),
@@ -808,7 +810,11 @@ async def handle_wait(
         # find and 1 for a word that is not a spec at all, the last
         # refusal deciding.
         last = errors[-1]
-        code = 1 if last.endswith("not a pid or valid job spec") else 127
+        code = (
+            1
+            if last.endswith("not a pid or valid job spec")
+            else NOT_FOUND_STATUS
+        )
         return _job_result(cmd_str, err_text, code)
     last_code = 0
     last_job: Job | None = None

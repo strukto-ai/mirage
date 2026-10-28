@@ -54,6 +54,11 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.console.types import Channel
+from mirage.shell.constants import (
+    NOT_FOUND_STATUS,
+    SIGPIPE_STATUS,
+    TIMEOUT_STATUS,
+)
 from mirage.shell.join import shell_join
 from mirage.utils.quote import shell_quote
 from mirage.workspace.evaluation import EvaluationContext
@@ -932,7 +937,7 @@ async def _drain_child(
         await pump(pipe, Channel.STDOUT, io.stdout)
     finally:
         output.stderr = await pipe.snapshot(Channel.STDERR)
-        output.exit_code = 141 if io is None else io.exit_code
+        output.exit_code = SIGPIPE_STATUS if io is None else io.exit_code
 
 
 async def _run_lines(
@@ -1027,10 +1032,10 @@ async def _run_lines(
             results.append(
                 IOResult(
                     stderr=encode_text(xargs_missing(words[0])),
-                    exit_code=127,
+                    exit_code=NOT_FOUND_STATUS,
                 )
             )
-            stop = 127
+            stop = NOT_FOUND_STATUS
             stopping.set()
             return results, None
         pipe = PipeConsole()
@@ -1047,7 +1052,7 @@ async def _run_lines(
                         IOResult(stderr=encode_text(aborted))
                     )
                     io.stderr = combined.stderr
-                    stop = 124
+                    stop = TIMEOUT_STATUS
                     stopping.set()
             except BaseException as exc:
                 stop = 1 if stop is None else stop
@@ -1240,7 +1245,7 @@ async def handle_xargs(
             nonlocal failed, stop
             failed = failed or io.exit_code != 0
             if io.exit_code == 255 and stop is None:
-                stop = 124
+                stop = TIMEOUT_STATUS
             combined = await merged.merge(IOResult(stderr=io.stderr))
             merged.stderr = combined.stderr
 

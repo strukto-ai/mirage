@@ -20,8 +20,9 @@ from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.quote import quote_text
 from mirage.context.session_context import current_caller
-from mirage.errors.classify import classify, failure_text
+from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
+from mirage.errors.fs import strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
@@ -48,7 +49,7 @@ async def _spooled(spool: ByteSpool) -> AsyncIterator[bytes]:
 def _failure(exc: BaseException) -> dict[str, JsonValue]:
     """A failed request's reply: the failure's words and the condition it
     names, when the vocabulary names one."""
-    reply: dict[str, JsonValue] = {"error": byte_view(failure_text(exc))}
+    reply: dict[str, JsonValue] = {"error": byte_view(strerror_of(exc))}
     condition = classify(exc)
     if condition is not None:
         reply["errno"] = condition.name

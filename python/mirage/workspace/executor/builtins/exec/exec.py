@@ -39,6 +39,8 @@ from mirage.shell.constants import (
     FD_STDERR,
     FD_STDIN,
     FD_STDOUT,
+    NOT_FOUND_STATUS,
+    SIGPIPE_STATUS,
 )
 from mirage.shell.descriptors import (
     Descriptor,
@@ -137,7 +139,8 @@ async def handle_exec_command(
     )
     if missing:
         raise ExitSignal(
-            127, stderr=builtin_error("exec", f"{head}: not found")
+            NOT_FOUND_STATUS,
+            stderr=builtin_error("exec", f"{head}: not found"),
         )
     line = ("command " if shadowed else "") + shell_join(words)
     clear_traps(session)
@@ -683,8 +686,8 @@ async def divert_statement(
             ):
                 break
             if not writer_forks(statement, session, io):
-                raise ExitSignal(141) from None
-            io.exit_code = 141
+                raise ExitSignal(SIGPIPE_STATUS) from None
+            io.exit_code = SIGPIPE_STATUS
             break
         if refused:
             failed = failed or channel == Channel.STDOUT

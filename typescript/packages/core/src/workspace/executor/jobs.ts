@@ -23,7 +23,14 @@ import { IOResult } from '../../io/types.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
-import { FD_BOTH, FD_CLOSE, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
+import {
+  FD_BOTH,
+  FD_CLOSE,
+  FORK_FAILED,
+  FORK_FAILED_STATUS,
+  NOT_FOUND_STATUS,
+  TIMEOUT_STATUS,
+} from '../../shell/constants.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
@@ -288,8 +295,12 @@ export async function handleBackground(
         if (err instanceof CommandTimeoutError) {
           const msg = encodeText(`${err.message}\n`)
           stdout = new Uint8Array()
-          io = new IOResult({ exitCode: 124, stderr: msg })
-          execNode = new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 })
+          io = new IOResult({ exitCode: TIMEOUT_STATUS, stderr: msg })
+          execNode = new ExecutionNode({
+            command: cmdStrInner,
+            stderr: msg,
+            exitCode: TIMEOUT_STATUS,
+          })
         } else if (err instanceof ExitSignal) {
           // A background job is its own shell: exit ends the job only, a
           // simple command the top shell forked with the status that shell
@@ -657,8 +668,8 @@ export async function handleWait(
     if (candidates.length === 0) {
       return [
         null,
-        new IOResult({ exitCode: 127, stderr: errBytes }),
-        new ExecutionNode({ command: cmdStr, exitCode: 127 }),
+        new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: errBytes }),
+        new ExecutionNode({ command: cmdStr, exitCode: NOT_FOUND_STATUS }),
       ]
     }
     const job = await abortable(waitFirst(jobTable, candidates, signal), signal)
@@ -676,7 +687,7 @@ export async function handleWait(
     // Every spec was refused: bash answers 127 for a job it cannot find
     // and 1 for a word that is not a spec at all, the last one deciding.
     const last = errors[errors.length - 1] ?? ''
-    const code = last.endsWith('not a pid or valid job spec') ? 1 : 127
+    const code = last.endsWith('not a pid or valid job spec') ? 1 : NOT_FOUND_STATUS
     return jobResult(cmdStr, errText, code)
   }
   let lastCode = 0

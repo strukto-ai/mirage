@@ -19,27 +19,3 @@ export class UnsupportedExecutionError extends Error {
     this.name = 'UnsupportedExecutionError'
   }
 }
-
-/**
- * A rename whose two ends do not live on the same mount.
- *
- * The dispatcher picks the mount from the source and addresses the
- * destination against that same backend, so applying one would drop
- * the source and write the target into the wrong store.
- *
- * The condition is decided once, in RuntimeFiles.rename, and names EXDEV,
- * what rename(2) answers across two file systems; each encoder renders
- * it in its own number for that condition.
- */
-export class CrossMountError extends Error {
-  readonly src: string
-  readonly dst: string
-  readonly code = 'EXDEV'
-
-  constructor(src: string, dst: string) {
-    super(`cross-mount rename: ${src} -> ${dst}`)
-    this.name = 'CrossMountError'
-    this.src = src
-    this.dst = dst
-  }
-}

@@ -16,9 +16,15 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { type FindOptions, modifiedTs } from '../../../core/generic/find.ts'
-import { fsStrerror, isEnoent, isEnotdir, isMissError, walkRefusal } from '../../../errors/fs.ts'
+import {
+  fsStrerror,
+  isEnoent,
+  isEnotdir,
+  isMissError,
+  strerrorOf,
+  walkRefusal,
+} from '../../../errors/fs.ts'
 import { dotRefusal, linkFollow, statOrEnoent, vfsStatPath } from '../utils/paths.ts'
-import { failureText } from '../../../errors/classify.ts'
 import { IOResult, type PathRecord } from '../../../io/types.ts'
 import { FindParseError } from '../../errors.ts'
 import { parseDepth, parseFindExpression, parseMtime, parseSize } from '../find_parse.ts'
@@ -486,7 +492,7 @@ export function findGeneric(
       // listed where no test needed its stat.
       for (const [path, err] of unstatted?.() ?? []) {
         const shown = respellOne(path, root.virtual, root.rawPath)
-        missing.push(`find: '${shown}': ${failureText(err)}`)
+        missing.push(`find: '${shown}': ${strerrorOf(err)}`)
       }
       for (const [path, above] of loops?.() ?? []) {
         missing.push(

@@ -36,12 +36,12 @@ from mirage.server.ssh.stream import (
     loop_sender,
 )
 from mirage.server.stdin import LoopStdin
+from mirage.shell.constants import INTERRUPTED_STATUS
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.executor.statement import record_status
 
 logger = logging.getLogger(__name__)
 
-INTERRUPTED = 130
 FALLBACK_PROMPT = "mirage$ "
 LOGIN_HOME = "/"
 
@@ -269,7 +269,7 @@ async def run_line(
         ) as execution:
             io = await deliver(execution, send)
     except MirageAbortError:
-        return INTERRUPTED
+        return INTERRUPTED_STATUS
     return io.exit_code
 
 
@@ -285,7 +285,7 @@ async def stamp_interrupt(ws: Workspace, session_id: str) -> None:
         ws (Workspace): the workspace, on its own loop.
         session_id (str): the session the line ran as.
     """
-    record_status(ws.get_session(session_id), INTERRUPTED)
+    record_status(ws.get_session(session_id), INTERRUPTED_STATUS)
 
 
 class ShellChannel:
@@ -397,12 +397,12 @@ class ShellChannel:
             if task is not None and task.cancelling():
                 raise
             if self._lost:
-                return INTERRUPTED
+                return INTERRUPTED_STATUS
             if self._live():
                 await runner.call(stamp_interrupt(runner.ws, self._session_id))
             if self._tty:
                 await self._output.write(b"^C\n")
-            return INTERRUPTED
+            return INTERRUPTED_STATUS
         except Exception as exc:
             if self._lost:
                 logger.debug("ssh: line ended with the connection: %r", exc)
@@ -437,7 +437,7 @@ class ShellChannel:
             if item is Mark.INTERRUPT:
                 if self._tty:
                     await self._output.write(b"^C\n")
-                status = INTERRUPTED
+                status = INTERRUPTED_STATUS
                 if self._live():
                     runner = self._entry.runner
                     await runner.call(

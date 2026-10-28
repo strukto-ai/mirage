@@ -54,6 +54,7 @@ from mirage.shell.console import JobConsole
 from mirage.shell.constants import (
     FORK_FAILED,
     FORK_FAILED_STATUS,
+    SIGPIPE_STATUS,
 )
 from mirage.shell.errors import ArithError, ExitSignal, ReadonlyError
 from mirage.shell.helpers import (
@@ -1328,8 +1329,10 @@ async def _execute_node(
                 raise
             return (
                 None,
-                IOResult(exit_code=141),
-                ExecutionNode(command=get_text(node), exit_code=141),
+                IOResult(exit_code=SIGPIPE_STATUS),
+                ExecutionNode(
+                    command=get_text(node), exit_code=SIGPIPE_STATUS
+                ),
             )
 
     if kind == NodeKind.PIPELINE:

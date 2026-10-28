@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 INTERRUPT = "\x03"
-INTERRUPTED_EXIT_CODE = 130
 DEFAULT_EXEC_YIELD_MS = 10_000
 DEFAULT_WRITE_YIELD_MS = 250
 NO_STDIN = "stdin is not available for this process"

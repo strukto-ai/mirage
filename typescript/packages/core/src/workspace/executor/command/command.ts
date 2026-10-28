@@ -103,6 +103,7 @@ import {
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
 
 // One handler per JOB_BUILTINS member but ps, which also takes the workspace
 // user; lookup already narrowed the name.
@@ -406,8 +407,8 @@ export async function handleCommand(
     const errBytes = encodeText(`${typed}: command not found\n`)
     return [
       null,
-      new IOResult({ exitCode: 127, stderr: errBytes }),
-      new ExecutionNode({ command: cmdStr, exitCode: 127, stderr: errBytes }),
+      new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: errBytes }),
+      new ExecutionNode({ command: cmdStr, exitCode: NOT_FOUND_STATUS, stderr: errBytes }),
     ]
   }
 
@@ -870,8 +871,8 @@ export async function handleCommand(
     const err = encodeText(`${cmdName}: command not found`)
     return [
       null,
-      new IOResult({ exitCode: 127, stderr: err }),
-      new ExecutionNode({ command: cmdStr, exitCode: 127 }),
+      new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: err }),
+      new ExecutionNode({ command: cmdStr, exitCode: NOT_FOUND_STATUS }),
     ]
   }
   const selectedTree = mount.cliFor(cmdName)

@@ -25,7 +25,7 @@ import { MAX_STDIN_BYTES } from '../constants.ts'
 import { UploadStdin } from '../stdin.ts'
 import { shellResponse } from '../stream.ts'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
-import { RouteError, failure, queryFlag, requireEntry, sessionOf } from './vfs.ts'
+import { HttpError, failure, queryFlag, requireEntry, sessionOf } from './vfs.ts'
 
 export interface ShellRoutesDeps {
   registry: WorkspaceRegistry
@@ -248,12 +248,9 @@ async function explained(
       req.headers['content-type']?.startsWith('multipart/') === true ||
       (parsed.success && (parsed.data.cwd !== undefined || parsed.data.runtime !== undefined))
     ) {
-      throw new RouteError(
-        400,
-        'explain takes the line alone: no stdin, cwd, runtime or background',
-      )
+      throw new HttpError(400, 'explain takes the line alone: no stdin, cwd, runtime or background')
     }
-    if (!parsed.success) throw new RouteError(400, `bad shell request: ${parsed.error.message}`)
+    if (!parsed.success) throw new HttpError(400, `bad shell request: ${parsed.error.message}`)
     const session = await sessionOf(entry.runner.ws, req.query.session_id)
     said = await session.explain.shell(parsed.data.command)
   } catch (err) {
@@ -273,7 +270,7 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
           streaming &&
           (queryFlag(req.query.background, 'background') || queryFlag(req.query.explain, 'explain'))
         ) {
-          throw new RouteError(400, 'stream cannot be combined with background or explain')
+          throw new HttpError(400, 'stream cannot be combined with background or explain')
         }
         if (queryFlag(req.query.explain, 'explain')) return await explained(req, reply, deps)
       } catch (err) {
