@@ -1,0 +1,226 @@
+---
+title: "Weights & Biases"
+description: "Read experiment runs, configuration, summaries, history, and run files."
+---
+
+The Weights & Biases (W&B) VFS provides read-only access to experiments, run
+configurations, summaries, metric history, and logged artifacts.
+
+For API key setup and entity discovery, see [Weights & Biases Setup](/home/setup/wandb).
+For the TypeScript SDK, see [Weights & Biases (TypeScript)](/typescript/setup/wandb).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.vfs.wandb import WandbConfig, WandbVFS
+
+config = WandbConfig(
+    entities=["my-team"],
+    api_key=os.environ["WANDB_API_KEY"],
+)
+vfs = WandbVFS(config)
+ws = Workspace({"/wandb": vfs}, mode=MountMode.READ)
+```
+
+The mount exposes `/<entity>/<project>/<run-id>/` with `run.json`,
+`config.json`, `summary.json`, `history.jsonl`, and `files/`.
+
+Configure one or more entities explicitly; project and run listings are fetched
+on demand and follow service pagination. Run IDs identify directories; duplicate
+display names remain separate runs.
+
+{/* generated: config-table wandb start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
+| <code style={{ whiteSpace: 'nowrap' }}>entities</code><br />required | W&B entities (users or teams) the mount shows as top-level directories; no other entity is reachable. |
+| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />default `SecretStr('')`, secret | W&B API key, sent as HTTP Basic auth. Empty sends no credentials. |
+| <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />default `'https://api.wandb.ai'` | W&B API root. Queries go to its `/graphql`, and only downloads from the same origin carry the key. |
+| <code style={{ whiteSpace: 'nowrap' }}>page_size</code><br />default `100` | Items per GraphQL page, and steps per window when reading `history.jsonl`. |
+| <code style={{ whiteSpace: 'nowrap' }}>max_pages</code><br />default `10000` | The most pages one listing or history read fetches. Past it the read fails rather than return a partial result. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table wandb end */}
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with Weights & Biases mounted at `/<path>`.
+
+{/* generated: vfs-md wandb start */}
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `wandb`, read |
+
+    #### `/<path>` layout
+
+    ```text
+    Read-only W&B experiments: /<entity>/<project>/<run-id>/ contains
+    run.json (identity, creator, sweep/group/job, tags, timestamps, notes, system metrics,
+    history keys/count and file count), config.json, summary.json, history.jsonl and files/.
+    Run IDs are stable; display names may repeat. history.jsonl scans unsampled history
+    in original order, preserving missing metrics and _step. Logged training-step keys
+    are independent of _step. Summary metrics are stored values, not history maxima.
+    Listings and reads are lazy. History reads may be large; use head to stream a prefix.
+    Only configured entities are visible. Files retain their run-relative paths.
+    files/wandb-metadata.json, when present, describes the machine/runtime environment.
+    run.json user contains the creator's id, name, username and email, when available.
+    Missing run metadata is null. run.json read_only is W&B's permission, not mount mode.
+    ```
+
+    #### Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
+
+    #### Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `wandb`, read |
+
+    ## `/<path>` layout
+
+    ```text
+    Read-only W&B experiments: /<entity>/<project>/<run-id>/ contains
+    run.json (identity, creator, sweep/group/job, tags, timestamps, notes, system metrics,
+    history keys/count and file count), config.json, summary.json, history.jsonl and files/.
+    Run IDs are stable; display names may repeat. history.jsonl scans unsampled history
+    in original order, preserving missing metrics and _step. Logged training-step keys
+    are independent of _step. Summary metrics are stored values, not history maxima.
+    Listings and reads are lazy. History reads may be large; use head to stream a prefix.
+    Only configured entities are visible. Files retain their run-relative paths.
+    files/wandb-metadata.json, when present, describes the machine/runtime environment.
+    run.json user contains the creator's id, name, username and email, when available.
+    Missing run metadata is null. run.json read_only is W&B's permission, not mount mode.
+    ```
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+    ````
+  </Tab>
+</Tabs>
+{/* generated: vfs-md wandb end */}
+
+## Run data reference
+
+`run.json` contains the run metadata exposed by the supported W&B API fields:
+
+| Fields | Contents |
+| --- | --- |
+| `entity`, `project`, `run`, `path` | Run identity and its `entity/project/run-id` path |
+| `storage_id`, `display_name`, `state` | W&B's opaque storage ID, display name, and reported state |
+| `tags`, `sweep_name`, `group`, `job_type` | Experiment organization |
+| `commit`, `created_at`, `heartbeat_at` | Source revision, creation time, and last heartbeat |
+| `description`, `notes`, `user` | Run description, notes, and creator's `id`/`name`/`username`/`email` |
+| `read_only` | W&B's reported edit permission; the Mirage mount remains read-only |
+| `system_metrics` | Latest system metrics decoded as JSON, retaining nested values |
+| `history_line_count`, `history_keys`, `file_count` | History row count, metric-key metadata including the last step, and file count |
+
+Unavailable metadata is `null`; empty tags, zero counts, false permissions, and
+original timestamp strings are preserved. These fields are fetched only when
+reading `run.json`, in one run query. Listing and stat do not fetch them.
+The `user` is the run's creator, not the identity associated with the API key.
+
+`config.json` unwraps W&B's configuration `value` envelopes. `summary.json`
+contains the stored summary, which may differ from the best value in history.
+These documents have run-defined keys rather than a fixed Mirage field list.
+Nested objects, arrays, metric names containing `/` or `.`, and null values remain
+intact.
+
+`history.jsonl` scans full history in `_step` windows using the public SDK's
+unsampled scan protocol. It retains row order, missing keys, nulls, and logged
+training-step fields. `_step` and a training-step metric are separate values.
+The last step is captured when a read begins; rows appended later are visible on
+a subsequent read.
+
+Run files retain their relative paths and are downloaded as raw bytes. Listing
+and stat do not download histories or files. Rendered JSON and history have
+unknown sizes; raw file sizes come from W&B's file metadata.
+
+Directory metadata uses Mirage's index cache (600 seconds by default). A project
+listing also establishes its runs' existence; a file catalog populates all nested
+directories, so traversing them reuses the same metadata. Config, summary, and
+history reads request their own fields. Downloads resolve the exact filename for
+a fresh URL on each read. File content and download URLs are not cached in the index.
+
+Reads and downloads stream, so `head` can stop before fetching the entire history.
+`page_size` defaults to 100 (maximum 1000); `max_pages` defaults to 10000.
+Exhausting a page budget raises an error instead of returning a complete-looking
+partial result.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from mirage import MountMode, Workspace
+from mirage.vfs.wandb import WandbConfig, WandbVFS
+
+
+async def main() -> None:
+    config = WandbConfig(
+        entities=["my-team"],
+        api_key=os.environ["WANDB_API_KEY"],
+    )
+    vfs = WandbVFS(config)
+    ws = Workspace({"/wandb": vfs}, mode=MountMode.READ)
+
+    # Discover runs
+    res = await ws.shell("find /wandb/my-team -maxdepth 3 -name run.json")
+    print(await res.stdout_str())
+
+    # Inspect a run configuration
+    res = await ws.shell("cat /wandb/my-team/my-project/run-01/config.json")
+    print(await res.stdout_str())
+
+    # Stream the first 10 steps of history
+    res = await ws.shell("head -n 10 /wandb/my-team/my-project/run-01/history.jsonl")
+    print(await res.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```

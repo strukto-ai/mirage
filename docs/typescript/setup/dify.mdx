@@ -1,0 +1,171 @@
+---
+title: Dify
+icon: /images/dify-logo.svg
+description: Mount a Dify Knowledge dataset as a read-only virtual filesystem.
+---
+
+The Dify VFS exposes completed Dify Knowledge documents as text files
+mounted at a prefix such as `/knowledge/`. Each file is assembled from the
+document's completed, enabled segments.
+
+For API key setup and dataset creation, see [Dify Setup](/home/setup/dify).
+For Python, see the [Dify (Python)](/python/vfs/dify) documentation.
+
+## Config
+
+```typescript
+import { MountMode, Workspace } from '@struktoai/mirage-node'
+import { DifyVFS } from '@struktoai/mirage-core'
+
+const vfs = new DifyVFS({
+  apiKey: process.env.DIFY_API_KEY!,
+  baseUrl: process.env.DIFY_BASE_URL ?? 'https://api.dify.ai/v1',
+  datasetId: process.env.DIFY_DATASET_ID!,
+  slugMetadataName: process.env.DIFY_SLUG_METADATA_NAME ?? 'slug',
+})
+const ws = new Workspace({ '/knowledge/': vfs }, { mode: MountMode.READ })
+```
+
+The VFS is read-only. Snapshots redact credentials, so `Workspace.load` needs
+a live `DifyVFS` in its third argument for `/knowledge/` (e.g.
+`Workspace.load(snapshot, {}, { '/knowledge/': freshDifyVfs })`).
+Restored cache entries are served as saved and un-cached reads reach the live backend.
+
+{/* generated: config-table dify start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />required, secret | Dify Knowledge API key, sent as `Authorization: Bearer`. |
+| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />required | Dify API root, such as `https://api.dify.ai/v1`. |
+| <code style={{ whiteSpace: 'nowrap' }}>datasetId</code><br />required | ID of the Knowledge dataset the mount shows. |
+| <code style={{ whiteSpace: 'nowrap' }}>slugMetadataName</code><br />default `'slug'` | Document metadata field whose value is the document's path in the mount. A document without it is mounted under its document name. |
+| <code style={{ whiteSpace: 'nowrap' }}>maxConcurrency</code><br />default `10` | The most Dify API requests in flight at once. |
+| <code style={{ whiteSpace: 'nowrap' }}>retryAttempts</code><br />default `4` | Attempts per request, the first included. A 429, a 5xx or a transport error is retried. |
+| <code style={{ whiteSpace: 'nowrap' }}>retryMaxDelay</code><br />default `30` | Longest wait in seconds before a retry, whether from backoff or `Retry-After`. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table dify end */}
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
+
+{/* generated: vfs-md dify start */}
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `dify`, read |
+
+    #### `/<path>` layout
+
+    ```text
+    This is a Dify Knowledge Base mounted as a read-only filesystem.
+
+    All files are plain text assembled from Dify document segments, regardless of
+    their original extension. You can use cat, head, tail, grep, find, ls, and wc
+    on these files.
+    ```
+
+    #### Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
+
+    #### Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `dify`, read |
+
+    ## `/<path>` layout
+
+    ```text
+    This is a Dify Knowledge Base mounted as a read-only filesystem.
+
+    All files are plain text assembled from Dify document segments, regardless of
+    their original extension. You can use cat, head, tail, grep, find, ls, and wc
+    on these files.
+    ```
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+    ````
+  </Tab>
+</Tabs>
+{/* generated: vfs-md dify end */}
+
+## Document metadata and paths
+
+Mirage mounts documents using a slug metadata field when present (defaulting to
+`slug`), falling back to the document name. Adding a `slug` metadata field to
+your Dify Knowledge dataset allows you to organize virtual paths into a clean
+nested directory structure:
+
+| Dify document | `slug` metadata value | Virtual path |
+| --- | --- | --- |
+| Quickstart Guide | `guides/quickstart.md` | `/knowledge/guides/quickstart.md` |
+| API Overview | `api/overview.md` | `/knowledge/api/overview.md` |
+
+## Example
+
+```typescript
+import { MountMode, Workspace } from '@struktoai/mirage-node'
+import { DifyVFS } from '@struktoai/mirage-core'
+
+const vfs = new DifyVFS({
+  apiKey: process.env.DIFY_API_KEY!,
+  baseUrl: process.env.DIFY_BASE_URL ?? 'https://api.dify.ai/v1',
+  datasetId: process.env.DIFY_DATASET_ID!,
+})
+const ws = new Workspace({ '/knowledge/': vfs }, { mode: MountMode.READ })
+
+// List available knowledge documents
+const ls = await ws.shell('ls -la /knowledge/')
+console.log(await ls.stdoutStr())
+
+// Read document contents
+const content = await ws.shell('cat /knowledge/guides/quickstart.md')
+console.log(await content.stdoutStr())
+
+// Search for keywords
+const grep = await ws.shell('shopt -s globstar; grep -i "authentication" /knowledge/**/*.md')
+console.log(await grep.stdoutStr())
+```
