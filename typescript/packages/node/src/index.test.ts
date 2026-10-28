@@ -19,7 +19,7 @@ describe('@struktoai/mirage-node barrel exports', () => {
   it('re-exports core symbols (Workspace, MountMode, RAMVFS, …)', () => {
     expect(nodePkg.MountMode).toBeDefined()
     expect(nodePkg.RAMVFS).toBeDefined()
-    expect(nodePkg.vfsCall).toBeDefined()
+    expect(nodePkg.BaseVFS).toBeDefined()
     expect(nodePkg.PathSpec).toBeDefined()
   })
 
