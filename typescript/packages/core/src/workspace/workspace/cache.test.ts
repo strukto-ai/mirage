@@ -258,12 +258,11 @@ describe('the workspace clock', () => {
     }
   })
 
-  it('unmounting one of two mounts of a VFS keeps the clock', async () => {
+  it('a refused second mount of a VFS keeps its clock', async () => {
     const vfs = drive()
     const ws = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: new ManualClock() })
     try {
-      ws.addMount('/h', vfs, MountMode.WRITE)
-      await ws.unmount('/h')
+      expect(() => ws.addMount('/h', vfs, MountMode.WRITE)).toThrow(/already mounted at \/g\//)
       expect(() => {
         vfs.accessor.bindClock(new ManualClock(), 'later')
       }).toThrow(/another clock/)
