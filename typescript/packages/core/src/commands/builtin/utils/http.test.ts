@@ -15,6 +15,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import { httpFormRequest, httpRequest, isHttpError, registerInsecureFetch } from './http.ts'
+import { runWithEvaluation } from '../../../context/session_context.ts'
+import { EvaluationContext } from '../../../workspace/evaluation.ts'
+import { SessionState } from '../../../workspace/session/session.ts'
 
 const ENC = new TextEncoder()
 
@@ -276,5 +279,38 @@ describe('insecure fetch', () => {
     vi.stubGlobal('fetch', fetchMock)
     const resp = await httpRequest('https://example.com/x', { verify: false })
     expect(new TextDecoder().decode(resp.body)).toBe('verified')
+  })
+})
+
+// A request with no signal of its own (git's transport) still ends with the
+// call it runs in, as an abort rather than a connection failure.
+describe("httpRequest and the call's signal", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('a stopped call ends a request that has no deadline', async () => {
+    const stop = new AbortController()
+    const evaluation = new EvaluationContext(new SessionState({ sessionId: 's' }))
+    evaluation.frame.abortSignal = stop.signal
+    vi.stubGlobal(
+      'fetch',
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        }),
+    )
+    const pending = runWithEvaluation(evaluation, () =>
+      httpRequest('http://127.0.0.1:9/repo.git/info/refs', { timeoutMs: null }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    stop.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
   })
 })

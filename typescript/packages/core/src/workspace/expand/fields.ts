@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { callerSignal } from '../../context/session_context.ts'
+import { YieldBudget } from '../../io/yield_budget.ts'
 import { joinBytes } from '../../shell/bytes.ts'
 import { IFS_DEFAULT } from '../../shell/constants.ts'
 import { markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
@@ -34,13 +36,23 @@ export function valuePiece(text: string, quoted: boolean): Piece {
   return quoted ? piece(markGlobs(text)) : piece(text, true)
 }
 
-/** The elements of a splat, a field boundary between each two. */
-export function splatChunks(elements: readonly string[], joiner: string, quoted: boolean): Chunk[] {
+/**
+ * The elements of a splat, a field boundary between each two. A long splat
+ * yields between its elements, so a cancel or the line's deadline lands
+ * mid-list.
+ */
+export async function splatChunks(
+  elements: readonly string[],
+  joiner: string,
+  quoted: boolean,
+): Promise<Chunk[]> {
   const out: Chunk[] = []
-  elements.forEach((element, index) => {
+  const budget = new YieldBudget(callerSignal())
+  for (const [index, element] of elements.entries()) {
     if (index > 0) out.push(fieldBreak(joiner))
     out.push(valuePiece(element, quoted))
-  })
+    await budget.run()
+  }
   return out
 }
 
@@ -69,15 +81,18 @@ export function chunksText(chunks: Iterable<Chunk>): string {
  * `IFS=,` is three fields and `a,` is one. A splat boundary always ends
  * a field. A field exists once literal or quoted text, or a non-empty
  * split, opened it, so an unquoted expansion that comes back empty is
- * no word at all while `""` is an empty one. `ifs` is null when unset.
+ * no word at all while `""` is an empty one. `ifs` is null when unset. A
+ * value that splits into many fields yields between them, so a cancel or
+ * the line's deadline lands mid-split.
  */
-export function splitFields(chunks: Iterable<Chunk>, ifs: string | null): string[] {
+export async function splitFields(chunks: Iterable<Chunk>, ifs: string | null): Promise<string[]> {
   const separators = ifs ?? IFS_DEFAULT
   let blanks = ''
   for (const c of IFS_DEFAULT) if (separators.includes(c)) blanks += c
   const fields: string[] = []
   let current = ''
   let started = false
+  const budget = new YieldBudget(callerSignal())
   for (const chunk of chunks) {
     if (chunk.kind === 'break') {
       if (started) fields.push(current)
@@ -107,7 +122,10 @@ export function splitFields(chunks: Iterable<Chunk>, ifs: string | null): string
         end++
         while (end < text.length && blanks.includes(text[end] ?? '')) end++
       }
-      if (started || hard) fields.push(current)
+      if (started || hard) {
+        fields.push(current)
+        await budget.run()
+      }
       current = ''
       started = false
       index = end

@@ -783,7 +783,9 @@ async def _run_argv(
     if name and await fill_tree_env(
         name, list(argv.args), session, registry, assigned
     ):
-        words = classified_words(name, list(argv.args), session, registry)
+        words = await classified_words(
+            name, list(argv.args), session, registry
+        )
         argv = dataclasses.replace(argv, operands=tuple(words[1:]))
 
     admitted: Admitted | None = None

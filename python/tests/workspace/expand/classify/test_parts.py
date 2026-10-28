@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.expand.classify.parts import classify_parts
@@ -24,29 +26,33 @@ def _registry() -> MountRegistry:
     return registry
 
 
-def test_name_never_classified():
-    result = classify_parts(["/ram/cat", "/ram/x"], _registry(), "/")
+@pytest.mark.asyncio
+async def test_name_never_classified():
+    result = await classify_parts(["/ram/cat", "/ram/x"], _registry(), "/")
     assert result[0] == "/ram/cat"
     assert isinstance(result[1], PathSpec)
 
 
-def test_text_kind_keeps_string():
-    result = classify_parts(
+@pytest.mark.asyncio
+async def test_text_kind_keeps_string():
+    result = await classify_parts(
         ["cat", "/ram/x"], _registry(), "/", word_kinds=["str"]
     )
     assert result[1] == "/ram/x"
 
 
-def test_path_kind_classifies_bare_filename():
-    result = classify_parts(
+@pytest.mark.asyncio
+async def test_path_kind_classifies_bare_filename():
+    result = await classify_parts(
         ["cat", "file.txt"], _registry(), "/ram", word_kinds=["path"]
     )
     assert isinstance(result[1], PathSpec)
     assert result[1].virtual == "/ram/file.txt"
 
 
-def test_duplicate_word_kinds_per_slot():
-    result = classify_parts(
+@pytest.mark.asyncio
+async def test_duplicate_word_kinds_per_slot():
+    result = await classify_parts(
         ["grep", "*.txt", "*.txt"],
         _registry(),
         "/ram",
@@ -57,13 +63,15 @@ def test_duplicate_word_kinds_per_slot():
     assert result[2].pattern == "*.txt"
 
 
-def test_none_kind_falls_back_to_heuristic():
-    result = classify_parts(
+@pytest.mark.asyncio
+async def test_none_kind_falls_back_to_heuristic():
+    result = await classify_parts(
         ["cat", "/ram/x", "plain"], _registry(), "/", word_kinds=[None, None]
     )
     assert isinstance(result[1], PathSpec)
     assert result[2] == "plain"
 
 
-def test_empty_parts():
-    assert classify_parts([], _registry(), "/") == []
+@pytest.mark.asyncio
+async def test_empty_parts():
+    assert await classify_parts([], _registry(), "/") == []

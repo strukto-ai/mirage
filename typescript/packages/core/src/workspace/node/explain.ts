@@ -474,7 +474,7 @@ async function* judgeWords(
   const literal = stated && [...words, ...redirectWords].every((w) => w.text !== null)
   const name = wordValue(head)
   const args = words.slice(1).map(wordValue)
-  const classified = classifiedWords(name, args, session, registry)
+  const classified = await classifiedWords(name, args, session, registry)
   const readWords = [...words.slice(1), ...redirectWords]
   const kinds = [
     ...classified.slice(1),

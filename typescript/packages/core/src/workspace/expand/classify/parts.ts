@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { callerSignal } from '../../../context/session_context.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
 import type { SessionAccess } from '../../../view/types.ts'
 import { type ValueType } from '../../../commands/spec/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -25,18 +27,21 @@ import { classifyBarePath } from './path.ts'
 // PATH classifies even bare filenames, null falls back to the shape
 // heuristics. wordBases, also aligned with parts[1:], names the
 // directory a word resolves against when a chdir option (tar's -C)
-// moved it; null there means the cwd.
-export function classifyParts(
+// moved it; null there means the cwd. A long list yields between its
+// words, so a cancel or the line's deadline lands mid-list.
+export async function classifyParts(
   parts: string[],
   registry: MountRegistry,
   cwd: string,
   wordKinds: readonly (ValueType | null)[] | null = null,
   wordBases: readonly (string | null)[] | null = null,
   access?: SessionAccess,
-): (string | PathSpec)[] {
+): Promise<(string | PathSpec)[]> {
   if (parts.length === 0) return []
   const result: (string | PathSpec)[] = [parts[0] ?? '']
+  const budget = new YieldBudget(callerSignal())
   for (let i = 1; i < parts.length; i++) {
+    await budget.run()
     const w = parts[i]
     if (w === undefined) continue
     const kind = wordKinds !== null ? (wordKinds[i - 1] ?? null) : null

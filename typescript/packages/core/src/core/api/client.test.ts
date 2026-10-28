@@ -26,6 +26,9 @@ import {
   type RetryPolicy,
 } from './client.ts'
 import { ResponseTooLargeError } from './errors.ts'
+import { runWithEvaluation } from '../../context/session_context.ts'
+import { EvaluationContext } from '../../workspace/evaluation.ts'
+import { SessionState } from '../../workspace/session/session.ts'
 
 const TARGET = 'https://api.test/v1/thing'
 
@@ -1037,5 +1040,37 @@ describe('stallTimeout', () => {
   it('fails a body that stops flowing at the bound', async () => {
     const response = await stallTimeout(0.05, drip([0, 500]))(TARGET)
     await expect(response.text()).rejects.toMatchObject({ name: 'TimeoutError' })
+  })
+})
+
+// A request a command makes answers to the call it runs in: the line that
+// stops, or the job that is killed or past its limit, ends the request, as
+// Python cancels the task that awaits it, and no retry follows.
+describe("the call's signal", () => {
+  it('a stopped call ends its request and retries nothing', async () => {
+    const stop = new AbortController()
+    const evaluation = new EvaluationContext(new SessionState({ sessionId: 's' }))
+    evaluation.frame.abortSignal = stop.signal
+    let calls = 0
+    const hang: typeof fetch = (_input, init) => {
+      calls += 1
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => {
+            reject(init.signal?.reason as Error)
+          },
+          { once: true },
+        )
+      })
+    }
+    const retry: RetryPolicy = { ...NO_RETRY, maxRetries: 3, retryTransport: true }
+    const pending = runWithEvaluation(evaluation, () =>
+      apiRequest('GET', TARGET, { errorOf, fetchFn: hang, retry }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    stop.abort()
+    await expect(pending).rejects.toThrow()
+    expect(calls).toBe(1)
   })
 })

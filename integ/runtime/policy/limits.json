@@ -1310,6 +1310,48 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_background_job_stops_at_the_line_limit",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {}
+          }
+        },
+        "command_limits": {
+          "@line": {
+            "timeout_seconds": 1
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "sleep 30 &",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "sleep 0.6",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "wait %1; echo status=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "status=124\n",
+            "stderr": "line: timed out after 1s\n"
+          }
+        }
+      ]
     }
   ]
 }

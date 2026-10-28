@@ -23,10 +23,14 @@ export class ExecutionFrame {
   // one channel. Python needs no equivalent: kill cancels the asyncio task
   // and cancellation is ambient.
   abortSignal: AbortSignal | null = null
+  // The line's `@line` limit, which fork() carries so a job the line
+  // starts runs under it from its own start.
+  lineTimeout: number | null = null
 
   fork(): ExecutionFrame {
     const child = new ExecutionFrame()
     child.abortSignal = this.abortSignal
+    child.lineTimeout = this.lineTimeout
     if (this.routing !== undefined) child.routing = this.routing
     return child
   }

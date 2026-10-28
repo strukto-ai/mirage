@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { childMountNames, namespaceNames } from '../../view/namespace_view.ts'
-import { currentCaller, sessionAccess, sessionVisibility } from '../../context/session_context.ts'
+import {
+  callerSignal,
+  currentCaller,
+  sessionAccess,
+  sessionVisibility,
+} from '../../context/session_context.ts'
+import { YieldBudget } from '../../io/yield_budget.ts'
 import { walkBound } from '../../policy/builtin/output_cap.ts'
 import type { NamespaceLinks, SessionAccess } from '../../view/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -505,7 +511,9 @@ export async function resolveGlobs(
   }
   const access = opts.access
   const result: (string | PathSpec)[] = []
+  const budget = new YieldBudget(callerSignal())
   for (const item of classified) {
+    await budget.run()
     if (item instanceof PathSpec && item.pattern !== null) {
       // A pattern word no mount owns stays the literal word like a
       // zero-match glob.

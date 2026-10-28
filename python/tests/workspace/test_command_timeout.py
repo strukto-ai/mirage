@@ -80,6 +80,28 @@ async def test_a_streamed_builtin_runs_under_the_line_deadline():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "echo {1..3000000} > /dev/null",
+        "set -- $x",
+        "a=($x); : \"${a[@]}\"",
+    ],
+)
+async def test_the_line_deadline_lands_inside_a_long_expansion(line):
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits=_line(0.3),
+        env={"x": "\n".join(str(i) for i in range(1, 2000001))},
+    )
+    started = time.monotonic()
+    r = await ws.shell(line)
+    assert r.exit_code == 124
+    assert time.monotonic() - started < 1.5
+
+
+@pytest.mark.asyncio
 async def test_mount_override_threaded_via_constructor():
     overrides = {"cat": Limit(max_bytes=42, max_lines=99)}
     ws = _ws(limits=overrides)
@@ -131,9 +153,9 @@ async def test_a_nested_line_shares_the_line_deadline(nested):
 
 @pytest.mark.asyncio
 async def test_foreground_timeout_leaves_a_background_job_alone():
-    ws = _ws(line=0.3)
+    ws = _ws(line=0.6)
     r = await ws.shell(
-        "{ sleep 0.2; sleep 0.2; echo bg-done; } & sleep 1",
+        "sleep 0.4; { sleep 0.4; echo bg-done; } & sleep 2",
         cancel=asyncio.Event(),
     )
     assert r.exit_code == 124
@@ -141,6 +163,42 @@ async def test_foreground_timeout_leaves_a_background_job_alone():
     job = ws.job_table.get(1, ws.default_session_id)
     assert job.exit_code == 0
     assert (await job.console.snapshot(Channel.STDOUT)) == b"bg-done\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "job", ["sleep 5", "seq 1 1000000000 > /data/g", "{ sleep 5; echo x; }"]
+)
+async def test_a_job_runs_under_the_line_limit_from_its_own_start(job):
+    ws = _ws(line=0.2)
+    r = await ws.shell(f"{job} &")
+    assert r.exit_code == 0
+    await ws.job_table.wait(1, ws.default_session_id)
+    done = ws.job_table.get(1, ws.default_session_id)
+    assert done.exit_code == 124
+    assert (await done.console.snapshot(Channel.STDOUT)) == b""
+    assert (
+        await done.console.snapshot(Channel.STDERR)
+    ) == b"line: timed out after 0.2s\n"
+    assert not list(ws.processes.live())
+
+
+@pytest.mark.asyncio
+async def test_a_lifted_line_limit_lifts_a_job_s_too():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits={"@line": Limit(timeout_seconds=0)},
+    )
+    r = await ws.shell("{ sleep 0.3; echo done; } & wait $!; echo $?")
+    assert (await r.stdout_str()) == "done\n0\n"
+
+
+@pytest.mark.asyncio
+async def test_a_job_keeps_its_own_status_inside_the_limit():
+    ws = _ws(line=1)
+    r = await ws.shell("(exit 3) & wait $!; echo $?")
+    assert (await r.stdout_str()) == "3\n"
 
 
 @pytest.mark.asyncio

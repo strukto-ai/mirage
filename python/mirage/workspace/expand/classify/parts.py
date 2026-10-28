@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.spec.types import ValueType
+from mirage.io.yield_budget import YieldBudget
 from mirage.types import PathSpec
 from mirage.workspace.expand.classify.heuristic import classify_word
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.mount import MountRegistry
 
 
-def classify_parts(
+async def classify_parts(
     parts: list[str],
     registry: MountRegistry,
     cwd: str,
@@ -34,11 +35,15 @@ def classify_parts(
     filenames, None falls back to the shape heuristics. word_bases, also
     aligned with parts[1:], names the directory a word resolves against
     when a chdir option (tar's -C) moved it; None there means the cwd.
+    A long list yields between its words, so a cancel or the line's
+    deadline lands mid-list.
     """
     if not parts:
         return []
     result: list[str | PathSpec] = [parts[0]]
+    budget = YieldBudget()
     for i, w in enumerate(parts[1:]):
+        await budget.run()
         kind = (
             word_kinds[i]
             if word_kinds is not None and i < len(word_kinds)

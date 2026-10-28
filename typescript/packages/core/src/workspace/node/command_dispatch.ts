@@ -696,7 +696,7 @@ async function runArgv(
   // words read (an env-filled required option lets the walk reach the leaf,
   // whose files are paths), so they are classified again.
   if (name !== '' && (await fillTreeEnv(name, argv.args, session, registry, assigned))) {
-    const words = classifiedWords(name, argv.args, session, registry)
+    const words = await classifiedWords(name, argv.args, session, registry)
     argv = new Argv(argv.name, argv.args, words.slice(1), argv.prefix)
   }
 

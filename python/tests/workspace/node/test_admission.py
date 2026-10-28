@@ -78,8 +78,8 @@ def _ws() -> Workspace:
     )
 
 
-def _virtuals(ws: Workspace, name: str, *args: str) -> list[str]:
-    words = classify_parts([name, *args], ws._registry, "/")
+async def _virtuals(ws: Workspace, name: str, *args: str) -> list[str]:
+    words = await classify_parts([name, *args], ws._registry, "/")
     return [
         p.virtual
         for p in policy_scopes(name, list(args), words[1:], ws._namespace, "/")
@@ -101,19 +101,19 @@ async def test_policy_scopes_follow_links_only_for_a_following_command():
         )
         # cat opens the target: the typed path first, then what it
         # resolves to; rm and `ls -l` act on the link itself.
-        assert _virtuals(ws, "cat", "/data/link") == [
+        assert await _virtuals(ws, "cat", "/data/link") == [
             "/data/link",
             "/data/secret",
         ]
-        assert _virtuals(ws, "rm", "/data/link") == ["/data/link"]
-        assert _virtuals(ws, "ls", "-l", "/data/link") == ["/data/link"]
-        assert _virtuals(ws, "ls", "/data/link") == [
+        assert await _virtuals(ws, "rm", "/data/link") == ["/data/link"]
+        assert await _virtuals(ws, "ls", "-l", "/data/link") == ["/data/link"]
+        assert await _virtuals(ws, "ls", "/data/link") == [
             "/data/link",
             "/data/secret",
         ]
         # A path that is not a link reads once; no namespace reads typed.
-        assert _virtuals(ws, "cat", "/data/secret") == ["/data/secret"]
-        words = classify_parts(["cat", "/data/link"], ws._registry, "/")
+        assert await _virtuals(ws, "cat", "/data/secret") == ["/data/secret"]
+        words = await classify_parts(["cat", "/data/link"], ws._registry, "/")
         assert [
             p.virtual
             for p in policy_scopes("cat", ["/data/link"], words[1:], None, "/")
@@ -174,7 +174,7 @@ async def test_a_bare_listing_reads_the_working_directory():
         registry, namespace = ws._registry, ws._namespace
 
         async def run(name: str, *args: str, stdin: bytes | None = None):
-            words = classify_parts([name, *args], registry, session.cwd)
+            words = await classify_parts([name, *args], registry, session.cwd)
             refusal = await admit(
                 name,
                 list(args),
@@ -540,7 +540,7 @@ async def test_a_hidden_path_is_no_path_to_any_policy():
         registry, namespace = ws._registry, ws._namespace
 
         async def run(session, name: str, *args: str):
-            words = classify_parts([name, *args], registry, session.cwd)
+            words = await classify_parts([name, *args], registry, session.cwd)
             refusal = await admit(
                 name, list(args), words[1:], session, registry, namespace
             )
@@ -681,7 +681,7 @@ async def test_admit_reports_the_grant_the_line_runs_under():
     try:
         session = ws._session_mgr.get(ws._session_mgr.default_id)
         registry, namespace = ws._registry, ws._namespace
-        words = classify_parts(["rm", "/data/x"], registry, session.cwd)
+        words = await classify_parts(["rm", "/data/x"], registry, session.cwd)
         verdict = await admit(
             "rm", ["/data/x"], words[1:], session, registry, namespace
         )

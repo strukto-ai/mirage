@@ -227,7 +227,7 @@ export async function expandArgv(
     }
   }
 
-  const classified = classifyParts(
+  const classified = await classifyParts(
     lineWords,
     registry,
     session.cwd,
@@ -259,7 +259,15 @@ export async function expandArgv(
           item instanceof PathSpec && item.pattern !== null ? item : literalWord(item),
         )
   if (program && spec !== null) {
-    words = programWords(words, spec, name, consumed, registry, session.cwd, envSnapshot(session))
+    words = await programWords(
+      words,
+      spec,
+      name,
+      consumed,
+      registry,
+      session.cwd,
+      envSnapshot(session),
+    )
   }
   // The text view renders words as typed (rawPath): bash hands
   // programs their words unchanged, so `echo sub/file.txt` prints the
@@ -288,7 +296,7 @@ export async function expandArgv(
  * nothing keeps the pattern spec the resolver left in a path slot, and is
  * its typed text in a text slot.
  */
-function programWords(
+async function programWords(
   words: readonly (string | PathSpec)[],
   spec: CommandSpec,
   name: string,
@@ -296,14 +304,14 @@ function programWords(
   registry: MountRegistry,
   cwd: string,
   env: Readonly<Record<string, string>>,
-): (string | PathSpec)[] {
+): Promise<(string | PathSpec)[]> {
   const literal = words.map((w) => markGlobs(wordText(w)))
   const kinds: (ValueType | null)[] = [
     ...new Array<ValueType | null>(consumed - 1).fill('str'),
     ...specWordKinds(spec, literal.slice(consumed), name, env),
   ]
   const bases = specWordBases(spec, literal.slice(consumed), cwd, name, env)
-  const reread = classifyParts(
+  const reread = await classifyParts(
     literal,
     registry,
     cwd,

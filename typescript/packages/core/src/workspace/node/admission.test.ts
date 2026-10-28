@@ -89,8 +89,8 @@ function ws(profile: SessionProfile | null = DOC): Workspace {
   return w
 }
 
-function virtuals(w: Workspace, name: string, ...args: string[]): string[] {
-  const words = classifyParts([name, ...args], w.registry, '/')
+async function virtuals(w: Workspace, name: string, ...args: string[]): Promise<string[]> {
+  const words = await classifyParts([name, ...args], w.registry, '/')
   return policyScopes(name, args, words.slice(1), w.namespace, '/', null).map((p) => p.virtual)
 }
 
@@ -125,13 +125,13 @@ describe('admission', () => {
     await w.shell('echo top > /data/secret && ln -s /data/secret /data/link')
     // cat opens the target: the typed path first, then what it resolves
     // to; rm and `ls -l` act on the link itself.
-    expect(virtuals(w, 'cat', '/data/link')).toEqual(['/data/link', '/data/secret'])
-    expect(virtuals(w, 'rm', '/data/link')).toEqual(['/data/link'])
-    expect(virtuals(w, 'ls', '-l', '/data/link')).toEqual(['/data/link'])
-    expect(virtuals(w, 'ls', '/data/link')).toEqual(['/data/link', '/data/secret'])
+    expect(await virtuals(w, 'cat', '/data/link')).toEqual(['/data/link', '/data/secret'])
+    expect(await virtuals(w, 'rm', '/data/link')).toEqual(['/data/link'])
+    expect(await virtuals(w, 'ls', '-l', '/data/link')).toEqual(['/data/link'])
+    expect(await virtuals(w, 'ls', '/data/link')).toEqual(['/data/link', '/data/secret'])
     // A path that is not a link reads once; no namespace reads typed.
-    expect(virtuals(w, 'cat', '/data/secret')).toEqual(['/data/secret'])
-    const words = classifyParts(['cat', '/data/link'], w.registry, '/')
+    expect(await virtuals(w, 'cat', '/data/secret')).toEqual(['/data/secret'])
+    const words = await classifyParts(['cat', '/data/link'], w.registry, '/')
     expect(
       policyScopes('cat', ['/data/link'], words.slice(1), null, '/', null).map((p) => p.virtual),
     ).toEqual(['/data/link'])
@@ -145,7 +145,7 @@ describe('admission', () => {
     await w.shell('mkdir -p /data/private && echo x > /data/private/f')
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const run = async (name: string, args: string[], stdin: Uint8Array | null = null) => {
-      const words = classifyParts([name, ...args], w.registry, session.cwd)
+      const words = await classifyParts([name, ...args], w.registry, session.cwd)
       const refusal = await admit(
         name,
         args,
@@ -189,7 +189,7 @@ describe('admission', () => {
     })
     const plain = w.sessionManager.get(w.sessionManager.defaultId)
     const run = async (session: typeof plain, name: string, ...args: string[]) => {
-      const words = classifyParts([name, ...args], w.registry, session.cwd)
+      const words = await classifyParts([name, ...args], w.registry, session.cwd)
       const refusal = await admit(name, args, words.slice(1), session, w.registry, w.namespace)
       return refusal instanceof Admitted ? null : [refusal.exitCode, voicedStderr(refusal)]
     }
@@ -531,7 +531,7 @@ describe('admission', () => {
   it('admit reports the grant the line runs under', async () => {
     const w = ws()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
-    const words = classifyParts(['rm', '/data/x'], w.registry, session.cwd)
+    const words = await classifyParts(['rm', '/data/x'], w.registry, session.cwd)
     const verdict = await admit('rm', ['/data/x'], words.slice(1), session, w.registry, w.namespace)
     expect(verdict).toBeInstanceOf(Admitted)
     const admitted = verdict as Admitted

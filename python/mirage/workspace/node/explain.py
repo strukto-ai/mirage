@@ -536,7 +536,7 @@ async def _judge_words(
     )
     name = head.value
     args = [w.value for w in words[1:]]
-    classified = classified_words(name, args, session, registry)
+    classified = await classified_words(name, args, session, registry)
     read_words = [*words[1:], *redirect_words]
     kinds = [
         *classified[1:],

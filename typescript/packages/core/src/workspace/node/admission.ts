@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { pathVisible } from '../../utils/hidden.ts'
-import { sessionAccess } from '../../context/session_context.ts'
+import { callerSignal, sessionAccess } from '../../context/session_context.ts'
+import { YieldBudget } from '../../io/yield_budget.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
   Outcome,
@@ -318,15 +319,15 @@ function seenWords(
  * One command's literal words, classified the way the runtime would
  * classify them, so the gate and the run name the same paths.
  */
-export function classifiedWords(
+export async function classifiedWords(
   name: string,
   args: readonly string[],
   session: SessionState,
   registry: MountRegistry,
-): (string | PathSpec)[] {
+): Promise<(string | PathSpec)[]> {
   const line = [name, ...args]
   const [wordKinds, wordBases] = wordHints(line, session, registry)
-  return classifyParts(line, registry, session.cwd, wordKinds, wordBases)
+  return await classifyParts(line, registry, session.cwd, wordKinds, wordBases)
 }
 
 /**
@@ -536,45 +537,58 @@ export async function gate(
     name in CWD_DEFAULT_RAW
       ? defaultCwdOperand([name, ...operands], name, registry, session.cwd, stdin)
       : null
+  // Each read of the words is a pass over all of them, so a command of a
+  // million words yields between them: a cancel or the line's deadline
+  // lands before the policies are asked.
+  const budget = new YieldBudget(callerSignal())
+  await budget.run()
+  const paths = seen(
+    session,
+    policyScopes(
+      name,
+      args,
+      operands,
+      namespace !== null && namespace.nodes.size > 0 ? namespace.sessionLinks(session) : null,
+      session.cwd,
+      implied,
+      redirects,
+      treePathScopes(registry, name, args, session.cwd, env, sessionAccess(session)),
+    ),
+    unread,
+  )
+  await budget.run()
+  const words = seenWords(
+    session,
+    commandWords(
+      registry,
+      name,
+      args,
+      operands,
+      redirects,
+      session.cwd,
+      env,
+      sessionAccess(session),
+    ),
+    unread,
+  )
+  await budget.run()
+  const walks = walksMounts(name, lineFlags(name, [name, ...args]))
+  await budget.run()
+  const write = writes(name, args, operands, session, registry, namespace, implied)
+  await budget.run()
   const ctx: CommandContext = {
     line,
     command: name,
-    paths: seen(
-      session,
-      policyScopes(
-        name,
-        args,
-        operands,
-        namespace !== null && namespace.nodes.size > 0 ? namespace.sessionLinks(session) : null,
-        session.cwd,
-        implied,
-        redirects,
-        treePathScopes(registry, name, args, session.cwd, env, sessionAccess(session)),
-      ),
-      unread,
-    ),
-    words: seenWords(
-      session,
-      commandWords(
-        registry,
-        name,
-        args,
-        operands,
-        redirects,
-        session.cwd,
-        env,
-        sessionAccess(session),
-      ),
-      unread,
-    ),
+    paths,
+    words,
     argv: [...args],
     cwd: session.cwd,
     sessionId: session.sessionId,
     tokens,
     program,
     tool,
-    walks: walksMounts(name, lineFlags(name, [name, ...args])),
-    write: writes(name, args, operands, session, registry, namespace, implied),
+    walks,
+    write,
     // The methods read the session this command is judged in, which for a
     // line explain walks is the walked one, not the stored one.
     ...registry.policies.views?.(session.sessionId, session),
@@ -694,7 +708,7 @@ export async function admitTest(
   signal?: AbortSignal,
   claimant: Claimant | null = null,
 ): Promise<Admitted> {
-  const classified = classifiedWords(name, words, session, registry)
+  const classified = await classifiedWords(name, words, session, registry)
   const verdict = await admit(
     name,
     words,

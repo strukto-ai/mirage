@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { sleep } from '../../utils/abort.ts'
+import { callerSignal } from '../../context/session_context.ts'
+import { mergeSignals, sleep } from '../../utils/abort.ts'
 import { type ByteWindow, rangeHeader } from '../../utils/ranges.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { CHUNK_SIZE, chunks } from '../../io/cooperative.ts'
@@ -130,8 +131,12 @@ export async function* apiStream(
     onResponse?: (headers: Record<string, string>) => void
   },
 ): AsyncGenerator<Uint8Array, void> {
+  // The caller's signal and the call's (a line's stop, a job's kill or
+  // limit), so a stopped command ends its request as Python's cancelled
+  // task does.
+  const signal = mergeSignals(options.signal, callerSignal())
   const retry = options.retry ?? NO_RETRY
-  const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000, options.signal))
+  const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000, signal))
   const doFetch = stallTimeout(options.timeout, options.fetchFn)
   for (let attempt = 0; ; attempt += 1) {
     const last = attempt >= retry.maxRetries
@@ -140,11 +145,11 @@ export async function* apiStream(
       response = await doFetch(url, {
         method: 'GET',
         ...(options.headers === undefined ? {} : { headers: options.headers }),
-        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...(signal === undefined ? {} : { signal }),
       })
     } catch (err) {
       // a caller's abort is not a transport failure worth another attempt
-      if (last || retry.retryTransport !== true || options.signal?.aborted === true) throw err
+      if (last || retry.retryTransport !== true || signal?.aborted === true) throw err
       await wait(Math.min(2 ** attempt, retry.maxBackoff))
       continue
     }
@@ -156,11 +161,11 @@ export async function* apiStream(
     try {
       if (response.status >= 400) text = await response.text()
       else if (response.body !== null) {
-        chunksOf = bodyChunks(response.body, options.signal)
+        chunksOf = bodyChunks(response.body, signal)
         first = await chunksOf.next()
       }
     } catch (err) {
-      if (last || retry.retryTransport !== true || options.signal?.aborted === true) throw err
+      if (last || retry.retryTransport !== true || signal?.aborted === true) throw err
       await wait(Math.min(2 ** attempt, retry.maxBackoff))
       continue
     }
@@ -468,22 +473,27 @@ export async function apiRequest(
     const range = rangeHeader(options.window.offset, options.window.size)
     if (range !== null) headers.Range = range
   }
+  // The call's signal (a line's stop, a job's kill or limit), so a stopped
+  // command ends its request as Python's cancelled task does.
+  const signal = callerSignal()
   const retry = options.retry ?? NO_RETRY
-  const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000))
+  const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000, signal))
   const read = options.read ?? 'json'
   const asBytes = read === 'bytes' || read === 'bytes_response'
   const discard = read === 'none' || read === 'location'
   let attempt = 0
   for (;;) {
     const init: RequestInit = { method, headers: { ...headers } }
+    if (signal !== undefined) init.signal = signal
     if (options.json !== undefined) init.body = JSON.stringify(options.json)
     else if (options.body !== undefined) init.body = options.body
     let response: Response
     try {
       response = await doFetch(target.toString(), init)
     } catch (err) {
-      // a rejection is connection-level: HTTP errors resolve normally
-      if (retry.retryTransport === true && attempt < retry.maxRetries) {
+      // a rejection is connection-level: HTTP errors resolve normally; a
+      // caller's abort is not one worth another attempt
+      if (signal?.aborted !== true && retry.retryTransport === true && attempt < retry.maxRetries) {
         await wait(Math.min(2 ** attempt, retry.maxBackoff))
         attempt += 1
         continue
@@ -502,7 +512,7 @@ export async function apiRequest(
       else data = await readBytes(response, options.window, maxBodyBytes)
     } catch (err) {
       if (err instanceof ResponseTooLargeError) throw err
-      if (retry.retryTransport === true && attempt < retry.maxRetries) {
+      if (signal?.aborted !== true && retry.retryTransport === true && attempt < retry.maxRetries) {
         await wait(Math.min(2 ** attempt, retry.maxBackoff))
         attempt += 1
         continue

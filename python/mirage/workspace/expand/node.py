@@ -439,7 +439,7 @@ async def _node_chunks(
         tail = raw[end:]
         return [
             *lead,
-            *parameter_chunks(name, session, call_stack, quoted),
+            *(await parameter_chunks(name, session, call_stack, quoted)),
             *([Piece(mark_globs(tail) if quoted else tail)] if tail else []),
         ]
 

@@ -330,7 +330,7 @@ async function nodeChunks(
     const tail = raw.slice(end)
     return [
       ...lead,
-      ...parameterChunks(name, session, callStack, quoted),
+      ...(await parameterChunks(name, session, callStack, quoted)),
       ...(tail !== '' ? [piece(quoted ? markGlobs(tail) : tail)] : []),
     ]
   }

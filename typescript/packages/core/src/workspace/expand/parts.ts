@@ -27,6 +27,8 @@ import { expandTemplate, makeInert, substitute } from './brace.ts'
 import { classifyWord } from './classify/index.ts'
 import { BRACE_LITERAL_TYPES, BRACE_WORD_TYPES } from './constants.ts'
 import { splitFields } from './fields.ts'
+import { callerSignal } from '../../context/session_context.ts'
+import { YieldBudget } from '../../io/yield_budget.ts'
 import { expandChunks } from './node.ts'
 import type { Chunk } from './types.ts'
 import { ifsValue } from './variable.ts'
@@ -72,9 +74,15 @@ async function expandBraceWord(
     values.push(await expandChunks(atom, context, executeFn, callStack, view))
   }
   const home = homeDir(session)
-  return words.map((w) =>
-    substitute(expandTilde(unescapeUnquoted(markEscapedGlobs(w)), home), values),
-  )
+  // `{1..1000000}` is a million words: they yield as they are made, so a
+  // cancel or the line's deadline lands before the last.
+  const budget = new YieldBudget(callerSignal())
+  const out: Chunk[][] = []
+  for (const w of words) {
+    out.push(substitute(expandTilde(unescapeUnquoted(markEscapedGlobs(w)), home), values))
+    await budget.run()
+  }
+  return out
 }
 
 /**
@@ -101,12 +109,13 @@ export async function expandWords(
     if (BRACE_WORD_TYPES.has(p.type) && session.shellOptions.braceexpand !== false) {
       const braceWords = await expandBraceWord(p, context, executeFn, callStack, view)
       if (braceWords !== null) {
-        for (const chunks of braceWords) for (const w of splitFields(chunks, ifs)) result.push(w)
+        for (const chunks of braceWords)
+          for (const w of await splitFields(chunks, ifs)) result.push(w)
         continue
       }
     }
     const chunks = await expandChunks(p, context, executeFn, callStack, view)
-    for (const w of splitFields(chunks, ifs)) result.push(w)
+    for (const w of await splitFields(chunks, ifs)) result.push(w)
   }
   return result
 }

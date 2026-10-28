@@ -15,6 +15,7 @@
 from collections.abc import Callable
 from typing import Any
 
+from mirage.io.yield_budget import YieldBudget
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import SET_OPTION_DEFAULTS
 from mirage.shell.escapes import unescape_unquoted
@@ -89,13 +90,19 @@ async def _expand_brace_word(
         for atom in atoms
     ]
     home = home_dir(session)
-    return [
-        substitute(
-            expand_tilde(unescape_unquoted(mark_escaped_globs(w)), home),
-            values,
+    # `{1..1000000}` is a million words: they yield as they are made, so
+    # a cancel or the line's deadline lands before the last.
+    budget = YieldBudget()
+    out: list[list[Chunk]] = []
+    for w in words:
+        out.append(
+            substitute(
+                expand_tilde(unescape_unquoted(mark_escaped_globs(w)), home),
+                values,
+            )
         )
-        for w in words
-    ]
+        await budget.run()
+    return out
 
 
 async def expand_words(
@@ -135,12 +142,12 @@ async def expand_words(
             )
             if brace_words is not None:
                 for chunks in brace_words:
-                    result.extend(split_fields(chunks, ifs))
+                    result.extend(await split_fields(chunks, ifs))
                 continue
         chunks = await expand_chunks(
             p, context, execute_fn, call_stack, view=view
         )
-        result.extend(split_fields(chunks, ifs))
+        result.extend(await split_fields(chunks, ifs))
     return result
 
 

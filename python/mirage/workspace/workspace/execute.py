@@ -724,6 +724,12 @@ async def run_prepared_line(
     # A line run on its caller's evaluation (a CLI's own ``ws.shell``)
     # routes itself; the caller's route comes back when it ends.
     outer_routing = context.frame.routing
+    # The `@line` limit the frame carries to the outermost line's deadline
+    # and to every job the line starts, each from its own start.
+    outer_timeout = context.frame.line_timeout
+    context.frame.line_timeout = line_timeout(
+        ws.registry.command_limits, effective_session.command_limits
+    )
     # Taken before any statement stamps, so a cancelled line can put
     # `$?` back to what it found. Restored at the seam in
     # ``Workspace.shell``, after the last await of the line, so an
@@ -934,14 +940,7 @@ async def run_prepared_line(
                     )
                     else None,
                     sink,
-                    (
-                        line_timeout(
-                            ws.registry.command_limits,
-                            effective_session.command_limits,
-                        )
-                        if top_level
-                        else None
-                    ),
+                    context.frame.line_timeout if top_level else None,
                     budget_start,
                 )
                 if io.refusal is None:
@@ -1075,14 +1074,7 @@ async def run_prepared_line(
                     )
                     else None,
                 ),
-                (
-                    line_timeout(
-                        ws.registry.command_limits,
-                        effective_session.command_limits,
-                    )
-                    if top_level
-                    else None
-                ),
+                context.frame.line_timeout if top_level else None,
                 LINE_NAME,
                 budget_start,
             )
@@ -1169,6 +1161,7 @@ async def run_prepared_line(
         scope.close()
         effective_session._alias_view = outer_view
         context.frame.routing = outer_routing
+        context.frame.line_timeout = outer_timeout
         if is_line:
             # Every read of the line has ended, so what a read kept of the
             # aliases it changed goes with it.

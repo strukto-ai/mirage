@@ -44,8 +44,9 @@ import {
   runWithCaller,
 } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { abortable, mergeSignals } from '../../utils/abort.ts'
+import { abortable, atDeadline, mergeSignals } from '../../utils/abort.ts'
 import type { SessionView } from '../../view/types.ts'
+import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
 import { type Decisions, isPending } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import { PathSpec, type JsonValue, type Refusal } from '../../types.ts'
@@ -259,7 +260,12 @@ export async function handleBackground(
   // session so the job's whole subtree (builtins, mounts, runtimes)
   // observes the kill, merged with any enclosing job's channel.
   const killed = mergeSignals(context.frame.abortSignal, abort.signal) ?? abort.signal
-  childEvaluation.frame.abortSignal = killed
+  // The job runs under the `@line` limit of the line that started it, from
+  // its own start, its output included: past it the subtree is stopped as a
+  // kill stops it and the job answers 124 and the line's message, as a line
+  // does. Its copy to the shell's output stays open for that message.
+  const expiry = new AbortController()
+  childEvaluation.frame.abortSignal = AbortSignal.any([killed, expiry.signal])
   const cmdStrInner = left.text
   const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
     // What the job writes stays in its console and goes where its shell
@@ -274,7 +280,7 @@ export async function handleBackground(
       hold.held ||= isPending(refusal)
       lineSink?.(refusal)
     }
-    const body = async (): Promise<[IOResult, ExecutionNode]> => {
+    const run = async (): Promise<[IOResult, ExecutionNode]> => {
       let stdout: ByteSource | null
       let io: IOResult
       let execNode: ExecutionNode
@@ -285,23 +291,14 @@ export async function handleBackground(
         // job at all, since a promise cannot be cancelled.
         const opts: ExecuteNodeOpts = {
           sink: console_,
-          signal: abort.signal,
+          signal: AbortSignal.any([abort.signal, expiry.signal]),
           executionScope: new ExecutionScope(undefined, job.executionId ?? undefined),
           endsShell: true,
         }
         if (jobHanded !== null) opts.handed = jobHanded
         ;[stdout, io, execNode] = await executeNode(left, childEvaluation, null, bgCallStack, opts)
       } catch (err) {
-        if (err instanceof CommandTimeoutError) {
-          const msg = encodeText(`${err.message}\n`)
-          stdout = new Uint8Array()
-          io = new IOResult({ exitCode: TIMEOUT_STATUS, stderr: msg })
-          execNode = new ExecutionNode({
-            command: cmdStrInner,
-            stderr: msg,
-            exitCode: TIMEOUT_STATUS,
-          })
-        } else if (err instanceof ExitSignal) {
+        if (err instanceof ExitSignal) {
           // A background job is its own shell: exit ends the job only, a
           // simple command the top shell forked with the status that shell
           // would exit with (`: ${U?} &` is 127, `{ : ${U?}; } &` and
@@ -336,8 +333,32 @@ export async function handleBackground(
       if (stderr.byteLength > 0) {
         await console_.emit(Channel.STDERR, stderr)
       }
-      hold.ended = hold.held || isPending(io.refusal)
       return [io, execNode]
+    }
+    const body = async (): Promise<[IOResult, ExecutionNode]> => {
+      const seconds = childEvaluation.frame.lineTimeout
+      const disarm =
+        seconds !== null && seconds > 0
+          ? atDeadline(seconds, () => {
+              expiry.abort()
+            })
+          : undefined
+      let result: [IOResult, ExecutionNode]
+      try {
+        result = await run()
+      } catch (err) {
+        if (seconds === null || !expiry.signal.aborted || abort.signal.aborted) throw err
+        const msg = encodeText(`${new CommandTimeoutError(LINE_NAME, seconds).message}\n`)
+        await console_.emit(Channel.STDERR, msg)
+        result = [
+          new IOResult({ exitCode: TIMEOUT_STATUS }),
+          new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: TIMEOUT_STATUS }),
+        ]
+      } finally {
+        disarm?.()
+      }
+      hold.ended = hold.held || isPending(result[0].refusal)
+      return result
     }
     // The job's own layer of the caller: its fork, so dispatcher and host
     // callbacks stay in it; its session writes, calls of the job's spent

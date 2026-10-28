@@ -49,29 +49,33 @@ describe('splitFields', () => {
     ['a b\nc', '\n', ['a b', 'c']],
     // An empty IFS splits nothing.
     ['a b', '', ['a b']],
-  ])('%j under IFS %j reads as bash reads it', (text, ifs, fields) => {
-    expect(splitFields([piece(text, true)], ifs)).toEqual(fields)
+  ])('%j under IFS %j reads as bash reads it', async (text, ifs, fields) => {
+    expect(await splitFields([piece(text, true)], ifs)).toEqual(fields)
   })
 
-  it('joins literal text to the split edges', () => {
-    expect(splitFields([piece('q'), piece(' a ', true), piece('r')], null)).toEqual(['q', 'a', 'r'])
+  it('joins literal text to the split edges', async () => {
+    expect(await splitFields([piece('q'), piece(' a ', true), piece('r')], null)).toEqual([
+      'q',
+      'a',
+      'r',
+    ])
   })
 
-  it('never splits quoted text', () => {
-    expect(splitFields([piece('a b'), piece(',c', true)], ',')).toEqual(['a b', 'c'])
+  it('never splits quoted text', async () => {
+    expect(await splitFields([piece('a b'), piece(',c', true)], ',')).toEqual(['a b', 'c'])
   })
 
-  it('reads an empty unquoted value as no word', () => {
-    expect(splitFields([piece('', true)], null)).toEqual([])
-    expect(splitFields([piece('  ', true)], null)).toEqual([])
+  it('reads an empty unquoted value as no word', async () => {
+    expect(await splitFields([piece('', true)], null)).toEqual([])
+    expect(await splitFields([piece('  ', true)], null)).toEqual([])
   })
 
-  it('reads empty quoted text as an empty word', () => {
-    expect(splitFields([piece('')], null)).toEqual([''])
-    expect(splitFields([piece(''), piece(' a', true)], null)).toEqual(['', 'a'])
+  it('reads empty quoted text as an empty word', async () => {
+    expect(await splitFields([piece('')], null)).toEqual([''])
+    expect(await splitFields([piece(''), piece(' a', true)], null)).toEqual(['', 'a'])
   })
 
-  it('breaks between splat elements', () => {
+  it('breaks between splat elements', async () => {
     const chunks = [
       piece('x'),
       piece('', true),
@@ -80,14 +84,14 @@ describe('splitFields', () => {
       fieldBreak(' '),
       piece('b c', true),
     ]
-    expect(splitFields(chunks, '')).toEqual(['x', 'b c'])
+    expect(await splitFields(chunks, '')).toEqual(['x', 'b c'])
   })
 })
 
 describe('chunk helpers', () => {
-  it('keeps quoted empty splat elements', () => {
-    const chunks = splatChunks(['', '*'], ' ', true)
-    expect(splitFields(chunks, null)).toEqual(['', markGlobs('*')])
+  it('keeps quoted empty splat elements', async () => {
+    const chunks = await splatChunks(['', '*'], ' ', true)
+    expect(await splitFields(chunks, null)).toEqual(['', markGlobs('*')])
     expect(joinChunks(chunks)).toBe(' ' + markGlobs('*'))
     expect(chunksText(chunks)).toBe(' *')
   })

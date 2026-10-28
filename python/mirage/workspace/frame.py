@@ -33,10 +33,13 @@ class ExecutionFrame:
         Callable[[TSNodeLike, ProcessSubLine], Awaitable[str]] | None
     ) = None
     routing: RouteDecision[RuntimeIdentity] | None = None
+    line_timeout: float | None = None
 
     def fork(self) -> ExecutionFrame:
         """A child evaluation's frame, which starts empty but for the
-        line's routing decision: nested lines never re-route.
+        line's routing decision, since nested lines never re-route, and
+        its time limit, which a job it starts runs under from its own
+        start.
 
         TypeScript's also carries the abort signal; here cancellation is
         the asyncio task's and is ambient.
@@ -44,4 +47,6 @@ class ExecutionFrame:
         Args:
             None
         """
-        return ExecutionFrame(routing=self.routing)
+        return ExecutionFrame(
+            routing=self.routing, line_timeout=self.line_timeout
+        )
