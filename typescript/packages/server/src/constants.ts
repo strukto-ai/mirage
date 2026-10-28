@@ -16,6 +16,7 @@ export const MAX_FINISHED_JOBS = 1024
 export const FINISHED_JOB_RETENTION_SECONDS = 3600
 
 export const MAX_STDIN_BYTES = 64 * 1024 * 1024
+export const MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 
 /**
  * Dispatcher keywords a remote VFS function call may not set: the session,

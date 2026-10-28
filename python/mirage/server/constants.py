@@ -16,6 +16,7 @@ MAX_FINISHED_JOBS = 1024
 FINISHED_JOB_RETENTION_SECONDS = 3600.0
 
 MAX_STDIN_BYTES = 64 * 1024 * 1024
+MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 
 # Dispatcher keywords a remote VFS function call may not set: the session,
 # the report and the admission flags are the server's.

@@ -39,6 +39,7 @@ import {
 import { makeBrief, makeDetail } from '../summary.ts'
 import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from '../multipart.ts'
 import { SharedStorageError, WritePolicyError } from '@struktoai/mirage-core/workspace/mount/errors'
+import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
 
 export interface WorkspaceRoutesDeps {
   registry: WorkspaceRegistry
@@ -415,6 +416,8 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         ws = await Workspace.load(
           source,
           {
+            maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
+            maxSnapshotEncodedBytes: MAX_SNAPSHOT_PART,
             ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
             ...(store !== undefined ? { s3: store } : {}),
           },

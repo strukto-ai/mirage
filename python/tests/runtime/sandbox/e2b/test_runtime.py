@@ -73,6 +73,8 @@ class FakeHandle:
         self.waiting.set()
         if self.command == "sleep":
             await asyncio.Event().wait()
+        if self.command == "exit 0":
+            return FakeResult("partial", "boom-err", 0)
         if self.command == "exit 3":
             raise CommandExitException(
                 stderr="boom-err", stdout="partial", exit_code=3, error=None
@@ -225,17 +227,25 @@ async def test_native_stdin_eof_and_command_are_preserved(data, monkeypatch):
             "Code.INTERNAL: error writing to stdin of process '2815': "
             "write |1: broken pipe"
         ),
+        SandboxException(
+            "Code.INTERNAL: error writing to stdin: error writing to stdin "
+            "of process '2822': write |1: file already closed"
+        ),
     ],
 )
-async def test_nonzero_exit_preserves_output_even_when_stdin_loses_exit_race(
+@pytest.mark.parametrize("exit_code", [0, 3])
+async def test_exit_preserves_output_even_when_stdin_loses_exit_race(
     input_error,
+    exit_code,
 ):
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     await runtime.connect()
     FakeSandbox.last.commands.input_error = input_error
-    result = await runtime.exec_line("exit 3", b"input", {}, "/workspace")
+    result = await runtime.exec_line(
+        f"exit {exit_code}", b"input", {}, "/workspace"
+    )
     assert (result.exit_code, result.stdout, result.stderr) == (
-        3,
+        exit_code,
         b"partial",
         b"boom-err",
     )

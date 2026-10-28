@@ -155,6 +155,8 @@ async def read_snapshot(
     *,
     s3: S3Config | None = None,
     staging: Path | None = None,
+    max_bytes: int | None = None,
+    max_encoded_bytes: int | None = None,
 ) -> dict[str, Any]:
     """Read a snapshot tar back into a state dict.
 
@@ -165,6 +167,9 @@ async def read_snapshot(
         staging (Path | None): a directory disk mount files are
             extracted into, so the state names them by path rather
             than holding their bytes.
+        max_bytes (int | None): maximum expanded archive size.
+        max_encoded_bytes (int | None): maximum encoded size fetched
+            from the snapshot store, independent of compression ratio.
 
     Returns:
         dict[str, Any]: the resolved state dict.
@@ -172,9 +177,17 @@ async def read_snapshot(
     if s3 is not None:
         accessor = _s3_accessor(s3)
         try:
-            source = io.BytesIO(
-                await read(accessor, _key_path(cast(str, source)))
+            data = await read(
+                accessor,
+                _key_path(cast(str, source)),
+                size=None
+                if max_encoded_bytes is None
+                else max_encoded_bytes + 1,
             )
+            if max_encoded_bytes is not None and len(data) > max_encoded_bytes:
+                raise ValueError("snapshot exceeds encoded size limit")
+            source = io.BytesIO(data)
+
         finally:
             await accessor.close()
-    return await run_blocking(read_tar, source, staging)
+    return await run_blocking(read_tar, source, staging, max_bytes=max_bytes)

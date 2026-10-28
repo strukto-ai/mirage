@@ -171,3 +171,49 @@ fn the_escape_style_is_gnu_tars() {
         assert_eq!(escaped(name), shown.as_bytes(), "{shown}");
     }
 }
+
+#[test]
+fn decoded_limits_cover_metadata_before_it_is_retained() {
+    for flag in *b"LKxg" {
+        let size = 128 * 1024;
+        let mut tar = header::encode(b"././@LongLink", Kind::File, size as u64, b"");
+        tar[156] = flag;
+        tar[148..156].fill(b' ');
+        let sum: u32 = tar.iter().map(|&b| u32::from(b)).sum();
+        tar[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+        tar.resize(BLOCK + size, 0);
+        if flag == b'L' {
+            tar[BLOCK..BLOCK + 2].copy_from_slice(b"a\0");
+        }
+        tar.extend(archive("a", (0, b"")));
+        assert_eq!(read(&mut Host::default(), &tar, json!({})).0, 0);
+        let (status, _, err) = read(
+            &mut Host::default(),
+            &tar,
+            json!({"max_decoded_bytes": 32_768}),
+        );
+        assert_eq!(status, 2);
+        assert_eq!(err, "tar: decoded input exceeds size limit\n");
+    }
+}
+
+#[test]
+fn decoded_limit_accepts_its_exact_boundary() {
+    let tar = archive("a", (0, b""));
+    assert_eq!(
+        read(
+            &mut Host::default(),
+            &tar,
+            json!({"max_decoded_bytes": tar.len()})
+        )
+        .0,
+        0
+    );
+    let (status, _, err) = read(
+        &mut Host::default(),
+        &tar,
+        json!({"max_decoded_bytes": tar.len() - 1}),
+    );
+    assert_eq!(status, 2);
+    assert_eq!(err, "tar: decoded input exceeds size limit\n");
+}

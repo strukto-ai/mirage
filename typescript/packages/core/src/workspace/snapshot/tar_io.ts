@@ -53,8 +53,9 @@ export async function writeSnapshotTar(
 export async function readSnapshotTar(
   data: Uint8Array,
   compress: CompressMode = null,
+  maxBytes?: number,
 ): Promise<unknown> {
-  return unpack(once(data), null, compress)
+  return unpack(once(data), null, compress, maxBytes)
 }
 
 /**
@@ -85,8 +86,12 @@ export async function writeTar(
  * host paths, so a restore copies them into place instead of holding them
  * in memory; the caller removes the directory once the state is loaded.
  */
-export async function readTar(source: string, staging: string): Promise<unknown> {
-  return unpack(fileChunks(source), staging, null)
+export async function readTar(
+  source: string,
+  staging: string,
+  maxBytes?: number,
+): Promise<unknown> {
+  return unpack(fileChunks(source), staging, null, maxBytes)
 }
 
 /**
@@ -110,7 +115,14 @@ async function run(
   }
   try {
     await drain(serveRequests(stream, host))
-    if (stream.status() !== 0) throw new Error(DEC.decode(concat(errors)).trim())
+    if (stream.status() !== 0) {
+      const message = DEC.decode(concat(errors)).trim()
+      throw new Error(
+        message === 'tar: decoded input exceeds size limit'
+          ? 'snapshot exceeds expanded size limit'
+          : message,
+      )
+    }
   } finally {
     await closeStream(stream)
   }
@@ -179,7 +191,10 @@ async function unpack(
   source: AsyncGenerator<Uint8Array>,
   staging: string | null,
   compress: CompressMode,
+  maxBytes: number | undefined,
 ): Promise<unknown> {
+  if (maxBytes !== undefined && maxBytes < 0) throw new Error('maxBytes must be non-negative')
+  let total = 0
   const held = new Map<string, Uint8Array[]>()
   const staged = new Map<string, string>()
   const files = new Map<string, [WritableStreamDefaultWriter<Uint8Array>, Promise<number>]>()
@@ -219,6 +234,12 @@ async function unpack(
     }
     const name = textView(request.path).replace(/^\/+/, '')
     if (request.create === true || request.whole === true) await begin(name)
+    if (maxBytes !== undefined) {
+      const copies = name === MANIFEST_NAME ? 1 : Math.max(1, named.get(name) ?? 0)
+      const amount = data.byteLength * copies
+      if (amount > maxBytes - total) throw new Error('snapshot exceeds expanded size limit')
+      total += amount
+    }
     held.get(name)?.push(data)
     const file = files.get(name)
     if (file === undefined) return { reply: {} }
@@ -232,7 +253,13 @@ async function unpack(
   }
   try {
     await run(
-      { mode: 'extract', archive: ARCHIVE, base: '', codec: compress === 'gz' ? 'gzip' : null },
+      {
+        mode: 'extract',
+        archive: ARCHIVE,
+        base: '',
+        codec: compress === 'gz' ? 'gzip' : null,
+        max_decoded_bytes: maxBytes ?? null,
+      },
       serve,
     )
   } finally {
@@ -249,6 +276,8 @@ async function unpack(
   }
   return resolveManifest(manifest, (blobPath: string): Uint8Array => {
     if (!isSafeBlobPath(blobPath)) throw new Error(`Unsafe blob path: ${String(blobPath)}`)
+    if (memberName(blobPath) === MANIFEST_NAME)
+      throw new Error('Manifest cannot reference itself as a blob')
     const blob = held.get(memberName(blobPath))
     if (blob === undefined) throw new Error(`Manifest references missing blob: ${blobPath}`)
     return concat(blob)

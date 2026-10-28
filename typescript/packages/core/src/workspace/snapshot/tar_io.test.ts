@@ -25,6 +25,8 @@ import {
   writeTar as writeFileTar,
 } from './tar_io.ts'
 import { BLOB_REF_KEY } from './utils.ts'
+import { concat } from '../../utils/bytes.ts'
+import { gzip } from '../../utils/compress.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -211,4 +213,101 @@ describe('snapshot tars of disk files', () => {
       await rm(dir, { recursive: true, force: true })
     }
   })
+})
+
+describe('snapshot load budgets', () => {
+  it.each([null, 'gz'] as const)('bounds the manifest and blobs for %s', async (compress) => {
+    for (const [manifest, blobs] of [
+      [{ padding: 'x'.repeat(128_000) }, {}],
+      [{ blob: { [BLOB_REF_KEY]: 'b/f' } }, { 'b/f': new Uint8Array(128_000) }],
+    ] as const) {
+      const data = await writeSnapshotTar(manifest, blobs, compress)
+      await expect(readSnapshotTar(data, compress, 32_768)).rejects.toThrow(
+        'snapshot exceeds expanded size limit',
+      )
+    }
+  })
+
+  it('charges repeated and normalized references before retaining the blob', async () => {
+    const manifest = {
+      references: Array.from({ length: 16 }, () => ({ [BLOB_REF_KEY]: './b//f' })),
+    }
+    const data = await writeSnapshotTar(manifest, { 'b/f': new Uint8Array(16_384) })
+    await expect(readSnapshotTar(data, null, 32_768)).rejects.toThrow(
+      'snapshot exceeds expanded size limit',
+    )
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-budget-'))
+    try {
+      const path = join(dir, 's.tar')
+      await writeFileTar(path, manifest, { 'b/f': new Uint8Array(16_384) })
+      await expect(readFileTar(path, dir, 32_768)).rejects.toThrow(
+        'snapshot exceeds expanded size limit',
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('counts staged and held copies under the same budget', async () => {
+    const manifest = {
+      mounts: [{ vfs_state: { type: VFSName.DISK, files: { a: { [BLOB_REF_KEY]: 'b/f' } } } }],
+      references: [{ [BLOB_REF_KEY]: 'b/f' }],
+    }
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-budget-'))
+    try {
+      const path = join(dir, 's.tar')
+      await writeFileTar(path, manifest, { 'b/f': new Uint8Array(16_384) })
+      await expect(readFileTar(path, dir, 32_768)).rejects.toThrow(
+        'snapshot exceeds expanded size limit',
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts the exact restored-byte budget and refuses one byte less', async () => {
+    const manifest = { references: Array.from({ length: 16 }, () => ({ [BLOB_REF_KEY]: 'b/f' })) }
+    const data = await writeSnapshotTar(manifest, { 'b/f': new Uint8Array(1024) })
+    const budget = ENC.encode(JSON.stringify(manifest, null, 2)).byteLength + 16 * 1024
+    await expect(readSnapshotTar(data, null, budget)).resolves.toBeDefined()
+    await expect(readSnapshotTar(data, null, budget - 1)).rejects.toThrow(
+      'snapshot exceeds expanded size limit',
+    )
+  })
+})
+
+describe('snapshot metadata and manifest-reference limits', () => {
+  it.each(['L', 'K', 'x', 'g'])(
+    'bounds %s metadata before the tar engine retains it',
+    async (kind) => {
+      const text = kind === 'L' ? 'manifest.json\0'.padEnd(128_000, '\0') : '\0'.repeat(128_000)
+      const meta = tarOf('././@LongLink', text)
+      meta[156] = kind.charCodeAt(0)
+      meta.fill(32, 148, 156)
+      const sum = meta.subarray(0, 512).reduce((total, byte) => total + byte, 0)
+      meta.set(ENC.encode(`${sum.toString(8).padStart(6, '0')}\0 `), 148)
+      const raw = concat([meta.subarray(0, meta.byteLength - 1024), tarOf('manifest.json', '{}')])
+      for (const data of [raw, await gzip(raw)]) {
+        await expect(readSnapshotTar(data, null, 32_768)).rejects.toThrow(
+          'snapshot exceeds expanded size limit',
+        )
+      }
+    },
+  )
+
+  it.each(['manifest.json', './manifest.json', '././manifest.json'])(
+    'refuses %s as a blob target',
+    async (path) => {
+      const manifest = {
+        padding: 'x'.repeat(16_384),
+        references: Array.from({ length: 16 }, () => ({ [BLOB_REF_KEY]: path })),
+      }
+      const data = await writeSnapshotTar(manifest, {})
+      for (const limit of [undefined, 32_768]) {
+        await expect(readSnapshotTar(data, null, limit)).rejects.toThrow(
+          'Manifest cannot reference itself as a blob',
+        )
+      }
+    },
+  )
 })

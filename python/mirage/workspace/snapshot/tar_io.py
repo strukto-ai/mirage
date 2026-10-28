@@ -137,7 +137,10 @@ def write_tar(
 
 
 def read_tar(
-    source: str | Path | BinaryIO, staging: Path | None = None
+    source: str | Path | BinaryIO,
+    staging: Path | None = None,
+    *,
+    max_bytes: int | None = None,
 ) -> dict[str, Any]:
     """Read a tar produced by write_tar; return a resolved state dict.
 
@@ -153,7 +156,12 @@ def read_tar(
         source (str | Path | BinaryIO): filesystem path OR a readable file-like
             object with a `read` method.
         staging (Path | None): a directory for disk mount files.
+        max_bytes (int | None): maximum decoded member bytes and restored
+            bytes, including every manifest reference and staged copy.
     """
+    if max_bytes is not None and max_bytes < 0:
+        raise ValueError("max_bytes must be non-negative")
+    total = 0
     held: dict[str, bytearray] = {}
     staged: dict[str, Path] = {}
     files: dict[str, IO[bytes]] = {}
@@ -198,6 +206,7 @@ def read_tar(
         def serve(
             request: dict[str, JsonValue], data: bytes
         ) -> tuple[dict[str, JsonValue], bytes]:
+            nonlocal total
             op = request["op"]
             if op == "read":
                 chunk = src.read(_CHUNK)
@@ -210,6 +219,12 @@ def read_tar(
             name = text_view(path).lstrip("/")
             if request.get("create") or request.get("whole"):
                 begin(name)
+            if max_bytes is not None:
+                copies = 1 if name == _MANIFEST_NAME else max(1, named[name])
+                amount = len(data) * copies
+                if amount > max_bytes - total:
+                    raise ValueError("snapshot exceeds expanded size limit")
+                total += amount
             if name in files:
                 files[name].write(data)
                 if op == "flush" or request.get("whole"):
@@ -218,7 +233,15 @@ def read_tar(
                 held[name] += data
             return {}, b""
 
-        _run({"mode": "extract", "archive": _ARCHIVE, "base": ""}, serve)
+        _run(
+            {
+                "mode": "extract",
+                "archive": _ARCHIVE,
+                "base": "",
+                "max_decoded_bytes": max_bytes,
+            },
+            serve,
+        )
     if manifest is None:
         manifest = _manifest_of(held)
     for files_map, rel, blob_path in _disk_file_refs(manifest):
@@ -226,6 +249,8 @@ def read_tar(
             files_map[rel] = staged[_member_name(blob_path)]
 
     def reader(blob_path: str) -> bytes:
+        if _member_name(blob_path) == _MANIFEST_NAME:
+            raise ValueError("Manifest cannot reference itself as a blob")
         if _member_name(blob_path) not in held:
             raise ValueError(
                 f"Manifest references missing blob: {blob_path!r}"
@@ -260,7 +285,10 @@ def _run(
         stream.respond(*serve(*taken))
     stream.finish()
     if stream.status() != 0:
-        raise ValueError(stream.take_stderr().decode(errors="replace").strip())
+        message = stream.take_stderr().decode(errors="replace").strip()
+        if message == "tar: decoded input exceeds size limit":
+            message = "snapshot exceeds expanded size limit"
+        raise ValueError(message)
 
 
 def _manifest_of(held: dict[str, bytearray]) -> dict[str, Any]:

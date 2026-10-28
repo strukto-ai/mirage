@@ -1344,6 +1344,43 @@
           }
         }
       ]
+    },
+    {
+      "id": "redirected_background_output_keeps_the_job_deadline",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {}
+          }
+        },
+        "command_limits": {
+          "@line": {
+            "timeout_seconds": 0.2
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "seq 1 1000000000 > /ram/output &",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "wait_job": 1
+        },
+        {
+          "command": "wait %1; echo status=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "status=124\n",
+            "stderr": "line: timed out after 0.2s\n"
+          }
+        }
+      ]
     }
   ]
 }

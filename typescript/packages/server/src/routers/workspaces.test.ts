@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '@struktoai/mirage-node'
+import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/workspace/snapshot/tar_io'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { buildApp } from '../app.ts'
@@ -24,8 +25,22 @@ import type * as multipart from '../multipart.ts'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
+import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
 
-const limits = vi.hoisted(() => ({ snapshot: undefined as number | undefined }))
+const limits = vi.hoisted(() => ({
+  snapshot: undefined as number | undefined,
+  expanded: undefined as number | undefined,
+}))
+
+vi.mock('../constants.ts', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    get MAX_SNAPSHOT_BYTES(): number {
+      return limits.expanded ?? (actual.MAX_SNAPSHOT_BYTES as number)
+    },
+  }
+})
 
 vi.mock('../multipart.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof multipart>()
@@ -747,7 +762,11 @@ describe('workspaces router', () => {
       })
       expect(res.statusCode).toBe(201)
       expect(load.mock.calls[0]?.[0]).toBe('a.tar')
-      expect(load.mock.calls[0]?.[1]).toEqual({ s3: STORE })
+      expect(load.mock.calls[0]?.[1]).toEqual({
+        s3: STORE,
+        maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
+        maxSnapshotEncodedBytes: 1024 * 1024 * 1024,
+      })
       load.mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }))
       const missing = await app.inject({
         method: 'POST',
@@ -807,6 +826,32 @@ describe('workspaces router', () => {
     } finally {
       limits.snapshot = undefined
       await app.close().catch(() => undefined)
+    }
+  })
+
+  it('caps expanded snapshot bytes and releases the rejected workspace id', async () => {
+    const app = buildApp()
+    limits.expanded = 32_768
+    try {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { id: 'source', config: RAM },
+      })
+      expect(created.statusCode).toBe(201)
+      const original = await download(app, 'source')
+      const manifest = (await readSnapshotTar(original)) as Record<string, unknown>
+      const oversized = await writeSnapshotTar({ ...manifest, padding: 'x'.repeat(128_000) }, {})
+      const res = await upload(app, oversized, { id: 'limited' })
+      expect(res.statusCode).toBe(400)
+      expect(res.json<{ detail: string }>().detail).toContain(
+        'snapshot exceeds expanded size limit',
+      )
+      expect(app.registry.has('limited')).toBe(false)
+      expect((await upload(app, original, { id: 'limited' })).statusCode).toBe(201)
+    } finally {
+      limits.expanded = undefined
+      await app.close()
     }
   })
 

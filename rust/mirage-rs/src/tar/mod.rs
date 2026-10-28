@@ -132,6 +132,9 @@ struct Config {
     #[serde(deserialize_with = "crate::latin1_opt")]
     unopened: Option<Vec<u8>>,
     codec: Option<Codec>,
+    /// An optional host budget for decoded archive bytes, including metadata.
+    #[serde(deserialize_with = "crate::saturating_u64_opt")]
+    max_decoded_bytes: Option<u64>,
     verbose: bool,
     /// A missing archive may be a directory a backend keys no file for.
     probe: bool,

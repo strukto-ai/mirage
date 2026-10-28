@@ -1219,6 +1219,9 @@ async def _perform_step(
     if "add_runtime" in step:
         ws.add_runtime(step["add_runtime"])
         return []
+    if "wait_job" in step:
+        await ws.job_table.wait(step["wait_job"], ws.default_session_id)
+        return []
     if "profile" in step:
         # The default session's profile from here on: a world's own
         # profile applies before its files are seeded, so a case that
