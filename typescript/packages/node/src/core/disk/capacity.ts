@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { lstat } from 'node:fs/promises'
+import { lstat, opendir } from 'node:fs/promises'
 import path from 'node:path'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { readEntries, resolveInside } from './utils.ts'
+
+export const logger: { debug?: (message: string) => void } = {}
 
 /** The bytes of the regular files at or under `host`; 0 for none. */
 async function bytesUnder(host: string): Promise<number> {
@@ -24,7 +26,10 @@ async function bytesUnder(host: string): Promise<number> {
   try {
     info = await lstat(host)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 0
+    if (['ENOENT', 'EACCES', 'EPERM'].includes((err as NodeJS.ErrnoException).code ?? '')) {
+      logger.debug?.(`path skipped while counting ${host}: ${String(err)}`)
+      return 0
+    }
     throw err
   }
   if (!info.isDirectory()) return info.isFile() ? info.size : 0
@@ -33,17 +38,37 @@ async function bytesUnder(host: string): Promise<number> {
   try {
     entries = await readEntries(host)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 0
+    if (['ENOENT', 'EACCES', 'EPERM'].includes((err as NodeJS.ErrnoException).code ?? '')) {
+      logger.debug?.(`directory skipped while counting ${host}: ${String(err)}`)
+      return 0
+    }
     throw err
   }
   for (const entry of entries) total += await bytesUnder(path.join(host, entry.name))
   return total
 }
 
-/** The bytes at `path`, a directory's whole subtree included. Mirrors
+/** The bytes at `path` included by whole-root counting. Mirrors
  * Python's `size_of`. */
 export async function sizeOf(accessor: DiskAccessor, spec: PathSpec): Promise<number> {
-  return bytesUnder(await resolveInside(accessor.root, spec))
+  const host = await resolveInside(accessor.root, spec)
+  const root = path.resolve(accessor.root)
+  if (host !== root) {
+    for (let at = path.dirname(host); ; at = path.dirname(at)) {
+      try {
+        const directory = await opendir(at)
+        await directory.close()
+      } catch (err) {
+        if (['ENOENT', 'EACCES', 'EPERM'].includes((err as NodeJS.ErrnoException).code ?? '')) {
+          logger.debug?.(`ancestor skipped while counting ${at}: ${String(err)}`)
+          return 0
+        }
+        throw err
+      }
+      if (at === root) break
+    }
+  }
+  return bytesUnder(host)
 }
 
 /** The bytes the whole mount root holds. Mirrors Python's `count`. */

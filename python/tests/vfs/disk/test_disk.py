@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
 
 import pytest
 
@@ -39,6 +40,41 @@ def test_a_capacity_that_is_not_a_size_is_refused(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root can read chmod 000 folders"
+)
+@pytest.mark.parametrize("mode", [0, 0o400])
+async def test_a_capped_root_counts_past_an_unreadable_folder(
+    tmp_path, mode, caplog
+):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "hidden").write_bytes(b"x" * 100)
+    data = DiskVFS(str(tmp_path), capacity=4)
+    ws = Workspace({"/d": (data, MountMode.WRITE)})
+    caplog.set_level("DEBUG", logger="mirage.core.disk.capacity")
+    try:
+        locked.chmod(mode)
+        written = await ws.shell("printf hi > /d/a")
+        report = await ws.shell("df /d")
+        assert (written.exit_code, report.exit_code) == (0, 0)
+        assert await written.stderr_str() == ""
+        assert await report.stderr_str() == ""
+        assert str(tmp_path) not in await report.stdout_str()
+        assert "skipped while counting" in caplog.text
+        assert (tmp_path / "a").read_bytes() == b"hi"
+        assert data.usage is not None and data.usage.used == 2
+        assert (await ws.shell("printf abc > /d/b")).exit_code == 1
+        unreadable = await ws.shell("du /d")
+        assert unreadable.exit_code == 1
+        assert "Permission denied" in await unreadable.stderr_str()
+        assert str(tmp_path) not in await unreadable.stderr_str()
+    finally:
+        locked.chmod(0o755)
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_capped_root_counts_what_it_holds_and_refuses_growth(tmp_path):
     (tmp_path / "pre").write_bytes(b"xx")
     data = DiskVFS(str(tmp_path), capacity=12)
@@ -56,6 +92,71 @@ async def test_a_capped_root_counts_what_it_holds_and_refuses_growth(tmp_path):
         assert (await ws.shell("truncate -s 13 /d/c")).exit_code == 1
         assert data.usage is not None and data.usage.used == 9
     finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root can list execute-only folders"
+)
+@pytest.mark.parametrize(
+    ("mode", "command"),
+    [
+        (0o111, "printf x > /d/locked/known"),
+        (0o333, "rm /d/locked/known"),
+        (0o333, "mv /d/locked/known /d/locked/other"),
+        (0o333, "mv /d/locked /d/renamed; printf x > /d/renamed/known"),
+    ],
+)
+async def test_skipped_bytes_never_credit_other_writes(
+    tmp_path, mode, command
+):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "known").write_bytes(b"x" * 100)
+    (tmp_path / "plain").write_bytes(b"123")
+    data = DiskVFS(str(tmp_path), capacity=4)
+    ws = Workspace({"/d": (data, MountMode.WRITE)})
+    try:
+        locked.chmod(mode)
+        changed = await ws.shell(command)
+        assert changed.exit_code == 0, await changed.stderr_str()
+        assert data.usage is not None and data.usage.used == 3
+        assert (await ws.shell("printf 12 > /d/new")).exit_code == 1
+        assert not (tmp_path / "new").exists()
+        assert (await ws.shell("printf 1 > /d/new")).exit_code == 0
+        assert data.usage.used == 4
+    finally:
+        (locked if locked.exists() else tmp_path / "renamed").chmod(0o755)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root can list execute-only folders"
+)
+async def test_reusing_a_skipped_directory_name_does_not_exempt_new_files(
+    tmp_path,
+):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "known").write_bytes(b"x" * 100)
+    (tmp_path / "plain").write_bytes(b"123")
+    data = DiskVFS(str(tmp_path), capacity=4)
+    ws = Workspace({"/d": (data, MountMode.WRITE)})
+    try:
+        locked.chmod(0o333)
+        assert (
+            await ws.shell("mv /d/locked /d/renamed; mkdir /d/locked")
+        ).exit_code == 0
+        assert (await ws.shell("printf 12 > /d/locked/new")).exit_code == 1
+        assert not (locked / "new").exists()
+        assert (await ws.shell("printf 1 > /d/locked/new")).exit_code == 0
+        assert data.usage is not None and data.usage.used == 4
+    finally:
+        (
+            tmp_path / "renamed" if (tmp_path / "renamed").exists() else locked
+        ).chmod(0o755)
         await ws.close()
 
 
