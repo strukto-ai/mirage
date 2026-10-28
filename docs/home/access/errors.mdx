@@ -34,13 +34,13 @@ carry credentials or host paths; they stay in the server's logs.
 | `ELOOP` | Too many levels of symbolic links | `400` | A link loop stands in the path. |
 | `EINVAL` | Invalid argument | `400` | The call's arguments are invalid. |
 | `EBUSY` | Device or resource busy | `409` | A mount root, or the workspace is busy. |
-| `EFBIG` | File too large | `500` | A read the backend will not serve whole. |
+| `EFBIG` | File too large | `400` | A read the backend will not serve whole. |
 | `EDQUOT` | Disk quota exceeded | `507` | A write past the mount's capacity. |
 | `EPIPE` | Broken pipe | `500` | A write to a closed pipe. |
 | `EIO` | Input/output error | `500` | The backend failed. |
 | `EBADF` | Bad file descriptor | `500` | A read from a closed or write-only descriptor. |
 | `NO_XATTR` | No data available | `404` | The attribute is not set. Python on macOS says `Attribute not found`. |
-| `STALE_WRITE` | changed since it was read; read it again before writing | `500` | A [conditional write](/home/configuration#read-and-write-policies) lost its condition. |
+| `STALE_WRITE` | changed since it was read; read it again before writing | `409` | A [conditional write](/home/configuration#read-and-write-policies) lost its condition. |
 
 Each surface carries the condition its own way:
 

@@ -51,13 +51,18 @@ STATUS: dict[FsCondition, int] = {
     FsCondition.EEXIST: 409,
     FsCondition.ENOTEMPTY: 409,
     FsCondition.EBUSY: 409,
+    FsCondition.STALE_WRITE: 409,
     FsCondition.ENOTDIR: 400,
     FsCondition.EISDIR: 400,
     FsCondition.EINVAL: 400,
     FsCondition.EXDEV: 400,
     FsCondition.ELOOP: 400,
     FsCondition.ENOTSUP: 400,
+    FsCondition.EFBIG: 400,
     FsCondition.EDQUOT: 507,
+    FsCondition.EIO: 500,
+    FsCondition.EPIPE: 500,
+    FsCondition.EBADF: 500,
 }
 
 
@@ -140,7 +145,7 @@ def failure(exc: Exception) -> JSONResponse:
         # carry nothing private, so the caller learns why.
         return JSONResponse(status_code=400, content={"detail": exc.reason})
     condition = classify(exc)
-    status = 500 if condition is None else STATUS.get(condition, 500)
+    status = 500 if condition is None else STATUS[condition]
     return JSONResponse(status_code=status, content=failure_to_dict(exc))
 
 

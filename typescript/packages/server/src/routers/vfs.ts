@@ -38,7 +38,7 @@ interface CallQuery {
   explain?: string
 }
 
-const STATUS: Partial<Record<FsCondition, number>> = {
+const STATUS: Record<FsCondition, number> = {
   ENOENT: 404,
   NO_XATTR: 404,
   EACCES: 403,
@@ -47,13 +47,18 @@ const STATUS: Partial<Record<FsCondition, number>> = {
   EEXIST: 409,
   ENOTEMPTY: 409,
   EBUSY: 409,
+  STALE_WRITE: 409,
   ENOTDIR: 400,
   EISDIR: 400,
   EINVAL: 400,
   EXDEV: 400,
   ELOOP: 400,
   ENOTSUP: 400,
+  EFBIG: 400,
   EDQUOT: 507,
+  EIO: 500,
+  EPIPE: 500,
+  EBADF: 500,
 }
 
 /** Thrown for a request the route answers with a fixed status and detail. */
@@ -108,7 +113,7 @@ export function failure(reply: FastifyReply, err: unknown): FastifyReply {
   // nothing private, so the caller learns why.
   if (err instanceof TooManyMatches) return reply.status(400).send({ detail: err.reason })
   const condition = classify(err)
-  const status = condition === null ? 500 : (STATUS[condition] ?? 500)
+  const status = condition === null ? 500 : STATUS[condition]
   return reply.status(status).send(failureToDict(err))
 }
 

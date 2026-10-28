@@ -22,6 +22,16 @@ describe.each(['vfs/read', 'glob'])('%s failure responses', (route) => {
       507,
       { detail: 'Disk quota exceeded', errno: 'EDQUOT' },
     ],
+    [
+      Object.assign(new Error('backend token=secret'), { code: 'STALE_WRITE' }),
+      409,
+      { detail: 'changed since it was read; read it again before writing', errno: 'STALE_WRITE' },
+    ],
+    [
+      Object.assign(new Error('backend token=secret'), { code: 'EFBIG' }),
+      400,
+      { detail: 'File too large', errno: 'EFBIG' },
+    ],
   ])('keeps private exception details out of HTTP responses (%s)', async (err, status, body) => {
     const app = buildApp()
     try {
