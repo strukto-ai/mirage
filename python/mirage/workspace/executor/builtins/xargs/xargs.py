@@ -58,7 +58,6 @@ from mirage.shell.console.types import Channel
 from mirage.shell.constants import (
     NOT_FOUND_STATUS,
     SIGPIPE_STATUS,
-    TIMEOUT_STATUS,
 )
 from mirage.shell.join import shell_join
 from mirage.utils.quote import shell_quote
@@ -1048,7 +1047,7 @@ async def _run_lines(
                         IOResult(stderr=encode_text(aborted))
                     )
                     io.stderr = combined.stderr
-                    stop = TIMEOUT_STATUS
+                    stop = 124
                     stopping.set()
             except BaseException as exc:
                 stop = 1 if stop is None else stop
@@ -1241,7 +1240,7 @@ async def handle_xargs(
             nonlocal failed, stop
             failed = failed or io.exit_code != 0
             if io.exit_code == 255 and stop is None:
-                stop = TIMEOUT_STATUS
+                stop = 124
             combined = await merged.merge(IOResult(stderr=io.stderr))
             merged.stderr = combined.stderr
 

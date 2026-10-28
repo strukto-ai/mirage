@@ -14,8 +14,10 @@ those two.
 A file call (`read`, `write`, `stat`, `readdir`, `rename`, ...) names its
 failure with one of these conditions, whatever the backend. A service's own
 error becomes the condition it means, such as an object that is not there
-becoming `ENOENT`. One that means none keeps its own message, and HTTP answers
-it `500`.
+becoming `ENOENT`. One that means none keeps its own words in an exception
+and in a shell diagnostic. HTTP answers it `500`, and RPC `-32603`, with
+`detail` set to `internal server error` and no `errno`, since those words can
+carry credentials or host paths; they stay in the server's logs.
 
 | Condition | Message | HTTP | Means |
 | --- | --- | --- | --- |
@@ -50,15 +52,19 @@ Each surface carries the condition its own way:
 | [HTTP](/home/access/http#errors) | `{detail, errno}` with the status above, plus a `refusal` record when a policy refused the call. |
 | [RPC](/home/access/rpc#errors) | `-32004` for `ENOENT` and `-32603` for the rest, with `{detail, errno}` in `data`. |
 | [MCP](/home/access/mcp#tools) | The tool's answer with `isError` set: `Error: /data/x: No such file or directory`. |
-| [FUSE](/home/setup/fuse), SFTP, NFS | The host's errno number. A failure with no errno reads as `EIO`. |
+| [FUSE](/home/setup/fuse) | The host's errno number. A failure with no errno reads as `EIO`. |
+| SFTP | An SFTP status code, such as `3` for permission denied and `4` for a general failure. |
+| NFS | An NFS3 status code, such as `NFS3ERR_NOTSUPP` (`10004`) for an unsupported call. |
 | [Runtimes](/home/setup/runtime/overview) | The guest's own error: an `OSError` with its errno in Python, the WASI errno in a WebAssembly guest. |
 
 ## Shell lines
 
-A line answers `exit_code`, `stdout` and `stderr`. A non-zero status is the
-line's result, not a failed call: HTTP answers `200`, RPC a result, and MCP sets
-`isError`. A command's stderr follows GNU coreutils, and its status is the one
-the real command exits with. These statuses come from the shell itself:
+A line that runs to its end answers `exit_code`, `stdout` and `stderr`. A
+non-zero status is the line's result, not a failed call: HTTP answers `200`, RPC
+a result, and MCP sets `isError`. Canceling the request is a failed call
+instead: HTTP answers `499` and RPC the error `-32800`. A command's stderr
+follows GNU coreutils, and its status is the one the real command exits with.
+These statuses come from the shell itself:
 
 | Status | Means |
 | --- | --- |
@@ -68,7 +74,7 @@ the real command exits with. These statuses come from the shell itself:
 | `124` | The line, or `timeout`, ran past its time limit. |
 | `126` | The command was found but not run: it is not executable, a policy refused it, no runtime takes it, or its argument list is too long, as a glob past a mount's [`walk_limit`](/home/integration/search#walk_limit) is. |
 | `127` | The command was not found, or an unset variable was read under `set -u`. |
-| `128` + n | Signal n ended it: `130` for an interrupt or a canceled line, `141` for a write to a closed pipe. |
+| `128` + n | Signal n ended it: `130` for an interrupt (the CLI and SSH report a Ctrl-C so), `141` for a write to a closed pipe. |
 | `254` | The session's `processes.max` refused a fork. |
 
 ## Service errors

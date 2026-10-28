@@ -52,7 +52,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { readScriptBytes } from '../script/script.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { concat, findBytes } from '../../../../utils/bytes.ts'
-import { NOT_FOUND_STATUS, SIGPIPE_STATUS, TIMEOUT_STATUS } from '../../../../shell/constants.ts'
+import { NOT_FOUND_STATUS, SIGPIPE_STATUS } from '../../../../shell/constants.ts'
 
 const SYNOPSIS = 'xargs [OPTION]... COMMAND [INITIAL-ARGS]...'
 
@@ -1060,7 +1060,7 @@ async function* runLines(
               }),
             )
           ).stderr
-          stop = TIMEOUT_STATUS
+          stop = 124
           stopping.abort()
         }
       } catch (error) {
@@ -1247,7 +1247,7 @@ export async function handleXargs(
     let failed = false
     const torn: IOResult[] = []
     async function record(io: IOResult): Promise<boolean> {
-      if (io.exitCode === 255 && stopped === null) stopped = TIMEOUT_STATUS
+      if (io.exitCode === 255 && stopped === null) stopped = 124
       merged.stderr = (await merged.merge(new IOResult({ stderr: io.stderr }))).stderr
       return io.exitCode !== 0
     }
