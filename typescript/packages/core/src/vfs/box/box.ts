@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CONDITION_SUPPORT } from '../../core/box/constants.ts'
-import type { ConditionSupport } from '../../cache/types.ts'
+import type { ConditionSupport, ReplaceRequest } from '../../cache/types.ts'
 import { BaseVFS } from '../base.ts'
 import { BoxAccessor } from '../../accessor/box.ts'
 import { BoxTokenManager } from '../../core/box/client.ts'
@@ -30,7 +30,7 @@ import { checksum as boxChecksum } from '../../core/box/checksum.ts'
 import { stat as boxStat } from '../../core/box/stat.ts'
 import { exists as boxExists } from '../../core/box/exists.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { write as boxWrite } from '../../core/box/write.ts'
+import { write as boxWrite, replace as boxReplace } from '../../core/box/write.ts'
 import { create as boxCreate } from '../../core/box/create.ts'
 import { mkdir as boxMkdir } from '../../core/box/mkdir.ts'
 import { unlink as boxUnlink } from '../../core/box/unlink.ts'
@@ -150,6 +150,14 @@ export class BoxVFS extends BaseVFS {
     handed: Handed = {},
   ): Promise<FileStat | null> {
     return boxWrite(this.accessor, path, data, handed, signal)
+  }
+
+  override _replace(
+    request: ReplaceRequest,
+    signal?: AbortSignal,
+    handed: Handed = {},
+  ): Promise<FileStat | null> {
+    return boxReplace(this.accessor, request, handed, signal)
   }
 
   override create(path: PathSpec, handed: Handed = {}): Promise<FileStat | null> {

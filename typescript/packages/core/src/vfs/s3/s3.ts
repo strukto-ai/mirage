@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConditionSupport } from '../../cache/types.ts'
+import type { ConditionSupport, ReplaceRequest } from '../../cache/types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { appendByStreamedRewrite } from '../../core/generic/rewrite.ts'
 import { checksum as s3Checksum } from '../../core/s3/checksum.ts'
@@ -130,6 +130,10 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
       path,
       data,
     )
+  }
+
+  override _replace(request: ReplaceRequest, signal?: AbortSignal): Promise<FileStat | null> {
+    return s3Replace(this.accessor, request, signal)
   }
 
   override create(path: PathSpec): Promise<FileStat | null> {

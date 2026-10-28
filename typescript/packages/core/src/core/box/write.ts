@@ -17,6 +17,8 @@ import { requireSupported, writesConditioned } from '../../cache/context.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
+import { closeQuietly } from '../../io/stream.ts'
+import type { ReplaceRequest, WriteCondition } from '../../cache/types.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { nativeCondition, writeCondition } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
@@ -82,10 +84,44 @@ export async function write(
       await spool.close()
     }
   }
+  const condition = await writeCondition(path, 'put')
+  return uploadPrepared(accessor, path, data, condition, handed)
+}
+
+export async function replace(
+  accessor: BoxAccessor,
+  request: ReplaceRequest,
+  handed: Handed = {},
+  signal?: AbortSignal,
+): Promise<FileStat | null> {
+  try {
+    requireSupported(CONDITION_SUPPORT, 'box', request.path, 'put', request.condition)
+  } catch (error) {
+    await closeQuietly(request.body)
+    throw error
+  }
+  if (!(request.body instanceof Uint8Array)) {
+    const spool = new ByteSpool()
+    try {
+      await spool.fill(chunks(request.body, signal))
+      return await uploadPrepared(accessor, request.path, spool, request.condition, handed)
+    } finally {
+      await spool.close()
+    }
+  }
+  return uploadPrepared(accessor, request.path, request.body, request.condition, handed)
+}
+
+async function uploadPrepared(
+  accessor: BoxAccessor,
+  path: PathSpec,
+  data: Uint8Array | ByteSpool,
+  cond: WriteCondition,
+  handed: Handed = {},
+): Promise<FileStat | null> {
   const parts = pathParts(path)
   if (parts.length === 0 || handed.entry?.type === FileType.DIRECTORY) throw eisdir(path.virtual)
   const tm = accessor.tokenManager
-  const cond = await writeCondition(path, 'put', null, accessor)
   requireSupported(CONDITION_SUPPORT, 'box', path, 'put', cond)
   const timer = startOp()
   // What is there now: the listed row can be older than the path's file, and

@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Accessor } from '../accessor/base.ts'
 import { enotsup, staleWrite } from '../errors/fs.ts'
 import type { FsError, StaleWriteError } from '../errors/types.ts'
 import { markLost } from '../observe/context.ts'
@@ -24,8 +23,6 @@ import {
   ANY_WRITE,
   ABSENT_WRITE,
   type ConditionSupport,
-  type ReplaceRequest,
-  type SettledWrite,
   type CacheContextState,
   type CacheInvalidator,
   type KnownVersions,
@@ -139,7 +136,6 @@ declare module '../context/session_context.ts' {
     readonly cache: CacheContextState | null
     readonly readFacts: ReadFacts | null
     readonly write: WriteBinding | null
-    readonly settledWrite: SettledWrite | null
   }
 }
 
@@ -149,7 +145,7 @@ export function runWithWriteContext<T>(
   context: WriteContext | null,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return runWithCaller({ ...currentCaller(), write: { prefix, context }, settledWrite: null }, fn)
+  return runWithCaller({ ...currentCaller(), write: { prefix, context } }, fn)
 }
 
 /**
@@ -188,33 +184,6 @@ function agree<S>(states: readonly S[], pick: (state: S) => unknown): boolean {
 
 function overlapping(path: PathSpec): FsError {
   return enotsup('workspace', 'conditional write (overlapping lines)', path)
-}
-
-export function runWithSettledWrite<T>(
-  owner: Accessor,
-  request: ReplaceRequest,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const scopes = ownersOf(
-    request.path,
-    liveCallers().flatMap((caller) => (caller.write === null ? [] : [caller.write])),
-  )
-  if (!agree(scopes, (scope) => scope.context)) throw overlapping(request.path)
-  const scope = scopes[scopes.length - 1] ?? null
-  return runWithCaller(
-    {
-      ...currentCaller(),
-      write: scope,
-      settledWrite: {
-        owner,
-        scope,
-        path: request.path.mountPath,
-        kind: 'put',
-        condition: request.condition,
-      },
-    },
-    fn,
-  )
 }
 
 export function conditionVersion(condition: WriteCondition | null): string | null {
@@ -260,43 +229,17 @@ export function writeCondition(
   path: PathSpec,
   kind: 'put',
   own?: string | OwnRead | null,
-  owner?: Accessor | null,
 ): Promise<WriteCondition>
 export function writeCondition(
   path: PathSpec,
   kind: 'copy' | 'delete',
   own?: string | OwnRead | null,
-  owner?: Accessor | null,
 ): Promise<WriteCondition | null>
 export async function writeCondition(
   path: PathSpec,
   kind: WriteKind,
   own: string | OwnRead | null = null,
-  owner: Accessor | null = null,
 ): Promise<WriteCondition | null> {
-  const settled = liveCallers()
-    .flatMap((caller) => (caller.settledWrite === null ? [] : [caller.settledWrite]))
-    .filter(
-      (state) => state.owner === owner && state.path === path.mountPath && state.kind === kind,
-    )
-  const held = settled[0]
-  if (held !== undefined) {
-    const scopes = ownersOf(
-      path,
-      liveCallers().flatMap((caller) => (caller.write === null ? [] : [caller.write])),
-    )
-    if (
-      !agree(scopes, (scope) => scope.context) ||
-      settled.some(
-        (state) =>
-          state.scope !== (scopes[scopes.length - 1] ?? null) ||
-          state.condition.kind !== held.condition.kind ||
-          conditionVersion(state.condition) !== conditionVersion(held.condition),
-      )
-    )
-      throw overlapping(path)
-    return held.condition
-  }
   const context = activeWriteContext(path)
   if (context === null)
     return kind === 'put' ? (own === OwnRead.ABSENT ? ABSENT_WRITE : ANY_WRITE) : null

@@ -146,7 +146,7 @@ export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
   return async function write(accessor, path, body, signal) {
     let condition: WriteCondition
     try {
-      condition = await writeCondition(path, 'put', null, accessor)
+      condition = await writeCondition(path, 'put')
     } catch (error) {
       await closeQuietly(body)
       throw error
@@ -159,7 +159,7 @@ export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
 export function makeCreate<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): CreateFn<A> {
   return async function create(accessor, path) {
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
-    const cond = await writeCondition(path, 'put', null, accessor)
+    const cond = await writeCondition(path, 'put')
     const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
     let meta: ObjectMeta | null
@@ -188,7 +188,7 @@ export function makeTruncate<A extends Accessor, C>(
     try {
       if (length === 0) {
         // Emptying reads nothing, so it carries the agent's version.
-        const cond = await writeCondition(path, 'put', null, accessor)
+        const cond = await writeCondition(path, 'put')
         meta = await put(driver, conn, key, new Uint8Array(0), path, cond)
       } else {
         let existing: Uint8Array | null
@@ -211,7 +211,7 @@ export function makeTruncate<A extends Accessor, C>(
         const result = new Uint8Array(length)
         result.set(data.subarray(0, Math.min(data.byteLength, length)), 0)
         // Remaining bytes are already zero-filled (Uint8Array default).
-        const cond = await writeCondition(path, 'put', own, accessor)
+        const cond = await writeCondition(path, 'put', own)
         meta = await put(driver, conn, key, result, path, cond)
       }
     } finally {

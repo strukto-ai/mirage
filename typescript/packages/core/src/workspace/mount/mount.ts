@@ -69,7 +69,6 @@ import {
   readVersioned,
   runWithWriteContext,
   requireSupported,
-  runWithSettledWrite,
 } from '../../cache/context.ts'
 import { latestFingerprint } from '../../cache/file/io.ts'
 import type { OpRecord } from '../../observe/record.ts'
@@ -1101,16 +1100,24 @@ export class MountEntry {
   }
 
   private async replaceAt(index: IndexCacheStore, request: ReplaceRequest): Promise<unknown> {
-    requireSupported(
-      this.vfs.conditionSupport,
-      this.vfs.name,
-      request.path,
-      'put',
-      request.condition,
-    )
-    return runWithSettledWrite(this.vfs.accessor, request, () =>
-      this.writeAt(index, request.path, request.body),
-    )
+    try {
+      requireSupported(
+        this.vfs.conditionSupport,
+        this.vfs.name,
+        request.path,
+        'put',
+        request.condition,
+      )
+      if (request.condition.kind === 'any')
+        return await this.writeAt(index, request.path, request.body)
+      return await this.vfs._replace(
+        request,
+        callerSignal(),
+        await this.handedFor('write', request.path, null, index),
+      )
+    } finally {
+      await closeQuietly(request.body)
+    }
   }
 
   /** The VFS's read of a whole file, handed what is at its path. */
@@ -1926,7 +1933,6 @@ export class MountEntry {
         revisions: { map: this.revisions.size > 0 ? this.revisions : null },
         cache: { manager: this.cacheManager },
         write: { prefix: this.prefix, context: this.writeContext() },
-        settledWrite: null,
         mount: [this.prefix, this.mode],
         walkProbe: probe === null ? outer.walkProbe : [this.prefix, probe],
       },

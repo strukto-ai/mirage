@@ -14,7 +14,6 @@
 
 import type { FileStat, PathSpec } from '../types.ts'
 import type { ByteSource } from '../io/types.ts'
-import type { Accessor } from '../accessor/base.ts'
 
 /** The active cache operations a backend needs from its cache manager. */
 export interface CacheInvalidator {
@@ -56,14 +55,6 @@ export type RewriteWriteFn<Written = FileStat | null> = (
 export interface WriteBinding {
   prefix: string
   context: WriteContext | null
-}
-
-export interface SettledWrite {
-  readonly owner: Accessor
-  readonly scope: WriteBinding | null
-  readonly path: string
-  readonly kind: WriteKind
-  readonly condition: WriteCondition
 }
 
 /**

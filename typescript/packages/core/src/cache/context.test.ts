@@ -23,11 +23,9 @@ import {
   runWithCacheManager,
   runWithWriteContext,
   settleAfter,
-  runWithSettledWrite,
   writeCondition,
 } from './context.ts'
 import { ABSENT_WRITE, ANY_WRITE, OwnRead, type WriteContext } from './types.ts'
-import { NOOPAccessor } from '../accessor/base.ts'
 
 class FakeManager {
   probedStat(): null {
@@ -166,27 +164,4 @@ it('preserves absent evidence without optional mount policy', async () => {
   expect(await writeCondition(path, 'put', OwnRead.ABSENT)).toEqual(ABSENT_WRITE)
   expect(await writeCondition(path, 'put')).toEqual(ANY_WRITE)
   expect(await writeCondition(path, 'copy')).toBeNull()
-})
-
-it('binds settled requirements to their destination and clears them at a new boundary', async () => {
-  const path = PathSpec.fromStrPath('/m/f', '/f')
-  const owner = new NOOPAccessor()
-  const other = new NOOPAccessor()
-  await runWithSettledWrite(
-    owner,
-    { path, body: new Uint8Array(), condition: ABSENT_WRITE },
-    async () => {
-      expect(await writeCondition(path, 'put', null, owner)).toEqual(ABSENT_WRITE)
-      expect(await writeCondition(path, 'put', null, other)).toEqual(ANY_WRITE)
-      expect(await writeCondition(PathSpec.fromStrPath('/m/g', '/g'), 'put', null, owner)).toEqual(
-        ANY_WRITE,
-      )
-      expect(await writeCondition(path, 'copy', null, owner)).toBeNull()
-      expect(
-        await runWithWriteContext('/m/', null, () => writeCondition(path, 'put', null, owner)),
-      ).toEqual(ANY_WRITE)
-      expect(await writeCondition(path, 'put', null, owner)).toEqual(ABSENT_WRITE)
-    },
-  )
-  expect(await writeCondition(path, 'put', null, owner)).toEqual(ANY_WRITE)
 })

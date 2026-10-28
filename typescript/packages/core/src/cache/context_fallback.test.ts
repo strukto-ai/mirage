@@ -20,7 +20,6 @@ import {
   captureRead,
   publishRead,
   runWithCacheManager,
-  runWithSettledWrite,
   runWithWriteContext,
   writeCondition,
   writesConditioned,
@@ -36,6 +35,7 @@ import { RAMIndexCacheStore } from './index/ram.ts'
 import { runInCommandScope } from './index/scope.ts'
 import { currentCaller, runWithCaller } from '../context/session_context.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
+import { materialize } from '../io/types.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 
@@ -197,10 +197,10 @@ describe('a conditional write on the fallback storage', () => {
     }
   }
 
-  async function conditional(): Promise<[MountEntry, PathSpec]> {
+  async function conditional(vfs: BaseVFS = new S3Stub()): Promise<[MountEntry, PathSpec]> {
     const entry = new MountEntry({
       prefix: '/s3/',
-      vfs: new S3Stub(),
+      vfs,
       mode: MountMode.WRITE,
       write: WritePolicy.CONDITIONAL,
     })
@@ -228,60 +228,45 @@ describe('a conditional write on the fallback storage', () => {
     expect(cond).toEqual({ kind: 'match', version: 'v2' })
   })
 
-  it('binds the destination requirement inside its existing mount frames', async () => {
-    const [entry, path] = await conditional()
-    const request = {
-      path,
-      body: new Uint8Array(),
-      condition: { kind: 'match', version: 'v2' },
-    } satisfies ReplaceRequest
-    const condition = await runWithWriteContext('/s3/', entry.writeContext(), () =>
-      runWithWriteContext('/s3/', entry.writeContext(), () =>
-        runWithSettledWrite(entry.vfs.accessor, request, () =>
-          writeCondition(path, 'put', null, entry.vfs.accessor),
-        ),
-      ),
-    )
-    expect(condition).toEqual(request.condition)
+  it('sends a protected positional rewrite through the explicit commit hook', async () => {
+    const commits: ReplaceRequest[] = []
+    class ReplacingVFS extends S3Stub {
+      override read(path: PathSpec): Promise<Uint8Array> {
+        const data = new Uint8Array([1])
+        publishRead(path.virtual, data, 'v1')
+        return Promise.resolve(data)
+      }
+      override write(): Promise<unknown> {
+        throw new Error('ordinary write received a protected replacement')
+      }
+      override async _replace(request: ReplaceRequest): Promise<unknown> {
+        commits.push({ ...request, body: await materialize(request.body) })
+        return null
+      }
+    }
+    const [entry] = await conditional(new ReplacingVFS())
+    await entry.call('pwrite', '/s3/f', [new Uint8Array([2]), 0])
+    expect(commits).toHaveLength(1)
+    expect(commits[0]?.condition).toEqual({ kind: 'match', version: 'v1' })
+    expect(commits[0]?.body).toEqual(new Uint8Array([2]))
   })
 
-  it.each([
-    ['/u/', false],
-    ['/u/', true],
-    ['/', false],
-    ['/', true],
-  ] as const)(
-    'keeps the destination requirement while another mount is live: %s, settled first=%s',
-    async (otherPrefix, settledFirst) => {
-      const [entry, path] = await conditional()
-      const request = {
-        path,
-        body: new Uint8Array(),
-        condition: { kind: 'match', version: 'v2' },
-      } satisfies ReplaceRequest
-      const [otherStarted, startOther] = gate()
-      const [finished, finish] = gate()
-      const bind = () =>
-        runWithSettledWrite(entry.vfs.accessor, request, async () => {
-          await otherStarted
-          try {
-            return await writeCondition(path, 'put', null, entry.vfs.accessor)
-          } finally {
-            finish()
-          }
-        })
-      const first = runWithWriteContext('/s3/', entry.writeContext(), async () => {
-        if (!settledFirst) await otherStarted
-        return bind()
-      })
-      const other = runWithWriteContext(otherPrefix, null, async () => {
-        startOther()
-        await finished
-      })
-      const [condition] = await Promise.all([first, other])
-      expect(condition).toEqual(request.condition)
-    },
-  )
+  it('refuses a protected fallback when the backend has no explicit commit hook', async () => {
+    class ReadableVFS extends S3Stub {
+      override read(path: PathSpec): Promise<Uint8Array> {
+        const data = new Uint8Array([1])
+        publishRead(path.virtual, data, 'v1')
+        return Promise.resolve(data)
+      }
+      override write(): Promise<unknown> {
+        throw new Error('ordinary write received a protected replacement')
+      }
+    }
+    const [entry] = await conditional(new ReadableVFS())
+    await expect(entry.call('pwrite', '/s3/f', [new Uint8Array([2]), 0])).rejects.toMatchObject({
+      code: 'ENOTSUP',
+    })
+  })
 
   it.each([
     { kind: 'any' },
@@ -295,23 +280,23 @@ describe('a conditional write on the fallback storage', () => {
       const [otherStarted, startOther] = gate()
       const [replacementStarted, startReplacement] = gate()
       const [otherFinished, finishOther] = gate()
+      class ReplacingVFS extends S3Stub {
+        override async _replace(request: ReplaceRequest): Promise<unknown> {
+          startReplacement()
+          await otherFinished
+          return request.condition
+        }
+      }
+      const vfs = new ReplacingVFS()
       const first = runWithWriteContext('/s3/', context, async () => {
         await otherStarted
-        return runWithSettledWrite(
-          entry.vfs.accessor,
-          { path, body: new Uint8Array(), condition },
-          async () => {
-            startReplacement()
-            await otherFinished
-            return writeCondition(path, 'put', null, entry.vfs.accessor)
-          },
-        )
+        return vfs._replace({ path, body: new Uint8Array(), condition })
       })
       const other = runWithWriteContext('/s3/', context, async () => {
         startOther()
         await replacementStarted
         try {
-          return await writeCondition(path, 'put', 'new', entry.vfs.accessor)
+          return await writeCondition(path, 'put', 'new')
         } finally {
           finishOther()
         }
@@ -322,42 +307,6 @@ describe('a conditional write on the fallback storage', () => {
       ])
     },
   )
-
-  it('refuses incompatible settled requirements on overlapping frames', async () => {
-    const [entry, path] = await conditional()
-    const request = {
-      path,
-      body: new Uint8Array(),
-      condition: { kind: 'match', version: 'v2' },
-    } satisfies ReplaceRequest
-    await expect(
-      runWithSettledWrite(entry.vfs.accessor, request, () =>
-        runWithSettledWrite(
-          entry.vfs.accessor,
-          { ...request, condition: { kind: 'match', version: 'v3' } },
-          () => writeCondition(path, 'put', null, entry.vfs.accessor),
-        ),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOTSUP' })
-  })
-
-  it('refuses an outer settled requirement across an ambiguous fallback boundary', async () => {
-    const [entry, path] = await conditional()
-    const request = {
-      path,
-      body: new Uint8Array(),
-      condition: { kind: 'absent' },
-    } satisfies ReplaceRequest
-    await expect(
-      runWithWriteContext('/s3/', entry.writeContext(), () =>
-        runWithSettledWrite(entry.vfs.accessor, request, () =>
-          runWithWriteContext('/s3/', entry.writeContext(), () =>
-            writeCondition(path, 'put', null, entry.vfs.accessor),
-          ),
-        ),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOTSUP' })
-  })
 
   it.each([
     ['a sibling line nested in it', '/u/', true],
@@ -415,19 +364,6 @@ describe('a conditional write on the fallback storage', () => {
       expect(got).toEqual(want)
     },
   )
-
-  it('leaves another destination settled condition alone', async () => {
-    const [entry, path] = await conditional()
-    const other = PathSpec.fromStrPath('/s3/o', '/o')
-    const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
-      runWithSettledWrite(
-        entry.vfs.accessor,
-        { path: other, body: new Uint8Array(), condition: { kind: 'match', version: 'v9' } },
-        () => writeCondition(path, 'put', null, entry.vfs.accessor),
-      ),
-    )
-    expect(cond).toEqual({ kind: 'match', version: 'v1' })
-  })
 })
 
 describe('listedThisCommand on the fallback storage', () => {
