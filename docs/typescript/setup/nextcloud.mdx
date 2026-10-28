@@ -1,0 +1,149 @@
+---
+title: Nextcloud
+description: "Mount Nextcloud over WebDAV as a filesystem and read or write your files with shell commands."
+icon: /images/nextcloud-logo.svg
+---
+
+The Nextcloud VFS mounts a [WebDAV](http://www.webdav.org/specs/rfc4918.html)
+server (Nextcloud, ownCloud, Hetzner Storage Share, or any generic WebDAV
+endpoint) at a prefix such as `/nc/`. Reads are streaming, with HTTP `Range`
+requests for partial reads.
+
+For credential and server setup, see [Nextcloud Setup](/home/setup/nextcloud).
+For Python, see the [Nextcloud (Python)](/python/vfs/nextcloud) reference.
+
+## Config
+
+```typescript
+import { MountMode, NextcloudVFS, normalizeNextcloudConfig, Workspace } from '@struktoai/mirage-node'
+
+const config = normalizeNextcloudConfig({
+  url: process.env.NEXTCLOUD_URL!,
+  username: process.env.NEXTCLOUD_USERNAME,
+  password: process.env.NEXTCLOUD_PASSWORD,
+  // Optional:
+  // timeout: 30,
+})
+const vfs = new NextcloudVFS(config)
+const ws = new Workspace({ '/nc/': vfs }, { mode: MountMode.WRITE })
+```
+
+`NextcloudVFS` accepts a configuration object with the WebDAV URL and optional
+Basic Auth credentials. Both `READ` and `WRITE` mount modes are supported.
+Use an **app password** (Settings → Security in Nextcloud) rather than your
+account password.
+
+{/* generated: config-table nextcloud start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>url</code><br />required | WebDAV URL of the user's files, such as `https://cloud.example.com/remote.php/dav/files/alice/`. |
+| <code style={{ whiteSpace: 'nowrap' }}>username</code> | Basic Auth user name; unset sends requests without credentials. |
+| <code style={{ whiteSpace: 'nowrap' }}>password</code><br />secret | Basic Auth password; use an app password (Settings → Security) rather than the account password. |
+| <code style={{ whiteSpace: 'nowrap' }}>verifySsl</code><br />default `true` | Accepted but not applied: every request verifies the server's TLS certificate. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one WebDAV request may take before timing out. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table nextcloud end */}
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with Nextcloud mounted at `/<path>`.
+
+{/* generated: vfs-md nextcloud start */}
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `nextcloud`, write |
+
+    #### Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    #### Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `nextcloud`, write |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+{/* generated: vfs-md nextcloud end */}
+
+WebDAV resources map directly to virtual paths under the mount prefix.
+For example, virtual `/nc/Documents/notes.md` issues HTTP WebDAV requests
+against `<NEXTCLOUD_URL>/Documents/notes.md`.
+
+## Cache
+
+The Nextcloud VFS caches directory listings in Mirage's index cache. Directory
+listings issue a single `PROPFIND Depth: 1` that populates file sizes, types,
+and ETags for child entries. Subsequent `stat` operations read from this cache,
+so operations like `ls` or directory scans cost one HTTP request instead of N.
+
+## Example
+
+```typescript
+import { MountMode, NextcloudVFS, normalizeNextcloudConfig, Workspace } from '@struktoai/mirage-node'
+
+const config = normalizeNextcloudConfig({
+  url: process.env.NEXTCLOUD_URL!,
+  username: process.env.NEXTCLOUD_USERNAME,
+  password: process.env.NEXTCLOUD_PASSWORD,
+})
+const vfs = new NextcloudVFS(config)
+const ws = new Workspace({ '/nc/': vfs }, { mode: MountMode.WRITE })
+
+// List files
+const ls = await ws.shell('ls -la /nc/')
+console.log(await ls.stdoutStr())
+
+// Read a remote document
+const doc = await ws.shell('cat /nc/Documents/notes.md')
+console.log(await doc.stdoutStr())
+
+// Search document contents
+const search = await ws.shell('grep -i "meeting" /nc/Documents/*.md')
+console.log(await search.stdoutStr())
+```

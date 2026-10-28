@@ -1,0 +1,132 @@
+---
+title: RAM
+description: Use an in-memory Mirage filesystem for temporary files, tests, examples, and writable agent scratch space.
+icon: memory
+---
+
+The RAM VFS exposes an in-memory filesystem mounted at a path prefix such as
+`/data/`. All files live in process memory and are discarded when the process exits.
+
+Available across Node, browser, and edge runtimes via `@struktoai/mirage-node` and
+`@struktoai/mirage-browser`. No setup or credentials required.
+
+For Python, see the [RAM (Python)](/python/vfs/ram) documentation.
+
+## Config
+
+```typescript
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace({
+  '/data': new RAMVFS(),
+}, { mode: MountMode.WRITE })
+```
+
+`RAMVFS()` requires no configuration object.
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with RAM mounted at `/<path>`.
+
+{/* generated: vfs-md ram start */}
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `ram`, write |
+
+    #### Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    #### Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 10000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `ram`, write |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 10000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+{/* generated: vfs-md ram end */}
+
+The RAM filesystem starts empty. Files and directories are created
+on demand via shell commands such as `touch`, `mkdir`, `tee`, and `cp`.
+
+Paths are normalized with a leading `/`. The root directory `/` always
+exists.
+
+## Cache
+
+The RAM VFS does not cache directory listings (`index_ttl = 0`): because data
+resides entirely in memory, every listing reads the live tree directly without
+network latency. A workspace or mount `index:` configuration still applies its
+`ttl` if specified.
+
+## Integration
+
+Commands like `find`, `du`, `ls -R`, and `tree` execute directly in-process via a
+single recursive tree traversal.
+
+## Example
+
+```typescript
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace({
+  '/data': new RAMVFS(),
+}, { mode: MountMode.WRITE })
+
+// Create files and directories
+await ws.shell('echo "hello world" > /data/hello.txt')
+await ws.shell('mkdir -p /data/reports')
+await ws.shell('echo \'{"status": "ok"}\' > /data/reports/status.json')
+
+// Read file contents
+const hello = await ws.shell('cat /data/hello.txt')
+console.log(await hello.stdoutStr())
+
+// Run shell pipelines
+const json = await ws.shell('jq -r .status /data/reports/status.json')
+console.log(await json.stdoutStr())
+```

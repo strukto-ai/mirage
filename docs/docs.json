@@ -443,6 +443,7 @@
                   "python/vfs/github",
                   "python/vfs/hf_spaces",
                   "python/vfs/linear",
+                  "python/vfs/wandb",
                   "python/vfs/langfuse",
                   "python/vfs/slack",
                   "python/vfs/discord",
@@ -574,6 +575,7 @@
                 "icon": "server",
                 "pages": [
                   "typescript/setup/disk",
+                  "typescript/setup/ram",
                   "typescript/setup/opfs",
                   "typescript/setup/redis",
                   "typescript/setup/upstash",
@@ -615,6 +617,7 @@
                   "typescript/setup/sharepoint",
                   "typescript/setup/dropbox",
                   "typescript/setup/box",
+                  "typescript/setup/nextcloud",
                   "typescript/setup/databricks_volume",
                   "typescript/setup/tidb_filesystem"
                 ]
@@ -644,6 +647,7 @@
                   "typescript/setup/chroma",
                   "typescript/setup/lancedb",
                   "typescript/setup/qdrant",
+                  "typescript/setup/dify",
                   "typescript/setup/mem0",
                   "typescript/setup/hf_datasets",
                   "typescript/setup/hf_models"

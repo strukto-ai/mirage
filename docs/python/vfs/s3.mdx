@@ -166,7 +166,19 @@ Under `write: conditional` a write carries the version of the file mirage read, 
 
 ## Refused keys
 
-A key the credentials may not read (S3's `AccessDenied`, or the bodiless 403 a `HEAD` answers) fails with `EACCES` (Permission denied) on that operand, like a file in a directory you may not search; the rest of the line goes on. `cat a b c` prints `a` and `c` and names `b`, `grep -r` reports `b` and exits 2, `cp b x || fallback` runs the fallback, and `test -e b` is false. A grant scoped to the keys below a directory (`GetObject` on `bucket/dir/*`, with `ListBucket` on the bucket) still stats `dir` as a directory. Without `ListBucket`, S3 answers 403 for a key that does not exist too, so a missing file reads as Permission denied rather than No such file. Once a listing has named a key the bucket lists but refuses to read, `stat` and `test -e` find it while `cat` stays refused.
+When credentials cannot read an S3 object (S3 returns `AccessDenied` or an HTTP 403 response on a `HEAD` or `GET` request), Mirage reports `EACCES` (`Permission denied`) for that file operand.
+
+Shell commands follow standard POSIX conventions:
+- `cat a b c` prints the contents of `a` and `c`, writes a permission error for `b` to `stderr`, and exits with a non-zero status.
+- `grep -r` logs an error on inaccessible files and exits with status `2`.
+- `cp b x || fallback` triggers the fallback branch.
+- `test -e b` evaluates to false.
+
+### IAM permissions and existence checks
+
+- **Scoped grants:** When access is granted below a specific prefix (for example, `s3:GetObject` on `bucket/dir/*` alongside `s3:ListBucket` on the bucket), Mirage treats `dir` as a directory during `stat`.
+- **Missing `ListBucket`:** Without `s3:ListBucket` permission, S3 returns HTTP 403 even for non-existent keys to avoid leaking existence. As a result, non-existent files report `Permission denied` (`EACCES`) instead of `No such file or directory` (`ENOENT`).
+- **Listed but unreadable keys:** If `ListObjectsV2` includes an object that your credentials cannot read, `stat` and `test -e` report that the file exists, while read attempts (`cat`) fail with `Permission denied`.
 
 ## Integration
 
