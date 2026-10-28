@@ -101,3 +101,9 @@ def test_patch_walks_a_long_directory_a_name_at_a_time():
     )
     stdout, io = run_raw(ws, f"patch -d {dots} -i p.diff", cwd="/data")
     assert (io.exit_code, output_bytes(stdout)) == (0, b"patching file a\n")
+    # The directory it starts from is checked too, a stale one refused.
+    _, io = run_raw(ws, "patch -d . /data/a /data/p.diff", cwd="/data/f")
+    assert io.exit_code == 2
+    assert stderr_text(io) == (
+        "patch: **** Can't change to directory . : Not a directory\n"
+    )

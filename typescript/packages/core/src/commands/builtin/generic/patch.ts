@@ -258,9 +258,10 @@ function parseFlags(bag: Record<string, FlagValue>): PatchFlags {
 /**
  * The directory `-d` moves to from `cwd`, or GNU patch's fatal line when it
  * cannot move there. It is walked a name at a time, as chdir walks it: each
- * entry a `.` or `..` steps out of must be a directory too, checked once and
- * in order, so the first that is not stops the walk. `stat` refuses a
- * directory with EISDIR. Mirrors Python's `_directory`.
+ * entry a `.` or `..` steps out of must be a directory too, and so must the
+ * last, the one it starts from among them. Each is checked once and in
+ * order, so the first that is not stops the walk. `stat` refuses a directory
+ * with EISDIR. Mirrors Python's `_directory`.
  */
 async function directory(
   typed: string,
@@ -270,7 +271,7 @@ async function directory(
 ): Promise<string | Uint8Array> {
   let why = typed === '' ? 'No such file or directory' : ''
   const names = typed.startsWith('/') ? [] : cwd.split('/').filter(Boolean)
-  let checked = names.length
+  let checked = 0
   for (const name of typed === '' ? [] : [...typed.split('/'), '.']) {
     if ((name === '.' || name === '..') && names.length > checked) {
       const target = `/${names.join('/')}`
