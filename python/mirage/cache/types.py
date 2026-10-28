@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Literal, Protocol, TypeAlias
 
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec
 
 WriteKind = Literal["put", "copy", "delete"]
@@ -34,18 +35,44 @@ class CacheInvalidator(Protocol):
     def probed_stat(self, path: PathSpec) -> FileStat | None: ...
 
 
+class AnyWrite(Enum):
+    VALUE = auto()
+
+
+class AbsentWrite(Enum):
+    VALUE = auto()
+
+
 @dataclass(frozen=True, slots=True)
-class WriteCondition:
-    """The precondition one write carries.
+class MatchWrite:
+    version: str
 
-    Empty when mirage holds no version of the object: the write goes out
-    plain, there being nothing to compare.
 
-    Args:
-        if_match (str | None): the version the object must still have.
-    """
+WriteCondition: TypeAlias = AnyWrite | AbsentWrite | MatchWrite
+ANY_WRITE = AnyWrite.VALUE
+ABSENT_WRITE = AbsentWrite.VALUE
+ConditionMode = Literal["absent", "match"]
+ConditionSupport: TypeAlias = Mapping[WriteKind, frozenset[ConditionMode]]
 
-    if_match: str | None = None
+
+@dataclass(frozen=True, slots=True)
+class ReplaceRequest:
+    path: PathSpec
+    body: ByteSource
+    condition: WriteCondition
+
+
+RewriteWriteFn: TypeAlias = Callable[
+    [ReplaceRequest], Awaitable[FileStat | None]
+]
+
+
+@dataclass(frozen=True, slots=True)
+class SettledWrite:
+    owner: int
+    path: str
+    kind: WriteKind
+    condition: WriteCondition
 
 
 @dataclass(frozen=True, slots=True)

@@ -14,11 +14,18 @@
 
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 from mirage.accessor.s3 import S3Accessor
+from mirage.cache.types import ConditionSupport, ReplaceRequest
 from mirage.core.generic.rewrite import append_by_streamed_rewrite
 from mirage.core.s3.checksum import checksum as _checksum
-from mirage.core.s3.constants import MD5_ETAG_STORES
+from mirage.core.s3.constants import (
+    AWS_DOMAINS,
+    CONDITION_SUPPORT,
+    CUSTOM_CONDITION_SUPPORT,
+    MD5_ETAG_STORES,
+)
 from mirage.core.s3.copy import copy as _copy
 from mirage.core.s3.copy import copy_from as _copy_from
 from mirage.core.s3.create import create as _create
@@ -34,12 +41,20 @@ from mirage.core.s3.stat import stat as _stat
 from mirage.core.s3.stream import read_stream as _read_stream
 from mirage.core.s3.truncate import truncate as _truncate
 from mirage.core.s3.unlink import unlink as _unlink
+from mirage.core.s3.write import replace as _replace
 from mirage.core.s3.write import write as _write
 from mirage.errors.fs import exdev
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.s3.config import S3Config
+
+
+def _aws_endpoint(endpoint: str) -> bool:
+    host = urlparse(endpoint).hostname or ""
+    return any(
+        host == domain or host.endswith("." + domain) for domain in AWS_DOMAINS
+    )
 
 
 def _declared_endpoint(config: S3Config) -> str | None:
@@ -85,6 +100,18 @@ class S3VFS(BaseVFS):
             else config
         )
         self.accessor = S3Accessor(pinned)
+
+    @property
+    def condition_support(self) -> ConditionSupport:
+        endpoint = self.resolved_endpoint()
+        if self.name == "minio" or (
+            self.name == "s3" and endpoint and not _aws_endpoint(endpoint)
+        ):
+            return CUSTOM_CONDITION_SUPPORT
+        return CONDITION_SUPPORT
+
+    async def _replace(self, request: ReplaceRequest) -> FileStat | None:
+        return await _replace(self.accessor, request)
 
     def resolved_endpoint(self) -> str | None:
         """The endpoint this mount's writes go to.
@@ -150,7 +177,7 @@ class S3VFS(BaseVFS):
             lambda p, remember: _read_stream(
                 self.accessor, p, on_version=remember
             ),
-            self.write,
+            self._replace,
             self.stat,
             path,
             data,

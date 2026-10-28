@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.cache.context import (
+    condition_version,
     drop_cached,
     known_versions,
     move_condition,
@@ -130,7 +131,7 @@ def make_rename(
         ) -> tuple[PathSpec, Measured | None]:
             # The path the refusal names and the version its write sent.
             if key == kp.apply(kpfx, dst):
-                return dst_spec, cond.if_match if cond is not None else None
+                return dst_spec, condition_version(cond)
             if key == src_key:
                 return src_spec, exc.versions.get(key, source)
             return kp.key_path(src_spec, kpfx, key), exc.versions.get(key)
@@ -147,8 +148,8 @@ def make_rename(
                 elif lost is dst_spec:
                     if source:
                         await drop_cached(src_spec, source)
-                elif cond is not None and cond.if_match:
-                    await drop_cached(dst_spec, cond.if_match)
+                elif cond is not None and condition_version(cond):
+                    await drop_cached(dst_spec, condition_version(cond))
                 raise await stale(
                     lost, landed=exc.landed, gone=exc.gone, version=sent
                 ) from exc

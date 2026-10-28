@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from mirage.cache.types import ABSENT_WRITE, ReplaceRequest
 from mirage.core.generic.rewrite import (
     append_by_rewrite,
     append_by_streamed_rewrite,
@@ -58,7 +59,7 @@ async def test_append_reads_current_bytes_and_creates_missing():
     write = AsyncMock()
     for data in (b"new", b"!", b"created"):
         await append_by_rewrite(read, write, AsyncMock(), PATH, data)
-    assert [call.args[1] for call in write.await_args_list] == [
+    assert [call.args[0].body for call in write.await_args_list] == [
         b"oldnew",
         b"oldnew!",
         b"created",
@@ -114,7 +115,7 @@ async def test_an_empty_write_stats_instead_of_rewriting(by_rewrite):
     await run()
     write.assert_not_awaited()
     await run()
-    write.assert_awaited_once_with(PATH, b"")
+    write.assert_awaited_once_with(ReplaceRequest(PATH, b"", ABSENT_WRITE))
     with pytest.raises(IsADirectoryError):
         await run()
     read.assert_not_awaited()
@@ -127,8 +128,8 @@ async def test_pwrite_splices_pads_and_creates_missing():
     stat = AsyncMock(side_effect=FileNotFoundError())
     written = []
 
-    async def write(path, data):
-        written.append(await materialize(data))
+    async def write(request):
+        written.append(await materialize(request.body))
 
     for data, offset in ((_stream(b"X", b"Y"), 1), (b"z", 4), (b"new", 2)):
         await pwrite_by_streamed_rewrite(read, write, stat, PATH, data, offset)
@@ -148,8 +149,8 @@ async def test_a_write_landing_while_the_source_runs_stays(by_rewrite, want):
         stored[PATH.virtual] += b"tail"
         yield b"CD"
 
-    async def write(path, data):
-        stored[path.virtual] = await materialize(data)
+    async def write(request):
+        stored[request.path.virtual] = await materialize(request.body)
 
     async def read_whole(path, spool):
         await spool.append(stored[path.virtual])
@@ -203,9 +204,9 @@ async def test_truncate_pads_and_cuts():
     write = AsyncMock()
     read = AsyncMock(return_value=b"data")
     await truncate_by_rewrite(read, write, PATH, 6, False)
-    assert write.await_args.args[1] == b"data\0\0"
+    assert write.await_args.args[0].body == b"data\0\0"
     await truncate_by_rewrite(read, write, PATH, 2, False)
-    assert write.await_args.args[1] == b"da"
+    assert write.await_args.args[0].body == b"da"
 
 
 @pytest.mark.asyncio
@@ -213,7 +214,7 @@ async def test_truncate_of_a_missing_file_pads_zeros():
     write = AsyncMock()
     read = AsyncMock(side_effect=FileNotFoundError(PATH.virtual))
     await truncate_by_rewrite(read, write, PATH, 3, False)
-    assert write.await_args.args[1] == b"\0\0\0"
+    assert write.await_args.args[0].body == b"\0\0\0"
 
 
 @pytest.mark.asyncio

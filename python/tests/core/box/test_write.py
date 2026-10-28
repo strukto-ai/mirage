@@ -18,6 +18,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import mirage.core.box.readdir as readdir_mod
+from mirage.cache.context import settled_write
+from mirage.cache.types import ABSENT_WRITE, ReplaceRequest
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.copy import copy
 from mirage.core.box.mkdir import mkdir
@@ -26,6 +28,7 @@ from mirage.core.box.rename import rename
 from mirage.core.box.rmdir import rm_r, rmdir
 from mirage.core.box.unlink import unlink
 from mirage.core.box.write import write
+from mirage.errors.types import OperationNotSupportedError
 from mirage.observe.context import RecordingScope
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.box import BoxVFS
@@ -103,6 +106,26 @@ def _workspace(accessor) -> Workspace:
 def root_accessor(accessor):
     # Mount root is the account root "0".
     return accessor
+
+
+@pytest.mark.asyncio
+async def test_create_only_write_refuses_without_native_support(root_accessor):
+    path = _spec("/data/new.txt")
+    with (
+        patch(
+            "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
+        ) as create,
+        patch(
+            "mirage.core.box.write.upload_file_version", new_callable=AsyncMock
+        ) as overwrite,
+        settled_write(
+            id(root_accessor), ReplaceRequest(path, b"ours", ABSENT_WRITE)
+        ),
+    ):
+        with pytest.raises(OperationNotSupportedError):
+            await write(root_accessor, path, b"ours")
+    create.assert_not_awaited()
+    overwrite.assert_not_awaited()
 
 
 @pytest.mark.asyncio

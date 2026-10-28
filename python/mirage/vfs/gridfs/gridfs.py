@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.accessor.gridfs import GridFSAccessor
+from mirage.cache.types import ReplaceRequest
 from mirage.core.generic.rewrite import append_by_streamed_rewrite
 from mirage.core.gridfs.copy import copy as _copy
 from mirage.core.gridfs.create import create as _create
@@ -30,6 +31,7 @@ from mirage.core.gridfs.stat import stat as _stat
 from mirage.core.gridfs.stream import read_stream as _read_stream
 from mirage.core.gridfs.truncate import truncate as _truncate
 from mirage.core.gridfs.unlink import unlink as _unlink
+from mirage.core.gridfs.write import replace as _replace
 from mirage.core.gridfs.write import write as _write
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
@@ -83,6 +85,9 @@ class GridFSVFS(BaseVFS):
     ) -> FileStat | None:
         return await _write(self.accessor, path, data)
 
+    async def _replace(self, request: ReplaceRequest) -> FileStat | None:
+        return await _replace(self.accessor, request)
+
     async def append(
         self, path: PathSpec, data: ByteSource
     ) -> FileStat | None:
@@ -90,7 +95,7 @@ class GridFSVFS(BaseVFS):
             lambda p, remember: _read_stream(
                 self.accessor, p, on_version=remember
             ),
-            self.write,
+            self._replace,
             self.stat,
             path,
             data,

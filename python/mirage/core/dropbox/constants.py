@@ -12,6 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.cache.types import ConditionSupport
+
+CONDITION_SUPPORT: ConditionSupport = {
+    kind: frozenset({"match"}) for kind in ("put", "copy", "delete")
+}
+
 DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token"
 DROPBOX_API_BASE = "https://api.dropboxapi.com/2"
 DROPBOX_CONTENT_BASE = "https://content.dropboxapi.com/2"

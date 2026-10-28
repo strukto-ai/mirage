@@ -90,6 +90,14 @@ def test_every_registered_vfs_has_a_condition_row_and_no_row_is_stale():
     assert set(_CONDITIONS["vfs"]) - set(_CONDITIONS["browser_only"]) == names
 
 
+@pytest.mark.parametrize("name", known_vfs_names())
+def test_every_backend_declares_the_shared_condition_modes(name):
+    assert {
+        operation: sorted(modes)
+        for operation, modes in _stub(name).condition_support.items()
+    } == _CONDITIONS["condition_modes"]["vfs"][name]
+
+
 _MINIO = "http://127.0.0.1:9000"
 
 

@@ -15,15 +15,15 @@
 import json
 from pathlib import Path
 
-from mirage.workspace.mount.constants import WRITE_CONDITIONS
+from mirage.core.s3.constants import (
+    CONDITION_SUPPORT,
+    CUSTOM_CONDITION_SUPPORT,
+)
 
 _FIXTURES = Path(__file__).parents[4] / "integ" / "fixtures" / "write"
 _CONDITIONS = json.loads((_FIXTURES / "conditions.json").read_text())
 
 
-def test_the_condition_table_is_the_shared_fixture_both_ways():
-    rows = _CONDITIONS["vfs"]
-    assert rows
-    assert {k: sorted(v) for k, v in WRITE_CONDITIONS.items()} == {
-        k: sorted(v) for k, v in rows.items() if v
-    }
+def test_s3_put_modes_are_declared_for_default_and_custom_endpoints():
+    assert CONDITION_SUPPORT["put"] == frozenset({"absent", "match"})
+    assert CUSTOM_CONDITION_SUPPORT == {"put": CONDITION_SUPPORT["put"]}

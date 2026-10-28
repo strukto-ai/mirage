@@ -16,16 +16,68 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.cache.types import WriteCondition
+from mirage.cache.types import ABSENT_WRITE, ANY_WRITE, ReplaceRequest
 from mirage.core.gridfs import driver as gridfs_driver
 from mirage.core.gridfs.read import read
 from mirage.core.gridfs.unlink import unlink
-from mirage.core.gridfs.write import write
+from mirage.core.gridfs.write import replace, write
+from mirage.core.object_store import write as object_write
+from mirage.errors.types import OperationNotSupportedError
 from mirage.types import PathSpec
 from mirage.vfs.gridfs.config import GridFSConfig
 from tests.fixtures.gridfs_store import FakeStore, make_accessor
 
 A_TXT = PathSpec(vfs_path="a.txt", virtual="/mnt/a.txt", directory="/mnt")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_protected_replacement_refuses_before_upload_and_closes_source(
+    store, streamed
+):
+    closed = []
+
+    async def source():
+        try:
+            yield b"first"
+            yield b"last"
+        finally:
+            closed.append(True)
+
+    body = source() if streamed else b"body"
+    if streamed:
+        await anext(body)
+    with pytest.raises(OperationNotSupportedError):
+        await replace(
+            make_accessor(), ReplaceRequest(A_TXT, body, ABSENT_WRITE)
+        )
+    assert store.ids("a.txt") == []
+    assert closed == ([True] if streamed else [])
+
+
+@pytest.mark.asyncio
+async def test_write_closes_source_when_condition_resolution_fails(
+    monkeypatch, store
+):
+    closed = []
+
+    async def source():
+        try:
+            yield b"first"
+            yield b"last"
+        finally:
+            closed.append(True)
+
+    async def refuse(*args, **kwargs):
+        raise RuntimeError("condition lookup failed")
+
+    monkeypatch.setattr(object_write, "write_condition", refuse)
+    body = source()
+    await anext(body)
+    with pytest.raises(RuntimeError, match="condition lookup failed"):
+        await write(make_accessor(), A_TXT, body)
+    assert closed == [True]
+    assert store.ids("a.txt") == []
 
 
 @pytest.mark.asyncio
@@ -71,13 +123,13 @@ async def test_stream_upload_commits_or_aborts_and_closes_source(
     if fail:
         with pytest.raises(RuntimeError, match="producer failed"):
             await gridfs_driver.DRIVER.put_stream(
-                accessor, "a", source(), WriteCondition()
+                accessor, "a", source(), ANY_WRITE
             )
         upload.abort.assert_awaited_once()
         upload.close.assert_not_awaited()
     else:
         meta = await gridfs_driver.DRIVER.put_stream(
-            accessor, "a", source(), WriteCondition()
+            accessor, "a", source(), ANY_WRITE
         )
         assert meta.size == 9
         assert meta.revision == "new-id"

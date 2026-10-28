@@ -13,10 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import native_condition, write_condition
+from mirage.cache.context import (
+    native_condition,
+    require_supported,
+    write_condition,
+    writes_conditioned,
+)
+from mirage.cache.types import AnyWrite
 from mirage.core.box.api import refused, upload_file_version, upload_new_file
 from mirage.core.box.client import BoxApiError
-from mirage.core.box.constants import CONFLICT_STATUS
+from mirage.core.box.constants import CONDITION_SUPPORT, CONFLICT_STATUS
 from mirage.core.box.fingerprint import live_of
 from mirage.core.box.readdir import stat_from_item
 from mirage.core.box.resolve import (
@@ -97,13 +103,14 @@ async def write(
     if not parts or (entry is not None and entry.type is FileType.DIRECTORY):
         raise eisdir(path.virtual)
     tm = accessor.token_manager
-    cond = await write_condition(path, "put")
+    cond = await write_condition(path, "put", owner=id(accessor))
+    require_supported(CONDITION_SUPPORT, "box", path, "put", cond)
     timer = start_op()
     # What is there now: the listed row can be older than the path's file,
     # and older than the read a held version came from.
     existing = (
         await live_item(accessor, path, item_of(entry))
-        if cond is not None
+        if writes_conditioned() or not isinstance(cond, AnyWrite)
         else await live_item_of(accessor, path, entry)
     )
     etag = await native_condition(path, cond, live_of(existing), "put")
@@ -115,7 +122,7 @@ async def write(
             reply = await upload_file_version(
                 tm, existing["id"], existing["name"], data, etag
             )
-        elif cond is None:
+        elif isinstance(cond, AnyWrite) and not writes_conditioned():
             reply = await _upload_new(
                 accessor, path, data, parent_folder(accessor, path, parent)
             )

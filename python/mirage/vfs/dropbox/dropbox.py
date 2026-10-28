@@ -16,8 +16,11 @@ import functools
 from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
+from mirage.cache.context import require_supported, settled_write
+from mirage.cache.types import ConditionSupport, ReplaceRequest
 from mirage.core.dropbox.capacity import capacity as _capacity
 from mirage.core.dropbox.client import DropboxTokenManager
+from mirage.core.dropbox.constants import CONDITION_SUPPORT
 from mirage.core.dropbox.copy import copy as _copy
 from mirage.core.dropbox.copy import dir_copy as _dir_copy
 from mirage.core.dropbox.create import create as _create
@@ -51,6 +54,21 @@ from mirage.vfs.dropbox.config import DropboxConfig
 
 
 class DropboxVFS(BaseVFS):
+    @property
+    def condition_support(self) -> ConditionSupport:
+        return CONDITION_SUPPORT
+
+    async def _replace(self, request: ReplaceRequest) -> FileStat | None:
+        require_supported(
+            self.condition_support,
+            self.name,
+            request.path,
+            "put",
+            request.condition,
+        )
+        with settled_write(id(self.accessor), request):
+            return await self.write(request.path, request.body)
+
     accessor: DropboxAccessor
     name: str = VFSName.DROPBOX
     caches_reads: bool = True
@@ -118,7 +136,7 @@ class DropboxVFS(BaseVFS):
                 if entry is None
                 else functools.partial(_read, self.accessor, entry=entry)
             ),
-            self.write,
+            self._replace,
             path,
             length,
             no_create,

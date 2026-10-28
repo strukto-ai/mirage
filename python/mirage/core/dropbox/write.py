@@ -13,9 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import native_condition, write_condition
+from mirage.cache.context import (
+    condition_version,
+    native_condition,
+    require_supported,
+    write_condition,
+)
 from mirage.core.dropbox.api import lookup, refused
 from mirage.core.dropbox.client import DropboxApiError, dropbox_upload
+from mirage.core.dropbox.constants import CONDITION_SUPPORT
 from mirage.core.dropbox.fingerprint import live_of
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.core.dropbox.readdir import stat_from_entry
@@ -50,9 +56,10 @@ async def write(
             return await write(accessor, path, spool)
     tm = accessor.token_manager
     api_path = dropbox_path_of(accessor, path)
-    cond = await write_condition(path, "put")
+    cond = await write_condition(path, "put", owner=id(accessor))
+    require_supported(CONDITION_SUPPORT, "dropbox", path, "put", cond)
     rev = None
-    if cond is not None and cond.if_match:
+    if cond is not None and condition_version(cond):
         live = live_of(await lookup(tm, api_path))
         rev = await native_condition(path, cond, live, "put")
     timer = start_op()

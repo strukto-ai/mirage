@@ -15,10 +15,13 @@
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
+from mirage.cache.context import require_supported, settled_write
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.types import ConditionSupport, ReplaceRequest
 from mirage.core.box.capacity import capacity as _capacity
 from mirage.core.box.checksum import checksum as _checksum
 from mirage.core.box.client import BoxTokenManager
+from mirage.core.box.constants import CONDITION_SUPPORT
 from mirage.core.box.copy import copy as _copy
 from mirage.core.box.create import create as _create
 from mirage.core.box.events import build_delta_hook
@@ -62,6 +65,21 @@ VFS_MD = """{prefix}
 
 
 class BoxVFS(BaseVFS):
+    @property
+    def condition_support(self) -> ConditionSupport:
+        return CONDITION_SUPPORT
+
+    async def _replace(self, request: ReplaceRequest) -> FileStat | None:
+        require_supported(
+            self.condition_support,
+            self.name,
+            request.path,
+            "put",
+            request.condition,
+        )
+        with settled_write(id(self.accessor), request):
+            return await self.write(request.path, request.body)
+
     accessor: BoxAccessor
     name: str = VFSName.BOX
     caches_reads: bool = True

@@ -20,12 +20,20 @@ import pytest
 from mirage.cache.context import (
     capture_read,
     native_condition,
-    own_write_version,
     publish_read,
     settle_after,
+    settled_write,
     write_condition,
 )
-from mirage.cache.types import LiveVersion, WriteCondition, WriteContext
+from mirage.cache.types import (
+    ABSENT_WRITE,
+    ANY_WRITE,
+    LiveVersion,
+    MatchWrite,
+    OwnRead,
+    ReplaceRequest,
+    WriteContext,
+)
 from mirage.context.session_context import (
     bind_caller,
     current_caller,
@@ -133,11 +141,46 @@ async def test_an_own_version_conditions_only_its_own_path(own_path, want):
     )
     prev = bind_caller(replace(current_caller(), write_context=context))
     try:
-        with own_write_version(other, "v2"):
-            cond = await write_condition(path, "put")
+        with settled_write(7, ReplaceRequest(other, b"", MatchWrite("v2"))):
+            cond = await write_condition(path, "put", owner=7)
     finally:
         reset_caller(prev)
-    assert cond is not None and cond.if_match == want
+    assert isinstance(cond, MatchWrite) and cond.version == want
+
+
+@pytest.mark.asyncio
+async def test_missing_write_requires_absence_without_a_mount_context():
+    path = PathSpec.from_str_path("/s3/f", "f")
+    assert (
+        await write_condition(path, "put", own=OwnRead.ABSENT) is ABSENT_WRITE
+    )
+    assert await write_condition(path, "put") is ANY_WRITE
+    assert await write_condition(path, "delete", own=OwnRead.ABSENT) is None
+
+
+@pytest.mark.asyncio
+async def test_settled_requirement_is_bound_to_owner_path_and_operation():
+    path = PathSpec.from_str_path("/s3/f", "f")
+    other = PathSpec.from_str_path("/s3/g", "g")
+    original = current_caller().settled_write
+    with pytest.raises(_OpFailed):
+        with settled_write(7, ReplaceRequest(path, b"", ABSENT_WRITE)):
+            assert await write_condition(path, "put", owner=7) is ABSENT_WRITE
+            assert await write_condition(path, "put", owner=8) is ANY_WRITE
+            assert await write_condition(other, "put", owner=7) is ANY_WRITE
+            assert await write_condition(path, "copy", owner=7) is None
+            raise _OpFailed
+    assert current_caller().settled_write is original
+    assert await write_condition(path, "put", owner=7) is ANY_WRITE
+
+
+@pytest.mark.asyncio
+async def test_match_without_a_native_token_refuses_without_mount_context():
+    path = PathSpec.from_str_path("/box/f", "f")
+    with pytest.raises(OperationNotSupportedError):
+        await native_condition(
+            path, MatchWrite("same"), LiveVersion("same", None), "put"
+        )
 
 
 @pytest.mark.asyncio
@@ -157,7 +200,7 @@ async def test_native_condition_names_the_op_it_cannot_condition(kind):
         with pytest.raises(OperationNotSupportedError) as info:
             await native_condition(
                 path,
-                WriteCondition(if_match="s1"),
+                MatchWrite("s1"),
                 LiveVersion(content="s1", native=None),
                 kind,
             )

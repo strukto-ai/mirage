@@ -19,6 +19,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor
+from mirage.cache.types import ConditionSupport
 from mirage.errors.fs import enotsup
 from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
@@ -71,6 +72,10 @@ class BaseVFS:
     fill ``FileStat.fingerprint``, and a snapshot pins what it read
     while ``Workspace.load`` asks for the live VFS back.
     """
+
+    @property
+    def condition_support(self) -> ConditionSupport:
+        return {}
 
     name: str = "base"
     accessor: Accessor = Accessor()

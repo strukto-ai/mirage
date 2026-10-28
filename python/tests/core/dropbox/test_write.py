@@ -17,9 +17,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
+from mirage.cache.context import settled_write
+from mirage.cache.types import ABSENT_WRITE, ReplaceRequest
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.core.dropbox.create import create
 from mirage.core.dropbox.write import write
+from mirage.errors.types import OperationNotSupportedError
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.vfs.dropbox.config import DropboxConfig
@@ -46,6 +49,23 @@ def _file_metadata() -> dict:
         "size": 5,
         "content_hash": "h5",
     }
+
+
+@pytest.mark.asyncio
+async def test_create_only_write_refuses_without_native_support():
+    accessor = make_accessor()
+    path = PathSpec.from_str_path("/new.txt")
+    with (
+        patch(
+            "mirage.core.dropbox.write.dropbox_upload", new_callable=AsyncMock
+        ) as upload,
+        settled_write(
+            id(accessor), ReplaceRequest(path, b"ours", ABSENT_WRITE)
+        ),
+    ):
+        with pytest.raises(OperationNotSupportedError):
+            await write(accessor, path, b"ours")
+    upload.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -19,10 +19,16 @@ from typing import Generic, Literal, NoReturn, Protocol, TypeVar
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import (
+    condition_version,
     drop_cached,
     stale,
 )
-from mirage.cache.types import KnownVersions, OwnRead, WriteCondition
+from mirage.cache.types import (
+    ConditionSupport,
+    KnownVersions,
+    OwnRead,
+    WriteCondition,
+)
 from mirage.core.object_store.errors import ConditionLostError
 from mirage.errors.types import StaleWriteError
 from mirage.io.types import ByteSource
@@ -174,9 +180,7 @@ async def refused(
         exc (ConditionLostError): the store's refusal.
         cond (WriteCondition | None): the condition the op sent.
     """
-    return await stale(
-        path, gone=exc.gone, version=cond.if_match if cond else None
-    )
+    return await stale(path, gone=exc.gone, version=condition_version(cond))
 
 
 async def keep_all_lost(
@@ -354,6 +358,7 @@ class ObjectStoreDriver(Generic[A, C]):
     head_revision: (
         Callable[[C, str, str], Awaitable[ObjectMeta | None]] | None
     ) = None
+    condition_support: ConditionSupport = field(default_factory=dict)
     markers_supported: bool = True
     put_if: (
         Callable[[C, str, bytes, WriteCondition], Awaitable[ObjectMeta | None]]

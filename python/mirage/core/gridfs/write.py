@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.gridfs.driver import DRIVER
-from mirage.core.object_store.write import make_write
+from mirage.core.object_store.write import make_replace, make_write
 
 write = make_write(DRIVER)
+
+replace = make_replace(DRIVER)

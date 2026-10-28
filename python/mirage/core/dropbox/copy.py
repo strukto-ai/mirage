@@ -16,7 +16,12 @@ from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import native_condition, stale, write_condition
+from mirage.cache.context import (
+    condition_version,
+    native_condition,
+    stale,
+    write_condition,
+)
 from mirage.cache.types import WriteCondition
 from mirage.core.dropbox.api import (
     copy_path,
@@ -56,8 +61,8 @@ async def _retaken(
     """
     if cond is None or not exc.summary.startswith(TAKEN):
         return None
-    if cond.if_match and not exc.summary.startswith(TAKEN_BY_FOLDER):
-        return await stale(dst, version=cond.if_match)
+    if condition_version(cond) and not exc.summary.startswith(TAKEN_BY_FOLDER):
+        return await stale(dst, version=condition_version(cond))
     return await stale(dst, gone=True)
 
 
@@ -89,7 +94,7 @@ async def replace_onto(
     """
     cond = await write_condition(dst, "copy")
     rev = None
-    if cond is not None and cond.if_match:
+    if cond is not None and condition_version(cond):
         live = live_of(await lookup(tm, to_path))
         rev = await native_condition(dst, cond, live, "copy")
     try:

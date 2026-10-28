@@ -15,8 +15,8 @@
 import hashlib
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import own_write_version
-from mirage.cache.types import OwnRead
+from mirage.cache.context import settled_write, write_condition
+from mirage.cache.types import OwnRead, ReplaceRequest
 from mirage.core.box.api import download_file
 from mirage.core.box.fingerprint import live_of
 from mirage.core.box.resolve import live_item_of
@@ -62,5 +62,8 @@ async def truncate(
         new = data[:length]
     else:
         new = data + b"\x00" * (length - len(data))
-    with own_write_version(path, own):
+    with settled_write(
+        id(accessor),
+        ReplaceRequest(path, new, await write_condition(path, "put", own=own)),
+    ):
         await write(accessor, path, new, entry, parent)

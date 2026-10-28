@@ -10,7 +10,7 @@ from botocore.exceptions import ClientError
 from packaging.requirements import Requirement
 from packaging.version import Version
 
-from mirage.cache.types import WriteCondition
+from mirage.cache.types import ABSENT_WRITE, ANY_WRITE, MatchWrite
 from mirage.core.object_store.errors import ConditionLostError
 from mirage.core.s3.constants import MAX_PARTS, PART_DOUBLING
 from mirage.core.s3.driver import DRIVER
@@ -60,7 +60,7 @@ async def test_a_matched_write_loses_only_on_its_key(case):
     )
     conn = S3Conn(client, S3Config(bucket="b"))
     with pytest.raises(ConditionLostError if case["lost"] else ClientError):
-        await DRIVER.put_if(conn, "k", b"x", WriteCondition(if_match="v1"))
+        await DRIVER.put_if(conn, "k", b"x", MatchWrite("v1"))
 
 
 @pytest.mark.asyncio
@@ -81,7 +81,7 @@ async def test_a_copy_keeps_its_own_error_whatever_the_source_probe_finds(
     )
     conn = S3Conn(client, S3Config(bucket="b"))
     with pytest.raises(ClientError) as raised:
-        await DRIVER.copy_if(conn, "src", "dst", WriteCondition(if_match="v1"))
+        await DRIVER.copy_if(conn, "src", "dst", MatchWrite("v1"))
     assert raised.value is missing
 
 
@@ -132,12 +132,16 @@ def test_the_s3_model_carries_every_condition_the_driver_sends():
         shape: set(model.shape_for(shape).members)
         for shape in (
             "PutObjectRequest",
+            "CompleteMultipartUploadRequest",
             "CopyObjectRequest",
             "DeleteObjectRequest",
             "ObjectIdentifier",
         )
     }
-    assert {"IfMatch"} <= members["PutObjectRequest"]
+    assert {"IfMatch", "IfNoneMatch"} <= members["PutObjectRequest"]
+    assert {"IfMatch", "IfNoneMatch"} <= members[
+        "CompleteMultipartUploadRequest"
+    ]
     assert {"IfMatch", "CopySourceIfMatch"} <= members["CopyObjectRequest"]
     assert {"IfMatch"} <= members["DeleteObjectRequest"]
     assert {"ETag"} <= members["ObjectIdentifier"]
@@ -164,7 +168,16 @@ def test_every_s3_extra_admits_no_botocore_below_the_floor(extra):
 @pytest.mark.parametrize(
     "size", [0, 13, 8 * 1024 * 1024, 8 * 1024 * 1024 + 37]
 )
-async def test_streamed_upload_uses_bounded_parts_and_conditions(size):
+@pytest.mark.parametrize(
+    "condition, header, value",
+    [
+        (MatchWrite("old"), "IfMatch", '"old"'),
+        (ABSENT_WRITE, "IfNoneMatch", "*"),
+    ],
+)
+async def test_streamed_upload_uses_bounded_parts_and_conditions(
+    size, condition, header, value
+):
     client = Mock()
     client.put_object = AsyncMock(return_value={"ETag": '"small"'})
     client.create_multipart_upload = AsyncMock(
@@ -185,22 +198,19 @@ async def test_streamed_upload_uses_bounded_parts_and_conditions(size):
         finally:
             closed.append(True)
 
-    result = await DRIVER.put_stream(
-        conn, "k", source(), WriteCondition(if_match="old")
-    )
+    result = await DRIVER.put_stream(conn, "k", source(), condition)
     assert result.size == size
     assert closed == [True]
     if size < 8 * 1024 * 1024:
         client.create_multipart_upload.assert_not_called()
-        assert client.put_object.call_args.kwargs["IfMatch"] == '"old"'
+        assert client.put_object.call_args.kwargs[header] == value
         assert len(client.put_object.call_args.kwargs["Body"]) == size
     else:
         assert [
             len(c.kwargs["Body"]) for c in client.upload_part.call_args_list
         ] == ([8 * 1024 * 1024] + ([37] if size % (8 * 1024 * 1024) else []))
         assert (
-            client.complete_multipart_upload.call_args.kwargs["IfMatch"]
-            == '"old"'
+            client.complete_multipart_upload.call_args.kwargs[header] == value
         )
     client.abort_multipart_upload.assert_not_called()
 
@@ -227,7 +237,7 @@ async def test_streamed_parts_carry_their_bytes_as_they_went():
             yield data[offset : offset + 65521]
 
     await DRIVER.put_stream(
-        S3Conn(client, S3Config(bucket="b")), "k", source(), WriteCondition()
+        S3Conn(client, S3Config(bucket="b")), "k", source(), ANY_WRITE
     )
     assert [len(body) for body in bodies] == [part, part, 37]
     assert b"".join(bodies) == data
@@ -249,7 +259,7 @@ async def test_streamed_parts_double_past_the_part_cap(monkeypatch):
             yield b"x" * min(16, size - offset)
 
     result = await DRIVER.put_stream(
-        S3Conn(client, S3Config(bucket="b")), "k", source(), WriteCondition()
+        S3Conn(client, S3Config(bucket="b")), "k", source(), ANY_WRITE
     )
     sizes = [len(c.kwargs["Body"]) for c in client.upload_part.call_args_list]
     assert result.size == sum(sizes) == size
@@ -297,9 +307,7 @@ async def test_failed_multipart_upload_is_aborted(failure):
         else OSError
     )
     with pytest.raises(expected):
-        await DRIVER.put_stream(
-            conn, "k", source(), WriteCondition(if_match="old")
-        )
+        await DRIVER.put_stream(conn, "k", source(), MatchWrite("old"))
     client.abort_multipart_upload.assert_awaited_once_with(
         Bucket="b", Key="k", UploadId="upload"
     )
@@ -307,16 +315,23 @@ async def test_failed_multipart_upload_is_aborted(failure):
 
 
 @pytest.mark.asyncio
-async def test_custom_endpoint_keeps_conditional_single_put():
+@pytest.mark.parametrize(
+    "condition, header, value",
+    [
+        (MatchWrite("old"), "IfMatch", '"old"'),
+        (ABSENT_WRITE, "IfNoneMatch", "*"),
+    ],
+)
+async def test_custom_endpoint_keeps_conditional_single_put(
+    condition, header, value
+):
     client = Mock()
     client.put_object = AsyncMock(return_value={"ETag": '"new"'})
     conn = S3Conn(
         client, S3Config(bucket="b", endpoint_url="https://store.invalid")
     )
     data = b"x" * (8 * 1024 * 1024)
-    result = await DRIVER.put_stream(
-        conn, "k", data, WriteCondition(if_match="old")
-    )
+    result = await DRIVER.put_stream(conn, "k", data, condition)
     assert result.size == len(data)
     client.create_multipart_upload.assert_not_called()
-    assert client.put_object.call_args.kwargs["IfMatch"] == '"old"'
+    assert client.put_object.call_args.kwargs[header] == value

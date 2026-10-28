@@ -20,11 +20,13 @@ from types import MappingProxyType
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.context import read_versioned
+from mirage.cache.context import read_versioned, settled_write
+from mirage.cache.types import ABSENT_WRITE, ReplaceRequest
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import Context, command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Argument
+from mirage.context.session_context import current_caller
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
@@ -51,6 +53,17 @@ def _run(coro):
 def test_mount_accepts_root_prefix():
     m = MountEntry("/", RAMVFS())
     assert m.prefix == "/"
+
+
+def test_a_new_mount_operation_clears_a_settled_requirement():
+    mount = MountEntry("/data/", RAMVFS())
+    request = ReplaceRequest(
+        PathSpec.from_str_path("/data/f", "f"), b"", ABSENT_WRITE
+    )
+    with settled_write(id(mount.vfs.accessor), request):
+        assert current_caller().settled_write is not None
+        assert mount._on_mount(current_caller()).settled_write is None
+    assert current_caller().settled_write is None
 
 
 def test_mount_rejects_no_leading_slash():
