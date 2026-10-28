@@ -1,4 +1,6 @@
+import asyncio
 import errno
+import threading
 
 import pytest
 
@@ -84,6 +86,34 @@ async def test_a_read_whose_flush_failed_writes_the_bytes_again_in_place(
             await spool.read(0, 3)
         assert await spool.read(0, 3) == b"abc"
         assert await spool.read(3, 3) == b""
+
+
+@pytest.mark.asyncio
+async def test_an_append_cancelled_while_it_flushes_leaves_the_spool_whole(
+    monkeypatch,
+):
+    block = bytes(range(256)) * 1024
+    async with ByteSpool(0) as spool:
+        await spool.append(b"head")
+        started, go = threading.Event(), threading.Event()
+        write = spool._write
+
+        def held(data: bytes, offset: int) -> None:
+            started.set()
+            go.wait()
+            write(data, offset)
+
+        monkeypatch.setattr(spool, "_write", held)
+        appending = asyncio.create_task(spool.append(block))
+        await asyncio.to_thread(started.wait)
+        appending.cancel()
+        go.set()
+        with pytest.raises(asyncio.CancelledError):
+            await appending
+        monkeypatch.undo()
+        await spool.append(b"tail")
+        assert spool.size == len(block) + 8
+        assert await materialize(spool.stream()) == b"head" + block + b"tail"
 
 
 @pytest.mark.asyncio

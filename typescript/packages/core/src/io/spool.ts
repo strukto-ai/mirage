@@ -23,11 +23,11 @@ export function setSpoolFactory(value: SpoolFactory | null): void {
 
 /**
  * Retain replayable bytes, spilling through the host's scratch storage. An
- * append that fails leaves no telling which of its bytes were kept, so every
- * call after it fails too, rather than read bytes from where the append never
- * put them. Bytes waiting for the store go at the offset they end up at, so a
- * flush that failed writes them there again rather than after what it got
- * through. A reader that `hold`s the spool keeps it open: a `close` while it
+ * append counts its bytes before they go to the store, and bytes waiting for
+ * the store go at the offset they end up at, so a flush that failed writes
+ * them there again rather than after what it got through. An append that
+ * fails leaves no telling which of its bytes were kept, so every call after it
+ * fails too, rather than read bytes from where the append never put them. A reader that `hold`s the spool keeps it open: a `close` while it
  * is held takes effect at the last `unhold`.
  */
 export class ByteSpool {
@@ -108,8 +108,8 @@ export class ByteSpool {
       }
     }
     this.pendingSize += data.length
-    if (this.store !== null && this.pendingSize >= IO_BUFFER_SIZE) await this.flush()
     this.size += data.length
+    if (this.store !== null && this.pendingSize >= IO_BUFFER_SIZE) await this.flush()
   }
 
   private async flush(): Promise<void> {

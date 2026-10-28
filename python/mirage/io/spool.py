@@ -17,11 +17,14 @@ IO_BUFFER_SIZE = 256 * 1024
 class ByteSpool:
     """Retain replayable bytes, spilling large contents outside the event loop.
 
-    An append that fails leaves no telling which of its bytes were kept,
-    so every call after it fails too, rather than read bytes from where
-    the append never put them. Bytes waiting for the file go at the
-    offset they end up at, so a flush that failed or was cancelled
-    writes them there again rather than after what it got through.
+    An append counts its bytes before they go to the file, and bytes
+    waiting for the file go at the offset they end up at, so a flush that
+    failed or was cancelled writes them there again rather than after
+    what it got through. A cancelled append leaves the spool whole, as
+    its blocking write ends before the cancel goes on; one that fails
+    otherwise leaves no telling which of its bytes were kept, so every
+    call after it fails too, rather than read bytes from where the append
+    never put them.
     A reader that ``hold``s the spool keeps it open: a ``close`` while
     it is held takes effect at the last ``unhold``.
 
@@ -60,6 +63,8 @@ class ByteSpool:
             self._usable()
             try:
                 await self._append(data)
+            except asyncio.CancelledError:
+                raise
             except BaseException as exc:
                 self._lost = exc
                 raise
@@ -79,9 +84,9 @@ class ByteSpool:
                 self._stored = len(self._memory)
                 self._memory.clear()
             self._memory.extend(data)
-            if len(self._memory) >= IO_BUFFER_SIZE:
-                await self._flush()
         self.size += len(data)
+        if self._file is not None and len(self._memory) >= IO_BUFFER_SIZE:
+            await self._flush()
 
     async def _flush(self) -> None:
         if self._memory:
