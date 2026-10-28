@@ -579,12 +579,12 @@ async def test_closing_one_workspace_keeps_another_s_hold():
 
 
 @pytest.mark.asyncio
-async def test_unmounting_one_of_two_mounts_of_a_vfs_keeps_the_clock():
+async def test_a_refused_second_mount_of_a_vfs_keeps_its_clock():
     vfs = _drive()
     ws = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=ManualClock())
     try:
-        ws.add_mount("/h", vfs, MountMode.WRITE)
-        await ws.unmount("/h")
+        with pytest.raises(ValueError, match="already mounted at /g/"):
+            ws.add_mount("/h", vfs, MountMode.WRITE)
         with pytest.raises(ValueError, match="another clock"):
             vfs.accessor.bind_clock(ManualClock(), "later")
     finally:

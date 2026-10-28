@@ -1083,11 +1083,10 @@ async def test_clone_with_a_bad_secrets_override_is_a_bad_request():
 
 
 @pytest.mark.asyncio
-async def test_clone_giving_one_saved_vfs_two_vfss_is_a_bad_request():
-    shared = RAMVFS()
-    src = Workspace(
-        {"/a": shared, "/b": shared, "/c": shared}, mode=MountMode.WRITE
-    )
+async def test_clone_with_two_overrides_on_one_disk_root_is_a_bad_request(
+    tmp_path,
+):
+    src = Workspace({"/a": RAMVFS(), "/b": RAMVFS()}, mode=MountMode.WRITE)
     tar = io.BytesIO()
     try:
         await src.snapshot(tar)
@@ -1098,18 +1097,15 @@ async def test_clone_giving_one_saved_vfs_two_vfss_is_a_bad_request():
     async with AsyncClient(
         transport=transport, base_url="http://test"
     ) as client:
-        r = await _upload(client, tar.getvalue(), {"id": "src-same"})
+        r = await _upload(client, tar.getvalue(), {"id": "src-disk"})
         assert r.status_code == 201, r.text
+        block = {"vfs": "disk", "config": {"root": str(tmp_path)}}
         r = await client.post(
-            "/v1/workspaces/src-same/clone",
-            json={
-                "override": {
-                    "mounts": {"/a": {"vfs": "ram"}, "/b": {"vfs": "ram"}}
-                }
-            },
+            "/v1/workspaces/src-disk/clone",
+            json={"override": {"mounts": {"/a": block, "/b": block}}},
         )
         assert r.status_code == 400, r.text
-        assert "override ['/c/'] too" in r.json()["detail"]
+        assert "is already mounted at" in r.json()["detail"]
 
 
 @pytest.mark.asyncio

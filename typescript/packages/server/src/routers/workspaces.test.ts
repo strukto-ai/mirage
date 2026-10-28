@@ -567,28 +567,33 @@ describe('workspaces router', () => {
     }
   })
 
-  it('POST /v1/workspaces/:id/clone 400s for two VFSs given one saved VFS', async () => {
+  it('POST /v1/workspaces/:id/clone 400s for two overrides on one disk root', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mirage-clone-disk-'))
     const app = buildApp()
-    const shared = new RAMVFS()
-    const src = new Workspace(
-      { '/a': shared, '/b': shared, '/c': shared },
-      { mode: MountMode.WRITE },
-    )
-    let tar: Uint8Array
     try {
-      tar = await src.snapshot()
+      const src = new Workspace(
+        { '/a': new RAMVFS(), '/b': new RAMVFS() },
+        { mode: MountMode.WRITE },
+      )
+      let tar: Uint8Array
+      try {
+        tar = await src.snapshot()
+      } finally {
+        await src.close()
+      }
+      expect((await upload(app, tar, { id: 'src-disk' })).statusCode).toBe(201)
+      const block = { vfs: 'disk', config: { root } }
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/src-disk/clone',
+        payload: { override: { mounts: { '/a': block, '/b': block } } },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json<{ detail: string }>().detail).toContain('is already mounted at')
     } finally {
-      await src.close()
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
     }
-    expect((await upload(app, tar, { id: 'src-same' })).statusCode).toBe(201)
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/workspaces/src-same/clone',
-      payload: { override: { mounts: { '/a': { vfs: 'ram' }, '/b': { vfs: 'ram' } } } },
-    })
-    expect(res.statusCode).toBe(400)
-    expect(res.json<{ detail: string }>().detail).toContain('override /c/ too')
-    await app.close()
   })
 
   it('POST /v1/workspaces/:id/clone 400s for an unknown mount config key', async () => {

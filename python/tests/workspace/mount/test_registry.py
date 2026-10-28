@@ -14,6 +14,7 @@
 
 import asyncio
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -38,11 +39,14 @@ from mirage.types import (
     Visibility,
 )
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 from mirage.view.types import SessionAccess
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.mount.errors import MountCommandAmbiguous
+
+SharedStorageError = ValueError
 
 # ── mount_for ──────────────────────────────────
 
@@ -293,6 +297,59 @@ def test_mount_normalizes_prefix():
 def test_mount_duplicate_raises(registry):
     with pytest.raises(ValueError, match="duplicate"):
         registry.mount("/data/", RAMVFS())
+
+
+def _same_object(root: Path) -> tuple[BaseVFS, BaseVFS]:
+    vfs = RAMVFS()
+    return vfs, vfs
+
+
+def _same_disk_object(root: Path) -> tuple[BaseVFS, BaseVFS]:
+    vfs = DiskVFS(root=str(root))
+    return vfs, vfs
+
+
+def _disk_spelled_twice(root: Path) -> tuple[BaseVFS, BaseVFS]:
+    return DiskVFS(root=str(root)), DiskVFS(root=f"{root}/")
+
+
+def _disk_through_a_link(root: Path) -> tuple[BaseVFS, BaseVFS]:
+    link = root.parent / "link"
+    link.symlink_to(root)
+    return DiskVFS(root=str(root)), DiskVFS(root=str(link))
+
+
+SAME_VFS = "mount /b/: this VFS is already mounted at /a/; mount a separate VFS instead"
+SAME_DISK = "mount /b/: disk:{root} is already mounted at /a/"
+
+
+@pytest.mark.parametrize(
+    "pair, message",
+    [
+        (_same_object, SAME_VFS),
+        (_same_disk_object, SAME_VFS),
+        (_disk_spelled_twice, SAME_DISK),
+        (_disk_through_a_link, SAME_DISK),
+    ],
+    ids=["ram", "disk-object", "disk-spelling", "disk-link"],
+)
+def test_mount_refuses_storage_already_mounted(tmp_path, pair, message):
+    root = tmp_path / "d"
+    root.mkdir()
+    first, second = pair(root)
+    reg = MountRegistry()
+    reg.mount("/a", first)
+    with pytest.raises(SharedStorageError) as raised:
+        reg.mount("/b", second)
+    assert str(raised.value) == message.format(root=root.resolve())
+    assert "/b/" not in {m.prefix for m in reg.mounts()}
+
+
+def test_mount_allows_a_disk_root_inside_another(tmp_path):
+    reg = MountRegistry()
+    reg.mount("/a/b", DiskVFS(root=str(tmp_path / "ccc")))
+    reg.mount("/a", DiskVFS(root=str(tmp_path)))
+    assert {m.prefix for m in reg.mounts()} >= {"/a/", "/a/b/"}
 
 
 # ── mounts listing ─────────────────────────────

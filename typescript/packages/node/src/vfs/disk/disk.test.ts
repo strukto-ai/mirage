@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { chmodSync, existsSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, realpathSync, statSync, symlinkSync } from 'node:fs'
 import { chmod, mkdir, readFile, symlink, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -56,11 +56,45 @@ afterEach(() => {
   cleanup()
 })
 
+describe('DiskVFS — one folder at one prefix', () => {
+  const sameVfs = 'mount /b/: this VFS is already mounted at /a/; mount a separate VFS instead'
+  const sameDisk = (): string => `mount /b/: disk:${realpathSync(root)} is already mounted at /a/`
+  it.each([
+    ['the same object', (): [DiskVFS, DiskVFS] => [res, res], (): string => sameVfs],
+    [
+      'another spelling',
+      (): [DiskVFS, DiskVFS] => [res, new DiskVFS({ root: `${root}/` })],
+      sameDisk,
+    ],
+    [
+      'a link',
+      (): [DiskVFS, DiskVFS] => {
+        const link = join(root, 'link')
+        symlinkSync(root, link)
+        return [res, new DiskVFS({ root: link })]
+      },
+      sameDisk,
+    ],
+  ])('refuses %s on a folder already mounted', (_name, pair, message) => {
+    const [first, second] = pair()
+    expect(() => new Workspace({ '/a': first, '/b': second })).toThrow(new Error(message()))
+  })
+
+  it('mounts a folder inside one already mounted', async () => {
+    const ws = new Workspace({ '/a/b': new DiskVFS({ root: join(root, 'ccc') }), '/a': res })
+    try {
+      expect(ws.mount('/a/b').prefix).toBe('/a/b/')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('DiskVFS — identity', () => {
   it('exposes kind, vfsMd, root', () => {
     expect(res.name).toBe(VFSName.DISK)
     expect(typeof res.vfsMd).toBe('string')
-    expect(res.root).toBe(root)
+    expect(res.root).toBe(realpathSync(root))
   })
 
   it('serves no commands of its own', () => {

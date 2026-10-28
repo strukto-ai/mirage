@@ -130,6 +130,13 @@ describe('MountRegistry.resolve', () => {
       /duplicate mount prefix/,
     )
   })
+
+  it('refuses one VFS at a second prefix', () => {
+    const vfs = new RAMVFS()
+    expect(() => new MountRegistry({ '/a': vfs, '/b': vfs }, MountMode.READ)).toThrow(
+      new Error('mount /b/: this VFS is already mounted at /a/; mount a separate VFS instead'),
+    )
+  })
 })
 
 describe('MountRegistry.descendantMounts', () => {
