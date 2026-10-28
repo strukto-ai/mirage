@@ -2597,6 +2597,55 @@ fn pending_formats_and_extrema_cancel_and_reuse_the_stream() {
 }
 
 #[test]
+fn long_number_scratch_limits_are_terminal_and_reset_between_runs() {
+    let number = format!("1{}", "0".repeat(4999));
+    let invalid = format!("{number}e");
+    for steps in [7, u64::MAX] {
+        for memory in [16000, 20000] {
+            let config = serde_json::json!({
+                "program":"try input catch empty | empty", "memory":memory, "steps":steps,
+            });
+            let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+            for (source, cancel) in [
+                (number.as_str(), false),
+                ("1", false),
+                (number.as_str(), true),
+                (invalid.as_str(), false),
+                ("1", false),
+            ] {
+                let mut wire = Vec::new();
+                stream.begin(b"{}").unwrap();
+                stream.feed(b"null", &mut wire).unwrap();
+                stream.finish(&mut wire).unwrap();
+                while stream.busy() {
+                    stream.drain(&mut wire).unwrap();
+                }
+                assert!(stream.request(&mut Vec::new()).is_some());
+                stream
+                    .respond(br#"{"kind":"value"}"#, source.as_bytes(), &mut wire)
+                    .unwrap();
+                if cancel {
+                    if steps == 7 {
+                        for _ in 0..100 {
+                            assert!(stream.busy());
+                            stream.drain(&mut wire).unwrap();
+                        }
+                    }
+                    assert!(stream.cancel());
+                }
+                settle(&mut *stream, &mut wire);
+                let expected = if !cancel && source == number && memory == 16000 {
+                    vec![Frame::Err("jq memory limit of 16000 bytes exceeded".into())]
+                } else {
+                    vec![]
+                };
+                assert_eq!(frames(&wire), expected, "{memory} bytes, {steps} steps");
+            }
+        }
+    }
+}
+
+#[test]
 fn retirement_releases_cancelled_and_completed_pending_tasks() {
     for (program, input, drains) in [
         (

@@ -1590,7 +1590,11 @@ impl NumberReading {
                 if self.adjusted >= 0 {
                     self.out.push('+');
                 }
-                self.out.push_str(&self.adjusted.to_string());
+                let exponent = self.adjusted.to_string();
+                let _charge = Charge::open(exponent.capacity());
+                self.out.push_str(&exponent);
+                self.charge
+                    .set(self.out.capacity() + self.prefix.capacity());
             }
             if self.prefix.is_empty() {
                 self.prefix.push('0');
@@ -1598,15 +1602,20 @@ impl NumberReading {
             if self.sticky {
                 self.prefix.push('1');
             }
+            self.charge
+                .set(self.out.capacity() + self.prefix.capacity());
             let exponent = self
                 .exp
                 .saturating_add(self.digits as i64 - self.prefix.len() as i64);
-            let short = format!(
-                "{}{}e{exponent}",
-                if bytes[self.start] == b'-' { "-" } else { "" },
-                self.prefix
-            );
-            let value = short.parse::<f64>().unwrap_or(f64::NAN);
+            let value = {
+                let short = format!(
+                    "{}{}e{exponent}",
+                    if bytes[self.start] == b'-' { "-" } else { "" },
+                    self.prefix
+                );
+                let _charge = Charge::open(short.capacity());
+                short.parse::<f64>().unwrap_or(f64::NAN)
+            };
             let literal = std::mem::take(&mut self.out).into_boxed_str();
             self.charge.set(self.prefix.capacity());
             let literal = Arc::new(Text::new(literal));
@@ -2325,7 +2334,7 @@ mod tests {
 
     #[test]
     fn numeric_buffer_transfer_preserves_the_literal_within_the_cap() {
-        let meter = Arc::new(Meter::limited(18000));
+        let meter = Arc::new(Meter::limited(22000));
         let _installed = meter::install(&meter);
         let mut parsing = Parsing::begin("1".repeat(5000));
         let value = loop {
@@ -2340,6 +2349,50 @@ mod tests {
         assert!(!meter.exceeded());
         drop(value);
         assert_eq!(meter.live(), 0);
+    }
+
+    #[test]
+    fn long_number_final_scratch_latches_its_peak_before_release() {
+        let prepare = || {
+            let mut parsing = Parsing::begin(format!("1{}", "0".repeat(4999)));
+            while !parsing
+                .numeric
+                .as_ref()
+                .is_some_and(|number| number.build && number.copied == number.digits)
+            {
+                assert!(parsing.run(&mut 1).is_none());
+            }
+            parsing
+        };
+        let meter = Arc::new(Meter::default());
+        let installed = meter::install(&meter);
+        let parsing = prepare();
+        let retained = meter.live();
+        drop(parsing);
+        assert_eq!(meter.live(), 0);
+        drop(installed);
+        for budget in [7, u64::MAX] {
+            for (limit, exceeded) in [(retained, true), (retained + 20000, false)] {
+                let meter = Arc::new(Meter::limited(limit));
+                let _installed = meter::install(&meter);
+                let mut parsing = prepare();
+                assert!(!meter.exceeded(), "input and retained buffers fit");
+                let mut budget = budget;
+                let result = parsing.run(&mut budget);
+                assert_eq!(
+                    meter.exceeded(),
+                    exceeded,
+                    "{retained} retained bytes, limit {limit}"
+                );
+                assert!(meter.live() <= retained, "final scratch was released");
+                drop(result);
+                drop(parsing);
+                assert_eq!(meter.live(), 0);
+                assert_eq!(meter.exceeded(), exceeded);
+                meter.reset();
+                assert!(!meter.exceeded());
+            }
+        }
     }
 
     #[test]
