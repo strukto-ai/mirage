@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import type { Writable } from 'node:stream'
+import { INTERRUPTED_STATUS, SIGPIPE_STATUS } from '@struktoai/mirage-core/shell/constants'
 import type { Refusal } from '@struktoai/mirage-core/types'
 import { refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
 import type { DaemonClient } from './client.ts'
@@ -133,7 +134,7 @@ export async function streamShell(
           signal: stop.signal,
           timeoutMs: null,
         })
-    if (response.status === 499) return 130
+    if (response.status === 499) return INTERRUPTED_STATUS
     if (!response.ok) await handleResponse(response)
     if (response.body === null) throw new Error('daemon stream ended without a completion record')
     const capturedStdout: Uint8Array[] = []
@@ -156,7 +157,7 @@ export async function streamShell(
       },
     )
     if (terminal.status === 'failed') throw new Error(`shell failed: ${String(terminal.error)}`)
-    if (terminal.status === 'canceled') return 130
+    if (terminal.status === 'canceled') return INTERRUPTED_STATUS
     const line = jsonOutput ? '' : refusalLine(refusalOf(terminal.result))
     if (line !== '') await write(process.stderr, Buffer.from(line), stop.signal)
     if (jsonOutput) {
@@ -169,9 +170,10 @@ export async function streamShell(
     }
     return exitCodeFromResponse(terminal.result)
   } catch (error) {
-    if (state.interrupted) return 130
+    if (state.interrupted) return INTERRUPTED_STATUS
     const failure: unknown = stop.signal.aborted ? stop.signal.reason : error
-    if (failure instanceof Error && 'code' in failure && failure.code === 'EPIPE') return 141
+    if (failure instanceof Error && 'code' in failure && failure.code === 'EPIPE')
+      return SIGPIPE_STATUS
     throw error
   } finally {
     stop.abort()

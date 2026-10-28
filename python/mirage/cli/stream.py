@@ -13,6 +13,7 @@ import aiohttp
 from mirage.cli.client import DaemonClient
 from mirage.cli.output import exit_code_from_response
 from mirage.io.cooperative import CHUNK_SIZE
+from mirage.shell.constants import INTERRUPTED_STATUS
 from mirage.types import Refusal
 from mirage.workspace.tools.io_text import refusal_line
 
@@ -217,7 +218,7 @@ async def stream_shell(
                 json=payload if body is None else None,
             ) as response:
                 if response.status == 499:
-                    return 130
+                    return INTERRUPTED_STATUS
                 if response.status >= 400:
                     text = await response.text()
                     detail = text
@@ -242,7 +243,7 @@ async def stream_shell(
     if terminal["status"] == "failed":
         raise RuntimeError(f"shell failed: {terminal['error']}")
     if terminal["status"] == "canceled":
-        return 130
+        return INTERRUPTED_STATUS
     line = "" if json_output else refusal_line(refusal_of(terminal["result"]))
     if line:
         await _write(stderr_fd, line.encode())
