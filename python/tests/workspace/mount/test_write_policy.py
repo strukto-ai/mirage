@@ -98,6 +98,18 @@ def test_every_backend_declares_the_shared_condition_modes(name):
     } == _CONDITIONS["condition_modes"]["vfs"][name]
 
 
+def test_create_only_support_does_not_admit_a_conditional_mount(monkeypatch):
+    vfs = _stub("s3")
+    monkeypatch.setattr(
+        S3VFS, "condition_support", {"put": frozenset({"absent"})}
+    )
+    assert write_conditions(vfs) == frozenset()
+    with pytest.raises(WritePolicyError, match="s3 does not"):
+        check_write_capability(
+            "/x/", vfs, WritePolicy.CONDITIONAL, MountMode.WRITE, True
+        )
+
+
 _MINIO = "http://127.0.0.1:9000"
 
 

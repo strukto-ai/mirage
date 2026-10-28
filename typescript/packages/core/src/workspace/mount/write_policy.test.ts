@@ -26,6 +26,7 @@ import {
 import { CONDITION_SUPPORT as BOX_SUPPORT } from '../../core/box/constants.ts'
 import { CONDITION_SUPPORT as DROPBOX_SUPPORT } from '../../core/dropbox/constants.ts'
 import { S3VFSBase } from '../../vfs/s3/s3.ts'
+import type { ConditionSupport } from '../../cache/types.ts'
 
 const FIXTURES = new URL('../../../../../../integ/fixtures/write/', import.meta.url)
 
@@ -121,6 +122,18 @@ describe('writeConditions', () => {
 })
 
 describe('checkWriteCapability', () => {
+  it('refuses a conditional mount with only create-only support', () => {
+    const vfs = Object.assign(stub('s3'), {
+      conditionSupport: { put: ['absent'] } satisfies ConditionSupport,
+    })
+    expect(writeConditions(vfs)).toEqual([])
+    expect(() => {
+      checkWriteCapability('/x/', vfs, WritePolicy.CONDITIONAL, MountMode.WRITE, true)
+    }).toThrow(
+      "mount '/x/': write: conditional needs a backend that refuses a stale write; s3 does not",
+    )
+  })
+
   it.each(VERDICTS.map((c) => [c.name, c] as const))('matches the shared fixture: %s', (_n, c) => {
     const vfs = stub(c.vfs)
     const run = () => {
