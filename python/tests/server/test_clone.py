@@ -327,7 +327,7 @@ class LiveRAM(RAMVFS):
         return {**super().get_state(), VFSStateKey.NEEDS_OVERRIDE: True}
 
 
-async def _root_on_live(live: type[RAMVFS] = LiveRAM) -> Workspace:
+async def _root_on_live(live: type[RAMVFS]) -> Workspace:
     ws = Workspace({"/a": RAMVFS()}, mode=MountMode.WRITE)
     try:
         state = await to_state_dict(ws)
