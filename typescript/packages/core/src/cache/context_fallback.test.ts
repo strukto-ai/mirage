@@ -228,6 +228,23 @@ describe('a conditional write on the fallback storage', () => {
     expect(cond).toEqual({ kind: 'match', version: 'v2' })
   })
 
+  it('binds the destination requirement inside its existing mount frames', async () => {
+    const [entry, path] = await conditional()
+    const request = {
+      path,
+      body: new Uint8Array(),
+      condition: { kind: 'match', version: 'v2' },
+    } satisfies ReplaceRequest
+    const condition = await runWithWriteContext('/s3/', entry.writeContext(), () =>
+      runWithWriteContext('/s3/', entry.writeContext(), () =>
+        runWithSettledWrite(entry.vfs.accessor, request, () =>
+          writeCondition(path, 'put', null, entry.vfs.accessor),
+        ),
+      ),
+    )
+    expect(condition).toEqual(request.condition)
+  })
+
   it.each([
     ['/u/', false],
     ['/u/', true],

@@ -195,12 +195,19 @@ export function runWithSettledWrite<T>(
   request: ReplaceRequest,
   fn: () => Promise<T>,
 ): Promise<T> {
+  const scopes = ownersOf(
+    request.path,
+    liveCallers().flatMap((caller) => (caller.write === null ? [] : [caller.write])),
+  )
+  if (!agree(scopes, (scope) => scope.context)) throw overlapping(request.path)
+  const scope = scopes[scopes.length - 1] ?? null
   return runWithCaller(
     {
       ...currentCaller(),
+      write: scope,
       settledWrite: {
         owner,
-        scope: currentCaller().write,
+        scope,
         path: request.path.mountPath,
         kind: 'put',
         condition: request.condition,
@@ -274,10 +281,15 @@ export async function writeCondition(
     )
   const held = settled[0]
   if (held !== undefined) {
+    const scopes = ownersOf(
+      path,
+      liveCallers().flatMap((caller) => (caller.write === null ? [] : [caller.write])),
+    )
     if (
+      !agree(scopes, (scope) => scope.context) ||
       settled.some(
         (state) =>
-          state.scope !== currentCaller().write ||
+          state.scope !== (scopes[scopes.length - 1] ?? null) ||
           state.condition.kind !== held.condition.kind ||
           conditionVersion(state.condition) !== conditionVersion(held.condition),
       )
