@@ -26,6 +26,7 @@ from mirage.context.session_context import (
 from mirage.errors.types import FileTooLargeError
 from mirage.io.types import materialize
 from mirage.policy import PolicyDenied
+from mirage.shell.constants import SET_OPTION_DEFAULTS, SET_OPTION_NAMES
 from mirage.shell.errors import ArithError
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.dates import iso_timestamp
@@ -34,7 +35,6 @@ from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY,
     FILE_UNARY,
     INT_COMPARATORS,
-    UNSUPPORTED_UNARY,
 )
 from mirage.workspace.executor.builtins.condition.types import (
     CondContext,
@@ -44,6 +44,7 @@ from mirage.workspace.executor.builtins.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 from mirage.workspace.executor.builtins.shared import abs_path
 from mirage.workspace.session.elements import element_is_set
+from mirage.workspace.session.state import nameref_target
 
 
 def operand_scope(ctx: CondContext, val: str | PathSpec) -> PathSpec:
@@ -76,8 +77,8 @@ def operand_scope(ctx: CondContext, val: str | PathSpec) -> PathSpec:
 async def path_kind(
     ctx: CondContext, val: str | PathSpec
 ) -> tuple[str | None, FileStat | None]:
-    """Resolve an operand to 'dir' / 'file' / 'char' / 'fifo' / None plus
-    its stat.
+    """Resolve an operand to 'dir' / 'file' / 'char' / 'fifo' / 'block' /
+    'socket' / None plus its stat.
 
     Symlinks are followed first (test -e/-f/-d act on the target), then
     ``resolve_path_stat`` answers what is there. That probe is shared with
@@ -125,6 +126,10 @@ async def path_kind(
         return "char", stat
     if stat.type == FileType.FIFO:
         return "fifo", stat
+    if stat.type == FileType.BLOCK_DEVICE:
+        return "block", stat
+    if stat.type == FileType.SOCKET:
+        return "socket", stat
     return "file", stat
 
 
@@ -149,6 +154,15 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
             # division by 0`, a test's grammar error being the only
             # other thing that ends it.
             raise exc.signal(fatal=True) from exc
+    if op == "-R":
+        return nameref_target(ctx.session, text) is not None
+    if op == "-o":
+        return text in SET_OPTION_NAMES and ctx.session.shell_options.get(
+            text, SET_OPTION_DEFAULTS[text]
+        )
+    if op == "-t":
+        # No descriptor of a mirage line is a terminal.
+        return False
     if op in ("-L", "-h"):
         if not isinstance(val, PathSpec) and not text:
             return False
@@ -171,7 +185,7 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
         if not isinstance(val, PathSpec) and not text:
             return False
         kind, stat = await path_kind(ctx, val)
-        if op == "-e":
+        if op in ("-e", "-a"):
             return kind is not None
         if op == "-f":
             return kind == "file"
@@ -181,6 +195,29 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
             return kind == "char"
         if op == "-p":
             return kind == "fifo"
+        if op == "-b":
+            return kind == "block"
+        if op == "-S":
+            return kind == "socket"
+        if op in ("-O", "-G"):
+            # Mirage has one user, who owns every entry it reaches, as
+            # every entry it reaches is readable (`-r`).
+            return kind is not None
+        if op in ("-u", "-g", "-k"):
+            bit = {"-u": 0o4000, "-g": 0o2000, "-k": 0o1000}[op]
+            return (
+                stat is not None
+                and stat.mode is not None
+                and bool(stat.mode & bit)
+            )
+        if op == "-N":
+            # Modified since last read: a write later than the last
+            # access, which only a store that keeps both times can say.
+            if stat is None:
+                return False
+            written = iso_timestamp(stat.modified)
+            read = iso_timestamp(stat.atime)
+            return written is not None and read is not None and written > read
         if op == "-s":
             if kind == "dir":
                 return True
@@ -210,8 +247,6 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
             if kind not in ("file", "fifo") or stat is None:
                 return False
             return stat.mode is not None and bool(stat.mode & 0o111)
-    if op in UNSUPPORTED_UNARY:
-        raise CondError(f"{ctx.name}: {op}: unsupported operator")
     raise CondError(f"{ctx.name}: {op}: unary operator expected")
 
 

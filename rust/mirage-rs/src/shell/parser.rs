@@ -1152,31 +1152,7 @@ impl Parser<'_> {
             return self.compound();
         }
         if self.at_word(b"[[") {
-            return self.test_command(true);
-        }
-        if self.peek() == b'[' && is_space(self.at(1)) {
-            // `[` is a command: one whose words the grammar cannot read
-            // as a test, or that has no `]`, still runs, and so do one
-            // with a redirect among its words and one with words after a
-            // redirect that follows its `]`.
-            let mark = self.mark();
-            let tested = if self.redirect_in_brackets() {
-                None
-            } else {
-                self.test_command(false).ok()
-            };
-            if let Some(node) = tested {
-                let after = self.mark();
-                self.skip_blank();
-                if !((self.at_redirect() || self.at_herestring())
-                    && self.words_after_redirects()?)
-                {
-                    self.reset(after);
-                    return Ok(node);
-                }
-            }
-            self.reset(mark);
-            return self.command();
+            return self.test_command();
         }
         if self.at_word(b"if") {
             return self.if_statement();

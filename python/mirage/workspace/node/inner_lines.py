@@ -25,10 +25,8 @@ from mirage.workspace.executor.builtins.script.bash import parse_bash_args
 from mirage.workspace.node.test_tokens import (
     PATTERN_OPS,
     CondParser,
-    ExprToken,
     cond_leaves,
     cond_tokens,
-    flat_tokens,
 )
 
 
@@ -94,22 +92,17 @@ class TestRead:
 
 
 def reads_of_test(node: TSNodeLike, home: str | None = None) -> list[TestRead]:
-    """A ``[ ]`` or ``[[ ]]`` as the tests the gate admits, read with the
-    tokens and the grammar the run evaluates it by.
-
-    A ``[ ]`` is one test, admitted whole on its words and its closing
-    ``]``, as the command ``[`` is. A ``[[ ]]`` is a test per leaf, each
-    admitted as the run reaches it, since a branch never reached never
-    expands; every reader of the line reads the same leaves, so a
-    question one asked is the one the gate answers.
+    """A ``[[ ]]`` as the tests the gate admits, read with the tokens and
+    the grammar the run evaluates it by: a test per leaf, each admitted
+    as the run reaches it, since a branch never reached never expands;
+    every reader of the line reads the same leaves, so a question one
+    asked is the one the gate answers. (``[`` is a command, admitted on
+    its words as any command is.)
 
     Args:
         node (TSNodeLike): the test_command node.
         home (str | None): the home directory a leading tilde names.
     """
-    if not (node.children and node.children[0].type == "[["):
-        words = [_token_word(t, home) for t in flat_tokens(node)]
-        return [TestRead([Word("[", "["), *words, Word("]", "]")])]
     opener = Word("[[", "[[")
     out: list[TestRead] = []
     for leaf in cond_leaves(CondParser(cond_tokens(node)).parse()):
@@ -126,22 +119,6 @@ def reads_of_test(node: TSNodeLike, home: str | None = None) -> list[TestRead]:
         stated = leaf[0] != "binary" or leaf[1] not in PATTERN_OPS
         out.append(TestRead([opener, *words], stated))
     return out
-
-
-def _token_word(token: ExprToken, home: str | None) -> Word:
-    """One token of a test as a word of the line.
-
-    Args:
-        token (ExprToken): an operator, or an operand node.
-        home (str | None): the home directory a leading tilde names.
-    """
-    if token.op is not None:
-        return Word(token.op, token.op)
-    word = read_word(token.operand, home)
-    if not token.negative:
-        return word
-    text = None if word.text is None else "-" + word.text
-    return Word("-" + word.raw, text, word.glob)
 
 
 @dataclass(frozen=True, slots=True)

@@ -143,7 +143,6 @@ from mirage.workspace.node.process_sub import ProcessSubScope
 from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.test_expr import (
     expand_double_bracket,
-    expand_test_expr,
 )
 from mirage.workspace.node.timing import timed_by, timing_report
 from mirage.workspace.node.types import ExpandedWords
@@ -1597,40 +1596,26 @@ async def _execute_node(
         )
 
     if kind == NodeKind.TEST:
-        opener = node.children[0].type if node.children else "["
-        # The shell's own test, which no command gate admits: it is
+        # The shell's own `[[`, which no command gate admits: it is
         # admitted by its own name on what it tests.
         admitted = partial(
             admit_test,
-            "[[" if opener == "[[" else "[",
+            "[[",
             session=session,
             registry=registry,
             namespace=namespace,
             cancel=cancel,
             claimant=claimant_for(node, handed),
         )
-        if opener == "[[":
-            tree = await expand_double_bracket(
-                node, context, execute_fn, cs, view=view
-            )
-            return await handle_test(
-                dispatch,
-                namespace,
-                tree,
-                session,
-                name="[[",
-                view=view,
-                admit=admitted,
-            )
-        test_argv = await expand_test_expr(
+        tree = await expand_double_bracket(
             node, context, execute_fn, cs, view=view
         )
         return await handle_test(
             dispatch,
             namespace,
-            test_argv,
+            tree,
             session,
-            name="[",
+            name="[[",
             view=view,
             admit=admitted,
         )

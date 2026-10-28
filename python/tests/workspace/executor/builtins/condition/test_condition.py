@@ -454,11 +454,11 @@ async def test_single_bracket_word_splits_expansion():
 
 
 @pytest.mark.asyncio
-async def test_unsupported_operator_fails_loudly():
+async def test_no_entry_is_a_socket():
     ws = await _workspace()
     io = await ws.shell("[ -S /data/plain.txt ]")
-    assert io.exit_code == 2
-    assert "[: -S: unsupported operator" in await io.stderr_str()
+    assert io.exit_code == 1
+    assert await io.stderr_str() == ""
 
 
 @pytest.mark.asyncio

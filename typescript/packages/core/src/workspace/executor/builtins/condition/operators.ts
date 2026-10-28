@@ -19,6 +19,7 @@ import {
 } from '../../../../commands/builtin/utils/paths.ts'
 import { CycleError, dottedSpelling, resolvePath } from '../../../../utils/path.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
+import { SET_OPTION_DEFAULTS, SET_OPTION_NAMES } from '../../../../shell/constants.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { type FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { effectivePathMode, sessionAccess } from '../../../../context/session_context.ts'
@@ -29,7 +30,8 @@ import { followPaths } from '../links/links.ts'
 import { absPath } from '../shared.ts'
 import { toScope, scopePath } from '../scope.ts'
 import { elementIsSet } from '../../../session/elements.ts'
-import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY } from './constants.ts'
+import { namerefTarget } from '../../../session/state.ts'
+import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS } from './constants.ts'
 import { CondError, type CondContext } from './types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
@@ -52,8 +54,8 @@ function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
 }
 
 /**
- * Resolve an operand to 'dir' / 'file' / 'char' / 'fifo' / null plus its
- * stat. Symlinks are followed first, then resolvePathStat answers what is
+ * Resolve an operand to 'dir' / 'file' / 'char' / 'fifo' / 'block' /
+ * 'socket' / null plus its stat. Symlinks are followed first, then resolvePathStat answers what is
  * there. That probe is shared with find and tree's start point, so `test -d`
  * and a traversal cannot disagree about whether a path exists. A FIFO is no
  * regular file and stores nothing, so `-f` and `-s` are false for one (GNU:
@@ -62,7 +64,7 @@ function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
 async function pathKind(
   ctx: CondContext,
   val: string | PathSpec,
-): Promise<['dir' | 'file' | 'char' | 'fifo' | null, FileStat | null]> {
+): Promise<['dir' | 'file' | 'char' | 'fifo' | 'block' | 'socket' | null, FileStat | null]> {
   const walk = PathSpec.fromStrPath(val, undefined, ctx.session.cwd)
   let stat: FileStat | null
   try {
@@ -97,6 +99,8 @@ async function pathKind(
   if (stat.type === FileType.DIRECTORY) return ['dir', stat]
   if (stat.type === FileType.CHAR_DEVICE) return ['char', stat]
   if (stat.type === FileType.FIFO) return ['fifo', stat]
+  if (stat.type === FileType.BLOCK_DEVICE) return ['block', stat]
+  if (stat.type === FileType.SOCKET) return ['socket', stat]
   return ['file', stat]
 }
 
@@ -118,6 +122,15 @@ export async function applyUnary(
       throw err
     }
   }
+  if (op === '-R') return namerefTarget(ctx.session, text) !== null
+  if (op === '-o') {
+    return (
+      SET_OPTION_NAMES.has(text) &&
+      (ctx.session.shellOptions[text] ?? SET_OPTION_DEFAULTS.get(text) ?? false)
+    )
+  }
+  // No descriptor of a mirage line is a terminal.
+  if (op === '-t') return false
   if (op === '-L' || op === '-h') {
     if (!(val instanceof PathSpec) && text === '') return false
     // A builtin's operand never passes the router's pathname walk, so it is
@@ -135,11 +148,28 @@ export async function applyUnary(
   if (FILE_UNARY.has(op)) {
     if (!(val instanceof PathSpec) && text === '') return false
     const [kind, stat] = await pathKind(ctx, val)
-    if (op === '-e') return kind !== null
+    if (op === '-e' || op === '-a') return kind !== null
     if (op === '-f') return kind === 'file'
     if (op === '-d') return kind === 'dir'
     if (op === '-c') return kind === 'char'
     if (op === '-p') return kind === 'fifo'
+    if (op === '-b') return kind === 'block'
+    if (op === '-S') return kind === 'socket'
+    // Mirage has one user, who owns every entry it reaches, as every entry it
+    // reaches is readable (`-r`).
+    if (op === '-O' || op === '-G') return kind !== null
+    if (op === '-u' || op === '-g' || op === '-k') {
+      const bit = op === '-u' ? 0o4000 : op === '-g' ? 0o2000 : 0o1000
+      return stat !== null && stat.mode !== null && (stat.mode & bit) !== 0
+    }
+    if (op === '-N') {
+      // Modified since last read: a write later than the last access, which
+      // only a store that keeps both times can say.
+      if (stat === null) return false
+      const written = isoTimestamp(stat.modified)
+      const read = isoTimestamp(stat.atime)
+      return written !== null && read !== null && written > read
+    }
     if (op === '-s') {
       if (kind === 'dir') return true
       if (kind !== 'file' || stat === null) return false
@@ -169,9 +199,6 @@ export async function applyUnary(
       if ((kind !== 'file' && kind !== 'fifo') || stat === null) return false
       return stat.mode !== null && (stat.mode & 0o111) !== 0
     }
-  }
-  if (UNSUPPORTED_UNARY.has(op)) {
-    throw new CondError(`${ctx.name}: ${op}: unsupported operator`)
   }
   throw new CondError(`${ctx.name}: ${op}: unary operator expected`)
 }

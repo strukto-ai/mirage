@@ -14,11 +14,11 @@ const TEST: u8 = 10;
 /// Where a test expression ends.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Closer {
-    /// `]`.
+    /// `]` of a subscript.
     Single,
     /// `]]`.
     Double,
-    /// `)` of a parenthesized expression in a `[` test or a subscript.
+    /// `)` of a parenthesized expression in a subscript.
     Paren,
     /// `)` of a group inside `[[`.
     Group,
@@ -33,18 +33,12 @@ impl Closer {
 }
 
 impl Parser<'_> {
-    /// `[ expression ]` or `[[ expression ]]`.
-    pub(super) fn test_command(&mut self, double: bool) -> R<Syn> {
+    /// `[[ expression ]]`. `[` is a command, its words test's to read.
+    pub(super) fn test_command(&mut self) -> R<Syn> {
         self.enter()?;
-        let (open, close, closer) = if double {
-            ("[[", "]]", Closer::Double)
-        } else {
-            ("[", "]", Closer::Single)
-        };
-        let mut children = vec![self.expect(open)?];
-        if double {
-            self.check_conditional(self.i)?;
-        }
+        let closer = Closer::Double;
+        let mut children = vec![self.expect("[[")?];
+        self.check_conditional(self.i)?;
         self.test_space(closer);
         if !self.at_test_close(closer) {
             children.push(self.test_expression(closer, 0)?);
@@ -53,7 +47,7 @@ impl Parser<'_> {
         if !self.at_test_close(closer) {
             return self.fail(self.i);
         }
-        children.push(self.expect(close)?);
+        children.push(self.expect("]]")?);
         self.leave();
         Ok(Syn::node("test_command", children))
     }

@@ -28,32 +28,35 @@ const NUMERIC_BINARY = new Set(INT_COMPARATORS.keys())
 // inode to compare, and one path names one entry).
 export const FILE_PAIR_BINARY = new Set(['-nt', '-ot', '-ef'])
 const STRING_UNARY = new Set(['-n', '-z'])
-// `-v NAME` asks whether the variable (or the `NAME[sub]` element) is
-// set; it reads session state, not a path.
-const VAR_UNARY = new Set(['-v'])
+// `-v NAME` asks whether the variable (or the `NAME[sub]` element) is set
+// and `-R NAME` whether it is a nameref aimed at a name; `-o OPT` whether a
+// `set -o` option is on, and `-t FD` whether a descriptor is a terminal.
+// They read session state, not a path.
+const SESSION_UNARY = new Set(['-v', '-R', '-o', '-t'])
+// `-a` is bash's old spelling of `-e`. Mirage keeps one user who owns every
+// entry it reaches (`-O`, `-G`), modes only where a store keeps them (`-u`,
+// `-g`, `-k`), and no socket or block device (`-S`, `-b`).
 export const FILE_UNARY = new Set([
+  '-a',
   '-e',
   '-f',
   '-d',
   '-c',
   '-p',
+  '-b',
+  '-S',
   '-s',
   '-r',
   '-w',
   '-x',
+  '-u',
+  '-g',
+  '-k',
+  '-O',
+  '-G',
+  '-N',
   '-L',
   '-h',
 ])
-// Real GNU operators mirage cannot answer truthfully: the VFS has no
-// socket or block-device node types, no uid/gid ownership or setuid
-// bits, and no controlling terminal. (Character devices and FIFOs ARE
-// modelled, so -c and -p are supported above.) Failing loudly beats the
-// silent-false this module used to produce.
-export const UNSUPPORTED_UNARY = new Set(['-S', '-b', '-g', '-k', '-u', '-O', '-G', '-N', '-t'])
 export const BINARY_OPS = new Set([...STRING_BINARY, ...NUMERIC_BINARY, ...FILE_PAIR_BINARY])
-export const UNARY_OPS = new Set([
-  ...STRING_UNARY,
-  ...VAR_UNARY,
-  ...FILE_UNARY,
-  ...UNSUPPORTED_UNARY,
-])
+export const UNARY_OPS = new Set([...STRING_UNARY, ...SESSION_UNARY, ...FILE_UNARY])

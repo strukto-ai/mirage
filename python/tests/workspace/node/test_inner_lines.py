@@ -150,8 +150,6 @@ def test_shell_option_values_require_stable_words(raw, stable):
 @pytest.mark.parametrize(
     ("line", "reads"),
     [
-        ("[ -e /x ]", [(["[", "-e", "/x", "]"], True)]),
-        ("[ 1 -lt -2 ]", [(["[", "1", "-lt", "-2", "]"], True)]),
         (
             "[[ ! -e /x && a == b* ]]",
             [(["[[", "-e", "/x"], True), (["[[", "a", "==", "b*"], False)],

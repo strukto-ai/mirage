@@ -122,10 +122,10 @@ describe('test/[ arity, combinators, errors', () => {
     expect(stderr).toContain(message)
   })
 
-  it('unsupported operator fails loudly', async () => {
+  it('finds no entry a socket', async () => {
     const [rc, , stderr] = await runResult(ws, '[ -S /data/plain.txt ]')
-    expect(rc).toBe(2)
-    expect(stderr).toContain('[: -S: unsupported operator')
+    expect(rc).toBe(1)
+    expect(stderr).toBe('')
   })
 })
 

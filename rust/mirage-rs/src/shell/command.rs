@@ -454,28 +454,6 @@ impl Parser<'_> {
         Ok(words)
     }
 
-    /// Whether a redirect stands among the words of the `[` here, before
-    /// its `]`: `[` is a command to bash, so a `<` or `>` there redirects.
-    pub(super) fn redirect_in_brackets(&mut self) -> bool {
-        let mark = self.mark();
-        self.i += 1;
-        let found = loop {
-            self.skip_blank();
-            if self.at_redirect() || self.at_herestring() {
-                break true;
-            }
-            if self.at_command_end() || self.at_word(b"]") {
-                break false;
-            }
-            match self.scan_word(self.i) {
-                Ok(end) if end > self.i => self.i = end,
-                _ => break false,
-            }
-        };
-        self.reset(mark);
-        found
-    }
-
     /// Past the redirects and herestrings from here, each with its word;
     /// false at one the scanner cannot read, which the parse refuses.
     fn skip_redirects(&mut self) -> bool {
