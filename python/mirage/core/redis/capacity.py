@@ -66,6 +66,8 @@ async def size_of(accessor: RedisAccessor, path: PathSpec) -> int:
     key = norm(path.mount_path)
     if await store.has_file(key):
         return await store.file_len(key)
+    if not await store.has_dir(key):
+        return 0
     under = key if key.endswith("/") else key + "/"
     files = await store.list_files(under)
     return sum(await asyncio.gather(*(store.file_len(f) for f in files)))
