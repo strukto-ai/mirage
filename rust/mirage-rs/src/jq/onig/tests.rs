@@ -161,6 +161,16 @@ fn a_caseless_run_folds_together_up_to_a_boundary() {
     assert_eq!(strings("(?i:(?=a))*", "a"), ["", ""]);
 }
 
+/// A scoped option group around one character repeats as that character
+/// does, and a look-behind still refuses one around a repeat, as jq does.
+#[test]
+fn a_scoped_option_group_repeats_as_its_character() {
+    let hay = "a".repeat(2_100_000);
+    assert_eq!(strings("^(?i:a)*$", &hay).len(), 1);
+    assert_eq!(strings("(?<=(?:a+))b", "ab"), ["b"]);
+    assert_eq!(error("(?<=(?i:a+))b"), "invalid pattern in look-behind");
+}
+
 #[test]
 fn a_look_behind_folds_one_character_to_one() {
     let none: Vec<String> = Vec::new();
