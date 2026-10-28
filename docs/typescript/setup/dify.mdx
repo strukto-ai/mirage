@@ -166,6 +166,6 @@ const content = await ws.shell('cat /knowledge/guides/quickstart.md')
 console.log(await content.stdoutStr())
 
 // Search for keywords
-const grep = await ws.shell('grep -i "authentication" /knowledge/**/*.md')
+const grep = await ws.shell('shopt -s globstar; grep -i "authentication" /knowledge/**/*.md')
 console.log(await grep.stdoutStr())
 ```
