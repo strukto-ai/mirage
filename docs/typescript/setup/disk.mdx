@@ -30,7 +30,7 @@ await ws.shell('cat /disk/note.txt')
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `root` | required | Absolute path on the host. Reads and writes are scoped to this directory. |
+| `root` | required | Absolute path on the host. Reads and writes are scoped to this directory. A second disk mount whose root resolves to a folder already mounted is refused; a folder inside one is fine. |
 | `folderVersions` | `true` | Store each listing at its folder's version (device, inode, change and modified time), so a `read: fresh` mount re-lists only folders that changed. Must be a boolean. Set `false` for a network or FUSE root (NFS, SMB, rclone, s3fs, mirage's own FUSE), whose change time may not move with its entries. In YAML: `folder_versions`. |
 
 A folder changed in the last 2 seconds gets no version and is re-listed until it has been quiet that long.

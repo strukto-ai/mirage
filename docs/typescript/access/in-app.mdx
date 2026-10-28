@@ -168,7 +168,7 @@ ws.snapshot(target, { s3? }): Promise<number>
 Workspace.load(source, { s3?, ... }): Promise<Workspace>
 ```
 
-Save the workspace to a tar and rebuild it from one. With no target, `snapshot` answers the tar's bytes; with one, its size. `target` and `source` are a path, or an object key with `s3`; `source` can also be the bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it rejects with an `EBUSY` error; a path target streams disk mount files rather than holding them whole. The tar carries the profiles and command limits (the workspace's and each mount's), and each session loads back under the restrictions it ran with. A VFS mounted at several prefixes comes back as one store at all of them; an override for one of those prefixes replaces it at every prefix that has no override of its own, and overrides giving those prefixes different VFSs while leaving one out reject with `MountOverrideError`. The scratch root, the RAM root a workspace adds when nothing is mounted at `/`, comes back as the scratch root, an override for it included.
+Save the workspace to a tar and rebuild it from one. With no target, `snapshot` answers the tar's bytes; with one, its size. `target` and `source` are a path, or an object key with `s3`; `source` can also be the bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it rejects with an `EBUSY` error; a path target streams disk mount files rather than holding them whole. The tar carries the profiles and command limits (the workspace's and each mount's), and each session loads back under the restrictions it ran with. The scratch root, the RAM root a workspace adds when nothing is mounted at `/`, comes back as the scratch root, an override for it included.
 
 ```ts
 const tar = await ws.snapshot()
@@ -181,7 +181,7 @@ const restored = await Workspace.load(tar)
 ws.copy(options?): Promise<Workspace>
 ```
 
-A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original. Sessions, history, profiles, command limits (the workspace's and each mount's), secrets declarations and CLIs come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policy objects and the route policy are not copied. A VFS mounted at several prefixes stays one store at all of them in the copy.
+A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original. Sessions, history, profiles, command limits (the workspace's and each mount's), secrets declarations and CLIs come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policy objects and the route policy are not copied.
 
 ```ts
 const fork = await ws.copy()

@@ -6,7 +6,7 @@
       "targets": [
         "command-service"
       ],
-      "command": "mkdir -p /a/keep /shadow/inner/deep; printf 'hit\\nmiss\\nhit\\n' > /a/top.txt; printf 'none\\n' > /a/keep/k.txt; printf 'hit child\\n' > /a/inner/i.txt; printf 'hit deep\\n' > /a/inner/deep/d.txt; printf 'miss\\nhit b\\n' > /b/b.txt; printf 'hit ghost\\n' > /ghost/deep/g.txt; printf 'hit shadow\\n' > /shadow/inner/shadow.txt; printf 'hit shadow deep\\n' > /shadow/inner/deep/shadow.txt",
+      "command": "mkdir -p /a/keep; printf 'hit\\nmiss\\nhit\\n' > /a/top.txt; printf 'none\\n' > /a/keep/k.txt; printf 'hit child\\n' > /a/inner/i.txt; printf 'hit deep\\n' > /a/inner/deep/d.txt; printf 'miss\\nhit b\\n' > /b/b.txt; printf 'hit ghost\\n' > /ghost/deep/g.txt",
       "expect": {
         "exit": 0,
         "stdout": "",

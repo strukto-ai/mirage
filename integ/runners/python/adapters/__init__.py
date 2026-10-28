@@ -55,7 +55,7 @@ from mirage.core.email.config import EmailConfig
 from mirage.core.github.client import GitHubApiError, github_request
 from mirage.core.hf_hub.commit import Addition, commit
 from mirage.runtime.types import ScriptSource
-from mirage.types import JsonValue, ReadSpec, WritePolicy
+from mirage.types import JsonValue, PathSpec, ReadSpec, WritePolicy
 from mirage.utils.clock import ManualClock
 from mirage.vfs.airtable import AirtableConfig, AirtableVFS
 from mirage.vfs.aliyun import AliyunConfig, AliyunVFS
@@ -2575,16 +2575,22 @@ Service = (
 )
 
 
-def build_ram(
+async def build_ram(
     mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
-    return (
+    vfs = (
         CommandService(
             metadata_only=mount.get("backend") == "metadata-service"
         )
         if mount.get("backend") in ("command-service", "metadata-service")
         else _ram(mount)
-    ), _noop
+    )
+    # Before mounting, so a file can sit under a child mount's root.
+    for relative, text in (mount.get("files") or {}).items():
+        path = PathSpec.from_str_path("/" + relative)
+        await vfs.mkdir(path.parent, parents=True)
+        await vfs.write(path, text.encode())
+    return vfs, _noop
 
 
 def _ram(mount: dict) -> RAMVFS:
@@ -3122,26 +3128,15 @@ async def build_mounts(
 ) -> tuple[dict[str, VFSMount], list[Callable[[], Awaitable[None]]]]:
     mounts: dict[str, VFSMount] = {}
     cleanups: list[Callable[[], Awaitable[None]]] = []
-    built: dict[str, object] = {}
     for mount in target["mounts"]:
-        alias_of = mount.get("alias_of")
-        if alias_of is not None:
-            # Two prefixes over one store: the shape that made cross-mount
-            # mv copy an object onto itself and then unlink the source.
-            # Reusing the built VFS is the only way to express it,
-            # since every builder otherwise allocates fresh storage.
-            vfs = built[alias_of]
-            cleanup = _noop
-        else:
-            builder = BUILDERS[mount["vfs"]]
-            # A builder is async only when its VFS needs I/O to come
-            # up — github fetches the repo tree. Awaiting whatever the
-            # table returns keeps the other forty builders plain.
-            pair = builder(mount, run_id, service)
-            if inspect.isawaitable(pair):
-                pair = await pair
-            vfs, cleanup = pair
-        built[mount["path"]] = vfs
+        builder = BUILDERS[mount["vfs"]]
+        # A builder is async only when its VFS needs I/O to come
+        # up — github fetches the repo tree. Awaiting whatever the
+        # table returns keeps the other forty builders plain.
+        pair = builder(mount, run_id, service)
+        if inspect.isawaitable(pair):
+            pair = await pair
+        vfs, cleanup = pair
         mode = (
             MountMode.READ
             if mount.get("mode") == "read"

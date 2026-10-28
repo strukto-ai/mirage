@@ -68,11 +68,9 @@ async def functions(ws: Workspace, phase: str) -> None:
 
 
 async def write(path: Path) -> None:
-    direct = RAMVFS()
     ws = Workspace(
         {
-            "/direct/": direct,
-            "/same/": direct,
+            "/direct/": RAMVFS(),
             "/nested/registered/": Mount(
                 build_vfs("portable-ram"),
                 vfs_ref="portable-ram",
@@ -97,8 +95,6 @@ async def read(path: Path) -> None:
         await check(ws, "cat /direct/note.txt", "portable\n")
         await check(ws, "cat /nested/registered/*.txt", "registered\n")
         await check(ws, "cat /nested/registered/link", "portable\n")
-        await check(ws, "printf 'one store\\n' > /same/both.txt")
-        await check(ws, "cat /direct/both.txt", "one store\n")
         await functions(ws, "read")
         registered = next(
             m for m in ws.mounts() if m.prefix == "/nested/registered/"
@@ -138,7 +134,7 @@ async def main() -> None:
         await read(path)
     print(
         "Snapshot smoke passed in both directions: "
-        "direct/registered/shared mounts and portable functions"
+        "direct/registered mounts and portable functions"
     )
 
 

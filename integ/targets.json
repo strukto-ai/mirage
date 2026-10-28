@@ -376,26 +376,6 @@
       }
     },
     {
-      "id": "ram-alias",
-      "hosts": [
-        "python",
-        "typescript-node"
-      ],
-      "mounts": [
-        {
-          "path": "/data",
-          "vfs": "ram",
-          "backend": "memory"
-        },
-        {
-          "path": "/alias",
-          "vfs": "ram",
-          "backend": "memory",
-          "alias_of": "/data"
-        }
-      ]
-    },
-    {
       "id": "redis-alias",
       "hosts": [
         "python",
@@ -4194,7 +4174,11 @@
         {
           "path": "/a",
           "vfs": "ram",
-          "backend": "command-service"
+          "backend": "command-service",
+          "files": {
+            "inner/shadow.txt": "hit shadow\n",
+            "inner/deep/shadow.txt": "hit shadow deep\n"
+          }
         },
         {
           "path": "/a/inner",
@@ -4215,12 +4199,6 @@
           "path": "/ghost/deep",
           "vfs": "ram",
           "backend": "command-service"
-        },
-        {
-          "path": "/shadow",
-          "vfs": "ram",
-          "backend": "command-service",
-          "alias_of": "/a"
         },
         {
           "path": "/plain",

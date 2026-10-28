@@ -36,10 +36,8 @@ export interface Mount {
   config?: Record<string, unknown>
   fixture?: string
   host_fixture?: string
-  // Mount this prefix over an already-built mount's storage instead of
-  // allocating fresh storage, so cp/mv can be exercised against two
-  // prefixes that address the same bytes.
-  alias_of?: string
+  // Written into a ram mount's store before mounting, so a file can sit under a child mount's root.
+  files?: Record<string, string>
   // A redis mount opened on another mount's keyspace through a second
   // spelling of its url, so the two must still compare as one store.
   keyspace_of?: string
