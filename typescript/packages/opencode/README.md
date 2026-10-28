@@ -79,7 +79,10 @@ ws = Workspace(
     },
     runtimes=[
         MontyRuntime(captures=["python", "python3"]),
-        E2BRuntime(captures=["python", "python3"], config={"sandbox_id": sandbox_id}),
+        E2BRuntime(
+            captures=["python", "python3"],
+            config={"sandbox_id": sandbox_id, "mount_type": "ssh"},
+        ),
     ],
     # route the underlying computation: numpy lines run in the e2b sandbox, the rest on monty
     route_policy=lambda ctx: "e2b" if "numpy" in ctx.line else None,
@@ -322,7 +325,7 @@ app.post('/sessions/:id/run', async (req, res) => {
   res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
 })
 
-app.listen(3000)
+app.listen(3000, '127.0.0.1')
 ```
 
 ## Contributors
