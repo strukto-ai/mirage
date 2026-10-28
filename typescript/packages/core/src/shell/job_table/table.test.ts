@@ -1681,6 +1681,38 @@ describe('JobTable process plane', () => {
     await b.close()
   })
 
+  it('finishes the lease wait after an early timer', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    let elapsed = 0
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+    const store = new RAMJobStore(0.5)
+    const b = new JobTable(store)
+    const reaped: unknown[] = []
+    b.reaper = (runs) => {
+      reaped.push(...runs.map((run) => run.tag))
+      return Promise.resolve([])
+    }
+    try {
+      await store.publish('dying', {
+        '2': { pid: 2, session: 's', runs: [{ runtime: 'docker', tag: 'dying', command: 'x' }] },
+      })
+      await store.renew('dying')
+      b.reapLapsed()
+      await vi.advanceTimersByTimeAsync(0)
+      elapsed = 499
+      await vi.advanceTimersByTimeAsync(500)
+      expect(reaped).toEqual([])
+      elapsed = 500
+      await vi.advanceTimersByTimeAsync(1)
+      expect(reaped).toEqual(['dying'])
+      expect(await store.processes()).toEqual({})
+    } finally {
+      await b.close()
+      now.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   // A store that leases no owner has no lapsed one, so a start sweeps nothing.
   it('sweeps nothing on a store without leases', async () => {
     const b = new JobTable(new RAMJobStore())

@@ -16,7 +16,6 @@ import Fastify from 'fastify'
 import rateLimit from '@fastify/rate-limit'
 import { DiskRecordClient } from '@struktoai/mirage-node'
 import { OWNERS_PREFIX, WorkspaceRegistry } from './registry.ts'
-import { ExecutionTable } from './jobs.ts'
 import type { AuthConfig } from './auth/index.ts'
 import { AuthMode, registerAuth, resolveAuthConfig } from './auth/index.ts'
 import { isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
@@ -82,7 +81,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     accountsRequired: authConfig.mode === AuthMode.Jwt,
     owners: new DiskRecordClient(stateRoot, OWNERS_PREFIX),
   })
-  const jobs = new ExecutionTable()
+  const jobs = registry.jobs
   const pidFile = pidFilePath(options.pidFile)
   const app = Fastify({ logger: false })
   void app.register(rateLimit, {

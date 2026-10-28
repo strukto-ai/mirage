@@ -165,6 +165,10 @@ async def shell(
 
     if background and upload is not None:
         await upload
+    if not entry.accepting_jobs:
+        if upload is not None:
+            await _finish_upload(upload, part)
+        raise HTTPException(status_code=404, detail="workspace not found")
     job = jobs.submit(
         workspace_id=workspace_id,
         command=req_obj.command,

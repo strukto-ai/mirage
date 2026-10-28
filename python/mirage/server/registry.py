@@ -21,6 +21,7 @@ from enum import StrEnum
 from typing import Any, Iterable
 
 from mirage import Workspace, WorkspaceRunner
+from mirage.server.jobs import ExecutionTable
 from mirage.utils.ids import new_workspace_id
 from mirage.workspace.record.disk import DiskRecordClient
 
@@ -60,6 +61,7 @@ class WorkspaceEntry:
         self.owner = owner
         self.created_at = time.time()
         self.config_digest: str | None = None
+        self.accepting_jobs = True
 
 
 class WorkspaceRegistry:
@@ -98,6 +100,7 @@ class WorkspaceRegistry:
                 ownership in memory.
         """
         self._entries: dict[str, WorkspaceEntry] = {}
+        self.jobs = ExecutionTable()
         self.accounts_required = accounts_required
         self._owners = owners
         self._removals: dict[str, asyncio.Task[WorkspaceEntry]] = {}
@@ -295,7 +298,7 @@ class WorkspaceRegistry:
     async def remove(self, workspace_id: str) -> WorkspaceEntry:
         """Delete ``workspace_id``: stop its runner and drop its state.
 
-        The workspace's links, history, sessions, metadata and owner
+        The workspace's links, history, sessions, metadata, jobs and owner
         leave with it, so a workspace created later under the same id
         starts empty, for any account. ``close_all`` (daemon shutdown)
         keeps them. The id stays registered until the deletion is done, so
@@ -318,6 +321,7 @@ class WorkspaceRegistry:
         if removal is None:
             if workspace_id not in self._entries:
                 raise KeyError(workspace_id)
+            self._entries[workspace_id].accepting_jobs = False
             removal = asyncio.create_task(
                 self._remove(self._entries[workspace_id])
             )
@@ -335,6 +339,7 @@ class WorkspaceRegistry:
             if self._owners is not None:
                 await self._owners.delete([entry.id])
         finally:
+            self.jobs.discard_workspace(entry.id)
             del self._removals[entry.id]
             self._entries.pop(entry.id, None)
             if not self._entries:
@@ -363,6 +368,7 @@ class WorkspaceRegistry:
         removal = self._removals.get(workspace_id)
         if removal is None:
             entry = self._entries.pop(workspace_id)
+            entry.accepting_jobs = False
             removal = asyncio.create_task(self._close(entry))
             self._removals[workspace_id] = removal
         return await asyncio.shield(removal)
@@ -387,6 +393,7 @@ class WorkspaceRegistry:
         ids = list(self._entries)
         for wid in ids:
             entry = self._entries.pop(wid)
+            entry.accepting_jobs = False
             try:
                 await entry.runner.stop()
             except Exception:

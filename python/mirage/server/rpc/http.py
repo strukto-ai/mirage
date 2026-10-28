@@ -116,6 +116,8 @@ class DaemonRpcServer(MirageRpcServer):
         async def run(scope: ExecutionScope) -> JsonValue:
             return await runner.call(line(scope))
 
+        if not self._entry.accepting_jobs:
+            raise RpcError(RPC_INTERNAL_ERROR, "workspace not found")
         job = self._jobs.submit(
             workspace_id=self._entry.id,
             command=command,
@@ -189,8 +191,15 @@ class RpcEndpoint:
         Raises:
             LookupError: the workspace or the session does not exist.
         """
+        entry = self._registry.visible(workspace_id, account)
+        if entry is None:
+            raise LookupError("workspace not found")
         operations = await self._mcp.tools(workspace_id, session_id, account)
-        entry = self._registry.get(workspace_id)
+        if (
+            not entry.accepting_jobs
+            or self._registry.visible(workspace_id, account) is not entry
+        ):
+            raise LookupError("workspace not found")
         return DaemonRpcServer(
             entry,
             self._jobs,

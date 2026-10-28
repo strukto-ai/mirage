@@ -1327,14 +1327,20 @@ export class JobTable {
       const lease = this.store.leaseSeconds
       if (this.reapingStopped || this.closed || Object.keys(live).length === 0 || lease === null)
         return
-      await new Promise<void>((wake) => {
-        const timer = setTimeout(wake, lease * 1000)
-        ;(timer as { unref?: () => void }).unref?.()
-        this.sweepTick = { timer, wake }
-      })
-      this.sweepTick = null
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- a teardown may stop it across the await
-      if (!this.reapingStopped && !this.closed) await this.remoteProcesses()
+      const deadline = performance.now() + lease * 1000
+      let remaining = lease * 1000
+      while (remaining > 0) {
+        await new Promise<void>((wake) => {
+          const timer = setTimeout(wake, Math.max(1, remaining))
+          ;(timer as { unref?: () => void }).unref?.()
+          this.sweepTick = { timer, wake }
+        })
+        this.sweepTick = null
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- a teardown may stop it across the await
+        if (this.reapingStopped || this.closed) return
+        remaining = deadline - performance.now()
+      }
+      await this.remoteProcesses()
     } catch (err) {
       console.debug('lapsed owners not swept:', err)
     }

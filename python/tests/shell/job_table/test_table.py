@@ -1542,6 +1542,50 @@ async def test_a_start_reaps_lapsed_owners():
     await b.close()
 
 
+@pytest.mark.asyncio
+async def test_a_start_finishes_the_lease_wait_after_an_early_timer(
+    monkeypatch,
+):
+    clock = ManualClock()
+    waits: list[float] = []
+    reaped: list[str] = []
+
+    async def sleep(seconds: float) -> None:
+        waits.append(seconds)
+        clock.advance(seconds - 0.001 if len(waits) == 1 else seconds)
+
+    async def reaper(runs: list, signum: int) -> list:
+        reaped.extend(run["tag"] for run in runs)
+        return []
+
+    monkeypatch.setattr(table_module.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(table_module.asyncio, "sleep", sleep)
+    store = RAMJobStore(lease_seconds=0.5)
+    await store.publish(
+        "dying",
+        {
+            "2": {
+                "pid": 2,
+                "session": "s",
+                "runs": [
+                    {"runtime": "docker", "tag": "dying", "command": "x"}
+                ],
+            }
+        },
+    )
+    await store.renew("dying")
+    b = JobTable(store)
+    b.reaper = reaper
+    try:
+        await b._sweep()
+        await asyncio.gather(*b._reaping)
+        assert reaped == ["dying"]
+        assert await store.processes() == {}
+        assert waits == pytest.approx([0.5, 0.001])
+    finally:
+        await b.close()
+
+
 # A store that leases no owner has no lapsed one, so a start sweeps nothing.
 @pytest.mark.asyncio
 async def test_a_start_on_a_store_without_leases_sweeps_nothing():

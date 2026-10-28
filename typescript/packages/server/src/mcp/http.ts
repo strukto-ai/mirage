@@ -68,6 +68,9 @@ export class DaemonToolOperations extends McpToolOperations {
   ): Promise<ToolResult> {
     const ws = this.entry.runner.ws
     let answer: ToolResult | undefined
+    if (!this.entry.acceptingJobs) {
+      return { content: [{ type: 'text', text: 'workspace not found' }], isError: true }
+    }
     const submitted = this.jobs.submit(
       this.entry.id,
       command,
