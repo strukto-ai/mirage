@@ -37,6 +37,45 @@
       "flags": [
         "p"
       ]
+    },
+    {
+      "id": "xxd_p_wraps_at_its_columns",
+      "seq": 17000030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '%040d' 0 | xxd -p; printf '%010d' 0 | xxd -p -c 4; printf '%010d' 0 | xxd -p -c 0; printf '' | xxd -p | wc -c; printf hi | xxd -p -c 300",
+      "expect": {
+        "exit": 0,
+        "stdout": "303030303030303030303030303030303030303030303030303030303030\n30303030303030303030\n30303030\n30303030\n3030\n30303030303030303030\n0\n6869\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p",
+        "c"
+      ]
     }
   ]
 }

@@ -25,6 +25,7 @@ enum Config {
     },
     Plain {
         uppercase: bool,
+        cols: usize,
     },
     Reverse {
         plain: bool,
@@ -51,7 +52,11 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
                 held: Vec::new(),
             })
         }
-        Config::Plain { uppercase } => Box::new(Plain(if uppercase { UPPER } else { LOWER })),
+        Config::Plain { uppercase, cols } => Box::new(Plain {
+            digits: if uppercase { UPPER } else { LOWER },
+            cols,
+            column: 0,
+        }),
         Config::Reverse { plain, segments } => Box::new(Reverse {
             decoder: if plain {
                 Decoder::Plain(Pairs::default())
@@ -144,19 +149,33 @@ impl Stream for Dump {
 }
 
 /// `-p`: the octets in hex, unbroken, and one newline at the end.
-struct Plain(&'static [u8; 16]);
+/// A plain (`-p`) dump: `cols` octets a line, all of them on one with
+/// `cols` 0, and nothing for no input.
+struct Plain {
+    digits: &'static [u8; 16],
+    cols: usize,
+    /// The octets on the line being written.
+    column: usize,
+}
 
 impl Stream for Plain {
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        out.reserve(input.len() * 2);
+        out.reserve(input.len() * 2 + input.len() / self.cols.max(1));
         for &byte in input {
-            hex(out, byte, self.0);
+            hex(out, byte, self.digits);
+            self.column += 1;
+            if self.column == self.cols {
+                out.push(b'\n');
+                self.column = 0;
+            }
         }
         Ok(())
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        out.push(b'\n');
+        if self.column > 0 {
+            out.push(b'\n');
+        }
         Ok(())
     }
 }
@@ -478,10 +497,13 @@ mod tests {
     }
 
     #[test]
-    fn a_plain_dump_ends_in_one_newline() {
-        let config = r#"{"mode":"plain","uppercase":false}"#;
-        assert_eq!(dump(config, &[b"\x00\xff", b"A"]), "00ff41\n");
-        assert_eq!(dump(config, &[]), "\n");
+    fn a_plain_dump_wraps_at_its_columns() {
+        let config = r#"{"mode":"plain","uppercase":false,"cols":2}"#;
+        assert_eq!(dump(config, &[b"\x00\xff", b"A"]), "00ff\n41\n");
+        assert_eq!(dump(config, &[b"\x00", b"\xff"]), "00ff\n");
+        assert_eq!(dump(config, &[]), "");
+        let config = r#"{"mode":"plain","uppercase":true,"cols":0}"#;
+        assert_eq!(dump(config, &[b"\xab\xcd", b"\xef"]), "ABCDEF\n");
     }
 
     #[test]
