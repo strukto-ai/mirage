@@ -18,10 +18,12 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.pipe import DevicePipe
+from mirage.core.ram import rename as rename_module
 from mirage.core.ram.rename import rename
 from mirage.types import PathSpec
 from mirage.vfs.dev.store import DevFiles, DevStore
 from mirage.vfs.ram.store import RAMStore
+from tests.fixtures.ram_capacity import capped, ram_path, table_bytes
 
 
 def spec(path: str) -> PathSpec:
@@ -195,3 +197,47 @@ async def test_rename_at_a_live_descriptor_is_eperm(pipe_end):
     assert store.files.pipe_of(path[4:]) is endpoint
     assert store.files["/plain"] == b"x"
     assert "/moved" not in store.files
+
+
+@pytest.mark.asyncio
+async def test_a_capped_rename_onto_a_file_takes_back_the_replaced_bytes():
+    accessor, usage = capped(10, {"/a": b"123", "/b": b"12345"})
+    await rename(accessor, ram_path("/a"), ram_path("/b"))
+    assert usage.used == table_bytes(accessor) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_capped_rename_onto_itself_keeps_the_file_and_its_count():
+    accessor, usage = capped(10, {"/a": b"123"})
+    usage.used = 3
+    await rename(accessor, ram_path("/a"), ram_path("/a"))
+    assert accessor.store.files == {"/a": b"123"}
+    assert usage.used == table_bytes(accessor) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_directory_move_takes_back_a_file_another_writer_put_in_its_way(
+    monkeypatch,
+):
+    accessor, usage = capped(100, {"/a/x": b"123"})
+    accessor.store.dirs.add("/a")
+    checked = rename_module.check_rename
+
+    def check_then_fill(store, src_spec, s, dst_spec, d):
+        checked(store, src_spec, s, dst_spec, d)
+        store.files["/b/x"] = b"12345"
+
+    monkeypatch.setattr(rename_module, "check_rename", check_then_fill)
+    await rename(accessor, ram_path("/a"), ram_path("/b"))
+    assert accessor.store.files == {"/b/x": b"123"}
+    assert usage.used == table_bytes(accessor) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_capped_directory_renamed_onto_itself_keeps_its_count():
+    accessor, usage = capped(100, {"/d/x": b"12345678"})
+    accessor.store.dirs.add("/d")
+    usage.used = 8
+    await rename(accessor, ram_path("/d"), ram_path("/d"))
+    assert accessor.store.files == {"/d/x": b"12345678"}
+    assert usage.used == table_bytes(accessor) == 8

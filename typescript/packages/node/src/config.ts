@@ -15,6 +15,7 @@ import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 
 import { IOConfig } from '@struktoai/mirage-core/io/config'
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
+import { parseLimit } from '@struktoai/mirage-core/utils/size'
 import { readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parseYaml } from './utils/yaml.ts'
@@ -464,6 +465,9 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
     new IOConfig(camelizeKeys(raw.io))
   }
   validateTypedBlock(raw.cache, CACHE_KEYS, 'cache')
+  if (isPlainObject(raw.cache) && raw.cache.limit !== undefined) {
+    parseLimit(raw.cache.limit as string | number, 'limit')
+  }
   validateTypedBlock(raw.index, INDEX_KEYS, 'index')
   validateIndexValues(raw.index, 'index')
   validateStoreBlock(raw.store)

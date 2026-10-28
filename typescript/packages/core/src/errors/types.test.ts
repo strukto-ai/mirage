@@ -45,6 +45,7 @@ describe('the condition vocabulary', () => {
         'EBUSY',
         'EROFS',
         'EFBIG',
+        'EDQUOT',
         'EPIPE',
         'NO_XATTR',
         'STALE_WRITE',

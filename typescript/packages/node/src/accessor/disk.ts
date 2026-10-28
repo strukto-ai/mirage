@@ -13,16 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
+import type { StorageUsage } from '@struktoai/mirage-core/vfs/capacity'
 
 export class DiskAccessor extends Accessor {
   readonly root: string
   // Whether a listing is stored with its folder's version
   // (core/disk/listing_version.ts).
   readonly folderVersions: boolean
+  /** The root's capacity and counted bytes, null when uncapped. */
+  usage: StorageUsage | null = null
 
   constructor(root: string, folderVersions = true) {
     super()
     this.root = root
     this.folderVersions = folderVersions
+  }
+
+  /** Drop its own answers, its count of the root's bytes among them: a write
+   * past the dispatcher went uncounted. Mirrors Python's. */
+  override forget(): void {
+    super.forget?.()
+    this.usage?.stale()
   }
 }

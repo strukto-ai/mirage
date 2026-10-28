@@ -230,7 +230,8 @@ def validate_cases(root: Path, cases: list[dict]) -> None:
     case never runs anywhere, which reads as "passing" everywhere. A
     `mount_read` or a `write` without a `read` is routed as an ordinary
     case, where the selector is never applied, and ``faults`` beside a
-    ``read`` goes to the scenario runner, which never arms them.
+    ``read`` goes to the scenario runner, which never arms them; so does
+    a ``mount_capacity``, and a ``capacity_door`` needs one to open.
 
     Args:
         root (Path): the integ directory.
@@ -264,6 +265,20 @@ def validate_cases(root: Path, cases: list[dict]) -> None:
             raise ValueError(
                 f"case {case['id']}: faults ride plain cases only; "
                 "the scenario runner never arms them"
+            )
+        if "capacity_door" in case and "mount_capacity" not in case:
+            raise ValueError(
+                f"case {case['id']}: capacity_door needs mount_capacity"
+            )
+        if case.get("capacity_door", "open") not in ("open", "load"):
+            raise ValueError(
+                f"case {case['id']}: capacity_door is open or load, "
+                f"got {case['capacity_door']!r}"
+            )
+        if "mount_capacity" in case and "read" in case:
+            raise ValueError(
+                f"case {case['id']}: mount_capacity rides plain cases "
+                "only; the scenario runner never applies it"
             )
         first = seen.get(case["id"])
         if first is not None:

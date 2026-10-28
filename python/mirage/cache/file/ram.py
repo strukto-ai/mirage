@@ -18,11 +18,11 @@ from collections import OrderedDict
 from mirage.cache.file.entry import CacheEntry, Holds
 from mirage.cache.file.invalidation import Invalidation, with_fill_guard
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
-from mirage.cache.file.utils import parse_limit
 from mirage.cache.lock import KeyLockMixin
 from mirage.types import PathSpec
 from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.key_prefix import under_path
+from mirage.utils.size import parse_limit
 from mirage.vfs.ram import RAMVFS
 
 
@@ -47,7 +47,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
         max_drain_bytes: int | None = None,
         clock: Clock | None = None,
     ) -> None:
-        parsed_limit = parse_limit(cache_limit)
+        parsed_limit = parse_limit(cache_limit, "limit")
         validate_max_drain_bytes(parsed_limit, max_drain_bytes)
         super().__init__()
         self._cache_limit: int = parsed_limit

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.types import MountBackend
+from mirage.utils.path import norm_dir
 from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.nfs import NFSManager
@@ -37,6 +38,7 @@ class KernelMounts:
         self._sessions = sessions
         self._mountpoints: dict[str, str] = {}
         self._managers: dict[str, FuseManager | NFSManager] = {}
+        self._writable: dict[str, tuple[str, MountBackend]] = {}
 
     def add(
         self,
@@ -94,6 +96,8 @@ class KernelMounts:
             raise
         if mountpoint is None:
             self._register(key, resolved)
+        if isinstance(manager, FuseManager):
+            self._writable[key] = (norm_dir(prefix), MountBackend(backend))
         return resolved
 
     def remove(self, prefix: str, session_id: str | None = None) -> None:
@@ -111,6 +115,7 @@ class KernelMounts:
                 return
         self._managers.pop(key, None)
         self._mountpoints.pop(key, None)
+        self._writable.pop(key, None)
 
     def close(self) -> None:
         """Unmount everything this workspace exposed."""
@@ -118,6 +123,11 @@ class KernelMounts:
             manager.unmount()
         self._managers.clear()
         self._mountpoints.clear()
+        self._writable.clear()
+
+    def writable(self) -> list[tuple[str, MountBackend]]:
+        """The prefixes FUSE or FSKit expose, each with its backend."""
+        return list(self._writable.values())
 
     @property
     def mountpoint(self) -> str | None:

@@ -36,6 +36,7 @@ describe('classify', () => {
     ['EIO', 'EIO'],
     ['EBUSY', 'EBUSY'],
     ['EROFS', 'EROFS'],
+    ['EDQUOT', 'EDQUOT'],
     ['ENODATA', 'NO_XATTR'],
     ['ENOATTR', 'NO_XATTR'],
   ])('names a stamped %s code %s', (code, expected) => {

@@ -21,6 +21,7 @@ import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { DevicePipe } from '../dev/pipe.ts'
 import { copy } from './copy.ts'
+import { capped, ramPath, tableBytes } from '../../test-utils.ts'
 
 const DEC = new TextDecoder()
 
@@ -141,4 +142,14 @@ it.each([
     expect(DEC.decode(await consumed)).toBe('hello')
   }
   if (fromPipe) expect(store.files.pipeOf(src)).toBe(source)
+})
+
+describe('copy against a capacity', () => {
+  it('charges the destination its growth', async () => {
+    const [acc, usage] = capped(10, { '/a': '12345', '/b': '123' })
+    await copy(acc, ramPath('/a'), ramPath('/b'))
+    expect([usage.used, tableBytes(acc)]).toEqual([10, 10])
+    await expect(copy(acc, ramPath('/a'), ramPath('/c'))).rejects.toMatchObject({ code: 'EDQUOT' })
+    expect(acc.store.files.has('/c')).toBe(false)
+  })
 })

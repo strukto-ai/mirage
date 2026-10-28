@@ -125,3 +125,19 @@ export function checkMkdirTarget(
     throw component === key ? eexist(named) : enotdir(named)
   }
 }
+
+/**
+ * Throw EDQUOT for a key growing to `size` bytes past its store's capacity;
+ * an uncapped store takes any size. Called just before the change, with no
+ * await between, so the check and the change run as one step. Mirrors
+ * Python's `check_capacity`.
+ */
+export function checkCapacity(
+  accessor: RAMAccessor,
+  spec: PathSpec,
+  key: string,
+  size: number,
+): void {
+  const usage = accessor.store.usage
+  if (usage !== null) usage.admit(spec, size - (accessor.store.files.get(key)?.byteLength ?? 0))
+}

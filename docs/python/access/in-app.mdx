@@ -162,7 +162,12 @@ await ws.snapshot(target, *, compress=None, s3=None) -> int
 await Workspace.load(source, *, s3=None, ...) -> Workspace
 ```
 
-Save the workspace to a tar and rebuild it from one. `target` and `source` are a path or a file object, or an object key with `s3=`. `snapshot` answers the tar's size in bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`); disk mount files are streamed, never held whole. The tar carries the profiles and command limits (the workspace's and each mount's), and each session loads back under the restrictions it ran with. The scratch root, the RAM root a workspace adds when nothing is mounted at `/`, comes back as the scratch root, an override for it included.
+Save the workspace to a tar and rebuild it from one. `target` and `source` are a path, a file object, or an object key with `s3=`. `snapshot` returns the tar's size in bytes.
+
+- While it captures, new lines and file writes wait. Running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`). Disk mount files are streamed, never held whole.
+- The tar keeps the profiles, the command limits and each store's `capacity`. Each session loads back under the restrictions it ran with.
+- An override brings its own `capacity`, or none.
+- The scratch root, the RAM root added when nothing is mounted at `/`, comes back as the scratch root, an override for it included.
 
 ```python
 await ws.snapshot("run.tar")

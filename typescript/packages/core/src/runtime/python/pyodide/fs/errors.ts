@@ -35,6 +35,7 @@ const CONDITION_KEY: Record<FsCondition, keyof ErrnoCodes> = {
   EBUSY: 'EBUSY',
   EROFS: 'EROFS',
   EFBIG: 'EFBIG',
+  EDQUOT: 'EDQUOT',
   EPIPE: 'EPIPE',
   NO_XATTR: 'ENODATA',
   STALE_WRITE: 'ESTALE',

@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { CapacityState, type CapacityResult } from '../../types.ts'
+import { CapacityState, type CapacityResult, type PathSpec } from '../../types.ts'
+import { norm } from '../../utils/path.ts'
 
 /**
  * The server's memory, for df, from `INFO memory`: its `maxmemory` limit as
@@ -47,4 +48,22 @@ export async function capacity(accessor: RedisAccessor): Promise<CapacityResult>
     used: Number(used),
     available: Math.max(Number(limit) - Number(used), 0),
   }
+}
+
+/** The bytes at `path`, a directory's files included; 0 for none. Mirrors
+ * Python's `size_of`. */
+export async function sizeOf(accessor: RedisAccessor, path: PathSpec): Promise<number> {
+  const store = accessor.store
+  const key = norm(path.mountPath)
+  if (await store.hasFile(key)) return store.fileLen(key)
+  const files = await store.listFiles(key.endsWith('/') ? key : `${key}/`)
+  const sizes = await Promise.all(files.map((f) => store.fileLen(f)))
+  return sizes.reduce((a, b) => a + b, 0)
+}
+
+/** The bytes every file of the mount holds. Mirrors Python's `count`. */
+export async function count(accessor: RedisAccessor): Promise<number> {
+  const store = accessor.store
+  const sizes = await Promise.all((await store.listFiles()).map((f) => store.fileLen(f)))
+  return sizes.reduce((a, b) => a + b, 0)
 }

@@ -20,12 +20,13 @@ import { norm } from '../../utils/path.ts'
 
 import { einval } from '../../errors/fs.ts'
 import { activePipe } from '../dev/device.ts'
-import { checkDestParents, checkWriteTarget } from './dest.ts'
+import { checkCapacity, checkDestParents, checkWriteTarget } from './dest.ts'
 
 /**
  * Set one key's length, padding with NULs or cutting it short. A live pipe
  * has no length to set: EINVAL, as ftruncate(2) answers for one (GNU:
- * `truncate -s 0 >(cat)` is "Invalid argument"). Mirrors Python's truncate.
+ * `truncate -s 0 >(cat)` is "Invalid argument"), and for a length that is not
+ * a whole, non-negative number of bytes. Mirrors Python's truncate.
  */
 export async function truncate(
   accessor: RAMAccessor,
@@ -35,10 +36,13 @@ export async function truncate(
 ): Promise<void> {
   const timer = startOp()
   const p = norm(path.mountPath)
-  if (activePipe(accessor, p) !== null) throw einval(path)
+  if (activePipe(accessor, p) !== null || !Number.isSafeInteger(length) || length < 0) {
+    throw einval(path)
+  }
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
   if (noCreate && !accessor.store.files.has(p)) return
+  checkCapacity(accessor, path, p, length)
   const existing = accessor.store.files.get(p) ?? new Uint8Array()
   const out = new Uint8Array(length)
   out.set(existing.subarray(0, Math.min(existing.byteLength, length)))

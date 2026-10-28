@@ -14,6 +14,13 @@
 
 import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
+import {
+  type Charge,
+  type StorageUsage,
+  charge,
+  storageUsage,
+} from '@struktoai/mirage-core/vfs/capacity'
+import { count, sizeOf } from '../../core/disk/capacity.ts'
 import { chmod, mkdir, stat as fsStat, statfs as fsStatfs, writeFile } from 'node:fs/promises'
 import { createWriteStream, mkdirSync, realpathSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
@@ -51,11 +58,15 @@ export interface DiskVFSOptions {
   // local POSIX filesystem; turn them off for an NFS, SMB or FUSE root, whose
   // change times may not move with the folder's entries.
   folderVersions?: boolean
+  // The most bytes the root may hold: a size like `100MB` or a count of
+  // bytes. Counted at the first write or `df`, and again after a write past
+  // mirage (a native program).
+  capacity?: number | string | null
 }
 
 export interface DiskVFSState {
   type: string
-  config?: { root: string; folderVersions: boolean }
+  config?: { root: string; folderVersions: boolean; capacity?: number }
   /**
    * Each file as bytes, or as a host path read by whoever consumes the
    * state (a snapshot tar, a copy).
@@ -91,6 +102,7 @@ export class DiskVFS extends BaseVFS {
   readonly folderVersions: boolean
   override walkLimit: number = LOCAL_WALK_LIMIT
   override readonly accessor: DiskAccessor
+  override readonly usage: StorageUsage | null
 
   constructor(options: DiskVFSOptions) {
     let folderVersions: unknown = options.folderVersions
@@ -106,6 +118,18 @@ export class DiskVFS extends BaseVFS {
     // Links resolved so one folder has one location; `..` collapses before links here, unlike Python.
     this.root = realpathSync(resolved)
     this.accessor = new DiskAccessor(this.root, folderVersions)
+    this.usage = storageUsage(this.name, options.capacity)
+    this.accessor.usage = this.usage
+  }
+
+  private charge<T>(path: PathSpec, write: (held: Charge) => Promise<T>): Promise<T> {
+    return charge(
+      this.usage,
+      path,
+      (p) => sizeOf(this.accessor, p),
+      () => count(this.accessor),
+      write,
+    )
   }
 
   // The resolved root is the storage: two DiskVFS instances on one resolved
@@ -117,6 +141,12 @@ export class DiskVFS extends BaseVFS {
   // A real filesystem reports real numbers (QUOTA). GNU df: used counts
   // reserved blocks (blocks - bfree), available excludes them (bavail).
   override async capacity(): Promise<CapacityResult> {
+    if (this.usage !== null) {
+      // Counted afresh, so a write past mirage shows.
+      this.usage.stale()
+      await this.usage.counted(() => count(this.accessor))
+      return this.usage.report()
+    }
     const st = await fsStatfs(this.root)
     const bsize = st.bsize
     return {
@@ -163,7 +193,9 @@ export class DiskVFS extends BaseVFS {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    return diskWrite(this.accessor, path, data, false, signal, atomic)
+    return this.charge(path, (held) =>
+      diskWrite(this.accessor, path, held.stream(data), false, signal, atomic),
+    )
   }
 
   override append(
@@ -172,15 +204,20 @@ export class DiskVFS extends BaseVFS {
     _handed?: Handed,
     signal?: AbortSignal,
   ): Promise<void> {
-    return diskWrite(this.accessor, path, data, true, signal)
+    return this.charge(path, (held) =>
+      diskWrite(this.accessor, path, held.stream(data, true), true, signal),
+    )
   }
 
   override pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
-    return diskPwrite(this.accessor, path, data, offset)
+    return this.charge(path, (held) => {
+      if (data.byteLength > 0) held.growTo(offset + data.byteLength)
+      return diskPwrite(this.accessor, path, data, offset)
+    })
   }
 
   override create(path: PathSpec): Promise<void> {
-    return diskCreate(this.accessor, path)
+    return this.charge(path, () => diskCreate(this.accessor, path))
   }
 
   override mkdir(path: PathSpec, parents = false): Promise<void> {
@@ -188,7 +225,7 @@ export class DiskVFS extends BaseVFS {
   }
 
   override unlink(path: PathSpec): Promise<void> {
-    return diskUnlink(this.accessor, path)
+    return this.charge(path, () => diskUnlink(this.accessor, path))
   }
 
   override rmdir(path: PathSpec): Promise<void> {
@@ -196,19 +233,25 @@ export class DiskVFS extends BaseVFS {
   }
 
   override rmR(path: PathSpec): Promise<void> {
-    return diskRmR(this.accessor, path)
+    return this.charge(path, () => diskRmR(this.accessor, path))
   }
 
   override rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    return diskRename(this.accessor, src, dst)
+    return this.charge(src, () => this.charge(dst, () => diskRename(this.accessor, src, dst)))
   }
 
   override copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    return diskCopy(this.accessor, src, dst)
+    return this.charge(dst, async (held) => {
+      if (this.usage !== null) held.growTo(await sizeOf(this.accessor, src))
+      await diskCopy(this.accessor, src, dst)
+    })
   }
 
   override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
-    return diskTruncate(this.accessor, path, length, noCreate)
+    return this.charge(path, async (held) => {
+      if (!noCreate || (await this.exists(path))) held.growTo(length)
+      await diskTruncate(this.accessor, path, length, noCreate)
+    })
   }
 
   override setattr(
@@ -244,6 +287,7 @@ export class DiskVFS extends BaseVFS {
       config: {
         root: this.root,
         folderVersions: this.folderVersions,
+        ...(this.usage !== null ? { capacity: this.usage.limit } : {}),
       },
       files,
       modes,
@@ -267,5 +311,6 @@ export class DiskVFS extends BaseVFS {
       const mode = state.modes?.[rel]
       if (mode !== undefined) await chmod(full, mode)
     }
+    this.usage?.stale()
   }
 }

@@ -27,6 +27,7 @@ from mirage.types import CapacityResult, CapacityState, MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.mount.spec import Mount
 
 
 class _QuotaVFS(RAMVFS):
@@ -270,3 +271,25 @@ async def test_df_follows_symlink_to_target_mount():
     code, out = await _run(ws, "df /mem/link")
     assert code == 0
     assert out.splitlines()[-1].split()[-1] == "/q"
+
+
+@pytest.mark.asyncio
+async def test_df_and_stat_report_a_capped_store():
+    ws = Workspace(
+        {"/cap": Mount(RAMVFS(capacity="1MB"), mode=MountMode.WRITE)},
+        mode=MountMode.WRITE,
+    )
+    try:
+        await ws.shell("head -c 1000 /dev/zero > /cap/z")
+        code, out = await _run(ws, "df /cap")
+        assert code == 0
+        assert out == (
+            "Filesystem     1K-blocks Used Available Use% Mounted on\n"
+            "ram                 1024    1      1024   1% /cap\n"
+        )
+        assert await _run(ws, "stat -f -c '%b %S %a' /cap") == (
+            0,
+            "1024 1024 1024\n",
+        )
+    finally:
+        await ws.close()

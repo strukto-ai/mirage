@@ -19,7 +19,13 @@ import { lstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { OPFSAccessor } from '../../accessor/opfs.ts'
 import { iterEntries, toWritableChunk } from '../../core/opfs/utils.ts'
-import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import type { CapacityResult, PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import {
+  type Charge,
+  type StorageUsage,
+  charge,
+  storageUsage,
+} from '@struktoai/mirage-core/vfs/capacity'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { readdir as opfsReaddir } from '../../core/opfs/readdir.ts'
 import { read as opfsRead } from '../../core/opfs/read.ts'
@@ -36,14 +42,19 @@ import { rmR as opfsRmR } from '../../core/opfs/rm.ts'
 import { rename as opfsRename } from '../../core/opfs/rename.ts'
 import { copy as opfsCopy } from '../../core/opfs/copy.ts'
 import { truncate as opfsTruncate } from '../../core/opfs/truncate.ts'
+import { count as opfsCount, sizeOf as opfsSizeOf } from '../../core/opfs/capacity.ts'
 import { LOCAL_WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface OPFSVFSOptions {
   root?: string
+  // The most bytes the root may hold: a size like `100MB` or a count of
+  // bytes. Counted at the first write or `df`.
+  capacity?: number | string | null
 }
 
 export interface OPFSVFSState {
   type: string
+  config?: { capacity?: number }
   files: Record<string, Uint8Array>
   dirs: string[]
 }
@@ -99,6 +110,7 @@ export class OPFSVFS extends BaseVFS {
   override readonly sizesAlwaysKnown: boolean = true
   readonly rootName: string
   override readonly accessor: OPFSAccessor
+  override readonly usage: StorageUsage | null
   private rootHandle: FileSystemDirectoryHandle | null = null
   private openPromise: Promise<FileSystemDirectoryHandle> | null = null
 
@@ -108,6 +120,26 @@ export class OPFSVFS extends BaseVFS {
     super()
     this.rootName = options.root ?? ''
     this.accessor = new OPFSAccessor(this)
+    this.usage = storageUsage(this.name, options.capacity)
+  }
+
+  private charge<T>(path: PathSpec, write: (held: Charge) => Promise<T>): Promise<T> {
+    return charge(
+      this.usage,
+      path,
+      (p) => opfsSizeOf(this.accessor, p),
+      () => opfsCount(this.accessor),
+      write,
+    )
+  }
+
+  /** df's QUOTA row for a capped root, counted afresh so another tab's
+   * writes show; the base answer otherwise. */
+  override async capacity(): Promise<CapacityResult> {
+    if (this.usage === null) return super.capacity()
+    this.usage.stale()
+    await this.usage.counted(() => opfsCount(this.accessor))
+    return this.usage.report()
   }
   override async close(): Promise<void> {
     this.rootHandle = null
@@ -162,7 +194,7 @@ export class OPFSVFS extends BaseVFS {
   }
 
   override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
-    return opfsWrite(this.accessor, path, data, signal)
+    return this.charge(path, (held) => opfsWrite(this.accessor, path, held.stream(data), signal))
   }
 
   override append(
@@ -171,11 +203,13 @@ export class OPFSVFS extends BaseVFS {
     _handed?: Handed,
     signal?: AbortSignal,
   ): Promise<void> {
-    return opfsAppend(this.accessor, path, data, signal)
+    return this.charge(path, (held) =>
+      opfsAppend(this.accessor, path, held.stream(data, true), signal),
+    )
   }
 
   override create(path: PathSpec): Promise<void> {
-    return opfsCreate(this.accessor, path)
+    return this.charge(path, () => opfsCreate(this.accessor, path))
   }
 
   override mkdir(path: PathSpec, parents = false): Promise<void> {
@@ -183,7 +217,7 @@ export class OPFSVFS extends BaseVFS {
   }
 
   override unlink(path: PathSpec): Promise<void> {
-    return opfsUnlink(this.accessor, path)
+    return this.charge(path, () => opfsUnlink(this.accessor, path))
   }
 
   override rmdir(path: PathSpec): Promise<void> {
@@ -191,19 +225,25 @@ export class OPFSVFS extends BaseVFS {
   }
 
   override rmR(path: PathSpec): Promise<void> {
-    return opfsRmR(this.accessor, path)
+    return this.charge(path, () => opfsRmR(this.accessor, path))
   }
 
   override rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    return opfsRename(this.accessor, src, dst)
+    return this.charge(src, () => this.charge(dst, () => opfsRename(this.accessor, src, dst)))
   }
 
   override copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    return opfsCopy(this.accessor, src, dst)
+    return this.charge(dst, async (held) => {
+      if (this.usage !== null) held.growTo(await opfsSizeOf(this.accessor, src))
+      await opfsCopy(this.accessor, src, dst)
+    })
   }
 
   override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
-    return opfsTruncate(this.accessor, path, length, noCreate)
+    return this.charge(path, async (held) => {
+      if (!noCreate || (await this.exists(path))) held.growTo(length)
+      await opfsTruncate(this.accessor, path, length, noCreate)
+    })
   }
 
   override async getState(): Promise<OPFSVFSState> {
@@ -215,6 +255,7 @@ export class OPFSVFS extends BaseVFS {
     dirs.sort(compareCodePoints)
     return {
       type: this.name,
+      ...(this.usage !== null ? { config: { capacity: this.usage.limit } } : {}),
       files,
       dirs,
     }
@@ -240,5 +281,6 @@ export class OPFSVFS extends BaseVFS {
       await writable.write(toWritableChunk(data))
       await writable.close()
     }
+    this.usage?.stale()
   }
 }

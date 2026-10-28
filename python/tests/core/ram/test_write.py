@@ -22,11 +22,14 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.constants import STREAM_PUBLISH_SECONDS
+from mirage.core.ram.unlink import unlink
 from mirage.core.ram.write import write
+from mirage.errors.types import QuotaExceededError
 from mirage.types import PathSpec
 from mirage.vfs.dev.store import DevFiles, DevStore
 from mirage.vfs.ram.store import RAMStore
 from tests.fixtures.held_loop import HeldLoop, run_on_held_loop
+from tests.fixtures.ram_capacity import capped, ram_path, table_bytes
 
 
 @pytest.fixture
@@ -347,3 +350,132 @@ def test_the_publish_interval_is_spent_on_the_loop_clock():
 
     assert run_on_held_loop(main) == b"abc"
     assert seen == [b""]
+
+
+@pytest.mark.asyncio
+async def test_a_capped_bytes_write_charges_what_it_adds():
+    accessor, usage = capped(10, {"/old": b"123"})
+    await write(accessor, ram_path("/f"), b"1234")
+    await write(accessor, ram_path("/f"), b"12", append=True)
+    assert usage.used == table_bytes(accessor) == 9
+
+
+@pytest.mark.asyncio
+async def test_a_refused_bytes_write_leaves_the_table_as_it_was():
+    accessor, usage = capped(10, {"/f": b"12345678"})
+    with pytest.raises(QuotaExceededError) as err:
+        await write(accessor, ram_path("/g"), b"123")
+    assert err.value.filename == "/g"
+    assert "/g" not in accessor.store.files
+    assert usage.used == table_bytes(accessor) == 8
+
+
+@pytest.mark.asyncio
+async def test_an_overwrite_that_shrinks_passes_over_the_cap():
+    accessor, usage = capped(5, {"/f": b"1234567890"})
+    await write(accessor, ram_path("/f"), b"123456789")
+    with pytest.raises(QuotaExceededError):
+        await write(accessor, ram_path("/f"), b"1", append=True)
+    assert usage.used == table_bytes(accessor) == 9
+
+
+@pytest.mark.asyncio
+async def test_an_atomic_stream_charges_its_growth_once():
+    accessor, usage = capped(10, {"/f": b"12345678"})
+    await write(
+        accessor, ram_path("/f"), _chunks_of(b"12345", b"6789"), atomic=True
+    )
+    assert accessor.store.files["/f"] == b"123456789"
+    assert usage.used == table_bytes(accessor) == 9
+
+
+@pytest.mark.asyncio
+async def test_a_stream_refused_midway_keeps_the_chunks_before():
+    accessor, usage = capped(10)
+    with pytest.raises(QuotaExceededError):
+        await write(
+            accessor, ram_path("/s"), _chunks_of(b"1234", b"5678", b"9abc")
+        )
+    assert accessor.store.files["/s"] == b"12345678"
+    assert (usage.used, usage.pending) == (8, 0)
+
+
+async def _bytes_then_text():
+    yield b"1234"
+    yield "5678"
+
+
+@pytest.mark.asyncio
+async def test_a_publish_that_fails_to_join_its_chunks_holds_nothing():
+    accessor, usage = capped(10)
+    with pytest.raises(TypeError):
+        await write(accessor, ram_path("/s"), _bytes_then_text())
+    assert (usage.used, usage.pending) == (0, 0)
+    await write(accessor, ram_path("/t"), b"x" * 10)
+
+
+async def _unjoinable_then(tail: bytes | None):
+    yield b"1234"
+    yield "5678"
+    await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
+    if tail is not None:
+        yield tail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tail", [b"9999", None], ids=["more", "end"])
+async def test_a_timer_publish_that_fails_fails_the_write(tail):
+    accessor, usage = capped(100)
+    with pytest.raises(TypeError):
+        await write(accessor, ram_path("/s"), _unjoinable_then(tail))
+    assert accessor.store.files["/s"] == b""
+    assert (usage.used, usage.pending) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_stream_counts_the_change_its_splice_made():
+    accessor, usage = capped(100)
+    hold = asyncio.Event()
+
+    async def source():
+        yield b"aaaa"
+        await hold.wait()
+        yield b"bb"
+
+    writing = asyncio.create_task(write(accessor, ram_path("/s"), source()))
+    await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
+    await write(accessor, ram_path("/s"), b"xxxxxxxx")
+    hold.set()
+    await writing
+    assert accessor.store.files["/s"] == b"xxxxbbxx"
+    assert (usage.used, usage.pending) == (8, 0)
+    assert usage.used == table_bytes(accessor)
+
+
+@pytest.mark.asyncio
+async def test_a_shortened_stream_pads_its_gap_counted_not_admitted():
+    accessor, usage = capped(5)
+    hold = asyncio.Event()
+
+    async def source():
+        yield b"aaaa"
+        await hold.wait()
+        yield b"b"
+
+    writing = asyncio.create_task(write(accessor, ram_path("/s"), source()))
+    await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
+    await unlink(accessor, ram_path("/s"))
+    hold.set()
+    await writing
+    assert accessor.store.files["/s"] == b"\0\0\0\0b"
+    assert usage.used == table_bytes(accessor) == 5
+    with pytest.raises(QuotaExceededError):
+        await write(accessor, ram_path("/t"), b"1")
+
+
+@pytest.mark.asyncio
+async def test_a_replacing_stream_gives_back_the_old_bytes_first():
+    accessor, usage = capped(10, {"/s": b"12345678"})
+    await write(accessor, ram_path("/s"), _chunks_of(b"abc", b"def"))
+    assert accessor.store.files["/s"] == b"abcdef"
+    assert (usage.used, usage.pending) == (6, 0)

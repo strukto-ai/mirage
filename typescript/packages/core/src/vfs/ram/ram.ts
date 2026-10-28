@@ -16,9 +16,10 @@ import { RAMAccessor } from '../../accessor/ram.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
+import { type StorageUsage, storageUsage } from '../capacity.ts'
 import { LOCAL_WALK_LIMIT } from '../constants.ts'
 import { RAMStore, type RAMAttrs } from './store.ts'
-import type { PathSpec, FileStat, SetAttrFields } from '../../types.ts'
+import type { CapacityResult, PathSpec, FileStat, SetAttrFields } from '../../types.ts'
 import type { Handed } from '../types.ts'
 import { readdir as ramReaddir } from '../../core/ram/readdir.ts'
 import { read as devAwareRead, readRange as devAwareReadRange } from '../../core/dev/read.ts'
@@ -37,8 +38,15 @@ import { truncate as ramTruncate } from '../../core/ram/truncate.ts'
 import { setAttrs as ramSetAttrs } from '../../core/ram/set_attrs.ts'
 import { tree as ramTree } from '../../core/ram/readdir.ts'
 
+export interface RAMVFSOptions {
+  /** The most bytes the store may hold: a size like `100MB` or a count of
+   * bytes; left out or null, no limit. Every mount of the store shares it. */
+  capacity?: number | string | null
+}
+
 export interface RAMVFSState {
   type: string
+  config?: { capacity?: number }
   files?: Record<string, Uint8Array>
   dirs?: string[]
   modified?: Record<string, string>
@@ -51,13 +59,22 @@ export class RAMVFS extends BaseVFS {
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
-  readonly store = new RAMStore()
-  override readonly accessor = new RAMAccessor(this.store)
+  override readonly usage: StorageUsage | null
+  readonly store: RAMStore
+  override readonly accessor: RAMAccessor
   override readonly readsRanges: boolean = true
 
   override readonly local: boolean = true
 
   override walkLimit: number = LOCAL_WALK_LIMIT
+
+  /** @throws VFSConfigError when `capacity` is not a size. */
+  constructor(options: RAMVFSOptions = {}) {
+    super()
+    this.usage = storageUsage(this.name, options.capacity, 0)
+    this.store = new RAMStore(this.usage)
+    this.accessor = new RAMAccessor(this.store)
+  }
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     return ramTree(this.accessor, path)
@@ -163,6 +180,7 @@ export class RAMVFS extends BaseVFS {
     for (const [k, v] of this.store.attrs) attrs[k] = { ...v }
     return {
       type: this.name,
+      ...(this.usage !== null ? { config: { capacity: this.usage.limit } } : {}),
       files,
       dirs: [...this.store.dirs],
       modified,
@@ -180,5 +198,11 @@ export class RAMVFS extends BaseVFS {
     for (const [k, v] of Object.entries(state.modified ?? {})) this.store.modified.set(k, v)
     this.store.attrs.clear()
     for (const [k, v] of Object.entries(state.attrs ?? {})) this.store.attrs.set(k, { ...v })
+  }
+
+  /** df's QUOTA row for a capped store; the base UNKNOWN otherwise. Mirrors
+   * Python's. */
+  override capacity(): Promise<CapacityResult> {
+    return this.usage !== null ? Promise.resolve(this.usage.report()) : super.capacity()
   }
 }

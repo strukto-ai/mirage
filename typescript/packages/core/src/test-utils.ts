@@ -20,7 +20,7 @@ import type { Handed } from './vfs/types.ts'
 import type { NamespaceLinks, OpKwargs } from './view/types.ts'
 import type { MountRow } from './workspace/types.ts'
 import type { WriteContext } from './cache/types.ts'
-import { type FileStat, MountMode, type PathSpec, type Visibility } from './types.ts'
+import { type FileStat, MountMode, PathSpec, type Visibility } from './types.ts'
 import { BaseVFS } from './vfs/base.ts'
 import { RAMVFS } from './vfs/ram/ram.ts'
 import { stripSlash } from './utils/slash.ts'
@@ -34,6 +34,32 @@ import { NamespaceReader } from './workspace/dispatcher/reader.ts'
 import { enotsup } from './errors/fs.ts'
 import { IOResult, type ByteSource } from './io/types.ts'
 import type { DispatchFn } from './runtime/types.ts'
+import type { RAMAccessor } from './accessor/ram.ts'
+import type { StorageUsage } from './vfs/capacity.ts'
+
+/** A RAM accessor whose store holds at most `cap` bytes. */
+export function capped(
+  cap: number,
+  files: Record<string, string> = {},
+): [RAMAccessor, StorageUsage] {
+  const vfs = new RAMVFS({ capacity: cap })
+  for (const [key, text] of Object.entries(files))
+    vfs.store.files.set(key, new TextEncoder().encode(text))
+  if (vfs.usage === null) throw new Error('a capped store has a usage')
+  return [vfs.accessor, vfs.usage]
+}
+
+/** A RAM mount path for core calls: `/a/b` keyed as the store keys it. */
+export function ramPath(virtual: string): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, vfsPath: stripSlash(virtual) })
+}
+
+/** The bytes a RAM accessor's table holds. */
+export function tableBytes(accessor: RAMAccessor): number {
+  let total = 0
+  for (const data of accessor.store.files.values()) total += data.byteLength
+  return total
+}
 
 /**
  * A VFS called the way a mount calls it: through the dispatcher, one index

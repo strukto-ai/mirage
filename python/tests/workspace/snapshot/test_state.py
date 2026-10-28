@@ -37,6 +37,7 @@ from mirage import (
 )
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
+from mirage.errors.types import QuotaExceededError
 from mirage.io import IOResult
 from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
@@ -1811,3 +1812,47 @@ async def test_a_scratch_root_marker_off_the_root_is_ignored():
     rows["/data/"][MountKey.ANCHOR] = True
     del rows["/"][MountKey.ANCHOR]
     assert not build_mount_args(state, None, None).anchored
+
+
+@pytest.mark.asyncio
+async def test_a_ram_capacity_round_trips_through_state_copy_and_load():
+    ws = Workspace({"/a": Mount(RAMVFS(capacity=10), mode=MountMode.WRITE)})
+    try:
+        state = await to_state_dict(ws)
+        restored = await Workspace.from_state(state)
+        copied = await ws.copy()
+        for other in (restored, copied):
+            try:
+                vfs = other.mount("/a/").vfs
+                assert isinstance(vfs, RAMVFS)
+                assert vfs.usage is not None and vfs.usage.limit == 10
+                await other.vfs.write("/a/f", b"12345678")
+                with pytest.raises(QuotaExceededError):
+                    await other.vfs.write("/a/g", b"123")
+            finally:
+                await other.close()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_override_brings_its_own_capacity():
+    ws = Workspace({"/a": Mount(RAMVFS(capacity=10), mode=MountMode.WRITE)})
+    try:
+        await ws.vfs.write("/a/f", b"x" * 8)
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    smaller = RAMVFS(capacity=1)
+    uncapped = RAMVFS()
+    over = await Workspace.from_state(state, mounts={"/a": smaller})
+    free = await Workspace.from_state(state, mounts={"/a": uncapped})
+    try:
+        assert await over.vfs.read("/a/f") == b"x" * 8
+        with pytest.raises(QuotaExceededError):
+            await over.vfs.write("/a/g", b"1")
+        await free.vfs.write("/a/g", b"y" * 100)
+        assert uncapped.usage is None
+    finally:
+        await over.close()
+        await free.close()

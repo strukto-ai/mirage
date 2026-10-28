@@ -20,6 +20,7 @@ import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { DevicePipe } from '../dev/pipe.ts'
 import { rename } from './rename.ts'
+import { capped, ramPath, tableBytes } from '../../test-utils.ts'
 
 function mkPath(virtual: string): PathSpec {
   return new PathSpec({
@@ -185,4 +186,34 @@ describe('core/ram rename at a live descriptor', () => {
       expect(store.files.has('/moved')).toBe(false)
     },
   )
+})
+
+describe('rename against a capacity', () => {
+  it('takes back the bytes of a file it replaces', async () => {
+    const [acc, usage] = capped(10, { '/a': '123', '/b': '12345' })
+    await rename(acc, ramPath('/a'), ramPath('/b'))
+    expect([usage.used, tableBytes(acc)]).toEqual([3, 3])
+  })
+
+  it('keeps a file renamed onto itself, and its count', async () => {
+    const [acc, usage] = capped(10, { '/a': '123' })
+    usage.used = 3
+    await rename(acc, ramPath('/a'), ramPath('/a'))
+    expect([[...acc.store.files.keys()], usage.used, tableBytes(acc)]).toEqual([['/a'], 3, 3])
+  })
+
+  it('keeps a directory renamed onto itself, and its count', async () => {
+    const [acc, usage] = capped(100, { '/d/x': '12345678' })
+    acc.store.dirs.add('/d')
+    usage.used = 8
+    await rename(acc, ramPath('/d'), ramPath('/d'))
+    expect([[...acc.store.files.keys()], usage.used, tableBytes(acc)]).toEqual([['/d/x'], 8, 8])
+  })
+
+  it('takes back what a directory move overwrites', async () => {
+    const [acc, usage] = capped(100, { '/a/x': '123', '/b/x': '12345' })
+    acc.store.dirs.add('/a')
+    await rename(acc, ramPath('/a'), ramPath('/b'))
+    expect([[...acc.store.files.keys()], usage.used, tableBytes(acc)]).toEqual([['/b/x'], 3, 3])
+  })
 })

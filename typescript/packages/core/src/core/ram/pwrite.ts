@@ -20,7 +20,7 @@ import { norm } from '../../utils/path.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 
 import { activeDevice, activePipe } from '../dev/device.ts'
-import { checkDestParents, checkWriteTarget } from './dest.ts'
+import { checkCapacity, checkDestParents, checkWriteTarget } from './dest.ts'
 
 /**
  * Write bytes at an offset of one key. A live pipe has no offset: its bytes
@@ -49,6 +49,10 @@ export async function pwrite(
   checkWriteTarget(accessor, path, p)
   if (activeDevice(accessor, p) === null) {
     const existing = accessor.store.files.get(p) ?? new Uint8Array()
+    if (data.byteLength > 0) {
+      const end = Math.max(existing.byteLength, offset + data.byteLength)
+      checkCapacity(accessor, path, p, end)
+    }
     accessor.store.files.set(p, spliceWindow(existing, offset, data))
   }
   accessor.store.modified.set(p, nowIso())

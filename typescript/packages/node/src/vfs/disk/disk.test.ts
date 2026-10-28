@@ -453,3 +453,61 @@ describe('DiskVFS — cp -r past a folder it may not open', () => {
     }
   })
 })
+
+describe('DiskVFS capacity', () => {
+  it('refuses a capacity that is not a size', () => {
+    expect(() => new DiskVFS({ root: tmpRoot().root, capacity: '1.5MB' })).toThrow(
+      new VFSConfigError('disk: capacity must be a size like 100MB, got "1.5MB"'),
+    )
+  })
+
+  it('counts what the root holds and refuses growth', async () => {
+    const root = tmpRoot().root
+    await writeFile(join(root, 'pre'), 'xx')
+    const data = new DiskVFS({ root, capacity: 12 })
+    const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+    expect((await ws.shell('printf 12345678 > /d/a')).exitCode).toBe(0)
+    const refused = await ws.shell('printf 123 > /d/b')
+    expect(refused.exitCode).toBe(1)
+    expect(refused.stderrText).toBe('/d/b: Disk quota exceeded\n')
+    expect((await ws.shell('rm /d/a; printf 1234567 > /d/b')).exitCode).toBe(0)
+    expect((await ws.shell('cp /d/b /d/c')).exitCode).toBe(1)
+    expect((await ws.shell('mv /d/b /d/c')).exitCode).toBe(0)
+    expect((await ws.shell('truncate -s 13 /d/c')).exitCode).toBe(1)
+    expect(data.usage?.used).toBe(9)
+    await ws.close()
+  })
+
+  it('never passes its cap under parallel writers', async () => {
+    const root = tmpRoot().root
+    const data = new DiskVFS({ root, capacity: 10 })
+    const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) => ws.shell(`printf 123 > /d/f${String(i)}`)),
+    )
+    expect(results.filter((r) => r.exitCode === 0).length).toBe(3)
+    expect([data.usage?.used, data.usage?.pending]).toEqual([9, 0])
+    await ws.close()
+  })
+
+  it('counts a write past mirage once the caches drop', async () => {
+    const root = tmpRoot().root
+    const data = new DiskVFS({ root, capacity: 10 })
+    const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+    expect((await ws.shell('printf 12345 > /d/a')).exitCode).toBe(0)
+    await writeFile(join(root, 'native'), 'xxxxx')
+    data.accessor.forget()
+    expect((await ws.shell('printf 1 > /d/b')).exitCode).toBe(1)
+    expect((await data.capacity()).used).toBe(10)
+    await ws.close()
+  })
+
+  it('saves its capacity in its state only when capped', async () => {
+    expect(
+      (await new DiskVFS({ root: tmpRoot().root }).getState()).config?.capacity,
+    ).toBeUndefined()
+    expect(
+      (await new DiskVFS({ root: tmpRoot().root, capacity: 10 }).getState()).config?.capacity,
+    ).toBe(10)
+  })
+})

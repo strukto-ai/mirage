@@ -46,5 +46,9 @@
   "document_kernel_size": true,
   "document_kernel_live_handle": true,
   "document_kernel_skill": true,
-  "document_kernel_readonly": true
+  "document_kernel_readonly": true,
+  "capacity_kernel_write_refused": true,
+  "capacity_kernel_size_zero": true,
+  "capacity_shared_with_shell": true,
+  "capacity_kernel_errno_edquot": true
 }

@@ -15,6 +15,7 @@
 from pathlib import Path
 
 from mirage.accessor.base import Accessor
+from mirage.vfs.capacity import StorageUsage
 
 
 class DiskAccessor(Accessor):
@@ -26,3 +27,12 @@ class DiskAccessor(Accessor):
         """
         self.root = root
         self.folder_versions = folder_versions
+        # The root's capacity and counted bytes, None when uncapped.
+        self.usage: StorageUsage | None = None
+
+    def forget(self) -> None:
+        """Drop its own answers, its count of the root's bytes among them:
+        a write past the dispatcher went uncounted."""
+        super().forget()
+        if self.usage is not None:
+            self.usage.stale()

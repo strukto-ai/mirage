@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import {
   dotWalkError,
   ebadf,
+  edquot,
   efbig,
   eisdir,
   enoent,
@@ -99,6 +100,7 @@ describe('formatFsError', () => {
     ['cat', efbig('/r'), '/r: File too large'],
     ['head', efbig('/r'), "error reading '/r': File too large"],
     ['tail', efbig('/r'), "error reading '/r': File too large"],
+    ['tee', edquot('/q'), '/q: Disk quota exceeded'],
     ['rmdir', enotempty('/d'), "failed to remove '/d': Directory not empty"],
     ['mv', exdev('/d'), '/d: Invalid cross-device link'],
     ['cat', new CycleError('/l'), '/l: Too many levels of symbolic links'],

@@ -158,6 +158,9 @@ impl Host {
         if path.starts_with("/denied/") {
             return failure("EACCES", "Permission denied");
         }
+        if path.starts_with("/full/") {
+            return failure("EDQUOT", "Disk quota exceeded");
+        }
         let window = match (request["spool"].as_u64(), request["size"].as_u64()) {
             (Some(fd), Some(size)) => {
                 let skip = request["skip"].as_u64().unwrap_or(0) as usize;
@@ -252,6 +255,11 @@ impl Host {
             }
             "flush" => {
                 let path = request["path"].as_str();
+                // A full disk refuses the bytes as they land.
+                if path.is_some_and(|path| path.starts_with("/brim/")) {
+                    self.writers.remove(path.unwrap_or_default());
+                    return (failure("ENOSPC", "No space left on device"), Vec::new());
+                }
                 // A conditional write finds the file changed at its commit.
                 if path.is_some_and(|path| path.starts_with("/stale/")) {
                     self.writers.remove(path.unwrap_or_default());

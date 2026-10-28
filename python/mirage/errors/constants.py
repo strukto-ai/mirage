@@ -22,6 +22,7 @@ from mirage.errors.types import (
     FsCondition,
     NoMountError,
     OperationNotSupportedError,
+    QuotaExceededError,
     ReadOnlyError,
     StaleWriteError,
 )
@@ -42,6 +43,7 @@ CLASS_ARMS: tuple[tuple[type[BaseException], FsCondition], ...] = (
     (NotImplementedError, FsCondition.ENOTSUP),
     (BadDescriptorError, FsCondition.EBADF),
     (FileTooLargeError, FsCondition.EFBIG),
+    (QuotaExceededError, FsCondition.EDQUOT),
     (BrokenPipeError, FsCondition.EPIPE),
     (StaleWriteError, FsCondition.STALE_WRITE),
     (NotADirectoryError, FsCondition.ENOTDIR),
@@ -79,6 +81,7 @@ ERRNO_ARMS: dict[int, FsCondition] = {
     errno.EBUSY: FsCondition.EBUSY,
     errno.EROFS: FsCondition.EROFS,
     errno.EFBIG: FsCondition.EFBIG,
+    errno.EDQUOT: FsCondition.EDQUOT,
     errno.EPIPE: FsCondition.EPIPE,
     POSIX[FsCondition.NO_XATTR].errno: FsCondition.NO_XATTR,
 }
@@ -102,6 +105,7 @@ OPERAND_CONDITIONS: frozenset[FsCondition] = frozenset(
         FsCondition.ENOTSUP,
         FsCondition.EXDEV,
         FsCondition.EFBIG,
+        FsCondition.EDQUOT,
         FsCondition.EPIPE,
         FsCondition.STALE_WRITE,
     }
@@ -116,6 +120,7 @@ CONDITION_CLASS: dict[FsCondition, type[OSError]] = {
     FsCondition.EROFS: ReadOnlyError,
     FsCondition.ENOTSUP: OperationNotSupportedError,
     FsCondition.EFBIG: FileTooLargeError,
+    FsCondition.EDQUOT: QuotaExceededError,
     FsCondition.STALE_WRITE: StaleWriteError,
 }
 
@@ -134,6 +139,7 @@ FS_ERRORS: tuple[type[OSError], ...] = (
     PermissionError,
     OperationNotSupportedError,
     FileTooLargeError,
+    QuotaExceededError,
     StaleWriteError,
 )
 

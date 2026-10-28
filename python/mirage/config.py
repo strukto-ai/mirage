@@ -51,6 +51,7 @@ from mirage.types import (
     parse_mount_mode,
 )
 from mirage.utils.loader import load_attr
+from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
 from mirage.vfs.registry import build_vfs
 from mirage.vfs.s3.config import S3Config
@@ -158,6 +159,12 @@ class RamCacheBlock(BaseModel):
     limit: str | int = "512MB"
     max_drain_bytes: int | None = None
 
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _v_limit(cls, v: Any) -> Any:
+        parse_limit(v, "limit")
+        return v
+
 
 class RedisCacheBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -167,6 +174,12 @@ class RedisCacheBlock(BaseModel):
     max_drain_bytes: int | None = None
     url: str = "redis://localhost:6379/0"
     key_prefix: str | None = None
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _v_limit(cls, v: Any) -> Any:
+        parse_limit(v, "limit")
+        return v
 
 
 CacheBlock = Annotated[

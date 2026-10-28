@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "id": "a_write_past_the_mount_capacity_is_edquot",
+      "note": "The guest sees an ordinary OSError carrying CPython's EDQUOT, 122, with the operand, as it sees any other mount refusal.",
+      "runtimes": [
+        "monty"
+      ],
+      "backends": [
+        "ram"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "config": {
+              "capacity": 10
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "try:\n    f = open('/data/x', 'w')\n    f.write('x' * 100)\n    f.close()\nexcept OSError as e:\n    print(e)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "[Errno 122] Disk quota exceeded: '/data/x'\n"
+          }
+        },
+        {
+          "command": "printf 12345678 > /data/y; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
+          }
+        }
+      ]
+    }
+  ]
+}

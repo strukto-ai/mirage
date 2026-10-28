@@ -19,7 +19,11 @@ import pytest
 from mirage.errors.classify import classify
 from mirage.errors.fs import enotsup, no_mount
 from mirage.errors.posix import POSIX
-from mirage.errors.types import FsCondition, ReadOnlyError
+from mirage.errors.types import (
+    FsCondition,
+    QuotaExceededError,
+    ReadOnlyError,
+)
 from mirage.runtime.errors import CrossMountError
 from mirage.utils.path import CycleError
 
@@ -37,6 +41,7 @@ from mirage.utils.path import CycleError
         (enotsup("ram", "unlink", "/x"), FsCondition.ENOTSUP),
         (NotImplementedError("append"), FsCondition.ENOTSUP),
         (no_mount("/x"), FsCondition.ENOENT),
+        (QuotaExceededError("/x"), FsCondition.EDQUOT),
     ],
 )
 def test_class_arms(exc, expected):
@@ -54,6 +59,7 @@ def test_class_arms(exc, expected):
         (errno.EROFS, FsCondition.EROFS),
         (errno.EINVAL, FsCondition.EINVAL),
         (errno.EIO, FsCondition.EIO),
+        (errno.EDQUOT, FsCondition.EDQUOT),
     ],
 )
 def test_errno_carrying_oserror_arms(code, expected):

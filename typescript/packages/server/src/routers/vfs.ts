@@ -53,6 +53,7 @@ const STATUS: Partial<Record<FsCondition, number>> = {
   EXDEV: 400,
   ELOOP: 400,
   ENOTSUP: 400,
+  EDQUOT: 507,
 }
 
 /** Thrown for a request the route answers with a fixed status and detail. */

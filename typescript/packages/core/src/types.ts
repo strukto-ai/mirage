@@ -915,10 +915,11 @@ export const OverflowPolicy = Object.freeze({
 export type OverflowPolicy = (typeof OverflowPolicy)[keyof typeof OverflowPolicy]
 
 // How a mount's capacity relates to a df-style report. QUOTA: real
-// total/used/available are known (a real filesystem, or a provider that
-// exposes a storage quota). ELASTIC: no fixed size (object stores that grow
-// without a quota). NA: no filesystem-capacity concept (message/table
-// surfaces). UNKNOWN: bounded but not cheaply measurable / not reported yet.
+// total/used/available are known (a real filesystem, a provider that
+// exposes a storage quota, or a mount's capacity). ELASTIC: no fixed size
+// (object stores that grow without a quota). NA: no filesystem-capacity
+// concept (message/table surfaces). UNKNOWN: bounded but not cheaply
+// measurable / not reported yet.
 // df renders real numbers for QUOTA and a literal `-` for the rest — never a
 // fabricated total.
 export const CapacityState = {

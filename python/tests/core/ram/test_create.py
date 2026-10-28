@@ -19,6 +19,7 @@ from mirage.core.ram.create import create
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
+from tests.fixtures.ram_capacity import capped, ram_path, table_bytes
 
 
 @pytest.mark.asyncio
@@ -116,3 +117,10 @@ async def test_create_into_an_existing_dir_is_allowed():
     a = RAMAccessor(s)
     await create(a, PathSpec.from_str_path("/d/f.txt"))
     assert s.files["/d/f.txt"] == b""
+
+
+@pytest.mark.asyncio
+async def test_a_capped_create_takes_back_the_bytes_it_empties():
+    accessor, usage = capped(5, {"/f": b"1234567890"})
+    await create(accessor, ram_path("/f"))
+    assert usage.used == table_bytes(accessor) == 0

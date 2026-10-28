@@ -116,6 +116,15 @@ describe('cloneWorkspaceWithOverride', () => {
     expect((built['/r/'] as Mount).options.write).toBeUndefined()
   })
 
+  it('carries an override mount capacity in its config', async () => {
+    const built = await buildOverrideMounts(
+      { mounts: { '/d': { vfs: 'ram', config: { capacity: '1KB' } } } },
+      null,
+    )
+    const vfs = (built['/d/'] as Mount).vfs
+    expect(vfs instanceof RAMVFS ? vfs.usage?.limit : undefined).toBe(1024)
+  })
+
   it('keeps a mount limit unless the override names one', async () => {
     const src = new Workspace({ '/a': capped(), '/b': capped() })
     try {

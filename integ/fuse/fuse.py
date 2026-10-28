@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import faulthandler
 import json
 import os
@@ -394,6 +395,56 @@ def run_sizeless_probe(result: dict[str, ProbeValue]) -> None:
             )
 
 
+def run_capacity_probe(result: dict[str, ProbeValue]) -> None:
+    """Record that a capped RAM store refuses a kernel write past its cap.
+
+    Served through ``mount_background`` itself, past ``add_fuse_mount``'s
+    refusal, with one writer at a time: the probe pins the kernel's errno
+    and that a shell write after the kernel's counts the kernel's bytes.
+
+    Args:
+        result (dict[str, ProbeValue]): the probe result to extend.
+    """
+    ws = Workspace({"/data": (RAMVFS(capacity=10), MountMode.WRITE)})
+    mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-cap-")
+    mount_background(ws.vfs, mountpoint)
+    data = f"{mountpoint}/data"
+    try:
+        code = None
+        try:
+            with open(f"{data}/big", "wb") as fh:
+                fh.write(b"x" * 100)
+                fh.flush()
+                os.fsync(fh.fileno())
+        except OSError as err:
+            code = err.errno
+        result["capacity_kernel_write_refused"] = code is not None
+        # WinFsp respells the errno, as policy_sealed_eacces folds in.
+        result["capacity_kernel_errno_edquot"] = (
+            code == errno.EDQUOT or sys.platform == "win32"
+        )
+        result["capacity_kernel_size_zero"] = (
+            os.path.getsize(f"{data}/big") == 0
+        )
+        # Landed before the shell runs: WinFsp closes after its cleanup.
+        with open(f"{data}/a", "wb") as fh:
+            fh.write(b"12345678")
+            fh.flush()
+            os.fsync(fh.fileno())
+        shell = asyncio.run(ws.shell("printf 123 > /data/b"))
+        result["capacity_shared_with_shell"] = shell.exit_code == 1
+    finally:
+        if sys.platform == "darwin":
+            subprocess.run(
+                ["diskutil", "unmount", "force", mountpoint],
+                capture_output=True,
+            )
+        elif sys.platform != "win32":
+            subprocess.run(
+                ["fusermount", "-u", mountpoint], capture_output=True
+            )
+
+
 def run_external_unmount_probe(result: dict[str, ProbeValue]) -> None:
     """Record that a mount released from outside is removed and remounts.
 
@@ -576,6 +627,7 @@ def main() -> None:
     run_policy_probe(result)
     run_link_probe(result)
     run_session_probe(result)
+    run_capacity_probe(result)
     run_external_unmount_probe(result)
     print(json.dumps(result))
 

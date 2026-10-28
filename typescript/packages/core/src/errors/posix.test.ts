@@ -35,9 +35,14 @@ describe('the posix table', () => {
     ['EBUSY', 'Device or resource busy'],
     ['EROFS', 'Read-only file system'],
     ['EFBIG', 'File too large'],
+    ['EDQUOT', 'Disk quota exceeded'],
     ['STALE_WRITE', 'changed since it was read; read it again before writing'],
   ] as const)('speaks the strerror text for %s', (cond, phrase) => {
     expect(posixPhrase(cond)).toBe(phrase)
+  })
+
+  it('numbers EDQUOT as Linux does', () => {
+    expect(posixErrno('EDQUOT')).toBe(122)
   })
 
   it('gives every row a positive number and a phrase', () => {

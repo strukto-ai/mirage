@@ -47,6 +47,8 @@ export interface MirageMountBlock {
   config?: Record<string, unknown>
 }
 
+const MOUNT_BLOCK_KEYS = ['vfs', 'mode', 'config']
+
 /** One mount entry: a live spec or instance, or a declarative block. */
 export type MirageMount = MountSpec | Mount | MirageMountBlock
 
@@ -107,7 +109,14 @@ function isMountBlock(entry: MirageMount): entry is MirageMountBlock {
   return typeof (entry as MirageMountBlock).vfs === 'string'
 }
 
-async function resolveMount(entry: MirageMountBlock): Promise<MountSpec> {
+async function resolveMount(prefix: string, entry: MirageMountBlock): Promise<MountSpec> {
+  for (const key of Object.keys(entry)) {
+    if (!MOUNT_BLOCK_KEYS.includes(key)) {
+      throw new Error(
+        `mirage: unknown mount \`${prefix}\` key \`${key}\` (allowed: ${MOUNT_BLOCK_KEYS.join(', ')})`,
+      )
+    }
+  }
   const vfs = await buildVfs(entry.vfs, entry.config ?? {})
   return new Mount(vfs, {
     ...(entry.mode !== undefined ? { mode: parseMountMode(entry.mode) } : {}),
@@ -335,7 +344,7 @@ export class MirageService extends Service {
   ): Promise<Workspace> {
     const resolved: Record<string, MountSpec | Mount> = {}
     for (const [prefix, entry] of Object.entries(mounts)) {
-      resolved[prefix] = isMountBlock(entry) ? await resolveMount(entry) : entry
+      resolved[prefix] = isMountBlock(entry) ? await resolveMount(prefix, entry) : entry
     }
     const ws = new Workspace(resolved, options)
     this.built = ws

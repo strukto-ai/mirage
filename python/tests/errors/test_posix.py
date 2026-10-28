@@ -45,6 +45,7 @@ from mirage.errors.types import FsCondition
         (FsCondition.EBUSY, errno.EBUSY),
         (FsCondition.EROFS, errno.EROFS),
         (FsCondition.EFBIG, errno.EFBIG),
+        (FsCondition.EDQUOT, errno.EDQUOT),
         (FsCondition.STALE_WRITE, errno.ESTALE),
     ],
 )
@@ -77,6 +78,7 @@ def test_xattr_miss_resolves_per_platform():
         (FsCondition.EBUSY, "Device or resource busy"),
         (FsCondition.EROFS, "Read-only file system"),
         (FsCondition.EFBIG, "File too large"),
+        (FsCondition.EDQUOT, "Disk quota exceeded"),
         (
             FsCondition.STALE_WRITE,
             "changed since it was read; read it again before writing",
@@ -103,3 +105,4 @@ def test_linux_errno_numbers_every_condition_as_linux_does():
     assert linux_errno(FsCondition.EACCES) == 13
     assert linux_errno(FsCondition.ENOTDIR) == 20
     assert linux_errno(FsCondition.ELOOP) == 40
+    assert linux_errno(FsCondition.EDQUOT) == 122

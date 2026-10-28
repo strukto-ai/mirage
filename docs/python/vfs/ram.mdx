@@ -18,7 +18,7 @@ vfs = RAMVFS()
 ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
 ```
 
-`RAMVFS()` needs no configuration object.
+`RAMVFS()` needs no configuration object. `RAMVFS(capacity="100MB")` caps the bytes the store holds; a write past it fails with "Disk quota exceeded". See [capacity](/home/configuration#capacity).
 
 ## VFS.md
 

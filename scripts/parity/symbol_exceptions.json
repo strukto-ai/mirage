@@ -750,6 +750,11 @@
     "numbered": "pathlib reads an OSError's errno to tell a missing path from a broken one, so the Python file adapter renumbers an error a third-party mount raised without one; a TypeScript error carries its code, which is what node callers read."
    }
   },
+  "errors/types": {
+   "python_only": {
+    "QuotaExceededError": "Python raises a write past a mount's capacity as its own OSError class, so a catch site names it by class; TypeScript errors are FsError objects tagged by code, so edquot returns an FsError with code EDQUOT and no class of its own."
+   }
+  },
   "workspace/mount/storage": {
    "python_only": {
     "check_unlink": "Python binds the check to a registry with functools.partial (make_check_unlink), as it does storage_key; TypeScript's makeCheckUnlink returns a closure, so the unbound function has no twin."
@@ -1063,6 +1068,16 @@
   "runtime/wasm/stat": {
    "typescript_only": {
     "nanoseconds": "A stat's epoch milliseconds as the nanoseconds preview1 asks in; Python's rows are nanoseconds already."
+   }
+  },
+  "vfs/ram/ram": {
+   "typescript_only": {
+    "RAMVFSOptions": "TypeScript constructors take one options object, as DiskVFSOptions and RedisVFSOptions do; Python's RAMVFS takes capacity as a keyword."
+   }
+  },
+  "vfs/registry": {
+   "typescript_only": {
+    "RAM_OPTIONS": "The TypeScript registry refuses unknown config keys against a per-backend key list, as DISK_OPTIONS does; Python's build_vfs reads the constructor's keywords."
    }
   }
  }

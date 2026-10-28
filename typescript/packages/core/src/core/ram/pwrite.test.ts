@@ -20,6 +20,7 @@ import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
 import { PathSpec } from '../../types.ts'
 import { DevicePipe } from '../dev/pipe.ts'
 import { pwrite } from './pwrite.ts'
+import { capped, ramPath, tableBytes } from '../../test-utils.ts'
 
 const ENC = new TextEncoder()
 const PATH = new PathSpec({ virtual: '/f.txt', directory: '/', vfsPath: 'f.txt' })
@@ -72,5 +73,33 @@ describe('pwrite to a discarding device', () => {
     const nul = new PathSpec({ virtual: '/dev/null', directory: '/dev/', vfsPath: 'null' })
     await pwrite(accessor, nul, ENC.encode('x'), Number.MAX_SAFE_INTEGER)
     expect(store.files.get('/null')).toEqual(new Uint8Array())
+  })
+})
+
+describe('pwrite against a capacity', () => {
+  it('charges only its growth', async () => {
+    const [acc, usage] = capped(10, { '/f': '12345678' })
+    await pwrite(acc, ramPath('/f'), ENC.encode('ab'), 2)
+    await pwrite(acc, ramPath('/f'), ENC.encode('xyz'), 7)
+    expect(new TextDecoder().decode(acc.store.files.get('/f'))).toBe('12ab567xyz')
+    expect([usage.used, tableBytes(acc)]).toEqual([10, 10])
+    await expect(pwrite(acc, ramPath('/f'), ENC.encode('q'), 10)).rejects.toMatchObject({
+      code: 'EDQUOT',
+    })
+    expect(new TextDecoder().decode(acc.store.files.get('/f'))).toBe('12ab567xyz')
+  })
+
+  it('refuses a sparse write past the cap before it builds', async () => {
+    const [acc, usage] = capped(10)
+    await expect(pwrite(acc, ramPath('/f'), ENC.encode('x'), 2 ** 40)).rejects.toMatchObject({
+      code: 'EDQUOT',
+    })
+    expect([acc.store.files.has('/f'), usage.used]).toEqual([false, 0])
+  })
+
+  it('changes nothing for an empty write past the end', async () => {
+    const [acc, usage] = capped(0, { '/f': '' })
+    await pwrite(acc, ramPath('/f'), new Uint8Array(), 2 ** 40)
+    expect([acc.store.files.get('/f')?.byteLength, usage.used]).toEqual([0, 0])
   })
 })

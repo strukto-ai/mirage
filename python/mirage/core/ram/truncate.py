@@ -14,7 +14,11 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.device import active_pipe
-from mirage.core.ram.dest import check_dest_parents, check_write_target
+from mirage.core.ram.dest import (
+    check_capacity,
+    check_dest_parents,
+    check_write_target,
+)
 from mirage.errors.fs import einval
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -28,7 +32,8 @@ async def truncate(
     """Set one key's length, padding with NULs or cutting it short.
 
     A live pipe has no length to set: EINVAL, as ftruncate(2) answers
-    for one (GNU: ``truncate -s 0 >(cat)`` is "Invalid argument").
+    for one (GNU: ``truncate -s 0 >(cat)`` is "Invalid argument"), and
+    for a length that is not a whole, non-negative number of bytes.
 
     Args:
         accessor (RAMAccessor): the RAM accessor.
@@ -39,7 +44,11 @@ async def truncate(
     store = accessor.store
     timer = start_op()
     p = norm(path.mount_path)
-    if active_pipe(accessor, p) is not None:
+    if (
+        active_pipe(accessor, p) is not None
+        or not isinstance(length, int)
+        or length < 0
+    ):
         raise einval(path)
     check_dest_parents(store, path, p)
     check_write_target(store, path, p)
@@ -49,6 +58,7 @@ async def truncate(
         if no_create:
             return
         data = b""
+    check_capacity(store, path, p, length)
     store.files[p] = data[:length].ljust(length, b"\0")
     store.modified[p] = now_iso()
     record("truncate", path.virtual, "ram", 0, timer)

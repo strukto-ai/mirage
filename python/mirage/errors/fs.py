@@ -29,6 +29,7 @@ from mirage.errors.types import (
     FsCondition,
     NoMountError,
     OperationNotSupportedError,
+    QuotaExceededError,
     ReadOnlyError,
     StaleWriteError,
     WalkDeclinedError,
@@ -141,6 +142,10 @@ def walk_refusal(path: PathSpec) -> DotWalkError:
 
 def efbig(path: str | PathSpec) -> FileTooLargeError:
     return _stamped(FileTooLargeError, FsCondition.EFBIG, path)
+
+
+def edquot(path: str | PathSpec) -> QuotaExceededError:
+    return _stamped(QuotaExceededError, FsCondition.EDQUOT, path)
 
 
 def stale_write(path: str | PathSpec, landed: bool = False) -> StaleWriteError:

@@ -1339,3 +1339,26 @@ async def test_set_profile_defines_and_replaces_a_name(tmp_path):
         r = await client.put("/v1/workspaces/nope/profiles/reader", json={})
         assert r.status_code == 404
         await client.delete(f"/v1/workspaces/{wid}")
+
+
+@pytest.mark.asyncio
+async def test_clone_with_a_bad_capacity_override_is_a_bad_request():
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+        wid = r.json()["id"]
+        r = await client.post(
+            f"/v1/workspaces/{wid}/clone",
+            json={
+                "override": {
+                    "mounts": {
+                        "/": {"vfs": "ram", "config": {"capacity": "1.5MB"}}
+                    }
+                }
+            },
+        )
+        assert r.status_code == 400, r.text
+        assert "capacity must be a size like 100MB" in r.json()["detail"]

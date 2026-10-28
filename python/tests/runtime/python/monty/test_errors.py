@@ -51,6 +51,7 @@ def test_every_condition_renders_as_a_python_oserror():
             "Too many levels of symbolic links",
         ),
         (FsCondition.NO_XATTR, "OSError", 61, "No data available"),
+        (FsCondition.EDQUOT, "OSError", 122, "Disk quota exceeded"),
     ],
 )
 def test_rows_are_cpython_on_linux(cond, exception, number, phrase):

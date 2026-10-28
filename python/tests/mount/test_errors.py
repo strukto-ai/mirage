@@ -19,7 +19,7 @@ import os
 import pytest
 
 from mirage.errors import FsCondition, posix_errno
-from mirage.errors.fs import no_mount
+from mirage.errors.fs import edquot, no_mount
 from mirage.mount.errors import classify_error
 from mirage.policy import PolicyDenied
 from mirage.runtime.errors import CrossMountError
@@ -36,6 +36,7 @@ from mirage.utils.path import CycleError
         (PermissionError("x"), errno.EACCES),
         (FileNotFoundError("x"), errno.ENOENT),
         (no_mount("/x"), errno.ENOENT),
+        (edquot("/x"), errno.EDQUOT),
     ],
 )
 def test_exception_class_wins(err, expected):

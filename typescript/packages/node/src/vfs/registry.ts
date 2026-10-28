@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { resolveConfigSecrets } from '@struktoai/mirage-core/secrets/sources'
+import type { RAMVFSOptions } from '@struktoai/mirage-core/vfs/ram/ram'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
 import { type BaseVFS, VFS_BRAND } from '@struktoai/mirage-core/vfs/base'
 import { refuseUnknownKeys, z } from '@struktoai/mirage-core/vfs/secrets'
@@ -42,14 +43,15 @@ export type VFSFactory = (config: Record<string, unknown>) => Promise<BaseVFS>
 // The backends that take their options without a schema, and the option
 // names each takes. Python builds the same three from constructor keywords,
 // so a key outside these is refused on both sides rather than ignored here.
-const DISK_OPTIONS: readonly (keyof DiskVFSOptions)[] = ['root', 'folderVersions']
-const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = ['url', 'keyPrefix']
+const RAM_OPTIONS: readonly (keyof RAMVFSOptions)[] = ['capacity']
+const DISK_OPTIONS: readonly (keyof DiskVFSOptions)[] = ['root', 'folderVersions', 'capacity']
+const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = ['url', 'keyPrefix', 'capacity']
 
 const REGISTRY: Record<string, VFSFactory> = {
   ram: async (config) => {
-    refuseUnknownKeys(config, [])
+    refuseUnknownKeys(config, RAM_OPTIONS)
     const { RAMVFS } = await import('@struktoai/mirage-core/vfs/ram/ram')
-    return new RAMVFS()
+    return new RAMVFS(normalizeFields(config) as RAMVFSOptions)
   },
   disk: async (config) => {
     refuseUnknownKeys(config, DISK_OPTIONS)

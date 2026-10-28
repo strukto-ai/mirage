@@ -203,6 +203,36 @@
       }
     },
     {
+      "name": "cache block: a boolean limit",
+      "error": "limit must be a size like 100MB",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "cache": {
+          "type": "ram",
+          "limit": true
+        }
+      }
+    },
+    {
+      "name": "cache block: a redis limit of \"1_000\"",
+      "error": "limit must be a size like 100MB",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "cache": {
+          "type": "redis",
+          "limit": "1_000"
+        }
+      }
+    },
+    {
       "name": "index block: camelCase keyPrefix",
       "config": {
         "mounts": {

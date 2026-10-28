@@ -54,6 +54,11 @@ describe('the shared vocabulary', () => {
     expect((errnoError(HOST, codes, 'NO_XATTR') as FakeErrnoError).errno).toBe(61)
   })
 
+  it('answers EDQUOT in the interpreter numbering, EIO when it lacks one', () => {
+    expect((errnoError(HOST, { ...CODES, EDQUOT: 19 }, 'EDQUOT') as FakeErrnoError).errno).toBe(19)
+    expect((errnoError(HOST, CODES, 'EDQUOT') as FakeErrnoError).errno).toBe(29)
+  })
+
   it('falls back to EIO for a key this interpreter does not define', () => {
     // Emscripten builds differ on ENODATA; a missing key must not
     // surface as ErrnoError(undefined).

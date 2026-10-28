@@ -439,9 +439,13 @@ export function buildMountArgs(
     // A prefix carries the label of what supplied its VFS, so a second
     // round trip rebuilds through the same entry point; a rebuild came
     // through the saved reference, so it keeps it.
+    // The capacity a saved RAM or disk store held comes back with it, as
+    // the `capacity` knob Python's `_construct_vfs` reads.
+    const saved = m.vfs_state.config as { capacity?: unknown } | undefined
+    const capacity = typeof saved?.capacity === 'number' ? saved.capacity : null
     const [vfs, vfsRef]: [BaseVFS, string | null] =
       override === undefined
-        ? [new RAMVFS(), savedRef(m)]
+        ? [new RAMVFS({ capacity }), savedRef(m)]
         : userPrefixes.has(normDir(m.prefix)) || override instanceof Mount
           ? placedVfs(override, m)
           : [override, savedRef(m)]
