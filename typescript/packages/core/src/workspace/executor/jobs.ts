@@ -263,15 +263,18 @@ export async function handleBackground(
   // enclosing job's limit is not part of that channel: it aborts with a
   // CommandTimeoutError, which this job does not answer to, so a job runs
   // to its own limit as a line's deadline leaves the line's jobs alone.
+  // The job stops listening once it ends or is killed, so a long-lived
+  // job keeps nothing of the jobs it started.
   const enclosing = context.frame.abortSignal
   const inherited = new AbortController()
-  if (enclosing !== null) {
-    const follow = (): void => {
-      if (!(enclosing.reason instanceof CommandTimeoutError)) inherited.abort(enclosing.reason)
-    }
-    if (enclosing.aborted) follow()
-    else enclosing.addEventListener('abort', follow, { once: true })
+  const follow = (): void => {
+    if (!(enclosing?.reason instanceof CommandTimeoutError)) inherited.abort(enclosing?.reason)
   }
+  const unfollow = (): void => {
+    enclosing?.removeEventListener('abort', follow)
+  }
+  if (enclosing?.aborted === true) follow()
+  else enclosing?.addEventListener('abort', follow, { once: true, signal: abort.signal })
   const killed = AbortSignal.any([inherited.signal, abort.signal])
   // The job runs under the `@line` limit of the line that started it, from
   // its own start, its output included: past it the subtree is stopped as a
@@ -406,6 +409,7 @@ export async function handleBackground(
     try {
       return await (asyncContextIsolatesTasks ? runWithCaller(own, body) : body())
     } finally {
+      unfollow()
       releaseProgram()
       await bgSession.closeInputs()
       for (const source of heldInputs) await source.lines.unhold()
@@ -436,6 +440,7 @@ export async function handleBackground(
       simple: oneProgram(left, session),
     })
   } catch (err) {
+    unfollow()
     releaseProgram()
     for (const source of heldInputs) await source.lines.unhold()
 

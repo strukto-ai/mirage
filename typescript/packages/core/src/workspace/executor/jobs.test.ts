@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
@@ -392,6 +392,30 @@ describe('& inside a compound body', () => {
     const ws = buildWs()
     const io = await ws.shell('set -e; for i in 1; do false & done; echo ok; wait')
     expect(stdoutStr(io)).toBe('ok\n')
+  })
+})
+
+// A job a job starts follows its parent's kill; it lets go once it ends,
+// so a long-lived job keeps nothing of the jobs it started.
+describe('a job inside a job', () => {
+  it('stops following its parent once it ends', async () => {
+    const added = vi.spyOn(EventTarget.prototype, 'addEventListener')
+    const removed = vi.spyOn(EventTarget.prototype, 'removeEventListener')
+    const ws = buildWs()
+    try {
+      await ws.shell('{ true & wait $!; true & wait $!; } & wait')
+      const follows = added.mock.calls
+        .map(([, listener]) => listener)
+        .filter((listener) => typeof listener === 'function' && listener.name === 'follow')
+      expect(follows).toHaveLength(2)
+      for (const listener of follows) {
+        expect(removed.mock.calls.some(([, gone]) => gone === listener)).toBe(true)
+      }
+    } finally {
+      added.mockRestore()
+      removed.mockRestore()
+      await ws.close()
+    }
   })
 })
 
