@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_invalid_modes",
+      "seq": 16160007,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --invalid=fail abc 12 def; echo rc=$?; numfmt --invalid=warn --field=2 'a x b'; echo rc=$?; numfmt --invalid=ignore x 12; echo rc=$?; numfmt --invalid=abort x 12; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "abc\n12\ndef\nrc=2\na x b\nrc=0\nx\n12\nrc=0\nrc=2\n",
+        "stderr": "numfmt: invalid number: 'abc'\nnumfmt: invalid number: 'def'\nnumfmt: invalid number: 'x'\nnumfmt: invalid number: 'x'\n"
+      },
+      "flags": [
+        "invalid",
+        "field"
+      ]
+    }
+  ]
+}

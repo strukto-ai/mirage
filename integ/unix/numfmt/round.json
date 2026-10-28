@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_round_methods",
+      "seq": 16160004,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --to=si --round=up 1001; numfmt --to=si --round=down 1999; numfmt --to=si --round=nearest 1250 1049; numfmt --to=si --round=n 1050; numfmt --to=si --round=up -- -1001; numfmt --to-unit=1000 --round=towards-zero 1999; numfmt --round=sideways 1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1.1k\n1.9k\n1.3k\n1.0k\n1.1k\n-1.0k\n1\nrc=1\n",
+        "stderr": "numfmt: invalid argument 'sideways' for '--round'\nValid arguments are:\n  - 'up'\n  - 'down'\n  - 'from-zero'\n  - 'towards-zero'\n  - 'nearest'\nTry 'numfmt --help' for more information.\n"
+      },
+      "flags": [
+        "round",
+        "to"
+      ]
+    }
+  ]
+}

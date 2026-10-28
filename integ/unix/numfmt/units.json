@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_units_scale_in_and_out",
+      "seq": 16160003,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --from-unit=1024 1.5; numfmt --from-unit=Ki 1; numfmt --to-unit=1000 1499 1.5; numfmt --from-unit=10 --to-unit=3 1; numfmt --from-unit=1000 --to=si 1500; numfmt --from-unit=KiB 1; echo rc=$?; numfmt --to-unit=0 1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1536.0\n1024\n2\n0.1\n4\n1.5M\nrc=1\nrc=1\n",
+        "stderr": "numfmt: invalid unit size: 'KiB'\nnumfmt: invalid unit size: '0'\n"
+      },
+      "flags": [
+        "from_unit",
+        "to_unit"
+      ]
+    }
+  ]
+}

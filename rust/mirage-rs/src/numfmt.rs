@@ -1,11 +1,21 @@
 use num_bigint::BigUint;
-use num_traits::Zero;
+use num_traits::{ToPrimitive, Zero};
 use serde::Deserialize;
 
 use crate::cut::{Interval, Mode, intervals};
+use crate::printf::number::render_float;
 use crate::{Stream, StreamError, latin1, latin1_list, parse_config, quoted};
 
 const OUTPUT: usize = 64 * 1024;
+
+/// The most digits GNU prints a value with, its whole part and its
+/// decimals together: its long double's digits and one, 34 where that is
+/// binary128 (aarch64, whose pins this follows; x86-64 stops at 19).
+const DIGITS: usize = 34;
+
+/// The widest field mirage pads to, a bound GNU has not: past it a
+/// padding or format width is refused, not allocated.
+const WIDEST: usize = 1 << 20;
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -15,6 +25,30 @@ enum Scale {
     Iec,
     IecI,
     Auto,
+}
+
+/// --round's methods, which settle a value cut to the decimals it prints.
+#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum Round {
+    Up,
+    Down,
+    #[default]
+    FromZero,
+    TowardsZero,
+    Nearest,
+}
+
+/// --invalid's modes: stop at the first field that is no number, or copy
+/// it and go on, saying so and failing at the end, saying so, or not.
+#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum Invalid {
+    #[default]
+    Abort,
+    Fail,
+    Warn,
+    Ignore,
 }
 
 #[derive(Deserialize)]
@@ -38,6 +72,159 @@ struct Config {
     headers: Vec<Vec<u8>>,
     #[serde(default)]
     zero_terminated: bool,
+    /// --from-unit and --to-unit as typed, none for 1.
+    #[serde(default, deserialize_with = "crate::latin1_opt")]
+    from_unit: Option<Vec<u8>>,
+    #[serde(default, deserialize_with = "crate::latin1_opt")]
+    to_unit: Option<Vec<u8>>,
+    #[serde(default)]
+    round: Round,
+    /// --padding as typed.
+    #[serde(default, deserialize_with = "crate::latin1_opt")]
+    padding: Option<Vec<u8>>,
+    /// --format as typed.
+    #[serde(default, deserialize_with = "crate::latin1_opt")]
+    format: Option<Vec<u8>>,
+    #[serde(default)]
+    invalid: Invalid,
+}
+
+/// A --format: the text around its one directive, and the directive's
+/// zero flag, left alignment, width and precision. GNU unescapes `%%`
+/// before the directive and copies the text after it as it is.
+#[derive(Default)]
+struct Format {
+    prefix: Vec<u8>,
+    suffix: Vec<u8>,
+    zero: bool,
+    left: bool,
+    width: Option<usize>,
+    precision: Option<usize>,
+}
+
+/// Leading digits as a count, saturating, and the rest.
+fn count(text: &[u8]) -> (Option<usize>, &[u8]) {
+    let len = text.iter().take_while(|b| b.is_ascii_digit()).count();
+    let value = text[..len].iter().fold(0usize, |value, digit| {
+        value
+            .saturating_mul(10)
+            .saturating_add(usize::from(digit - b'0'))
+    });
+    ((len > 0).then_some(value), &text[len..])
+}
+
+/// --format as GNU reads it (coreutils 9.7): any text, `%%` a `%`, then
+/// one `%[0][' ][-][N][.[N]]f`, then text that holds no other directive.
+fn format_of(typed: &[u8]) -> Result<Format, StreamError> {
+    let shown = quoted(typed);
+    let mut format = Format::default();
+    let mut at = 0;
+    loop {
+        let Some(found) = memchr::memchr(b'%', &typed[at..]) else {
+            return Err(refusal(format!("format '{shown}' has no % directive")));
+        };
+        format.prefix.extend_from_slice(&typed[at..at + found]);
+        at += found + 1;
+        match typed.get(at) {
+            Some(b'%') => {
+                format.prefix.push(b'%');
+                at += 1;
+            }
+            Some(_) => break,
+            None => return Err(refusal(format!("format '{shown}' ends in %"))),
+        }
+    }
+    let mut rest = &typed[at..];
+    while let Some((flag, tail)) = rest.split_first() {
+        match flag {
+            b'0' => format.zero = true,
+            b'\'' | b' ' => {}
+            _ => break,
+        }
+        rest = tail;
+    }
+    if let Some(tail) = rest.strip_prefix(b"-") {
+        format.left = true;
+        rest = tail;
+    }
+    (format.width, rest) = count(rest);
+    if let Some(tail) = rest.strip_prefix(b".") {
+        let (precision, tail) = count(tail);
+        format.precision = Some(precision.unwrap_or(0));
+        rest = tail;
+    }
+    let Some(suffix) = rest.strip_prefix(b"f") else {
+        return Err(refusal(format!(
+            "invalid format '{shown}', directive must be %[0]['][-][N][.][N]f"
+        )));
+    };
+    let mut scan = suffix;
+    while let Some(found) = memchr::memchr(b'%', scan) {
+        if scan.get(found + 1) != Some(&b'%') {
+            return Err(refusal(format!(
+                "format '{shown}' has too many % directives"
+            )));
+        }
+        scan = &scan[found + 2..];
+    }
+    if format.width.is_some_and(|width| width > WIDEST) {
+        return Err(refusal(format!(
+            "invalid format '{shown}': width too large"
+        )));
+    }
+    format.suffix = suffix.to_vec();
+    Ok(format)
+}
+
+/// A --from-unit or --to-unit size as GNU reads it: blanks and a `+`,
+/// digits (1 when there are none), then a unit letter, `i` after it for
+/// powers of 1024, and nothing more; zero, or past what 64 bits hold, is
+/// no size.
+fn unit_size(typed: &[u8]) -> Result<BigUint, StreamError> {
+    let invalid = || refusal(format!("invalid unit size: '{}'", quoted(typed)));
+    let lead = typed.iter().take_while(|b| b.is_ascii_whitespace()).count();
+    let text = &typed[lead..];
+    let text = text.strip_prefix(b"+").unwrap_or(text);
+    let digits = text.iter().take_while(|b| b.is_ascii_digit()).count();
+    let mut size = if digits == 0 {
+        BigUint::from(1_u8)
+    } else {
+        BigUint::parse_bytes(&text[..digits], 10).expect("digits")
+    };
+    match &text[digits..] {
+        [] => {}
+        [letter] => size *= pow(1000, unit_power(*letter).ok_or_else(invalid)? as usize),
+        [letter, b'i'] => size *= pow(1024, unit_power(*letter).ok_or_else(invalid)? as usize),
+        _ => return Err(invalid()),
+    }
+    if size.is_zero() || size > BigUint::from(u64::MAX) {
+        return Err(invalid());
+    }
+    Ok(size)
+}
+
+/// --padding as GNU reads it: blanks, a sign and digits, never zero; a
+/// negative width pads on the right.
+fn padding_of(typed: &[u8]) -> Result<i64, StreamError> {
+    let invalid = || refusal(format!("invalid padding value '{}'", quoted(typed)));
+    let lead = typed.iter().take_while(|b| b.is_ascii_whitespace()).count();
+    let text = &typed[lead..];
+    let (negative, text) = match text.split_first() {
+        Some((b'-', rest)) => (true, rest),
+        Some((b'+', rest)) => (false, rest),
+        _ => (false, text),
+    };
+    let (Some(width), []) = count(text) else {
+        return Err(invalid());
+    };
+    if width == 0 || width > WIDEST {
+        return Err(invalid());
+    }
+    Ok(if negative {
+        -(width as i64)
+    } else {
+        width as i64
+    })
 }
 
 // SI spells kilo lowercase; every larger unit and all of IEC stay uppercase.
@@ -186,16 +373,6 @@ fn parse(value: &[u8], from: Scale) -> Result<Value, StreamError> {
     })
 }
 
-/// `numerator / denominator` rounded away from zero.
-fn ceil(numerator: &BigUint, denominator: &BigUint) -> BigUint {
-    let kept = numerator / denominator;
-    if &kept * denominator == *numerator {
-        kept
-    } else {
-        kept + 1_u8
-    }
-}
-
 /// `numerator / denominator` rounded half to even, as printf rounds.
 fn half_even(numerator: &BigUint, denominator: &BigUint) -> BigUint {
     let kept = numerator / denominator;
@@ -205,6 +382,51 @@ fn half_even(numerator: &BigUint, denominator: &BigUint) -> BigUint {
     } else {
         kept
     }
+}
+
+/// The magnitude `numerator / denominator` of a value of sign `negative`,
+/// to a whole number as --round says.
+fn rounded(numerator: &BigUint, denominator: &BigUint, round: Round, negative: bool) -> BigUint {
+    let kept = numerator / denominator;
+    let rest = numerator - &kept * denominator;
+    let up = !rest.is_zero()
+        && match round {
+            Round::FromZero => true,
+            Round::TowardsZero => false,
+            Round::Up => !negative,
+            Round::Down => negative,
+            Round::Nearest => rest << 1_usize >= *denominator,
+        };
+    if up { kept + 1_u8 } else { kept }
+}
+
+/// GNU's refusal of a value printed with more digits than it holds.
+fn too_precise(
+    value: &Value,
+    numerator: &BigUint,
+    denominator: &BigUint,
+    places: usize,
+) -> StreamError {
+    let magnitude = numerator.to_f64().unwrap_or(f64::MAX) / denominator.to_f64().unwrap_or(1.0);
+    let signed = if value.negative {
+        -magnitude
+    } else {
+        magnitude
+    };
+    let general = render_float(signed, b'g', &[], None);
+    let shown = String::from_utf8_lossy(&[general.prefix, general.body, general.suffix].concat())
+        .into_owned();
+    refusal(format!(
+        "value/precision too large to be printed: '{shown}/{places}' (consider using --to)"
+    ))
+}
+
+/// Whether a value's whole digits and `places` decimals are more than GNU
+/// prints. A whole number has none to refuse: mirage prints every digit
+/// of one, where GNU refuses to read one so long (`value too large to be
+/// converted`).
+fn past_digits(numerator: &BigUint, denominator: &BigUint, places: usize) -> bool {
+    places > 0 && (numerator / denominator).to_string().len() + places > DIGITS
 }
 
 fn fixed(negative: bool, scaled: &BigUint, places: usize, out: &mut Vec<u8>) {
@@ -220,24 +442,43 @@ fn fixed(negative: bool, scaled: &BigUint, places: usize, out: &mut Vec<u8>) {
     }
 }
 
-/// A value as GNU numfmt prints it under `--to`. `none` keeps the decimals
-/// it was typed with and a scaled one is a whole number, rounded away from
-/// zero, in fixed notation (`1Y` is twenty-five digits). A scale divides
-/// while it can, rounds away from zero keeping one decimal below 10, which
-/// can carry it back over the base (999.4 is 1.0k), and prints through
-/// printf, rounding half to even. GNU reads into a long double, so a value
-/// it cannot hold exactly may round up on the way out (`1.10` prints as
-/// `1.11`); mirage keeps the value exact, as printf does.
-fn format(value: &Value, to: Scale, out: &mut Vec<u8>) {
+/// A value as GNU numfmt prints it under `--to`, rounded as --round says
+/// and with `precision` decimals when --format gives some; the length of
+/// its number before the unit. `none` keeps the decimals it was typed with
+/// and a scaled one is a whole number, in fixed notation (`1Y` is
+/// twenty-five digits). A scale divides while it can, rounds keeping one
+/// decimal below 10, which can carry it back over the base (999.4 is
+/// 1.0k), and prints through printf, rounding half to even. GNU reads into
+/// a long double, so a value it cannot hold exactly may round up on the way
+/// out (`1.10` prints as `1.11`); mirage keeps the value exact, as printf
+/// does.
+fn format(
+    value: &Value,
+    to: Scale,
+    round: Round,
+    precision: Option<usize>,
+    out: &mut Vec<u8>,
+) -> Result<usize, StreamError> {
     let Value {
         negative,
         numerator,
         denominator,
         decimals,
     } = value;
+    let start = out.len();
     if to == Scale::None {
-        let scaled = ceil(&(numerator * pow(10, *decimals)), denominator);
-        return fixed(*negative, &scaled, *decimals, out);
+        let places = precision.unwrap_or(*decimals);
+        if past_digits(numerator, denominator, places) {
+            return Err(too_precise(value, numerator, denominator, places));
+        }
+        let scaled = rounded(
+            &(numerator * pow(10, places)),
+            denominator,
+            round,
+            *negative,
+        );
+        fixed(*negative, &scaled, places, out);
+        return Ok(out.len() - start);
     }
     let (base, units) = match to {
         Scale::Si => (BigUint::from(1000_u32), SI_UNITS),
@@ -251,24 +492,45 @@ fn format(value: &Value, to: Scale, out: &mut Vec<u8>) {
         denominator *= &base;
         power += 1;
     }
-    let places = usize::from(*numerator < &ten * &denominator);
-    let mut numerator = ceil(&(numerator * pow(10, places)), &denominator);
+    let places = precision.unwrap_or(usize::from(*numerator < &ten * &denominator));
+    if past_digits(numerator, &denominator, places) {
+        return Err(too_precise(value, numerator, &denominator, places));
+    }
+    let mut numerator = rounded(
+        &(numerator * pow(10, places)),
+        &denominator,
+        round,
+        *negative,
+    );
     let mut denominator = pow(10, places);
     if numerator >= &base * &denominator && power < top {
         denominator *= &base;
         power += 1;
     }
-    let places = usize::from(power > 0 && numerator < &ten * &denominator);
+    let places = precision.unwrap_or(usize::from(power > 0 && numerator < &ten * &denominator));
     numerator *= pow(10, places);
-    fixed(*negative, &half_even(&numerator, &denominator), places, out);
+    let scaled = half_even(&numerator, &denominator);
+    fixed(*negative, &scaled, places, out);
+    let number = out.len() - start;
     out.extend_from_slice(units[power].as_bytes());
     if to == Scale::IecI && power > 0 {
         out.push(b'i');
     }
+    Ok(number)
 }
 
 struct Numfmt {
     config: Config,
+    from_unit: BigUint,
+    to_unit: BigUint,
+    format: Option<Format>,
+    /// The width a field is padded to, negative to pad on the right; 0 for
+    /// none.
+    padding: i64,
+    /// Lines said of the fields --invalid let through, not yet taken.
+    warnings: Vec<u8>,
+    /// Whether --invalid=fail let a field through.
+    invalid_seen: bool,
     fields: Vec<Interval>,
     delimiter: Option<u8>,
     header: u64,
@@ -300,6 +562,15 @@ fn header_count(value: &[u8]) -> Result<u64, StreamError> {
 
 pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(config)?;
+    let unit = |typed: &Option<Vec<u8>>| {
+        typed
+            .as_deref()
+            .map_or_else(|| Ok(BigUint::from(1_u8)), unit_size)
+    };
+    let from_unit = unit(&config.from_unit)?;
+    let to_unit = unit(&config.to_unit)?;
+    let padding = config.padding.as_deref().map_or(Ok(0), padding_of)?;
+    let format = config.format.as_deref().map(format_of).transpose()?;
     if config
         .delimiters
         .iter()
@@ -323,6 +594,12 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         _ => return Err(refusal("multiple field specifications".to_owned())),
     };
     Ok(Box::new(Numfmt {
+        from_unit,
+        to_unit,
+        format,
+        padding,
+        warnings: Vec::new(),
+        invalid_seen: false,
         delimiter: config
             .delimiters
             .last()
@@ -341,13 +618,71 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 }
 
 impl Numfmt {
-    /// One field with `--suffix` cut off its end when there and written
-    /// back after the number either way.
-    fn field(&self, value: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+    /// One field converted. A field that is no number stops the run, or,
+    /// under --invalid, goes out as it came, said of unless ignored, and
+    /// fails the run at its end under `fail`.
+    fn field(&mut self, value: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let mode = self.config.invalid;
+        match self.convert(value, out) {
+            Err(error) if mode != Invalid::Abort => {
+                if mode != Invalid::Ignore {
+                    self.warnings.extend_from_slice(error.message.as_bytes());
+                    self.warnings.push(b'\n');
+                }
+                self.invalid_seen |= mode == Invalid::Fail;
+                out.extend_from_slice(value);
+                Ok(())
+            }
+            converted => converted,
+        }
+    }
+
+    /// One field with `--suffix` cut off its end when there, scaled by the
+    /// units, then the number with the suffix after it, padded and set in
+    /// --format's text. A format's width stands in for --padding; with its
+    /// zero flag the number is zero-filled to it before its unit, as printf
+    /// fills it, and otherwise the whole field is padded with blanks.
+    fn convert(&self, value: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
         let suffix = &self.config.suffix;
-        let value = value.strip_suffix(suffix.as_slice()).unwrap_or(value);
-        format(&parse(value, self.config.from)?, self.config.to, out);
-        out.extend_from_slice(suffix);
+        let number = value.strip_suffix(suffix.as_slice()).unwrap_or(value);
+        let mut parsed = parse(number, self.config.from)?;
+        parsed.numerator *= &self.from_unit;
+        parsed.denominator *= &self.to_unit;
+        let layout = self.format.as_ref();
+        let precision = layout.and_then(|layout| layout.precision);
+        let mut field = Vec::new();
+        let digits = format(
+            &parsed,
+            self.config.to,
+            self.config.round,
+            precision,
+            &mut field,
+        )?;
+        let zero = layout.filter(|layout| layout.zero && !layout.left);
+        if let Some(width) = zero.and_then(|layout| layout.width) {
+            let sign = usize::from(field.first() == Some(&b'-'));
+            let fill = width.saturating_sub(digits);
+            field.splice(sign..sign, std::iter::repeat_n(b'0', fill));
+        }
+        field.extend_from_slice(suffix);
+        let (width, left) = match layout.and_then(|layout| layout.width.map(|w| (w, layout.left))) {
+            Some(spec) => spec,
+            None => (self.padding.unsigned_abs() as usize, self.padding < 0),
+        };
+        let fill = width.saturating_sub(field.len());
+        if let Some(layout) = layout {
+            out.extend_from_slice(&layout.prefix);
+        }
+        if !left {
+            out.resize(out.len() + fill, b' ');
+        }
+        out.extend_from_slice(&field);
+        if left {
+            out.resize(out.len() + fill, b' ');
+        }
+        if let Some(layout) = layout {
+            out.extend_from_slice(&layout.suffix);
+        }
         Ok(())
     }
 
@@ -364,7 +699,7 @@ impl Numfmt {
     /// field, and a converted field that had them is right-aligned to its
     /// width. A selected field holding no number is refused, so is an
     /// empty record.
-    fn record(&self, line: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+    fn record(&mut self, line: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
         if let Some(delimiter) = self.delimiter {
             for (index, field) in line.split(|b| *b == delimiter).enumerate() {
                 if index > 0 {
@@ -503,6 +838,14 @@ impl Stream for Numfmt {
         }
         self.checked(out)
     }
+
+    fn status(&self) -> i32 {
+        if self.invalid_seen { 2 } else { 0 }
+    }
+
+    fn take_stderr(&mut self, err: &mut Vec<u8>) {
+        err.append(&mut self.warnings);
+    }
 }
 
 #[cfg(test)]
@@ -617,6 +960,198 @@ mod tests {
         }
         let err = stream.finish(&mut out).err().map(|err| err.message);
         (out, err)
+    }
+
+    /// The operands' output, the stream's warnings and status, and its
+    /// refusal, under `options` over `to: none`.
+    fn converted(
+        options: serde_json::Value,
+        operands: &[&str],
+    ) -> (String, String, i32, Option<String>) {
+        let mut config = serde_json::json!({
+            "to": "none", "from": "none", "suffix": "", "operands": operands,
+        });
+        config
+            .as_object_mut()
+            .unwrap()
+            .extend(options.as_object().unwrap().clone());
+        let mut stream = match super::open(config.to_string().as_bytes()) {
+            Ok(stream) => stream,
+            Err(err) => return (String::new(), String::new(), 1, Some(err.message)),
+        };
+        let mut out = Vec::new();
+        let refusal = stream.finish(&mut out).err().map(|err| err.message);
+        while stream.busy() {
+            stream.drain(&mut out).unwrap();
+        }
+        let mut warnings = Vec::new();
+        stream.take_stderr(&mut warnings);
+        let text = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap();
+        (text(out), text(warnings), stream.status(), refusal)
+    }
+
+    #[test]
+    fn units_rounding_padding_and_formats_match_gnu() {
+        use serde_json::json;
+        for (options, operand, expected) in [
+            (json!({"from_unit": "1024"}), "1.5", "1536.0\n"),
+            (json!({"from_unit": "Ki"}), "1", "1024\n"),
+            (json!({"from_unit": " +5"}), "1", "5\n"),
+            (json!({"from_unit": "1000", "to": "si"}), "1500", "1.5M\n"),
+            (json!({"to_unit": "1000"}), "1499", "2\n"),
+            (json!({"to_unit": "1000"}), "1.5", "0.1\n"),
+            (json!({"to_unit": "10"}), "1.55", "0.16\n"),
+            (json!({"from_unit": "10", "to_unit": "3"}), "1", "4\n"),
+            (json!({"to_unit": "1000"}), "-1500", "-2\n"),
+            (
+                json!({"to_unit": "1000", "round": "towards-zero"}),
+                "1999",
+                "1\n",
+            ),
+            (
+                json!({"to_unit": "1000", "round": "nearest"}),
+                "2500",
+                "3\n",
+            ),
+            (json!({"round": "up", "to": "si"}), "1001", "1.1k\n"),
+            (json!({"round": "down", "to": "si"}), "1999", "1.9k\n"),
+            (json!({"round": "up", "to": "si"}), "-1001", "-1.0k\n"),
+            (json!({"round": "down", "to": "si"}), "-1001", "-1.1k\n"),
+            (json!({"round": "nearest", "to": "si"}), "1250", "1.3k\n"),
+            (json!({"round": "nearest", "to": "si"}), "1049", "1.0k\n"),
+            (json!({"round": "up", "to": "si"}), "9999", "10k\n"),
+            (json!({"round": "down", "to": "si"}), "999999", "999k\n"),
+            (json!({"padding": "10"}), "1000", "      1000\n"),
+            (json!({"padding": "-10"}), "1000", "1000      \n"),
+            (json!({"padding": "3"}), "123456", "123456\n"),
+            (
+                json!({"padding": "5", "suffix": "B", "to": "si"}),
+                "1500",
+                "1.5kB\n",
+            ),
+            (json!({"format": "%.3f"}), "1000", "1000.000\n"),
+            (json!({"format": "%f"}), "1.50", "1.50\n"),
+            (json!({"format": "%010f"}), "1000", "0000001000\n"),
+            (json!({"format": "%-10f"}), "1000", "1000      \n"),
+            (json!({"format": "%0-10f"}), "5", "5         \n"),
+            (json!({"format": "%'05f"}), "5", "00005\n"),
+            (json!({"format": "x%fy"}), "5", "x5y\n"),
+            (json!({"format": "%%%f%%"}), "5", "%5%%\n"),
+            (json!({"format": "%.f"}), "1234.5", "1235\n"),
+            (json!({"format": "%.2f"}), "0.125", "0.13\n"),
+            (
+                json!({"format": "%.2f", "round": "down"}),
+                "0.125",
+                "0.12\n",
+            ),
+            (json!({"format": "%.1f"}), "-0.04", "-0.1\n"),
+            (json!({"format": "%05.1f"}), "-5", "-05.0\n"),
+            (json!({"format": "%.3f", "to": "si"}), "1234567", "1.235M\n"),
+            (json!({"format": "%.0f", "to": "si"}), "1499", "2k\n"),
+            (
+                json!({"format": "%.4f", "to": "iec"}),
+                "1000",
+                "1000.0000\n",
+            ),
+            (
+                json!({"format": "%08.1f", "to": "si"}),
+                "1500",
+                "000001.5k\n",
+            ),
+            (
+                json!({"format": "%010.2f", "to": "si"}),
+                "-1500",
+                "-000001.50k\n",
+            ),
+            (
+                json!({"format": "%10.1f", "to": "iec"}),
+                "1048576",
+                "      1.0M\n",
+            ),
+            (
+                json!({"format": "x%-6.1fy", "to": "si"}),
+                "1500",
+                "x1.5k  y\n",
+            ),
+            (
+                json!({"format": "%8.1f", "suffix": "B", "to": "si"}),
+                "1500",
+                "   1.5kB\n",
+            ),
+            (json!({"format": "%3f", "padding": "10"}), "1", "  1\n"),
+        ] {
+            let (out, _, status, refusal) = converted(options.clone(), &[operand]);
+            assert_eq!(
+                (out.as_str(), status, refusal),
+                (expected, 0, None),
+                "{options} {operand}"
+            );
+        }
+    }
+
+    #[test]
+    fn bad_options_and_fields_are_refused_or_let_through_as_gnu_does() {
+        use serde_json::json;
+        for (options, expected) in [
+            (json!({"from_unit": "0"}), "numfmt: invalid unit size: '0'"),
+            (
+                json!({"from_unit": "KiB"}),
+                "numfmt: invalid unit size: 'KiB'",
+            ),
+            (
+                json!({"to_unit": "16Ei"}),
+                "numfmt: invalid unit size: '16Ei'",
+            ),
+            (
+                json!({"from_unit": "1i"}),
+                "numfmt: invalid unit size: '1i'",
+            ),
+            (json!({"padding": "0"}), "numfmt: invalid padding value '0'"),
+            (json!({"padding": ""}), "numfmt: invalid padding value ''"),
+            (
+                json!({"format": "abc"}),
+                "numfmt: format 'abc' has no % directive",
+            ),
+            (json!({"format": "%"}), "numfmt: format '%' ends in %"),
+            (
+                json!({"format": "%f%f"}),
+                "numfmt: format '%f%f' has too many % directives",
+            ),
+            (
+                json!({"format": "%-'5f"}),
+                "numfmt: invalid format '%-\\'5f', directive must be %[0]['][-][N][.][N]f",
+            ),
+        ] {
+            let (_, _, _, refusal) = converted(options.clone(), &["1"]);
+            assert_eq!(refusal.as_deref(), Some(expected), "{options}");
+        }
+        let (out, _, _, refusal) = converted(json!({"format": "%.34f"}), &["1"]);
+        assert_eq!(out, "");
+        assert_eq!(
+            refusal.as_deref(),
+            Some("numfmt: value/precision too large to be printed: '1/34' (consider using --to)")
+        );
+        let (out, _, _, _) = converted(json!({"format": "%.33f"}), &["1"]);
+        assert_eq!(out.len(), 36);
+        let invalid = ["abc", "12", "def"];
+        let said = "numfmt: invalid number: 'abc'\nnumfmt: invalid number: 'def'\n";
+        assert_eq!(
+            converted(json!({"invalid": "fail"}), &invalid),
+            ("abc\n12\ndef\n".into(), said.into(), 2, None)
+        );
+        assert_eq!(
+            converted(json!({"invalid": "warn", "padding": "6"}), &invalid),
+            ("abc\n    12\ndef\n".into(), said.into(), 0, None)
+        );
+        assert_eq!(
+            converted(json!({"invalid": "ignore"}), &invalid),
+            ("abc\n12\ndef\n".into(), String::new(), 0, None)
+        );
+        let (out, _, _, refusal) = converted(json!({"invalid": "abort"}), &invalid);
+        assert_eq!(
+            (out.as_str(), refusal.as_deref()),
+            ("", Some("numfmt: invalid number: 'abc'"))
+        );
     }
 
     #[test]
