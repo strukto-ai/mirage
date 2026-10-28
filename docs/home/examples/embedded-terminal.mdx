@@ -201,7 +201,7 @@ terminal:
     import re
     from contextlib import asynccontextmanager
 
-    from fastapi import FastAPI
+    from fastapi import FastAPI, HTTPException
     from pydantic import BaseModel
 
     from mirage import MountMode, Workspace
@@ -254,7 +254,8 @@ terminal:
             "docker", "run", "-d", "--cap-add", "SYS_ADMIN", "--device", "/dev/fuse",
             "--name", f"box-{session_id}", "mirage-box", "sleep", "infinity",
         )
-        await docker.wait()
+        if await docker.wait() != 0:
+            raise HTTPException(500, "could not start the terminal's container")
         terminal(session_id).create_session(session_id)
 
 
@@ -336,7 +337,8 @@ terminal:
 
 - A terminal created on one replica runs on any other, in the directory it
   left: the other replica builds the same workspace from Redis on its first
-  line. `jobs`, `kill %N` and `ps` work across replicas, as
+  line. The replicas share one Docker daemon, which holds every terminal's
+  container. `jobs`, `kill %N` and `ps` work across replicas, as
   [Jobs](/home/infrastructure/jobs#run-several-instances-of-one-workspace)
   describes.
 - Every terminal's `/work` is the same Redis keys, so terminals share files.
