@@ -44,7 +44,7 @@ from mirage.core.disk.utils import (
     walk_entries,
 )
 from mirage.core.disk.write import write as _write
-from mirage.errors.fs import edquot
+from mirage.errors.types import QuotaExceededError
 from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
@@ -185,9 +185,11 @@ class DiskVFS(BaseVFS):
             await _copy(self.accessor, src, dst)
             if self.usage is not None:
                 copied = await _size_of(self.accessor, dst)
-                if copied > held.reserved:
+                try:
+                    held.grow_to(copied)
+                except QuotaExceededError:
                     await _truncate(self.accessor, dst, held.reserved, True)
-                    raise edquot(dst)
+                    raise
 
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
