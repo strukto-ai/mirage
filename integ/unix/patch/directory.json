@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/patch_dir/sub && cd /data/patch_dir || exit 1; printf 'a\\nb\\nc\\n' > sub/f; printf -- '--- f\\n+++ f\\n@@ -1,3 +1,3 @@\\n a\\n-b\\n+B\\n c\\n' > top.diff; cp top.diff sub/p.diff; patch -d sub < top.diff; cat sub/f; printf 'a\\nb\\nc\\n' > sub/f; patch -d sub -i p.diff; echo rc=$?; printf 'a\\nb\\nc\\n' > sub/f; patch --directory=sub f p.diff; echo rc=$?; patch -d sub -i top.diff; echo rc=$?; patch -d nosuch < top.diff; echo rc=$?; patch -d top.diff < top.diff; echo rc=$?; patch -d '' < top.diff; echo rc=$?; cd /; rm -r /data/patch_dir",
+      "command": "mkdir -p /data/patch_dir/sub && touch /data/patch_dir/sub/.keep; cd /data/patch_dir || exit 1; printf 'a\\nb\\nc\\n' > sub/f; printf -- '--- f\\n+++ f\\n@@ -1,3 +1,3 @@\\n a\\n-b\\n+B\\n c\\n' > top.diff; cp top.diff sub/p.diff; patch -d sub < top.diff; cat sub/f; printf 'a\\nb\\nc\\n' > sub/f; patch -d sub -i p.diff; echo rc=$?; printf 'a\\nb\\nc\\n' > sub/f; patch --directory=sub f p.diff; echo rc=$?; patch -d sub -i top.diff; echo rc=$?; patch -d nosuch < top.diff; echo rc=$?; patch -d top.diff < top.diff; echo rc=$?; patch -d '' < top.diff; echo rc=$?; cd /; rm -r /data/patch_dir",
       "expect": {
         "exit": 0,
         "stdout": "patching file f\na\nB\nc\npatching file f\nrc=0\npatching file f\nrc=0\nrc=2\nrc=2\nrc=2\nrc=2\n",

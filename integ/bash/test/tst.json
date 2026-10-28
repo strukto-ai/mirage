@@ -1918,7 +1918,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/tst_ops && cd /data/tst_ops && printf x > f; [[ -S f ]]; s=$?; [ -b f ]; b=$?; [[ -t 1 ]]; t=$?; test -t x; tx=$?; [[ -O f ]]; o=$?; [ -G f ]; g=$?; [[ -O nosuch ]]; on=$?; [[ -a f ]]; a=$?; [ -a f ]; ta=$?; echo $s $b $t $tx $o $g $on $a $ta; cd /; rm -r /data/tst_ops",
+      "command": "mkdir -p /data/tst_ops && touch /data/tst_ops/.keep; cd /data/tst_ops && printf x > f; [[ -S f ]]; s=$?; [ -b f ]; b=$?; [[ -t 1 ]]; t=$?; test -t x; tx=$?; [[ -O f ]]; o=$?; [ -G f ]; g=$?; [[ -O nosuch ]]; on=$?; [[ -a f ]]; a=$?; [ -a f ]; ta=$?; echo $s $b $t $tx $o $g $on $a $ta; cd /; rm -r /data/tst_ops",
       "expect": {
         "exit": 0,
         "stdout": "1 1 1 1 0 0 1 0 0\n",
