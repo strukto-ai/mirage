@@ -226,8 +226,8 @@ export type ReadPolicy = (typeof ReadPolicy)[keyof typeof ReadPolicy]
 
 /**
  * Whether replacements carry the version they were based on. Unconditional
- * existing-file rewrites are last-write-wins. A rewrite that observed a
- * missing file still requires atomic create-only under either policy.
+ * existing-file rewrites are last-write-wins. Shared rewrites that observed
+ * a missing file require atomic create-only under either policy.
  * Conditional writes also protect the version the mount last saw. Staged
  * names a staging layer not implemented here and is refused at mount time.
  * Mirrors Python's `WritePolicy`.

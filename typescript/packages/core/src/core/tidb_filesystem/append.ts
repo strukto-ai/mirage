@@ -28,8 +28,8 @@ import { write } from './write.ts'
 /**
  * Add bytes to the end of a file. A file drive9 keeps in object storage takes
  * them natively, so only its last part and the new bytes move. Any other path
- * is read and written back whole, which makes a missing file and refuses a
- * directory.
+ * is read and written back whole. The fallback refuses missing-file creation
+ * because its upload cannot enforce create-only, and it refuses directories.
  */
 export async function append(
   accessor: TiDBFilesystemAccessor,
