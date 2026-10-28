@@ -168,7 +168,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/patch_9941421 && touch /data/patch_9941421/.keep; cd /data/patch_9941421 || exit 1; mkdir -p d/sub; printf 'a\\n' > d/f; printf 'z\\n' > other; ln -s d/sub link; ln -s other f; printf -- '--- x\\n+++ x\\n@@ -1 +1 @@\\n-a\\n+b\\n' > p.diff; patch link/../f p.diff; echo rc=$?; cat d/f other; cd /; rm -r /data/patch_9941421",
+      "command": "mkdir -p /data/patch_9941421 && touch /data/patch_9941421/.keep; cd /data/patch_9941421 || exit 1; mkdir -p d/sub; printf 'k\\n' > d/sub/k; printf 'a\\n' > d/f; printf 'z\\n' > other; ln -s d/sub link; ln -s other f; printf -- '--- x\\n+++ x\\n@@ -1 +1 @@\\n-a\\n+b\\n' > p.diff; patch link/../f p.diff; echo rc=$?; cat d/f other; cd /; rm -r /data/patch_9941421",
       "expect": {
         "exit": 0,
         "stdout": "patching file link/../f\nrc=0\nb\nz\n",
