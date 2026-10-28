@@ -1118,7 +1118,7 @@ mod tests {
             assert_eq!(decode(b"\0junk").1.as_deref(), Some(bz2::NOT_BZIP2));
             assert_eq!(
                 decode(&[&hello[..], b"\0junk"].concat()),
-                (b"hello\n".to_vec(), None)
+                (b"hello\n".to_vec(), Some(bz2::TRAILING.into()))
             );
             assert_eq!(
                 decode(&[&hello[..], b"B"].concat()),

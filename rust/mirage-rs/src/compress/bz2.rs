@@ -13,6 +13,9 @@ You can use the -tvv option to test integrity of such files.
 You can use the `bzip2recover' program to attempt to recover
 data from undamaged sections of corrupted files.
 ";
+/// bzip2 warns of bytes after a whole stream that are no stream, and still
+/// succeeds.
+pub(super) const TRAILING: &str = "\nbzip2: ({}): trailing garbage after EOF ignored";
 pub(super) const ENDS: &str = "\nbzip2: Compressed file ends unexpectedly;
 \tperhaps it is corrupted?  *Possible* reason follows.
 bzip2: Inappropriate ioctl for device
@@ -37,7 +40,7 @@ fn failure(reason: &str) -> Failure {
 
 /// bzip2 -d over concatenated streams, in bzip2 1.0.8's words. A stream
 /// that follows a whole one and does not start with bzip2's magic is
-/// ignored; bzip2 also warns that it ignored it, which mirage does not.
+/// ignored, with bzip2's warning and its exit 0.
 pub(super) struct Decoder {
     stream: Option<Decompress>,
     streams: usize,
@@ -88,7 +91,13 @@ impl Unpack for Decoder {
                 Ok(_) => {}
                 Err(Error::DataMagic) if self.streams > 0 => {
                     step.consumed = input.len();
-                    step.ended = true;
+                    step.failure = Some(Failure {
+                        reasons: vec![TRAILING.into()],
+                        fatal: false,
+                        exit_code: 0,
+                        keeps_output: true,
+                        first_header: false,
+                    });
                     return step;
                 }
                 Err(Error::DataMagic) => {
