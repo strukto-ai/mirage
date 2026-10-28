@@ -23,7 +23,10 @@ interface Sent {
   body: unknown
 }
 
-function setup(fail: string | null = null): {
+function setup(
+  fail: string | null = null,
+  status = 500,
+): {
   accessor: NextcloudAccessor
   fake: FakeNextcloudOperator
   sent: Sent[]
@@ -35,7 +38,7 @@ function setup(fail: string | null = null): {
   vi.stubGlobal('fetch', (url: string, init: RequestInit) => {
     const method = init.method ?? 'GET'
     sent.push({ method, url, headers: init.headers, body: init.body })
-    return Promise.resolve(new Response(null, { status: method === fail ? 500 : 201 }))
+    return Promise.resolve(new Response(null, { status: method === fail ? status : 201 }))
   })
   return { accessor, fake, sent }
 }
@@ -79,5 +82,17 @@ describe('nextcloud write', () => {
     ).rejects.toThrow('Nextcloud MOVE returned HTTP 500')
     expect(sent.map((s) => s.method)).toEqual(['MKCOL', 'PUT', 'PUT', 'MOVE', 'DELETE'])
     expect(sent.at(-1)?.url).toBe(sent[0]?.url)
+  })
+
+  it.each([
+    [404, 'ENOENT'],
+    [409, 'ENOENT'],
+    [423, 'EACCES'],
+  ])('refuses a step answered %i as %s, as a single PUT would', async (status, code) => {
+    const { accessor, sent } = setup('MOVE', status)
+    await expect(
+      write(accessor, PathSpec.fromStrPath('/big.bin'), new Uint8Array(UPLOAD_CHUNK_SIZE + 1)),
+    ).rejects.toMatchObject({ code })
+    expect(sent.map((s) => s.method)).toEqual(['MKCOL', 'PUT', 'PUT', 'MOVE', 'DELETE'])
   })
 })

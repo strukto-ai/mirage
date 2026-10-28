@@ -853,20 +853,41 @@ export class MountCore {
   private supersede(key: string, pos: number, size: number, ctx: Handle | undefined): void {
     // Its bytes land at the end the file has then, not here.
     if (ctx?.mode.append === true) return
-    const end = pos + size
     for (const other of this.openOn(key)) {
       if (other === ctx || other.mode.append || other.writeBuf === undefined) continue
-      const kept: [number, Uint8Array | ByteSlice][] = []
-      for (const [at, run] of other.writeBuf) {
-        if (at >= end || at + run.byteLength <= pos) {
-          kept.push([at, run])
-          continue
-        }
-        if (at < pos) kept.push([at, run.subarray(0, pos - at)])
-        if (at + run.byteLength > end) kept.push([end, run.subarray(end - at)])
-      }
-      other.writeBuf = kept
+      other.writeBuf = MountCore.cut(other.writeBuf, pos, size)
+      other.cuts?.push([pos, size])
     }
+  }
+
+  /** `writes` with the range a newer write took cut out of them. Mirrors Python's `_cut`. */
+  private static cut(
+    writes: [number, Uint8Array | ByteSlice][],
+    pos: number,
+    size: number,
+  ): [number, Uint8Array | ByteSlice][] {
+    const end = pos + size
+    const kept: [number, Uint8Array | ByteSlice][] = []
+    for (const [at, run] of writes) {
+      if (at >= end || at + run.byteLength <= pos) {
+        kept.push([at, run])
+        continue
+      }
+      if (at < pos) kept.push([at, run.subarray(0, pos - at)])
+      if (at + run.byteLength > end) kept.push([end, run.subarray(end - at)])
+    }
+    return kept
+  }
+
+  /**
+   * Put a failed landing's writes back ahead of those made since, less what
+   * other writes took meanwhile, so a retry never lands bytes older than
+   * theirs. Mirrors Python's `_put_back`.
+   */
+  private static putBack(ctx: Handle, writes: [number, Uint8Array | ByteSlice][]): void {
+    let kept = writes
+    for (const [pos, size] of ctx.cuts ?? []) kept = MountCore.cut(kept, pos, size)
+    ctx.writeBuf = [...kept, ...(ctx.writeBuf ?? [])]
   }
 
   /**
@@ -1183,13 +1204,15 @@ export class MountCore {
     const writes = ctx.writeBuf ?? []
     const marker = new Uint8Array()
     ctx.writeBuf = [[end, marker]]
+    ctx.cuts = []
     let data: Uint8Array
     try {
       data = overlaid(held, 0, end, await windowWrites(writes, 0, end))
     } catch (err) {
-      ctx.writeBuf = [...writes, ...ctx.writeBuf]
+      MountCore.putBack(ctx, writes)
       throw err
     } finally {
+      delete ctx.cuts
       ctx.writeBuf = ctx.writeBuf.filter(([, run]) => run !== marker)
     }
     await MountCore.freeSpool(ctx)
@@ -1247,22 +1270,28 @@ export class MountCore {
     if (held.length < ctx.writeBuf.length) {
       const groups = runGroups(ctx.writeBuf)
       ctx.writeBuf = []
+      ctx.cuts = []
       try {
         await this.landSpooled(ctx, groups)
       } catch (err) {
-        ctx.writeBuf = [...groups.flat(), ...ctx.writeBuf]
+        MountCore.putBack(ctx, groups.flat())
         throw err
+      } finally {
+        delete ctx.cuts
       }
       await MountCore.freeSpool(ctx)
       return
     }
     const runs = writeRuns(held)
     ctx.writeBuf = []
+    ctx.cuts = []
     try {
       await this.applyWrites(ctx.path, runs, ctx.mode.append)
     } catch (err) {
-      ctx.writeBuf = [...runs, ...ctx.writeBuf]
+      MountCore.putBack(ctx, runs)
       throw err
+    } finally {
+      delete ctx.cuts
     }
   }
 

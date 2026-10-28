@@ -1,7 +1,7 @@
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/errors/fs'
+import { eacces, enoent } from '@struktoai/mirage-core/errors/fs'
 import { ByteSpool } from '@struktoai/mirage-core/io/spool'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { SystemIdSource } from '@struktoai/mirage-core/utils/ids'
@@ -9,6 +9,17 @@ import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { MAX_UPLOAD_CHUNKS, UPLOAD_CHUNK_SIZE } from './constants.ts'
 import { davRequest, davUrl, uploadsUrl } from './dav.ts'
 import { isNotFound, nextcloudKey } from './util.ts'
+
+/**
+ * Refuse a chunked upload's failed step as the file error a single PUT gives,
+ * any other failure as its HTTP error. Mirrors Python's `_refused`.
+ */
+function refused(answer: Response, method: string, path: PathSpec): void {
+  if (answer.ok) return
+  if (answer.status === 404 || answer.status === 409) throw enoent(path)
+  if (answer.status === 403 || answer.status === 423) throw eacces(path)
+  throw new Error(`Nextcloud ${method} returned HTTP ${String(answer.status)}`)
+}
 
 /**
  * Upload a spooled file through Nextcloud's chunked upload: an upload folder,
@@ -32,8 +43,7 @@ async function chunked(
     sent: Record<string, string>,
     body?: Uint8Array<ArrayBuffer> | Blob,
   ): Promise<void> => {
-    const answer = await davRequest(accessor, method, url, sent, body)
-    if (!answer.ok) throw new Error(`Nextcloud ${method} returned HTTP ${String(answer.status)}`)
+    refused(await davRequest(accessor, method, url, sent, body), method, path)
   }
   await send('MKCOL', folder, target)
   try {

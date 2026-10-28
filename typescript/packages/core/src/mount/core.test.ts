@@ -2184,6 +2184,67 @@ describe('MountCore past the memory limit', () => {
     expect(spool.closed).toBe(true)
   })
 
+  it('gives a failed unlinked landing back none of the bytes written over meanwhile', async () => {
+    const { core, store } = streamed()
+    store.store.files.set('/f', enc.encode('stored'))
+    const first = await core.open('/data/f', flags(fsConstants.O_RDWR))
+    const second = await core.open('/data/f', flags(fsConstants.O_RDWR))
+    for (let i = 0; i < 24; i++) await core.write('/data/f', first, BLOCK, i * BLOCK.byteLength)
+    await core.unlink('/data/f')
+    const spool = core.handles.get(first)?.spool
+    if (spool === undefined) throw new Error('expected a spool')
+    let reading = (): void => undefined
+    const waiting = new Promise<void>((resolve) => (reading = resolve))
+    let go = (): void => undefined
+    const gate = new Promise<void>((resolve) => (go = resolve))
+    vi.spyOn(spool, 'read').mockImplementationOnce(async () => {
+      reading()
+      await gate
+      throw Object.assign(new Error('spool'), { code: 'EIO' })
+    })
+    const landing = core.flush('/data/f', first)
+    await waiting
+    await core.write('/data/f', second, enc.encode('NEWER'), 0)
+    go()
+    await expect(landing).rejects.toMatchObject({ code: 'EIO' })
+    await core.flush('/data/f', second)
+    await core.flush('/data/f', first)
+    const want = new Uint8Array([...enc.encode('NEWER'), ...BLOCK.subarray(5, 8)])
+    for (const fh of [first, second]) {
+      expect(await core.read('/data/f', fh, 0, 8)).toEqual(want)
+      await core.release(fh)
+    }
+  })
+
+  it('gives a failed landing back none of the bytes written over meanwhile', async () => {
+    const { core, store } = streamed()
+    const first = await core.open(
+      '/data/f',
+      flags(fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC),
+    )
+    const second = await core.open('/data/f', flags(fsConstants.O_WRONLY))
+    for (let i = 0; i < 24; i++) await core.write('/data/f', first, BLOCK, i * BLOCK.byteLength)
+    let entered = (): void => undefined
+    const writing = new Promise<void>((resolve) => (entered = resolve))
+    let go = (): void => undefined
+    const gate = new Promise<void>((resolve) => (go = resolve))
+    vi.spyOn(store, 'write').mockImplementationOnce(async () => {
+      entered()
+      await gate
+      throw Object.assign(new Error('denied'), { code: 'EACCES' })
+    })
+    const landing = core.flush('/data/f', first)
+    await writing
+    await core.write('/data/f', second, enc.encode('NEWER'), 0)
+    go()
+    await expect(landing).rejects.toMatchObject({ code: 'EACCES' })
+    await core.release(second)
+    await core.release(first)
+    const want = repeat(24)
+    want.set(enc.encode('NEWER'), 0)
+    landed(store, want)
+  })
+
   it('has a read ready before a spill wait for the spilled bytes', async () => {
     const { core } = streamed()
     const fh = await core.open(

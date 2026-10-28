@@ -2114,6 +2114,69 @@ async def test_a_spill_while_an_unlinked_handle_lands_stays_in_its_spool():
     assert spool.closed
 
 
+@pytest.mark.asyncio
+async def test_a_failed_unlinked_landing_gives_back_no_bytes_written_over():
+    core, store = _streamed_core()
+    store._store.files["/f"] = b"stored"
+    first = await core.open("/f", open_mode(os.O_RDWR))
+    second = await core.open("/f", open_mode(os.O_RDWR))
+    for i in range(24):
+        await core.write("/f", BLOCK, i * len(BLOCK), first)
+    await core.unlink("/f")
+    spool = core.handles.get(first).spool
+    reading, go = asyncio.Event(), asyncio.Event()
+    read = spool.read
+
+    async def failing(offset: int, size: int) -> bytes:
+        reading.set()
+        await go.wait()
+        raise OSError(errno.EIO, "spool")
+
+    spool.read = failing
+    landing = asyncio.create_task(core.flush("/f", first))
+    await reading.wait()
+    await core.write("/f", b"NEWER", 0, second)
+    go.set()
+    with pytest.raises(OSError):
+        await landing
+    spool.read = read
+    await core.flush("/f", second)
+    await core.flush("/f", first)
+    for fh in (first, second):
+        assert await core.read("/f", 8, 0, fh) == b"NEWER" + BLOCK[5:8]
+        await core.release(fh)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_landing_gives_back_no_bytes_written_over_meanwhile():
+    core, store = _streamed_core()
+    first = await core.open(
+        "/f", open_mode(os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    )
+    second = await core.open("/f", open_mode(os.O_WRONLY))
+    for i in range(24):
+        await core.write("/f", BLOCK, i * len(BLOCK), first)
+    entered, go = asyncio.Event(), asyncio.Event()
+    real = store.write
+
+    async def refused(path, data, *, atomic=False):
+        entered.set()
+        await go.wait()
+        raise PermissionError(errno.EACCES, "denied", path)
+
+    store.write = refused
+    landing = asyncio.create_task(core.flush("/f", first))
+    await entered.wait()
+    await core.write("/f", b"NEWER", 0, second)
+    go.set()
+    with pytest.raises(PermissionError):
+        await landing
+    store.write = real
+    await core.release(second)
+    await core.release(first)
+    assert store._store.files["/f"] == b"NEWER" + (BLOCK * 24)[5:]
+
+
 class _DigestRAM(_StreamedRAM):
     """Keeps a written stream's digest rather than its bytes."""
 

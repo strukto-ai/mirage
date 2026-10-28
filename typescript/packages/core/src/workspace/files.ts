@@ -547,8 +547,8 @@ export class Files {
    * facade's `pwrite`). pwrite(2): the bytes outside the window stay, a gap
    * past the end reads back as zeros, and a missing file is created. It is
    * one write at the dispatcher, so a session that may write the file and not
-   * read it can still do it. A stream is written under the path's hold until
-   * it ends.
+   * read it can still do it. A stream lets the path's hold go while its next
+   * bytes are pulled, as a streamed write does.
    */
   async pwrite(
     path: string | PathSpec,

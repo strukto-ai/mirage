@@ -32,11 +32,13 @@ class _Uploads:
     target, headers and body size, never the body.
 
     Args:
-        fail (str | None): the method answered 500.
+        fail (str | None): the method answered ``status``.
+        status (int): the failed method's answer.
     """
 
-    def __init__(self, fail: str | None = None) -> None:
+    def __init__(self, fail: str | None = None, status: int = 500) -> None:
         self.fail = fail
+        self.status = status
         self.calls: list[tuple[str, str, dict[str, str] | None, int]] = []
 
     async def __call__(
@@ -47,7 +49,7 @@ class _Uploads:
             async for piece in content:
                 size += len(piece)
         self.calls.append((method, url, headers, size))
-        status = 500 if method == self.fail else 201
+        status = self.status if method == self.fail else 201
         return httpx.Response(status, request=httpx.Request(method, url))
 
 
@@ -92,11 +94,22 @@ async def test_a_large_write_goes_up_in_chunks_in_bounded_memory(make_acc):
 
 
 @pytest.mark.asyncio
-async def test_a_failed_chunked_upload_deletes_its_folder(make_acc):
-    uploads = _Uploads(fail="MOVE")
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [
+        (500, httpx.HTTPStatusError),
+        (404, FileNotFoundError),
+        (409, FileNotFoundError),
+        (423, PermissionError),
+    ],
+)
+async def test_a_failed_chunked_upload_deletes_its_folder(
+    make_acc, status, error
+):
+    uploads = _Uploads(fail="MOVE", status=status)
     with (
         patch("mirage.core.nextcloud.write.dav_request", uploads),
-        pytest.raises(httpx.HTTPStatusError),
+        pytest.raises(error),
     ):
         await write(
             make_acc({}),

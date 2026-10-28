@@ -77,4 +77,9 @@ export interface Handle {
    * read through it reports it rather than read what the name holds now.
    */
   lost?: Error
+  /**
+   * The ranges other writes took while a landing had its writes out, cut
+   * from those writes should they come back. Absent while none is.
+   */
+  cuts?: [number, number][]
 }

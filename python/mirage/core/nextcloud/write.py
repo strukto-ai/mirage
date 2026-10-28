@@ -1,5 +1,7 @@
 import logging
+from http import HTTPStatus
 
+import httpx
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
@@ -9,7 +11,7 @@ from mirage.core.nextcloud.constants import (
 )
 from mirage.core.nextcloud.dav import dav_request, dav_url, uploads_url
 from mirage.core.nextcloud.util import nextcloud_key
-from mirage.errors.fs import enoent
+from mirage.errors.fs import eacces, enoent
 from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
@@ -17,6 +19,22 @@ from mirage.types import PathSpec
 from mirage.utils.ids import SystemIdSource
 
 logger = logging.getLogger(__name__)
+
+
+def _refused(response: httpx.Response, path: PathSpec) -> None:
+    """Refuse a chunked upload's failed step as the file error a single PUT
+    gives, any other failure as its HTTP error.
+
+    Args:
+        response (httpx.Response): the step's answer.
+        path (PathSpec): the destination.
+    """
+    status = response.status_code
+    if status in (HTTPStatus.NOT_FOUND, HTTPStatus.CONFLICT):
+        raise enoent(path)
+    if status in (HTTPStatus.FORBIDDEN, HTTPStatus.LOCKED):
+        raise eacces(path)
+    response.raise_for_status()
 
 
 async def _chunked(
@@ -40,7 +58,7 @@ async def _chunked(
     target = {"Destination": dav_url(accessor, path)}
     headers = {**target, "OC-Total-Length": str(spool.size)}
     part = max(UPLOAD_CHUNK_SIZE, -(-spool.size // MAX_UPLOAD_CHUNKS))
-    (await dav_request(accessor, "MKCOL", folder, target)).raise_for_status()
+    _refused(await dav_request(accessor, "MKCOL", folder, target), path)
     try:
         for number, start in enumerate(range(0, spool.size, part), 1):
             size = min(part, spool.size - start)
@@ -51,11 +69,11 @@ async def _chunked(
                 {**headers, "Content-Length": str(size)},
                 spool.stream(start, size),
             )
-            response.raise_for_status()
+            _refused(response, path)
         response = await dav_request(
             accessor, "MOVE", f"{folder}/.file", headers
         )
-        response.raise_for_status()
+        _refused(response, path)
     except BaseException:
         try:
             await dav_request(accessor, "DELETE", folder)

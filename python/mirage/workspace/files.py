@@ -685,8 +685,9 @@ class Files:
         pwrite(2): the bytes outside ``[offset, offset + len(data))``
         stay, a gap past the end reads back as zeros, and a missing file
         is created. It is one write at the dispatcher, so a session that may
-        write the file and not read it can still do it. A stream is
-        written under the path's hold until it ends.
+        write the file and not read it can still do it. A stream lets the
+        path's hold go while its next bytes are pulled, as a streamed
+        write does.
 
         Args:
             path (str | PathSpec): Virtual path.

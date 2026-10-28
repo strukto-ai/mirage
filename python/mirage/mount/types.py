@@ -93,3 +93,6 @@ class Handle:
     # every read through it reports it rather than read what the name
     # holds now.
     lost: Exception | None = None
+    # The ranges other writes took while a landing had its writes out,
+    # cut from those writes should they come back. None while none is.
+    cuts: list[tuple[int, int]] | None = None

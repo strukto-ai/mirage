@@ -968,20 +968,46 @@ class MountCore:
         if ctx is not None and ctx.mode.append:
             # Its bytes land at the end the file has then, not here.
             return
-        end = offset + size
         for other in self._open_on(key):
             if other is ctx or other.mode.append:
                 continue
-            kept: WriteBuf = []
-            for at, run in other.write_buf:
-                if at >= end or at + len(run) <= offset:
-                    kept.append((at, run))
-                    continue
-                if at < offset:
-                    kept.append((at, run[: offset - at]))
-                if at + len(run) > end:
-                    kept.append((end, run[end - at :]))
-            other.write_buf = kept
+            other.write_buf = self._cut(other.write_buf, offset, size)
+            if other.cuts is not None:
+                other.cuts.append((offset, size))
+
+    @staticmethod
+    def _cut(writes: WriteBuf, offset: int, size: int) -> WriteBuf:
+        """``writes`` with the range a newer write took cut out of them.
+
+        Args:
+            writes (WriteBuf): a handle's writes.
+            offset (int): where the newer write starts.
+            size (int): its length.
+        """
+        end = offset + size
+        kept: WriteBuf = []
+        for at, run in writes:
+            if at >= end or at + len(run) <= offset:
+                kept.append((at, run))
+                continue
+            if at < offset:
+                kept.append((at, run[: offset - at]))
+            if at + len(run) > end:
+                kept.append((end, run[end - at :]))
+        return kept
+
+    def _put_back(self, ctx: Handle, writes: WriteBuf) -> None:
+        """Put a failed landing's writes back ahead of those made since,
+        less what other writes took meanwhile, so a retry never lands
+        bytes older than theirs.
+
+        Args:
+            ctx (Handle): the handle whose landing failed.
+            writes (WriteBuf): the writes it took out.
+        """
+        for offset, size in ctx.cuts or ():
+            writes = self._cut(writes, offset, size)
+        ctx.write_buf = [*writes, *ctx.write_buf]
 
     async def create(self, path: str, mode: int | None = None) -> int:
         """Create an empty file and return a fresh handle.
@@ -1283,7 +1309,8 @@ class MountCore:
         The buffer is detached before the await so a write arriving
         meanwhile is not lost to the clear, and the runs that did not land
         are restored ahead of those later writes when persistence fails,
-        so the acknowledged bytes stay for the handle's own flush to retry.
+        less what other writes took meanwhile, so the acknowledged bytes
+        stay for the handle's own flush to retry.
 
         Args:
             ctx (Handle): the handle whose buffer to land.
@@ -1300,27 +1327,27 @@ class MountCore:
         ]
         if len(held) < len(ctx.write_buf):
             groups = run_groups(ctx.write_buf)
-            ctx.write_buf = []
+            ctx.write_buf, ctx.cuts = [], []
             try:
                 await self._land_spooled(ctx, groups)
             except BaseException:
-                ctx.write_buf = [
-                    *(write for group in groups for write in group),
-                    *ctx.write_buf,
-                ]
+                self._put_back(
+                    ctx, [write for group in groups for write in group]
+                )
                 raise
+            finally:
+                ctx.cuts = None
             await self._free_spool(ctx)
             return
         runs = write_runs(held)
-        ctx.write_buf = []
+        ctx.write_buf, ctx.cuts = [], []
         try:
             await self._apply_writes(ctx.path, runs, ctx.mode.append)
         except BaseException:
-            ctx.write_buf = [
-                *((at, bytearray(run)) for at, run in runs),
-                *ctx.write_buf,
-            ]
+            self._put_back(ctx, [(at, bytearray(run)) for at, run in runs])
             raise
+        finally:
+            ctx.cuts = None
 
     async def _land_spooled(self, ctx: Handle, groups: list[WriteBuf]) -> None:
         """Land a buffer whose writes wait in its spool, each group of
@@ -1415,12 +1442,14 @@ class MountCore:
         end = self._end(ctx)
         marker = bytearray()
         writes, ctx.write_buf = ctx.write_buf, [(end, marker)]
+        ctx.cuts = []
         try:
             data = overlaid(held, 0, end, await window_writes(writes, 0, end))
         except BaseException:
-            ctx.write_buf = [*writes, *ctx.write_buf]
+            self._put_back(ctx, writes)
             raise
         finally:
+            ctx.cuts = None
             ctx.write_buf = [
                 w for w in ctx.write_buf if w[1] is not marker or marker
             ]

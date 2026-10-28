@@ -2657,7 +2657,7 @@ class Dispatcher:
                     if _facts_of(mount).cacheable
                     else 0,
                 )
-                if call.name in ("write", "append")
+                if call.name in ("write", "append", "pwrite")
                 and not isinstance(kwargs.get("data"), bytes)
                 else None
             )
