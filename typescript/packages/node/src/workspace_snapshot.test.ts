@@ -479,6 +479,32 @@ describe('the scratch root and overrides through a copy or a load', () => {
     }
   })
 
+  // A state saved while one VFS could sit at two prefixes: the later row names
+  // the first and both carry the shared files. Each row now loads on its own.
+  it('loads a row naming another as its VFS on its own', async () => {
+    const ws = new Workspace({ '/a': new RAMVFS(), '/b': new RAMVFS() }, { mode: MountMode.WRITE })
+    let state: WorkspaceStateDict
+    try {
+      expect((await ws.shell('echo hi > /a/f')).exitCode).toBe(0)
+      state = await toStateDict(ws)
+    } finally {
+      await ws.close()
+    }
+    const a = state.mounts.find((m) => m.prefix === '/a/')
+    const b = state.mounts.find((m) => m.prefix === '/b/')
+    if (a === undefined || b === undefined) throw new Error('rows missing')
+    Object.assign(b, { vfs_state: a.vfs_state, same_vfs_as: '/a/' })
+    const restored = await Workspace.fromState(state)
+    try {
+      expect(restored.mount('/a').vfs).not.toBe(restored.mount('/b').vfs)
+      expect((await restored.shell('cat /b/f')).stdoutText).toBe('hi\n')
+      expect((await restored.shell('echo x > /a/g')).exitCode).toBe(0)
+      expect((await restored.shell('cat /b/g')).exitCode).toBe(1)
+    } finally {
+      await restored.close()
+    }
+  })
+
   it('refuses a newer format before it reads the rows', async () => {
     let built = 0
     registerVfs('notes-test', () => {

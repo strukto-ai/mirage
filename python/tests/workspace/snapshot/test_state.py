@@ -1129,6 +1129,29 @@ async def test_a_newer_format_is_refused_before_any_vfs_is_built(monkeypatch):
     assert CountingRAM.builds == 0
 
 
+# A state saved while one VFS could sit at two prefixes: the later row names
+# the first and both carry the shared files. Each row now loads on its own.
+@pytest.mark.asyncio
+async def test_a_row_naming_another_as_its_vfs_loads_on_its_own():
+    ws = Workspace({"/a": RAMVFS(), "/b": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        assert (await ws.shell("echo hi > /a/f")).exit_code == 0
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    rows = {m[MountKey.PREFIX]: m for m in state[StateKey.MOUNTS]}
+    rows["/b/"][MountKey.VFS_STATE] = rows["/a/"][MountKey.VFS_STATE]
+    rows["/b/"]["same_vfs_as"] = "/a/"
+    restored = await Workspace.from_state(state)
+    try:
+        assert restored.mount("/a").vfs is not restored.mount("/b").vfs
+        assert await (await restored.shell("cat /b/f")).stdout_str() == "hi\n"
+        assert (await restored.shell("echo x > /a/g")).exit_code == 0
+        assert (await restored.shell("cat /b/g")).exit_code == 1
+    finally:
+        await restored.close()
+
+
 @pytest.mark.asyncio
 async def test_an_overridden_mount_takes_the_default_read_spec():
     """The saved policy belongs to the backend that was saved.
