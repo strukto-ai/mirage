@@ -89,13 +89,19 @@ one `[path, record]` pair per hit, the hit's workspace path and the text
 `search` prints; `[]` means no match and `null` declines. A VFS that ranks
 several paths together overrides `searchMany(paths, query)` as well.
 
+Pass the path on to the service, so a search under one folder ranks only
+that folder's notes and no other folder's hits use up `top_k`.
+
 ```ts
 import { BaseVFS, type PathSpec, type SearchQuery } from '@struktoai/mirage-node'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 
 class NotesVFS extends BaseVFS<NotesAccessor> {
   override async search(path: PathSpec, query: SearchQuery): Promise<[string, string][] | null> {
-    const hits = await this.accessor.client.search(query.query, { limit: Number(query.options?.top_k ?? 10) })
+    const hits = await this.accessor.client.search(query.query, {
+      folder: path.vfsPath,
+      limit: Number(query.options?.top_k ?? 10),
+    })
     return hits.map((hit) => [mountedPath(path, `/${hit.key}`).virtual, hit.text])
   }
 }

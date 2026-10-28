@@ -41,6 +41,11 @@ if ctx["command"].startswith("python") and any(deletes(p) for p in ctx["paths"])
     print(json.dumps({"kind": "deny", "reason": "deleting files is disabled"}))
 ```
 
+The script reads the code as text, so it stops the usual calls, not every way
+Python can delete a file. A rule that must always hold belongs in a coded
+policy, which judges each file call itself, as `WritesOnlyToOut` below does
+for writes.
+
 ## The workspace
 
 <Tabs>

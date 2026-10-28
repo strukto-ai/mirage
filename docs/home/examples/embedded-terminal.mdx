@@ -97,7 +97,7 @@ One endpoint creates a session, another runs a command line in it.
       res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
     })
 
-    app.listen(3000)
+    app.listen(3000, '127.0.0.1')
     ```
 
     ```bash
@@ -122,6 +122,9 @@ The run prints `45`. A later call to session `a` starts in `/work`, where the
   workspace, to keep files apart.
 - Monty supports a subset of Python and has no network or host access. For
   more, see [Hybrid Terminal](#hybrid-terminal).
+- The server runs any line for any caller that names a session. Put
+  authentication and a check that the caller owns the session in front of it
+  before it listens beyond localhost.
 
 ## Async
 
@@ -133,6 +136,8 @@ every other terminal, with no thread or process per terminal.
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
+    import asyncio
+
     for sid in ["a", "b", "c"]:
         ws.create_session(sid)
     await asyncio.gather(*(ws.shell("sleep 1", session_id=sid) for sid in ["a", "b", "c"]))
@@ -166,7 +171,7 @@ replicas serve the same sessions.
 | `ffmpeg -i in.mp4 out.gif` | Docker, by `@external` |
 
 Build the container's image with `sshfs`, which serves the workspace into it,
-and the programs the lines need:
+and the programs the lines need, and start Redis:
 
 ```dockerfile Dockerfile
 FROM python:3.12-slim
@@ -178,21 +183,26 @@ RUN apt-get update \
 
 ```bash
 docker build -t mirage-box .
-docker run -d --cap-add SYS_ADMIN --device /dev/fuse --name mirage-box mirage-box sleep infinity
 docker run -d --name redis -p 6379:6379 redis
 ```
 
-Then build the workspace below in place of the one above; the endpoints stay
-the same.
+A container serves one session, so each terminal gets a workspace and a
+container of its own. The server starts the container when it creates the
+terminal:
 
 <Tabs>
   <Tab title="FastAPI" icon="/images/python-logo.svg">
     ```bash
-    pip install 'mirage-ai[monty,redis,ssh]'
+    pip install 'mirage-ai[monty,redis,ssh]' fastapi uvicorn
     ```
 
-    ```python
+    ```python app.py
+    import asyncio
     import re
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from pydantic import BaseModel
 
     from mirage import MountMode, Workspace
     from mirage.runtime.python.monty import MontyRuntime
@@ -201,22 +211,57 @@ the same.
     from mirage.workspace.store import RedisWorkspaceStateStore
 
     REDIS_URL = "redis://localhost:6379/0"
+    terminals: dict[str, Workspace] = {}
 
-    ws = Workspace(
-        {"/work": RedisVFS(url=REDIS_URL)},
-        mode=MountMode.EXEC,
-        workspace_id="terminal",
-        store=RedisWorkspaceStateStore(url=REDIS_URL),
-        owns_store=True,
-        runtimes=[
-            MontyRuntime(captures=["python", "python3"]),
-            DockerRuntime(
-                captures=["python", "python3", "@external"],
-                config={"container": "mirage-box", "mount_type": "ssh"},
-            ),
-        ],
-        route_policy=lambda ctx: "docker" if re.search(r"\b(numpy|pandas)\b", ctx.line) else None,
-    )
+
+    def terminal(terminal_id: str) -> Workspace:
+        if terminal_id not in terminals:
+            terminals[terminal_id] = Workspace(
+                {"/work": RedisVFS(url=REDIS_URL)},
+                mode=MountMode.EXEC,
+                workspace_id=terminal_id,
+                store=RedisWorkspaceStateStore(url=REDIS_URL),
+                owns_store=True,
+                runtimes=[
+                    MontyRuntime(captures=["python", "python3"]),
+                    DockerRuntime(
+                        captures=["python", "python3", "@external"],
+                        config={"container": f"box-{terminal_id}", "mount_type": "ssh"},
+                    ),
+                ],
+                route_policy=lambda ctx: "docker" if re.search(r"\b(numpy|pandas)\b", ctx.line) else None,
+            )
+        return terminals[terminal_id]
+
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        for ws in terminals.values():
+            await ws.close()
+
+
+    app = FastAPI(lifespan=lifespan)
+
+
+    class Run(BaseModel):
+        command: str
+
+
+    @app.post("/sessions/{session_id}")
+    async def create(session_id: str) -> None:
+        docker = await asyncio.create_subprocess_exec(
+            "docker", "run", "-d", "--cap-add", "SYS_ADMIN", "--device", "/dev/fuse",
+            "--name", f"box-{session_id}", "mirage-box", "sleep", "infinity",
+        )
+        await docker.wait()
+        terminal(session_id).create_session(session_id)
+
+
+    @app.post("/sessions/{session_id}/run")
+    async def run(session_id: str, body: Run) -> dict:
+        r = await terminal(session_id).shell(body.command, session_id=session_id)
+        return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
     ```
   </Tab>
   <Tab title="Express" icon="/images/typescript-logo.svg">
@@ -224,7 +269,10 @@ the same.
     npm install @struktoai/mirage-node @pydantic/monty redis ssh2 express
     ```
 
-    ```typescript
+    ```typescript app.mjs
+    import { execFile } from 'node:child_process'
+    import { promisify } from 'node:util'
+    import express from 'express'
     import {
       DockerRuntime,
       MontyRuntime,
@@ -235,33 +283,64 @@ the same.
     } from '@struktoai/mirage-node'
 
     const redisUrl = 'redis://localhost:6379/0'
+    const terminals = new Map()
 
-    const ws = new Workspace(
-      { '/work': new RedisVFS({ url: redisUrl }) },
-      {
-        mode: MountMode.EXEC,
-        workspaceId: 'terminal',
-        store: new RedisWorkspaceStateStore({ url: redisUrl }),
-        ownsStore: true,
-        runtimes: [
-          new MontyRuntime({ captures: ['python', 'python3'] }),
-          new DockerRuntime({
-            captures: ['python', 'python3', '@external'],
-            config: { container: 'mirage-box', mountType: 'ssh' },
-          }),
-        ],
-        routePolicy: (ctx) => (/\b(numpy|pandas)\b/.test(ctx.line) ? 'docker' : null),
-      },
-    )
+    function terminal(id) {
+      if (!terminals.has(id)) {
+        terminals.set(
+          id,
+          new Workspace(
+            { '/work': new RedisVFS({ url: redisUrl }) },
+            {
+              mode: MountMode.EXEC,
+              workspaceId: id,
+              store: new RedisWorkspaceStateStore({ url: redisUrl }),
+              ownsStore: true,
+              runtimes: [
+                new MontyRuntime({ captures: ['python', 'python3'] }),
+                new DockerRuntime({
+                  captures: ['python', 'python3', '@external'],
+                  config: { container: `box-${id}`, mountType: 'ssh' },
+                }),
+              ],
+              routePolicy: (ctx) => (/\b(numpy|pandas)\b/.test(ctx.line) ? 'docker' : null),
+            },
+          ),
+        )
+      }
+      return terminals.get(id)
+    }
+
+    const app = express()
+    app.use(express.json())
+
+    app.post('/sessions/:id', async (req, res) => {
+      const id = req.params.id
+      await promisify(execFile)('docker', [
+        'run', '-d', '--cap-add', 'SYS_ADMIN', '--device', '/dev/fuse',
+        '--name', `box-${id}`, 'mirage-box', 'sleep', 'infinity',
+      ])
+      terminal(id).createSession(id)
+      res.sendStatus(201)
+    })
+
+    app.post('/sessions/:id/run', async (req, res) => {
+      const r = await terminal(req.params.id).shell(req.body.command, { sessionId: req.params.id })
+      res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+    })
+
+    app.listen(3000, '127.0.0.1')
     ```
   </Tab>
 </Tabs>
 
-- A session created on one replica runs on any other, in the directory it
-  left. `jobs`, `kill %N` and `ps` work across replicas, as
+- A terminal created on one replica runs on any other, in the directory it
+  left: the other replica builds the same workspace from Redis on its first
+  line. `jobs`, `kill %N` and `ps` work across replicas, as
   [Jobs](/home/infrastructure/jobs#run-several-instances-of-one-workspace)
   describes.
-- The container sees the files as the first session to run a line in it sees
-  them. Here every session has the same view, so one container serves them
-  all; give a session with narrower permissions its own container.
+- Every terminal's `/work` is the same Redis keys, so terminals share files.
+  Give each `RedisVFS` its own `key_prefix` to keep them apart.
+- Remove a terminal's container with `docker rm -f box-<id>` when the
+  terminal ends.
 - `ws.explain(line)` shows which runtime serves each command.

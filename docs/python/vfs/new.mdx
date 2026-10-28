@@ -121,8 +121,12 @@ class IndexedS3VFS(S3VFS):
         return [mounted_path(path, "/" + hit["_id"]) for hit in hits["hits"]]
 
     async def close(self) -> None:
-        await self.es.close()
-        await super().close()
+        if self.is_closed:
+            return
+        try:
+            await self.es.close()
+        finally:
+            await super().close()
 
 
 vfs = IndexedS3VFS(S3Config(bucket="docs"), AsyncElasticsearch("http://localhost:9200"))
@@ -134,7 +138,9 @@ await ws.shell("grep -rlw outage /s3/")
 ignores case, so it may name more than grep prints; grep checks each line and
 drops the rest. `grep -rl outage` without `-w` gets `None` and reads every
 object, so `outages` still matches. The mount is read-only because a write
-through Mirage would leave the index behind.
+through Mirage would leave the index behind. The answer is only as complete
+as the index: grep skips an object written elsewhere that Elasticsearch has
+not indexed yet, so return `None` while the indexer lags.
 
 | Function | Asked by | Answers |
 | --- | --- | --- |

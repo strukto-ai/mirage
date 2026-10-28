@@ -39,8 +39,12 @@ class JiraVFS extends BaseVFS<JiraAccessor> {
   override async stat(path: PathSpec): Promise<FileStat> { ... }
 
   override async close(): Promise<void> {
-    await this.accessor.client.close()
-    await super.close()
+    if (this.isClosed) return
+    try {
+      await this.accessor.client.close()
+    } finally {
+      await super.close()
+    }
   }
 }
 
@@ -120,8 +124,12 @@ class IndexedS3VFS extends S3VFS {
   }
 
   override async close(): Promise<void> {
-    await this.es.close()
-    await super.close()
+    if (this.isClosed) return
+    try {
+      await this.es.close()
+    } finally {
+      await super.close()
+    }
   }
 }
 
@@ -134,7 +142,9 @@ await ws.shell('grep -rlw outage /s3/')
 ignores case, so it may name more than grep prints; grep checks each line and
 drops the rest. `grep -rl outage` without `-w` gets `null` and reads every
 object, so `outages` still matches. The mount is read-only because a write
-through Mirage would leave the index behind.
+through Mirage would leave the index behind. The answer is only as complete
+as the index: grep skips an object written elsewhere that Elasticsearch has
+not indexed yet, so return `null` while the indexer lags.
 
 | Function | Asked by | Answers |
 | --- | --- | --- |

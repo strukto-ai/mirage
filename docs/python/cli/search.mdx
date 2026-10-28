@@ -91,6 +91,9 @@ one `(path, record)` pair per hit, the hit's workspace path and the text
 `search` prints; `[]` means no match and `None` declines. A VFS that ranks
 several paths together defines `search_many(paths, query)` as well.
 
+Pass the path on to the service, so a search under one folder ranks only
+that folder's notes and no other folder's hits use up `top_k`.
+
 ```python
 from mirage import BaseVFS, PathSpec, SearchQuery
 from mirage.utils.key_prefix import mounted_path
@@ -98,7 +101,9 @@ from mirage.utils.key_prefix import mounted_path
 
 class NotesVFS(BaseVFS):
     async def search(self, path: PathSpec, query: SearchQuery) -> list[tuple[str, str]] | None:
-        hits = await self.accessor.client.search(query.query, limit=int(query.options.get("top_k", 10)))
+        hits = await self.accessor.client.search(
+            query.query, folder=path.vfs_path, limit=int(query.options.get("top_k", 10))
+        )
         return [(mounted_path(path, "/" + hit.key).virtual, hit.text) for hit in hits]
 ```
 

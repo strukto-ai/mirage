@@ -270,6 +270,10 @@ if ctx["command"] == "rm" or (
     print(json.dumps({"kind": "deny", "reason": "deleting files is disabled"}))
 ```
 
+The script reads the code as text, so it stops the usual calls, not every way
+Python can delete a file. A rule that must always hold belongs in a
+[coded policy](/home/policy/policies), which judges each file call itself.
+
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
