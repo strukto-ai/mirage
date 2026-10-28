@@ -156,6 +156,45 @@
         "t",
         "j"
       ]
+    },
+    {
+      "id": "tar_j_trailing_garbage_warns",
+      "seq": 15100079,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/tgj && cd /data/tgj && mkdir src && printf hi > src/a && tar -cjf a.tbz src && cat a.tbz > g.tbz && printf garbage >> g.tbz && tar -tjf g.tbz; echo rc=$?; tar -tjf g.tbz nosuch; echo rc=$?; cd / && rm -r /data/tgj)",
+      "expect": {
+        "exit": 0,
+        "stdout": "src/\nsrc/a\nrc=0\nrc=2\n",
+        "stderr": "\nbzip2: (stdin): trailing garbage after EOF ignored\n\nbzip2: (stdin): trailing garbage after EOF ignored\ntar: nosuch: Not found in archive\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "t",
+        "j"
+      ]
     }
   ]
 }

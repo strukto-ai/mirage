@@ -34,6 +34,11 @@ struct Failure {
 }
 
 impl Failure {
+    /// Whether the compressor only warned, and tar reads on.
+    fn warned(&self) -> bool {
+        self.exit_code == 0
+    }
+
     /// The compressor's lines, its input named as stdin.
     fn lines(&self) -> Vec<u8> {
         self.reasons
@@ -140,11 +145,15 @@ impl Input<'_> {
             } else {
                 break;
             }
-            if codec.status() != 0 {
+            if codec.status() != 0 || codec.done() {
+                // A codec that ends may still have warned, as bzip2 warns of
+                // trailing garbage and exits 0.
                 let mut report = Vec::new();
                 codec.take_stderr(&mut report);
-                self.failure =
-                    Some(serde_json::from_slice(&report).expect("a codec reports its failure"));
+                if !report.is_empty() {
+                    self.failure =
+                        Some(serde_json::from_slice(&report).expect("a codec reports its failure"));
+                }
             }
         }
         self.buf.len() > before
@@ -707,7 +716,10 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
             break;
         }
     }
-    if input.taken == 0 && input.failure.is_none() && input.raw.error.is_none() {
+    if input.taken == 0
+        && input.failure.as_ref().is_none_or(Failure::warned)
+        && input.raw.error.is_none()
+    {
         run.say(NOT_TAR);
         run.failed = true;
     }
@@ -730,10 +742,15 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         host.warn(&[lead, lines(&run.notices), lines(&[UNEXPECTED_EOF, FATAL])].concat());
         return FAILED;
     }
-    if let Some(failure) = &input.failure {
+    if let Some(failure) = input.failure.as_ref().filter(|failure| !failure.warned()) {
         let status = format!("tar: Child returned status {}", failure.exit_code);
         host.warn(&[lead, lines(&run.notices), lines(&[status.as_str(), FATAL])].concat());
         return FAILED;
+    }
+    // The compressor's warning lands after what tar said while reading and
+    // before what it says of the run.
+    if let Some(warning) = lead.strip_suffix(b"\n") {
+        run.say(warning);
     }
     let misses: Vec<&Vec<u8>> = config
         .selectors
