@@ -24,6 +24,7 @@ SHARED_TARGETS = [
     "ram",
     "disk",
     "disk-host-links",
+    "disk-capacity-permissions",
     "redis",
     "ram-history",
     "ram-nested",

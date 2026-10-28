@@ -51,6 +51,7 @@ export async function setAttrs(
   if (fields.mode !== undefined) {
     const keep = st.isDirectory() ? 0o700 : 0o600
     await chmod(full, fields.mode | keep)
+    accessor.usage?.stale()
     if ((fields.mode | keep) !== fields.mode) residual.mode = fields.mode
   }
   if (fields.uid !== undefined) residual.uid = fields.uid

@@ -65,6 +65,8 @@ async def set_attrs(
     if mode is not None:
         keep = 0o700 if await aiofiles.os.path.isdir(p) else 0o600
         await aio_chmod(p, mode | keep)
+        if accessor.usage is not None:
+            accessor.usage.stale()
         if mode | keep != mode:
             residual["mode"] = mode
     if uid is not None:

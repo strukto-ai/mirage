@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "id": "disk_capacity_writes_and_df_skip_unreadable_folders",
+      "seq": 1,
+      "targets": ["disk-capacity-permissions"],
+      "command": "printf x > /data/new; echo $?; df -B1 /data | awk 'NR == 2 { print $3 }'; cat /data/new; echo; rm /data/new",
+      "expect": { "exit": 0, "stdout": "0\n4\nx\n", "stderr": "" }
+    },
+    {
+      "id": "disk_capacity_refused_copy_keeps_existing_destination",
+      "seq": 2,
+      "targets": ["disk-capacity-permissions"],
+      "command": "cp /data/source/known /data/destination; echo $?; cat /data/destination; echo; cat /data/source/known; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\nZ\nabcde\n",
+        "stderr": "cp: cannot create regular file '/data/destination': Disk quota exceeded\n"
+      }
+    },
+    {
+      "id": "disk_capacity_refused_move_keeps_unlisted_source",
+      "seq": 3,
+      "targets": ["disk-capacity-permissions"],
+      "command": "mv /data/source/known /data/moved; echo $?; cat /data/source/known; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\nabcde\n",
+        "stderr": "mv: cannot move '/data/source/known' to '/data/moved': Disk quota exceeded\n"
+      }
+    },
+    {
+      "id": "disk_capacity_chmod_recounts_before_deletion",
+      "seq": 4,
+      "targets": ["disk-capacity-permissions"],
+      "command": "chmod 755 /data/locked; rm /data/locked/hidden; df -B1 /data | awk 'NR == 2 { print $3 }'; printf xx > /data/new; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n1\n",
+        "stderr": "/data/new: Disk quota exceeded\n"
+      }
+    }
+  ]
+}

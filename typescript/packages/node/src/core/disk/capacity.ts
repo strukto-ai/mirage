@@ -48,9 +48,8 @@ async function bytesUnder(host: string): Promise<number> {
   return total
 }
 
-/** The bytes at `path` included by whole-root counting. Mirrors
- * Python's `size_of`. */
-export async function sizeOf(accessor: DiskAccessor, spec: PathSpec): Promise<number> {
+/** Whether whole-root counting can traverse the operand's ancestors. */
+export async function isCounted(accessor: DiskAccessor, spec: PathSpec): Promise<boolean> {
   const host = await resolveInside(accessor.root, spec)
   const root = path.resolve(accessor.root)
   if (host !== root) {
@@ -61,14 +60,25 @@ export async function sizeOf(accessor: DiskAccessor, spec: PathSpec): Promise<nu
       } catch (err) {
         if (['ENOENT', 'EACCES', 'EPERM'].includes((err as NodeJS.ErrnoException).code ?? '')) {
           logger.debug?.(`ancestor skipped while counting ${at}: ${String(err)}`)
-          return 0
+          return false
         }
         throw err
       }
       if (at === root) break
     }
   }
-  return bytesUnder(host)
+  return true
+}
+
+/** Measure bytes for accounting or for reserving a transfer. With
+ * `accounted=false`, measure a source even when its ancestors cannot be listed. */
+export async function sizeOf(
+  accessor: DiskAccessor,
+  spec: PathSpec,
+  accounted = true,
+): Promise<number> {
+  if (accounted && !(await isCounted(accessor, spec))) return 0
+  return bytesUnder(await resolveInside(accessor.root, spec))
 }
 
 /** The bytes the whole mount root holds. Mirrors Python's `count`. */

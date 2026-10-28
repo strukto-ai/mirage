@@ -16,7 +16,16 @@ import { normalizeSlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
 import { normalizeDiscordConfig } from '@struktoai/mirage-core/vfs/discord/config'
 import { normalizeGCalConfig } from '@struktoai/mirage-core/vfs/gcal/config'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
 import { gzipSync } from 'node:zlib'
@@ -398,6 +407,7 @@ async function openDisk(target: Target, options?: OpenOptions): Promise<Open> {
   // mounts, the way another process sees the same disk. Each case opens with
   // its own roots, so nothing carries over between cases.
   const roots: string[] = []
+  const modePaths: string[] = []
   const mountRoots = target.mounts.map((m) => {
     const root = mkdtempSync(join(tmpdir(), 'mirage-integ-disk-'))
     roots.push(root)
@@ -408,6 +418,7 @@ async function openDisk(target: Target, options?: OpenOptions): Promise<Open> {
       files: Record<string, string>
       directories: string[]
       symlinks: Record<string, string>
+      modes?: Record<string, number>
     }
     for (const [relative, text] of Object.entries(fixture.files)) {
       const full = join(root, relative)
@@ -417,17 +428,30 @@ async function openDisk(target: Target, options?: OpenOptions): Promise<Open> {
     for (const relative of fixture.directories) mkdirSync(join(root, relative), { recursive: true })
     for (const [relative, link] of Object.entries(fixture.symlinks))
       symlinkSync(link, join(root, relative))
+    const modes = Object.entries(fixture.modes ?? {}).sort(([a], [b]) => a.localeCompare(b))
+    for (const [relative, mode] of [...modes].reverse()) chmodSync(join(root, relative), mode)
+    for (const [relative] of modes) modePaths.push(join(root, relative))
     return join(root, 'root')
   })
   const build = (): Record<string, DiskVFS | [DiskVFS, MountMode]> => {
     const mounts: Record<string, DiskVFS | [DiskVFS, MountMode]> = {}
     target.mounts.forEach((m, i) => {
-      const vfs = new DiskVFS({ root: mountRoots[i] ?? '' })
+      const capacity = m.config?.capacity
+      if (
+        capacity !== undefined &&
+        capacity !== null &&
+        typeof capacity !== 'number' &&
+        typeof capacity !== 'string'
+      ) {
+        throw new Error('disk: capacity must be a number or string')
+      }
+      const vfs = new DiskVFS({ root: mountRoots[i] ?? '', capacity: capacity ?? null })
       mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
     })
     return mounts
   }
   const removeRoots = (): void => {
+    for (const full of modePaths) if (existsSync(full)) chmodSync(full, 0o700)
     for (const root of roots) rmSync(root, { recursive: true, force: true })
   }
   if (options === undefined) {

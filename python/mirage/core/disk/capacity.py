@@ -57,8 +57,8 @@ def _bytes_under(host: Path) -> int:
     return total
 
 
-async def size_of(accessor: DiskAccessor, path: PathSpec) -> int:
-    """The bytes at ``path`` included by whole-root counting.
+async def is_counted(accessor: DiskAccessor, path: PathSpec) -> bool:
+    """Whether whole-root counting can traverse the operand's ancestors.
 
     Args:
         accessor (DiskAccessor): the mount's root.
@@ -67,7 +67,7 @@ async def size_of(accessor: DiskAccessor, path: PathSpec) -> int:
     host = await resolve_inside(accessor.root, path)
     root = Path(os.path.abspath(accessor.root))
 
-    def measure() -> int:
+    def included() -> bool:
         if host != root:
             for directory in host.parents:
                 try:
@@ -79,12 +79,29 @@ async def size_of(accessor: DiskAccessor, path: PathSpec) -> int:
                         directory,
                         exc,
                     )
-                    return 0
+                    return False
                 if directory == root:
                     break
-        return _bytes_under(host)
+        return True
 
-    return await asyncio.to_thread(measure)
+    return await asyncio.to_thread(included)
+
+
+async def size_of(
+    accessor: DiskAccessor, path: PathSpec, *, accounted: bool = True
+) -> int:
+    """Measure bytes for accounting or for reserving a transfer.
+
+    Args:
+        accessor (DiskAccessor): the mount's root.
+        path (PathSpec): the operand.
+        accounted (bool): exclude paths whose ancestors cannot be listed;
+            False measures a source's bytes before copying or moving it.
+    """
+    if accounted and not await is_counted(accessor, path):
+        return 0
+    host = await resolve_inside(accessor.root, path)
+    return await asyncio.to_thread(_bytes_under, host)
 
 
 async def count(accessor: DiskAccessor) -> int:

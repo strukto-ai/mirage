@@ -456,6 +456,82 @@ describe('DiskVFS — cp -r past a folder it may not open', () => {
 })
 
 describe('DiskVFS capacity', () => {
+  it.skipIf(process.getuid?.() === 0).each([false, true])(
+    'reserves actual source bytes when copying from an unlisted folder (%s)',
+    async (existing) => {
+      const locked = join(root, 'locked')
+      await mkdir(locked)
+      await writeFile(join(locked, 'source'), 'abcde')
+      await writeFile(join(root, 'plain'), '12')
+      const destination = join(root, 'destination')
+      if (existing) await writeFile(destination, 'Z')
+      const data = new DiskVFS({ root, capacity: 4 })
+      const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+      try {
+        await chmod(locked, 0o111)
+        const refused = await ws.shell('cp /d/locked/source /d/destination')
+        expect(refused.exitCode).toBe(1)
+        expect(refused.stderrText).toContain('Disk quota exceeded')
+        if (existing) expect(await readFile(destination, 'utf8')).toBe('Z')
+        else expect(existsSync(destination)).toBe(false)
+        expect(await readFile(join(locked, 'source'), 'utf8')).toBe('abcde')
+      } finally {
+        await chmod(locked, 0o755)
+        await ws.close()
+      }
+    },
+  )
+
+  it.skipIf(process.getuid?.() === 0).each([4, 8])(
+    'reserves counted growth when moving out of an unlisted folder (%i)',
+    async (limit) => {
+      const locked = join(root, 'locked')
+      await mkdir(locked)
+      await writeFile(join(locked, 'source'), 'abcde')
+      await writeFile(join(root, 'plain'), '123')
+      const data = new DiskVFS({ root, capacity: limit })
+      const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+      try {
+        await chmod(locked, 0o333)
+        const moved = await ws.shell('mv /d/locked/source /d/destination')
+        expect(moved.exitCode).toBe(limit === 4 ? 1 : 0)
+        expect(data.usage?.used).toBe(limit === 4 ? 3 : 8)
+        expect(data.usage?.pending).toBe(0)
+        if (limit === 4) {
+          expect(await readFile(join(locked, 'source'), 'utf8')).toBe('abcde')
+          expect(existsSync(join(root, 'destination'))).toBe(false)
+        } else expect(await readFile(join(root, 'destination'), 'utf8')).toBe('abcde')
+      } finally {
+        await chmod(locked, 0o755)
+        await ws.close()
+      }
+    },
+  )
+
+  it.skipIf(process.getuid?.() === 0).each([0, 0o755])(
+    'recounts bytes made visible by owner access in setattr (%i)',
+    async (mode) => {
+      const locked = join(root, 'locked')
+      await mkdir(locked)
+      await writeFile(join(locked, 'known'), 'x'.repeat(100))
+      await writeFile(join(root, 'plain'), '123')
+      const data = new DiskVFS({ root, capacity: 4 })
+      try {
+        await chmod(locked, 0o111)
+        expect((await data.capacity()).used).toBe(3)
+        await data.setattr(PathSpec.fromStrPath('/locked'), { mode })
+        await data.unlink(PathSpec.fromStrPath('/locked/known'))
+        expect(data.usage?.used).toBe(3)
+        await expect(
+          data.write(PathSpec.fromStrPath('/new'), new TextEncoder().encode('12')),
+        ).rejects.toMatchObject({ code: 'EDQUOT' })
+      } finally {
+        await chmod(locked, 0o755)
+        await data.close()
+      }
+    },
+  )
+
   it.skipIf(process.getuid?.() === 0)(
     'does not exempt new files when a skipped directory name is reused',
     async () => {
