@@ -1,0 +1,266 @@
+---
+title: Embedded Terminal
+icon: terminal
+description: A lightweight terminal inside a FastAPI or Express server, with Python on Monty and no container.
+---
+
+An embedded terminal runs inside an application server. Each terminal is a
+Mirage session with its own working directory, environment and history, and
+[Monty](/home/setup/runtime/monty) runs Python in-process, so a terminal
+starts with no container or VM. Mirage is async native, so one server process
+runs many terminals at once on its event loop.
+
+## Installation
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```bash
+    pip install 'mirage-ai[monty]' fastapi uvicorn
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```bash
+    npm install @struktoai/mirage-node @pydantic/monty express
+    ```
+  </Tab>
+</Tabs>
+
+## Server
+
+One endpoint creates a session, another runs a command line in it.
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```python app.py
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from pydantic import BaseModel
+
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.python.monty import MontyRuntime
+
+    ws = Workspace(
+        {"/work": (RAMVFS(), MountMode.EXEC)},
+        runtimes=[MontyRuntime(captures=["python", "python3"])],
+    )
+
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        await ws.close()
+
+
+    app = FastAPI(lifespan=lifespan)
+
+
+    class Run(BaseModel):
+        command: str
+
+
+    @app.post("/sessions/{session_id}")
+    async def create(session_id: str) -> None:
+        ws.create_session(session_id)
+
+
+    @app.post("/sessions/{session_id}/run")
+    async def run(session_id: str, body: Run) -> dict:
+        r = await ws.shell(body.command, session_id=session_id)
+        return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
+    ```
+
+    ```bash
+    uvicorn app:app --port 3000
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```typescript app.mjs
+    import express from 'express'
+    import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/work': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+    )
+    const app = express()
+    app.use(express.json())
+
+    app.post('/sessions/:id', (req, res) => {
+      ws.createSession(req.params.id)
+      res.sendStatus(201)
+    })
+
+    app.post('/sessions/:id/run', async (req, res) => {
+      const r = await ws.shell(req.body.command, { sessionId: req.params.id })
+      res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+    })
+
+    app.listen(3000)
+    ```
+
+    ```bash
+    node app.mjs
+    ```
+  </Tab>
+</Tabs>
+
+## Usage
+
+```bash
+curl -X POST localhost:3000/sessions/a
+curl -X POST localhost:3000/sessions/a/run -H 'content-type: application/json' \
+  -d '{"command": "cd /work && echo \"print(sum(range(10)))\" > s.py && python3 s.py"}'
+```
+
+The run prints `45`. A later call to session `a` starts in `/work`, where the
+`cd` left it.
+
+- Sessions share the workspace's mounts, so a file one writes under `/work`
+  is visible to the others. Give each session its own directory, or its own
+  workspace, to keep files apart.
+- Monty supports a subset of Python and has no network or host access. For
+  more, see [Hybrid Terminal](#hybrid-terminal).
+
+## Async
+
+`ws.shell` is a coroutine in Python and a promise in TypeScript, and it never
+blocks the event loop. The handlers above are `async`, so while one terminal
+waits on a file read, a runtime or a slow command, the server keeps serving
+every other terminal, with no thread or process per terminal.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    for sid in ["a", "b", "c"]:
+        ws.create_session(sid)
+    await asyncio.gather(*(ws.shell("sleep 1", session_id=sid) for sid in ["a", "b", "c"]))
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    for (const sid of ['a', 'b', 'c']) ws.createSession(sid)
+    await Promise.all(['a', 'b', 'c'].map((sid) => ws.shell('sleep 1', { sessionId: sid })))
+    ```
+  </Tab>
+</Tabs>
+
+The three lines finish together in about a second; 20 sessions take the
+same. Within one session, lines run one after another in order, as in a real
+terminal, so three `sleep 1` lines on session `a` take three seconds.
+
+## Hybrid Terminal
+
+A hybrid terminal keeps light Python on Monty and sends the rest to a Docker
+container: lines that use `numpy` or `pandas` by route policy, and every
+program Mirage does not have itself, such as `ffmpeg`, by `@external`. Redis
+holds the files, sessions, jobs and processes, so any number of server
+replicas serve the same sessions.
+
+| Line | Runs on |
+| --- | --- |
+| `cat`, `grep`, pipes, redirects | Mirage |
+| `python3 s.py` | Monty |
+| `python3 -c 'import numpy; ...'` | Docker, by the route policy |
+| `ffmpeg -i in.mp4 out.gif` | Docker, by `@external` |
+
+Build the container's image with `sshfs`, which serves the workspace into it,
+and the programs the lines need:
+
+```dockerfile Dockerfile
+FROM python:3.12-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends sshfs ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir numpy pandas
+```
+
+```bash
+docker build -t mirage-box .
+docker run -d --cap-add SYS_ADMIN --device /dev/fuse --name mirage-box mirage-box sleep infinity
+docker run -d --name redis -p 6379:6379 redis
+```
+
+Then build the workspace below in place of the one above; the endpoints stay
+the same.
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```bash
+    pip install 'mirage-ai[monty,redis,ssh]'
+    ```
+
+    ```python
+    import re
+
+    from mirage import MountMode, Workspace
+    from mirage.runtime.python.monty import MontyRuntime
+    from mirage.runtime.sandbox.docker import DockerRuntime
+    from mirage.vfs.redis import RedisVFS
+    from mirage.workspace.store import RedisWorkspaceStateStore
+
+    REDIS_URL = "redis://localhost:6379/0"
+
+    ws = Workspace(
+        {"/work": RedisVFS(url=REDIS_URL)},
+        mode=MountMode.EXEC,
+        workspace_id="terminal",
+        store=RedisWorkspaceStateStore(url=REDIS_URL),
+        owns_store=True,
+        runtimes=[
+            MontyRuntime(captures=["python", "python3"]),
+            DockerRuntime(
+                captures=["python", "python3", "@external"],
+                config={"container": "mirage-box", "mount_type": "ssh"},
+            ),
+        ],
+        route_policy=lambda ctx: "docker" if re.search(r"\b(numpy|pandas)\b", ctx.line) else None,
+    )
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```bash
+    npm install @struktoai/mirage-node @pydantic/monty redis ssh2 express
+    ```
+
+    ```typescript
+    import {
+      DockerRuntime,
+      MontyRuntime,
+      MountMode,
+      RedisVFS,
+      RedisWorkspaceStateStore,
+      Workspace,
+    } from '@struktoai/mirage-node'
+
+    const redisUrl = 'redis://localhost:6379/0'
+
+    const ws = new Workspace(
+      { '/work': new RedisVFS({ url: redisUrl }) },
+      {
+        mode: MountMode.EXEC,
+        workspaceId: 'terminal',
+        store: new RedisWorkspaceStateStore({ url: redisUrl }),
+        ownsStore: true,
+        runtimes: [
+          new MontyRuntime({ captures: ['python', 'python3'] }),
+          new DockerRuntime({
+            captures: ['python', 'python3', '@external'],
+            config: { container: 'mirage-box', mountType: 'ssh' },
+          }),
+        ],
+        routePolicy: (ctx) => (/\b(numpy|pandas)\b/.test(ctx.line) ? 'docker' : null),
+      },
+    )
+    ```
+  </Tab>
+</Tabs>
+
+- A session created on one replica runs on any other, in the directory it
+  left. `jobs`, `kill %N` and `ps` work across replicas, as
+  [Jobs](/home/infrastructure/jobs#run-several-instances-of-one-workspace)
+  describes.
+- The container sees the files as the first session to run a line in it sees
+  them. Here every session has the same view, so one container serves them
+  all; give a session with narrower permissions its own container.
+- `ws.explain(line)` shows which runtime serves each command.

@@ -1,0 +1,235 @@
+---
+title: Runtime Routing
+icon: route
+description: Route each line with a policy script, first a fixed one and then one that asks an LLM, so plain Python stays in-process and only GPU work reaches a Daytona GPU sandbox.
+---
+
+Mirage picks a runtime for every command line. Most Python an agent writes
+runs on [Monty](/home/setup/runtime/monty), in-process and at no
+infrastructure cost. A line that needs a GPU has to run on one, and a GPU is
+billed while it runs. A [route policy](/home/policy/route-runtime) makes that
+choice per line. This example sends GPU work to a
+[Daytona](/home/setup/runtime/sandbox/daytona) GPU sandbox and keeps
+everything else on Monty: first with a fixed script, then with one that asks
+an LLM.
+
+The LLM step builds on the LLM routing example in
+[Python](https://github.com/strukto-ai/mirage/tree/main/examples/python/policy/llm_routing)
+and
+[TypeScript](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/policy/llm_routing),
+which routes between Monty and the host's Python.
+
+## The GPU sandbox
+
+Create a GPU sandbox in Daytona from a snapshot with PyTorch and CUDA, and
+note its id. Daytona sets the GPU type on the snapshot, and a GPU sandbox is
+ephemeral. Mirage runs programs in it and leaves its lifecycle to Daytona.
+
+## The workspace
+
+Two runtimes capture `python3`: `monty` first, then `daytona`. The route
+policy is a script that runs on Monty, read from `route.py`:
+
+```yaml workspace.yaml
+mode: exec
+
+mounts:
+  /data:
+    vfs: ram
+
+runtimes:
+  - monty
+  - name: daytona
+    captures: ["python3"]
+    config:
+      sandbox_id: ${DAYTONA_GPU_SANDBOX_ID}
+  - workspace
+
+route_policy:
+  script: route.py
+  runtime: monty
+```
+
+## Route by a fixed script
+
+A policy script reads the line as JSON and prints where it runs. This one
+sends any line that names PyTorch or CUDA to the GPU:
+
+```python route.py
+import json
+import os
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+if any(word in ctx["line"] for word in ("torch", "cuda")):
+    print(json.dumps({"kind": "route", "runtime": "daytona", "reason": "the line uses PyTorch or CUDA"}))
+```
+
+A line the script stays silent on runs on the first runtime that captures
+it, so `python3 -c "print(sum(range(1, 101)))"` runs on Monty. The script costs
+microseconds, and it misses what it does not name: a script file that
+imports `torch`, or a GPU library under another name.
+
+## Route by an LLM
+
+An LLM reads the line the way an engineer would. This `route.py` describes
+each runtime and asks which one the line needs. A program on Monty has no
+network, so the LLM call is a
+[host function](/home/policy/scripts#host-functions), `parse_runtime`, that
+the workspace hands it:
+
+```python route.py
+import json
+import os
+
+TASK = (
+    "Pick the runtime that can run the Python code in this line, monty "
+    "when it can."
+)
+
+RUNTIMES = {
+    "monty": (
+        "Mirage's sandboxed Python, in-process and free: a subset of the "
+        "language and part of the standard library, with no packages, GPU, "
+        "network or subprocesses"
+    ),
+    "daytona": (
+        "a cloud sandbox with an NVIDIA GPU, CUDA, PyTorch and the full "
+        "standard library, billed while it runs"
+    ),
+}
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+if any(c["command"] == "python3" for c in ctx["commands"]):
+    choice = await parse_runtime(TASK, RUNTIMES, ctx["line"])
+    print(json.dumps({"kind": "route", **choice}))
+```
+
+A line with no `python3` gets no answer, and runs where its commands'
+captures put it.
+
+`parse_runtime` asks the LLM for a runtime and a one-sentence reason. Both
+`explain` and the run ask the policy, so it keeps each line's answer and the
+preview and the run agree:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from typing import Literal
+
+    from openai import AsyncOpenAI
+    from pydantic import BaseModel
+
+    from mirage import Workspace
+    from mirage.config import load_config
+
+
+    class RuntimeChoice(BaseModel):
+        runtime: Literal["monty", "daytona"]
+        reason: str
+
+
+    CHOICES: dict[str, dict[str, str]] = {}
+
+
+    async def parse_runtime(task: str, runtimes: dict[str, str], line: str) -> dict[str, str]:
+        if line not in CHOICES:
+            prompt = f"{task} Say why in one sentence.\n" + "\n".join(
+                f"{name}: {about}" for name, about in runtimes.items()
+            )
+            done = await AsyncOpenAI(timeout=10).responses.parse(
+                model="gpt-6-luna", instructions=prompt, input=line, text_format=RuntimeChoice
+            )
+            CHOICES[line] = done.output_parsed.model_dump()
+        return CHOICES[line]
+
+
+    ws = Workspace(
+        **load_config("workspace.yaml").to_workspace_kwargs(),
+        policy_functions={"parse_runtime": parse_runtime},
+    )
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import OpenAI from 'openai'
+    import { zodTextFormat } from 'openai/helpers/zod'
+    import { z } from 'zod'
+    import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
+
+    const RuntimeChoice = z.object({ runtime: z.enum(['monty', 'daytona']), reason: z.string() })
+    type Choice = z.infer<typeof RuntimeChoice>
+
+    const choices = new Map<string, Choice>()
+
+    async function parseRuntime(task: string, runtimes: Record<string, string>, line: string): Promise<Choice> {
+      const known = choices.get(line)
+      if (known !== undefined) return known
+      const prompt = [
+        `${task} Say why in one sentence.`,
+        ...Object.entries(runtimes).map(([name, about]) => `${name}: ${about}`),
+      ].join('\n')
+      const done = await new OpenAI({ timeout: 10_000 }).responses.parse({
+        model: 'gpt-6-luna',
+        instructions: prompt,
+        input: line,
+        text: { format: zodTextFormat(RuntimeChoice, 'runtime_choice') },
+      })
+      if (done.output_parsed === null) throw new Error('the model chose no runtime')
+      choices.set(line, done.output_parsed)
+      return done.output_parsed
+    }
+
+    const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
+    const ws = new Workspace(mounts, { ...options, policyFunctions: { parse_runtime: parseRuntime } })
+    ```
+  </Tab>
+</Tabs>
+
+## Run it
+
+`ws.explain(line)` shows where a line will run and why, before it runs, so
+no GPU starts for a line that does not need one:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    for line in (
+        'python3 -c "print(sum(range(1, 101)))"',
+        'python3 -c "import torch; print(torch.cuda.get_device_name(0))"',
+    ):
+        plan = await ws.explain(line)
+        for answer in plan.answers:
+            if answer.kind == "route":
+                print(line, "->", answer.runtime, answer.reason)
+        await ws.shell(line)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    for (const line of [
+      'python3 -c "print(sum(range(1, 101)))"',
+      'python3 -c "import torch; print(torch.cuda.get_device_name(0))"',
+    ]) {
+      const plan = await ws.explain(line)
+      for (const answer of plan.answers) {
+        if (answer.kind === 'route') console.log(line, '->', answer.runtime, answer.reason)
+      }
+      await ws.shell(line)
+    }
+    ```
+  </Tab>
+</Tabs>
+
+The sum stays on Monty and prints `5050` in-process; only the `torch` line
+reaches the GPU.
+
+## Notes
+
+- Daytona GPU sandboxes cannot mount FUSE, so a Mirage inside one cannot
+  serve the workspace's files. Lines routed there should carry their code
+  (`python3 -c`, or a script piped on stdin) and fetch their data, such as
+  model weights from Hugging Face, themselves.
+- The script has 10 seconds, the LLM call included. A script that fails or
+  runs past them fails the line with a routing error rather than guessing.
+- [Hybrid Terminal](/home/examples/embedded-terminal#hybrid-terminal) routes
+  with a fixed rule written as a function in code instead of a script.

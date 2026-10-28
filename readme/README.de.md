@@ -98,7 +98,7 @@ await ws.shell('slack send-message --channel general --text "report is up"')
 
 ## Installation
 
-- **Python** ≥ 3.11 für das Paket `mirage-ai` und die CLI `mirage`
+- **Python** ≥ 3.12 für das Paket `mirage-ai` und die CLI `mirage`
 - **Node.js** ≥ 20 für das TypeScript-SDK
 - **macOS** oder **Linux** (FUSE-Mounts brauchen Unterstützung durch die Plattform)
 
@@ -122,8 +122,6 @@ Beide Runtime-Pakete installieren `@struktoai/mirage-core` automatisch mit.
 ### CLI
 
 ```bash
-curl -fsSL https://strukto.ai/mirage/install.sh | sh
-# oder
 npm install -g @struktoai/mirage-cli
 # oder
 uvx mirage-ai

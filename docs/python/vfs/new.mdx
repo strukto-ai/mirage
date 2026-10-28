@@ -1,22 +1,20 @@
 ---
 title: Adding a New VFS
 icon: plus
-description: Ship your own backend on the public `mirage` surface, or contribute a builtin VFS using Mirage's VFS, command, and snapshot conventions.
+description: Mount a service Mirage does not ship by writing one class.
 ---
 
-A VFS maps an external system to Mirage's filesystem operations and shell commands. There are two paths:
+A VFS is a class that extends `BaseVFS`. Define `readdir`, `read` and `stat`,
+and `ls`, `cat`, `grep`, `find`, `head`, `wc` and the other read commands work
+on the service. [Custom VFS](/home/setup/custom-vfs) lists every method, with
+examples for a writable VFS and for grep on the service's own search.
 
-- **Ship your own backend** — a single Python file in your own project or package, built on what the `mirage` package exports at its root. No Mirage fork, no edits to Mirage source.
-- **Contribute a builtin** — the four-layer layout inside the Mirage repo, mirrored in TypeScript.
-
-## Ship Your Own Backend
-
-Most of what your own backend needs is exported from the `mirage` package root, the same entry point that hands out `Workspace`. The samples below import the rest from their own modules. Subclass `BaseVFS` and define the functions your data source supports. `readdir`, `read` and `stat` are enough for the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution:
+## Write one
 
 ```python
 from pydantic import BaseModel, ConfigDict, SecretStr
 
-from mirage import Accessor, BaseVFS, FileStat, PathSpec
+from mirage import Accessor, BaseVFS, FileStat, PathSpec, Workspace
 
 
 class JiraConfig(BaseModel):
@@ -50,332 +48,130 @@ class JiraVFS(BaseVFS):
     async def read(self, path: PathSpec) -> bytes: ...
 
     async def stat(self, path: PathSpec) -> FileStat: ...
+
+
+ws = Workspace({"/jira/": JiraVFS(JiraConfig(site="acme", token="..."))})
+await ws.shell("grep -rl outage /jira/")
 ```
 
-Mount it like any builtin: `Workspace({"/jira/": JiraVFS(cfg)})`. A class rather than a
-factory function, because that is what the registry and the config reference below both name;
-`examples/python/vfs/new/custom_vfs.py` is the same shape end to end.
+`readdir` returns each child's `FileStat` with `name` set to the base name.
+The mount keeps the listing and answers a later `stat` from it, so `ls -l`
+costs one request. Use `path.vfs_path` to address the service and
+`path.virtual` for the workspace path. Set `FileStat.size` to the length of
+the bytes `read` returns, or `None` when it is unknown.
 
-For a smaller runnable example, see `examples/python/vfs/new/basevfs_views.py`.
-Its read-only `NotesVFS` connects to a nested mount, a namespace symlink,
-a CLI using namespace and session views, and the filesystem and runtime APIs.
+## Add functions as the service grows
 
-### Add functions as the resource grows
+Every other function is optional. Define one, and the commands that need it
+start working; leave it out, and those commands answer
+`Operation not supported`.
 
-Only `readdir`, `read`, and `stat` are required. Mirage derives existence
-checks from `stat` and treats the resource as remote and available.
-
-`read` answers with the file's bytes, or with an async iterator of them for a
-file too large to hold: return either from an `async def`, or `yield` chunks
-from one. Mirage collects a stream for a caller that needs the whole file and
-hands bytes to a streaming caller as one chunk. A window of a file is cut from
-the whole `read` unless the class sets `reads_ranges = True`; then `read`
-also takes the window's `offset` and `size` (`size=None` means through EOF) and
-fetches only that, and `file` then reads only the first bytes it sniffs.
-
-`write` and `append` take `data` as bytes or an async byte iterator (a
-`ByteSource`); `await materialize(data)` collects it for a store that takes one
-body. A program's output redirected into the mount arrives as a stream: a
-`write` that lands each chunk as it comes lets a reader watch the file grow,
-and one that collects first shows it when the program ends. A `write` that
-lands chunks as they come also takes `atomic: bool`, and when it is true shows
-nothing until the stream has ended whole (`sed -i`); any other `write` is
-handed the collected bytes for those. Close or abort uploads when the producer
-fails or is cancelled. A write may declare `entry` and `parent` and return the
-committed `FileStat`. The dispatcher keeps policy, cache invalidation and
-conditional-write checks in the same path. Object-store append still requires
-reading and replacing the existing object.
-
-Commands that need replay or seekable input spill through temporary files after
-1 MiB per spool. Python runs temporary-file and synchronous archive operations
-outside the event loop. This reduces payload memory for archives, external
-sort, record reordering and deferred output; it does not remove their scan,
-CPU or temporary-disk costs. A single unbounded record, archive metadata, AWK
-arrays, regex `tac`, `diff`/`patch` and `jq --slurp` can still require memory
-proportional to their working data. Whole-byte API results still allocate the
-complete result.
-
-Streamed cache fills retain at most 8 MiB by default, further limited by the
-cache's own capacity. Larger files continue streaming but are not admitted to
-the whole-file cache. Raise `max_drain_bytes` explicitly when retaining larger
-files is worth the memory; partial or cancelled reads never become full cache
-entries. Full-file scans have the same backend byte count even when peak RAM
-falls sharply.
-
-`readdir` returns each child's `FileStat`, filled in as `stat` would fill
-it, with `name` the base name alone. The mount keeps the listing and answers a
-stat of anything it names from that row, so a listing costs one request.
-Return a `DirListing` when one fetch proves more: `seeds` for the descendant
-listings it also names, `partial=True` for a filtered or truncated view, and
-`window=True` for a capped one that proves nothing absent.
-
-On a walk, a `readdir` that takes `limit` is handed how many entries the walk
-can still use; it may stop paging there and return what it holds with
-`partial=True`. A glob hands the word it matches as `path.pattern`
-(`*.json`); a `readdir` that lists only what matches returns `partial=True`
-too.
-
-A function that needs what a listing already holds declares it by parameter
-name: `entry` (the row at the path) and `parent` (the row of its folder), and
-for `rename`, `copy` and `dir_copy` also `dst_entry` and `dst_parent`. Each is
-`None` when nothing is there. The mount finds them in its stored listings and
-lists a folder only when none is stored, so a backend that addresses items by
-id reads the id off the row instead of resolving the path again. A function
-that creates something (`mkdir`, `create`, `write`) may return the new
-`FileStat`: the mount keeps it, and `mkdir -p` hands it as `parent` to the
-next level.
-
-Every other function is optional, and each stands alone:
-
-| Functions | Purpose |
+| Functions | Enables |
 | --- | --- |
-| `readdir`, `read`, `stat` | Required filesystem behavior. |
-| `exists`, `read_tree`, `first_lines`, `last_lines`, `line_count`, `follow`, `checksum` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines), [Checksums](/home/integration/checksums)). |
-| `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rm_r`, `rename`, `copy`, `dir_copy`, `truncate`, `setattr` | Individually supported mutations. |
-| `copy_from` | Optional: copy a file from another mount of the same kind inside the store, for `cp` and `mv` between two mounts. |
-| `read_many` | Optional: read several small files in one request. |
-| `delta_hook` | Optional: read the service's change feed ([Notifications](/home/notifications/support)). |
-| `search`, `search_many` | Optional resource search. |
-| `files_containing`, `lines_containing`, `before_full_walk` | Optional: let grep and rg skip what your search rules out, and refuse a walk of every file. |
+| `write`, `append`, `create`, `truncate` | `>`, `>>`, `touch`, `truncate`, `sed -i` |
+| `mkdir`, `rmdir`, `unlink`, `rm_r`, `rename`, `copy`, `dir_copy`, `setattr` | `mkdir`, `rm`, `mv`, `cp`, `chmod`, `touch -d` |
+| `files_containing`, `lines_containing` | [Search](/home/integration/search) for `grep` and `rg` from the service's own index |
+| `first_lines`, `last_lines`, `line_count`, `checksum`, `read_tree` | Fast `head`, `tail`, `wc -l`, `md5sum`, `find` ([Lines](/home/integration/lines), [Walks](/home/integration/walks)) |
+| `delta_hook` | [Notifications](/home/notifications/support) from the service's change feed |
 
-`copy_from(source, src, dst)` receives the other mount's VFS and the file's
-path there. Raise EXDEV when the store cannot make the copy (another kind of
-store, other credentials, a refusal), and `cp` reads the file and writes it
-instead. S3 and the S3-compatible stores copy between two buckets that one
-set of credentials reaches.
+The mount mode still decides whether a write may run. `read` may return an
+async iterator of bytes for a large file, and `write` receives one when a
+program's output streams into the mount.
 
-`read_many(paths, limit)` reads several whole files in one request. When a
-command reads its operands in turn (`cat a b c`), the next few go to it as one
-batch and land in the read cache. Return the bytes keyed by each path's
-`virtual`; leave out a file larger than `limit` bytes or one the request could
-not read, and its own `read` answers it.
+## Plug in the service's search
 
-`delta_hook()` returns the hook a poll loop or webhook receiver calls to read
-the service's changes since a checkpoint. Leave it out when the service has no
-change feed.
+`files_containing` and `lines_containing` hand Mirage the service's own search.
+`grep` and `rg` ask them which files or lines can hold the text and read only
+those; they still match every line themselves, so the output is the same as a
+full read. `before_full_walk` can refuse a command that would walk the whole tree.
 
-`pwrite` receives `(path, data, offset)` and keeps every byte outside the
-window, as pwrite(2) does. A VFS with `write` and no `append` or `pwrite` gets
-both built from `read` and `write`, so define them only when the backend writes
-a range natively. Use `FileStat.size=None` when rendered size is unknown.
-All functions enforce the same resource scope, including direct reads of known
-IDs. A partial listing cannot prove an omitted resource absent.
-
-Defining `write` does not enable deletion or rename. Every generic command is
-registered either way: `gzip -c` and `tar -t` run as readers, a line that needs
-a function the VFS does not define answers `Operation not supported` at that
-function, and mount mode still controls whether a defined mutation may run. Set
-`local = True` only for host-local data; `is_mounted` can override the default
-availability check. `vfs.supports("write")` says whether a class defines a
-function. `commands=[...]` adds bespoke `@command` verbs and replacements: a
-command of the same name as a generic wins on this VFS's mounts. Such a command
-reads through its own `accessor`, past the dispatcher, so it does not run
-(exit 127) in a session that hides, rules or caps anything on its mount.
-
-The dispatcher reaches the same functions by name (`ws.dispatch("read", path)`)
-and wraps them the same way for every backend: a read takes a window, `append`
-and `pwrite` are rewrites when the VFS does not define them, `mkdir` refuses a
-taken name first, and `glob` walks `readdir`. A function only your class
-declares is reachable by name once it is marked with what it does to the mount:
+For example, an S3 bucket whose objects are indexed in Elasticsearch under
+their keys, by whatever indexes the bucket (such as a function on S3 events).
+Subclass the built-in `S3VFS` and answer from the index:
 
 ```python
-from mirage import Effect, Target, vfs_call
+from elasticsearch import AsyncElasticsearch
 
-
-class JiraVFS(BaseVFS):
-    @vfs_call(effect=Effect.READ)
-    async def search_issues(self, scope: PathSpec, jql: str) -> list[PathSpec]: ...
-
-    @vfs_call(effect=Effect.WRITE, target=Target.FILE)
-    async def add_comment(self, issue: PathSpec, body: str) -> None: ...
-```
-
-`await ws.dispatch("search_issues", PathSpec.from_str_path("/jira/"), jql="project = OPS")`
-then runs through every check the dispatcher runs: hidden paths, path rules, the
-mount's mode and admission policies. An answer that is a list of `PathSpec`s,
-or of records with a `path`, loses what the session hides; any other answer is
-declined (`Operation not supported`) while the session hides something under
-the call's path. A subclass overriding a marked function keeps the mark. Every other `PathSpec` argument passes the same checks and
-must be on the function's own mount (EXDEV otherwise); the backend receives
-it mount-relative.
-
-The effect is one of `READ`, `METADATA`, `WRITE`, `CREATE`, `REMOVE`,
-`RENAME`, `COPY` and `ATTR`; every one but `READ` and `METADATA` is a write.
-A `COPY` reads its path and writes only its `dst`. `target=`
-names the kind of entry the path is (`Target.FILE`, `DIR`, `LINK`, or `ANY`
-by default), and `creates=True` marks a `WRITE` that makes a missing file.
-`subtree=True` marks a call that reaches everything below its paths: a write is
-then refused with `EROFS` when anything below is read-only for the session, and
-[policy scripts](/home/policy/scripts) see `subtree` on the call. The
-base functions declare theirs the same way, and the dispatcher reads which ops
-follow a link, create a name or run one at a time per path off them.
-Three effects are reserved for fixed names: `REMOVE` for `unlink`, `rmdir`
-and `rm_r`, `RENAME` for `rename`, and `COPY` for `copy` and `dir_copy`. The
-dispatcher handles these names specially. It removes a link instead of
-following it, refuses a rename that would bring hidden entries into view,
-moves the links below a renamed directory and drops those below a removed
-one. A copy leaves the source's links behind. A custom
-function that declares a reserved effect raises `TypeError` when its class is defined.
-To delete, move or copy, define the function with the reserved name.
-
-The driver never sees the mount it runs under. The index store and the `vfs:` reference it was built from live on the mount, built when the driver is placed. One VFS mounts at one prefix: a second mount of it, or a second disk mount on the same folder, is refused; mount a separate VFS instead.
-
-### How the driver connects to a workspace
-
-`BaseVFS` is the backend authoring API. Mount it once with
-`Workspace({"/jira": JiraVFS(config)})`; consumers use workspace paths.
-
-| Consumer | Connection |
-| --- | --- |
-| Shell and coreutils | The mount builds the generic commands over the VFS's functions; the shell supplies expansion, pipes, redirects and session policy. |
-| Filesystem calls | `ws.vfs` and `ws.dispatch` reach the same functions through the dispatcher. |
-| CLIs | The host registers a `CLI` using `register_cli`. File-oriented handlers use `ctx.vfs`; mounting a driver does not install an account CLI. |
-| Runtimes | Runtimes wired to `RuntimeFiles` reach the same dispatcher. A process or remote runtime needs its configured mount bridge. |
-| Namespace | The workspace owns symlinks, nested mounts and metadata overlays; the backend implements its own tree. |
-
-Use `path.vfs_path` to address your backend and `path.virtual` for workspace
-paths. Return what a function lists or creates and let the mount keep it; a
-function sees the index only when it declares `index` (see point lookups
-below). Put shared behavior in the functions; a `commands=`
-override changes that shell command only. Optional mutations remain optional,
-and a function the VFS does not define reports `Operation not supported`.
-
-### Native search and backend-specific core functions
-
-Builtin backends define the same functions; their shared types live in
-`mirage.vfs.types`. A method calls a core function that already accepts the
-contract directly. Otherwise, the method resolves the `PathSpec`, calls the
-resource API, and normalizes the result.
-
-Search is a separate optional function:
-
-```python
-from mirage import SearchQuery
-
-
-class JiraVFS(BaseVFS):
-    async def search(
-        self, path: PathSpec, query: SearchQuery
-    ) -> list[tuple[str, str]] | None:
-        # Interpret query.query and validate the options your resource supports.
-        ...
-```
-
-`SearchQuery(query="recent deployments", options={"limit": 20})` carries plain
-search text and backend-specific arguments. The options can hold filters, limits,
-or other JSON values. Neither regex support nor grep compatibility is
-required. Leaving `search` undefined also works.
-
-`search` returns one `(path, record)` pair per hit: the hit's virtual path,
-which a session's hides are checked against, and the text record the
-[`search` CLI](/python/cli/search) prints. `[]` means no matches and `None` declines the request. Errors propagate, and a truncated result is never a complete answer.
-The CLI hands over only the options its line gives: `--top-k` as `top_k`,
-`--threshold` as `threshold` and `--method` as `method`. Validate them before
-any request. grep and rg never ask `search`; they use the functions below.
-
-A search never passes the file cache, so an accessor that keeps results of its
-own keeps them in a `ResponseCache` and returns it from `caches()`. Its mount
-then keeps them no longer than its read policy allows (none under `fresh`, the
-bound under `bounded`), and drops them with its other caches after a write that
-went past the dispatcher.
-
-```python
-from mirage import Accessor, ResponseCache
-
-
-class JiraAccessor(Accessor):
-    def __init__(self) -> None:
-        self.searches = ResponseCache[str, list[tuple[str, str]]]()
-
-    def caches(self):
-        return (self.searches,)
-```
-
-`await self.searches.get(key, fetch)` answers from the cache or asks `fetch`.
-
-### Let grep and rg use your search
-
-grep and rg always walk, filter, order and label the files themselves. Your
-search only tells them what they can skip, so their output never changes.
-
-| Function | Asked | Answer |
-| --- | --- | --- |
-| `files_containing(path, text, *, whole_word, ignore_case)` | which files under a walked directory may hold `text` | a list of `PathSpec`, or `None` |
-| `lines_containing(path, text, *, ignore_case)` | which lines of one file may hold `text` | those lines in file order, as bytes or a stream, or `None` |
-| `before_full_walk(path, *, files)` | a command is about to copy, compare, change or remove every file under a directory | return to let it run, raise to refuse |
-
-The arguments come from the command line:
-
-| Argument | grep | rg |
-| --- | --- | --- |
-| `text` | the pattern or each `-e`; for a regex, a plain-text piece of three or more characters every match holds | the same |
-| `path` | each directory operand under `-r` or `-R` | each directory operand, the cwd when none |
-| `whole_word=True` | `-w` or `-x` with plain-text patterns | the same |
-| `whole_word=False` | any other pattern; `text` may sit inside a word | the same |
-| `ignore_case` | `-i` | `-i`, or `-S` with a lowercase pattern |
-
-Answer more than needed, never less: an extra file costs a read, a missing one
-is a wrong answer. Files are matched on `vfs_path` without case; a search that holds only
-keys names each with `mounted_path(path, "/" + key)` from
-`mirage.utils.key_prefix`. Files a session hides are dropped from your answer
-before grep sees it, so it may cover the whole tree; under a path rule the
-search is still asked, and a file the rule refuses reports `Permission denied`
-whatever your answer says about it. Return `None` when the answer may be incomplete (an
-error, a truncated result, an index that lags writes) and every file is read. A
-word-based index answers `whole_word=True` and returns `None` otherwise.
-
-A search that sees only some files names them in `searchable`, a tuple of
-mount-relative globs where a directory covers what is under it; a walked file
-outside it is always read. The default, `None`, covers every file. The email
-mount, whose IMAP search sees messages but not attachments, sets
-`searchable = ("*/*/*.email.json",)`.
-
-```python
+from mirage import MountMode, PathSpec, Workspace
 from mirage.utils.key_prefix import mounted_path
+from mirage.vfs.s3 import S3Config, S3VFS
 
 
-class WikiVFS(BaseVFS):
-    walk_limit = 5000
+class IndexedS3VFS(S3VFS):
+    whole_word_search = True
 
-    async def files_containing(self, path, text, *, whole_word, ignore_case):
+    def __init__(self, config: S3Config, es: AsyncElasticsearch) -> None:
+        super().__init__(config)
+        self.es = es
+
+    async def files_containing(
+        self, path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool
+    ) -> list[PathSpec] | None:
         if not whole_word:
             return None
-        hits = await self.api.search(text, under=path.vfs_path)
-        if hits.truncated:
+        found = await self.es.search(
+            index=self.config.bucket,
+            query={"match_phrase": {"body": text}},
+            size=1000,
+            track_total_hits=True,
+        )
+        hits = found["hits"]
+        if hits["total"]["value"] > len(hits["hits"]):
             return None
-        return [mounted_path(path, "/" + hit.key) for hit in hits]
+        return [mounted_path(path, "/" + hit["_id"]) for hit in hits["hits"]]
+
+    async def close(self) -> None:
+        await self.es.close()
+        await super().close()
+
+
+vfs = IndexedS3VFS(S3Config(bucket="docs"), AsyncElasticsearch("http://localhost:9200"))
+ws = Workspace({"/s3/": (vfs, MountMode.READ)})
+await ws.shell("grep -rlw outage /s3/")
 ```
 
-`lines_containing` suits row stores, and may stream its rows. Its lines replace
-the file when the output shows no line numbers, byte offsets or context;
-otherwise the file is read only when the answer holds a line, and a stream is
-pulled no further than its first one. Answer `None` for a file that may hold a
-NUL byte: grep and rg call such a file binary from bytes outside its matching
-lines. A file named on the line and a binary-extension file read under `-a`
-are always read.
+`grep -rlw outage /s3/` reads only the objects Elasticsearch names. Elasticsearch
+ignores case, so it may name more than grep prints; grep checks each line and
+drops the rest. `grep -rl outage` without `-w` gets `None` and reads every
+object, so `outages` still matches. The mount is read-only because a write
+through Mirage would leave the index behind.
 
-`walk_limit` is the most files one command walks under a directory, 1000
-unless your VFS starts at another value, as `WikiVFS` starts at 5000; `-1` for
-no limit. A mount's `"@all"` [command limit](/home/core/output-limits), else the
-workspace's, replaces it when the VFS is mounted, so read `self.walk_limit`
-when a call runs, not in `__init__`. Searches and listings stop past it, keeping what they printed, and a search
-counts only the files it reads, so a file your search rules out costs nothing.
-A glob matching more is refused.
+| Function | Asked by | Answers |
+| --- | --- | --- |
+| `files_containing(path, text, *, whole_word, ignore_case)` | `grep -r`, `rg` on a folder | The files under `path` that may hold `text`, or `None` to read every file |
+| `lines_containing(path, text, *, ignore_case)` | `grep`, `rg` on one file | The lines that may hold `text`, in file order, or `None` to read the file |
+| `before_full_walk(path, *, files)` | `tar -c`, `cp -r`, `rm -r`, `chmod -R`, `diff -r` | Nothing to let the walk run; raise `ValueError` to refuse it |
 
-`before_full_walk` is called once per directory `tar -c`, `zip -r`, `cp -r`,
-`rm -r`, `chmod -R`, `chown -R`, `chgrp -R`, `mv` across mounts and `diff -r`
-walk, before they touch a file there. `files` is the number of files the
-session sees under `path`: from your VFS's `read_tree`, or by listing each
-directory until one file past `walk_limit`; `None` otherwise. Mirage refuses
-more than the command's `walk_limit` files before it asks, so define
-`before_full_walk` only for another rule.
+- Answer more files than needed, never fewer: an extra file costs one read,
+  a missing one is a wrong answer. Return `None` whenever the answer may be
+  incomplete, such as a truncated result or an index that lags writes.
+- A search that matches only whole words, as Elasticsearch does, returns
+  `None` unless `whole_word` is set, and sets `whole_word_search = True` so
+  the mount's VFS.md tells the agent to use `grep -w`.
+- Set `searchable` to the globs the search covers, such as
+  `("*/*.json",)`; a file outside them is always read.
+- `walk_limit` caps how many files one command walks, 1000 by default.
 
-Raise a `ValueError` from it (or from `files_containing`) to refuse: the command
-prints `<command>: <message>` and exits 1. From grep or rg, an `OSError` raised
-at a file is that file's read error.
-`examples/python/vfs/new/custom_vfs.py` defines `files_containing` for its wiki.
+[Search](/home/integration/search) lists which patterns and flags reach these
+functions, and which built-in VFSs answer them.
 
-To make the backend constructible by name (workspace YAML, snapshots, the daemon), register it:
+A service action that is not a file, such as a JQL search or adding a
+comment to an issue, belongs in a [CLI](/python/cli/custom), next to the mount.
+
+## Use it in YAML
+
+A workspace YAML mounts the class by its file and name:
+
+```yaml
+mounts:
+  /jira:
+    vfs: ./jira.py:JiraVFS
+    config:
+      site: acme
+      token: ${JIRA_TOKEN}
+```
+
+To write `vfs: jira` instead, register the class once:
 
 ```python
 from mirage import register_vfs
@@ -383,356 +179,13 @@ from mirage import register_vfs
 register_vfs("jira", JiraVFS, JiraConfig)
 ```
 
-or ship it as a normal package with an entry point — discovered automatically at registry-build time:
+## Examples
 
-```toml
-[project.entry-points."mirage.vfs"]
-jira = "mypackage.backends:JiraVFS"
-```
+Runnable, each with a TypeScript twin:
 
-The entry point resolves to the VFS class; declare a `CONFIG_CLS` class attribute when the constructor takes a typed config.
-
-Neither step is needed to mount from YAML. A `vfs` value carrying a colon names the class directly, the same way a `clis` entry's `cli` value names a spec tree, so a deployment can point at a file next to the config or at a class inside an installed package:
-
-```yaml
-mounts:
-  /jira:
-    vfs: ./jira.py:JiraVFS
-  /wiki:
-    vfs: mypackage.backends:WikiVFS
-```
-
-A relative path resolves against the config file's directory, not the server's working directory. A registry name always wins over a reference, so a name can never be reread as code. See `examples/python/vfs/new/custom_vfs.py` for a complete runnable backend in one file.
-
-When mounting a driver built with `build_vfs` in code, preserve its loader name on the placement: `Mount(build_vfs("jira", config), vfs_ref="jira")`. YAML does this automatically. Snapshots also preserve the mount’s effective index settings. An index URL containing credentials is redacted; pass a `Mount(..., index=...)` override with fresh credentials when loading it.
-
-Snapshots and versions rebuild a saved mount through the same entry point: the registered name, or the reference the config named (recorded beside the class path, since a class loaded from a script file cannot be imported back). What comes back depends on what the VFS owns. Content the VFS holds itself (an in-memory store) is mirage-owned state: override `get_state` and `load_state` to carry it, and a snapshot or a version restores the mount with that content and no override. Content that lives in a remote service is only observed: keep the default state, which says `needs_override`, set `supports_snapshot=True`, fill `FileStat.fingerprint` and record the same token on every read and write (see section 6), and a snapshot pins what it read while `Workspace.load` asks for the live VFS back through `mounts=`. A forgotten override is a refusal to load, never a mount that comes back empty. The example shows both halves: a wiki page is written, the workspace is snapshotted, the page is changed, and the loaded workspace serves the page as it was, while a feed mount that keeps the default state is refused until the load hands it back through `mounts=`.
-
-## Contribute a Builtin VFS
-
-Builtins live inside the Mirage repo: one backend is three layers with one name (accessor, core, VFS) plus its commands, and every layer has a TypeScript twin. Change both languages in the same PR; where they disagree, the more correct side wins.
-
-Most of a backend is already written as a kit. Reach for one before writing a layer by hand:
-
-| Kit | Module | For |
-| --- | --- | --- |
-| API client | `mirage.core.api.client` (`api_request`, `RetryPolicy`), `mirage.core.api.paginate` (`cursor_items`), `mirage.core.api.oauth` (`TokenManager`) | every HTTP call: one status-to-error mapping (`error_of`), retry, pagination, OAuth refresh, and the mount's session pool |
-| Hierarchy | `mirage.core.hierarchy.scope` (`Scope`, `Slot`, `make_detect_scope`), `mirage.core.hierarchy.readdir` (`make_readdir`), `mirage.core.hierarchy.stat` (`make_stat`, `entry_stat`), `mirage.core.hierarchy.read` (`make_read`), with `DirListing` and `SearchQuery` from `mirage.types` | an API tree of `<label>__<id>` directories: one scope table classifies every path for readdir, stat, read and search |
-| Object store | `mirage.core.object_store` | a flat key space (S3-style buckets, GridFS) |
-| Render | `mirage.core.render` (`json_bytes`, `jsonl_bytes`) | records rendered as the bytes the tree's files hold |
-
-Successful `api_request` reads in `bytes` or `bytes_response` mode retain at most **64 MiB** by default. Set `max_body_bytes` to a finite, non-negative integer to choose another per-call limit. The client counts decoded bytes as they arrive and raises `ResponseTooLargeError` on overflow without retrying or returning a truncated body. A finite byte window skips an ignored `Range` prefix incrementally and stops at the requested end; a `206` response larger than the requested window is rejected. Use `api_stream` for large whole-file downloads. This binary limit does not cap JSON, text, or HTTP error bodies.
-
-Two builtins are the references. Trello is the hierarchy kit end to end: a scope table, listers and id-addressed readers, with its id-addressed verbs in the `trello` CLI. Jaeger is the client shape to copy: its `_get(accessor, ...)` takes the accessor and passes `accessor.pool` itself, so no call can forget the pool. Paths are always `PathSpec` values inside the VFS; never pass a path as a raw string.
-
-## File Structure
-
-```text
-python/mirage/
-  accessor/<name>.py         # the client handle; owns config and the session pool
-  core/<name>/
-    client.py                # API calls, all through mirage.core.api
-    scope.py                 # SCOPES and detect_scope (hierarchy kit)
-    pathing.py               # <label>__<id> names (sanitize_name, make_id_name)
-    normalize.py             # the JSON a file renders
-    readdir.py stat.py read.py
-  commands/builtin/<name>/
-    __init__.py              # COMMANDS
-    <bespoke commands>.py    # push-downs and verbs
-  vfs/<name>/
-    __init__.py config.py
-    <name>.py                # the VFS class and its functions
-```
-
-Tests mirror `mirage/` one to one under `python/tests/`, with no `__init__.py` in the test tree. Patch a client call where the module under test imports it.
-
-## 1. Config, Accessor, and Registry
-
-Define a typed Pydantic config that refuses unknown keys, and keep secrets in `SecretStr` fields. `build_vfs`, YAML and snapshots all construct through it, so a misspelled knob fails by name instead of being dropped:
-
-```python
-from pydantic import BaseModel, ConfigDict, SecretStr
-
-
-class MyConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    token: SecretStr
-    board_ids: list[str] | None = None
-```
-
-Create an `Accessor` subclass for an SDK client. For the built-in HTTP kit, subclass `SessionAccessor` from `mirage.accessor.base` and call `super().__init__()`; it owns the `SessionPool` available as `pool`. Plain `Accessor` has only a no-op `close`, so it does not allocate a pool. `BaseVFS.close()` closes the accessor (the index store is the mount's, and the mount closes it); override the accessor's `close()` for an owned client, as above. If the VFS owns additional handles, release those in its `close()` and call `super().close()`. Shared clients need an explicit ownership decision: close them in the embedding program if several mounts use them.
-
-Add the VFS name to `VFSName`, export the config and VFS from `vfs/<name>/__init__.py`, and add a lazy `VFSEntry` to `mirage/vfs/registry.py`. The registry entry lets YAML, snapshots, and the daemon construct a builtin by name.
-
-Keep every import at module scope. If that creates a cycle, change the dependency direction instead of adding a function-local import.
-
-## 2. Core Functions
-
-Implement only the operations the backend supports, as pure functions over the accessor. A read-only API-backed mount usually starts with:
-
-- `readdir(accessor, path)` returning each child's `FileStat`, or a `DirListing`.
-- `read(accessor, path)` returning bytes.
-- `stat(accessor, path)` returning `FileStat`.
-
-Each may also take the handed `entry` and `parent`.
-
-Client functions take the accessor and pass `session=accessor.pool` to `api_request`; without it `api_request` opens a fresh session per request.
-
-A hierarchy backend writes its tree once, as `SCOPES` in `core/<name>/scope.py`, and builds the three operations from it: `make_readdir(detect_scope, listers=...)`, `make_stat(detect_scope, guards=...)` and `make_read(detect_scope, readers, parented=True)`. The kit holds these rules, and a new backend keeps them:
-
-- A backend whose readers reach the API by the ids in the path slots passes `parented=True`, so the kit proves the file's parent through the row its listing names first. Without it, a path outside the configured scope (Trello's `workspace_id` and `board_ids`) reads while `ls` and `stat` say it does not exist.
-- A listing that is a filtered or truncated view (one page of a bounded query, a time window, a glob-scoped span) returns `DirListing(entries, partial=True)`. Cached as the whole directory, it would prove every entry it left out absent.
-- `entry_stat("<id_key>", ...)` names the id under the key its path slot declares.
-- `FileStat.size` is the rendered byte length or `None`, never a storage-side number. Set `sizes_always_known` only when every listed size is computed from the same payload a read renders.
-- Id-addressed verbs honor the same scope knobs the listing does, read from their own config (the trello CLI's `commands/cli/builtin/trello/scope.py`).
-
-Glob resolution is not a per-backend file: the mount derives `glob` from the VFS's `readdir`, refused past its `walk_limit`, and expands patterns through it.
-
-Use explicit types:
-
-```python
-from mirage.accessor.base import Accessor
-from mirage.types import FileStat, PathSpec
-
-
-async def stat(
-    accessor: Accessor,
-    path: PathSpec,
-    entry: FileStat | None = None,
-) -> FileStat:
-    ...
-```
-
-Add write, append, create, unlink, rename, or directory operations only when the backend has matching semantics. I/O stays async-native.
-
-## 3. VFS Functions
-
-The VFS class defines the functions, each a thin call into the core:
-
-```python
-from mirage.core.my_vfs.readdir import readdir as _readdir
-
-
-class MyVFS(BaseVFS):
-    async def readdir(self, path: PathSpec) -> list[FileStat]:
-        return await _readdir(self.accessor, path)
-```
-
-The mount serves exactly what the class defines: commands and the dispatcher
-reach the same functions, and one the class leaves undefined answers
-`Operation not supported`. Set `reads_ranges = True` when `read` fetches only
-the asked window. Backend semantics stay in the method body, e.g. Databricks's
-`mkdir` passes the caller's `parents` to the core. Mark a function only this
-class declares with `@vfs_call(effect=...)`, a write effect for a mutation, so
-`MountMode.READ` remains a real boundary; the base functions carry their marks
-already.
-
-## 4. Commands
-
-The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each is an ordinary handler that reads and writes only through the line's files (`ctx.vfs`), so the dispatcher judges every call it makes and reaches the mount's functions by name; the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name in the backend's `COMMANDS` replaces the generic on that backend, and `generic("<name>")` is the default command a replacement hands what it does not support: `generic("grep").fn(accessor, paths, texts, ctx)`.
-
-- Let grep and rg skip files by defining `files_containing` (and `lines_containing` for row stores) on the VFS; `search` serves the [`search` CLI](/python/cli/search).
-- A mount verb declares its own `CommandSpec`, reads flags through `FlagView(ctx.flags, spec=SPEC)` (never `flags.get(...)`) and registers `write=True` for a mutation. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's.
-- A verb addressed by a service id rather than a path (`trello card create`) is an account [CLI](/python/cli/custom), not a mount command: a `CLI` under `commands/cli/builtin/<name>/` with a `config_model` and an `accessor`, which consults no mount and marks its writes on the `CLIHandler`. A VFS prompt that shows such verbs is pinned against the CLI's specs (`tests/vfs/trello/test_prompt.py`).
-- Handlers take `(accessor, paths, texts, ctx)`. Read `stdin`, the working directory and namespace facts from `ctx`, and files through `ctx.vfs`; do not add injected parameters or a second handler convention.
-- A handler that reads its `accessor` directly reaches its backend past the dispatcher. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands. A command handed through `commands=[...]`, or registered later with `ws.mount(prefix).register_commands(...)`, is such a user command. It runs under the session's hides and path rules, which apply to what it reads and writes through `ctx.vfs`; what it reads through its accessor is up to the handler. A write command is refused on a read-only mount before it runs.
-- A command that prints paths from its own data (an index, a listing it fetched) hands its output over as rows on `IOResult.rows` rather than as stdout. The workspace drops the rows the session hides and renders the rest, so no line, count or total stands for a hidden path ([rows](/python/cli/custom#use-workspace-files)).
-- Declare `write=True` on a user command that writes. Policy reads it as `CommandContext.write`, and the mount drops its cached listings and bodies after the command runs, since no per-path invalidation saw the write.
-- A program whose verbs work on the backend's files can be one command tree: hand the VFS a `CLI` in `commands=[...]`, and the mount serves its verbs under the root's name on its own accessor ([Serve a CLI on a mount](/python/cli/custom#serve-a-cli-on-a-mount)).
-
-For a flat mount command, an explicit path or the working directory selects
-the target before fallback. Without either, a write selects the only writable
-matching mount and refuses multiple writable matches. Read fallback stays
-deterministic: root first, then longest prefix, with registration order breaking
-ties; multiple read matches produce a debug log. Hidden mounts do not participate,
-and the session's permissions can narrow which mounts are writable.
-
-Export the final list as `COMMANDS` from `commands/builtin/<name>/__init__.py`, and map the VFS class's name to that module in `workspace/mount/backends.py`. The mount imports it on first use, and a subclass serves its base's commands.
-
-## 5. VFS Class
-
-Subclass `BaseVFS`, declare the facts as class attributes, and define the functions over the core. Core functions stay independent of the VFS class:
-
-```python
-from mirage.accessor.my_vfs import MyAccessor
-from mirage.core.my_vfs.read import read as _read
-from mirage.core.my_vfs.readdir import readdir as _readdir
-from mirage.core.my_vfs.stat import stat as _stat
-from mirage.types import FileStat, PathSpec, VFSName
-from mirage.vfs.base import BaseVFS
-from mirage.vfs.my_vfs.config import MyConfig
-
-
-class MyVFS(BaseVFS):
-    name: str = VFSName.MY_VFS
-    caches_reads: bool = True
-
-    def __init__(self, config: MyConfig) -> None:
-        super().__init__()
-        self.config = config
-        self.accessor = MyAccessor(config)
-
-    async def readdir(self, path: PathSpec) -> list[FileStat]:
-        return await _readdir(self.accessor, path)
-
-    async def read(self, path: PathSpec) -> bytes:
-        return await _read(self.accessor, path)
-
-    async def stat(
-        self, path: PathSpec, entry: FileStat | None = None
-    ) -> FileStat:
-        return await _stat(self.accessor, path, entry)
-```
-
-The mount builds the commands and the dispatcher from the class when the driver is placed; a driver never registers anything onto itself.
-
-Set `caches_reads=True` only for stable, read-mostly content. `index_ttl` is how long the mount keeps a listing or a stat, 600 seconds unless your VFS sets it; a mount's read `ttl` caps it. Implement `get_state()` with credentials redacted (`self.config_state(self.config)`) and close any network clients in `close()`.
-
-### Point lookups under `fresh`
-
-A `read: fresh` mount re-stats a cached file through a throwaway store that
-starts with none of the mount's rows (`ListingCheckStore`), so no cached
-row answers the check.
-A backend with a path lookup answers with one request for that path (Dropbox).
-A backend that addresses items only by id may declare `index` on `stat`. Under
-the check it is handed that store and no rows, and may read the mount's last
-row for the path with `await index.hint(key)` and address one request by its id (Box);
-it must then confirm from that answer alone that the item still sits at
-exactly this path, and otherwise resolve the path as it always does. The hint
-is a lead, never an answer: a stat built from its fields would let a stale row
-pass a freshness check.
-
-### Listing versions
-
-Under `read: fresh`, a cached listing the running command did not write is listed again, unless the backend declares what to check it against. Declare `listing_version` (`mirage.types.ListingVersion`) as a class attribute, like `read_revalidatable`:
-
-- `NONE` (the default): no version; every command re-lists.
-- `MOUNT`: one version covers every listing of the mount (GitHub and the Hub use the head commit). A stat of the mount root through the gate's empty check store (`mirage.cache.index.ram.ListingCheckStore`) asks the backend and returns it as `FileStat.fingerprint`; through any other index it names none and reads neither the index nor the backend, since nothing reads a root fingerprint off a mount-view stat. Every listing the tree fill returns carries the same value (`DirListing(..., version=...)`).
-- `FOLDER`: each listing carries its own folder's version (disk). A stat of the folder returns it as the fingerprint, and `readdir` reads it before listing and returns it as `DirListing(..., version=...)`, so a change during the scan leaves the stored version behind.
-
-Take the version from a backend response, the same kind of token the stat answers, since the gate compares the two with `==`. Store `None` when there is nothing reliable to store; that listing re-lists.
-
-`listings_pin` is an instance attribute (default `None`). Set it in `__init__` when the config pins the mount to something that cannot move: the lowercased ref when it is a full 40- or 64-hex commit sha. A stored listing whose version equals the pin is served with no request. The stored value still comes from a response, never from config, so a full-sha ref is served unchecked only when its listing was fetched at that sha. github.com refuses a branch or tag named with 40 or 64 hex characters, so a full-sha GitHub ref always names a commit (a GitHub Enterprise host is assumed to do the same). The Hugging Face Hub repos set no pin: a Hub revision named like a sha is checked every command.
-
-`tests/vfs/test_listing_version.py` holds every declarer to this: the fill stores a version on the root and on a nested folder, a stat through an empty index answers the stored value, a second command sends only the expected checks and no refill, and an outside change moves the version. A new declarer adds a harness there and adds its name to the pinned roster, or the roster tests fail.
-
-### Renderers and the file cache
-
-A file extension the VFS lists in `renderers` is never served from or kept in the file cache when the dispatcher reads it, since the cache holds what the VFS's own IO returns, not rendered bytes. Two cases fall outside that rule:
-
-- the VFS's own `read` is cached as usual, whatever it returns;
-- a command that names a path in its result's `cache` list has the bytes it reported for that path stored as given, so a command that reports rendered bytes there makes `cat` serve rendered bytes afterwards.
-
-## 6. Snapshot Support
-
-Leave `supports_snapshot=False` unless the complete drift contract is implemented:
-
-1. `stat()` returns a stable `FileStat.fingerprint`.
-1. Every read record includes the fingerprint that produced those bytes, and every write record the token the write reply names (a write with none drops the file's version).
-1. If the backend supports immutable revisions, reads consult `revision_for(path.virtual)` and record the resolved revision.
-
-Setting the flag without recording fingerprints does not provide drift detection. A backend with no immutable revisions skips step 3; drift detection still works on the fingerprint alone.
-
-## 7. Verification
-
-Exercise a custom backend at a nested prefix, with globs, unknown file sizes, a read-only mount, and a deliberately omitted mutation. Assert stdout, stderr, and exit status together. Use a small bounded page (three entries with five available) and request counters to check both cold and warm traversal costs. A partial `DirListing` caches positive membership until expiry; it never proves an omitted entry absent, and a subsequent directory read fetches a new page. Custom index stores may override `set_partial_dir`; the default conservatively refreshes on lookup.
-
-- Unit tests for config validation (an unknown key refused), path layout, every VFS op, command behavior, read-only enforcement, scope enforcement, state redaction, and cleanup.
-- Regenerate `spec/` with `scripts/gen_specs.py` and `typescript/scripts/gen-specs.ts`, then run `scripts/check_spec_parity.py` and `scripts/check_layout_parity.py --strict`.
-- An integration target in `integ/targets.json` with cases under `integ/vfs/<name>/`, run by both hosts' runners against the same goldens; a SaaS backend gets a fake under `integ/server/`. Any change in observable shell behavior adds a case.
-
-## Updating Existing Backends
-
-### From `VFSAdapter` and the op tables
-
-A VFS now owns its functions: they are methods on `BaseVFS`, and the
-commands, the dispatcher and FUSE all call the same ones. Nothing keeps the
-adapter spelling alive, so a backend written against it changes in these
-places:
-
-| Before | Now |
+| Example | Shows |
 | --- | --- |
-| `BaseVFS(name=..., accessor=..., io=VFSAdapter(read=ReadOps(readdir=..., read_bytes=..., stat=...)))` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
-| `read_bytes` and `read_range` | one `read(path)`; with `reads_ranges = True` it also takes `offset` and `size` and fetches only the window |
-| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`exists`, `read_tree`, `write`, ..., `search`, `search_many`) |
-| `read_stream`, `write_stream`, `append_stream` | `read` answering a stream, and `write` and `append` taking one |
-| `ops()`, `make_generic_ops`, `RegisteredOp`, `@op` | nothing to declare: the mount serves the functions; mark a custom one `@vfs_call(effect=...)` |
-| `commands()` returning a builtin set, `commands/builtin/<name>/io.py` | the command module mapped in `workspace/mount/backends.py`; `commands()` returns only the commands the VFS was handed |
-| `DriverOps(vfs)` and `check_driver_contract(vfs, fixture)` | call the functions on the VFS directly; `check_read_contract(vfs, fixture)` |
-
-### From `GenericVFS` and the per-driver methods
-
-An older spelling changes in these places:
-
-| Before | Now |
-| --- | --- |
-| `GenericVFS(name=..., accessor=..., io=...)` | a `BaseVFS` subclass that defines the functions; a driver built from options needs a name |
-| `SUPPORTS_SNAPSHOT`, `SIZES_ALWAYS_KNOWN`, `READ_REVALIDATABLE` | `supports_snapshot`, `sizes_always_known`, `read_revalidatable` |
-| `PROMPT`, `WRITE_PROMPT`, `prompt`, `write_prompt` | one `vfs_md`, this VFS's part of VFS.md; usage of a CLI belongs in its help |
-| `self.register(fn)` and `self.register_op(op)` in `__init__`, `ops_list()` | nothing: the mount builds the commands and the dispatcher when it places the driver |
-| `resolve_glob(paths, prefix)` | the `glob` the mount derives from `readdir`; the mount stamps each spec's `vfs_path` before calling it |
-| `vfs.read_bytes(path)` | `vfs.read(path)` outside a workspace, `ws.dispatch(...)` inside one |
-| `vfs.index`, `set_index(...)`, `index=` on the constructor | `Workspace(index=...)` or `Mount(index=...)`; the store is the mount's (`ws.mount(prefix).index_store`) |
-| `storage_id()` | `storage_location()`, which may return `None` |
-| `statfs()` | `capacity()` |
-| `vfs.vfs_ref` | `Mount(vfs_ref=...)`, recorded on the mount |
-
-Mount configs now reject unknown fields. Remove PostgreSQL's `default_search_limit` and MongoDB's `default_doc_limit` and `default_search_limit`; the remaining read ceilings are `max_read_rows` and `max_doc_limit`. PostgreSQL `head`/`tail` and MongoDB `tail` report a clipped window through stderr and a nonzero status; consumers must check status before treating captured output as complete. PostgreSQL refuses whole reads over its thresholds. MongoDB streams and search no longer apply a silent result cap.
-
-The hierarchy name helpers sanitize empty and dot-leading labels to reachable names. Regenerate stored paths from the listing instead of retaining an old sanitized label; the provider id remains the stable identifier. Keep read and mutation scope checks on every entry point, including direct ids, rather than relying on what a previous listing exposed.
-
-PostgreSQL whole-file reads check a bounded result’s database JSON byte size before transferring rows, then check the rendered JSONL size. Database formatting can make the first check conservative; use an explicit row window when that guard refuses a read.
-
-
-### Check the read contract
-
-The read-contract helper takes the VFS. Supply a small known file, its parent
-directory, an absent sibling, and the expected bytes. It checks listing,
-metadata, reads, streams where the VFS defines them, native windows where it
-reads ranges, existence, and missing-path errors without mutating the
-resource. Every function gets one RAM index store; pass `index=` to supply
-your own.
-
-```python
-from mirage import ReadFixture, check_read_contract
-
-await check_read_contract(vfs, ReadFixture(
-    file=file_path,
-    directory=parent_path,
-    missing=missing_path,
-    content=b"known fixture bytes",
-))
-```
-
-To script a VFS outside a workspace, call its functions directly:
-`await vfs.write(file_path, b"known fixture bytes")`.
-
-Use disposable fixtures to test supported writes and verify read-only mounts
-refuse mutations. Resource-specific tests should cover pagination, scope,
-authorization failures, and query options.
-
-Builtin VFS classes and your own serve through the same functions: commands,
-filesystem ops, and glob expansion all come from them. Backend classes also
-keep configuration, client lifecycle, storage location, event hooks, and
-snapshot behavior.
-
-### Batch resource search
-
-A VFS may also define `search_many(paths, query)`. Use it when ranking
-and `top_k` must apply once across several paths. `search` remains required.
-The `search` CLI uses `search_many` when it is defined and otherwise
-concatenate single-path results; a declined request raises an error rather
-than reporting no matches.
-
-Chroma, Dify, Qdrant, LanceDB, and Mem0 define it. Their options remain
-backend-specific: Dify takes four methods, the others only `semantic`. These
-declarations do not opt into grep.
-
-### Start from a packaged example
-
-The `mirage-vfs-authoring` skill in the Mirage plugin includes self-contained
-Python and TypeScript starters and `scripts/new_adapter.py`. It creates a
-VFS file in your project, refuses to overwrite existing files, and includes
-the contract check plus a mounted shell smoke test. Replace its fixture client
-with your resource API, then define more functions as needed.
+| [`custom_vfs.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/new/custom_vfs.py) | A complete backend in one file: grep on its search, a snapshot and a load |
+| [`basevfs_views.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/new/basevfs_views.py) | A read-only VFS beside a nested mount, a symlink and a CLI |
+| [`custom_command.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/new/custom_command.py) | A command of the VFS's own |
+| [`filetype.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/new/filetype.py) | A renderer for one file type |

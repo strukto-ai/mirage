@@ -52,7 +52,7 @@
   <a href="./readme/README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-F0ECE2"></a>
 </p>
 
-Mirage is **a Virtual Terminal for AI Agents**. The virtual filesystem delivers broad data context, virtualized CLIs give an agent more flexibility on tool use, dynamic runtimes save underlying infrastructure cost and are more token efficient, and fine-grained control over an agent's actions and even over what it can see gives the best security. Together these parts form one virtualized terminal, giving the best agent performance, cost efficiency and security.
+Mirage is **a Virtual Terminal for AI Agents**: one shell over data, CLIs and runtimes. Unix tools reach every service, and `grep` runs on each service's own search, such as Gmail's or Slack's. Mirage routes each command to the runtime that fits it, so most lines run in-process and only heavy work reaches a sandbox, which cuts infrastructure cost and tokens. Profiles decide what an agent can run and even what it can see, and scriptable policies refuse anything those rules cannot express.
 
 <p align="center">
   <picture>
@@ -66,24 +66,53 @@ Here is an example of launching Mirage inside an application:
 ```python
 ws = Workspace(
     {
-        "/tmp":   (RAMVFS(), MountMode.EXEC),
-        "/redis": (RedisVFS(url=redis_url), MountMode.WRITE),
+        "/s3":    (S3VFS(S3Config(bucket="my-bucket")), MountMode.WRITE),
         "/slack": (SlackVFS(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
+        "/gmail": (GmailVFS(GmailConfig(**google_credentials)), MountMode.READ),
     },
-    # monty captures python, so scripts run sandboxed inside the workspace
-    runtimes=[MontyRuntime(captures=["python", "python3"]), "workspace"],
+    # Install the Slack CLI, run by name and listed by `man` and `which` like any program
+    clis={"slack": (SLACK, {"token": slack_bot_token})},
+    # the analyst profile hides /s3/secrets and denies posting to Slack and curl
+    profiles={
+        "analyst": {
+            "paths": {"hide": ["/s3/secrets"]},
+            "commands": {"deny": ["slack send-message", "curl"]},
+        },
+    },
+    runtimes=[
+        MontyRuntime(captures=["python", "python3"]),
+        E2BRuntime(captures=["python", "python3"], config={"sandbox_id": sandbox_id}),
+    ],
+    # route the underlying computation: numpy lines run in the e2b sandbox, the rest on monty
+    route_policy=lambda ctx: "e2b" if "numpy" in ctx.line else None,
 )
 
-# one grep sweeps every source
-await ws.shell("grep -rln session /redis /tmp")
+# Add an agent using the analyst profile
+alice = await ws.session("alice", profile="analyst")
 
-# run a script that lives in Slack, file the report into Redis
-await ws.shell("python3 /slack/channels/general_.../files/example__F....py > /redis/report.txt")
+# one grep sweeps S3, Slack and Gmail, on each service's own search where it has one
+await alice.shell("grep -rlw invoice /s3 /slack /gmail")
 
-# install a typed CLI under a head word: dispatched by name, not by path,
-# and discoverable through `man`, `type` and `which` like any other program
-ws.register_cli("slack", SLACK, {"token": slack_bot_token})
-await ws.shell('slack send-message --channel general --text "report is up"')
+# run a script that lives in Slack on monty, file the report into S3
+await alice.shell("python3 /slack/channels/general__C0123/2026-10-21/files/report__F0456.py > /s3/report.txt")
+
+# numpy is not in monty, so the route policy sends this line to e2b
+await alice.shell("python3 -c 'import numpy; print(numpy.arange(10).sum())'")
+```
+
+And what `alice` sees in the shell:
+
+```console
+$ grep -rlw invoice /s3 /slack /gmail
+/s3/billing/2026-10.csv
+/gmail/INBOX/2026-10-21/Invoice_1042__18f3a9c2b7d1e0f4.gmail.json
+$ ls /s3
+billing
+report.txt
+$ cat /s3/secrets/aws.txt
+cat: /s3/secrets/aws.txt: No such file or directory
+$ slack send-message --channel general --text "report is up"
+slack: Permission denied
 ```
 
 ## About
@@ -170,7 +199,7 @@ in Mirage can resolve straight to a credential held in one of them.
 
 ## Installation
 
-- **Python** ≥ 3.11 for the `mirage-ai` package and the `mirage` CLI
+- **Python** ≥ 3.12 for the `mirage-ai` package and the `mirage` CLI
 - **Node.js** 22.20+ on Node 22, 24.12+ on Node 24, or 25+ for the TypeScript SDK
 
 ### Python
@@ -193,8 +222,6 @@ Both runtime packages pull in `@struktoai/mirage-core` automatically.
 ### CLI
 
 ```bash
-curl -fsSL https://strukto.ai/mirage/install.sh | sh
-# or
 npm install -g @struktoai/mirage-cli
 # or
 uvx --from mirage-ai mirage
@@ -202,49 +229,101 @@ uvx --from mirage-ai mirage
 npx @struktoai/mirage-cli
 ```
 
-## Quickstart
+To get started, see the quickstarts for
+[Python](https://docs.mirage.strukto.ai/python/quickstart),
+[TypeScript](https://docs.mirage.strukto.ai/typescript/quickstart) and the
+[CLI](https://docs.mirage.strukto.ai/home/access/cli).
 
-### Python
+## Scriptable Policy
+
+A profile can name policy scripts for what its rules cannot express. A script
+reads the command as JSON, can open the files it names, and prints a deny, an
+ask or nothing. This one disables `rm`, and a Python script whose code
+deletes files:
 
 ```python
-from mirage import Workspace
-from mirage.vfs.ram import RAMVFS
-from mirage.vfs.s3 import S3Config, S3VFS
+import json, os
 
-ws = Workspace({
-    "/data": RAMVFS(),
-    "/s3":   S3VFS(S3Config(bucket="my-bucket")),
-})
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
 
-await ws.shell("cp /s3/report.csv /data/report.csv")
-await ws.shell("grep alert /s3/data/log.jsonl | wc -l")
 
-await ws.snapshot("demo.tar")
+def deletes(path):
+    try:
+        code = open(path).read()
+    except OSError:
+        return False
+    return any(call in code for call in ("os.remove", "os.unlink", "shutil.rmtree"))
+
+
+if ctx["command"] == "rm" or (
+    ctx["command"].startswith("python") and any(deletes(p) for p in ctx["paths"])
+):
+    print(json.dumps({"kind": "deny", "reason": "deleting files is disabled"}))
 ```
 
-### TypeScript
+Register it in a profile, here to run on Monty before every command:
 
-```ts
-import { Workspace, RAMVFS, S3VFS } from '@struktoai/mirage-node'
-
-const ws = new Workspace({
-  '/data': new RAMVFS(),
-  '/s3':   new S3VFS({ bucket: 'my-bucket' }),
-})
-
-await ws.shell('cp /s3/report.csv /data/report.csv')
-await ws.shell('grep alert /s3/data/log.jsonl | wc -l')
-
-await ws.snapshot('demo.tar')
+```python
+ws = Workspace(
+    {"/s3": (S3VFS(S3Config(bucket="my-bucket")), MountMode.WRITE)},
+    profiles={
+        "analyst": {
+            "policy": {
+                "pre_command": [{"script": ScriptSource(Path("guard.py").read_text()), "runtime": "monty"}],
+            },
+        },
+    },
+    profile="analyst",
+)
 ```
 
-### CLI
+```console
+$ cat /s3/clean.py
+import os
+os.remove("/s3/report.txt")
+$ rm /s3/report.txt
+rm: Permission denied
+$ python3 /s3/clean.py
+python3: Permission denied
+```
+
+See [policy scripts](https://docs.mirage.strukto.ai/home/policy/scripts) for
+the other stages a script can answer at.
+
+## Embedded Terminal
+
+A lightweight terminal inside an application server. Each terminal is a Mirage
+session with its own working directory, environment and history, and Python
+runs in-process on Monty, so a terminal starts with no container or VM. Here
+it is in Express; the FastAPI version is in the
+[docs](https://docs.mirage.strukto.ai/home/examples/embedded-terminal).
 
 ```bash
-mirage workspace create ws.yaml --id demo
-mirage shell --workspace_id demo --command "cp /s3/report.csv /data/report.csv"
-mirage workspace snapshot demo demo.tar
-mirage workspace load demo.tar --id demo-restored
+npm install @struktoai/mirage-node @pydantic/monty express
+```
+
+```ts
+import express from 'express'
+import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/work': new RAMVFS() },
+  { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+)
+const app = express()
+app.use(express.json())
+
+app.post('/sessions/:id', (req, res) => {
+  ws.createSession(req.params.id)
+  res.sendStatus(201)
+})
+
+app.post('/sessions/:id/run', async (req, res) => {
+  const r = await ws.shell(req.body.command, { sessionId: req.params.id })
+  res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+})
+
+app.listen(3000)
 ```
 
 ## Contributors
