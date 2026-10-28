@@ -54,8 +54,9 @@ async def test_discord_get_rate_limited(accessor):
     with aioresponses() as m:
         for _ in range(3):
             m.get(url, status=429, payload={"retry_after": 0.001})
-        with pytest.raises(RuntimeError, match="Rate limited after 3"):
+        with pytest.raises(ApiError, match="Rate limited after 3") as raised:
             await discord_get(accessor, "/users/@me/guilds")
+        assert raised.value.status == 429
         # two waits, three requests, then the error surfaces
         assert len(m.requests[("GET", URL(url))]) == 3
 
@@ -78,8 +79,9 @@ async def test_discord_post_rate_limited_raises_without_retrying(accessor):
     url = f"{BASE}/channels/C001/messages"
     with aioresponses() as m:
         m.post(url, status=429, payload={"retry_after": 2.5})
-        with pytest.raises(RuntimeError, match="retry after 2.5s"):
+        with pytest.raises(ApiError, match="retry after 2.5s") as raised:
             await discord_post(accessor, "/channels/C001/messages", body={})
+        assert raised.value.status == 429
         assert len(m.requests[("POST", URL(url))]) == 1
 
 

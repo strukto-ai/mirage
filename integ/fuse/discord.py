@@ -186,12 +186,10 @@ async def run(case):
                         isinstance(error, OSError) and error.errno == errno.EIO
                     )
                     error = error.__cause__
+                assert isinstance(error, ApiError)
+                assert error.status == case["status"]
                 if case["status"] == 429:
-                    assert isinstance(error, RuntimeError)
                     assert str(error) == "Rate limited after 3 retries"
-                else:
-                    assert isinstance(error, ApiError)
-                    assert error.status == case["status"]
                 if case["recover"]:
                     http.status = 200
                     assert await driver.read(fh) == BODY

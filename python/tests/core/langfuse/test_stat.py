@@ -15,9 +15,9 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from langfuse.api.core.api_error import ApiError
 
 from mirage.accessor.langfuse import LangfuseAccessor
+from mirage.core.langfuse.client import LangfuseApiError
 from mirage.core.langfuse.stat import stat
 from mirage.core.render.json import json_bytes, jsonl_bytes
 from mirage.types import ContentType, FileStat, FileType, PathSpec
@@ -147,7 +147,7 @@ async def test_stat_unlisted_trace_raises(accessor):
         patch(
             "mirage.core.langfuse.read.fetch_trace",
             new_callable=AsyncMock,
-            side_effect=ApiError(status_code=404, body={"message": "nope"}),
+            side_effect=LangfuseApiError("nope", 404),
         ),
     ):
         with pytest.raises(FileNotFoundError):
@@ -195,7 +195,7 @@ async def test_stat_of_a_trace_the_api_does_not_have_is_enoent(accessor):
         patch(
             "mirage.core.langfuse.read.fetch_trace",
             new_callable=AsyncMock,
-            side_effect=ApiError(status_code=404, body={"message": "nope"}),
+            side_effect=LangfuseApiError("nope", 404),
         ),
     ):
         with pytest.raises(FileNotFoundError):

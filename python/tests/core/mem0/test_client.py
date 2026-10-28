@@ -1,5 +1,7 @@
 import pytest
+from mem0.exceptions import NetworkError, RateLimitError
 
+from mirage.accessor.mem0 import Mem0Error
 from mirage.core.mem0.client import get_all_memories, search_memories
 
 
@@ -44,3 +46,25 @@ async def test_search():
     assert client.calls[0]["query"] == "morning"
     assert client.calls[0]["filters"] == {"agent_id": "a"}
     assert client.calls[0]["top_k"] == 5
+
+
+class FailingClient:
+    def __init__(self, error):
+        self.error = error
+
+    async def search(self, query, options=None):
+        raise self.error
+
+
+@pytest.mark.asyncio
+async def test_an_sdk_failure_with_a_status_is_a_mem0_error():
+    limited = RateLimitError(
+        "slow down", "HTTP_429", debug_info={"status_code": 429}
+    )
+    with pytest.raises(Mem0Error) as caught:
+        await search_memories(FailingClient(limited), "q", {"user_id": "a"})
+    assert caught.value.status == 429
+    assert caught.value.__cause__ is limited
+    offline = NetworkError("no route", "NET_001")
+    with pytest.raises(NetworkError):
+        await search_memories(FailingClient(offline), "q", {"user_id": "a"})

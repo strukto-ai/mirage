@@ -12,10 +12,32 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable
 from typing import Any, cast
 
 from mem0 import AsyncMemoryClient
 from mem0.client.types import GetAllMemoryOptions, SearchMemoryOptions
+from mem0.exceptions import MemoryError as SdkError
+
+from mirage.accessor.mem0 import Mem0Error
+
+
+async def _answer(pending: Awaitable[dict[str, Any]]) -> dict[str, Any]:
+    """Await a mem0 SDK call, its HTTP failure as a ``Mem0Error``.
+
+    A failure with no status (the request never got an answer) stays the
+    SDK's.
+
+    Args:
+        pending (Awaitable[dict[str, Any]]): the SDK call.
+    """
+    try:
+        return await pending
+    except SdkError as exc:
+        status = exc.debug_info.get("status_code")
+        if not isinstance(status, int):
+            raise
+        raise Mem0Error(status) from exc
 
 
 async def get_all_memories(
@@ -41,7 +63,7 @@ async def get_all_memories(
             page=page,
             page_size=page_size,
         )
-        resp = await client.get_all(options=options)
+        resp = await _answer(client.get_all(options=options))
         batch = resp.get("results", [])
         results.extend(batch)
         if not resp.get("next") or not batch:
@@ -73,5 +95,5 @@ async def search_memories(
         top_k=top_k,
         threshold=threshold,
     )
-    resp = await client.search(query, options=options)
+    resp = await _answer(client.search(query, options=options))
     return cast(list[dict[str, Any]], resp.get("results", []))

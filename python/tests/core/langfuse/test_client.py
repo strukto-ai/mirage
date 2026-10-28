@@ -22,11 +22,13 @@ from langfuse.api import (
     GetScoresV3Response,
     ObservationsV2Response,
 )
-from langfuse.api.core.api_error import ApiError
+from langfuse.api.core.api_error import ApiError as SdkError
 from langfuse.api.core.pydantic_utilities import parse_obj_as
 
 from mirage.core.langfuse.client import (
+    LangfuseApiError,
     fetch_dataset_runs,
+    fetch_prompts,
     fetch_sessions,
     fetch_trace,
 )
@@ -131,9 +133,26 @@ async def test_fetch_trace_without_observations_is_a_404():
     api = MagicMock()
     api.observations.get_many = AsyncMock(return_value=_observations([]))
 
-    with pytest.raises(ApiError) as caught:
+    with pytest.raises(LangfuseApiError) as caught:
         await fetch_trace(api, "gone")
-    assert caught.value.status_code == 404
+    assert caught.value.status == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        ({"message": "Invalid credentials"}, "Invalid credentials"),
+        ("<html>", "Langfuse API error: HTTP 401"),
+    ],
+)
+async def test_an_sdk_failure_is_a_langfuse_api_error(body, message):
+    api = MagicMock()
+    api.prompts.list = AsyncMock(side_effect=SdkError(status_code=401, body=body))
+
+    with pytest.raises(LangfuseApiError) as caught:
+        await fetch_prompts(api)
+    assert (str(caught.value), caught.value.status) == (message, 401)
 
 
 @pytest.mark.asyncio
