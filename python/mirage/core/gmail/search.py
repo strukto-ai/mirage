@@ -21,6 +21,7 @@ import aiohttp
 from mirage.accessor.gmail import GmailAccessor
 from mirage.core.gmail.readdir import readdir
 from mirage.core.gmail.scope import detect_scope
+from mirage.core.google.client import GoogleApiError
 from mirage.core.hierarchy.probe import row_at, rows_of
 from mirage.core.hierarchy.scope import ROOT
 from mirage.types import FileStat, PathSpec
@@ -132,7 +133,7 @@ async def files_containing(
                         return None
                     if needle in kept:
                         found.append(child)
-    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+    except (aiohttp.ClientError, GoogleApiError, asyncio.TimeoutError) as exc:
         logger.debug("gmail listing failed (%s); reading every file", exc)
         return None
     return found

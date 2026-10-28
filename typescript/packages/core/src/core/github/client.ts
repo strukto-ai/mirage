@@ -24,6 +24,7 @@ import {
   stallTimeout,
 } from '../api/client.ts'
 import { GRAPHQL_PATH, RAW_MEDIA_TYPE, SEARCH_PAGE_SIZE } from './constants.ts'
+import { ApiError } from '../api/errors.ts'
 
 export const GITHUB_API_BASE = 'https://api.github.com'
 export const GITHUB_API_VERSION = '2022-11-28'
@@ -339,8 +340,8 @@ function apiMessage(body: string, reason: string): string {
  * included, and `headers` the response's, lowercased, which `gh api -i`
  * prints for a failing response as for any other.
  */
-export class GitHubApiError extends Error {
-  readonly status: number
+export class GitHubApiError extends ApiError {
+  declare readonly status: number
   readonly body: string
   readonly url: string
   readonly data: unknown
@@ -352,9 +353,8 @@ export class GitHubApiError extends Error {
     url = '',
     headers: Record<string, string> = {},
   ) {
-    super(message)
+    super(message, status)
     this.name = 'GitHubApiError'
-    this.status = status
     this.body = body
     this.url = url
     this.data = decodedBody(body)

@@ -19,6 +19,7 @@ import aiohttp
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.resolve import root_context
 from mirage.core.gdrive.tree import PARENTS_PER_QUERY, iter_tree
+from mirage.core.google.client import GoogleApiError
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mounted_path
 
@@ -77,7 +78,7 @@ async def files_containing(
                 return None
             for file_id in ids:
                 found.extend(files.get(file_id, []))
-    except (OSError, aiohttp.ClientError) as exc:
+    except (OSError, aiohttp.ClientError, GoogleApiError) as exc:
         logger.debug("drive search failed (%s); reading every file", exc)
         return None
     return found or None

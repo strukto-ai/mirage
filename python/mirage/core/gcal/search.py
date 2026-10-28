@@ -26,6 +26,7 @@ from mirage.core.gcal.readdir import (
     scoped_bucket,
 )
 from mirage.core.gcal.scope import detect_scope
+from mirage.core.google.client import GoogleApiError
 from mirage.core.hierarchy.probe import rows_of
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.time_range import parse_time
@@ -153,7 +154,13 @@ async def files_containing(
                         found.append(
                             mounted_path(bucket, f"{parent}/{row.name}")
                         )
-    except (OSError, aiohttp.ClientError, ValueError, RuntimeError) as exc:
+    except (
+        OSError,
+        aiohttp.ClientError,
+        GoogleApiError,
+        ValueError,
+        RuntimeError,
+    ) as exc:
         logger.debug("calendar search failed (%s); reading every file", exc)
         return None
     return found or None

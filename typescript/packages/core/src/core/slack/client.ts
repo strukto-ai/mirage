@@ -14,6 +14,7 @@
 
 import { windowFor } from '../../utils/ranges.ts'
 import { apiRequest, apiStream } from '../api/client.ts'
+import { ApiError } from '../api/errors.ts'
 
 export interface SlackResponse {
   ok: boolean
@@ -23,7 +24,7 @@ export interface SlackResponse {
   [key: string]: unknown
 }
 
-export class SlackApiError extends Error {
+export class SlackApiError extends ApiError {
   constructor(
     public readonly endpoint: string,
     public readonly slackError: string,

@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-import aiohttp
 import pytest
 
 from mirage.accessor.github import GitHubAccount
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
+from mirage.core.api.errors import ApiError
 from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.tree import fetch_tree
 from mirage.types import (
@@ -341,20 +341,12 @@ async def test_a_repository_it_cannot_see_keeps_the_overlay():
             err = await _fails(ws, f"cat {PATH}")
             # The HTTP error propagates as the cold read's message, unchanged
             # from any other refused github read; it is never ENOENT.
-            assert err == (
-                "cat: 404, message='Not Found', url='"
-                f"{hub.url}/repos/o/r/git/trees/main"
-                "?recursive=1'\n"
-            )
+            assert err == "cat: HTTP 404 Not Found\n"
             assert _kept(ws)
             err = await _fails(ws, f"cp {PATH} /r/x")
             # cp renders a backend error without its own prefix, as it does
             # for any backend (unchanged here).
-            assert err == (
-                "404, message='Not Found', url='"
-                f"{hub.url}/repos/o/r/git/trees/main"
-                "?recursive=1'\n"
-            )
+            assert err == "HTTP 404 Not Found\n"
             assert _kept(ws)
         finally:
             await ws.close()
@@ -376,11 +368,7 @@ async def test_a_refused_token_keeps_the_overlay():
                 }
             )
             err = await _fails(ws, f"cat {PATH}")
-            assert err == (
-                "cat: 401, message='Unauthorized', url='"
-                f"{hub.url}/repos/o/r/git/trees/main"
-                "?recursive=1'\n"
-            )
+            assert err == "cat: HTTP 401 Unauthorized\n"
             assert _kept(ws)
         finally:
             await ws.close()
@@ -443,11 +431,7 @@ async def test_the_dispatcher_never_reads_cannot_see_as_gone():
         try:
             await _cleared_with_overlay(ws, hub)
             err = await _fails(ws, f"cp {PATH} /r/x")
-            assert err == (
-                "401, message='Unauthorized', url='"
-                f"{hub.url}/repos/o/r/git/trees/main"
-                "?recursive=1'\n"
-            )
+            assert err == "HTTP 401 Unauthorized\n"
             assert _kept(ws)
         finally:
             await ws.close()
@@ -460,11 +444,7 @@ async def test_the_xattr_call_never_reads_cannot_see_as_gone():
         try:
             await _cleared_with_overlay(ws, hub)
             err = await _fails(ws, f"getfattr -d {PATH}")
-            assert err == (
-                "401, message='Unauthorized', url='"
-                f"{hub.url}/repos/o/r/git/trees/main"
-                "?recursive=1'\n"
-            )
+            assert err == "HTTP 401 Unauthorized\n"
             assert _kept(ws)
         finally:
             await ws.close()
@@ -616,7 +596,7 @@ async def test_a_drift_check_the_token_is_refused_is_not_drift():
             # The one-directory route is refused while the whole tree would
             # answer: deferring on 401 would pass the check silently.
             hub.fail["dir"] = (401, "Bad credentials")
-            with pytest.raises(aiohttp.ClientResponseError) as caught:
+            with pytest.raises(ApiError) as caught:
                 await _load(state, vfs)
             assert caught.value.status == 401
         finally:

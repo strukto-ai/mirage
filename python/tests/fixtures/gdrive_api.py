@@ -18,12 +18,10 @@ from collections.abc import Callable
 from http import HTTPStatus
 from typing import Any
 
-import aiohttp
 import pytest
-from multidict import CIMultiDict, CIMultiDictProxy
-from yarl import URL
 
 from mirage.core.gdrive.api import DriveApi
+from mirage.core.google.client import GoogleApiError
 from mirage.core.google.drive import FOLDER_MIME, ITEM_FIELDS, MIME_TO_EXT
 from mirage.io.spool import ByteSpool
 from mirage.utils.ranges import ByteWindow
@@ -45,9 +43,7 @@ async def payload(data: bytes | ByteSpool) -> bytes:
     return data
 
 
-def drive_error(
-    status: int, message: str, resource: str
-) -> aiohttp.ClientResponseError:
+def drive_error(status: int, message: str, resource: str) -> GoogleApiError:
     """The error Drive's client raises for a refused request.
 
     Args:
@@ -55,16 +51,11 @@ def drive_error(
         message (str): Google's message.
         resource (str): the path below ``drive/v3`` asked for.
     """
-    url = URL(f"https://www.googleapis.com/drive/v3/{resource}")
-    return aiohttp.ClientResponseError(
-        aiohttp.RequestInfo(url, "GET", CIMultiDictProxy(CIMultiDict()), url),
-        (),
-        status=status,
-        message=message,
-    )
+    del resource
+    return GoogleApiError(message, status)
 
 
-def not_found(file_id: str) -> aiohttp.ClientResponseError:
+def not_found(file_id: str) -> GoogleApiError:
     """The error Drive's client raises for an id it holds no file for.
 
     Args:

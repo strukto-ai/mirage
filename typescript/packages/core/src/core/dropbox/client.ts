@@ -25,6 +25,7 @@ import { ByteSpool } from '../../io/spool.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
 import type { JsonValue } from '../../types.ts'
+import { ApiError } from '../api/errors.ts'
 
 // The Dropbox-API-Arg header carries JSON, and a header is a ByteString:
 // a path with a character past U+00FF makes fetch refuse the request.
@@ -51,13 +52,12 @@ export interface DropboxConfig {
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
 }
 
-export class DropboxApiError extends Error {
-  readonly status: number
+export class DropboxApiError extends ApiError {
+  declare readonly status: number
   /** Dropbox `error_summary` (e.g. "path/not_found/..", "path/conflict/folder/.."). */
   readonly summary: string
   constructor(message: string, status: number, summary = '') {
-    super(message)
-    this.status = status
+    super(message, status)
     this.summary = summary
     this.name = 'DropboxApiError'
   }

@@ -19,6 +19,7 @@ import aiohttp
 import pytest
 
 from mirage.accessor.slack import SlackAccessor
+from mirage.core.slack.client import SlackApiError
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.search import (
     MAX_PAGES,
@@ -161,7 +162,7 @@ async def test_a_channel_is_searched_by_name_and_reactions_too(slack):
         ("grep -rlw Launch /slack/channels", FakeSlack(shares=False)),
         (
             "grep -rlw deploy /slack/channels",
-            FakeSlack(fails=RuntimeError("Slack API error: ratelimited")),
+            FakeSlack(fails=SlackApiError("Slack API error: ratelimited")),
         ),
         (
             "grep -rlw deploy /slack/channels",

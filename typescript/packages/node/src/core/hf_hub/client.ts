@@ -18,6 +18,7 @@ import type { ApiResponse, RetryPolicy } from '@struktoai/mirage-core/core/api/c
 import type { ByteWindow } from '@struktoai/mirage-core/utils/ranges'
 import { API_SEGMENTS, MAX_RETRIES, RESOLVE_SEGMENTS, RETRY_STATUSES } from './constants.ts'
 import { lstripSlash, rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { ApiError } from '@struktoai/mirage-core/core/api/errors'
 
 export const RETRY: RetryPolicy = {
   statuses: RETRY_STATUSES,
@@ -33,23 +34,15 @@ export const RETRY: RetryPolicy = {
 export const WRITE_RETRY: RetryPolicy = { ...RETRY, retryTransport: false }
 
 /** A Hub call that answered with a status the caller cannot use. */
-export class HfHubError extends Error {
-  /**
-   * The Hub's `X-Error-Code`, '' when it sent none. The status alone cannot
-   * tell its refusals apart: a missing repository, a missing revision and a
-   * missing file are all 404, and only this header says which
-   * (`RepoNotFound` / `RevisionNotFound` / `EntryNotFound`).
-   */
+export class HfHubError extends ApiError {
+  declare readonly status: number
   readonly errorCode: string
 
   constructor(message: string, status: number, errorCode = '') {
-    super(message)
+    super(message, status)
     this.name = 'HfHubError'
-    this.status = status
     this.errorCode = errorCode
   }
-
-  readonly status: number
 }
 
 /**

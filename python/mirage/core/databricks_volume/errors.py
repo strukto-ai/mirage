@@ -15,17 +15,20 @@
 import aiohttp
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from mirage.core.api.errors import ApiError
+
 
 class DatabricksVolumeCredentialError(RuntimeError):
     pass
 
 
-class DatabricksVolumeApiError(Exception):
+class DatabricksVolumeApiError(ApiError):
+    """A Databricks Files API call that failed, with its ``error_code``."""
+
     def __init__(
-        self, status_code: int, error_code: str | None, message: str
+        self, message: str, status: int, error_code: str | None = None
     ) -> None:
-        super().__init__(message)
-        self.status_code = status_code
+        super().__init__(message, status)
         self.error_code = error_code
 
 
@@ -42,20 +45,20 @@ def error_of(
         body = _ErrorBody.model_validate_json(text)
     except ValidationError:
         return DatabricksVolumeApiError(
-            response.status, None, text or f"HTTP {response.status}"
+            text or f"HTTP {response.status}", response.status
         )
     return DatabricksVolumeApiError(
+        body.message or text or f"HTTP {response.status}",
         response.status,
         body.error_code,
-        body.message or text or f"HTTP {response.status}",
     )
 
 
 def is_not_found(exc: Exception) -> bool:
     return isinstance(exc, DatabricksVolumeApiError) and (
-        exc.status_code == 404
+        exc.status == 404
         or (
-            exc.status_code == 400
+            exc.status == 400
             and exc.error_code in {"RESOURCE_DOES_NOT_EXIST", "NOT_FOUND"}
         )
     )

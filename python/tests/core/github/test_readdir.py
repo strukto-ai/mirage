@@ -14,10 +14,10 @@
 
 import asyncio
 
-import aiohttp
 import pytest
 
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
+from mirage.core.api.errors import ApiError
 from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GhConfig
 from mirage.core.github.readdir import readdir
@@ -177,7 +177,7 @@ async def test_a_truncated_folder_is_no_miss_while_its_repository_is_lost():
             vfs_path="docs", virtual="/gh/docs", directory="/gh/docs"
         )
         gh.fail["dir"] = (404, "Not Found")
-        with pytest.raises(aiohttp.ClientResponseError):
+        with pytest.raises(ApiError):
             await readdir(accessor, docs, root.entries[0])
         del gh.fail["dir"]
         del gh.files["docs/sub/b.txt"]

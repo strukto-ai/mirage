@@ -21,7 +21,7 @@ from mirage.core.hierarchy.readdir import Listed, cut_listing, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.slack.channels import list_channels, list_dms
-from mirage.core.slack.client import slack_get
+from mirage.core.slack.client import SlackApiError, slack_get
 from mirage.core.slack.formatters import (
     channel_dirname,
     dm_dirname,
@@ -94,7 +94,7 @@ async def _latest_message_ts(
             "conversations.history",
             params={"channel": channel_id, "limit": 1},
         )
-    except RuntimeError as e:
+    except SlackApiError as e:
         if any(code in str(e) for code in _SOFT_HISTORY_ERRORS):
             logger.debug(
                 "slack: history denied for %s (%s); treating as empty",
@@ -265,7 +265,7 @@ async def _day_listing(
         messages = await fetch_messages_for_day(
             accessor, channel_id, date_str, accessor.time_range
         )
-    except RuntimeError as e:
+    except SlackApiError as e:
         if any(code in str(e) for code in _SOFT_HISTORY_ERRORS):
             logger.debug(
                 "slack: history denied for %s/%s (%s); empty day",

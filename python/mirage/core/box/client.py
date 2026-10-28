@@ -23,6 +23,7 @@ from typing import Any, cast
 import aiohttp
 
 from mirage.core.api.client import api_request
+from mirage.core.api.errors import ApiError
 from mirage.core.api.oauth import TokenManager as OAuthTokenManager
 from mirage.core.box.constants import (
     BOX_API_BASE,
@@ -56,13 +57,15 @@ def upload_base_of(config: BoxConfig) -> str:
     return api_base_of(config) if config.endpoint else BOX_UPLOAD_BASE
 
 
-class BoxApiError(RuntimeError):
+class BoxApiError(ApiError):
+    """A Box call that failed; ``conflict`` is the type of the item a 409
+    names, when it names one."""
+
     def __init__(
         self, message: str, status: int, conflict: str | None = None
     ) -> None:
-        self.status = status
+        super().__init__(message, status)
         self.conflict = conflict
-        super().__init__(message)
 
 
 def conflict_of(text: str) -> str | None:

@@ -21,6 +21,7 @@ import aiohttp
 
 from mirage.accessor.jaeger import JaegerAccessor
 from mirage.core.api.client import api_request
+from mirage.core.api.errors import ApiError
 
 TRACE_ID_RE = re.compile(r"^[0-9a-f]{16}$|^[0-9a-f]{32}$", re.IGNORECASE)
 
@@ -28,10 +29,8 @@ TRACE_ID_RE = re.compile(r"^[0-9a-f]{16}$|^[0-9a-f]{32}$", re.IGNORECASE)
 # in listings alongside the ones a user actually sent.
 
 
-class JaegerApiError(Exception):
-    def __init__(self, message: str, status_code: int | None = None) -> None:
-        super().__init__(message)
-        self.status_code = status_code
+class JaegerApiError(ApiError):
+    """A Jaeger query the service refused or answered badly."""
 
 
 def is_trace_id(value: str) -> bool:

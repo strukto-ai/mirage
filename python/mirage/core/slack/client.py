@@ -21,6 +21,7 @@ import aiohttp
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.api.client import api_request, api_stream, status_error
+from mirage.core.api.errors import ApiError
 from mirage.core.slack.config import SlackConfig
 from mirage.utils.ranges import window_for
 from mirage.vfs.secrets import reveal_secret
@@ -50,6 +51,11 @@ def slack_headers(config: SlackConfig, method: str) -> dict[str, str]:
     }
 
 
+class SlackApiError(ApiError):
+    """A Slack call that failed: an ``ok: false`` payload, or a status
+    that carried none."""
+
+
 def _format_slack_error_message(method: str, data: dict[str, Any]) -> str:
     err = data.get("error", "unknown_error")
     base = f"Slack API error ({method}): {err}"
@@ -72,14 +78,18 @@ def _error_of(
     except ValueError:
         data = None
     if isinstance(data, dict):
-        return RuntimeError(_format_slack_error_message(method, data))
-    return RuntimeError(f"Slack API error ({method}): HTTP {resp.status}")
+        return SlackApiError(
+            _format_slack_error_message(method, data), resp.status
+        )
+    return SlackApiError(
+        f"Slack API error ({method}): HTTP {resp.status}", resp.status
+    )
 
 
 def _checked(method: str, data: Any) -> dict[str, Any]:
     payload = data if isinstance(data, dict) else {}
     if not payload.get("ok"):
-        raise RuntimeError(_format_slack_error_message(method, payload))
+        raise SlackApiError(_format_slack_error_message(method, payload))
     return payload
 
 

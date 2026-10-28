@@ -14,14 +14,16 @@
 
 import { apiRequest } from '../api/client.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { ApiError } from '../api/errors.ts'
 
-export class TrelloApiError extends Error {
+export class TrelloApiError extends ApiError {
+  declare readonly status: number
   constructor(
     public readonly endpoint: string,
-    public readonly status: number,
+    status: number,
     message: string,
   ) {
-    super(`Trello API error (${endpoint}): HTTP ${String(status)}: ${message}`)
+    super(`Trello API error (${endpoint}): HTTP ${String(status)}: ${message}`, status)
     this.name = 'TrelloApiError'
   }
 }

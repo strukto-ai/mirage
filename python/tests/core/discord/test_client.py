@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 import pytest
 import pytest_asyncio
 from aioresponses import aioresponses
 from yarl import URL
 
 from mirage.accessor.discord import DiscordAccessor
+from mirage.core.api.errors import ApiError
 from mirage.core.discord.client import (
     discord_delete,
     discord_get,
@@ -84,13 +84,12 @@ async def test_discord_post_rate_limited_raises_without_retrying(accessor):
 
 
 @pytest.mark.asyncio
-async def test_discord_get_error_keeps_the_aiohttp_type(accessor):
-    # readdir classifies on ClientResponseError.status, so the migration
-    # onto core/api must keep raising the aiohttp type for plain errors.
+async def test_discord_get_error_carries_the_status(accessor):
+    # readdir classifies on the error's status.
     url = f"{BASE}/guilds/999"
     with aioresponses() as m:
         m.get(url, status=404, payload={"message": "Unknown Guild"})
-        with pytest.raises(aiohttp.ClientResponseError) as exc:
+        with pytest.raises(ApiError) as exc:
             await discord_get(accessor, "/guilds/999")
     assert exc.value.status == 404
 

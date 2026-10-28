@@ -17,9 +17,8 @@ from collections import defaultdict
 from typing import Any
 from urllib.parse import quote
 
-import aiohttp
-
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
+from mirage.core.api.errors import ApiError
 from mirage.core.github.client import GitHubApiError, github_get
 from mirage.core.github.constants import DEFER_STATUSES
 from mirage.core.github.repo import ensure_ref
@@ -242,7 +241,7 @@ async def point_row(
             accessor.repo,
             expression,
         )
-    except aiohttp.ClientResponseError as exc:
+    except ApiError as exc:
         if exc.status not in DEFER_STATUSES:
             raise
         log.debug("point lookup of %s deferred: %s", rel, exc)

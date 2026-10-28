@@ -15,9 +15,8 @@
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-import aiohttp
-
 from mirage.accessor.discord import DiscordAccessor
+from mirage.core.api.errors import ApiError
 from mirage.core.discord.channels import list_channels
 from mirage.core.discord.entry import (
     channel_entry,
@@ -45,10 +44,7 @@ SOFT_HTTP_STATUSES = frozenset((403, 404, 429))
 
 
 def _is_soft_error(exc: Exception) -> bool:
-    return (
-        isinstance(exc, aiohttp.ClientResponseError)
-        and exc.status in SOFT_HTTP_STATUSES
-    )
+    return isinstance(exc, ApiError) and exc.status in SOFT_HTTP_STATUSES
 
 
 def _date_range(
@@ -162,7 +158,7 @@ async def _day_listing(
         messages = await listed_messages_for_day(
             accessor, channel_id, date_str
         )
-    except aiohttp.ClientResponseError as e:
+    except ApiError as e:
         if _is_soft_error(e):
             logger.debug(
                 "discord: history denied for %s/%s (%d); empty day",

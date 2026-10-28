@@ -14,7 +14,6 @@
 
 from datetime import datetime, timezone
 
-import aiohttp
 import pytest
 
 import mirage.core.discord.history as history_mod
@@ -22,6 +21,7 @@ import mirage.core.discord.read as read_mod
 import mirage.core.discord.readdir as readdir_mod
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.api.errors import ApiError
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.history import snowflake_at
 
@@ -78,12 +78,8 @@ SEALED_DAY = "2024-01-13"
 BROKEN_DAY = "2024-01-12"
 
 
-def _http_error(status: int) -> aiohttp.ClientResponseError:
-    return aiohttp.ClientResponseError(
-        request_info=None,  # type: ignore[arg-type]
-        history=(),
-        status=status,
-    )
+def _http_error(status: int) -> ApiError:
+    return ApiError(f"HTTP {status}", status)
 
 
 class FakeDiscordApi:

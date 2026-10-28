@@ -489,7 +489,7 @@ async def test_errors_are_structured_auth_precedence_and_writes_are_not_replayed
     async with http_files.accessor() as accessor:
         with pytest.raises(DatabricksVolumeApiError) as error:
             await upload(accessor, REMOTE, b"payload", overwrite=True)
-    assert error.value.status_code == status
+    assert error.value.status == status
     assert error.value.error_code == "RESOURCE_DOES_NOT_EXIST"
     assert str(error.value) == "refused"
     assert not is_not_found(error.value)

@@ -216,7 +216,7 @@ async def stat_entries(
         results = _BatchStat.model_validate(raw).results
         if len(results) != len(chunk):
             raise TiDBFilesystemApiError(
-                502, "fs:batch-stat answered a different number of paths"
+                "fs:batch-stat answered a different number of paths", 502
             )
         for remote_path, result in zip(chunk, results):
             if result.status == 404:
@@ -224,7 +224,7 @@ async def stat_entries(
                 continue
             if result.status != 200:
                 raise TiDBFilesystemApiError(
-                    result.status, result.error or f"HTTP {result.status}"
+                    result.error or f"HTTP {result.status}", result.status
                 )
             found.append(
                 Entry(
@@ -467,14 +467,14 @@ async def append_to(
         )
         if len(original) != own or len(added) != part.size - own:
             raise TiDBFilesystemApiError(
-                502, f"append part {part.number} does not match its plan"
+                f"append part {part.number} does not match its plan", 502
             )
         return await _put_part(accessor, part, original + added)
 
     try:
         if sum(part.size - kept(part) for part in plan.upload_parts) != size:
             raise TiDBFilesystemApiError(
-                502, "the append plan does not cover the appended bytes"
+                "the append plan does not cover the appended bytes", 502
             )
         await bounded_map(plan.upload_parts, put, MAX_UPLOAD_WORKERS)
         await _request(

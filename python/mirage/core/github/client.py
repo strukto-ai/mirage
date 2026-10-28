@@ -28,6 +28,7 @@ from mirage.core.api.client import (
     lowered_headers,
     status_error,
 )
+from mirage.core.api.errors import ApiError
 from mirage.core.github.constants import (
     API_BASE,
     API_VERSION,
@@ -76,7 +77,7 @@ def graphql_url(base_url: str | None = None) -> str:
     return base + "/graphql"
 
 
-class GitHubApiError(Exception):
+class GitHubApiError(ApiError):
     """A GitHub call that answered with a status the caller cannot use.
 
     Args:
@@ -89,6 +90,8 @@ class GitHubApiError(Exception):
             for any other.
     """
 
+    status: int
+
     def __init__(
         self,
         message: str,
@@ -98,8 +101,7 @@ class GitHubApiError(Exception):
         url: str = "",
         headers: dict[str, str] | None = None,
     ) -> None:
-        super().__init__(message)
-        self.status = status
+        super().__init__(message, status)
         self.body = body
         self.url = url
         self.headers = headers or {}

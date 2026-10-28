@@ -2,16 +2,15 @@ import { Accessor } from './base.ts'
 import { resolveMem0Config, type Mem0Config, type Mem0ConfigResolved } from '../vfs/mem0/config.ts'
 import { md5Hex } from '../utils/hash.ts'
 import { stallTimeout } from '../core/api/client.ts'
+import { ApiError } from '../core/api/errors.ts'
 
 const ENCODER = new TextEncoder()
 
-export class Mem0Error extends Error {
-  readonly status: number
-
+export class Mem0Error extends ApiError {
+  declare readonly status: number
   constructor(status: number) {
-    super(`Mem0 request failed with status ${String(status)}`)
+    super(`Mem0 request failed with status ${String(status)}`, status)
     this.name = 'Mem0Error'
-    this.status = status
   }
 }
 

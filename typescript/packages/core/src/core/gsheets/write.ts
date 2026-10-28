@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { googleRequest, sheetsBase, type TokenManager } from '../google/client.ts'
+import { ApiError } from '../api/errors.ts'
 
-class SheetsApiError extends Error {
-  readonly status: number
+class SheetsApiError extends ApiError {
+  declare readonly status: number
   constructor(message: string, status: number) {
-    super(message)
-    this.status = status
+    super(message, status)
     this.name = 'SheetsApiError'
   }
 }

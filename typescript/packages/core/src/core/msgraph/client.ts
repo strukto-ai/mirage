@@ -23,6 +23,7 @@ import {
   type RetryPolicy,
 } from '../api/client.ts'
 import { MAX_BACKOFF, RETRY_STATUSES } from './constants.ts'
+import { ApiError } from '../api/errors.ts'
 
 // A drive-relative item path as a Graph URL path: each segment escaped on
 // its own, so a `/` inside the path stays a separator.
@@ -34,13 +35,13 @@ export function encodedPath(path: string): string {
     .join('/')
 }
 
-export class GraphError extends Error {
-  readonly status: number
+export class GraphError extends ApiError {
+  declare readonly status: number
   readonly code: string
 
   constructor(status: number, code: string, message: string) {
-    super(`Graph API error ${String(status)} (${code}): ${message}`)
-    this.status = status
+    super(`Graph API error ${String(status)} (${code}): ${message}`, status)
+    this.name = 'GraphError'
     this.code = code
   }
 }

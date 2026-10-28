@@ -19,6 +19,7 @@ from typing import TypeVar
 import aiohttp
 
 from mirage.accessor.google_api import GoogleApiAccessor
+from mirage.core.google.client import GoogleApiError
 from mirage.core.google.constants import RENDERED_WORDS, TOP_LEVEL_DIRS
 from mirage.types import DirListing, FileStat, PathSpec
 from mirage.utils.key_prefix import mounted_path
@@ -111,7 +112,7 @@ async def files_containing(
                 for row in rows
                 if row.extra.get("doc_id") in named
             )
-    except (OSError, aiohttp.ClientError) as exc:
+    except (OSError, aiohttp.ClientError, GoogleApiError) as exc:
         logger.debug("drive search failed (%s); reading every file", exc)
         return None
     return found or None

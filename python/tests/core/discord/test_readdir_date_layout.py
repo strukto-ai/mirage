@@ -14,10 +14,10 @@
 
 from unittest.mock import patch
 
-import aiohttp
 import pytest
 
 from mirage.accessor.discord import DiscordAccessor
+from mirage.core.api.errors import ApiError
 from mirage.core.discord.readdir import _list_files
 from mirage.core.discord.readdir import readdir as discord_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
@@ -62,7 +62,7 @@ async def test_fetch_day_swallows_soft_errors(api, accessor):
 
 
 async def test_fetch_day_propagates_hard_errors(api, accessor):
-    with pytest.raises(aiohttp.ClientResponseError):
+    with pytest.raises(ApiError):
         await readdir(accessor, spec(f"/{CHANNEL}/{BROKEN_DAY}"))
 
 

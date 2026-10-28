@@ -16,7 +16,6 @@ import logging
 from unittest.mock import AsyncMock, patch
 from urllib.parse import quote, unquote
 
-import aiohttp
 import pytest
 
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
@@ -24,6 +23,7 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import Evicted
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.view import IndexView
+from mirage.core.api.errors import ApiError
 from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GhConfig
 from mirage.core.github.readdir import readdir
@@ -382,7 +382,7 @@ async def test_the_point_answers():
         )
         for status in (401, 403, 409, 429, 500):
             gh.fail["dir"] = (status, "refused")
-            with pytest.raises(aiohttp.ClientResponseError) as caught:
+            with pytest.raises(ApiError) as caught:
                 await point_row(accessor, "docs/a.txt")
             assert caught.value.status == status
         gh.fail["dir"] = (404, "Not Found")

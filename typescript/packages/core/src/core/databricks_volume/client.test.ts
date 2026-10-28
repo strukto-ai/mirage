@@ -199,7 +199,7 @@ describe('Files client', () => {
         )
       vi.stubGlobal('fetch', fetch)
       await expect(stat(accessor(), spec('/volume/file'))).rejects.toMatchObject({
-        statusCode: status,
+        status: status,
       })
       expect(fetch).toHaveBeenCalledTimes(1)
     },
@@ -227,7 +227,7 @@ describe('Files client', () => {
     vi.stubGlobal('fetch', fetch)
     await expect(
       upload(accessor({ token }), '/Volumes/x/a', new Uint8Array([1]), true),
-    ).rejects.toMatchObject({ statusCode: status, errorCode: 'NOT_FOUND' })
+    ).rejects.toMatchObject({ status: status, errorCode: 'NOT_FOUND' })
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(token).toHaveBeenCalledTimes(1)
   })
@@ -235,7 +235,7 @@ describe('Files client', () => {
   it('preserves non-JSON error bodies', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('plain boom', { status: 500 })))
     await expect(download(accessor(), '/Volumes/x/a')).rejects.toMatchObject({
-      statusCode: 500,
+      status: 500,
       errorCode: null,
       message: 'databricks_volume: HTTP 500 plain boom',
     })

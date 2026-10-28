@@ -32,14 +32,15 @@ import {
   TEAM_PROJECTS_QUERY,
   USER_LOOKUP_QUERY,
 } from './queries.ts'
+import { ApiError } from '../api/errors.ts'
 
-export class LinearApiError extends Error {
+export class LinearApiError extends ApiError {
   constructor(
     message: string,
     public readonly errors: readonly unknown[] = [],
-    public readonly status: number | null = null,
+    status: number | null = null,
   ) {
-    super(message)
+    super(message, status)
     this.name = 'LinearApiError'
   }
 }

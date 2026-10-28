@@ -15,10 +15,10 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from aiohttp import ClientResponseError
 
 from mirage.accessor.gdocs import GDocsAccessor
 from mirage.cache.index.scope import command_scope
+from mirage.core.google.client import GoogleApiError
 from mirage.core.google.entry import resolve_app_entry
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.types import PathSpec
@@ -78,12 +78,9 @@ async def test_a_direct_lookup_proves_the_file(outcome):
     if outcome == "owner":
         item["owners"] = []
     if outcome in ("deleted", "forbidden", "unavailable"):
-        error = ClientResponseError(
-            None,
-            (),
-            status={"deleted": 404, "forbidden": 403, "unavailable": 503}[
-                outcome
-            ],
+        error = GoogleApiError(
+            outcome,
+            {"deleted": 404, "forbidden": 403, "unavailable": 503}[outcome],
         )
     get = AsyncMock(return_value=item, side_effect=error)
     drive = StubDrive(get_file=get)
@@ -99,7 +96,7 @@ async def test_a_direct_lookup_proves_the_file(outcome):
             "source_size": 1000,
         }
     elif outcome in ("forbidden", "unavailable"):
-        with pytest.raises(ClientResponseError) as raised:
+        with pytest.raises(GoogleApiError) as raised:
             await resolve_app_entry(
                 drive, MATCH, PATH, ITEM["mimeType"], make_filename
             )

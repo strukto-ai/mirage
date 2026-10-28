@@ -13,16 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
+import { ApiError } from '../api/errors.ts'
 
 const ErrorBody = z.object({ error: z.string().nullish() })
 
-export class TiDBFilesystemApiError extends Error {
-  readonly statusCode: number
-
-  constructor(message: string, statusCode: number) {
-    super(message)
+export class TiDBFilesystemApiError extends ApiError {
+  declare readonly status: number
+  constructor(message: string, status: number) {
+    super(message, status)
     this.name = 'TiDBFilesystemApiError'
-    this.statusCode = statusCode
   }
 }
 
@@ -40,5 +39,5 @@ export function errorOf(response: Response, text: string): TiDBFilesystemApiErro
 }
 
 export function hasStatus(exc: unknown, status: number): boolean {
-  return exc instanceof TiDBFilesystemApiError && exc.statusCode === status
+  return exc instanceof TiDBFilesystemApiError && exc.status === status
 }

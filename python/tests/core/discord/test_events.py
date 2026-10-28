@@ -15,9 +15,8 @@
 import asyncio
 from datetime import datetime, timezone
 
-import aiohttp
-
 from mirage.accessor.discord import DiscordAccessor
+from mirage.core.api.errors import ApiError
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.events import DiscordEventHook
 from mirage.core.discord.history import snowflake_at
@@ -61,11 +60,7 @@ def _hook(monkeypatch) -> tuple[DiscordEventHook, list[str]]:
     async def fake_get(accessor, endpoint, params=None):
         calls.append(endpoint)
         if endpoint not in objects:
-            raise aiohttp.ClientResponseError(
-                request_info=None,  # type: ignore[arg-type]
-                history=(),
-                status=404,
-            )
+            raise ApiError("HTTP 404", 404)
         return dict(objects[endpoint])
 
     monkeypatch.setattr("mirage.core.discord.events.discord_get", fake_get)

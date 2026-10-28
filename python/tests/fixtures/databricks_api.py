@@ -17,7 +17,7 @@ servers: list["FakeFiles"] = []
 
 class NotFoundError(DatabricksVolumeApiError):
     def __init__(self, path: str) -> None:
-        super().__init__(404, "RESOURCE_DOES_NOT_EXIST", path)
+        super().__init__(path, 404, "RESOURCE_DOES_NOT_EXIST")
 
 
 class FakeDownload:
@@ -252,7 +252,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self._respond(405)
         except Exception as exc:
             status = (
-                exc.status_code
+                exc.status
                 if isinstance(exc, DatabricksVolumeApiError)
                 else 500
             )

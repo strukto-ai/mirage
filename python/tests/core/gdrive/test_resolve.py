@@ -24,6 +24,7 @@ from mirage.core.gdrive.resolve import (
     parent_folder,
     root_context,
 )
+from mirage.core.google.client import GoogleApiError
 from mirage.types import FileStat, FileType, PathSpec
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
@@ -82,7 +83,7 @@ async def test_root_context_memoizes_drive_lookup(
 
 @pytest.mark.asyncio
 async def test_eacces_on_denied_maps_403():
-    request_info = aiohttp.RequestInfo(
+    aiohttp.RequestInfo(
         url=URL("https://x"),
         method="POST",
         headers=CIMultiDictProxy(CIMultiDict()),
@@ -91,16 +92,16 @@ async def test_eacces_on_denied_maps_403():
 
     @eacces_on_denied
     async def denied(accessor, path: PathSpec) -> None:
-        raise aiohttp.ClientResponseError(request_info, (), status=403)
+        raise GoogleApiError("denied", 403)
 
     @eacces_on_denied
     async def server_error(accessor, path: PathSpec) -> None:
-        raise aiohttp.ClientResponseError(request_info, (), status=500)
+        raise GoogleApiError("boom", 500)
 
     spec = PathSpec.from_str_path("/gd/a.txt", "a.txt")
     with pytest.raises(PermissionError, match="/gd/a.txt"):
         await denied(None, spec)
-    with pytest.raises(aiohttp.ClientResponseError):
+    with pytest.raises(GoogleApiError):
         await server_error(None, spec)
 
 

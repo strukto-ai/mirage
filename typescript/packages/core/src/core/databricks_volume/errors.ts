@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ApiError } from '../api/errors.ts'
+
 export class DatabricksVolumeCredentialError extends Error {
   constructor(cause: unknown) {
     super('databricks_volume: credential provider failed', { cause })
@@ -19,14 +21,13 @@ export class DatabricksVolumeCredentialError extends Error {
   }
 }
 
-export class DatabricksVolumeApiError extends Error {
-  readonly statusCode: number
+export class DatabricksVolumeApiError extends ApiError {
+  declare readonly status: number
   readonly errorCode: string | null
 
-  constructor(message: string, statusCode: number, errorCode: string | null = null) {
-    super(message)
+  constructor(message: string, status: number, errorCode: string | null = null) {
+    super(message, status)
     this.name = 'DatabricksVolumeApiError'
-    this.statusCode = statusCode
     this.errorCode = errorCode
   }
 }
@@ -36,7 +37,7 @@ const NOT_FOUND_CODES = new Set(['RESOURCE_DOES_NOT_EXIST', 'NOT_FOUND'])
 export function isNotFound(exc: unknown): boolean {
   return (
     exc instanceof DatabricksVolumeApiError &&
-    (exc.statusCode === 404 ||
-      (exc.statusCode === 400 && exc.errorCode !== null && NOT_FOUND_CODES.has(exc.errorCode)))
+    (exc.status === 404 ||
+      (exc.status === 400 && exc.errorCode !== null && NOT_FOUND_CODES.has(exc.errorCode)))
   )
 }

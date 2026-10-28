@@ -23,6 +23,7 @@ from aiohttp.test_utils import TestServer
 from aioresponses import aioresponses
 from yarl import URL
 
+from mirage.core.api.errors import ApiError
 from mirage.core.google.client import (
     READ_RETRY,
     TokenManager,
@@ -392,7 +393,7 @@ async def test_a_write_retries_a_throttle_but_never_a_5xx(method, url, call):
             headers={"Retry-After": "0"},
         )
         _answer(mock, method, url, status=503)
-        with pytest.raises(aiohttp.ClientResponseError) as raised:
+        with pytest.raises(ApiError) as raised:
             await call(tm)
         assert len(mock.requests[(method, URL(url))]) == 3
     assert raised.value.status == 503
@@ -425,7 +426,7 @@ async def test_a_permission_403_is_final(method, url, call):
             status=403,
             body=_reason(403, "insufficientFilePermissions"),
         )
-        with pytest.raises(aiohttp.ClientResponseError) as raised:
+        with pytest.raises(ApiError) as raised:
             await call(tm)
     assert raised.value.status == 403
     assert waits == []
@@ -439,11 +440,11 @@ async def test_a_persistent_5xx_surfaces_after_the_budget():
     with aioresponses() as mock:
         for _ in range(MAX_RETRIES + 1):
             mock.get(FILES, status=500, body='{"error": {"message": "boom"}}')
-        with pytest.raises(aiohttp.ClientResponseError) as raised:
+        with pytest.raises(ApiError) as raised:
             await google_get(tm, FILES)
         assert len(mock.requests[("GET", URL(FILES))]) == MAX_RETRIES + 1
     assert raised.value.status == 500
-    assert raised.value.message == "boom"
+    assert str(raised.value) == "boom"
     assert waits == [1.0, 2.0, 4.0]
     await tm.pool.close()
 
@@ -487,7 +488,7 @@ async def test_a_resumable_upload_retries_its_start_but_not_a_chunk():
             mock.post(start, status=503, headers={"Retry-After": "1"})
             mock.post(start, headers={"Location": upload})
             mock.put(upload, status=503)
-            with pytest.raises(aiohttp.ClientResponseError) as raised:
+            with pytest.raises(ApiError) as raised:
                 await google_resumable(
                     tm, "POST", url, {}, spool, "text/plain", {}
                 )
@@ -549,7 +550,7 @@ async def test_the_request_door_never_retries_a_write_5xx(method):
     with aioresponses() as mock:
         mock.add(FILES, method, status=503)
         mock.add(FILES, method, payload={"ok": True})
-        with pytest.raises(aiohttp.ClientResponseError) as raised:
+        with pytest.raises(ApiError) as raised:
             await google_request(tm, method, FILES)
         assert len(mock.requests[(method, URL(FILES))]) == 1
     assert raised.value.status == 503

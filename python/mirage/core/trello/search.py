@@ -17,6 +17,7 @@ import logging
 import aiohttp
 
 from mirage.accessor.trello import TrelloAccessor
+from mirage.core.api.errors import ApiError
 from mirage.core.hierarchy.probe import row_at, rows_of
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.trello.client import search_cards
@@ -125,7 +126,13 @@ async def files_containing(
                         path, f"{path.mount_path.rstrip('/')}/card.json"
                     )
                 )
-    except (OSError, aiohttp.ClientError, RuntimeError, ValueError) as exc:
+    except (
+        OSError,
+        aiohttp.ClientError,
+        ApiError,
+        RuntimeError,
+        ValueError,
+    ) as exc:
         logger.debug("trello search failed (%s); reading every file", exc)
         return None
     return found or None

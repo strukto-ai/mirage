@@ -13,16 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { NOT_FOUND_TYPES } from './constants.ts'
+import { ApiError } from '../api/errors.ts'
 
 /** A >= 400 answer from the Airtable API, with its status and error type. */
-export class AirtableApiError extends Error {
-  readonly status: number | null
+export class AirtableApiError extends ApiError {
   readonly errorType: string | null
 
   constructor(message: string, status: number | null = null, errorType: string | null = null) {
-    super(message)
+    super(message, status)
     this.name = 'AirtableApiError'
-    this.status = status
     this.errorType = errorType
   }
 

@@ -16,13 +16,13 @@ import asyncio
 import errno
 from unittest.mock import AsyncMock, patch
 
-import aiohttp
 import pytest
 import pytest_asyncio
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from mirage import Workspace
+from mirage.core.api.errors import ApiError
 from mirage.core.discord.entry import (
     channel_dirname,
     channel_entry,
@@ -489,9 +489,7 @@ async def test_http_failure_is_deferred_to_read_and_does_not_cache_empty(
     fh = await reader.open()
     assert fh in reader.core.handles
     assert reader.http.history_calls == before + attempts
-    with pytest.raises(
-        (aiohttp.ClientResponseError, RuntimeError, OSError)
-    ) as failure:
+    with pytest.raises((ApiError, RuntimeError, OSError)) as failure:
         await reader.read(fh)
     assert reader.http.history_calls == before + 2 * attempts
     error = failure.value
@@ -504,7 +502,7 @@ async def test_http_failure_is_deferred_to_read_and_does_not_cache_empty(
         assert isinstance(error, RuntimeError)
         assert str(error) == "Rate limited after 3 retries"
     else:
-        assert isinstance(error, aiohttp.ClientResponseError)
+        assert isinstance(error, ApiError)
         assert error.status == status
     if recover:
         reader.http.status = 200

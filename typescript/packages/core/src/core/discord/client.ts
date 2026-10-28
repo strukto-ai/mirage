@@ -14,6 +14,7 @@
 
 import { NO_RETRY, apiRequest, type RetryPolicy } from '../api/client.ts'
 import { DISCORD_API, MAX_RETRIES } from './constants.ts'
+import { ApiError } from '../api/errors.ts'
 
 const RATE_LIMIT_RETRY: RetryPolicy = {
   ...NO_RETRY,
@@ -25,14 +26,15 @@ const RATE_LIMIT_RETRY: RetryPolicy = {
 export type DiscordMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type DiscordResponse = unknown
 
-export class DiscordApiError extends Error {
+export class DiscordApiError extends ApiError {
+  declare readonly status: number
   constructor(
     public readonly endpoint: string,
-    public readonly status: number,
+    status: number,
     public readonly discordError: string,
     public readonly payload?: unknown,
   ) {
-    super(`Discord API error (${endpoint}): ${discordError}`)
+    super(`Discord API error (${endpoint}): ${discordError}`, status)
     this.name = 'DiscordApiError'
   }
 }
