@@ -9,7 +9,7 @@ TS = REPO / "typescript"
 CORE_INDEX = TS / "packages/core/src/index.ts"
 CORE_PKG = "@struktoai/mirage-core"
 RUNTIME_PKGS = ("node", "browser")
-CONSUMER_ROOTS = ("examples", "docs", "integ", "typescript/scripts")
+CONSUMER_ROOTS = ("examples", "docs", "integ", "plugins", "typescript/scripts")
 SOURCE_SUFFIXES = {".ts", ".tsx", ".mts", ".mjs", ".js", ".md", ".mdx"}
 
 CLAUSE = r"\s+(type\s+)?\{([^{}]*)\}\s*from\s*['\"]([^'\"]+)['\"]"

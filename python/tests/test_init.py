@@ -46,7 +46,6 @@ def test_authoring_surface_is_stable():
         "BaseVFS",
         "CLI",
         "CommandSpec",
-        "Effect",
         "FileStat",
         "FlagView",
         "IOResult",
@@ -67,5 +66,4 @@ def test_authoring_surface_is_stable():
         "register_vfs",
         "register_runtime",
         "register_secrets",
-        "vfs_call",
     }

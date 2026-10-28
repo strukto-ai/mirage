@@ -79,7 +79,45 @@ A file the session cannot see is never printed.
 | [Qdrant](/typescript/setup/qdrant) | Qdrant's vector query | Qdrant's score |
 | [LanceDB](/typescript/setup/lancedb) | LanceDB's vector search | The largest distance kept |
 
-A [custom VFS](/typescript/vfs/new) joins the list by implementing `search`.
+
+## Answer from a custom VFS
+
+A [custom VFS](/typescript/vfs/new) joins the list by overriding `search`. It
+gets the path the line names and a `SearchQuery`: the text in `query`, and in
+`options` the `top_k`, `threshold` and `method` the line gives. It returns
+one `[path, record]` pair per hit, the hit's workspace path and the text
+`search` prints; `[]` means no match and `null` declines. A VFS that ranks
+several paths together overrides `searchMany(paths, query)` as well.
+
+```ts
+import { BaseVFS, type PathSpec, type SearchQuery } from '@struktoai/mirage-node'
+import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
+
+class NotesVFS extends BaseVFS<NotesAccessor> {
+  override async search(path: PathSpec, query: SearchQuery): Promise<[string, string][] | null> {
+    const hits = await this.accessor.client.search(query.query, { limit: Number(query.options?.top_k ?? 10) })
+    return hits.map((hit) => [mountedPath(path, `/${hit.key}`).virtual, hit.text])
+  }
+}
+```
+
+A search never passes the file cache. To keep results, the accessor holds a
+`ResponseCache` and returns it from `caches()`; the mount then expires it
+with its read policy and drops it after a write from outside Mirage.
+
+```ts
+import { Accessor, ResponseCache } from '@struktoai/mirage-node'
+
+class NotesAccessor extends Accessor {
+  readonly searches = new ResponseCache<string, [string, string][]>()
+
+  override caches(): readonly ResponseCache<unknown, unknown>[] {
+    return [this.searches]
+  }
+}
+```
+
+`await this.searches.get(key, fetch)` answers from the cache or calls `fetch`.
 
 ## Errors
 

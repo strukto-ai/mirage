@@ -97,10 +97,9 @@ the VFS does not define answers `Operation not supported`:
   not define them. Mount mode still enforces which supported writes may
   execute.
 
-A function only your class declares is reachable through the dispatcher by
-name once it is marked `@vfs_call(effect=Effect.READ)` /
-`@vfsCall({ effect: Effect.READ })`; the effect tells a read-only mount and
-its policies what the call does. Use the installed version's signatures,
+A service action that is not a file, such as a query language search or a
+comment on a record, belongs in a CLI registered next to the mount, not in a
+VFS function. Use the installed version's signatures,
 including optional index parameters. Older versions assembled a `VFSAdapter`
 of callbacks instead of methods; follow the guide matching the installed
 package.

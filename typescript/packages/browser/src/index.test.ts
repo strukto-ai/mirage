@@ -19,7 +19,7 @@ describe('@struktoai/mirage-browser barrel exports', () => {
   it('re-exports core symbols', () => {
     expect(browserPkg.MountMode).toBeDefined()
     expect(browserPkg.RAMVFS).toBeDefined()
-    expect(browserPkg.vfsCall).toBeDefined()
+    expect(browserPkg.BaseVFS).toBeDefined()
     expect(browserPkg.PathSpec).toBeDefined()
   })
 

@@ -102,17 +102,12 @@ if TYPE_CHECKING:
     from mirage.utils.glob_walk import make_resolve_glob
     from mirage.utils.ids import new_session_id, new_workspace_id, uuid7
     from mirage.vfs.base import BaseVFS
-    from mirage.vfs.call import vfs_call
     from mirage.vfs.disk import DiskVFS
     from mirage.vfs.ram import RAMVFS
     from mirage.vfs.registry import build_vfs, known_vfs_names, register_vfs
     from mirage.vfs.testing import (
         ReadFixture,
         check_read_contract,
-    )
-    from mirage.vfs.types import (
-        Effect,
-        Target,
     )
     from mirage.workspace import (
         ExecutionNode,
@@ -200,11 +195,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "ReadFixture",
         "check_read_contract",
     ),
-    "mirage.vfs.call": ("vfs_call",),
-    "mirage.vfs.types": (
-        "Effect",
-        "Target",
-    ),
     "mirage.vfs.registry": ("build_vfs", "known_vfs_names", "register_vfs"),
     "mirage.runtime.base": ("Runtime",),
     "mirage.runtime.config": ("RuntimeConfig",),
@@ -278,9 +268,6 @@ __all__ = [
     "FileType",
     "FlagView",
     "SearchQuery",
-    "Effect",
-    "Target",
-    "vfs_call",
     "IOResult",
     "IndexCacheStore",
     "IndexConfig",

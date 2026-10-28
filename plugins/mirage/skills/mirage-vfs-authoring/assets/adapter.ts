@@ -1,6 +1,6 @@
 import {
   Accessor, BaseVFS, FileStat, FileType, PathSpec, Workspace,
-  checkReadContract, eisdir, enoent, enotdir,
+  checkReadContract, eisdir, enoent, enotdir, type ReadFixture,
 } from '@struktoai/mirage-node'
 
 const enc = new TextEncoder()
@@ -44,12 +44,13 @@ class ResourceVFS extends BaseVFS<ResourceClient> {
 
 async function main(): Promise<void> {
   const vfs = new ResourceVFS(new ResourceClient())
-  await checkReadContract(vfs, {
+  const fixture: ReadFixture = {
     file: new PathSpec({ virtual: '/resource/hello.txt', directory: '/resource', vfsPath: 'hello.txt' }),
     directory: new PathSpec({ virtual: '/resource', directory: '/', vfsPath: '' }),
     missing: new PathSpec({ virtual: '/resource/missing', directory: '/resource', vfsPath: 'missing' }),
     content: enc.encode('Hello from my resource!\n'),
-  })
+  }
+  await checkReadContract(vfs, fixture)
   const ws = new Workspace({ '/resource': vfs })
   try {
     const result = await ws.shell('cat /resource/hello.txt')
