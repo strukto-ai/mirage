@@ -18,6 +18,7 @@ import pytest
 
 import mirage.core.github.stat as stat_module
 from mirage.cache.index.ram import ListingCheckStore
+from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.readdir import readdir
 from mirage.core.github.stat import stat
@@ -101,8 +102,9 @@ async def test_stat_propagates_a_listing_failure():
     # refusal surfaces rather than ENOENT.
     with serve(FakeGitHub(files=FILES)) as hub:
         hub.fail["recursive"] = (500, "boom")
-        with pytest.raises(Exception, match="500"):
+        with pytest.raises(GitHubApiError, match="boom") as raised:
             await _stat_at(hub, "/gh/missing.py")
+        assert raised.value.status == 500
 
 
 @pytest.mark.asyncio

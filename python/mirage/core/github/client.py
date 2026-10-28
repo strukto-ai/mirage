@@ -26,8 +26,8 @@ from mirage.core.api.client import (
     api_request,
     api_stream,
     lowered_headers,
-    status_error,
 )
+from mirage.core.api.errors import ApiError
 from mirage.core.github.constants import (
     API_BASE,
     API_VERSION,
@@ -76,7 +76,7 @@ def graphql_url(base_url: str | None = None) -> str:
     return base + "/graphql"
 
 
-class GitHubApiError(Exception):
+class GitHubApiError(ApiError):
     """A GitHub call that answered with a status the caller cannot use.
 
     Args:
@@ -89,6 +89,8 @@ class GitHubApiError(Exception):
             for any other.
     """
 
+    status: int
+
     def __init__(
         self,
         message: str,
@@ -98,8 +100,7 @@ class GitHubApiError(Exception):
         url: str = "",
         headers: dict[str, str] | None = None,
     ) -> None:
-        super().__init__(message)
-        self.status = status
+        super().__init__(message, status)
         self.body = body
         self.url = url
         self.headers = headers or {}
@@ -135,7 +136,7 @@ async def github_get(
     data: dict[str, Any] = await api_request(
         "GET",
         github_url(path, account.config.base_url, **kwargs),
-        error_of=status_error,
+        error_of=_error_of,
         headers=github_headers(account.config.token),
         params=params,
         session=account.pool,
@@ -337,7 +338,7 @@ def stream_blob(
     config = account.config
     return api_stream(
         github_url(blob_path(owner, repo, sha), config.base_url),
-        error_of=status_error,
+        error_of=_error_of,
         headers={**github_headers(config.token), "Accept": RAW_MEDIA_TYPE},
         session=account.pool,
     )

@@ -13,6 +13,27 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+class ApiError(Exception):
+    """A service answered a call with an error.
+
+    The one base every backend's service error shares, so a caller
+    catches any of them by one type and reads the status the same way.
+    A service's own error code stays on its subclass, under the name the
+    service gives it.
+
+    Args:
+        message (str): the failure, in the service's words where it gave
+            any.
+        status (int | None): the HTTP status, None when the failure
+            carried none (an ``ok: false`` payload, a body that is not
+            the expected shape).
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
 class PaginationStalledError(RuntimeError):
     """A paginated endpoint handed back a cursor it had already sent.
 

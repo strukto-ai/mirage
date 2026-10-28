@@ -21,6 +21,7 @@ import type {
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { API_VERSION, DEFAULT_API_BASE_URL } from './constants.ts'
 import { apiRequest, type RetryPolicy } from '../api/client.ts'
+import { ApiError } from '../api/errors.ts'
 
 const RATE_LIMIT_RETRY: RetryPolicy = {
   statuses: new Set([429, 529]),
@@ -200,13 +201,13 @@ export class MemoryOAuthClientProvider implements OAuthClientProvider {
   }
 }
 
-export class NotionAPIError extends Error {
+export class NotionAPIError extends ApiError {
   constructor(
     message: string,
-    public readonly status: number | null = null,
+    status: number | null = null,
     public readonly code: string | null = null,
   ) {
-    super(message)
+    super(message, status)
     this.name = 'NotionAPIError'
   }
 }

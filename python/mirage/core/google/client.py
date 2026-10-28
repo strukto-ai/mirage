@@ -28,6 +28,7 @@ from mirage.core.api.client import (
     api_request,
     api_stream,
 )
+from mirage.core.api.errors import ApiError
 from mirage.core.api.oauth import TokenManager as OAuthTokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.google.constants import (
@@ -132,21 +133,20 @@ WRITE_RETRY = replace(
 )
 
 
+class GoogleApiError(ApiError):
+    """A Google API call that failed, worded with Google's message."""
+
+
 def _error_of(resp: aiohttp.ClientResponse, text: str) -> Exception:
     """The error a failed call raises, worded with Google's message.
 
     A bare ``raise_for_status()`` would discard the reason Google gave in
     the body and report only "Bad Request"; an agent cannot correct an
-    error it cannot read. The exception type is the plain aiohttp one,
-    since callers classify on it (a 403 during a mutation becomes EACCES
-    in ``gdrive/resolve.py``).
+    error it cannot read. Callers classify on its status (a 403 during a
+    mutation becomes EACCES in ``gdrive/resolve.py``).
     """
-    return aiohttp.ClientResponseError(
-        resp.request_info,
-        resp.history,
-        status=resp.status,
-        message=google_error_message(text, resp.status, resp.reason),
-        headers=resp.headers,
+    return GoogleApiError(
+        google_error_message(text, resp.status, resp.reason), resp.status
     )
 
 

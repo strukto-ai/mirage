@@ -18,6 +18,7 @@ import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.slack.client import SlackApiError
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.readdir import _latest_message_ts, _list_files, readdir
 from mirage.types import DirListing, FileStat, FileType, PathSpec
@@ -33,7 +34,7 @@ def accessor():
 
 @pytest.mark.asyncio
 async def test_latest_message_ts_returns_none_on_not_in_channel(accessor):
-    err = RuntimeError(
+    err = SlackApiError(
         "Slack API error (conversations.history): not_in_channel"
     )
     with patch(
@@ -45,7 +46,7 @@ async def test_latest_message_ts_returns_none_on_not_in_channel(accessor):
 
 @pytest.mark.asyncio
 async def test_latest_message_ts_returns_none_on_missing_scope(accessor):
-    err = RuntimeError(
+    err = SlackApiError(
         "Slack API error (conversations.history): missing_scope "
         "(needed: channels:history; provided: channels:read)"
     )
@@ -58,17 +59,19 @@ async def test_latest_message_ts_returns_none_on_missing_scope(accessor):
 
 @pytest.mark.asyncio
 async def test_latest_message_ts_reraises_unrelated_errors(accessor):
-    err = RuntimeError("Slack API error (conversations.history): rate_limited")
+    err = SlackApiError(
+        "Slack API error (conversations.history): rate_limited"
+    )
     with patch(
         "mirage.core.slack.readdir.slack_get", new=AsyncMock(side_effect=err)
     ):
-        with pytest.raises(RuntimeError, match="rate_limited"):
+        with pytest.raises(SlackApiError, match="rate_limited"):
             await _latest_message_ts(accessor, "C1")
 
 
 @pytest.mark.asyncio
 async def test_day_listing_seals_empty_dir_on_not_in_channel(accessor):
-    err = RuntimeError(
+    err = SlackApiError(
         "Slack API error (conversations.history): not_in_channel"
     )
     channels_page = {
@@ -112,7 +115,7 @@ async def test_readdir_channel_inaccessible_yields_no_dates(accessor):
         ],
         "response_metadata": {"next_cursor": ""},
     }
-    err = RuntimeError(
+    err = SlackApiError(
         "Slack API error (conversations.history): not_in_channel"
     )
 
@@ -151,7 +154,7 @@ async def test_readdir_channel_inaccessible_yields_no_dates(accessor):
 async def test_a_soft_error_day_is_a_window(accessor):
     # An empty day from not_in_channel is not the backend saying the day's
     # messages are gone, so it must not evict what an earlier listing held.
-    err = RuntimeError(
+    err = SlackApiError(
         "Slack API error (conversations.history): not_in_channel"
     )
     channels_page = {

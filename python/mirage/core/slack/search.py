@@ -25,7 +25,7 @@ from mirage.core.hierarchy.probe import row_at, rows_of
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.channels import list_channels
-from mirage.core.slack.client import slack_get
+from mirage.core.slack.client import SlackApiError, slack_get
 from mirage.core.slack.events.payload import day_of
 from mirage.core.slack.paginate import cursor_pages
 from mirage.core.slack.readdir import readdir
@@ -617,7 +617,7 @@ async def files_containing(
         return None
     try:
         return await _search(accessor, text, queries, under)
-    except (RuntimeError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
+    except (SlackApiError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
         logger.debug("slack search failed (%s); reading every file", exc)
         return None
 

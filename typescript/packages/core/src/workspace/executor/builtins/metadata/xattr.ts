@@ -20,7 +20,7 @@ import {
   unknownOptionError,
 } from '../../../../commands/spec/usage.ts'
 import { classify } from '../../../../errors/index.ts'
-import { POSIX } from '../../../../errors/posix.ts'
+import { strerrorOf } from '../../../../errors/fs.ts'
 import { PathSpec } from '../../../../types.ts'
 import { result } from '../shared.ts'
 import type { Result } from '../types.ts'
@@ -68,14 +68,11 @@ export function attrUsageRefusal(cmd: string, parsed: ParsedArgs, usage: string)
 /**
  * The phrase attr prints for a failed attribute call: "No such
  * attribute" for one that is not set, whatever the platform calls it,
- * and the C library's wording for everything else. Mirrors Python's
- * `attr_error`.
+ * the C library's wording for any other condition, and a service's own
+ * words for its refusal. Mirrors Python's `attr_error`.
  */
 export function attrError(err: unknown): string {
-  const condition = classify(err)
-  if (condition === 'NO_XATTR') return 'No such attribute'
-  if (condition !== null) return POSIX[condition].phrase
-  return err instanceof Error ? err.message : String(err)
+  return classify(err) === 'NO_XATTR' ? 'No such attribute' : strerrorOf(err)
 }
 
 /**

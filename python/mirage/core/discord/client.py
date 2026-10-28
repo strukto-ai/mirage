@@ -19,6 +19,7 @@ import aiohttp
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.api.client import RetryPolicy, api_request, status_error
+from mirage.core.api.errors import ApiError
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.constants import DISCORD_API, MAX_RETRIES
 from mirage.vfs.secrets import reveal_secret
@@ -53,14 +54,14 @@ def _retry_after_of(body: str) -> Any:
 
 def _get_error(resp: aiohttp.ClientResponse, body: str) -> Exception:
     if resp.status == 429:
-        return RuntimeError(f"Rate limited after {MAX_RETRIES} retries")
+        return ApiError(f"Rate limited after {MAX_RETRIES} retries", 429)
     return status_error(resp, body)
 
 
 def _mutation_error(resp: aiohttp.ClientResponse, body: str) -> Exception:
     if resp.status == 429:
         retry = _retry_after_of(body)
-        return RuntimeError(f"Rate limited, retry after {retry}s")
+        return ApiError(f"Rate limited, retry after {retry}s", 429)
     return status_error(resp, body)
 
 

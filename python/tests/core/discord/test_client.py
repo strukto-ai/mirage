@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 import pytest
 import pytest_asyncio
 from aioresponses import aioresponses
 from yarl import URL
 
 from mirage.accessor.discord import DiscordAccessor
+from mirage.core.api.errors import ApiError
 from mirage.core.discord.client import (
     discord_delete,
     discord_get,
@@ -54,8 +54,9 @@ async def test_discord_get_rate_limited(accessor):
     with aioresponses() as m:
         for _ in range(3):
             m.get(url, status=429, payload={"retry_after": 0.001})
-        with pytest.raises(RuntimeError, match="Rate limited after 3"):
+        with pytest.raises(ApiError, match="Rate limited after 3") as raised:
             await discord_get(accessor, "/users/@me/guilds")
+        assert raised.value.status == 429
         # two waits, three requests, then the error surfaces
         assert len(m.requests[("GET", URL(url))]) == 3
 
@@ -78,19 +79,19 @@ async def test_discord_post_rate_limited_raises_without_retrying(accessor):
     url = f"{BASE}/channels/C001/messages"
     with aioresponses() as m:
         m.post(url, status=429, payload={"retry_after": 2.5})
-        with pytest.raises(RuntimeError, match="retry after 2.5s"):
+        with pytest.raises(ApiError, match="retry after 2.5s") as raised:
             await discord_post(accessor, "/channels/C001/messages", body={})
+        assert raised.value.status == 429
         assert len(m.requests[("POST", URL(url))]) == 1
 
 
 @pytest.mark.asyncio
-async def test_discord_get_error_keeps_the_aiohttp_type(accessor):
-    # readdir classifies on ClientResponseError.status, so the migration
-    # onto core/api must keep raising the aiohttp type for plain errors.
+async def test_discord_get_error_carries_the_status(accessor):
+    # readdir classifies on the error's status.
     url = f"{BASE}/guilds/999"
     with aioresponses() as m:
         m.get(url, status=404, payload={"message": "Unknown Guild"})
-        with pytest.raises(aiohttp.ClientResponseError) as exc:
+        with pytest.raises(ApiError) as exc:
             await discord_get(accessor, "/guilds/999")
     assert exc.value.status == 404
 

@@ -20,6 +20,7 @@ import aiohttp
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.fingerprint import drive_fingerprint
 from mirage.core.gdrive.resolve import root_context
+from mirage.core.google.client import GoogleApiError
 from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 from mirage.errors.fs import enoent, enotdir
 from mirage.types import DirListing, FileStat, FileType, PathSpec
@@ -137,7 +138,7 @@ async def live_row(
     drive = accessor.drive
     try:
         item = await drive.get_file(entry.extra["file_id"])
-    except aiohttp.ClientResponseError as exc:
+    except GoogleApiError as exc:
         if exc.status != 404:
             raise
         logger.debug("listed id for %s is gone: %s", path.virtual, exc)
@@ -198,7 +199,7 @@ async def readdir(
         # so shared drives never surface there.
         try:
             shared_drives = await drive.list_shared_drives()
-        except (OSError, aiohttp.ClientError):
+        except (OSError, aiohttp.ClientError, GoogleApiError):
             logger.debug("Unable to list Google Shared Drives", exc_info=True)
             shared_drives = []
             complete = False

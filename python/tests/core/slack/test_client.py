@@ -18,7 +18,12 @@ from aioresponses import aioresponses
 from yarl import URL
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.core.slack.client import download_file, slack_get, slack_post
+from mirage.core.slack.client import (
+    SlackApiError,
+    download_file,
+    slack_get,
+    slack_post,
+)
 from mirage.core.slack.config import SlackConfig
 
 BASE = "https://slack.com/api"
@@ -68,7 +73,7 @@ async def test_slack_get_error(accessor):
     with aioresponses() as m:
         m.get(url, payload={"ok": False, "error": "channel_not_found"})
         with pytest.raises(
-            RuntimeError, match=r"\(conversations\.info\): channel_not_found"
+            SlackApiError, match=r"\(conversations\.info\): channel_not_found"
         ):
             await slack_get(accessor, "conversations.info")
 
@@ -88,7 +93,7 @@ async def test_slack_get_http_error_keeps_slack_wording(accessor):
             },
         )
         with pytest.raises(
-            RuntimeError, match=r"\(conversations\.info\): ratelimited"
+            SlackApiError, match=r"\(conversations\.info\): ratelimited"
         ):
             await slack_get(accessor, "conversations.info")
 
@@ -99,7 +104,7 @@ async def test_slack_get_http_error_without_envelope_reports_status(accessor):
     with aioresponses() as m:
         m.get(url, status=502, body="<html>gateway</html>")
         with pytest.raises(
-            RuntimeError, match=r"\(conversations\.info\): HTTP 502"
+            SlackApiError, match=r"\(conversations\.info\): HTTP 502"
         ):
             await slack_get(accessor, "conversations.info")
 
@@ -118,7 +123,7 @@ async def test_slack_get_missing_scope_surfaces_scopes(accessor):
             },
         )
         with pytest.raises(
-            RuntimeError,
+            SlackApiError,
             match=(
                 r"\(conversations\.list\): missing_scope "
                 r"\(needed: im:read,mpim:read; "
@@ -133,7 +138,7 @@ async def test_slack_get_missing_scope_no_needed_falls_back(accessor):
     url = f"{BASE}/conversations.list"
     with aioresponses() as m:
         m.get(url, payload={"ok": False, "error": "missing_scope"})
-        with pytest.raises(RuntimeError) as ei:
+        with pytest.raises(SlackApiError) as ei:
             await slack_get(accessor, "conversations.list")
         assert str(ei.value).endswith(
             "Slack API error (conversations.list): missing_scope"

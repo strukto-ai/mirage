@@ -37,6 +37,7 @@ import { apiRequest, apiStream } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
 import type { Clock } from '../../utils/clock.ts'
+import { ApiError } from '../api/errors.ts'
 
 export function tokenUrl(config: GoogleConfig): string {
   return config.apiBase !== undefined ? `${config.apiBase}/token` : TOKEN_URL
@@ -134,11 +135,10 @@ export const WRITE_RETRY: RetryPolicy = {
   retryTransport: false,
 }
 
-export class GoogleApiError extends Error {
-  readonly status: number
+export class GoogleApiError extends ApiError {
+  declare readonly status: number
   constructor(message: string, status: number) {
-    super(message)
-    this.status = status
+    super(message, status)
     this.name = 'GoogleApiError'
   }
 }

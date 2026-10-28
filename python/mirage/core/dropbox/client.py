@@ -20,6 +20,7 @@ from typing import Any
 import aiohttp
 
 from mirage.core.api.client import ApiResponse, api_request, lowered_headers
+from mirage.core.api.errors import ApiError
 from mirage.core.api.oauth import TokenManager as OAuthTokenManager
 from mirage.core.dropbox.constants import (
     DROPBOX_API_BASE,
@@ -35,14 +36,14 @@ from mirage.vfs.dropbox.config import DropboxConfig
 from mirage.vfs.secrets import reveal_secret
 
 
-class DropboxApiError(RuntimeError):
+class DropboxApiError(ApiError):
+    """A Dropbox call that failed; ``summary`` is its ``error_summary``,
+    such as ``path/not_found/..`` or ``path/conflict/folder/..``."""
+
     def __init__(
         self, message: str, status: int | None = None, summary: str = ""
     ) -> None:
-        super().__init__(message)
-        self.status = status
-        # Dropbox error_summary, e.g. "path/not_found/.." or
-        # "path/conflict/folder/..".
+        super().__init__(message, status)
         self.summary = summary
 
 

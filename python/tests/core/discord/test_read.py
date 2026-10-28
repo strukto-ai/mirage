@@ -23,6 +23,7 @@ import pytest
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.scope import command_scope
+from mirage.core.api.errors import ApiError
 from mirage.core.discord.history import snowflake_at
 from mirage.core.discord.read import (
     follow,
@@ -170,9 +171,8 @@ async def test_read_chat_on_a_sealed_day_reproduces_the_api_answer(
 ):
     # The sealed day lists nothing but the file still reads through the
     # channel; the fetch then answers what the API answers.
-    import aiohttp
 
-    with pytest.raises(aiohttp.ClientResponseError):
+    with pytest.raises(ApiError):
         await read(accessor, spec(f"/{CHANNEL}/{SEALED_DAY}/chat.jsonl"))
 
 

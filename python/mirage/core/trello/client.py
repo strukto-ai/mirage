@@ -19,19 +19,13 @@ import aiohttp
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.core.api.client import api_request
+from mirage.core.api.errors import ApiError
 from mirage.core.trello.config import TrelloConfig
 from mirage.vfs.secrets import reveal_secret
 
 
-class TrelloAPIError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        status: int | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.status = status
+class TrelloAPIError(ApiError):
+    """A Trello call that failed."""
 
 
 def _auth_params(config: TrelloConfig) -> dict[str, str]:

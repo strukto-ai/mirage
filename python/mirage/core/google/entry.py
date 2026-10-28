@@ -15,9 +15,8 @@
 from collections.abc import Callable
 from typing import Any
 
-from aiohttp import ClientResponseError
-
 from mirage.core.gdrive.api import DriveApi
+from mirage.core.google.client import GoogleApiError
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.errors.fs import enoent
 from mirage.types import ContentType, FileStat, FileType, PathSpec
@@ -69,7 +68,7 @@ async def resolve_app_entry(
     """
     try:
         item = await drive.get_file(match.slots["file_id"])
-    except ClientResponseError as exc:
+    except GoogleApiError as exc:
         if exc.status != 404:
             raise
         raise enoent(path.virtual) from exc

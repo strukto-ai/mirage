@@ -13,17 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { apiRequest, buildUrl } from '../api/client.ts'
+import { ApiError } from '../api/errors.ts'
 
 const TRACE_ID_RE = /^[0-9a-f]{16}$|^[0-9a-f]{32}$/i
 
 // Jaeger's own query service self-instruments, so a `jaeger` service shows up
 // in listings alongside the ones a user actually sent.
-export class JaegerApiError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number | null = null,
-  ) {
-    super(message)
+export class JaegerApiError extends ApiError {
+  constructor(message: string, status: number | null = null) {
+    super(message, status)
     this.name = 'JaegerApiError'
   }
 }

@@ -5,6 +5,7 @@ from yarl import URL
 
 from mirage.accessor.dify import DifyAccessor
 from mirage.core.api import client as api_client
+from mirage.core.api.errors import ApiError
 from mirage.core.dify import client
 from mirage.vfs.dify.config import DifyConfig
 
@@ -181,7 +182,7 @@ async def test_dify_get_raises_after_retryable_errors(monkeypatch):
         for _ in range(4):
             m.get(DOCUMENTS, status=503, payload={"message": "unavailable"})
         try:
-            with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+            with pytest.raises(ApiError) as exc_info:
                 await client.dify_get(
                     dify_accessor, "/datasets/dataset-1/documents"
                 )
@@ -209,7 +210,7 @@ async def test_dify_get_uses_configured_retry_policy(monkeypatch):
         for _ in range(2):
             m.get(DOCUMENTS, status=503, payload={"message": "unavailable"})
         try:
-            with pytest.raises(aiohttp.ClientResponseError):
+            with pytest.raises(ApiError):
                 await client.dify_get(
                     dify_accessor, "/datasets/dataset-1/documents"
                 )
@@ -249,7 +250,7 @@ async def test_dify_get_raises_http_status_errors():
     with aioresponses() as m:
         m.get(DOCUMENTS, status=401, payload={"message": "unauthorized"})
         try:
-            with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+            with pytest.raises(ApiError) as exc_info:
                 await client.dify_get(
                     dify_accessor, "/datasets/dataset-1/documents"
                 )

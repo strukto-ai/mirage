@@ -17,12 +17,11 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any
 
-import aiohttp
-
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.api import DriveApi
 from mirage.core.gdrive.readdir import unique_shared_drive_name
 from mirage.core.gdrive.resolve import root_context
+from mirage.core.google.client import GoogleApiError
 from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 from mirage.core.google.events import feed_checkpoint, feed_state
 from mirage.events.base import DeltaHook
@@ -131,7 +130,7 @@ class _Places:
         """
         try:
             item = await self._drive.get_file(folder_id)
-        except aiohttp.ClientResponseError as exc:
+        except GoogleApiError as exc:
             if exc.status != HTTPStatus.NOT_FOUND:
                 raise
             logger.debug("drive folder %s is gone: %s", folder_id, exc)

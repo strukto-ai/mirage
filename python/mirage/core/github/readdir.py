@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 
 from mirage.accessor.github import GitHubAccessor
+from mirage.core.api.errors import ApiError
 from mirage.core.github.constants import DEFER_STATUSES
 from mirage.core.github.repo import ensure_ref
 from mirage.core.github.tree import (
@@ -71,7 +71,7 @@ async def readdir(
             accessor.repo,
             f"{ref}:{rel}" if rel else ref,
         )
-    except aiohttp.ClientResponseError as exc:
+    except ApiError as exc:
         if not rel or exc.status not in DEFER_STATUSES:
             raise
         await fetch_head(

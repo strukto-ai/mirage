@@ -18,19 +18,43 @@ from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
 from langfuse.api.client import AsyncLangfuseAPI
-from langfuse.api.core.api_error import ApiError
+from langfuse.api.core.api_error import ApiError as SdkError
 from langfuse.api.core.pydantic_utilities import UniversalBaseModel
 
+from mirage.core.api.errors import ApiError
 from mirage.errors.fs import enoent
 
 T = TypeVar("T")
 
 
+class LangfuseApiError(ApiError):
+    """A Langfuse call that answered with a status the caller cannot use."""
+
+
+async def _answer(pending: Awaitable[T]) -> T:
+    """Await a Langfuse SDK call, its HTTP failure as a ``LangfuseApiError``
+    worded with the API's own message.
+
+    Args:
+        pending (Awaitable[T]): the SDK call.
+    """
+    try:
+        return await pending
+    except SdkError as exc:
+        body = exc.body
+        message = (
+            str(body["message"])
+            if isinstance(body, dict) and "message" in body
+            else f"Langfuse API error: HTTP {exc.status_code}"
+        )
+        raise LangfuseApiError(message, exc.status_code) from exc
+
+
 async def fetch_or_enoent(pending: Awaitable[T], virtual: str) -> T:
     """Await a Langfuse fetch, translating a 404 into ENOENT.
 
-    Every other status stays an ApiError: only "this resource does not exist"
-    is a filesystem-level missing file.
+    Every other status stays a LangfuseApiError: only "this resource does not
+    exist" is a filesystem-level missing file.
 
     Args:
         pending (Awaitable[T]): pending Langfuse API call.
@@ -44,8 +68,8 @@ async def fetch_or_enoent(pending: Awaitable[T], virtual: str) -> T:
     """
     try:
         return await pending
-    except ApiError as exc:
-        if exc.status_code == 404:
+    except LangfuseApiError as exc:
+        if exc.status == 404:
             raise enoent(virtual) from exc
         raise
 
@@ -101,7 +125,7 @@ async def _collect(
     cursor: str | None = None
     while limit is None or len(out) < limit:
         size = PAGE_SIZE if limit is None else min(PAGE_SIZE, limit - len(out))
-        result = await page(limit=size, cursor=cursor, **kwargs)
+        result = await _answer(page(limit=size, cursor=cursor, **kwargs))
         out.extend(_to_dict(row) for row in result.data)
         cursor = result.meta.cursor
         if not result.data or not cursor:
@@ -155,7 +179,7 @@ async def fetch_trace(api: AsyncLangfuseAPI, trace_id: str) -> dict[str, Any]:
         ``scores`` added.
 
     Raises:
-        ApiError: 404 when the trace has no observations.
+        LangfuseApiError: 404 when the trace has no observations.
     """
     observations = await _collect(
         api.observations.get_many,
@@ -163,9 +187,7 @@ async def fetch_trace(api: AsyncLangfuseAPI, trace_id: str) -> dict[str, Any]:
         fields=OBSERVATION_FIELDS,
     )
     if not observations:
-        raise ApiError(
-            status_code=404, body={"message": f"trace {trace_id} not found"}
-        )
+        raise LangfuseApiError(f"trace {trace_id} not found", 404)
     roots = [o for o in observations if o.get("isRootObservation")]
     root = min(roots or observations, key=_start_time)
     scores = await _collect(
@@ -200,7 +222,7 @@ async def fetch_sessions(
 
 
 async def fetch_prompts(api: AsyncLangfuseAPI) -> list[dict[str, Any]]:
-    result = await api.prompts.list()
+    result = await _answer(api.prompts.list())
     return [_to_dict(p) for p in result.data]
 
 
@@ -212,12 +234,12 @@ async def fetch_prompt(
     kwargs: dict[str, Any] = {"prompt_name": name}
     if version is not None:
         kwargs["version"] = version
-    result = await api.prompts.get(**kwargs)
+    result = await _answer(api.prompts.get(**kwargs))
     return _to_dict(result)
 
 
 async def fetch_datasets(api: AsyncLangfuseAPI) -> list[dict[str, Any]]:
-    result = await api.datasets.list()
+    result = await _answer(api.datasets.list())
     return [_to_dict(d) for d in result.data]
 
 
@@ -226,9 +248,8 @@ async def fetch_dataset_items(
     dataset_name: str,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    result = await api.dataset_items.list(
-        dataset_name=dataset_name,
-        limit=limit,
+    result = await _answer(
+        api.dataset_items.list(dataset_name=dataset_name, limit=limit)
     )
     return [_to_dict(item) for item in result.data]
 
@@ -248,7 +269,7 @@ async def fetch_dataset_runs(
     Returns:
         list[dict[str, Any]]: experiments, latest activity first.
     """
-    dataset = await api.datasets.get(dataset_name)
+    dataset = await _answer(api.datasets.get(dataset_name))
     kwargs: dict[str, Any] = {
         "from_start_time": EXPERIMENTS_FROM,
         "dataset_id": dataset.id,
