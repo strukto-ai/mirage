@@ -52,7 +52,7 @@
   <a href="./readme/README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-F0ECE2"></a>
 </p>
 
-Mirage is **a Virtual Terminal for AI Agents**: one shell over data, CLIs and runtimes. Unix tools reach every service, and `grep` runs on each service's own search, such as Gmail's or Slack's. Mirage routes each command to the runtime that fits it, so most lines run in-process and only heavy work reaches a sandbox, which cuts infrastructure cost and tokens. Profiles decide what an agent can run and even what it can see, and scriptable policies refuse anything those rules cannot express.
+Mirage is **a Virtual Terminal for AI Agents**: one shell over data, CLIs and runtimes. Unix tools reach every service, and `grep` runs on each service's own search, such as Gmail's or Slack's. Mirage routes each command to the runtime that fits it, so most lines run in-process and only heavy work reaches a sandbox, which cuts infrastructure cost and tokens. The terminal itself is light: a workspace takes **about 100 KB** of memory and each new session **about 10 KB**, so one process serves many agents at once. Profiles decide what an agent can run and even what it can see, and scriptable policies refuse anything those rules cannot express.
 
 <p align="center">
   <picture>
@@ -125,6 +125,7 @@ slack: Permission denied
 - **Virtual command line tools (CLIs).** `git`, `slack` and `ntn` are answered by Mirage itself, so an agent drives the service with nothing installed, across different runtimes and machines, and one tool can be virtualized into two or more, each under its own name with its own credentials.
 - **Routed, dynamic runtimes.** Python, JavaScript and any other command can be sent to a configured runtime, in process, sandboxed or remote, which decouples computation from storage and lets either change without touching the other.
 - **The virtualized Mirage shell.** It binds the filesystem, the CLIs and the runtimes into one command line, so pipes, redirection, variables, jobs and history work across all three.
+- **Lightweight by design.** A workspace, the virtual terminal itself, takes about 100 KB of memory and each new session about 10 KB, so one process serves many agents without a container or VM per agent.
 - **Profiles designed for agents.** `allow`, `ask` and `deny` govern commands and CLIs, while `hide` and `show` govern files and folders, so a hidden path is not merely unreadable but absent from the filesystem the agent sees.
 - **A scriptable policy engine.** A policy script can prohibit any dangerous action before it runs, and the same stack gates every VFS op and session write, so neither a file nor an environment variable leaks.
 - **Notifications wired into the VFS and agents.** External changes become an event stream on the mount, so a new Slack reply surfaces as a change to the chat file in the virtual filesystem, and the agent reacts to it instead of rescanning the tree.
