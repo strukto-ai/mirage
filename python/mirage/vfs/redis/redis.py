@@ -37,7 +37,7 @@ from mirage.core.redis.stream import read_stream as _read_stream
 from mirage.core.redis.truncate import truncate as _truncate
 from mirage.core.redis.unlink import unlink as _unlink
 from mirage.core.redis.write import write as _write
-from mirage.errors.fs import edquot
+from mirage.errors.types import QuotaExceededError
 from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec
 
@@ -165,9 +165,11 @@ class RedisVFS(BaseVFS):
             await _copy(self.accessor, src, dst)
             if self.usage is not None:
                 copied = await _size_of(self.accessor, dst)
-                if copied > held.reserved:
+                try:
+                    held.grow_to(copied)
+                except QuotaExceededError:
                     await _truncate(self.accessor, dst, held.reserved, True)
-                    raise edquot(dst)
+                    raise
 
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False

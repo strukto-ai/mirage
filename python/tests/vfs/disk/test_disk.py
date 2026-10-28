@@ -102,7 +102,7 @@ async def test_a_copy_past_what_it_reserved_is_cut_back(tmp_path, monkeypatch):
     copy = disk_module._copy
 
     async def grown(accessor, src, dst):
-        (tmp_path / "src").write_bytes(b"y" * 6)
+        (tmp_path / "src").write_bytes(b"y" * 12)
         await copy(accessor, src, dst)
 
     monkeypatch.setattr(disk_module, "_copy", grown)
@@ -111,3 +111,25 @@ async def test_a_copy_past_what_it_reserved_is_cut_back(tmp_path, monkeypatch):
             PathSpec.from_str_path("/src"), PathSpec.from_str_path("/dst")
         )
     assert (tmp_path / "dst").read_bytes() == b"y"
+
+
+@pytest.mark.asyncio
+async def test_a_contended_copy_with_room_keeps_its_bytes(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "src").write_bytes(b"y" * 4)
+    (tmp_path / "dst").write_bytes(b"x" * 5)
+    data = DiskVFS(str(tmp_path), capacity=100)
+    copy = disk_module._copy
+
+    async def contended(accessor, src, dst):
+        assert data.usage is not None
+        for held in data.usage.active:
+            held.contended = True
+        await copy(accessor, src, dst)
+
+    monkeypatch.setattr(disk_module, "_copy", contended)
+    await data.copy(
+        PathSpec.from_str_path("/src"), PathSpec.from_str_path("/dst")
+    )
+    assert (tmp_path / "dst").read_bytes() == b"y" * 4

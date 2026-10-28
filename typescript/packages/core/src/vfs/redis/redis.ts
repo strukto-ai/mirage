@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { edquot } from '../../errors/fs.ts'
 import { RedisAccessor } from '../../accessor/redis.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { VFSName } from '../../types.ts'
@@ -197,9 +196,12 @@ export class RedisVFS extends BaseVFS {
       if (this.usage === null) return redisCopy(this.accessor, src, dst)
       held.growTo(await redisSizeOf(this.accessor, src))
       await redisCopy(this.accessor, src, dst)
-      if ((await redisSizeOf(this.accessor, dst)) > held.reserved) {
+      const copied = await redisSizeOf(this.accessor, dst)
+      try {
+        held.growTo(copied)
+      } catch (err) {
         await redisTruncate(this.accessor, dst, held.reserved, true)
-        throw edquot(dst)
+        throw err
       }
     })
   }
