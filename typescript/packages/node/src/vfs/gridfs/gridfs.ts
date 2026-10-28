@@ -26,7 +26,7 @@ import { read as gridfsRead } from '../../core/gridfs/read.ts'
 import { stat as gridfsStat } from '../../core/gridfs/stat.ts'
 import { readStream as gridfsStream } from '../../core/gridfs/stream.ts'
 import { exists as gridfsExists } from '../../core/gridfs/exists.ts'
-import { write as gridfsWrite } from '../../core/gridfs/write.ts'
+import { write as gridfsWrite, replace as gridfsReplace } from '../../core/gridfs/write.ts'
 import { create as gridfsCreate } from '../../core/gridfs/create.ts'
 import { mkdir as gridfsMkdir } from '../../core/gridfs/mkdir.ts'
 import { unlink as gridfsUnlink } from '../../core/gridfs/unlink.ts'
@@ -108,7 +108,7 @@ export class GridFSVFS extends BaseVFS {
   override append(path: PathSpec, data: ByteSource): Promise<FileStat | null | undefined> {
     return appendByStreamedRewrite(
       (p, remember) => gridfsStream(this.accessor, p, remember),
-      (p, d) => this.write(p, d),
+      (request) => gridfsReplace(this.accessor, request),
       (p) => this.stat(p),
       path,
       data,

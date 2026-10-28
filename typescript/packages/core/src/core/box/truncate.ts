@@ -14,7 +14,7 @@
 
 import { enotsup } from '../../errors/fs.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { runWithOwnVersion } from '../../cache/context.ts'
+import { runWithSettledWrite, writeCondition } from '../../cache/context.ts'
 import { OwnRead } from '../../cache/types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
@@ -56,5 +56,9 @@ export async function truncate(
     next = new Uint8Array(length)
     next.set(data)
   }
-  await runWithOwnVersion(path, own, () => write(accessor, path, next, handed))
+  await runWithSettledWrite(
+    accessor,
+    { path, body: next, condition: await writeCondition(path, 'put', own) },
+    () => write(accessor, path, next, handed),
+  )
 }

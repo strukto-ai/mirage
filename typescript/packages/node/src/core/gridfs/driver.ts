@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { requireSupported } from '@struktoai/mirage-core/cache/context'
+import type { WriteCondition } from '@struktoai/mirage-core/cache/types'
+import { PathSpec } from '@struktoai/mirage-core/types'
 import { concat } from '@struktoai/mirage-core/utils/bytes'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -186,8 +189,20 @@ function put(conn: GridFSAccessor, key: string, data: Uint8Array): Promise<Objec
   return upload(conn, key, chunks(data))
 }
 
-function putStream(conn: GridFSAccessor, key: string, data: ByteSource): Promise<ObjectMeta> {
-  return upload(conn, key, chunks(data))
+async function putStream(
+  conn: GridFSAccessor,
+  key: string,
+  data: ByteSource,
+  condition: WriteCondition,
+): Promise<ObjectMeta> {
+  requireSupported(
+    DRIVER.conditionSupport ?? {},
+    'gridfs',
+    PathSpec.fromStrPath(key),
+    'put',
+    condition,
+  )
+  return await upload(conn, key, chunks(data))
 }
 
 async function deleteFile(conn: GridFSAccessor, key: string): Promise<void> {

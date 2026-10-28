@@ -20,12 +20,17 @@ import {
   captureRead,
   publishRead,
   runWithCacheManager,
-  runWithOwnVersion,
+  runWithSettledWrite,
   runWithWriteContext,
   writeCondition,
   writesConditioned,
 } from './context.ts'
-import type { CacheInvalidator } from './types.ts'
+import {
+  ANY_WRITE,
+  type CacheInvalidator,
+  type ConditionSupport,
+  type ReplaceRequest,
+} from './types.ts'
 import { MountMode, PathSpec, WritePolicy } from '../types.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
 import { runInCommandScope } from './index/scope.ts'
@@ -179,6 +184,13 @@ it('a pending capture owns completed same-path bodies only weakly', async () => 
 describe('a conditional write on the fallback storage', () => {
   class S3Stub extends BaseVFS {
     override readonly name = 's3'
+    override get conditionSupport() {
+      return {
+        put: ['absent', 'match'],
+        copy: ['match'],
+        delete: ['match'],
+      } satisfies ConditionSupport
+    }
     override readonly cachesReads = true
     override close(): Promise<void> {
       return Promise.resolve()
@@ -205,25 +217,48 @@ describe('a conditional write on the fallback storage', () => {
     const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
       runWithWriteContext('/s3/', entry.writeContext(), () => writeCondition(path, 'put')),
     )
-    expect(cond).toEqual({ ifMatch: 'v1' })
+    expect(cond).toEqual({ kind: 'match', version: 'v1' })
   })
 
-  it('keeps an own version every live frame agrees on', async () => {
+  it('settles explicit own evidence without an ambient frame', async () => {
     const [entry, path] = await conditional()
     const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
-      runWithOwnVersion(path, 'v2', () =>
-        runWithOwnVersion(path, 'v2', () => writeCondition(path, 'put')),
-      ),
+      writeCondition(path, 'put', 'v2'),
     )
-    expect(cond).toEqual({ ifMatch: 'v2' })
+    expect(cond).toEqual({ kind: 'match', version: 'v2' })
   })
 
-  it('refuses an own version the live frames disagree on', async () => {
+  it('refuses incompatible settled requirements on overlapping frames', async () => {
     const [entry, path] = await conditional()
+    const request = {
+      path,
+      body: new Uint8Array(),
+      condition: { kind: 'match', version: 'v2' },
+    } satisfies ReplaceRequest
+    await expect(
+      runWithSettledWrite(entry.vfs.accessor, request, () =>
+        runWithSettledWrite(
+          entry.vfs.accessor,
+          { ...request, condition: { kind: 'match', version: 'v3' } },
+          () => writeCondition(path, 'put', null, entry.vfs.accessor),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+  })
+
+  it('refuses an outer settled requirement across an ambiguous fallback boundary', async () => {
+    const [entry, path] = await conditional()
+    const request = {
+      path,
+      body: new Uint8Array(),
+      condition: { kind: 'absent' },
+    } satisfies ReplaceRequest
     await expect(
       runWithWriteContext('/s3/', entry.writeContext(), () =>
-        runWithOwnVersion(path, 'v2', () =>
-          runWithOwnVersion(path, 'v3', () => writeCondition(path, 'put')),
+        runWithSettledWrite(entry.vfs.accessor, request, () =>
+          runWithWriteContext('/s3/', entry.writeContext(), () =>
+            writeCondition(path, 'put', null, entry.vfs.accessor),
+          ),
         ),
       ),
     ).rejects.toMatchObject({ code: 'ENOTSUP' })
@@ -247,7 +282,7 @@ describe('a conditional write on the fallback storage', () => {
         : runWithWriteContext(plainPrefix, null, () =>
             runWithWriteContext('/s3/', entry.writeContext(), both),
           ))
-      expect([cond, other]).toEqual([{ ifMatch: 'v1' }, null])
+      expect([cond, other]).toEqual([{ kind: 'match', version: 'v1' }, ANY_WRITE])
     },
   )
 
@@ -286,13 +321,17 @@ describe('a conditional write on the fallback storage', () => {
     },
   )
 
-  it("leaves another path's own version alone", async () => {
+  it('leaves another destination settled condition alone', async () => {
     const [entry, path] = await conditional()
     const other = PathSpec.fromStrPath('/s3/o', '/o')
     const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
-      runWithOwnVersion(other, 'v9', () => writeCondition(path, 'put')),
+      runWithSettledWrite(
+        entry.vfs.accessor,
+        { path: other, body: new Uint8Array(), condition: { kind: 'match', version: 'v9' } },
+        () => writeCondition(path, 'put', null, entry.vfs.accessor),
+      ),
     )
-    expect(cond).toEqual({ ifMatch: 'v1' })
+    expect(cond).toEqual({ kind: 'match', version: 'v1' })
   })
 })
 

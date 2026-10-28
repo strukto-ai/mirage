@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { conditionVersion } from '../../cache/context.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import {
   dropCached,
@@ -106,7 +107,7 @@ export function makeRename<A extends Accessor, C>(
     }
     // The path a refusal names and the version its write sent.
     const named = (key: string, err: ConditionLostError): [PathSpec, Measured | null] => {
-      if (key === kp.apply(kpfx, dst.mountPath)) return [dst, cond?.ifMatch ?? null]
+      if (key === kp.apply(kpfx, dst.mountPath)) return [dst, conditionVersion(cond)]
       if (key === srcKey) return [src, err.versions.get(key) ?? source]
       return [kp.keyPath(src, kpfx, key), err.versions.get(key) ?? null]
     }
@@ -128,7 +129,7 @@ export function makeRename<A extends Accessor, C>(
       if (err.landed) await dropCached(dst)
       else if (lost === dst) {
         if (source !== null && source !== '') await dropCached(src, source)
-      } else if (cond?.ifMatch !== undefined) await dropCached(dst, cond.ifMatch)
+      } else if (cond?.kind === 'match') await dropCached(dst, cond.version)
       throw await stale(lost, { landed: err.landed, gone: err.gone, version: sent })
     }
     if (!moved) throw enoent(src)

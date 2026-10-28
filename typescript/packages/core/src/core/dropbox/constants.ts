@@ -37,3 +37,11 @@ export const REV = 'rev'
 export const MISSING_SOURCE = 'from_lookup/not_found'
 export const TAKEN = 'to/conflict'
 export const TAKEN_BY_FOLDER = 'to/conflict/folder'
+
+import type { ConditionSupport } from '../../cache/types.ts'
+
+export const CONDITION_SUPPORT: ConditionSupport = {
+  put: ['match'],
+  copy: ['match'],
+  delete: ['match'],
+}

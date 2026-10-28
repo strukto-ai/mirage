@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat, PathSpec } from '../types.ts'
+import type { ByteSource } from '../io/types.ts'
+import type { WriteBinding } from './context.ts'
+import type { Accessor } from '../accessor/base.ts'
 
 /** The active cache operations a backend needs from its cache manager. */
 export interface CacheInvalidator {
@@ -30,9 +33,35 @@ export interface CacheContextState {
  * the object, so the write goes out plain, there being nothing to compare.
  * Mirrors Python's `WriteCondition`.
  */
-export interface WriteCondition {
-  /** The version the object must still have. */
-  readonly ifMatch?: string
+export interface AnyWrite {
+  readonly kind: 'any'
+}
+export interface AbsentWrite {
+  readonly kind: 'absent'
+}
+export interface MatchWrite {
+  readonly kind: 'match'
+  readonly version: string
+}
+export type WriteCondition = AnyWrite | AbsentWrite | MatchWrite
+export const ANY_WRITE: AnyWrite = { kind: 'any' }
+export const ABSENT_WRITE: AbsentWrite = { kind: 'absent' }
+export type ConditionMode = 'absent' | 'match'
+export type ConditionSupport = Readonly<Partial<Record<WriteKind, readonly ConditionMode[]>>>
+export interface ReplaceRequest {
+  readonly path: PathSpec
+  readonly body: ByteSource
+  readonly condition: WriteCondition
+}
+export type RewriteWriteFn<Written = FileStat | null> = (
+  request: ReplaceRequest,
+) => Promise<Written>
+export interface SettledWrite {
+  readonly owner: Accessor
+  readonly scope: WriteBinding | null
+  readonly path: string
+  readonly kind: WriteKind
+  readonly condition: WriteCondition
 }
 
 /**

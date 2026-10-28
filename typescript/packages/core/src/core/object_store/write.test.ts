@@ -27,10 +27,25 @@ import {
   makeDriver,
   spec,
 } from '../../../tests/core/object_store/fakes.ts'
-import { makeCreate, makeMkdir, makeTruncate, makeWrite } from './write.ts'
+import { makeCreate, makeMkdir, makeTruncate, makeWrite, makeReplace } from './write.ts'
+import { ABSENT_WRITE } from '../../cache/types.ts'
 
 const accessor = new FakeAccessor()
 const ENC = new TextEncoder()
+
+it.each(['bytes', 'stream'] as const)(
+  'refuses an unsupported protected %s replacement before mutation',
+  async (kind) => {
+    const store = new FakeStore()
+    const driver = makeDriver(store)
+    const body = kind === 'bytes' ? ENC.encode('new') : yieldBytes(ENC.encode('new'))
+    await expect(
+      makeReplace(driver)(accessor, { path: spec('/new'), body, condition: ABSENT_WRITE }),
+    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+    expect(store.connects).toBe(0)
+    expect(store.puts).toEqual([])
+  },
+)
 
 class MissingContainer extends Error {}
 

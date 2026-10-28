@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CONDITION_SUPPORT } from '../../core/box/constants.ts'
+import type { ConditionSupport } from '../../cache/types.ts'
 import { BaseVFS } from '../base.ts'
 import { BoxAccessor } from '../../accessor/box.ts'
 import { BoxTokenManager } from '../../core/box/client.ts'
@@ -57,6 +59,10 @@ export interface BoxVFSState {
 }
 
 export class BoxVFS extends BaseVFS {
+  override get conditionSupport(): ConditionSupport {
+    return CONDITION_SUPPORT
+  }
+
   override readonly name: string = VFSName.BOX
   override readonly cachesReads: boolean = true
   // Box item listings carry an exact byte `size` for every file (0

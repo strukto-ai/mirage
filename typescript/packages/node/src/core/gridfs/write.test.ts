@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ANY_WRITE } from '@struktoai/mirage-core/cache/types'
 import { Writable } from 'node:stream'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
@@ -81,7 +82,7 @@ it.each([false, true])('streams a GridFS upload and aborts failures: %s', async 
     }
   }
   if (DRIVER.putStream === undefined) throw new Error('stream hook missing')
-  const result = DRIVER.putStream(accessor, 'a', source(), {})
+  const result = DRIVER.putStream(accessor, 'a', source(), ANY_WRITE)
   if (fail) {
     await expect(result).rejects.toThrow('producer failed')
     expect(abort).toHaveBeenCalledOnce()

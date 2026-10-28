@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CONDITION_SUPPORT } from './constants.ts'
+import { requireSupported } from '../../cache/context.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -47,9 +49,10 @@ export async function write(
   }
   const tm = accessor.tokenManager
   const apiPath = dropboxPathOf(accessor, path)
-  const cond = await writeCondition(path, 'put')
+  const cond = await writeCondition(path, 'put', null, accessor)
+  requireSupported(CONDITION_SUPPORT, 'dropbox', path, 'put', cond)
   let rev: string | null = null
-  if (cond?.ifMatch !== undefined && cond.ifMatch !== '') {
+  if (cond.kind === 'match' && cond.version !== '') {
     rev = await nativeCondition(path, cond, liveOf(await lookup(tm, apiPath)), 'put')
   }
   const timer = startOp()

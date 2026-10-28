@@ -40,3 +40,14 @@ export const MD5_ETAG_STORES: ReadonlySet<string> = new Set([
   'digitalocean',
   'wasabi',
 ])
+
+import type { ConditionSupport } from '../../cache/types.ts'
+
+export const CONDITION_SUPPORT: ConditionSupport = {
+  put: ['absent', 'match'],
+  copy: ['match'],
+  delete: ['match'],
+}
+export const CUSTOM_CONDITION_SUPPORT: ConditionSupport = { put: ['absent', 'match'] }
+
+export const AWS_DOMAINS: readonly string[] = ['amazonaws.com', 'amazonaws.com.cn']

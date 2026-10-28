@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ReplaceRequest } from '../../cache/types.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { HistoryViewVFS } from '../../vfs/history/history.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
@@ -63,7 +64,13 @@ import type { ByteSpool } from '../../io/spool.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
 import { CommandSpec, type CommandSpecInit, type FlagValue } from '../../commands/spec/types.ts'
-import { publishRead, readVersioned, runWithWriteContext } from '../../cache/context.ts'
+import {
+  publishRead,
+  readVersioned,
+  runWithWriteContext,
+  requireSupported,
+  runWithSettledWrite,
+} from '../../cache/context.ts'
 import { latestFingerprint } from '../../cache/file/io.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { type WriteContext } from '../../cache/types.ts'
@@ -1030,7 +1037,7 @@ export class MountEntry {
   ): Promise<unknown> {
     return appendByRewrite(
       (p) => this.readAt(index, p),
-      (p, d) => this.writeAt(index, p, d),
+      (request) => this.replaceAt(index, request),
       (p) => this.statAt(index, p),
       path,
       data,
@@ -1070,7 +1077,7 @@ export class MountEntry {
   ): Promise<void> {
     return pwriteByStreamedRewrite(
       (p, spool) => this.readInto(index, p, spool),
-      (p, d) => this.writeAt(index, p, d),
+      (request) => this.replaceAt(index, request),
       (p) => this.statAt(index, p),
       path,
       data,
@@ -1086,10 +1093,23 @@ export class MountEntry {
   ): Promise<void> {
     return truncateByRewrite(
       (p) => this.readAt(index, p),
-      (p, d) => this.writeAt(index, p, d),
+      (request) => this.replaceAt(index, request),
       path,
       length,
       noCreate,
+    )
+  }
+
+  private async replaceAt(index: IndexCacheStore, request: ReplaceRequest): Promise<unknown> {
+    requireSupported(
+      this.vfs.conditionSupport,
+      this.vfs.name,
+      request.path,
+      'put',
+      request.condition,
+    )
+    return runWithSettledWrite(this.vfs.accessor, request, () =>
+      this.writeAt(index, request.path, request.body),
     )
   }
 
@@ -1906,6 +1926,7 @@ export class MountEntry {
         revisions: { map: this.revisions.size > 0 ? this.revisions : null },
         cache: { manager: this.cacheManager },
         write: { prefix: this.prefix, context: this.writeContext() },
+        settledWrite: null,
         mount: [this.prefix, this.mode],
         walkProbe: probe === null ? outer.walkProbe : [this.prefix, probe],
       },

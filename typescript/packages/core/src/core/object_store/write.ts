@@ -16,8 +16,8 @@ import { chunks } from '../../io/cooperative.ts'
 import { closeQuietly } from '../../io/stream.ts'
 import { materialize } from '../../io/types.ts'
 import type { Accessor } from '../../accessor/base.ts'
-import { runWithOwnVersion, writeCondition } from '../../cache/context.ts'
-import { OwnRead, type WriteCondition } from '../../cache/types.ts'
+import { requireSupported, writeCondition } from '../../cache/context.ts'
+import { ANY_WRITE, OwnRead, type ReplaceRequest, type WriteCondition } from '../../cache/types.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import {
@@ -81,7 +81,8 @@ async function put<A extends Accessor, C>(
   cond: WriteCondition | null = null,
 ): Promise<ObjectMeta | null> {
   try {
-    if (cond === null) return await driver.put(conn, key, data)
+    requireSupported(driver.conditionSupport ?? {}, driver.vfs, path, 'put', cond ?? ANY_WRITE)
+    if (cond === null || cond.kind === 'any') return await driver.put(conn, key, data)
     return await requireHook(driver.putIf)(conn, key, data, cond)
   } catch (err) {
     if (err instanceof ConditionLostError) throw await refused(path, err, cond)
@@ -94,45 +95,63 @@ async function put<A extends Accessor, C>(
  * Build the object write over one driver: bytes go up in one put, a stream as
  * it is produced where the store takes one, collected first where it does not.
  */
-export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): WriteFn<A> {
-  return async function write(accessor, path, data, signal) {
-    const body = driver.putStream === undefined ? await materialize(data) : data
-    const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
-    const cond = await writeCondition(path, 'put')
-    const timer = startOp()
-    let meta: ObjectMeta | null
-    let size: number
-    if (body instanceof Uint8Array) {
+export function makeReplace<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>) {
+  return async function replace(
+    accessor: A,
+    request: ReplaceRequest,
+    signal?: AbortSignal,
+  ): Promise<FileStat | null> {
+    const { path, condition: cond } = request
+    const data = request.body
+    try {
+      requireSupported(driver.conditionSupport ?? {}, driver.vfs, path, 'put', cond)
+      const body = driver.putStream === undefined ? await materialize(data) : data
+      const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
+      const timer = startOp()
+      let meta: ObjectMeta | null
+      let size: number
       const { conn, close } = await driver.connect(accessor)
       try {
-        meta = await put(driver, conn, key, body, path, cond)
-      } finally {
-        await close()
-      }
-      size = body.byteLength
-    } else {
-      const source = chunks(body, signal)
-      try {
-        const { conn, close } = await driver.connect(accessor)
-        try {
-          meta = await requireHook(driver.putStream)(conn, key, source, cond ?? {})
-        } finally {
-          await close()
+        if (body instanceof Uint8Array) {
+          meta = await put(driver, conn, key, body, path, cond)
+          size = body.byteLength
+        } else {
+          const source = chunks(body, signal)
+          try {
+            meta = await requireHook(driver.putStream)(conn, key, source, cond)
+          } finally {
+            await closeQuietly(source)
+          }
+          size = meta.size ?? 0
         }
       } catch (error) {
         if (error instanceof ConditionLostError) throw await refused(path, error, cond)
         if (driver.isNotFound(error)) throw enoent(path)
         throw error
       } finally {
-        await closeQuietly(source)
-        await closeQuietly(body)
+        await close()
       }
-      size = meta.size ?? 0
+      record('write', path.virtual, driver.vfs, size, timer, {
+        fingerprint: meta?.fingerprint ?? null,
+      })
+      return writtenStat(path, meta)
+    } finally {
+      await closeQuietly(data)
     }
-    record('write', path.virtual, driver.vfs, size, timer, {
-      fingerprint: meta?.fingerprint ?? null,
-    })
-    return writtenStat(path, meta)
+  }
+}
+
+export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): WriteFn<A> {
+  const replace = makeReplace(driver)
+  return async function write(accessor, path, body, signal) {
+    let condition: WriteCondition
+    try {
+      condition = await writeCondition(path, 'put', null, accessor)
+    } catch (error) {
+      await closeQuietly(body)
+      throw error
+    }
+    return replace(accessor, { path, body, condition }, signal)
   }
 }
 
@@ -140,7 +159,7 @@ export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
 export function makeCreate<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): CreateFn<A> {
   return async function create(accessor, path) {
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
-    const cond = await writeCondition(path, 'put')
+    const cond = await writeCondition(path, 'put', null, accessor)
     const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
     let meta: ObjectMeta | null
@@ -169,7 +188,7 @@ export function makeTruncate<A extends Accessor, C>(
     try {
       if (length === 0) {
         // Emptying reads nothing, so it carries the agent's version.
-        const cond = await writeCondition(path, 'put')
+        const cond = await writeCondition(path, 'put', null, accessor)
         meta = await put(driver, conn, key, new Uint8Array(0), path, cond)
       } else {
         let existing: Uint8Array | null
@@ -191,7 +210,7 @@ export function makeTruncate<A extends Accessor, C>(
         const result = new Uint8Array(length)
         result.set(data.subarray(0, Math.min(data.byteLength, length)), 0)
         // Remaining bytes are already zero-filled (Uint8Array default).
-        const cond = await runWithOwnVersion(path, own, () => writeCondition(path, 'put'))
+        const cond = await writeCondition(path, 'put', own, accessor)
         meta = await put(driver, conn, key, result, path, cond)
       }
     } finally {

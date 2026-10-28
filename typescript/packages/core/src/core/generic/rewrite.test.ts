@@ -17,6 +17,7 @@ import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { materialize } from '../../io/types.ts'
 import type { ByteSpool } from '../../io/spool.ts'
+import type { ReplaceRequest } from '../../cache/types.ts'
 import {
   appendByRewrite,
   appendByStreamedRewrite,
@@ -55,8 +56,8 @@ describe('pwriteByStreamedRewrite', () => {
     }
     const stat = () => Promise.reject(enoent(PATH))
     const written: string[] = []
-    const write = async (_path: PathSpec, data: Parameters<typeof materialize>[0]) => {
-      written.push(new TextDecoder().decode(await materialize(data)))
+    const write = async (request: ReplaceRequest) => {
+      written.push(new TextDecoder().decode(await materialize(request.body)))
     }
     async function* stream(): AsyncGenerator<Uint8Array> {
       await Promise.resolve()
@@ -82,8 +83,8 @@ describe('a streamed rewrite', () => {
       stored = new Uint8Array([...stored, ...enc.encode('tail')])
       yield enc.encode('CD')
     }
-    const write = async (_path: PathSpec, data: Parameters<typeof materialize>[0]) => {
-      stored = await materialize(data)
+    const write = async (request: ReplaceRequest) => {
+      stored = await materialize(request.body)
     }
     const stat = () => Promise.reject(enoent(PATH))
     if (kind === 'append') {

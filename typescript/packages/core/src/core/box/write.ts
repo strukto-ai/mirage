@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CONDITION_SUPPORT } from './constants.ts'
+import { requireSupported, writesConditioned } from '../../cache/context.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -83,12 +85,13 @@ export async function write(
   const parts = pathParts(path)
   if (parts.length === 0 || handed.entry?.type === FileType.DIRECTORY) throw eisdir(path.virtual)
   const tm = accessor.tokenManager
-  const cond = await writeCondition(path, 'put')
+  const cond = await writeCondition(path, 'put', null, accessor)
+  requireSupported(CONDITION_SUPPORT, 'box', path, 'put', cond)
   const timer = startOp()
   // What is there now: the listed row can be older than the path's file, and
   // older than the read a held version came from.
   const existing =
-    cond !== null
+    writesConditioned(path) || cond.kind !== 'any'
       ? await liveItem(accessor, path, itemOf(handed.entry))
       : await liveItemOf(accessor, path, handed.entry)
   const etag = await nativeCondition(path, cond, liveOf(existing), 'put')
@@ -98,7 +101,7 @@ export async function write(
       // Overwrite uploads a new version under the same id, keeping Box's own
       // name so a box-native file isn't renamed with the vfs suffix.
       reply = await uploadFileVersion(tm, existing.id, existing.name, data, etag)
-    } else if (cond === null) {
+    } else if (!writesConditioned(path) && cond.kind === 'any') {
       reply = await uploadNew(accessor, path, data, parentFolder(accessor, path, handed.parent))
     } else {
       reply = await uploadNewFile(

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConditionSupport } from '../cache/types.ts'
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { Command } from '../commands/config.ts'
 import type { CLI } from '../commands/cli/types.ts'
@@ -148,6 +149,9 @@ export interface VFSOptions<A extends Accessor = Accessor> {
 export class BaseVFS<A extends Accessor = Accessor> {
   readonly [VFS_BRAND] = true as const
   readonly name: string = 'base'
+  get conditionSupport(): ConditionSupport {
+    return {}
+  }
   vfsMd = ''
   readonly indexTtl: number = 600
   /**

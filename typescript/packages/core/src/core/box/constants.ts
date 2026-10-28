@@ -53,3 +53,11 @@ export const TRASH_FOLDER_ID = '1'
 // The space_amount Box reports for an account with unlimited storage, a
 // placeholder rather than a size.
 export const UNLIMITED_SPACE = 999_999_999_999_999
+
+import type { ConditionSupport } from '../../cache/types.ts'
+
+export const CONDITION_SUPPORT: ConditionSupport = {
+  put: ['match'],
+  copy: ['match'],
+  delete: ['match'],
+}

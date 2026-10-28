@@ -12,37 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { WriteKind } from '../../cache/types.ts'
-
-const ALL: readonly WriteKind[] = Object.freeze(['put', 'copy', 'delete'] as const)
-
-/** The ops each backend conditions (docs/home/yaml.mdx, conditions.json). */
-export const WRITE_CONDITIONS: Readonly<Record<string, readonly WriteKind[]>> = Object.freeze({
-  s3: ALL,
-  seaweedfs: ALL,
-  minio: Object.freeze(['put'] as const),
-  aliyun: ALL,
-  backblaze: ALL,
-  ceph: ALL,
-  digitalocean: ALL,
-  gcs: ALL,
-  oci: ALL,
-  qingstor: ALL,
-  r2: ALL,
-  scaleway: ALL,
-  supabase: ALL,
-  tencent: ALL,
-  wasabi: ALL,
-  box: ALL,
-  dropbox: ALL,
-})
-
-/** A custom `vfs: s3` endpoint may be MinIO, so it gets MinIO's row. */
-export const CUSTOM_ENDPOINT_CONDITIONS: readonly WriteKind[] = WRITE_CONDITIONS.minio ?? []
-
-/** The domains AWS serves S3 from: the commercial partitions and China. */
-export const AWS_DOMAINS: readonly string[] = ['amazonaws.com', 'amazonaws.com.cn']
-
 // What a backend function may be handed, each filled from the mount's stored
 // listings: the stat of what is at its path and at its path's parent, and the
 // same two at a rename's or a copy's destination. Mirrors Python's `HANDED`.

@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { requireSupported, runWithSettledWrite } from '../../cache/context.ts'
+import { CONDITION_SUPPORT } from '../../core/dropbox/constants.ts'
+import type { ConditionSupport } from '../../cache/types.ts'
 import { BaseVFS } from '../base.ts'
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { DropboxTokenManager } from '../../core/dropbox/client.ts'
@@ -51,6 +54,10 @@ export interface DropboxVFSState {
 }
 
 export class DropboxVFS extends BaseVFS {
+  override get conditionSupport(): ConditionSupport {
+    return CONDITION_SUPPORT
+  }
+
   override readonly name: string = VFSName.DROPBOX
   override readonly cachesReads: boolean = true
   // list_folder carries an exact byte `size` for every file (0 included).
@@ -127,8 +134,11 @@ export class DropboxVFS extends BaseVFS {
         handed.entry === undefined || handed.entry === null
           ? dropboxReadByPath(this.accessor, p)
           : dropboxRead(this.accessor, p, undefined, handed.entry),
-      async (p, d) => {
-        await this.write(p, d)
+      async (request) => {
+        requireSupported(this.conditionSupport, this.name, request.path, 'put', request.condition)
+        await runWithSettledWrite(this.accessor, request, () =>
+          this.write(request.path, request.body),
+        )
       },
       path,
       length,

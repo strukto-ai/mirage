@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { requireSupported } from '../../cache/context.ts'
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -46,7 +47,10 @@ export async function append(
     }
     await appendByStreamedRewrite(
       (p) => readStream(accessor, p),
-      (p, body) => write(accessor, p, body),
+      (request) => {
+        requireSupported({}, 'tidb_filesystem', request.path, 'put', request.condition)
+        return write(accessor, request.path, request.body)
+      },
       (p) => stat(accessor, p),
       path,
       spool.stream(),

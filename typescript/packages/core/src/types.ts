@@ -225,14 +225,12 @@ export const ReadPolicy = Object.freeze({
 export type ReadPolicy = (typeof ReadPolicy)[keyof typeof ReadPolicy]
 
 /**
- * Whether a mount's writes carry the version they were based on.
- *
- * UNCONDITIONAL writes always land and the last write wins. CONDITIONAL writes
- * send the version the mount last saw for the path (the backend's native
- * precondition, If-Match on the S3 family), so a write based on a stale read
- * is refused instead of overwriting the newer bytes. STAGED names a staging
- * layer mirage does not have; a mount declaring it is refused at mount time,
- * as `read: pinned` is. Mirrors Python's `WritePolicy`.
+ * Whether replacements carry the version they were based on. Unconditional
+ * existing-file rewrites are last-write-wins. A rewrite that observed a
+ * missing file still requires atomic create-only under either policy.
+ * Conditional writes also protect the version the mount last saw. Staged
+ * names a staging layer not implemented here and is refused at mount time.
+ * Mirrors Python's `WritePolicy`.
  */
 export const WritePolicy = Object.freeze({
   UNCONDITIONAL: 'unconditional',

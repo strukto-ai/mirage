@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { conditionVersion } from '../../cache/context.ts'
 import { DropboxApiError, dropboxRpc } from './client.ts'
 import type { DropboxTokenManager } from './client.ts'
 import { stale } from '../../cache/context.ts'
@@ -193,7 +194,7 @@ export async function refused(
 ): Promise<StaleWriteError | null> {
   if (rev === null || rev === '' || !(err instanceof DropboxApiError)) return null
   if (LOST_SUMMARIES.some((s) => err.summary.startsWith(s))) {
-    return stale(path, { version: cond?.ifMatch ?? null })
+    return stale(path, { version: conditionVersion(cond) })
   }
   if (GONE_SUMMARIES.some((s) => err.summary.startsWith(s))) return stale(path, { gone: true })
   return null

@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeWrite } from '../object_store/write.ts'
+import { makeReplace, makeWrite } from '../object_store/write.ts'
 import { DRIVER } from './driver.ts'
 
 export const write = makeWrite(DRIVER)
+
+export const replace = makeReplace(DRIVER)
