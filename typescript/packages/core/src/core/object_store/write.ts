@@ -206,6 +206,7 @@ export function makeTruncate<A extends Accessor, C>(
         } else {
           existing = await driver.get(conn, key)
         }
+        if (existing === null) own = OwnRead.ABSENT
         const data = existing ?? new Uint8Array(0)
         const result = new Uint8Array(length)
         result.set(data.subarray(0, Math.min(data.byteLength, length)), 0)

@@ -909,12 +909,12 @@
       "write": "conditional",
       "scenario": [
         {
-          "command": "printf 'first\\n' >> /data/append_create_conditional.txt; printf 'second\\n' >> /data/append_create_conditional.txt; cat /data/append_create_conditional.txt; truncate -s 0 /data/append_create_conditional.txt; printf 'replacement\\n' > /data/append_create_conditional.txt; cat /data/append_create_conditional.txt"
+          "command": "printf 'first\\n' >> /data/append_create_conditional.txt; printf 'second\\n' >> /data/append_create_conditional.txt; cat /data/append_create_conditional.txt; truncate -s 0 /data/append_create_conditional.txt; printf 'replacement\\n' > /data/append_create_conditional.txt; cat /data/append_create_conditional.txt; truncate -s 3 /data/append_create_conditional_padded.txt; wc -c < /data/append_create_conditional_padded.txt"
         }
       ],
       "expect": {
         "exit": 0,
-        "stdout": "first\nsecond\nreplacement\n",
+        "stdout": "first\nsecond\nreplacement\n3\n",
         "stderr": ""
       },
       "note": "Missing append uses native create-only under either policy. Existing append and intentional replacement keep their selected semantics. Deterministic competing creation is exercised by the mirrored host S3 regression tests.",
@@ -954,12 +954,12 @@
       "write": "unconditional",
       "scenario": [
         {
-          "command": "printf 'first\\n' >> /data/append_create_unconditional.txt; printf 'second\\n' >> /data/append_create_unconditional.txt; cat /data/append_create_unconditional.txt; truncate -s 0 /data/append_create_unconditional.txt; printf 'replacement\\n' > /data/append_create_unconditional.txt; cat /data/append_create_unconditional.txt"
+          "command": "printf 'first\\n' >> /data/append_create_unconditional.txt; printf 'second\\n' >> /data/append_create_unconditional.txt; cat /data/append_create_unconditional.txt; truncate -s 0 /data/append_create_unconditional.txt; printf 'replacement\\n' > /data/append_create_unconditional.txt; cat /data/append_create_unconditional.txt; truncate -s 3 /data/append_create_unconditional_padded.txt; wc -c < /data/append_create_unconditional_padded.txt"
         }
       ],
       "expect": {
         "exit": 0,
-        "stdout": "first\nsecond\nreplacement\n",
+        "stdout": "first\nsecond\nreplacement\n3\n",
         "stderr": ""
       },
       "note": "Missing append uses native create-only under either policy. Existing append and intentional replacement keep their selected semantics. Deterministic competing creation is exercised by the mirrored host S3 regression tests.",

@@ -247,10 +247,9 @@ export async function readVersioned<T>(
 }
 
 /**
- * The condition a write to `path` must carry, null when unconditional: the
- * op's explicit own-read evidence, else the
- * mount's cached one; with none, the write goes out plain. Mirrors Python's
- * `write_condition`.
+ * Resolve explicit read evidence and mount policy into a destination condition.
+ * PUT returns Any, Absent, or Match; copy and delete return null outside
+ * conditional policy. Mirrors Python's `write_condition`.
  *
  * @throws a stale-write error when the op found removed a file the mount saw
  * @throws an ENOTSUP error when the backend cannot condition this op

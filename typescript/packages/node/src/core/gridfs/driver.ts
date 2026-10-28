@@ -19,6 +19,7 @@ import { concat } from '@struktoai/mirage-core/utils/bytes'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { chunks } from '@struktoai/mirage-core/io/cooperative'
+import { closeQuietly } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type {
   ChildEntry,
@@ -195,13 +196,18 @@ async function putStream(
   data: ByteSource,
   condition: WriteCondition,
 ): Promise<ObjectMeta> {
-  requireSupported(
-    DRIVER.conditionSupport ?? {},
-    'gridfs',
-    PathSpec.fromStrPath(key),
-    'put',
-    condition,
-  )
+  try {
+    requireSupported(
+      DRIVER.conditionSupport ?? {},
+      'gridfs',
+      PathSpec.fromStrPath(key),
+      'put',
+      condition,
+    )
+  } catch (error) {
+    await closeQuietly(data)
+    throw error
+  }
   return await upload(conn, key, chunks(data))
 }
 

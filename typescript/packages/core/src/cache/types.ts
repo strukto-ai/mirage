@@ -28,11 +28,7 @@ export interface CacheContextState {
   manager: CacheInvalidator | null
 }
 
-/**
- * The precondition one write carries; empty when mirage holds no version of
- * the object, so the write goes out plain, there being nothing to compare.
- * Mirrors Python's `WriteCondition`.
- */
+/** A replacement with no destination-state requirement. Mirrors Python's `AnyWrite`. */
 export interface AnyWrite {
   readonly kind: 'any'
 }

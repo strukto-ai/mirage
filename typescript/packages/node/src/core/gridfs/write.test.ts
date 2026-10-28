@@ -43,11 +43,14 @@ const A_TXT = spec('a.txt')
 
 it('closes a direct protected stream without starting an upload', async () => {
   store = new FakeStore()
-  vi.mocked(clientMod.bucket).mockResolvedValue(store as never)
+  vi.mocked(clientMod.bucket).mockImplementation(() => {
+    throw new Error('protected stream must refuse before opening a bucket')
+  })
   let closed = false
   async function* source(): AsyncGenerator<Uint8Array> {
     try {
       yield ENC.encode('first')
+      await Promise.resolve()
       yield ENC.encode('last')
     } finally {
       closed = true

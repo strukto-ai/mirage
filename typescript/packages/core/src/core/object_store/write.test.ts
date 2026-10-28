@@ -69,7 +69,7 @@ class MissingContainer extends Error {}
 // A driver whose put fails the way a missing repository or bucket does.
 function missingContainer(): ObjectStoreDriver<FakeAccessor, Store> {
   return {
-    ...makeDriver(new FakeStore()),
+    ...makeDriver(new FakeStore({ 'a/cut.txt': 'before' })),
     put: () => Promise.reject(new MissingContainer('gone')),
     isNotFound: (err: unknown) => err instanceof MissingContainer,
   }
@@ -88,7 +88,7 @@ describe('object_store write', () => {
   it.each(['write', 'create', 'truncate', 'stream'] as const)(
     '%s returns confirmed metadata without a lookup',
     async (operation) => {
-      const store = new FakeStore()
+      const store = new FakeStore({ 'a/result.txt': 'before' })
       const meta = {
         size: 7,
         fingerprint: 'confirmed-token',
@@ -133,7 +133,7 @@ describe('object_store write', () => {
     '%s without metadata returns null',
     async (operation) => {
       const driver: ObjectStoreDriver<FakeAccessor, Store> = {
-        ...makeDriver(new FakeStore()),
+        ...makeDriver(new FakeStore({ 'a/result.txt': 'before' })),
         put: () => Promise.resolve(null),
       }
       const path = spec('/a/result.txt')
@@ -164,10 +164,12 @@ describe('object_store write', () => {
     expect(store.text('a/f.bin')).toBe('0123')
   })
 
-  it('truncate extends a missing key', async () => {
+  it('refuses missing truncate without create-only support', async () => {
     const store = new FakeStore()
-    await makeTruncate(makeDriver(store))(accessor, spec('/f.bin'), 3)
-    expect(store.text('f.bin')).toBe('\0\0\0')
+    await expect(
+      makeTruncate(makeDriver(store))(accessor, spec('/f.bin'), 3),
+    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+    expect(store.contents()).toEqual({})
   })
 
   it('mkdir writes a marker', async () => {
