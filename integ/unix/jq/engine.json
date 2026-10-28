@@ -1,0 +1,124 @@
+{
+  "cases": [
+    {
+      "id": "jq_engine_builtin_names",
+      "seq": 18613001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc 'builtins | [length,.[0],.[-1]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[226,\"have_literal_numbers/0\",\"builtins/0\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_engine_uri_decode",
+      "seq": 18613002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[\"foo%20bar\",\"%E9%9B%AA\",\"a+b\",\"%00\"] | map(@urid)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"foo bar\",\"雪\",\"a+b\",\"\\u0000\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_engine_module_path_errors",
+      "seq": 18613003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[\"../x\",\"a/a\",\"a\\\\b\",\"a\\u0000b\",\"missing1868plain\"] | map(try modulemeta catch .)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"Relative paths to modules may not traverse to parent directories (../x)\",\"module names must not have equal consecutive components: a/a\",\"Modules must be named by relative paths using '/', not '\\\\' (a\\\\b)\",\"Module path contains a NUL byte\",\"module not found: missing1868plain\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_engine_module_compile_error",
+      "seq": 18613004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc 'import \"missing1868\" as m; .'",
+      "expect": {
+        "exit": 3,
+        "stdout": "",
+        "stderr": "jq: error: module not found: missing1868\n\njq: 1 compile error\n"
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_engine_format_nul_dispatch",
+      "seq": 18613005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[[[\"uri\\u0000tail\",\"a b\"],[\"urid\\u0000tail\",\"a%20b\"],[\"html\\u0000\",\"<&\"],[\"text\\u0000tail\",\"a b\"],[\"json\\u0000tail\",{\"a\":1}],[\"base64\\u0000tail\",\"a b\"],[\"base64d\\u0000tail\",\"YSBi\"],[\"csv\\u0000tail\",[\"a b\",null]],[\"tsv\\u0000tail\",[\"a\\tb\",null]],[\"sh\\u0000tail\",[\"a b\",null]]][] as [$f,$v] | $v | format($f)]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"a%20b\",\"a b\",\"&lt;&amp;\",\"a b\",\"{\\\"a\\\":1}\",\"YSBi\",\"a b\",\"\\\"a b\\\",\",\"a\\\\tb\\t\",\"'a b' null\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_engine_format_nul_error_values",
+      "seq": 18613006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[[\"unknown\\u0000tail\",\"uriX\\u0000uri\",\"\\u0000uri\",\"u\\u0000ri\",\"unknown\\u0000\",\"unknown\",\"\"][] as $f | \"a b\" | try format($f) catch .]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"unknown\\u0000tail is not a valid format\",\"uriX\\u0000uri is not a valid format\",\"\\u0000uri is not a valid format\",\"u\\u0000ri is not a valid format\",\"unknown\\u0000 is not a valid format\",\"unknown is not a valid format\",\" is not a valid format\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    }
+  ]
+}
