@@ -25,10 +25,12 @@ export function setSpoolFactory(value: SpoolFactory | null): void {
  * Retain replayable bytes, spilling through the host's scratch storage. An
  * append that fails leaves no telling which of its bytes were kept, so every
  * call after it fails too, rather than read bytes from where the append never
- * put them. Bytes waiting for the store go at the offset they end up at, so a
- * flush that failed writes them there again rather than after what it got
- * through. A reader that `hold`s the spool keeps it open: a `close` while it
- * is held takes effect at the last `unhold`.
+ * put them. Bytes count once the spool holds them, before they flush, as in
+ * Python, where a cancelled append keeps the spool usable. Bytes waiting for
+ * the store go at the offset they end up at, so a flush that failed writes
+ * them there again rather than after what it got through. A reader that `hold`s
+ * the spool keeps it open: a `close` while it is held takes effect at the last
+ * `unhold`.
  */
 export class ByteSpool {
   size = 0

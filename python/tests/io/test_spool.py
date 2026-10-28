@@ -98,16 +98,18 @@ async def test_a_cancelled_append_leaves_the_spool_usable(monkeypatch):
         def held(data: bytes, offset: int) -> None:
             monkeypatch.undo()
             entered.set()
-            release.wait()
+            assert release.wait(5)
             write(data, offset)
 
         monkeypatch.setattr(spool, "_write", held)
         task = asyncio.create_task(spool.append(bytes(IO_BUFFER_SIZE)))
-        await asyncio.to_thread(entered.wait)
-        task.cancel()
-        release.set()
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            task.cancel()
+        finally:
+            release.set()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, 5)
         await spool.append(b"xyz")
         assert await materialize(spool.stream()) == (
             b"abc" + bytes(IO_BUFFER_SIZE) + b"xyz"
