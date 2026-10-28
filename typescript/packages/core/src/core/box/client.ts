@@ -440,8 +440,9 @@ export async function boxUploadSession(
   } catch (error) {
     try {
       // A stopped upload still ends its session, under a deadline of its
-      // own rather than the stopped call's signal.
-      const signal = AbortSignal.timeout((tm.timeout ?? DEFAULT_TIMEOUT) * 1000)
+      // own rather than the stopped call's signal; a timer takes whole
+      // milliseconds.
+      const signal = AbortSignal.timeout(Math.ceil((tm.timeout ?? DEFAULT_TIMEOUT) * 1000))
       await boxDelete(tm, endpoints.abort, undefined, {}, signal)
     } catch (cleanup) {
       console.debug('Could not abort Box upload session', cleanup)

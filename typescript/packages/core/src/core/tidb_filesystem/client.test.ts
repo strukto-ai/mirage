@@ -54,13 +54,19 @@ describe('upload', () => {
     expect(drive9.uploads.size).toBe(0)
   })
 
-  it('aborts the upload when a part fails', async () => {
-    drive9.partSize = 20_000
-    drive9.failParts = true
-    await expect(upload(accessor, '/root/big.bin', new Uint8Array(60_000))).rejects.toThrow()
-    expect(drive9.count('POST', '/v2/uploads/abort')).toBe(1)
-    expect(drive9.files.has('/root/big.bin')).toBe(false)
-  })
+  it.each([undefined, 1.001])(
+    'aborts the upload when a part fails, timeout %s',
+    async (timeout) => {
+      const timed = makeAccessor(drive9, timeout === undefined ? {} : { timeout })
+      drive9.partSize = 20_000
+      drive9.failParts = true
+      const failed = upload(timed, '/root/big.bin', new Uint8Array(60_000))
+      await expect(failed).rejects.toThrow()
+      await expect(failed).rejects.not.toBeInstanceOf(RangeError)
+      expect(drive9.count('POST', '/v2/uploads/abort')).toBe(1)
+      expect(drive9.files.has('/root/big.bin')).toBe(false)
+    },
+  )
 
   it('still aborts the upload once its call stops', async () => {
     drive9.partSize = 20_000

@@ -256,10 +256,11 @@ async function abort(
   method: string,
   target: string,
 ): Promise<void> {
-  // A stopped upload still sends its abort, under a deadline of its own
-  // rather than the stopped call's signal.
-  const signal = AbortSignal.timeout((accessor.config.timeout ?? DEFAULT_TIMEOUT) * 1000)
   try {
+    // A stopped upload still sends its abort, under a deadline of its own
+    // rather than the stopped call's signal; a timer takes whole milliseconds.
+    const seconds = accessor.config.timeout ?? DEFAULT_TIMEOUT
+    const signal = AbortSignal.timeout(Math.ceil(seconds * 1000))
     await request(accessor, method, target, { read: 'none', signal })
   } catch (err) {
     console.debug(`tidb_filesystem: abort ${target} failed:`, err)

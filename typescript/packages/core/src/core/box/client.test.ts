@@ -214,56 +214,71 @@ it.each([false, true])(
   },
 )
 
-it('upload session still ends once its call stops', async () => {
-  const spool = new ByteSpool()
-  await spool.append(new TextEncoder().encode('abcdefg'))
-  const base = 'https://example.test/session'
-  const stop = new AbortController()
-  const deletes: (AbortSignal | null | undefined)[] = []
-  const fake: typeof fetch = (input, init) => {
-    if (init?.method === 'DELETE') {
-      deletes.push(init.signal)
-      return init.signal?.aborted === true
-        ? Promise.reject(init.signal.reason as Error)
-        : Promise.resolve(new Response(null, { status: 204 }))
+it.each([undefined, 1.001])(
+  'upload session still ends once its call stops, timeout %s',
+  async (timeout) => {
+    const spool = new ByteSpool()
+    await spool.append(new TextEncoder().encode('abcdefg'))
+    const base = 'https://example.test/session'
+    const stop = new AbortController()
+    const deletes: (AbortSignal | null | undefined)[] = []
+    const fake: typeof fetch = (input, init) => {
+      if (init?.method === 'DELETE') {
+        deletes.push(init.signal)
+        return init.signal?.aborted === true
+          ? Promise.reject(init.signal.reason as Error)
+          : Promise.resolve(new Response(null, { status: 204 }))
+      }
+      const url = input instanceof Request ? input.url : input.toString()
+      if (init?.method === 'POST' && url === base) {
+        return Promise.resolve(
+          Response.json({
+            part_size: 4,
+            session_endpoints: {
+              upload_part: base + '/part',
+              commit: base + '/commit',
+              abort: base,
+            },
+          }),
+        )
+      }
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => {
+            reject(init.signal?.reason as Error)
+          },
+          { once: true },
+        )
+      })
     }
-    const url = input instanceof Request ? input.url : input.toString()
-    if (init?.method === 'POST' && url === base) {
-      return Promise.resolve(
-        Response.json({
-          part_size: 4,
-          session_endpoints: { upload_part: base + '/part', commit: base + '/commit', abort: base },
-        }),
+    const previous = globalThis.fetch
+    globalThis.fetch = fake
+    const evaluation = new EvaluationContext(new SessionState({ sessionId: 's' }))
+    evaluation.frame.abortSignal = stop.signal
+    try {
+      const pending = runWithEvaluation(evaluation, () =>
+        boxUploadSession(
+          new BoxTokenManager({
+            accessToken: 'token',
+            ...(timeout === undefined ? {} : { timeout }),
+          }),
+          base,
+          {},
+          spool,
+        ),
       )
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      stop.abort()
+      await expect(pending).rejects.toThrow()
+      expect(deletes).toHaveLength(1)
+      expect(deletes[0]?.aborted).toBe(false)
+    } finally {
+      globalThis.fetch = previous
+      await spool.close()
     }
-    return new Promise((_resolve, reject) => {
-      init?.signal?.addEventListener(
-        'abort',
-        () => {
-          reject(init.signal?.reason as Error)
-        },
-        { once: true },
-      )
-    })
-  }
-  const previous = globalThis.fetch
-  globalThis.fetch = fake
-  const evaluation = new EvaluationContext(new SessionState({ sessionId: 's' }))
-  evaluation.frame.abortSignal = stop.signal
-  try {
-    const pending = runWithEvaluation(evaluation, () =>
-      boxUploadSession(new BoxTokenManager({ accessToken: 'token' }), base, {}, spool),
-    )
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    stop.abort()
-    await expect(pending).rejects.toThrow()
-    expect(deletes).toHaveLength(1)
-    expect(deletes[0]?.aborted).toBe(false)
-  } finally {
-    globalThis.fetch = previous
-    await spool.close()
-  }
-})
+  },
+)
 
 it('upload session waits out a pending commit on its clock', async () => {
   const clock = new ManualClock()
