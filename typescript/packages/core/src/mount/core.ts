@@ -1267,9 +1267,11 @@ export class MountCore {
         let end = start
         for (const [at, run] of group) end = Math.max(end, at + run.byteLength)
         if (ctx.mode.append) await this.appendTo(target, group)
-        else if (start === 0 && (await this.endsBy(ctx.path, end)))
+        else if (start === 0 && (await this.endsBy(ctx.path, end))) {
+          // TODO(MIRAGE-34): hand a whole spool over, not a second copy.
           await this.op(() => this.files.write(target, runStream(group)))
-        else {
+        } else {
+          // TODO(MIRAGE-35): stream this pwrite rather than hold the group.
           const data = await materialize(runStream(group))
           await this.op(() => this.files.pwrite(target, data, start))
         }

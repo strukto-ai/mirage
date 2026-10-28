@@ -69,6 +69,7 @@ class NextcloudVFS(BaseVFS):
         return await _exists(self.accessor, path)
 
     async def write(self, path: PathSpec, data: ByteSource) -> None:
+        # TODO(MIRAGE-32): stream the upload; this holds the whole file.
         await _write(self.accessor, path, await materialize(data))
 
     async def create(self, path: PathSpec) -> None:

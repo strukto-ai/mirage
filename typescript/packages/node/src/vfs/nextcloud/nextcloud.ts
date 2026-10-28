@@ -85,6 +85,7 @@ export class NextcloudVFS extends BaseVFS {
   }
 
   override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    // TODO(MIRAGE-32): stream the upload; this holds the whole file.
     return write(this.accessor, path, await materialize(data))
   }
 

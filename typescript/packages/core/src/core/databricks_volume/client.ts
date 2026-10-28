@@ -171,6 +171,7 @@ export async function* downloadStream(
   })
 }
 
+// TODO(MIRAGE-32): stream the upload; this holds the whole file.
 export async function upload(
   accessor: DatabricksVolumeAccessor,
   path: string,

@@ -46,6 +46,7 @@ import type { S3Conn, S3SendClient } from './types.ts'
 import { CONDITION_LOST_CODES, SCOPE_ERROR } from './constants.ts'
 
 const DELETE_BATCH = 1000
+// TODO(MIRAGE-37): grow parts past 10,000 x 8 MiB (about 78 GiB).
 const PART_SIZE = 8 * 1024 * 1024
 const MAX_PARTS = 10000
 

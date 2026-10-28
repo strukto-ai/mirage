@@ -207,6 +207,7 @@ function isNotFound(err: unknown): boolean {
   return err instanceof Error && err.message.startsWith('NotFound')
 }
 
+// TODO(MIRAGE-32): stream the upload; this holds the whole file.
 export const DRIVER: ObjectStoreDriver<HfBucketsAccessor, HfConn> = {
   vfs: 'hf',
   scopeError: SCOPE_ERROR,

@@ -216,6 +216,7 @@ def _is_not_found(exc: Exception) -> bool:
     return isinstance(exc, NotFound)
 
 
+# TODO(MIRAGE-32): stream the upload; this holds the whole file.
 DRIVER: ObjectStoreDriver[HfBucketsAccessor, HfConn] = ObjectStoreDriver(
     vfs="hf",
     scope_error=SCOPE_ERROR,

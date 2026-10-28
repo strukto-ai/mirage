@@ -45,6 +45,7 @@ from mirage.utils.dates import to_iso_z
 logger = logging.getLogger(__name__)
 
 DELETE_BATCH = 1000
+# TODO(MIRAGE-37): grow parts past 10,000 x 8 MiB (about 78 GiB).
 PART_SIZE = 8 * 1024 * 1024
 MAX_PARTS = 10000
 

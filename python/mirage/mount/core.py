@@ -1344,10 +1344,12 @@ class MountCore:
                 if ctx.mode.append:
                     await self._append(target, group)
                 elif start == 0 and await self._ends_by(ctx.path, end):
+                    # TODO(MIRAGE-34): hand a whole spool over, not a second copy.
                     await self._op(
                         self._files.write(target, run_stream(group))
                     )
                 else:
+                    # TODO(MIRAGE-35): stream this pwrite rather than hold the group.
                     data = await materialize(run_stream(group))
                     await self._op(self._files.pwrite(target, data, start))
                 landed += 1

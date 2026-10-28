@@ -191,6 +191,7 @@ async def download_stream(
             yield chunk
 
 
+# TODO(MIRAGE-32): stream the upload; this holds the whole file.
 async def upload(
     accessor: DatabricksVolumeAccessor,
     remote_path: str,

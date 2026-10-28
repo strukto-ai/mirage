@@ -74,6 +74,7 @@ async def write(
         await store.append_file(p, b"")
         await store.set_modified(p, now_iso())
     size = 0
+    # TODO(MIRAGE-33): 1 MiB SETRANGEs, one timestamp each; native pwrite.
     async with aclosing(chunks(data)) as source:
         async for chunk in source:
             if not chunk:
