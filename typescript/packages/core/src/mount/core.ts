@@ -1027,7 +1027,8 @@ export class MountCore {
       await this.truncate(ctx.path, length)
       return
     }
-    if (ctx.writeBuf !== undefined && ctx.writeBuf.length > 0) await this.landHeld(ctx, ctx.detached)
+    if (ctx.writeBuf !== undefined && ctx.writeBuf.length > 0)
+      await this.landHeld(ctx, ctx.detached)
     const held = ctx.data ?? new Uint8Array()
     const data = new Uint8Array(length)
     data.set(held.subarray(0, length))
@@ -1254,7 +1255,10 @@ export class MountCore {
    * appends. The groups that landed leave `groups`, as `applyWrites` drops
    * its runs. Mirrors Python's `_land_spooled`.
    */
-  private async landSpooled(ctx: Handle, groups: [number, Uint8Array | ByteSlice][][]): Promise<void> {
+  private async landSpooled(
+    ctx: Handle,
+    groups: [number, Uint8Array | ByteSlice][][],
+  ): Promise<void> {
     const target = this.resolve(ctx.path)
     let landed = 0
     try {
@@ -1286,7 +1290,8 @@ export class MountCore {
   /** Close a handle's spool once none of its writes wait there. Mirrors Python's `_free_spool`. */
   private static async freeSpool(ctx: Handle): Promise<void> {
     const spool = ctx.spool
-    if (spool === undefined || (ctx.writeBuf ?? []).some(([, run]) => run instanceof ByteSlice)) return
+    if (spool === undefined || (ctx.writeBuf ?? []).some(([, run]) => run instanceof ByteSlice))
+      return
     delete ctx.spool
     await spool.close()
   }

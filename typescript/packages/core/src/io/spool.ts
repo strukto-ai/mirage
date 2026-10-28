@@ -249,7 +249,11 @@ export class ByteSlice {
   /** As `Uint8Array.subarray`, for the nonnegative bounds a buffer slices by. */
   subarray(start = 0, end = this.size): ByteSlice {
     const from = Math.min(start, this.size)
-    return new ByteSlice(this.source, this.offset + from, Math.max(0, Math.min(end, this.size) - from))
+    return new ByteSlice(
+      this.source,
+      this.offset + from,
+      Math.max(0, Math.min(end, this.size) - from),
+    )
   }
   stream(): AsyncGenerator<Uint8Array> {
     return this.source.stream(this.offset, this.size)

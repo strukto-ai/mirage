@@ -2012,13 +2012,15 @@ describe('MountCore past the memory limit', () => {
     expect(store.store.files.get('/f')).toEqual(want)
   })
 
-  it('lands an appending handle\'s spooled writes at the end', async () => {
+  it("lands an appending handle's spooled writes at the end", async () => {
     const { core, store } = streamed()
     store.store.files.set('/f', enc.encode('head'))
     const fh = await core.open('/data/f', flags(fsConstants.O_WRONLY | fsConstants.O_APPEND))
     for (let i = 0; i < 24; i++) await core.write('/data/f', fh, BLOCK, 0)
     await core.release(fh)
-    expect(store.store.files.get('/f')).toEqual(new Uint8Array([...enc.encode('head'), ...repeat(24)]))
+    expect(store.store.files.get('/f')).toEqual(
+      new Uint8Array([...enc.encode('head'), ...repeat(24)]),
+    )
   })
 
   it('keeps the spooled writes of a landing that fails for the retry', async () => {

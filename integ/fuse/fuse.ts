@@ -135,8 +135,7 @@ async function runBigWriteProbe(
       await fh.close()
     }
     result.big_write_body_matches = Buffer.compare(await readFile(path), want) === 0
-    result.big_write_lands_as_one_stream =
-      store.bodies.length === 1 && store.bodies[0] === 'stream'
+    result.big_write_lands_as_one_stream = store.bodies.length === 1 && store.bodies[0] === 'stream'
   } finally {
     await handle.unmount()
   }
