@@ -54,6 +54,22 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     await cache.close()
   })
 
+  it('versioned reads pair bytes with their token', async () => {
+    const one = new TextEncoder().encode('one')
+    const two = new TextEncoder().encode('two')
+    await cache.set('/f', one, { fingerprint: 'v1' })
+    const observed = await cache.getVersioned('/f')
+    await cache.set('/f', two, { fingerprint: 'v2' })
+    await cache.keepFingerprints({ '/f': 'v1' })
+    expect(observed).toEqual([one, 'v1'])
+    expect(await cache.getVersioned('/f')).toEqual([two, 'v2'])
+    await cache.set('/empty', new Uint8Array())
+    expect(await cache.getVersioned('/empty')).toEqual([new Uint8Array(), null])
+    await cache.remove('/f')
+    await cache.keepFingerprints({ '/f': 'v1' })
+    expect(await cache.getVersioned('/f')).toBeNull()
+  })
+
   it('a subtree removal preserves nested mount roots and descendants', async () => {
     const value = new TextEncoder().encode('value')
     for (const key of [

@@ -844,9 +844,9 @@ describe('Files goes through the dispatcher', () => {
     const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
     await ws.vfs.write('/m/books.tally', 'stored')
     await ws.cache.set('/m/books.tally', new TextEncoder().encode('cached'), { ttl: 600 })
-    const original = ws.cache.get.bind(ws.cache)
+    const original = ws.cache.getVersioned.bind(ws.cache)
     Object.assign(ws.cache, {
-      get: async (path: string) => {
+      getVersioned: async (path: string) => {
         const data = await original(path)
         renderTally(vfs)
         return data

@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VersionScope } from './versions.ts'
-import { currentCaller } from '../context/session_context.ts'
+import { VersionScope, type VersionHistory } from './versions.ts'
+import { currentCaller, liveCallers } from '../context/session_context.ts'
+import { enotsup } from '../errors/fs.ts'
 import { captureRead } from './context.ts'
 import { activeRecords, lineVersion, lostPaths, recordIndex } from '../observe/context.ts'
 import type { OpRecord } from '../observe/record.ts'
@@ -42,6 +43,7 @@ import { mutationLock, latestFingerprint } from './file/io.ts'
  * instead of after the whole command tree.
  */
 export class CacheManager {
+  readonly versionScope = new VersionScope()
   private readonly fileCache: FileCache | null
   private readonly index: IndexCacheStore | null
   private readonly clock: Clock
@@ -81,7 +83,7 @@ export class CacheManager {
     // cached listing; undefined serves them all.
     private readonly mayServeListing?: (folder: string, version: string | null) => Promise<boolean>,
     private readonly excludedPrefixes: () => readonly string[] = () => [],
-    readonly versionScope: VersionScope = new VersionScope(),
+    private readonly conditional = false,
   ) {
     this.fileCache = fileCache
     this.index = index
@@ -451,27 +453,50 @@ export class CacheManager {
     return this.fileCache
   }
 
-  /**
-   * Keep `version` for `path` without bytes, if this mount caches: a refused
-   * write keeps the version it lost on, so the next write without a read
-   * sends it again. A cache that refuses the entry is logged, never thrown:
-   * the refusal itself already stands. Mirrors Python's `keep_version`.
-   */
-  lose(path: PathSpec, version: string | null): void {
-    currentCaller().session?.versions.keep(this.versionScope, '/' + mountKey(path.virtual, this.prefix), version)
+  /** A browser fallback cannot attribute an overlapping result to a session. */
+  private sessionHistory(path: string | PathSpec): VersionHistory | null {
+    if (!this.conditional) return null
+    const histories = liveCallers()
+      .filter((caller) => caller.session !== null || caller.write?.context != null)
+      .map((caller) => caller.session?.versions ?? null)
+    const history = histories[0] ?? null
+    if (histories.some((held) => held !== history))
+      throw enotsup('workspace', 'conditional write (overlapping sessions)', path)
+    return history
   }
 
+  /** Remember a refusal, including a file confirmed gone. */
+  lose(path: PathSpec, version: string | null): void {
+    this.sessionHistory(path)?.keep(
+      this.versionScope,
+      '/' + mountKey(path.virtual, this.prefix),
+      version,
+    )
+  }
+
+  /** Record this session's exact result, never a peer's cached token. */
   observe(rec: OpRecord): void {
     const caller = currentCaller()
-    if (caller.session === null || !caller.versionReads || !this.ownsPath(rec.path)) return
-    caller.session.versions.observe(this.versionScope, '/' + mountKey(rec.path, this.prefix), rec)
+    if (
+      !this.conditional ||
+      caller.session === null ||
+      !caller.versionReads ||
+      !this.ownsPath(rec.path)
+    )
+      return
+    this.sessionHistory(rec.path)?.observe(
+      this.versionScope,
+      '/' + mountKey(rec.path, this.prefix),
+      rec,
+    )
   }
 
+  /** Retain the refused token in its session, or in the cache without a session. */
   async keepVersion(path: PathSpec, version: string): Promise<void> {
     const key = this.cacheKey(path)
-    const session = currentCaller().session
-    if (session !== null) {
-      session.versions.keep(this.versionScope, '/' + mountKey(path.virtual, this.prefix), version)
+    const history = this.sessionHistory(path)
+    if (history !== null) {
+      history.keep(this.versionScope, '/' + mountKey(path.virtual, this.prefix), version)
       return
     }
     const cache = this.fileCache
@@ -485,24 +510,25 @@ export class CacheManager {
   }
 
   /**
-   * The version this mount last saw for `path`, null when none. The running
-   * line's own records come first, newest first: a read or write earlier in
-   * the line names the exact bytes it saw, and a streamed read is not in the
-   * cache until the line ends. Then the cached copy's backend token. Mirrors
-   * Python's `CacheManager.read_version`.
+   * Conditional mounts use the live session's own observations, with
+   * current-line refusals first. Without a session, and on unconditional
+   * mounts, use current-line records then the shared cache's token.
+   * Cache eviction never clears a session's history.
    */
   async readVersion(path: PathSpec): Promise<string | null> {
     return (await this.readVersions([path]))[0] ?? null
   }
 
-  /** `readVersion` for many paths, asking the cache once. */
+  /** `readVersion` for many paths; session history needs no I/O. */
   async readVersions(paths: readonly PathSpec[]): Promise<(string | null)[]> {
-    const session = currentCaller().session
-    if (session !== null) {
+    const history = this.sessionHistory(paths[0] ?? this.prefix)
+    if (history !== null) {
       const lost = lostPaths(activeRecords())
-      return paths.map((path) => lost?.holds(path.virtual) === true
-        ? lost.version(path.virtual)
-        : session.versions.read(this.versionScope, '/' + mountKey(path.virtual, this.prefix)))
+      return paths.map((path) =>
+        lost?.holds(path.virtual) === true
+          ? lost.version(path.virtual)
+          : history.read(this.versionScope, '/' + mountKey(path.virtual, this.prefix)),
+      )
     }
     const out: (string | null)[] = paths.map(() => null)
     const pending: [number, string][] = []

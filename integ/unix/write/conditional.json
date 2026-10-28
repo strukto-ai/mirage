@@ -898,6 +898,106 @@
         "stdout": "v1\n1\nv1\nB\n0\nv1\n",
         "stderr": "mv: cannot remove '/seaweedfs/m1.txt': changed since it was read; read it again before writing\nls: cannot access '/seaweedfs/m2.txt': No such file or directory\n"
       }
+    },
+    {
+      "id": "write_conditional_live_session_overwrite",
+      "seq": 310092,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "command": "echo one > /data/session.txt; echo source > /data2/source.txt",
+          "session": "a"
+        },
+        {
+          "command": "cat /data/session.txt",
+          "session": "a"
+        },
+        {
+          "command": "echo peer > /data/session.txt",
+          "session": "b"
+        },
+        {
+          "command": "echo mine > /data/session.txt; echo $?",
+          "session": "a"
+        },
+        {
+          "command": "echo mine > /data/session.txt; echo $?",
+          "session": "a"
+        },
+        {
+          "command": "cat /data/session.txt",
+          "session": "a"
+        },
+        {
+          "command": "echo mine > /data/session.txt; echo $?",
+          "session": "a"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "one\n1\n1\npeer\n0\n",
+        "stderr": "/data/session.txt: changed since it was read; read it again before writing\n/data/session.txt: changed since it was read; read it again before writing\n"
+      },
+      "note": "Named sessions share one workspace and byte cache. A peer write cannot replace the reader's conditional basis; a reread permits retry."
+    },
+    {
+      "id": "write_conditional_live_session_copy",
+      "seq": 310093,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "command": "echo one > /data/session.txt; echo source > /data2/source.txt",
+          "session": "a"
+        },
+        {
+          "command": "cat /data/session.txt",
+          "session": "a"
+        },
+        {
+          "command": "echo peer > /data/session.txt",
+          "session": "b"
+        },
+        {
+          "command": "cp /data2/source.txt /data/session.txt; echo $?",
+          "session": "a"
+        },
+        {
+          "command": "cp /data2/source.txt /data/session.txt; echo $?",
+          "session": "a"
+        },
+        {
+          "command": "cat /data/session.txt",
+          "session": "a"
+        },
+        {
+          "command": "cp /data2/source.txt /data/session.txt; echo $?",
+          "session": "a"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "one\n1\n1\npeer\n0\n",
+        "stderr": "cp: cannot create regular file '/data/session.txt': changed since it was read; read it again before writing\ncp: cannot create regular file '/data/session.txt': changed since it was read; read it again before writing\n"
+      },
+      "note": "Named sessions share one workspace and byte cache. A peer write cannot replace the reader's conditional basis; a reread permits retry."
     }
   ]
 }

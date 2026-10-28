@@ -510,6 +510,10 @@ describe('Workspace custom cache option', () => {
       this.getCalls++
       return Promise.resolve(this.store.get(key) ?? null)
     }
+    async getVersioned(key: string): Promise<[Uint8Array, string | null] | null> {
+      const data = await this.get(key)
+      return data === null ? null : [data, null]
+    }
     set(key: string, data: Uint8Array): Promise<void> {
       this.setCalls++
       this.store.set(key, data)

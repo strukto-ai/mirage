@@ -74,7 +74,10 @@ are covered by mirrored unit tests.
 
 File-cache fill guards and their invalidation tests live under `cache/file`
 on both hosts. The existing whole-host core and TypeScript filters cover
-them, including the Node Redis store.
+them, including the Node Redis store. Live session version history lives in
+`cache/versions` on both hosts, covered by those same filters. The optional
+`session` on a scenario command selects a session in the reader workspace;
+`unix/write/conditional.json` uses it to test peers sharing one byte cache.
 
 The streamed read probes in `vfs/ranges/stream.json` accept
 `max_chunk_size` to bound every returned chunk and `take_bytes` to close

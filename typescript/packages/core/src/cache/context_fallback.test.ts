@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SessionState } from '../workspace/session/session.ts'
+import { OpRecord } from '../observe/record.ts'
 import { CacheManager } from './manager.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { describe, expect, it, vi } from 'vitest'
@@ -335,5 +337,71 @@ describe('listedThisCommand on the fallback storage', () => {
         expect(mine).toBe(true)
       })
     },
+  )
+})
+
+it("overlapping browser sessions cannot borrow or replace each other's versions", async () => {
+  const manager = new CacheManager(
+    null,
+    null,
+    '/s3/',
+    true,
+    () => true,
+    600,
+    undefined,
+    undefined,
+    () => [],
+    true,
+  )
+  const a = new SessionState({ sessionId: 'a' })
+  const b = new SessionState({ sessionId: 'b' })
+  a.versions.keep(manager.versionScope, '/f', 'v1')
+  b.versions.keep(manager.versionScope, '/f', 'v2')
+  const path = PathSpec.fromStrPath('/s3/f', '/f')
+  const rec = new OpRecord({
+    op: 'read',
+    path: '/s3/f',
+    source: 's3',
+    bytes: 1,
+    timestamp: 0,
+    durationMs: 0,
+    fingerprint: 'v3',
+  })
+  await runWithCaller({ ...currentCaller(), session: a }, () =>
+    runWithCaller({ ...currentCaller(), session: b }, async () => {
+      await expect(manager.readVersion(path)).rejects.toMatchObject({ code: 'ENOTSUP' })
+      expect(() => {
+        manager.observe(rec)
+      }).toThrow()
+      expect(() => {
+        manager.lose(path, 'v3')
+      }).toThrow()
+      await expect(manager.keepVersion(path, 'v3')).rejects.toMatchObject({ code: 'ENOTSUP' })
+    }),
+  )
+  await runWithCaller({ ...currentCaller(), session: a }, () =>
+    runWithCaller({ ...currentCaller(), session: null }, () =>
+      runWithWriteContext(
+        '/s3/',
+        {
+          vfs: 's3',
+          conditions: ['put'],
+          readVersion: (p) => manager.readVersion(p),
+          readVersions: (paths) => manager.readVersions(paths),
+          drop: () => Promise.resolve(),
+          keep: (p, version) => manager.keepVersion(p, version),
+        },
+        async () => {
+          await expect(manager.readVersion(path)).rejects.toMatchObject({ code: 'ENOTSUP' })
+        },
+      ),
+    ),
+  )
+  expect(a.versions.read(manager.versionScope, '/f')).toBe('v1')
+  expect(b.versions.read(manager.versionScope, '/f')).toBe('v2')
+  await runWithCaller({ ...currentCaller(), session: a }, () =>
+    runWithCaller({ ...currentCaller(), session: a.fork() }, async () => {
+      expect(await manager.readVersion(path)).toBe('v1')
+    }),
   )
 })

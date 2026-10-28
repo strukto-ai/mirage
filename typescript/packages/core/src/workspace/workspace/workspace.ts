@@ -414,7 +414,10 @@ export class Workspace {
       // own caller: its reads run, its writes are refused.
       {
         dispatch: (issuer) =>
-          this.programDispatch(issuer, this.dispatcher, { explaining: DryRun.DECIDING }),
+          this.programDispatch(issuer, this.dispatcher, {
+            explaining: DryRun.DECIDING,
+            versionReads: false,
+          }),
         resolver: sandboxResolver,
       },
       {

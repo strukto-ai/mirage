@@ -1696,8 +1696,12 @@ export class MountEntry {
           readVersions: (paths) => manager.readVersions(paths),
           drop: (path) => manager.invalidate(path, FileChangeKind.UPDATE),
           keep: (path, version) => manager.keepVersion(path, version),
-          observe: (record) => manager.observe(record),
-          lose: (path, version) => manager.lose(path, version),
+          observe: (record) => {
+            manager.observe(record)
+          },
+          lose: (path, version) => {
+            manager.lose(path, version)
+          },
         },
       }
     }

@@ -273,7 +273,9 @@ def vars_from_fields(data: Mapping[str, Any]) -> dict[str, ShellVar]:
 @dataclass
 class SessionState:
     session_id: str
-    versions: VersionHistory = field(default_factory=VersionHistory, repr=False)
+    versions: VersionHistory = field(
+        default_factory=VersionHistory, repr=False, compare=False, kw_only=True
+    )
     cwd: str = "/"
     # The spelling `cd` arrived at: `..` simplified textually, symlinks
     # left alone. bash reports it as `$PWD` and `pwd -L`, and applies the

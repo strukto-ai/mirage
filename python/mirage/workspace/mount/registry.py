@@ -364,11 +364,6 @@ class MountRegistry:
                     ),
                 )
 
-        scope = next(
-            (entry.cache_manager.version_scope for entry in self._mounts
-             if entry.vfs is m.vfs and entry.cache_manager is not None),
-            None,
-        )
         m.cache_manager = CacheManager(
             self._file_cache,
             m.index_store,
@@ -376,7 +371,7 @@ class MountRegistry:
             m.vfs.caches_reads,
             lambda path: not m.retiring and self.try_mount_for(path) is m,
             read_ttl=m.read.ttl,
-            version_scope=scope,
+            conditional=m.write is WritePolicy.CONDITIONAL,
             on_gone=cleanup,
             may_serve_listing=listing_gate,
             excluded_prefixes=lambda: tuple(

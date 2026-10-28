@@ -346,3 +346,17 @@ describe('a version kept without bytes', () => {
     expect(c.snapshotEntries()[0]?.entry.cachedAt).toBe(4242)
   })
 })
+
+it('versioned read pairs bytes with their token', async () => {
+  const cache = new RAMFileCacheStore()
+  await cache.set('/f', encode('one'), { fingerprint: 'v1' })
+  const read = await cache.getVersioned('/f')
+  await cache.set('/f', encode('two'), { fingerprint: 'v2' })
+  expect(read).toEqual([encode('one'), 'v1'])
+  expect(await cache.getVersioned('/f')).toEqual([encode('two'), 'v2'])
+  await cache.set('/f', encode(''))
+  expect(await cache.getVersioned('/f')).toEqual([encode(''), null])
+  await cache.remove('/f')
+  await cache.keepFingerprints({ '/f': 'v3' })
+  expect(await cache.getVersioned('/f')).toBeNull()
+})

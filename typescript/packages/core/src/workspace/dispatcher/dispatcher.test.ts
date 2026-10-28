@@ -1607,11 +1607,11 @@ describe('a cold read keeps its bytes for the next reader', () => {
       await ws.vfs.write('/data/f.count', 'STORED')
       await ws.cache.remove('/data/f.count')
       const mount = ws.mount('/data')
-      const probe = ws.cache.get.bind(ws.cache)
+      const probe = ws.cache.getVersioned.bind(ws.cache)
       const ready = mount.ensureReady.bind(mount)
       let probed = false
       Object.assign(ws.cache, {
-        get: async (path: string) => {
+        getVersioned: async (path: string) => {
           probed = true
           return probe(path)
         },

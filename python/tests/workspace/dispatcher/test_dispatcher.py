@@ -173,7 +173,7 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
     namespace.try_mount_for = MagicMock(return_value=mount)
     namespace.registry.policies = policies
     cache = MagicMock()
-    cache.get = AsyncMock(return_value=b"warm")
+    cache.get_versioned = AsyncMock(return_value=(b"warm", None))
     dispatcher = Dispatcher(namespace, cache)
     reconciler = MagicMock()
     reconciler.may_serve_cached = AsyncMock(return_value=True)
@@ -191,7 +191,7 @@ async def test_warm_cache_read_cannot_bypass_pre_vfs():
     dispatcher, cache = _dispatcher(policies)
     with pytest.raises(PolicyDenied):
         await dispatcher.dispatch("read", _path("/data/locked/a.txt"))
-    cache.get.assert_not_awaited()
+    cache.get_versioned.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -201,7 +201,7 @@ async def test_warm_cache_read_serves_when_no_policy_objects():
     dispatcher, cache = _dispatcher(policies)
     result, _ = await dispatcher.dispatch("read", _path("/data/open/a.txt"))
     assert result == b"warm"
-    cache.get.assert_awaited_once()
+    cache.get_versioned.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -2073,7 +2073,7 @@ async def test_a_renderer_registered_after_the_probe_is_not_kept(
     await ws.vfs.write("/data/f.count", b"STORED")
     await ws.cache.remove("/data/f.count")
     mount = ws.mount("/data/")
-    probe, ready = ws.cache.get, mount.ensure_ready
+    probe, ready = ws.cache.get_versioned, mount.ensure_ready
     probed = False
 
     async def probe_once(path, *args, **kwargs):
@@ -2086,7 +2086,7 @@ async def test_a_renderer_registered_after_the_probe_is_not_kept(
             render(mount.vfs, ".count", _render_count)
         await ready()
 
-    ws.cache.get = probe_once
+    ws.cache.get_versioned = probe_once
     mount.ensure_ready = register_after_probe
     assert await ws.vfs.read("/data/f.count", *window) == rendered
     assert not await ws.cache.exists("/data/f.count")

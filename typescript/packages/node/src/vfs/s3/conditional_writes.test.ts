@@ -14,11 +14,13 @@
 
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
+import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { markLost } from '@struktoai/mirage-core/observe/context'
 import { MountMode, PathSpec, WritePolicy } from '@struktoai/mirage-core/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { openMode } from '@struktoai/mirage-core/runtime/handles/index'
 import { MinIOVFS } from '../minio/minio.ts'
@@ -112,6 +114,62 @@ describe('conditional writes on an S3 mount', () => {
     built.push(ws)
     return ws
   }
+  it('live session warm reads keep the exact sampled version', async () => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    await ws.shell('cat /s3/f', { sessionId: 'b' })
+    let sampled!: () => void
+    let release!: () => void
+    const ready = new Promise<void>((resolve) => {
+      sampled = resolve
+    })
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const original = ws.cache.getVersioned.bind(ws.cache)
+    vi.spyOn(ws.cache, 'getVersioned').mockImplementation(async (key) => {
+      const held = await original(key)
+      if (key === '/s3/f' && currentCaller().session?.sessionId === 'a') {
+        sampled()
+        await gate
+      }
+      return held
+    })
+    const reading = ws.shell('cat /s3/f', { sessionId: 'a' })
+    try {
+      await ready
+      expect((await ws.shell('echo peer > /s3/f', { sessionId: 'b' })).exitCode).toBe(0)
+    } finally {
+      release()
+    }
+    expect(DEC.decode((await reading).stdout)).toBe('one\n')
+    expect((await ws.shell('rm /s3/f', { sessionId: 'a' })).exitCode).toBe(1)
+    expect(DEC.decode(mock.store.get('b', 'f'))).toBe('peer\n')
+  })
+
+  it('live session policy reads do not advance the agent', async () => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    await ws.shell('cat /s3/f', { sessionId: 'a' })
+    await ws.shell('echo peer > /s3/f', { sessionId: 'b' })
+    await ws.setSessionProfile('a', {
+      policy: {
+        preCommand: [
+          {
+            script: new ScriptSource("open('/s3/f').read()\nprint('null')\n", 'python'),
+            runtime: 'monty',
+          },
+        ],
+      },
+    })
+    const refused = await ws.shell('rm /s3/f', { sessionId: 'a' })
+    expect(refused.exitCode).toBe(1)
+    expect(DEC.decode(refused.stderr)).toContain(STALE)
+    expect(DEC.decode(mock.store.get('b', 'f'))).toBe('peer\n')
+  })
+
   it.each([
     ['rm /s3/f', 'f'],
     ['rm -f /s3/f', 'f'],
@@ -136,6 +194,49 @@ describe('conditional writes on an S3 mount', () => {
     expect(DEC.decode((await ws.shell(`cat /s3/${key}`, { sessionId: 'a' })).stdout)).toBe('peer\n')
     const accepted = await ws.shell(line, { sessionId: 'a' })
     expect(accepted.exitCode, DEC.decode(accepted.stderr)).toBe(0)
+  })
+
+  it.each([
+    'cat /s3/f',
+    'head -n1 /s3/f',
+    'grep one /s3/f',
+    'x=$(cat /s3/f); echo "$x"',
+    '(cat /s3/f)',
+  ])('live session read paths survive eviction: %s', async (read) => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    await ws.shell('cat /s3/f', { sessionId: 'b' })
+    expect(DEC.decode((await ws.shell(read, { sessionId: 'a' })).stdout)).toBe('one\n')
+    await ws.shell('echo peer > /s3/f', { sessionId: 'b' })
+    await ws.cache.clear()
+    expect((await ws.shell('rm -f /s3/f', { sessionId: 'a' })).exitCode).toBe(1)
+    expect(DEC.decode(mock.store.get('b', 'f'))).toBe('peer\n')
+    expect((await ws.shell('echo latest > /s3/f', { sessionId: 'b' })).exitCode).toBe(0)
+  })
+
+  it('live session direct files and recreation', async () => {
+    const ws = workspace()
+    const a = await ws.session('a')
+    const b = await ws.session('b')
+    expect(DEC.decode(await a.vfs.read('/s3/f'))).toBe('one\n')
+    await b.vfs.write('/s3/f', ENC.encode('peer\n'))
+    await expect(a.vfs.unlink('/s3/f')).rejects.toMatchObject({ code: 'STALE_WRITE' })
+    await ws.closeSession('a')
+    const fresh = await ws.session('a')
+    await fresh.vfs.unlink('/s3/f')
+    expect(mock.store.get('b', 'f')).toBeUndefined()
+  })
+
+  it('live session symlink read', async () => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    expect((await ws.shell('ln -s /s3/f /ram/alias')).exitCode).toBe(0)
+    await ws.shell('cat /ram/alias', { sessionId: 'a' })
+    await ws.shell('echo peer > /s3/f', { sessionId: 'b' })
+    expect((await ws.shell('rm /s3/f', { sessionId: 'a' })).exitCode).toBe(1)
+    expect(DEC.decode(mock.store.get('b', 'f'))).toBe('peer\n')
   })
 
   const mutations = (): [string, Record<string, string>][] =>

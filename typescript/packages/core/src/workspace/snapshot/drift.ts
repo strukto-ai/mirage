@@ -153,7 +153,11 @@ export async function installDriftState(
     if (mount === null) continue
     if (e.revision !== undefined && e.revision !== null) {
       mount.revisions.set(e.path, e.revision)
-      if (e.fingerprint !== undefined && e.fingerprint !== null) mount.cacheManager?.versionScope.pins.set('/' + mountKey(e.path, mount.prefix), e.fingerprint)
+      if (e.fingerprint !== undefined && e.fingerprint !== null)
+        mount.cacheManager?.versionScope.pins.set(
+          '/' + mountKey(e.path, mount.prefix),
+          e.fingerprint,
+        )
       continue
     }
     if (e.fingerprint !== undefined && e.fingerprint !== null) {

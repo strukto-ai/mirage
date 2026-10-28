@@ -12,10 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CONTENT_CHANGING_OPS, RETRACT_FINGERPRINT_OPS, STAMP_FINGERPRINT_OPS, SUBTREE_RETRACT_OPS, OpRecord } from '../observe/record.ts'
+import {
+  CONTENT_CHANGING_OPS,
+  RETRACT_FINGERPRINT_OPS,
+  STAMP_FINGERPRINT_OPS,
+  SUBTREE_RETRACT_OPS,
+  OpRecord,
+} from '../observe/record.ts'
 import { underPath } from '../utils/key_prefix.ts'
 
-/** Identity shared by live mounts of one VFS; never persisted. */
+/** Identity of one live mount; never persisted. */
 export class VersionScope {
   readonly pins = new Map<string, string>()
 }
@@ -40,10 +46,16 @@ export class VersionHistory {
 
   /** Keep the exact record, including a stream's later token stamp. */
   observe(scope: VersionScope, key: string, rec: OpRecord): void {
-    if (!STAMP_FINGERPRINT_OPS.has(rec.op) && !RETRACT_FINGERPRINT_OPS.has(rec.op) && !CONTENT_CHANGING_OPS.has(rec.op)) return
+    if (
+      !STAMP_FINGERPRINT_OPS.has(rec.op) &&
+      !RETRACT_FINGERPRINT_OPS.has(rec.op) &&
+      !CONTENT_CHANGING_OPS.has(rec.op)
+    )
+      return
     const held = this.scopes.get(scope) ?? new Map<string, OpRecord | string | null>()
     if (SUBTREE_RETRACT_OPS.has(rec.op)) {
-      for (const name of new Set([...held.keys(), ...scope.pins.keys()])) if (underPath(name, key)) held.set(name, null)
+      for (const name of new Set([...held.keys(), ...scope.pins.keys()]))
+        if (underPath(name, key)) held.set(name, null)
     }
     if (STAMP_FINGERPRINT_OPS.has(rec.op)) held.set(key, rec)
     else held.set(key, null)

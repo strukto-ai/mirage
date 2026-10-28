@@ -78,16 +78,19 @@ class WriteContext:
         conditions (frozenset[WriteKind]): the ops the backend can condition
             (put, copy, delete).
         read_version (Callable[[PathSpec], Awaitable[str | None]]): the
-            version the mount last saw for a path (its cached copy's
-            token), None when it saw none.
+            version the live session observed, or the mount's version
+            without a session; None when no version is known.
         read_versions (Callable[[list[PathSpec]], Awaitable[list[str |
-            None]]]): ``read_version`` for many paths at once, in one
-            store round trip.
+            None]]]): ``read_version`` for many paths at once.
         drop (Callable[[PathSpec], Awaitable[None]]): drops the mount's
             cached copy of a path, so the read a refusal asks for really
             fetches.
         keep (Callable[[PathSpec, str], Awaitable[None]]): keeps a version
             for a path without bytes, the one a refused write lost on.
+        observe (Callable[[OpRecord], None] | None): record a caller's
+            own read or mutation result.
+        lose (Callable[[PathSpec, str | None], None] | None): retain a
+            refused token, or clear it when the backend confirms absence.
     """
 
     vfs: str

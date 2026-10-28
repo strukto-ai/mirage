@@ -20,8 +20,6 @@ from datetime import datetime, timedelta, timezone
 from typing import TypeVar
 
 from mirage.cache.context import capture_read
-from mirage.cache.versions import VersionScope
-from mirage.context.session_context import current_caller
 from mirage.cache.file.io import latest_fingerprint, mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.config import Evicted
@@ -37,6 +35,8 @@ from mirage.cache.index.scope import (
 )
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
+from mirage.cache.versions import VersionScope
+from mirage.context.session_context import current_caller
 from mirage.io.stream import close_quietly
 from mirage.observe.context import active_recorder, line_version
 from mirage.observe.record import OpRecord
@@ -73,7 +73,7 @@ class CacheManager:
         may_serve_listing: Callable[[str, str | None], Awaitable[bool]]
         | None = None,
         excluded_prefixes: Callable[[], tuple[str, ...]] = tuple,
-        version_scope: VersionScope | None = None,
+        conditional: bool = False,
     ) -> None:
         """Args:
         file_cache (FileCacheMixin | None): Workspace file cache
@@ -98,8 +98,11 @@ class CacheManager:
             cached listing; None serves them all.
         excluded_prefixes (Callable[[], tuple[str, ...]]): live nested
             mount roots protected from recursive deletion.
+        conditional (bool): keep live sessions' observations independent
+            of the shared cache for a conditional-write mount.
         """
-        self.version_scope = version_scope if version_scope is not None else VersionScope()
+        self.version_scope = VersionScope()
+        self._conditional = conditional
         self._file_cache = file_cache
         self._index = index
         self._clock = index.clock
@@ -547,9 +550,11 @@ class CacheManager:
             version (str | None): the losing version, None when gone.
         """
         session = current_caller().session
-        if session is not None:
+        if self._conditional and session is not None:
             session.versions.keep(
-                self.version_scope, "/" + mount_key(path.virtual, self._prefix), version
+                self.version_scope,
+                "/" + mount_key(path.virtual, self._prefix),
+                version,
             )
 
     def observe(self, rec: OpRecord) -> None:
@@ -559,7 +564,12 @@ class CacheManager:
             rec (OpRecord): result stamped by the backend or cache read.
         """
         caller = current_caller()
-        if caller.session is None or caller.policy_read or not caller.version_reads:
+        if (
+            not self._conditional
+            or caller.session is None
+            or caller.policy_read
+            or not caller.version_reads
+        ):
             return
         if not self._owns_path(rec.path):
             return
@@ -580,9 +590,11 @@ class CacheManager:
         """
         key = self._cache_key(path)
         session = current_caller().session
-        if session is not None:
+        if self._conditional and session is not None:
             session.versions.keep(
-                self.version_scope, "/" + mount_key(path.virtual, self._prefix), version
+                self.version_scope,
+                "/" + mount_key(path.virtual, self._prefix),
+                version,
             )
             return
         if self._file_cache is None or not self._owns_path(key):
@@ -596,10 +608,10 @@ class CacheManager:
     async def read_version(self, path: PathSpec) -> str | None:
         """The version this mount last saw for ``path``, None when none.
 
-        The running line's own records come first, newest first: a read or
-        write earlier in the line names the exact bytes it saw, and a
-        streamed read is not in the cache until the line ends. Then the
-        cached copy's backend token.
+        Conditional mounts use the live session's own observations, with
+        current-line refusals taking precedence. Without a session, and
+        on unconditional mounts, use current-line records then the shared
+        cache's token. Cache eviction never clears a session's history.
 
         Args:
             path (PathSpec): the path written.
@@ -607,19 +619,20 @@ class CacheManager:
         return (await self.read_versions([path]))[0]
 
     async def read_versions(self, paths: list[PathSpec]) -> list[str | None]:
-        """``read_version`` for many paths, asking the cache once.
+        """``read_version`` for many paths; session history needs no I/O.
 
         Args:
             paths (list[PathSpec]): the paths asked about.
         """
         session = current_caller().session
-        if session is not None:
+        if self._conditional and session is not None:
             recorder = active_recorder()
             return [
                 recorder.lost.version(path.virtual)
                 if recorder is not None and recorder.lost.holds(path.virtual)
                 else session.versions.read(
-                    self.version_scope, "/" + mount_key(path.virtual, self._prefix)
+                    self.version_scope,
+                    "/" + mount_key(path.virtual, self._prefix),
                 )
                 for path in paths
             ]

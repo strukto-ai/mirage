@@ -2018,10 +2018,19 @@ export class Dispatcher {
     // recorded against the backend and counted as traffic that never
     // happened.
     memoryAnswered(call.report, window.byteLength)
-    const result = (await boundary.complete(mark, call.path, call.write, window, call.issuer)) as Uint8Array
-    if (mount.write === WritePolicy.CONDITIONAL) mount.cacheManager?.observe(finishRecord(
-      'read', call.path.virtual, 'ram', window.byteLength, startOp(), { fingerprint: held?.[1] ?? null },
-    ))
+    const result = (await boundary.complete(
+      mark,
+      call.path,
+      call.write,
+      window,
+      call.issuer,
+    )) as Uint8Array
+    if (mount.write === WritePolicy.CONDITIONAL)
+      mount.cacheManager?.observe(
+        finishRecord('read', call.path.virtual, 'ram', window.byteLength, startOp(), {
+          fingerprint: held?.[1] ?? null,
+        }),
+      )
     return result
   }
 

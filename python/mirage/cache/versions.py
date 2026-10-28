@@ -25,7 +25,7 @@ from mirage.utils.key_prefix import under_path
 
 
 class VersionScope:
-    """Identity shared by live mounts of one VFS; never persisted."""
+    """Identity of one live mount; never persisted."""
 
     def __init__(self) -> None:
         self.pins: dict[str, str] = {}
@@ -55,7 +55,7 @@ class VersionHistory:
         Args:
             scope (VersionScope): live VFS identity.
             key (str): resolved mount-relative file name.
-            version (str): the refused token.
+            version (str | None): the refused token, or None when gone.
         """
         self._scopes.setdefault(scope, {})[key] = version
 
@@ -68,7 +68,9 @@ class VersionHistory:
             rec (OpRecord): the operation's own result.
         """
         if rec.op not in (
-            STAMP_FINGERPRINT_OPS | RETRACT_FINGERPRINT_OPS | CONTENT_CHANGING_OPS
+            STAMP_FINGERPRINT_OPS
+            | RETRACT_FINGERPRINT_OPS
+            | CONTENT_CHANGING_OPS
         ):
             return
         held = self._scopes.setdefault(scope, {})

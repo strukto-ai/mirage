@@ -77,10 +77,10 @@ from mirage.io.types import PipeStream
 from mirage.io.yield_budget import task_turn
 from mirage.observe.context import (
     RecordingScope,
-    finish_record,
     active_lost,
     active_recorder,
     command_records,
+    finish_record,
     record,
     start_op,
 )
@@ -2214,11 +2214,20 @@ class Dispatcher:
         # traffic that never happened.
         _memory_answered(call.report, len(served))
         result = await boundary.complete(mark, call.path, call.write, served)
-        if mount.write is WritePolicy.CONDITIONAL and mount.cache_manager is not None:
-            mount.cache_manager.observe(finish_record(
-                "read", call.path.virtual, "ram", len(served), start_op(),
-                fingerprint=held[1] if held is not None else None,
-            ))
+        if (
+            mount.write is WritePolicy.CONDITIONAL
+            and mount.cache_manager is not None
+        ):
+            mount.cache_manager.observe(
+                finish_record(
+                    "read",
+                    call.path.virtual,
+                    "ram",
+                    len(served),
+                    start_op(),
+                    fingerprint=held[1] if held is not None else None,
+                )
+            )
         return result
 
     def _filler(self, call: _Call, mount: MountEntry) -> CacheManager | None:
