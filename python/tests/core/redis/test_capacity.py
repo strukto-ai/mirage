@@ -88,6 +88,8 @@ async def test_a_live_server_reports_its_memory(redis_prefix):
 
 @pytest.mark.asyncio
 async def test_size_of_counts_a_file_a_directory_and_nothing(store):
+    await store.store.add_dir("/d")
+    await store.store.add_dir("/d/e")
     await store.store.set_file("/a", b"123")
     await store.store.set_file("/d/b", b"4567")
     await store.store.set_file("/d/e/c", b"89")

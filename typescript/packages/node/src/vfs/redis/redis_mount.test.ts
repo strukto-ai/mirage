@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode } from '@struktoai/mirage-core/types'
+import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
+import { sizeOf } from '@struktoai/mirage-core/core/redis/capacity'
+import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 import { RedisVFS } from './redis.ts'
 
@@ -117,6 +119,40 @@ describe.skipIf(skip)('RedisVFS as mount', () => {
 })
 
 describe('RedisVFS capacity', () => {
+  it.skipIf(skip)('writes a new file on a capped mount without scanning', async () => {
+    const prefix = `mirage:test:cap:${Math.random().toString(36).slice(2)}:`
+    const data = new RedisVFS({ url: REDIS_URL ?? '', keyPrefix: prefix, capacity: 10 })
+    const ws = new Workspace({ '/r': [data, MountMode.WRITE] })
+    try {
+      await data.capacity()
+      const scan = vi.spyOn(data.store, 'listFiles')
+      try {
+        expect((await ws.shell('printf hi > /r/new')).exitCode).toBe(0)
+        expect(scan).not.toHaveBeenCalled()
+      } finally {
+        scan.mockRestore()
+      }
+    } finally {
+      await data.store.clear()
+      await ws.close()
+    }
+  })
+
+  it.skipIf(skip)('measures all files under a real directory', async () => {
+    const prefix = `mirage:test:cap:${Math.random().toString(36).slice(2)}:`
+    const data = new RedisVFS({ url: REDIS_URL ?? '', keyPrefix: prefix, capacity: 10 })
+    try {
+      await data.store.addDir('/d')
+      await data.store.addDir('/d/e')
+      await data.store.setFile('/d/b', new TextEncoder().encode('4567'))
+      await data.store.setFile('/d/e/c', new TextEncoder().encode('89'))
+      expect(await sizeOf(new RedisAccessor(data.store), PathSpec.fromStrPath('/d'))).toBe(6)
+    } finally {
+      await data.store.clear()
+      await data.close()
+    }
+  })
+
   it('refuses a capacity that is not a size', () => {
     expect(() => new RedisVFS({ capacity: '5T' })).toThrow(
       new VFSConfigError('redis: capacity must be a size like 100MB, got "5T"'),

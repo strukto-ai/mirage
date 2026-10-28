@@ -56,6 +56,7 @@ export async function sizeOf(accessor: RedisAccessor, path: PathSpec): Promise<n
   const store = accessor.store
   const key = norm(path.mountPath)
   if (await store.hasFile(key)) return store.fileLen(key)
+  if (!(await store.hasDir(key))) return 0
   const files = await store.listFiles(key.endsWith('/') ? key : `${key}/`)
   const sizes = await Promise.all(files.map((f) => store.fileLen(f)))
   return sizes.reduce((a, b) => a + b, 0)

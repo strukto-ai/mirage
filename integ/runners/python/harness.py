@@ -67,7 +67,7 @@ def load_targets(root: Path) -> dict:
 
 
 def validate_targets(data: dict) -> list[dict]:
-    """Reject a target whose ``exclusive`` is not a boolean.
+    """Reject target execution flags that are not booleans.
 
     The twin of the ``shared`` check in :func:`validate_services`, and for
     the same reason: one file is read by two hosts, and a hand-edited
@@ -85,6 +85,11 @@ def validate_targets(data: dict) -> list[dict]:
         list[dict]: the validated target list.
     """
     for target in data["targets"]:
+        if "non_root" in target and not isinstance(target["non_root"], bool):
+            raise KeyError(
+                f"targets.json: target {target['id']!r} declares "
+                f"'non_root' as {type(target['non_root']).__name__}, must be a boolean"
+            )
         flag = target.get("exclusive")
         if flag is not None and not isinstance(flag, bool):
             raise KeyError(

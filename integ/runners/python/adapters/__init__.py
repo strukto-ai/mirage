@@ -2617,8 +2617,12 @@ def build_disk(
     safe_path = mount["path"].strip("/").replace("/", "-") or "root"
     name = f"mirage-integ-disk-py-{run_id}-{safe_path}"
     root = Path(tempfile.gettempdir()) / name
+    mode_paths: list[Path] = []
 
     async def cleanup() -> None:
+        for path in mode_paths:
+            if path.exists():
+                path.chmod(0o700)
         shutil.rmtree(root, ignore_errors=True)
 
     fixture_name = mount.get("host_fixture")
@@ -2629,12 +2633,14 @@ def build_disk(
         logging.getLogger(__name__).debug("disk root %s is shared", root)
     else:
         if fixture_name:
-            seed_host_fixture(root, fixture_name)
+            mode_paths = seed_host_fixture(root, fixture_name)
     mount_root = root / "root" if fixture_name else root
-    return DiskVFS(root=str(mount_root)), cleanup
+    return DiskVFS(
+        root=str(mount_root), capacity=mount.get("config", {}).get("capacity")
+    ), cleanup
 
 
-def seed_host_fixture(root: Path, fixture_name: str) -> None:
+def seed_host_fixture(root: Path, fixture_name: str) -> list[Path]:
     """Lay a host fixture's files, folders and symlinks out under root.
 
     Args:
@@ -2656,6 +2662,10 @@ def seed_host_fixture(root: Path, fixture_name: str) -> None:
         (root / relative).mkdir(parents=True, exist_ok=True)
     for relative, link in fixture["symlinks"].items():
         (root / relative).symlink_to(link)
+    modes = fixture.get("modes", {})
+    for relative in reversed(sorted(modes)):
+        (root / relative).chmod(modes[relative])
+    return [root / relative for relative in sorted(modes)]
 
 
 def build_redis(

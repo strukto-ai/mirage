@@ -12,15 +12,48 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdir, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { tmpRoot } from '../../../tests/test-utils.ts'
 import { DiskAccessor } from '../../accessor/disk.ts'
 import { count, sizeOf } from './capacity.ts'
+import * as diskUtils from './utils.ts'
 
 describe('disk capacity', () => {
+  it.each(['EIO', 'EMFILE'])('propagates unexpected directory errors (%s)', async (code) => {
+    const accessor = new DiskAccessor(tmpRoot().root)
+    const failure = Object.assign(new Error('directory traversal failed'), { code })
+    const listing = vi.spyOn(diskUtils, 'readEntries').mockRejectedValueOnce(failure)
+    try {
+      await expect(count(accessor)).rejects.toBe(failure)
+    } finally {
+      listing.mockRestore()
+    }
+  })
+
+  it.skipIf(process.getuid?.() === 0)('clears old exclusions on recount', async () => {
+    const { root, cleanup } = tmpRoot()
+    const locked = join(root, 'locked')
+    await mkdir(locked)
+    await writeFile(join(locked, 'known'), '12345')
+    await writeFile(join(root, 'locked-sibling'), '12')
+    const accessor = new DiskAccessor(root)
+    try {
+      await chmod(locked, 0o111)
+      expect(await count(accessor)).toBe(2)
+      expect(await sizeOf(accessor, PathSpec.fromStrPath('/locked/known'))).toBe(0)
+      expect(await sizeOf(accessor, PathSpec.fromStrPath('/locked-sibling'))).toBe(2)
+      await chmod(locked, 0o755)
+      expect(await count(accessor)).toBe(7)
+      expect(await sizeOf(accessor, PathSpec.fromStrPath('/locked/known'))).toBe(5)
+    } finally {
+      await chmod(locked, 0o755)
+      cleanup()
+    }
+  })
+
   it('counts a file, a subtree and nothing', async () => {
     const root = tmpRoot().root
     await mkdir(join(root, 'd', 'e'), { recursive: true })

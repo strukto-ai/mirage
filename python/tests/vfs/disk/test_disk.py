@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
 
 import pytest
 
@@ -39,6 +40,41 @@ def test_a_capacity_that_is_not_a_size_is_refused(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root can read chmod 000 folders"
+)
+@pytest.mark.parametrize("mode", [0, 0o400])
+async def test_a_capped_root_counts_past_an_unreadable_folder(
+    tmp_path, mode, caplog
+):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "hidden").write_bytes(b"x" * 100)
+    data = DiskVFS(str(tmp_path), capacity=4)
+    ws = Workspace({"/d": (data, MountMode.WRITE)})
+    caplog.set_level("DEBUG", logger="mirage.core.disk.capacity")
+    try:
+        locked.chmod(mode)
+        written = await ws.shell("printf hi > /d/a")
+        report = await ws.shell("df /d")
+        assert (written.exit_code, report.exit_code) == (0, 0)
+        assert await written.stderr_str() == ""
+        assert await report.stderr_str() == ""
+        assert str(tmp_path) not in await report.stdout_str()
+        assert "skipped while counting" in caplog.text
+        assert (tmp_path / "a").read_bytes() == b"hi"
+        assert data.usage is not None and data.usage.used == 2
+        assert (await ws.shell("printf abc > /d/b")).exit_code == 1
+        unreadable = await ws.shell("du /d")
+        assert unreadable.exit_code == 1
+        assert "Permission denied" in await unreadable.stderr_str()
+        assert str(tmp_path) not in await unreadable.stderr_str()
+    finally:
+        locked.chmod(0o755)
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_capped_root_counts_what_it_holds_and_refuses_growth(tmp_path):
     (tmp_path / "pre").write_bytes(b"xx")
     data = DiskVFS(str(tmp_path), capacity=12)
@@ -57,6 +93,162 @@ async def test_a_capped_root_counts_what_it_holds_and_refuses_growth(tmp_path):
         assert data.usage is not None and data.usage.used == 9
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root can list execute-only folders"
+)
+@pytest.mark.parametrize(
+    ("mode", "command"),
+    [
+        (0o111, "printf x > /d/locked/known"),
+        (0o333, "rm /d/locked/known"),
+        (0o333, "mv /d/locked/known /d/locked/other"),
+        (0o333, "mv /d/locked /d/renamed; printf x > /d/renamed/known"),
+    ],
+)
+async def test_skipped_bytes_never_credit_other_writes(
+    tmp_path, mode, command
+):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "known").write_bytes(b"x" * 100)
+    (tmp_path / "plain").write_bytes(b"123")
+    data = DiskVFS(str(tmp_path), capacity=4)
+    ws = Workspace({"/d": (data, MountMode.WRITE)})
+    try:
+        locked.chmod(mode)
+        changed = await ws.shell(command)
+        assert changed.exit_code == 0, await changed.stderr_str()
+        assert data.usage is not None and data.usage.used == 3
+        assert (await ws.shell("printf 12 > /d/new")).exit_code == 1
+        assert not (tmp_path / "new").exists()
+        assert (await ws.shell("printf 1 > /d/new")).exit_code == 0
+        assert data.usage.used == 4
+    finally:
+        (locked if locked.exists() else tmp_path / "renamed").chmod(0o755)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root can list execute-only folders"
+)
+async def test_reusing_a_skipped_directory_name_does_not_exempt_new_files(
+    tmp_path,
+):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "known").write_bytes(b"x" * 100)
+    (tmp_path / "plain").write_bytes(b"123")
+    data = DiskVFS(str(tmp_path), capacity=4)
+    ws = Workspace({"/d": (data, MountMode.WRITE)})
+    try:
+        locked.chmod(0o333)
+        assert (
+            await ws.shell("mv /d/locked /d/renamed; mkdir /d/locked")
+        ).exit_code == 0
+        assert (await ws.shell("printf 12 > /d/locked/new")).exit_code == 1
+        assert not (locked / "new").exists()
+        assert (await ws.shell("printf 1 > /d/locked/new")).exit_code == 0
+        assert data.usage is not None and data.usage.used == 4
+    finally:
+        (
+            tmp_path / "renamed" if (tmp_path / "renamed").exists() else locked
+        ).chmod(0o755)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root can list execute-only folders"
+)
+@pytest.mark.parametrize("existing", [False, True])
+async def test_copy_from_an_unlisted_folder_reserves_actual_bytes(
+    tmp_path, existing
+):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "source").write_bytes(b"abcde")
+    (tmp_path / "plain").write_bytes(b"12")
+    destination = tmp_path / "destination"
+    if existing:
+        destination.write_bytes(b"Z")
+    data = DiskVFS(str(tmp_path), capacity=4)
+    ws = Workspace({"/d": (data, MountMode.WRITE)})
+    try:
+        locked.chmod(0o111)
+        refused = await ws.shell("cp /d/locked/source /d/destination")
+        assert refused.exit_code == 1
+        assert "Disk quota exceeded" in await refused.stderr_str()
+        assert (
+            destination.read_bytes() == b"Z"
+            if existing
+            else not destination.exists()
+        )
+        assert (locked / "source").read_bytes() == b"abcde"
+    finally:
+        locked.chmod(0o755)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root can list execute-only folders"
+)
+@pytest.mark.parametrize("limit", [4, 8])
+async def test_move_from_an_unlisted_folder_reserves_counted_growth(
+    tmp_path, limit
+):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "source").write_bytes(b"abcde")
+    (tmp_path / "plain").write_bytes(b"123")
+    data = DiskVFS(str(tmp_path), capacity=limit)
+    ws = Workspace({"/d": (data, MountMode.WRITE)})
+    try:
+        locked.chmod(0o333)
+        moved = await ws.shell("mv /d/locked/source /d/destination")
+        assert moved.exit_code == (1 if limit == 4 else 0)
+        assert data.usage is not None and data.usage.used == (
+            3 if limit == 4 else 8
+        )
+        assert data.usage.pending == 0
+        if limit == 4:
+            assert (locked / "source").read_bytes() == b"abcde"
+            assert not (tmp_path / "destination").exists()
+        else:
+            assert (tmp_path / "destination").read_bytes() == b"abcde"
+    finally:
+        locked.chmod(0o755)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root can list execute-only folders"
+)
+@pytest.mark.parametrize("mode", [0, 0o755])
+async def test_setattr_recounts_bytes_made_visible_by_owner_access(
+    tmp_path, mode
+):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "known").write_bytes(b"x" * 100)
+    (tmp_path / "plain").write_bytes(b"123")
+    data = DiskVFS(str(tmp_path), capacity=4)
+    try:
+        locked.chmod(0o111)
+        assert (await data.capacity()).used == 3
+        await data.setattr(PathSpec.from_str_path("/locked"), mode=mode)
+        await data.unlink(PathSpec.from_str_path("/locked/known"))
+        assert data.usage is not None and data.usage.used == 3
+        with pytest.raises(QuotaExceededError):
+            await data.write(PathSpec.from_str_path("/new"), b"12")
+    finally:
+        locked.chmod(0o755)
+        await data.close()
 
 
 @pytest.mark.asyncio

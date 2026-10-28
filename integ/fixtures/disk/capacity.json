@@ -1,0 +1,14 @@
+{
+  "files": {
+    "root/plain": "12",
+    "root/destination": "Z",
+    "root/locked/hidden": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "root/source/known": "abcde"
+  },
+  "directories": [],
+  "symlinks": {},
+  "modes": {
+    "root/locked": 0,
+    "root/source": 219
+  }
+}

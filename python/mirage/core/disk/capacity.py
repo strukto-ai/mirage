@@ -19,7 +19,7 @@ import stat
 from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.core.disk.utils import resolve_inside, walk_entries
+from mirage.core.disk.utils import resolve_inside
 from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
@@ -33,30 +33,73 @@ def _bytes_under(host: Path) -> int:
     """
     try:
         info = os.lstat(host)
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError) as exc:
+        logger.debug("path skipped while counting %s: %s", host, exc)
         return 0
     if not stat.S_ISDIR(info.st_mode):
         return info.st_size if stat.S_ISREG(info.st_mode) else 0
+
+    def skipped(exc: OSError) -> None:
+        if not isinstance(exc, (FileNotFoundError, PermissionError)):
+            raise exc
+        logger.debug("directory skipped while counting %s: %s", host, exc)
+
     total = 0
-    for directory, _, names in walk_entries(host):
+    for directory, _, names in os.walk(host, onerror=skipped):
         for name in names:
             try:
-                entry = os.lstat(directory / name)
-            except FileNotFoundError:
-                logger.debug("file vanished while counting: %s", name)
+                entry = os.lstat(Path(directory) / name)
+            except (FileNotFoundError, PermissionError) as exc:
+                logger.debug("file skipped while counting %s: %s", name, exc)
                 continue
             if stat.S_ISREG(entry.st_mode):
                 total += entry.st_size
     return total
 
 
-async def size_of(accessor: DiskAccessor, path: PathSpec) -> int:
-    """The bytes at ``path``, a directory's whole subtree included.
+async def is_counted(accessor: DiskAccessor, path: PathSpec) -> bool:
+    """Whether whole-root counting can traverse the operand's ancestors.
 
     Args:
         accessor (DiskAccessor): the mount's root.
         path (PathSpec): the operand.
     """
+    host = await resolve_inside(accessor.root, path)
+    root = Path(os.path.abspath(accessor.root))
+
+    def included() -> bool:
+        if host != root:
+            for directory in host.parents:
+                try:
+                    with os.scandir(directory):
+                        pass
+                except (FileNotFoundError, PermissionError) as exc:
+                    logger.debug(
+                        "ancestor skipped while counting %s: %s",
+                        directory,
+                        exc,
+                    )
+                    return False
+                if directory == root:
+                    break
+        return True
+
+    return await asyncio.to_thread(included)
+
+
+async def size_of(
+    accessor: DiskAccessor, path: PathSpec, *, accounted: bool = True
+) -> int:
+    """Measure bytes for accounting or for reserving a transfer.
+
+    Args:
+        accessor (DiskAccessor): the mount's root.
+        path (PathSpec): the operand.
+        accounted (bool): exclude paths whose ancestors cannot be listed;
+            False measures a source's bytes before copying or moving it.
+    """
+    if accounted and not await is_counted(accessor, path):
+        return 0
     host = await resolve_inside(accessor.root, path)
     return await asyncio.to_thread(_bytes_under, host)
 

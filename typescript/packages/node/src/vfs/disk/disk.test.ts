@@ -15,13 +15,14 @@
 import { chmodSync, existsSync, realpathSync, statSync, symlinkSync } from 'node:fs'
 import { chmod, mkdir, readFile, symlink, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { CapacityState, FileType, MountMode, PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { SharedStorageError } from '@struktoai/mirage-core/workspace/mount/errors'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { copy as copyCore } from '../../core/disk/copy.ts'
+import { logger as capacityLogger } from '../../core/disk/capacity.ts'
 import { exists as existsCore } from '../../core/disk/exists.ts'
 import { rmR as rmRCore } from '../../core/disk/rm.ts'
 import { readStream as streamCore } from '../../core/disk/stream.ts'
@@ -455,6 +456,167 @@ describe('DiskVFS — cp -r past a folder it may not open', () => {
 })
 
 describe('DiskVFS capacity', () => {
+  it.skipIf(process.getuid?.() === 0).each([false, true])(
+    'reserves actual source bytes when copying from an unlisted folder (%s)',
+    async (existing) => {
+      const locked = join(root, 'locked')
+      await mkdir(locked)
+      await writeFile(join(locked, 'source'), 'abcde')
+      await writeFile(join(root, 'plain'), '12')
+      const destination = join(root, 'destination')
+      if (existing) await writeFile(destination, 'Z')
+      const data = new DiskVFS({ root, capacity: 4 })
+      const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+      try {
+        await chmod(locked, 0o111)
+        const refused = await ws.shell('cp /d/locked/source /d/destination')
+        expect(refused.exitCode).toBe(1)
+        expect(refused.stderrText).toContain('Disk quota exceeded')
+        if (existing) expect(await readFile(destination, 'utf8')).toBe('Z')
+        else expect(existsSync(destination)).toBe(false)
+        expect(await readFile(join(locked, 'source'), 'utf8')).toBe('abcde')
+      } finally {
+        await chmod(locked, 0o755)
+        await ws.close()
+      }
+    },
+  )
+
+  it.skipIf(process.getuid?.() === 0).each([4, 8])(
+    'reserves counted growth when moving out of an unlisted folder (%i)',
+    async (limit) => {
+      const locked = join(root, 'locked')
+      await mkdir(locked)
+      await writeFile(join(locked, 'source'), 'abcde')
+      await writeFile(join(root, 'plain'), '123')
+      const data = new DiskVFS({ root, capacity: limit })
+      const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+      try {
+        await chmod(locked, 0o333)
+        const moved = await ws.shell('mv /d/locked/source /d/destination')
+        expect(moved.exitCode).toBe(limit === 4 ? 1 : 0)
+        expect(data.usage?.used).toBe(limit === 4 ? 3 : 8)
+        expect(data.usage?.pending).toBe(0)
+        if (limit === 4) {
+          expect(await readFile(join(locked, 'source'), 'utf8')).toBe('abcde')
+          expect(existsSync(join(root, 'destination'))).toBe(false)
+        } else expect(await readFile(join(root, 'destination'), 'utf8')).toBe('abcde')
+      } finally {
+        await chmod(locked, 0o755)
+        await ws.close()
+      }
+    },
+  )
+
+  it.skipIf(process.getuid?.() === 0).each([0, 0o755])(
+    'recounts bytes made visible by owner access in setattr (%i)',
+    async (mode) => {
+      const locked = join(root, 'locked')
+      await mkdir(locked)
+      await writeFile(join(locked, 'known'), 'x'.repeat(100))
+      await writeFile(join(root, 'plain'), '123')
+      const data = new DiskVFS({ root, capacity: 4 })
+      try {
+        await chmod(locked, 0o111)
+        expect((await data.capacity()).used).toBe(3)
+        await data.setattr(PathSpec.fromStrPath('/locked'), { mode })
+        await data.unlink(PathSpec.fromStrPath('/locked/known'))
+        expect(data.usage?.used).toBe(3)
+        await expect(
+          data.write(PathSpec.fromStrPath('/new'), new TextEncoder().encode('12')),
+        ).rejects.toMatchObject({ code: 'EDQUOT' })
+      } finally {
+        await chmod(locked, 0o755)
+        await data.close()
+      }
+    },
+  )
+
+  it.skipIf(process.getuid?.() === 0)(
+    'does not exempt new files when a skipped directory name is reused',
+    async () => {
+      const locked = join(root, 'locked')
+      await mkdir(locked)
+      await writeFile(join(locked, 'known'), 'x'.repeat(100))
+      await writeFile(join(root, 'plain'), '123')
+      const data = new DiskVFS({ root, capacity: 4 })
+      const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+      try {
+        await chmod(locked, 0o333)
+        expect((await ws.shell('mv /d/locked /d/renamed; mkdir /d/locked')).exitCode).toBe(0)
+        expect((await ws.shell('printf 12 > /d/locked/new')).exitCode).toBe(1)
+        expect(existsSync(join(locked, 'new'))).toBe(false)
+        expect((await ws.shell('printf 1 > /d/locked/new')).exitCode).toBe(0)
+        expect(data.usage?.used).toBe(4)
+      } finally {
+        const renamed = join(root, 'renamed')
+        await chmod(existsSync(renamed) ? renamed : locked, 0o755)
+        await ws.close()
+      }
+    },
+  )
+
+  it.skipIf(process.getuid?.() === 0).each([
+    [0o111, 'printf x > /d/locked/known'],
+    [0o333, 'rm /d/locked/known'],
+    [0o333, 'mv /d/locked/known /d/locked/other'],
+    [0o333, 'mv /d/locked /d/renamed; printf x > /d/renamed/known'],
+  ] as const)('never credits skipped bytes to other writes (%i, %s)', async (mode, command) => {
+    const locked = join(root, 'locked')
+    await mkdir(locked)
+    await writeFile(join(locked, 'known'), 'x'.repeat(100))
+    await writeFile(join(root, 'plain'), '123')
+    const data = new DiskVFS({ root, capacity: 4 })
+    const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+    try {
+      await chmod(locked, mode)
+      const changed = await ws.shell(command)
+      expect(changed.exitCode, changed.stderrText).toBe(0)
+      expect(data.usage?.used).toBe(3)
+      expect((await ws.shell('printf 12 > /d/new')).exitCode).toBe(1)
+      expect(existsSync(join(root, 'new'))).toBe(false)
+      expect((await ws.shell('printf 1 > /d/new')).exitCode).toBe(0)
+      expect(data.usage?.used).toBe(4)
+    } finally {
+      await chmod(existsSync(locked) ? locked : join(root, 'renamed'), 0o755)
+      await ws.close()
+    }
+  })
+
+  it.skipIf(process.getuid?.() === 0).each([0, 0o400])(
+    'counts past an unreadable folder on a capped root (%i)',
+    async (mode) => {
+      const locked = join(root, 'locked')
+      await mkdir(locked)
+      await writeFile(join(locked, 'hidden'), 'x'.repeat(100))
+      const data = new DiskVFS({ root, capacity: 4 })
+      const ws = new Workspace({ '/d': [data, MountMode.WRITE] })
+      try {
+        const debug = vi.fn()
+        capacityLogger.debug = debug
+        await chmod(locked, mode)
+        const written = await ws.shell('printf hi > /d/a')
+        const report = await ws.shell('df /d')
+        expect([written.exitCode, report.exitCode]).toEqual([0, 0])
+        expect(written.stderrText).toBe('')
+        expect(report.stderrText).toBe('')
+        expect(DEC.decode(report.stdout)).not.toContain(root)
+        expect(debug).toHaveBeenCalledWith(expect.stringContaining(locked))
+        expect(await readFile(join(root, 'a'), 'utf8')).toBe('hi')
+        expect(data.usage?.used).toBe(2)
+        expect((await ws.shell('printf abc > /d/b')).exitCode).toBe(1)
+        const unreadable = await ws.shell('du /d')
+        expect(unreadable.exitCode).toBe(1)
+        expect(unreadable.stderrText).toContain('Permission denied')
+        expect(unreadable.stderrText).not.toContain(root)
+      } finally {
+        await chmod(locked, 0o755)
+        delete capacityLogger.debug
+        await ws.close()
+      }
+    },
+  )
+
   it('refuses a capacity that is not a size', () => {
     expect(() => new DiskVFS({ root: tmpRoot().root, capacity: '1.5MB' })).toThrow(
       new VFSConfigError('disk: capacity must be a size like 100MB, got "1.5MB"'),

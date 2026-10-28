@@ -20,7 +20,7 @@ import {
   charge,
   storageUsage,
 } from '@struktoai/mirage-core/vfs/capacity'
-import { count, sizeOf } from '../../core/disk/capacity.ts'
+import { count, isCounted, sizeOf } from '../../core/disk/capacity.ts'
 import { chmod, mkdir, stat as fsStat, statfs as fsStatfs, writeFile } from 'node:fs/promises'
 import { createWriteStream, mkdirSync, realpathSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
@@ -237,13 +237,21 @@ export class DiskVFS extends BaseVFS {
   }
 
   override rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    return this.charge(src, () => this.charge(dst, () => diskRename(this.accessor, src, dst)))
+    return this.charge(src, (source) =>
+      this.charge(dst, async (target) => {
+        if (this.usage !== null && (await isCounted(this.accessor, dst))) {
+          const size = await sizeOf(this.accessor, src, false)
+          target.growTo(Math.max(size - source.before, 0))
+        }
+        await diskRename(this.accessor, src, dst)
+      }),
+    )
   }
 
   override copy(src: PathSpec, dst: PathSpec): Promise<void> {
     return this.charge(dst, async (held) => {
       if (this.usage === null) return diskCopy(this.accessor, src, dst)
-      held.growTo(await sizeOf(this.accessor, src))
+      held.growTo(await sizeOf(this.accessor, src, false))
       await diskCopy(this.accessor, src, dst)
       const copied = await sizeOf(this.accessor, dst)
       try {
