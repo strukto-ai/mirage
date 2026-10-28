@@ -20,6 +20,8 @@ from datetime import datetime, timedelta, timezone
 from typing import TypeVar
 
 from mirage.cache.context import capture_read
+from mirage.cache.versions import VersionScope
+from mirage.context.session_context import current_caller
 from mirage.cache.file.io import latest_fingerprint, mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.config import Evicted
@@ -71,6 +73,7 @@ class CacheManager:
         may_serve_listing: Callable[[str, str | None], Awaitable[bool]]
         | None = None,
         excluded_prefixes: Callable[[], tuple[str, ...]] = tuple,
+        version_scope: VersionScope | None = None,
     ) -> None:
         """Args:
         file_cache (FileCacheMixin | None): Workspace file cache
@@ -96,6 +99,7 @@ class CacheManager:
         excluded_prefixes (Callable[[], tuple[str, ...]]): live nested
             mount roots protected from recursive deletion.
         """
+        self.version_scope = version_scope if version_scope is not None else VersionScope()
         self._file_cache = file_cache
         self._index = index
         self._clock = index.clock
@@ -535,6 +539,34 @@ class CacheManager:
             return None
         return self._file_cache
 
+    def lose(self, path: PathSpec, version: str | None) -> None:
+        """Remember a refusal, including a file confirmed gone.
+
+        Args:
+            path (PathSpec): the refused path.
+            version (str | None): the losing version, None when gone.
+        """
+        session = current_caller().session
+        if session is not None:
+            session.versions.keep(
+                self.version_scope, "/" + mount_key(path.virtual, self._prefix), version
+            )
+
+    def observe(self, rec: OpRecord) -> None:
+        """Record this session's result, never another session's cache entry.
+
+        Args:
+            rec (OpRecord): result stamped by the backend or cache read.
+        """
+        caller = current_caller()
+        if caller.session is None or caller.policy_read or not caller.version_reads:
+            return
+        if not self._owns_path(rec.path):
+            return
+        caller.session.versions.observe(
+            self.version_scope, "/" + mount_key(rec.path, self._prefix), rec
+        )
+
     async def keep_version(self, path: PathSpec, version: str) -> None:
         """Keep ``version`` for ``path`` without bytes, if this mount caches.
 
@@ -547,6 +579,12 @@ class CacheManager:
             version (str): the version the write lost on.
         """
         key = self._cache_key(path)
+        session = current_caller().session
+        if session is not None:
+            session.versions.keep(
+                self.version_scope, "/" + mount_key(path.virtual, self._prefix), version
+            )
+            return
         if self._file_cache is None or not self._owns_path(key):
             return
         try:
@@ -574,6 +612,17 @@ class CacheManager:
         Args:
             paths (list[PathSpec]): the paths asked about.
         """
+        session = current_caller().session
+        if session is not None:
+            recorder = active_recorder()
+            return [
+                recorder.lost.version(path.virtual)
+                if recorder is not None and recorder.lost.holds(path.virtual)
+                else session.versions.read(
+                    self.version_scope, "/" + mount_key(path.virtual, self._prefix)
+                )
+                for path in paths
+            ]
         out: list[str | None] = [None] * len(paths)
         pending: list[tuple[int, str]] = []
         recorder = active_recorder()

@@ -1323,8 +1323,8 @@ async def test_a_conditional_line_sends_the_same_requests(line):
 @pytest.mark.parametrize(
     "line, lookups, keeps",
     [
-        ("mv /s3/f /s3/h", 1, 0),
-        ("eval 'echo x > /s3/g'", 1, 1),
+        ("mv /s3/f /s3/h", 0, 0),
+        ("eval 'echo x > /s3/g'", 0, 1),
     ],
     ids=["a move asks once", "a nested line keeps once"],
 )

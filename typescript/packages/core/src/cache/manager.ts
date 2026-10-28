@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { VersionScope } from './versions.ts'
+import { currentCaller } from '../context/session_context.ts'
 import { captureRead } from './context.ts'
 import { activeRecords, lineVersion, lostPaths, recordIndex } from '../observe/context.ts'
 import type { OpRecord } from '../observe/record.ts'
@@ -79,6 +81,7 @@ export class CacheManager {
     // cached listing; undefined serves them all.
     private readonly mayServeListing?: (folder: string, version: string | null) => Promise<boolean>,
     private readonly excludedPrefixes: () => readonly string[] = () => [],
+    readonly versionScope: VersionScope = new VersionScope(),
   ) {
     this.fileCache = fileCache
     this.index = index
@@ -454,8 +457,23 @@ export class CacheManager {
    * sends it again. A cache that refuses the entry is logged, never thrown:
    * the refusal itself already stands. Mirrors Python's `keep_version`.
    */
+  lose(path: PathSpec, version: string | null): void {
+    currentCaller().session?.versions.keep(this.versionScope, '/' + mountKey(path.virtual, this.prefix), version)
+  }
+
+  observe(rec: OpRecord): void {
+    const caller = currentCaller()
+    if (caller.session === null || !caller.versionReads || !this.ownsPath(rec.path)) return
+    caller.session.versions.observe(this.versionScope, '/' + mountKey(rec.path, this.prefix), rec)
+  }
+
   async keepVersion(path: PathSpec, version: string): Promise<void> {
     const key = this.cacheKey(path)
+    const session = currentCaller().session
+    if (session !== null) {
+      session.versions.keep(this.versionScope, '/' + mountKey(path.virtual, this.prefix), version)
+      return
+    }
     const cache = this.fileCache
     if (cache === null || !this.ownsPath(key)) return
     try {
@@ -479,6 +497,13 @@ export class CacheManager {
 
   /** `readVersion` for many paths, asking the cache once. */
   async readVersions(paths: readonly PathSpec[]): Promise<(string | null)[]> {
+    const session = currentCaller().session
+    if (session !== null) {
+      const lost = lostPaths(activeRecords())
+      return paths.map((path) => lost?.holds(path.virtual) === true
+        ? lost.version(path.virtual)
+        : session.versions.read(this.versionScope, '/' + mountKey(path.virtual, this.prefix)))
+    }
     const out: (string | null)[] = paths.map(() => null)
     const pending: [number, string][] = []
     const records = activeRecords()

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { OpRecord } from '../observe/record.ts'
 import type { FileStat, PathSpec } from '../types.ts'
 
 /** The active cache operations a backend needs from its cache manager. */
@@ -62,6 +63,8 @@ export interface WriteContext {
   drop(path: PathSpec): Promise<void>
   /** Keeps a version for a path without bytes, the one a refused write lost on. */
   keep(path: PathSpec, version: string): Promise<void>
+  observe?(record: OpRecord): void
+  lose?(path: PathSpec, version: string | null): void
 }
 
 export type WriteKind = 'put' | 'copy' | 'delete'

@@ -27,6 +27,7 @@ from mirage.observe.record import (
     OpRecord,
 )
 from mirage.types import DriftPolicy
+from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.snapshot.keys import FingerprintKey
@@ -304,6 +305,11 @@ async def install_fingerprints(
         revision = f.get(FingerprintKey.REVISION)
         if revision is not None:
             mount.revisions[path] = revision
+            fingerprint = f.get(FingerprintKey.FINGERPRINT)
+            if fingerprint is not None and mount.cache_manager is not None:
+                mount.cache_manager.version_scope.pins[
+                    "/" + mount_key(path, mount.prefix)
+                ] = fingerprint
             continue
         fingerprint = f.get(FingerprintKey.FINGERPRINT)
         if fingerprint is not None:

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { VersionHistory } from '../../cache/versions.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { type FunctionSite, functionSources } from './functions.ts'
 import { STARTUP_VALUES } from './constants.ts'
@@ -346,6 +347,7 @@ function copyVars(vars: Record<string, ShellVar>): Record<string, ShellVar> {
 }
 
 export class SessionState {
+  versions = new VersionHistory()
   sessionId: string
   cwd: string
   // The spelling `cd` arrived at: `..` simplified textually, symlinks
@@ -648,6 +650,7 @@ export class SessionState {
     // again; a fork given new variables starts them.
     if (overrides.vars === undefined) forked.vars = vars
     if (this.randomSeed === RANDOM_UNSET) forked.randomSeed = RANDOM_UNSET
+    forked.versions = this.versions
     forked.ids = this.ids
     forked.terminalOutput = this.terminalOutput
     forked.pipeStatus = [...this.pipeStatus]

@@ -73,6 +73,7 @@ import {
   runWithMountContext,
   runWithRecording,
   startOp,
+  finishRecord,
 } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
 import type { LostPaths, OpRecord } from '../../observe/record.ts'
@@ -1418,8 +1419,10 @@ export class Dispatcher {
         }
       }
     }
-    if (activeRecords() === undefined) await runWithRecording(warm, null, this.namespace.clock)
-    else await warm()
+    await runWithCaller({ ...currentCaller(), versionReads: false }, async () => {
+      if (activeRecords() === undefined) await runWithRecording(warm, null, this.namespace.clock)
+      else await warm()
+    })
   }
 
   /**
@@ -1995,7 +1998,8 @@ export class Dispatcher {
     mark: VfsCall,
   ): Promise<Uint8Array | null> {
     if (call.direct || !vfs.cachesReads || !DISPATCH_READ_OPS.has(call.name)) return null
-    const cached = await this.cache.get(call.path.virtual)
+    const held = await this.cache.getVersioned(call.path.virtual)
+    const cached = held?.[0] ?? null
     if (
       cached === null ||
       retracted(call.path.virtual) ||
@@ -2014,7 +2018,11 @@ export class Dispatcher {
     // recorded against the backend and counted as traffic that never
     // happened.
     memoryAnswered(call.report, window.byteLength)
-    return (await boundary.complete(mark, call.path, call.write, window, call.issuer)) as Uint8Array
+    const result = (await boundary.complete(mark, call.path, call.write, window, call.issuer)) as Uint8Array
+    if (mount.write === WritePolicy.CONDITIONAL) mount.cacheManager?.observe(finishRecord(
+      'read', call.path.virtual, 'ram', window.byteLength, startOp(), { fingerprint: held?.[1] ?? null },
+    ))
+    return result
   }
 
   /**

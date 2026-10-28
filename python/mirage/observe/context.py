@@ -194,6 +194,9 @@ def mark_lost(path: PathSpec, version: str | None = None) -> None:
         path (PathSpec): the path whose conditional write lost.
         version (str | None): the version it lost on, if any.
     """
+    context = current_caller().write_context
+    if context is not None and context.lose is not None:
+        context.lose(path, version)
     lost = active_lost()
     if lost is not None:
         lost.mark(path.virtual, version)
@@ -379,6 +382,9 @@ def finish_record(
 
 
 def _charge(op_rec: OpRecord) -> None:
+    context = current_caller().write_context
+    if context is not None and context.observe is not None:
+        context.observe(op_rec)
     held = current_caller().command_sink
     if held is not None:
         command, mine = held

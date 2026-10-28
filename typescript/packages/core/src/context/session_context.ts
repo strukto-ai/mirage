@@ -116,6 +116,7 @@ export interface Caller {
   readonly program: SessionState | null
   readonly stop: AbortController | null
   readonly writeHeld: boolean
+  readonly versionReads: boolean
   // The running command's own records, and those of the command it runs in.
   readonly commandSink: readonly [OpRecord[] | null, OpRecord[]] | null
   // When the running command started.
@@ -167,6 +168,7 @@ const UNBOUND: Caller = {
   call: null,
   stop: null,
   writeHeld: false,
+  versionReads: true,
   lineAbort: null,
   recording: null,
   revisions: null,

@@ -1062,8 +1062,8 @@ describe('conditional writes on an S3 mount', () => {
   })
 
   it.each([
-    ['a move asks once', 'mv /s3/f /s3/h', 1, 0],
-    ['a nested line keeps once', "eval 'echo x > /s3/g'", 1, 1],
+    ['a move uses its session', 'mv /s3/f /s3/h', 0, 0],
+    ['a nested line keeps once', "eval 'echo x > /s3/g'", 0, 1],
   ] as const)('asks the store once: %s', async (_name, line, lookups, keeps) => {
     const ws = workspace()
     await run(ws, 'cat /s3/f /s3/g')

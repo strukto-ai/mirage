@@ -36,6 +36,9 @@ class FileCacheMixin:
 
     _max_drain_bytes: int | None = None
 
+    async def get_versioned(self, key: str) -> tuple[bytes, str | None] | None:
+        raise NotImplementedError
+
     async def get(self, key: str) -> bytes | None:
         raise NotImplementedError
 

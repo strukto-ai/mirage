@@ -110,6 +110,7 @@ export function lostPaths(records: readonly OpRecord[] | undefined): LostPaths |
 
 /** Mark `key` lost on the running line, if one is recording. */
 export function markLost(path: PathSpec, version: string | null = null): void {
+  currentCaller().write?.context?.lose?.(path, version)
   lostPaths(currentCaller().recording?.records)?.mark(path.virtual, version)
 }
 
@@ -288,6 +289,7 @@ export function finishRecord(
 }
 
 function charge(rec: OpRecord): void {
+  currentCaller().write?.context?.observe?.(rec)
   const held = currentCaller().commandSink
   if (held !== null) {
     held[1].push(rec)

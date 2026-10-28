@@ -77,6 +77,7 @@ from mirage.io.types import PipeStream
 from mirage.io.yield_budget import task_turn
 from mirage.observe.context import (
     RecordingScope,
+    finish_record,
     active_lost,
     active_recorder,
     command_records,
@@ -1557,6 +1558,7 @@ class Dispatcher:
             active=active_recorder() is None,
             clock=self._namespace.registry.clock,
         )
+        token = bind_caller(current_caller().changed({"version_reads": False}))
         try:
             for mount, manager, paths in batches.values():
                 await mount.ensure_ready()
@@ -1613,6 +1615,7 @@ class Dispatcher:
                     for fill in fills:
                         fill.cancel()
         finally:
+            reset_caller(token)
             scope.close()
 
     async def _prepare(self, caller: Caller) -> None:
@@ -2189,7 +2192,8 @@ class Dispatcher:
             or call.name not in DISPATCH_READ_OPS
         ):
             return None
-        cached = await self._cache.get(call.path.virtual)
+        held = await self._cache.get_versioned(call.path.virtual)
+        cached = held[0] if held is not None else None
         if (
             cached is None
             or _retracted(call.path.virtual)
@@ -2209,7 +2213,13 @@ class Dispatcher:
         # warm read is recorded against the backend and counted as
         # traffic that never happened.
         _memory_answered(call.report, len(served))
-        return await boundary.complete(mark, call.path, call.write, served)
+        result = await boundary.complete(mark, call.path, call.write, served)
+        if mount.write is WritePolicy.CONDITIONAL and mount.cache_manager is not None:
+            mount.cache_manager.observe(finish_record(
+                "read", call.path.virtual, "ram", len(served), start_op(),
+                fingerprint=held[1] if held is not None else None,
+            ))
+        return result
 
     def _filler(self, call: _Call, mount: MountEntry) -> CacheManager | None:
         """The cache manager a cold read fills, or None to keep nothing.

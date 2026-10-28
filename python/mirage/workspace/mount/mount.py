@@ -1163,6 +1163,8 @@ class MountEntry:
             read_versions=manager.read_versions,
             drop=lambda path: manager.invalidate(path, FileChangeKind.UPDATE),
             keep=manager.keep_version,
+            observe=manager.observe,
+            lose=manager.lose,
         )
 
     async def _pick_handlers(

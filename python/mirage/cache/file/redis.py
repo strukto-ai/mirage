@@ -94,6 +94,12 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
             bytes | None, await self._cache_client.get(self._data_key(key))
         )
 
+    async def get_versioned(self, key: str) -> tuple[bytes, str | None] | None:
+        data, version = await self._cache_client.mget(
+            [self._data_key(key), self._meta_key(key)]
+        )
+        return (data, _text(version)) if data is not None else None
+
     async def set(
         self,
         key: str,

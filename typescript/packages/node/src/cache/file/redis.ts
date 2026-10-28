@@ -157,6 +157,12 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)
   }
 
+  async getVersioned(key: string): Promise<[Uint8Array, string | null] | null> {
+    const [raw, version] = await (await this.bytesView()).mGet([this.dataKey(key), this.metaKey(key)])
+    if (raw === null || raw === undefined) return null
+    return [new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength), version?.toString() ?? null]
+  }
+
   async set(
     key: string,
     data: Uint8Array,
