@@ -184,26 +184,10 @@
         "redis",
         "opfs",
         "s3",
-        "databricks",
-        "gridfs",
         "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "tidb-filesystem",
-        "gdrive",
-        "gdrive-folder",
-        "box"
+        "ssh"
       ],
-      "command": "( exec > exto.txt; ); ( exec >> extn.txt; ); echo old > extk.txt; ( exec >> extk.txt; ); test -e exto.txt && test -e extn.txt && cat extk.txt",
+      "command": "(cd /data; ( exec > exto.txt; ); ( exec >> extn.txt; ); echo old > extk.txt; ( exec >> extk.txt; ); test -e exto.txt && test -e extn.txt && cat extk.txt)",
       "expect": {
         "exit": 0,
         "stdout": "old\n",
@@ -527,6 +511,35 @@
         "stderr": "rc=0\ncat: -: Bad file descriptor\necho: write error: Bad file descriptor\nrc=1\n"
       },
       "note": "Pinned on bash 5.2: a closed descriptor dups onto itself as a no-op; `exec 0>f` leaves fd 0 write-only (a read is EBADF); `exec 1<f` / `exec 2<f` leave the stream read-only (a write fails). Not modelled: a transient `>&0` reaching the file after `exec 0>f`, or `<&1` reading it after `exec 1<f`."
+    },
+    {
+      "id": "exec_opens_the_target_at_exec_time_refuses_unprotected_append_creation",
+      "seq": 940200,
+      "targets": [
+        "databricks",
+        "gridfs",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data; ( exec > exto.txt; ); ( exec >> extn.txt; ); echo append=$?; test ! -e extn.txt && echo absent; echo old > extk.txt; ( exec >> extk.txt; ); test -e exto.txt && cat extk.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "append=1\nabsent\nold\n",
+        "stderr": "extn.txt: Operation not supported\n"
+      },
+      "note": "Opening a missing append descriptor refuses without native create-only and leaves no file. Ordinary output creation and opening an existing append descriptor still succeed."
     }
   ]
 }

@@ -14,11 +14,10 @@
 
 import logging
 
-import aiohttp
-
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.ram import ListingCheckStore
+from mirage.core.api.errors import ApiError
 from mirage.core.github.repo import ensure_ref
 from mirage.core.github.tree import (
     fetch_dir_tree,
@@ -176,7 +175,7 @@ async def _root_version(
             accessor.repo,
             await ensure_ref(accessor),
         )
-    except aiohttp.ClientResponseError as exc:
+    except ApiError as exc:
         log.debug(
             "head of %s/%s not answered: %s",
             accessor.owner,

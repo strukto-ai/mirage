@@ -21,6 +21,7 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import read_versioned
+from mirage.cache.types import ABSENT_WRITE, ANY_WRITE, ReplaceRequest
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import Context, command
 from mirage.commands.spec import CommandSpec
@@ -51,6 +52,46 @@ def _run(coro):
 def test_mount_accepts_root_prefix():
     m = MountEntry("/", RAMVFS())
     assert m.prefix == "/"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("declared", [False, True])
+async def test_protected_replacement_requires_an_implemented_hook(
+    monkeypatch, declared
+):
+    if declared:
+        monkeypatch.setattr(
+            RAMVFS,
+            "condition_support",
+            {"put": frozenset({"absent", "match"})},
+        )
+    mount = MountEntry("/data/", RAMVFS())
+    path = PathSpec.from_str_path("/data/f", "f")
+    closed = []
+
+    async def body():
+        try:
+            yield b"head"
+            yield b"tail"
+        finally:
+            closed.append(True)
+
+    source = body()
+    assert await anext(source) == b"head"
+    with pytest.raises(OperationNotSupportedError):
+        await mount._replace(
+            mount.index, ReplaceRequest(path, source, ABSENT_WRITE)
+        )
+    assert not await mount.vfs.exists(path)
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_unconditional_replacement_uses_the_ordinary_writer():
+    mount = MountEntry("/data/", RAMVFS())
+    path = PathSpec.from_str_path("/data/f", "f")
+    await mount._replace(mount.index, ReplaceRequest(path, b"ours", ANY_WRITE))
+    assert await materialize(await mount.vfs.read(path)) == b"ours"
 
 
 def test_mount_rejects_no_leading_slash():

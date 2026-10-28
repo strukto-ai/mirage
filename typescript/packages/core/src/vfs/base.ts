@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConditionSupport, ReplaceRequest } from '../cache/types.ts'
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { Command } from '../commands/config.ts'
 import type { CLI } from '../commands/cli/types.ts'
 import { enotsup } from '../errors/fs.ts'
 import type { ByteSource } from '../io/types.ts'
+import { closeQuietly } from '../io/stream.ts'
 import type {
   CapacityResult,
   DirListing,
@@ -148,6 +150,9 @@ export interface VFSOptions<A extends Accessor = Accessor> {
 export class BaseVFS<A extends Accessor = Accessor> {
   readonly [VFS_BRAND] = true as const
   readonly name: string = 'base'
+  get conditionSupport(): ConditionSupport {
+    return {}
+  }
   vfsMd = ''
   readonly indexTtl: number = 600
   /**
@@ -507,6 +512,15 @@ export class BaseVFS<A extends Accessor = Accessor> {
     _atomic = false,
   ): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'write', path))
+  }
+
+  async _replace(
+    request: ReplaceRequest,
+    _signal?: AbortSignal,
+    _handed?: Handed,
+  ): Promise<unknown> {
+    await closeQuietly(request.body)
+    throw enotsup(this.name, 'conditional replacement', request.path)
   }
 
   /**

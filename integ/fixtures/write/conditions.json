@@ -3,7 +3,7 @@
   "_evidence": {
     "s3": "measured: AWS S3 us-west-2, 2026-10-04 (put, create, copy If-Match, multipart, delete If-Match) and 2026-10-06 (copy If-None-Match, CopySourceIfMatch, DeleteObjects ETag)",
     "seaweedfs": "measured: SeaweedFS 4.48 local, 2026-10-04 and 2026-10-06, all cases honoured",
-    "minio": "measured: MinIO (CI image cgr.dev/chainguard/minio@sha256:bd0143…, release dated 2026-09-22): put and create honoured; copy If-Match and If-None-Match, DeleteObject If-Match and DeleteObjects ETag ignored",
+    "minio": "measured: MinIO (CI image cgr.dev/chainguard/minio@sha256:bd0143\u2026, release dated 2026-09-22): put and create honoured; copy If-Match and If-None-Match, DeleteObject If-Match and DeleteObjects ETag ignored",
     "s3+endpoint": "type: s3 with a non-AWS endpoint_url may be any S3-compatible server, MinIO included, so it gets MinIO's row",
     "assumed": "aliyun, backblaze, ceph, digitalocean, gcs, oci, qingstor, r2, scaleway, supabase, tencent, wasabi: ASSUMED via the shared S3 protocol by user decision (2026-10-05); not measured per provider",
     "sdk": "botocore 1.40.61 / aiobotocore 2.25.1; @aws-sdk/client-s3 3.1033.0",
@@ -144,5 +144,251 @@
       "copy",
       "delete"
     ]
+  },
+  "_mode_note": "condition_modes distinguishes atomic create-only (absent) from version matching (match). Both hosts derive operation support and commit validation from backend declarations. Put-only custom endpoints keep the same narrowed operation set. Box and Dropbox creation rewrites refuse until a native create-only path is verified. Historical measurement and assumption labels in _evidence remain unchanged.",
+  "condition_modes": {
+    "s3+endpoint": {
+      "put": [
+        "absent",
+        "match"
+      ]
+    },
+    "vfs": {
+      "airtable": {},
+      "aliyun": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "backblaze": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "box": {
+        "put": [
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "ceph": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "chroma": {},
+      "databricks_volume": {},
+      "dify": {},
+      "digitalocean": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "discord": {},
+      "disk": {},
+      "dropbox": {
+        "put": [
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "email": {},
+      "gcal": {},
+      "gcs": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "gdocs": {},
+      "gdrive": {},
+      "github": {},
+      "gmail": {},
+      "gridfs": {},
+      "gsheets": {},
+      "gslides": {},
+      "hf_buckets": {},
+      "hf_datasets": {},
+      "hf_models": {},
+      "hf_spaces": {},
+      "jaeger": {},
+      "lancedb": {},
+      "langfuse": {},
+      "linear": {},
+      "mem0": {},
+      "minio": {
+        "put": [
+          "absent",
+          "match"
+        ]
+      },
+      "mongodb": {},
+      "nextcloud": {},
+      "notion": {},
+      "oci": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "onedrive": {},
+      "opfs": {},
+      "postgres": {},
+      "qdrant": {},
+      "qingstor": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "r2": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "ram": {},
+      "redis": {},
+      "s3": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "scaleway": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "seaweedfs": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "sharepoint": {},
+      "slack": {},
+      "ssh": {},
+      "supabase": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "tencent": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      },
+      "tidb_filesystem": {},
+      "trello": {},
+      "wandb": {},
+      "wasabi": {
+        "put": [
+          "absent",
+          "match"
+        ],
+        "copy": [
+          "match"
+        ],
+        "delete": [
+          "match"
+        ]
+      }
+    }
   }
 }

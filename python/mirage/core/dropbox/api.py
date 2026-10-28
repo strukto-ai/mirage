@@ -14,7 +14,7 @@
 
 from typing import Any
 
-from mirage.cache.context import stale
+from mirage.cache.context import condition_version, stale
 from mirage.cache.types import WriteCondition
 from mirage.core.dropbox.client import (
     DropboxApiError,
@@ -76,7 +76,9 @@ async def refused(
     if not rev:
         return None
     if exc.summary.startswith(LOST_SUMMARIES):
-        return await stale(path, version=cond.if_match if cond else None)
+        return await stale(
+            path, version=condition_version(cond) if cond else None
+        )
     if exc.summary.startswith(GONE_SUMMARIES):
         return await stale(path, gone=True)
     return None

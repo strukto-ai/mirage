@@ -35,6 +35,7 @@ from mirage.fuse.mount import (
     resolve_fusermount_binary,
     unmount_with_fusermount,
 )
+from mirage.runtime.sandbox.program import SERVED
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -99,6 +100,20 @@ def test_prepare_mountpoint_posix_keeps_dir(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.platform", "linux")
     _prepare_mountpoint(str(mp))
     assert mp.is_dir()
+
+
+def test_run_fuse_serves_its_folder_while_mounted(fs):
+    # A program the local runtime starts in the folder must start outside
+    # it (run_program's prelude), whoever mounted it.
+    seen = []
+
+    class _ServedFuse:
+        def __init__(self, *args, **kwargs):
+            seen.append("/tmp/mp-served" in SERVED)
+
+    _run_fuse(SimpleNamespace(FUSE=_ServedFuse), fs, "/tmp/mp-served")
+    assert seen == [True]
+    assert "/tmp/mp-served" not in SERVED
 
 
 def test_run_fuse_win32_adds_winfsp_owner_mapping(monkeypatch, fs):

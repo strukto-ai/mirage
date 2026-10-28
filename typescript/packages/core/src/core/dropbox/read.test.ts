@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize } from '../../io/types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
@@ -20,7 +19,12 @@ import type * as ApiModule from './api.ts'
 
 vi.mock('./client.ts', async () => {
   const actual = await vi.importActual<typeof ClientModule>('./client.ts')
-  return { ...actual, dropboxDownload: vi.fn(), dropboxDownloadStream: vi.fn() }
+  return {
+    ...actual,
+    dropboxDownload: vi.fn(),
+    dropboxDownloadStream: vi.fn(),
+    dropboxUpload: vi.fn(),
+  }
 })
 
 vi.mock('./api.ts', async () => {
@@ -204,13 +208,13 @@ describe('dropbox read stamps content_hash', () => {
       result,
     ])
     const vfs = new DropboxVFS({ clientId: 'c', clientSecret: 's', refreshToken: 'r' })
-    const written: Uint8Array[] = []
-    vfs.write = async (_path, data) => {
-      written.push(await materialize(data))
-      return null
-    }
     await vfs.truncate(new PathSpec({ virtual: '/n', directory: '/', vfsPath: 'n' }), 4)
-    expect(written.map((data) => new TextDecoder().decode(data))).toEqual(['abcd'])
+    expect(client.dropboxUpload).toHaveBeenCalledWith(
+      vfs.accessor.tokenManager,
+      '/n',
+      new TextEncoder().encode('abcd'),
+      null,
+    )
   })
 })
 

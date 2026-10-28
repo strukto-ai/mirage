@@ -17,6 +17,7 @@ import logging
 import aiohttp
 
 from mirage.accessor.linear import LinearAccessor
+from mirage.core.api.errors import ApiError
 from mirage.core.hierarchy.probe import row_at, rows_of
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.linear.client import search_issues
@@ -122,7 +123,13 @@ async def _named(
             if len(nodes) >= SEARCH_LIMIT:
                 return None
             named[word] = {str(node.get("id")) for node in nodes}
-    except (OSError, aiohttp.ClientError, RuntimeError, ValueError) as exc:
+    except (
+        OSError,
+        aiohttp.ClientError,
+        ApiError,
+        RuntimeError,
+        ValueError,
+    ) as exc:
         logger.debug("linear search failed (%s); reading every issue", exc)
         return None
     return asked, named
@@ -167,7 +174,13 @@ async def files_containing(
         return None
     try:
         return await _found(accessor, text.lower(), under, ask_linear)
-    except (OSError, aiohttp.ClientError, RuntimeError, ValueError) as exc:
+    except (
+        OSError,
+        aiohttp.ClientError,
+        ApiError,
+        RuntimeError,
+        ValueError,
+    ) as exc:
         logger.debug("linear listing failed (%s); reading every file", exc)
         return None
 

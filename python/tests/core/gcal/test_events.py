@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 import pytest
 
 from mirage.core.gcal.events import build_delta_hook, event_paths
+from mirage.core.google.client import GoogleApiError
 from mirage.types import FileChangeKind
 from tests.fixtures.gcal_api import (
     EVENTS,
@@ -59,8 +59,8 @@ class Syncs:
         return answer
 
 
-def _gone() -> aiohttp.ClientResponseError:
-    return aiohttp.ClientResponseError(None, (), status=410)  # type: ignore[arg-type]
+def _gone() -> GoogleApiError:
+    return GoogleApiError("gone", 410)
 
 
 async def test_events_follow_each_event_s_files(gcal_api):

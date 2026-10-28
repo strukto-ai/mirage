@@ -17,9 +17,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, ParamSpec, TypeVar
 
-import aiohttp
-
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.google.client import GoogleApiError
 from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 from mirage.errors.fs import eacces, enoent, enotdir
 from mirage.types import FileStat, FileType, PathSpec
@@ -43,7 +42,7 @@ def eacces_on_denied(
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
         try:
             return await fn(*args, **kwargs)
-        except aiohttp.ClientResponseError as exc:
+        except GoogleApiError as exc:
             if exc.status == 403:
                 spec = next((a for a in args if isinstance(a, PathSpec)), None)
                 raise eacces(spec.virtual if spec is not None else "") from exc

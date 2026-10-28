@@ -99,6 +99,8 @@ struct Input<'h> {
     /// The blocks read so far.
     taken: u64,
     failure: Option<Failure>,
+    remaining: Option<u64>,
+    limited: bool,
 }
 
 impl Input<'_> {
@@ -106,8 +108,22 @@ impl Input<'_> {
         self.buf.len() - self.at
     }
 
+    fn account(&mut self, size: usize) -> bool {
+        if let Some(remaining) = self.remaining.as_mut() {
+            if size as u64 > *remaining {
+                self.limited = true;
+                return false;
+            }
+            *remaining -= size as u64;
+        }
+        true
+    }
+
     /// Bring more bytes into `buf`; false at the end of the input.
     async fn more(&mut self) -> bool {
+        if self.limited {
+            return false;
+        }
         if self.at > 0 && self.at * 2 >= self.buf.len() {
             self.buf.drain(..self.at);
             self.at = 0;
@@ -115,6 +131,9 @@ impl Input<'_> {
         let Some(codec) = self.codec.as_mut() else {
             self.raw.gather(1).await;
             if self.raw.unused().is_empty() {
+                return false;
+            }
+            if !self.account(self.raw.unused().len()) {
                 return false;
             }
             if self.held() == 0 && self.raw.used == 0 {
@@ -156,7 +175,12 @@ impl Input<'_> {
                 }
             }
         }
-        self.buf.len() > before
+        let produced = self.buf.len() - before;
+        if !self.account(produced) {
+            self.buf.truncate(before);
+            return false;
+        }
+        produced > 0
     }
 
     /// Whether `n` bytes are held, reading on until they are.
@@ -601,6 +625,8 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         at: 0,
         taken: 0,
         failure: None,
+        remaining: config.max_decoded_bytes,
+        limited: false,
     };
     let mut run = Run {
         config,
@@ -723,11 +749,15 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         run.say(NOT_TAR);
         run.failed = true;
     }
-    if !cut && input.codec.is_some() {
+    if !cut && !input.limited && input.codec.is_some() {
         // The compressor's verdict needs the whole of its input.
         while input.more().await {
             input.at = input.buf.len();
         }
+    }
+    if input.limited {
+        host.warn(b"tar: decoded input exceeds size limit\n");
+        return FAILED;
     }
     if let Some(reply) = input.raw.error.take() {
         host.warn(&open_failure(config, &reply, true));

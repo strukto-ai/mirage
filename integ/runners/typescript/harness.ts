@@ -85,7 +85,9 @@ export type TargetRunner = (
   emit: EmitRow[] | null,
 ) => Promise<void>
 
-export interface EmitRow {
+export type EmitRow = { target: string; skip: 'non_root' } | EmitCase
+
+interface EmitCase {
   target: string
   id: string
   exit: number
@@ -102,6 +104,7 @@ export interface Target {
   // `globalThis.navigator`, and a `secrets-*` target registers a fetch
   // function under a fixed name in the process-global source registry.
   exclusive?: boolean
+  non_root?: boolean
   service?: string
   epoch?: string
   apps?: string
@@ -160,7 +163,7 @@ export function integRoot(): string {
 }
 
 /**
- * Reject a target whose `exclusive` is not a boolean.
+ * Reject target execution flags that are not booleans.
  *
  * The twin of the `shared` check in `loadServices`, and for the same reason:
  * one file is read by two hosts, and a hand-edited `"exclusive": 1` would run
@@ -170,10 +173,12 @@ export function integRoot(): string {
  */
 export function validateTargets(targets: Target[]): Target[] {
   for (const target of targets) {
-    if ('exclusive' in target && typeof target.exclusive !== 'boolean') {
-      throw new Error(
-        `targets.json: target '${target.id}' declares 'exclusive' as ${typeof target.exclusive}, must be a boolean`,
-      )
+    for (const flag of ['exclusive', 'non_root'] as const) {
+      if (flag in target && typeof target[flag] !== 'boolean') {
+        throw new Error(
+          `targets.json: target '${target.id}' declares '${flag}' as ${typeof target[flag]}, must be a boolean`,
+        )
+      }
     }
   }
   return targets

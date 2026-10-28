@@ -24,6 +24,7 @@ from mirage.commands.builtin.utils.tree import WalkBudget, WalkCall, tree_walk
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_to_kwargs
+from mirage.core.api.errors import ApiError
 from mirage.errors import FsCondition, classify
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -238,7 +239,7 @@ async def handle_getfattr(
                     nofollow,
                     errors,
                 )
-            except OSError as exc:
+            except (OSError, ApiError) as exc:
                 errors.append(f"getfattr: {label}: {attr_error(exc)}\n")
                 failed = True
                 continue

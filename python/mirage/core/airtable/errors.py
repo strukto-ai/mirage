@@ -15,9 +15,10 @@
 import json
 
 from mirage.core.airtable.constants import NOT_FOUND_TYPES
+from mirage.core.api.errors import ApiError
 
 
-class AirtableAPIError(RuntimeError):
+class AirtableAPIError(ApiError):
     """A >= 400 answer from the Airtable API.
 
     Args:
@@ -34,8 +35,7 @@ class AirtableAPIError(RuntimeError):
         status: int | None = None,
         error_type: str | None = None,
     ) -> None:
-        super().__init__(message)
-        self.status = status
+        super().__init__(message, status)
         self.error_type = error_type
 
     @property

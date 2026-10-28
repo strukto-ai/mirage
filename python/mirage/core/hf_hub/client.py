@@ -30,6 +30,7 @@ from mirage.core.api.client import (
     api_stream,
     status_error,
 )
+from mirage.core.api.errors import ApiError
 from mirage.core.hf_hub.constants import (
     API_BASE,
     API_SEGMENTS,
@@ -56,7 +57,7 @@ RETRY = RetryPolicy(
 WRITE_RETRY = replace(RETRY, retry_transport=False)
 
 
-class HfHubError(Exception):
+class HfHubError(ApiError):
     """A Hub call that answered with a status the caller cannot use.
 
     Args:
@@ -72,8 +73,7 @@ class HfHubError(Exception):
     def __init__(
         self, message: str, status: int, error_code: str = ""
     ) -> None:
-        super().__init__(message)
-        self.status = status
+        super().__init__(message, status)
         self.error_code = error_code
 
 

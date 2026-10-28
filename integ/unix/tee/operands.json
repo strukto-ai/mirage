@@ -72,16 +72,13 @@
         "redis",
         "opfs",
         "s3",
-        "gridfs",
         "s3-prefix",
-        "gridfs-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
         "nextcloud",
-        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -215,6 +212,25 @@
         "stdout": "q\nz\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tee_a_creates_missing_refuses_unsupported_native_append_creation",
+      "seq": 601201,
+      "targets": [
+        "gridfs",
+        "gridfs-prefix",
+        "tidb-filesystem"
+      ],
+      "command": "mkdir -p /data/ptee5; printf 'NEW' | tee -a /data/ptee5/fresh.txt > /dev/null; echo tee=$?; test -e /data/ptee5/fresh.txt; echo exists=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "tee=1\nexists=1\n",
+        "stderr": "tee: /data/ptee5/fresh.txt: Operation not supported\n"
+      },
+      "flags": [
+        "a"
+      ],
+      "note": "GridFS and TiDB wire tee to their native append entry, whose shared missing-file fallback requires create-only. This refusal leaves no file. Other listed backends retain their existing tee writer path."
     }
   ]
 }

@@ -41,7 +41,11 @@ from typing import (
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.context import publish_read, read_versioned
+from mirage.cache.context import (
+    publish_read,
+    read_versioned,
+    require_supported,
+)
 from mirage.cache.file.io import latest_fingerprint
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexConfig, LookupStatus
@@ -50,7 +54,7 @@ from mirage.cache.index.lock import index_lock
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
-from mirage.cache.types import WriteContext
+from mirage.cache.types import AnyWrite, ReplaceRequest, WriteContext
 from mirage.commands.builtin.utils.links import dispatch_of, link_view
 from mirage.commands.builtin.utils.paths import (
     dispatch_stat,
@@ -1686,6 +1690,30 @@ class MountEntry:
         finally:
             await close_quietly(data)
 
+    async def _replace(
+        self, index: IndexCacheStore, request: ReplaceRequest
+    ) -> FileStat | None:
+        try:
+            require_supported(
+                self.vfs.condition_support,
+                self.vfs.name,
+                request.path,
+                "put",
+                request.condition,
+            )
+            if isinstance(request.condition, AnyWrite):
+                result = await self._write(index, request.path, request.body)
+                return result if isinstance(result, FileStat) else None
+            replace: Callable[..., Awaitable[FileStat | None]] = (
+                self.vfs._replace
+            )
+            handed = await self._handed(replace, request.path, {}, index)
+            return await replace(
+                request, **_handed_on(replace, NULL_INDEX, **handed)
+            )
+        finally:
+            await close_quietly(request.body)
+
     async def _append_by_rewrite(
         self,
         path: PathSpec,
@@ -1694,7 +1722,7 @@ class MountEntry:
     ) -> FileStat | None:
         return await append_by_rewrite(
             functools.partial(self._read, index),
-            functools.partial(self._write, index),
+            functools.partial(self._replace, index),
             functools.partial(self._stat, index),
             path,
             data,
@@ -1709,7 +1737,7 @@ class MountEntry:
     ) -> None:
         await pwrite_by_streamed_rewrite(
             functools.partial(self._read_into, index),
-            functools.partial(self._write, index),
+            functools.partial(self._replace, index),
             functools.partial(self._stat, index),
             path,
             data,
@@ -1725,7 +1753,7 @@ class MountEntry:
     ) -> None:
         await truncate_by_rewrite(
             functools.partial(self._read, index),
-            functools.partial(self._write, index),
+            functools.partial(self._replace, index),
             path,
             length,
             no_create,

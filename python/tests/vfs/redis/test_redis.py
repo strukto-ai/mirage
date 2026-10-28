@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+from unittest.mock import patch
 
 import pytest
 
@@ -54,6 +55,24 @@ def test_the_password_stays_out():
 def test_a_capacity_that_is_not_a_size_is_refused():
     with pytest.raises(VFSConfigError, match="redis: capacity must be a size"):
         RedisVFS(capacity="5T")
+
+
+@pytest.mark.asyncio
+async def test_a_new_file_on_a_capped_mount_does_not_scan(redis_prefix):
+    if not REDIS_URL:
+        pytest.skip("REDIS_URL not set")
+    data = RedisVFS(url=REDIS_URL, key_prefix=redis_prefix, capacity=10)
+    ws = Workspace({"/r": (data, MountMode.WRITE)})
+    store = data.accessor.store
+    try:
+        await data.capacity()
+        with patch.object(store, "list_files", wraps=store.list_files) as scan:
+            result = await ws.shell("printf hi > /r/new")
+            assert result.exit_code == 0
+            scan.assert_not_called()
+    finally:
+        await store.clear()
+        await ws.close()
 
 
 @pytest.mark.asyncio

@@ -92,6 +92,8 @@ If `ws.fuseMountpoints` prints a `mirage-fuse-XXXXXX` path under `os.tmpdir()` a
 
 Mounts are async, so `await ws.fuseReady()` once after constructing the workspace; it resolves when every kernel mount is live (and rejects if one fails to mount). Until then `ws.fuseMountpoints` may be empty. (In Python, where mounts are synchronous, the constructor blocks until ready instead.)
 
+The folder is served on Node's event loop. Never block it on the folder: a synchronous `fs` call there, or a child process spawned with `cwd` inside it, waits on a call only that loop can answer. Use the async `fs` API, or pass the folder's paths as arguments to the child.
+
 ## Per-mount backends
 
 How a mount is exposed is configured **per mount**, through one `backend`

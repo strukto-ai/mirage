@@ -1,3 +1,4 @@
+import { ABSENT_WRITE, ANY_WRITE } from '../../cache/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { ConditionLostError } from '../object_store/errors.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
@@ -55,7 +56,7 @@ describe('a write carrying If-Match', () => {
         $metadata: { httpStatusCode: c.status },
       })
       const conn = failing(() => Promise.reject(err))
-      const put = DRIVER.putIf?.(conn, 'k', new Uint8Array([1]), { ifMatch: 'v1' })
+      const put = DRIVER.putIf?.(conn, 'k', new Uint8Array([1]), { kind: 'match', version: 'v1' })
       if (c.lost) await expect(put).rejects.toBeInstanceOf(ConditionLostError)
       else await expect(put).rejects.toBe(err)
     },
@@ -99,7 +100,9 @@ describe('a missing bucket', () => {
       sent.push(cmd.input.CopySource ? 'copy' : 'other')
       return Promise.reject(err)
     })
-    await expect(DRIVER.copyIf?.(conn, 'src', 'dst', { ifMatch: 'v1' })).rejects.toBe(err)
+    await expect(
+      DRIVER.copyIf?.(conn, 'src', 'dst', { kind: 'match', version: 'v1' }),
+    ).rejects.toBe(err)
     expect(sent).toEqual(['copy'])
   })
 })
@@ -114,7 +117,9 @@ describe('a conditioned copy', () => {
     const conn = failing((cmd) =>
       Promise.reject(cmd.input.CopySource !== undefined ? missing : sdkError(code, status)),
     )
-    await expect(DRIVER.copyIf?.(conn, 'src', 'dst', { ifMatch: 'v1' })).rejects.toBe(missing)
+    await expect(
+      DRIVER.copyIf?.(conn, 'src', 'dst', { kind: 'match', version: 'v1' }),
+    ).rejects.toBe(missing)
   })
 })
 
@@ -162,7 +167,8 @@ describe('streamed uploads', () => {
         }
       }
       const result = await DRIVER.putStream?.(uploadConnection(sent), 'k', source(), {
-        ifMatch: 'old',
+        kind: 'match',
+        version: 'old',
       })
       expect(result?.size).toBe(size)
       expect(closed).toBe(true)
@@ -198,7 +204,7 @@ describe('streamed uploads', () => {
       for (let offset = 0; offset < data.length; offset += 65521)
         yield data.slice(offset, offset + 65521)
     }
-    await DRIVER.putStream?.(conn, 'k', source(), {})
+    await DRIVER.putStream?.(conn, 'k', source(), ANY_WRITE)
     expect(bodies.map((body) => body.length)).toEqual([part, part, 37])
     expect(Buffer.compare(Buffer.concat(bodies), data)).toBe(0)
   })
@@ -218,7 +224,7 @@ describe('streamed uploads', () => {
         for (let offset = 0; offset < size; offset += 16)
           yield new Uint8Array(Math.min(16, size - offset))
       }
-      const result = await small.putStream?.(uploadConnection(sent), 'k', source(), {})
+      const result = await small.putStream?.(uploadConnection(sent), 'k', source(), ANY_WRITE)
       const sizes = sent
         .filter((c) => c instanceof UploadPart)
         .map((c) => (c.input.Body as Uint8Array).length)
@@ -249,7 +255,10 @@ describe('streamed uploads', () => {
       }
     }
     await expect(
-      DRIVER.putStream?.(uploadConnection(sent, failure), 'k', source(), { ifMatch: 'old' }),
+      DRIVER.putStream?.(uploadConnection(sent, failure), 'k', source(), {
+        kind: 'match',
+        version: 'old',
+      }),
     ).rejects.toBeInstanceOf(Error)
     const aborted = sent.filter((c) => c instanceof AbortMultipart)
     expect(aborted.map((c) => c.input)).toEqual([{ Bucket: 'b', Key: 'k', UploadId: 'upload' }])
@@ -271,10 +280,38 @@ it.each(['presigned', 'custom'])('keeps %s uploads on the single-PUT fallback', 
     { ...base, config },
     'k',
     data,
-    kind === 'presigned' ? {} : { ifMatch: 'old' },
+    kind === 'presigned' ? { kind: 'any' } : { kind: 'match', version: 'old' },
   )
   expect(result?.size).toBe(data.length)
   expect(sent).toHaveLength(1)
   expect(sent[0]?.constructor).toBe(Command)
   if (kind === 'custom') expect(sent[0]?.input.IfMatch).toBe('"old"')
+})
+
+it.each([13, 8 * 1024 * 1024 + 37])(
+  'conditions the final streamed creation for %s bytes',
+  async (size) => {
+    const sent: Command[] = []
+    const body = new Uint8Array(size)
+    const result = await DRIVER.putStream?.(uploadConnection(sent), 'k', body, ABSENT_WRITE)
+    expect(result?.size).toBe(size)
+    expect(sent.at(-1)?.input.IfNoneMatch).toBe('*')
+    expect(sent.at(-1)?.input.IfMatch).toBeUndefined()
+  },
+)
+
+it('refuses protected presigned uploads before sending a request', async () => {
+  const sent: Command[] = []
+  const base = uploadConnection(sent)
+  const conn = {
+    ...base,
+    config: {
+      ...base.config,
+      presignedUrlProvider: () => Promise.resolve('https://store.invalid/object'),
+    },
+  }
+  await expect(
+    DRIVER.putStream?.(conn, 'k', new Uint8Array([1]), ABSENT_WRITE),
+  ).rejects.toMatchObject({ code: 'ENOTSUP' })
+  expect(sent).toEqual([])
 })

@@ -33,7 +33,7 @@ from tenacity import (
 )
 
 from mirage.core.api.constants import DEFAULT_TIMEOUT
-from mirage.core.api.errors import ResponseTooLargeError
+from mirage.core.api.errors import ApiError, ResponseTooLargeError
 from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow, range_header
@@ -335,23 +335,19 @@ _TRANSPORT = (
 
 
 def status_error(resp: aiohttp.ClientResponse, text: str) -> Exception:
-    """The error ``resp.raise_for_status()`` raises, built without raising.
+    """The plain service error for a failed response: its status and
+    reason, for an API whose body says nothing the caller words.
 
     Shaped as an ``ErrorOf`` so it can be passed to ``api_request``
-    directly; the body text is deliberately unused because
-    ``raise_for_status`` never reads it.
+    directly.
 
     Args:
         resp (aiohttp.ClientResponse): a response with status >= 400.
         text (str): the response body, ignored.
     """
     del text
-    return aiohttp.ClientResponseError(
-        resp.request_info,
-        resp.history,
-        status=resp.status,
-        message=resp.reason or "",
-        headers=resp.headers,
+    return ApiError(
+        f"HTTP {resp.status} {resp.reason or ''}".rstrip(), resp.status
     )
 
 

@@ -83,13 +83,15 @@ describe('dropbox listing miss', () => {
     expect(dbx.log.slice(start).filter((route) => route !== 'token')).toEqual(routes)
   })
 
-  it('appends expanded paths without relisting preserved siblings', async () => {
-    const r = await ws.shell('echo /dbx/* >> /dbx/new')
+  it('preserves the existing target and sibling when appending expanded paths', async () => {
+    dbx.write('out', new Uint8Array())
+    const r = await ws.shell('echo /dbx/* >> /dbx/out')
     expect([r.exitCode, DEC.decode(r.stderr)]).toEqual([0, ''])
-    expect(dbx.read('new')).toEqual(ENC.encode('/dbx/f\n'))
+    expect(dbx.read('out')).toEqual(ENC.encode('/dbx/f /dbx/out\n'))
+    expect(dbx.read('f')).toEqual(ENC.encode('one\n'))
     expect(dbx.log.filter((route) => route !== 'token')).toEqual([
       'list_folder',
-      'upload',
+      'list_folder',
       'download',
       'upload',
     ])

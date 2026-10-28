@@ -16,9 +16,9 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from langfuse.api.core.api_error import ApiError
 
 from mirage.accessor.langfuse import LangfuseAccessor
+from mirage.core.langfuse.client import LangfuseApiError
 from mirage.core.langfuse.read import read
 from mirage.types import PathSpec
 from mirage.vfs.langfuse.config import LangfuseConfig
@@ -170,7 +170,7 @@ async def test_read_trace_not_found_is_enoent(accessor):
     with patch(
         "mirage.core.langfuse.read.fetch_trace",
         new_callable=AsyncMock,
-        side_effect=ApiError(status_code=404, body={"message": "nope"}),
+        side_effect=LangfuseApiError("nope", 404),
     ):
         with pytest.raises(FileNotFoundError):
             await read(
@@ -189,9 +189,9 @@ async def test_read_trace_server_error_propagates(accessor):
     with patch(
         "mirage.core.langfuse.read.fetch_trace",
         new_callable=AsyncMock,
-        side_effect=ApiError(status_code=500, body={"message": "boom"}),
+        side_effect=LangfuseApiError("boom", 500),
     ):
-        with pytest.raises(ApiError):
+        with pytest.raises(LangfuseApiError):
             await read(
                 accessor,
                 PathSpec(

@@ -19,7 +19,8 @@ class ByteSpool:
 
     An append that fails leaves no telling which of its bytes were kept,
     so every call after it fails too, rather than read bytes from where
-    the append never put them. Bytes waiting for the file go at the
+    the append never put them. A cancelled one kept all of them or none,
+    so the spool stays usable. Bytes waiting for the file go at the
     offset they end up at, so a flush that failed or was cancelled
     writes them there again rather than after what it got through.
     A reader that ``hold``s the spool keeps it open: a ``close`` while
@@ -38,7 +39,7 @@ class ByteSpool:
         self._file: BinaryIO | None = None
         self._lock = asyncio.Lock()
         self._closed = False
-        self._lost: BaseException | None = None
+        self._lost: Exception | None = None
         self._stored = 0
         self._holders = 0
         self._closing = False
@@ -60,28 +61,25 @@ class ByteSpool:
             self._usable()
             try:
                 await self._append(data)
-            except BaseException as exc:
+            except Exception as exc:
                 self._lost = exc
                 raise
 
     async def _append(self, data: bytes) -> None:
         self._cache = b""
-        if self._file is None and self.size + len(data) <= self.memory_limit:
-            self._memory.extend(data)
-        else:
-            if self._file is None:
+        if self._file is None and self.size + len(data) > self.memory_limit:
 
-                def open_file() -> None:
-                    self._file = tempfile.TemporaryFile(mode="w+b")
-                    self._file.write(self._memory)
+            def open_file() -> None:
+                self._file = tempfile.TemporaryFile(mode="w+b")
+                self._file.write(self._memory)
 
-                await run_blocking(open_file)
-                self._stored = len(self._memory)
-                self._memory.clear()
-            self._memory.extend(data)
-            if len(self._memory) >= IO_BUFFER_SIZE:
-                await self._flush()
+            await run_blocking(open_file)
+            self._stored = len(self._memory)
+            self._memory.clear()
+        self._memory.extend(data)
         self.size += len(data)
+        if self._file is not None and len(self._memory) >= IO_BUFFER_SIZE:
+            await self._flush()
 
     async def _flush(self) -> None:
         if self._memory:

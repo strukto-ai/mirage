@@ -15,7 +15,7 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, TypeVar
 
-from mirage.cache.context import stale
+from mirage.cache.context import condition_version, stale
 from mirage.cache.types import WriteCondition
 from mirage.core.box.client import (
     BoxApiError,
@@ -82,7 +82,9 @@ async def refused(
     if not etag:
         return None
     if exc.status == LOST_STATUS:
-        return await stale(path, version=cond.if_match if cond else None)
+        return await stale(
+            path, version=condition_version(cond) if cond else None
+        )
     if exc.status == GONE_STATUS:
         return await stale(path, gone=True)
     return None

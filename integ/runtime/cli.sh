@@ -8,7 +8,7 @@
 # command_limits, and the per-line --runtime argument.
 #
 # Cases whose steps need the SDK surface (add_runtime, rename, s3_put,
-# read_op, profile, facade — the last calls ws.vfs directly) or a runner-local
+# read_op, profile, wait_job, facade — the last calls ws.vfs directly) or a runner-local
 # test runtime (echobox, named as a string or a mapping, or registered
 # through world.register_runtimes), generated file catalogs, runner-local
 # code policies (world.policies), or non-ram mounts are skipped as sdk-only,
@@ -165,7 +165,7 @@ cli_expressible() {
     and (((.world.policies // []) | length) == 0)
     and (((.world.runtimes // []) | map(select((type == "object" and .name == "echobox") or . == "echobox")) | length) == 0)
     and (((.world.register_runtimes // {}) | length) == 0)
-    and (([(.steps // [])[] | ., (.parallel // [])[]] | map(select(has("add_runtime") or has("add_policies") or has("rename") or has("s3_put") or has("read_op") or has("facade") or has("profile") or has("handle"))) | length) == 0)
+    and (([(.steps // [])[] | ., (.parallel // [])[]] | map(select(has("add_runtime") or has("add_policies") or has("rename") or has("s3_put") or has("read_op") or has("facade") or has("profile") or has("wait_job") or has("handle"))) | length) == 0)
   ' >/dev/null <<<"$case_json"
 }
 

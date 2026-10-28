@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readVersioned, runWithOwnVersion } from '../../cache/context.ts'
-import { OwnRead } from '../../cache/types.ts'
+import { readVersioned, writeCondition } from '../../cache/context.ts'
+import { OwnRead, type RewriteWriteFn } from '../../cache/types.ts'
 import { eexist, einval, eisdir, enotsup, isEnotdir, isMissingPath } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec, type StatFn } from '../../types.ts'
 import { CHUNK_SIZE } from '../../io/cooperative.ts'
@@ -21,7 +21,7 @@ import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 
 export type ReadFn = (path: PathSpec) => Promise<Uint8Array>
-export type WriteFn<Written = unknown> = (path: PathSpec, data: Uint8Array) => Promise<Written>
+export type WriteFn<Written = unknown> = RewriteWriteFn<Written>
 
 /**
  * Append by reading the file and writing it back whole.
@@ -37,7 +37,7 @@ export type WriteFn<Written = unknown> = (path: PathSpec, data: Uint8Array) => P
  */
 export async function appendByRewrite<Written>(
   read: ReadFn,
-  write: WriteFn<Written>,
+  write: RewriteWriteFn<Written>,
   stat: StatFn,
   path: PathSpec,
   data: Uint8Array,
@@ -48,7 +48,11 @@ export async function appendByRewrite<Written>(
       found = await stat(path)
     } catch (error) {
       if (!isMissingPath(error)) throw error
-      return await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, data))
+      return await write({
+        path,
+        body: data,
+        condition: await writeCondition(path, 'put', OwnRead.ABSENT),
+      })
     }
     if (found.type === FileType.DIRECTORY) throw eisdir(path)
     return
@@ -59,12 +63,16 @@ export async function appendByRewrite<Written>(
     ;[existing, own] = await readVersioned(path, () => read(path))
   } catch (error) {
     if (!isMissingPath(error)) throw error
-    return await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, data))
+    return await write({
+      path,
+      body: data,
+      condition: await writeCondition(path, 'put', OwnRead.ABSENT),
+    })
   }
   const joined = new Uint8Array(existing.length + data.length)
   joined.set(existing)
   joined.set(data, existing.length)
-  return await runWithOwnVersion(path, own, () => write(path, joined))
+  return await write({ path, body: joined, condition: await writeCondition(path, 'put', own) })
 }
 
 /**
@@ -75,7 +83,7 @@ export async function appendByRewrite<Written>(
  */
 export async function appendByStreamedRewrite<Written>(
   read: (path: PathSpec, onVersion: (version: string | null) => void) => AsyncIterable<Uint8Array>,
-  write: (path: PathSpec, data: ByteSource) => Promise<Written>,
+  write: RewriteWriteFn<Written>,
   stat: StatFn,
   path: PathSpec,
   data: ByteSource,
@@ -90,7 +98,11 @@ export async function appendByStreamedRewrite<Written>(
         found = await stat(path)
       } catch (error) {
         if (!isMissingPath(error)) throw error
-        return await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, new Uint8Array()))
+        return await write({
+          path,
+          body: new Uint8Array(),
+          condition: await writeCondition(path, 'put', OwnRead.ABSENT),
+        })
       }
       if (found.type === FileType.DIRECTORY) throw eisdir(path)
       return
@@ -106,9 +118,11 @@ export async function appendByStreamedRewrite<Written>(
       if (!isMissingPath(error) || spool.size > 0) throw error
       own = OwnRead.ABSENT
     }
-    return await runWithOwnVersion(path, own, () =>
-      write(path, spliced(spool, spool.size, incoming)),
-    )
+    return await write({
+      path,
+      body: spliced(spool, spool.size, incoming),
+      condition: await writeCondition(path, 'put', own),
+    })
   } finally {
     await incoming.close()
     await spool.close()
@@ -133,7 +147,7 @@ export async function appendByStreamedRewrite<Written>(
  */
 export async function pwriteByStreamedRewrite(
   read: (path: PathSpec, spool: ByteSpool) => Promise<string | null>,
-  write: (path: PathSpec, data: ByteSource) => Promise<unknown>,
+  write: RewriteWriteFn<unknown>,
   stat: StatFn,
   path: PathSpec,
   data: ByteSource,
@@ -149,7 +163,11 @@ export async function pwriteByStreamedRewrite(
         found = await stat(path)
       } catch (error) {
         if (!isMissingPath(error)) throw error
-        await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, new Uint8Array()))
+        await write({
+          path,
+          body: new Uint8Array(),
+          condition: await writeCondition(path, 'put', OwnRead.ABSENT),
+        })
         return
       }
       if (found.type === FileType.DIRECTORY) throw eisdir(path)
@@ -169,7 +187,11 @@ export async function pwriteByStreamedRewrite(
       if (missing !== null && missing.type === FileType.DIRECTORY) throw eisdir(path)
       own = OwnRead.ABSENT
     }
-    await runWithOwnVersion(path, own, () => write(path, spliced(spool, offset, incoming)))
+    await write({
+      path,
+      body: spliced(spool, offset, incoming),
+      condition: await writeCondition(path, 'put', own),
+    })
   } finally {
     await incoming.close()
     await spool.close()
@@ -204,7 +226,7 @@ async function* spliced(
  */
 export async function truncateByRewrite(
   read: ReadFn,
-  write: WriteFn,
+  write: RewriteWriteFn<unknown>,
   path: PathSpec,
   length: number,
   noCreate: boolean,
@@ -212,7 +234,7 @@ export async function truncateByRewrite(
   if (noCreate) throw enotsup('emulated', 'truncate --no-create', path)
   expectOffset(length, path)
   if (length === 0) {
-    await write(path, new Uint8Array(0))
+    await write({ path, body: new Uint8Array(0), condition: await writeCondition(path, 'put') })
     return
   }
   let data: Uint8Array
@@ -226,7 +248,7 @@ export async function truncateByRewrite(
   }
   const out = new Uint8Array(length)
   out.set(data.subarray(0, length))
-  await runWithOwnVersion(path, own, () => write(path, out))
+  await write({ path, body: out, condition: await writeCondition(path, 'put', own) })
 }
 
 /** A pwrite offset, refused with EINVAL when negative. Mirrors Python's `expect_offset`. */

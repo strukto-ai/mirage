@@ -117,7 +117,7 @@ async def test_fetch_traces_surfaces_api_error_message():
                 await fetch_traces(accessor, "checkout")
         finally:
             await accessor.close()
-    assert excinfo.value.status_code == 400
+    assert excinfo.value.status == 400
     assert "service" in str(excinfo.value)
 
 
@@ -131,7 +131,7 @@ async def test_fetch_traces_reports_status_without_body_message():
                 await fetch_traces(accessor, "checkout")
         finally:
             await accessor.close()
-    assert excinfo.value.status_code == 503
+    assert excinfo.value.status == 503
     assert str(excinfo.value) == "Jaeger API error: HTTP 503"
 
 

@@ -15,14 +15,15 @@
 import type { PathSpec } from '../../types.ts'
 import { apiRequest, buildUrl } from '../api/client.ts'
 import { enoent } from '../../errors/fs.ts'
+import { ApiError } from '../api/errors.ts'
 
-export class LangfuseApiError extends Error {
+export class LangfuseApiError extends ApiError {
   constructor(
     message: string,
     public readonly errors: readonly unknown[] = [],
-    public readonly status: number | null = null,
+    status: number | null = null,
   ) {
-    super(message)
+    super(message, status)
     this.name = 'LangfuseApiError'
   }
 }

@@ -22,6 +22,7 @@ from bson import ObjectId
 from gridfs.errors import NoFile
 
 from mirage.accessor.gridfs import GridFSAccessor
+from mirage.cache.context import require_supported
 from mirage.cache.types import WriteCondition
 from mirage.core.gridfs.client import (
     bucket,
@@ -41,7 +42,9 @@ from mirage.core.object_store.driver import (
     TreeEntry,
 )
 from mirage.io.cooperative import chunks
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
+from mirage.types import PathSpec
 from mirage.utils.dates import to_iso_z
 
 _COPY_CHUNK = 1024 * 1024
@@ -216,6 +219,17 @@ async def _put(
 async def _put_stream(
     conn: GridFSAccessor, key: str, data: ByteSource, cond: WriteCondition
 ) -> ObjectMeta:
+    try:
+        require_supported(
+            DRIVER.condition_support,
+            "gridfs",
+            PathSpec.from_str_path(key),
+            "put",
+            cond,
+        )
+    except BaseException:
+        await close_quietly(data)
+        raise
     async with aclosing(chunks(data)) as source:
         return await _upload(conn, key, source)
 

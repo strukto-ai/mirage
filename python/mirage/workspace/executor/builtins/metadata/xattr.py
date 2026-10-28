@@ -21,7 +21,9 @@ from mirage.commands.spec.usage import (
     unexpected_value_error,
     unknown_option_error,
 )
-from mirage.errors import POSIX, FsCondition, classify
+from mirage.core.api.errors import ApiError
+from mirage.errors import FsCondition, classify
+from mirage.errors.fs import strerror_of
 from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
 from mirage.workspace.executor.builtins.shared import result
@@ -73,22 +75,20 @@ def attr_usage_refusal(
     return result(cmd, exit_code=2, stderr=f"{line}\n{usage}")
 
 
-def attr_error(exc: OSError) -> str:
+def attr_error(exc: OSError | ApiError) -> str:
     """The phrase attr prints for a failed attribute call.
 
     attr says "No such attribute" for an attribute that is not set,
-    whatever the platform calls ENODATA or ENOATTR, and the C library's
-    wording for everything else.
+    whatever the platform calls ENODATA or ENOATTR, the C library's
+    wording for any other condition, and a service's own words for its
+    refusal.
 
     Args:
-        exc (OSError): what the dispatcher raised.
+        exc (OSError | ApiError): what the dispatcher raised.
     """
-    condition = classify(exc)
-    if condition is FsCondition.NO_XATTR:
+    if classify(exc) is FsCondition.NO_XATTR:
         return "No such attribute"
-    if condition is not None:
-        return POSIX[condition].phrase
-    return exc.strerror or str(exc)
+    return strerror_of(exc)
 
 
 def attr_operands(parsed: ParsedArgs) -> list[PathSpec]:

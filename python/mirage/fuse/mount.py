@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import importlib
 import os
 import shutil
@@ -22,9 +23,11 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from mirage.bridge.sync import blocking
 from mirage.fuse.backend import MountBackend, prepare_backend
 from mirage.fuse.darwin import install_macfuse_extensions, timespec_ns
 from mirage.fuse.fs import MirageFS
+from mirage.runtime.sandbox.program import serve, unserve
 from mirage.types import JsonValue
 from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.session.session import SessionState
@@ -194,14 +197,18 @@ def _run_fuse(
         opts["volname"] = os.path.basename(mountpoint.rstrip("/"))
     else:
         opts["direct_io"] = True
-    fuse.FUSE(
-        fs,
-        mountpoint,
-        nothreads=True,
-        foreground=True,
-        **opts,
-        **win_opts,
-    )
+    served = serve(mountpoint)
+    try:
+        fuse.FUSE(
+            fs,
+            mountpoint,
+            nothreads=True,
+            foreground=True,
+            **opts,
+            **win_opts,
+        )
+    finally:
+        unserve(served)
 
 
 def _await_ready(
@@ -240,6 +247,7 @@ def mount_background(
     root_prefix: str = "",
     session: SessionState | None = None,
     backend: str | MountBackend = MountBackend.FUSE,
+    owner: Callable[[], asyncio.AbstractEventLoop | None] = lambda: None,
 ) -> threading.Thread:
     """Mount in a background thread and return once the tree is live.
 
@@ -249,6 +257,8 @@ def mount_background(
         root_prefix (str): mount root; non-empty scopes the tree.
         session (SessionState | None): bind ops to this session's mount grants.
         backend (str | MountBackend): kernel interface to use.
+        owner (Callable[[], asyncio.AbstractEventLoop | None]): the
+            workspace's owner loop, which the mount's ops run on.
 
     Returns:
         threading.Thread: the thread serving the mount.
@@ -257,13 +267,14 @@ def mount_background(
         backend, files=files, mountpoint=mountpoint, root_prefix=root_prefix
     )
     fuse = load_fuse()
-    fs = MirageFS(files, root_prefix=root_prefix, session=session)
-    _prepare_mountpoint(mountpoint)
-    t = threading.Thread(
-        target=_run_fuse,
-        args=(fuse, fs, mountpoint, resolved),
-        daemon=True,
-    )
-    t.start()
-    _await_ready(t, mountpoint)
+    fs = MirageFS(files, root_prefix=root_prefix, session=session, owner=owner)
+    with blocking():
+        _prepare_mountpoint(mountpoint)
+        t = threading.Thread(
+            target=_run_fuse,
+            args=(fuse, fs, mountpoint, resolved),
+            daemon=True,
+        )
+        t.start()
+        _await_ready(t, mountpoint)
     return t

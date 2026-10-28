@@ -15,10 +15,12 @@
 import asyncio
 import concurrent.futures
 import threading
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import partial, wraps
 from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar
+from weakref import WeakSet
 
 from mirage.concurrency.limiter import run_blocking, settle
 
@@ -26,6 +28,27 @@ T = TypeVar("T")
 AUXILIARY_LOOP: ContextVar[bool] = ContextVar(
     "mirage_auxiliary_loop", default=False
 )
+BLOCKED: WeakSet[asyncio.AbstractEventLoop] = WeakSet()
+
+
+@contextmanager
+def blocking() -> Iterator[None]:
+    """Mark the running loop as blocked by the synchronous call inside.
+
+    A kernel mount answers on its workspace's loop. While that loop waits
+    on a mount coming up or going down, whose path work can reach any of
+    its mounts, their callbacks run on loops of their own rather than
+    wait for it.
+    """
+    loop = asyncio._get_running_loop()
+    if loop is None or loop in BLOCKED:
+        yield
+        return
+    BLOCKED.add(loop)
+    try:
+        yield
+    finally:
+        BLOCKED.discard(loop)
 
 
 async def _await_result(awaitable: Awaitable[T]) -> T:
@@ -128,6 +151,12 @@ class SyncBridge:
         self._stop_requested = False
         self._lock = threading.Lock()
         self._shutdown_lock = threading.Lock()
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop | None:
+        """The owner: the loop foreground calls and synchronous tools run
+        on, None until one does."""
+        return self._loop
 
     def observe(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
         """Record a foreground operation before it touches async state.

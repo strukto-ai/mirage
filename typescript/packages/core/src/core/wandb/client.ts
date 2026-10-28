@@ -8,7 +8,7 @@ import { PROJECTS, RUNS, RUN, FILE, FILES, HISTORY, HISTORY_KEYS } from './queri
 function responseError(response: Response): Error {
   if ([401, 403].includes(response.status))
     return eacces('W&B authentication or authorization failed')
-  return new WandbAPIError(`W&B HTTP ${String(response.status)}`)
+  return new WandbAPIError(`W&B HTTP ${String(response.status)}`, response.status)
 }
 
 export class WandbClient {

@@ -17,8 +17,6 @@ import logging
 from datetime import date, datetime, timezone
 from http import HTTPStatus
 
-import aiohttp
-
 from mirage.accessor.gcal import GCalAccessor
 from mirage.core.gcal.client import listed
 from mirage.core.gcal.day import (
@@ -37,6 +35,7 @@ from mirage.core.gcal.readdir import (
     scoped_bucket,
 )
 from mirage.core.gcal.scope import detect_scope
+from mirage.core.google.client import GoogleApiError
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.time_range import parse_time
 from mirage.events.base import DeltaHook
@@ -221,7 +220,7 @@ class GCalDeltaHook:
         whole = token is None
         try:
             events, nxt = await calendar.sync_events(cal_id, token, tz)
-        except aiohttp.ClientResponseError as exc:
+        except GoogleApiError as exc:
             if exc.status != HTTPStatus.GONE:
                 raise
             logger.debug("gcal sync token for %s expired: %s", cal_id, exc)

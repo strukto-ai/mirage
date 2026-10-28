@@ -278,6 +278,7 @@ export function installS3Mock(
   }
   // AWS answers an If-Match on a key that is gone with 404, not 412.
   const require = (current: Uint8Array | undefined, input: Conditions): void => {
+    if (input.IfNoneMatch === '*' && current !== undefined) throw preconditionFailed()
     if (input.IfMatch !== undefined) {
       if (current === undefined) throw notFound()
       if (bare(input.IfMatch) !== bare(etag(current))) throw preconditionFailed()

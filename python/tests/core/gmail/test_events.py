@@ -14,11 +14,11 @@
 
 from unittest.mock import MagicMock
 
-import aiohttp
 import pytest
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.core.gmail import events
+from mirage.core.google.client import GoogleApiError
 from mirage.types import FileChangeKind, JsonValue, PathSpec
 from mirage.vfs.gmail.config import GmailConfig
 from tests.fixtures.gmail_api import LABELS, MESSAGES, _message
@@ -37,8 +37,8 @@ WORK = _message(
 )
 
 
-def _gone() -> aiohttp.ClientResponseError:
-    return aiohttp.ClientResponseError(None, (), status=404)  # type: ignore[arg-type]
+def _gone() -> GoogleApiError:
+    return GoogleApiError("gone", 404)
 
 
 class Mailbox:
@@ -47,8 +47,7 @@ class Mailbox:
     def __init__(self) -> None:
         self.history: dict[
             str,
-            tuple[list[dict[str, JsonValue]], str]
-            | aiohttp.ClientResponseError,
+            tuple[list[dict[str, JsonValue]], str] | GoogleApiError,
         ] = {}
         self.now = "100"
         self.labels = LABELS

@@ -21,6 +21,7 @@ import aiohttp
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.core.api.client import RetryPolicy, api_request
+from mirage.core.api.errors import ApiError
 from mirage.core.api.paginate import cursor_items
 from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.constants import API_VERSION, MAX_PAGE_SIZE
@@ -32,7 +33,9 @@ _RATE_LIMIT_RETRY = RetryPolicy(
 )
 
 
-class NotionAPIError(RuntimeError):
+class NotionAPIError(ApiError):
+    """A Notion call that failed, with Notion's error ``code``."""
+
     def __init__(
         self,
         message: str,
@@ -40,8 +43,7 @@ class NotionAPIError(RuntimeError):
         status: int | None = None,
         code: str | None = None,
     ) -> None:
-        super().__init__(message)
-        self.status = status
+        super().__init__(message, status)
         self.code = code
 
 

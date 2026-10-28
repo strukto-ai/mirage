@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { conditionVersion } from '../../cache/context.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import {
   BoxApiError,
@@ -45,7 +46,7 @@ export async function refused(
   etag: string | null,
 ): Promise<StaleWriteError | null> {
   if (etag === null || etag === '' || !(err instanceof BoxApiError)) return null
-  if (err.status === LOST_STATUS) return stale(path, { version: cond?.ifMatch ?? null })
+  if (err.status === LOST_STATUS) return stale(path, { version: conditionVersion(cond) })
   if (err.status === GONE_STATUS) return stale(path, { gone: true })
   return null
 }

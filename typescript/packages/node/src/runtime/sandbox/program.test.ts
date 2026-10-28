@@ -14,11 +14,28 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { closeChildren, hostRun, openProgramPipe, reapHostRun, runProgram } from './program.ts'
+import {
+  SERVED,
+  serve,
+  unserve,
+  closeChildren,
+  hostRun,
+  openProgramPipe,
+  reapHostRun,
+  runProgram,
+} from './program.ts'
 import { ProcessTable } from '@struktoai/mirage-core/process/table'
 import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
@@ -98,6 +115,75 @@ function shRunner(
 }
 
 describe('runProgram', () => {
+  // A folder a kernel mount here serves answers on the loop spawning the
+  // child, which waits inside the spawn until the child runs, so the child
+  // starts outside and the prelude takes it in: its `cd` sets PWD.
+  it('knows a served folder by its absolute and resolved names', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-serve-'))
+    mkdirSync(join(dir, 'real'))
+    symlinkSync(join(dir, 'real'), join(dir, 'link'))
+    const names = serve(join(dir, 'link', 'mp'))
+    try {
+      expect(names).toEqual([join(dir, 'link', 'mp'), join(realpathSync(join(dir, 'real')), 'mp')])
+      expect(names.every((name) => SERVED.has(name))).toBe(true)
+    } finally {
+      unserve(names)
+    }
+  })
+
+  // A lazily released mount may end after a new one took its path.
+  it('keeps a folder served while another mount records it', () => {
+    const [old, current] = [serve('/tmp/mirage-mp'), serve('/tmp/mirage-mp')]
+    unserve(old)
+    expect(SERVED.has('/tmp/mirage-mp')).toBe(true)
+    unserve(current)
+    expect(SERVED.has('/tmp/mirage-mp')).toBe(false)
+  })
+
+  it.each([undefined, null, new DOMException('timed out', 'TimeoutError')])(
+    'starts nothing once stopped while it checks a served program (reason %s)',
+    async (reason) => {
+      const dir = mkdtempSync(join(tmpdir(), 'mirage-served-'))
+      const tool = join(dir, 'tool')
+      const ran = join(dir, 'ran')
+      writeFileSync(tool, `#!/bin/sh\ntouch '${ran}'\n`, { mode: 0o755 })
+      const names = serve(dir)
+      const controller = new AbortController()
+      try {
+        const running = runProgram(tool, null, [], null, { signal: controller.signal })
+        controller.abort(reason)
+        await expect(running).rejects.toMatchObject({ name: 'AbortError' })
+        await delay(300)
+        expect(existsSync(ran)).toBe(false)
+      } finally {
+        unserve(names)
+      }
+    },
+  )
+
+  it('starts a child in a served folder outside it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-served-'))
+    const pwd = async (): Promise<string> =>
+      new TextDecoder().decode(
+        (
+          await runProgram(
+            process.execPath,
+            null,
+            ['-e', 'process.stdout.write(process.env.PWD ?? "")'],
+            null,
+            { cwd: dir, env: {} },
+          )
+        ).stdout,
+      )
+    const names = serve(dir)
+    try {
+      expect(await pwd()).toBe(dir)
+    } finally {
+      unserve(names)
+    }
+    expect(await pwd()).toBe('')
+  })
+
   // A kill that names TERM reaches the program as TERM, so its handler
   // runs, and the runner's status is bash's 143 for a child TERM ended.
   it('lets the child handle the TERM a kill sent its runner', async () => {

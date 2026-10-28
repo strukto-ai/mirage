@@ -825,7 +825,11 @@ async function runRedirects(
     }
   }
   if (cancelled !== null) {
-    await keepOutput(recorder, outputs, dispatch, session)
+    try {
+      await keepOutput(recorder, outputs, dispatch, session)
+    } catch (error) {
+      console.debug(`kept output not written: ${String(error)}`)
+    }
     throw cancelled
   }
   let stdout: ByteSource | null = null

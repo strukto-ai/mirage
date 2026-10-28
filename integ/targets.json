@@ -3986,6 +3986,20 @@
       ]
     },
     {
+      "id": "disk-capacity-permissions",
+      "non_root": true,
+      "hosts": ["python", "typescript-node"],
+      "mounts": [
+        {
+          "path": "/data",
+          "vfs": "disk",
+          "backend": "tmpdir",
+          "host_fixture": "disk/capacity",
+          "config": { "capacity": 4 }
+        }
+      ]
+    },
+    {
       "id": "disk-host-links",
       "hosts": [
         "python",

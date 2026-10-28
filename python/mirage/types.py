@@ -481,11 +481,12 @@ KERNEL_BACKENDS: frozenset[MountBackend] = frozenset(
 class WritePolicy(str, Enum):
     """Whether a mount's writes carry the version they were based on.
 
-    UNCONDITIONAL writes always land and the last write wins. CONDITIONAL
-    writes send the version the mount last saw for the path (the backend's
-    native precondition, If-Match on the S3 family), so a write based on a
-    stale read is refused instead of overwriting the newer bytes. STAGED
-    names a staging layer mirage does not have; a mount declaring it is
+    UNCONDITIONAL replacements use last-write-wins. Shared rewrites that
+    observed a missing file require atomic create-only under either policy.
+    CONDITIONAL writes send the version the mount last saw for the path
+    (the backend's native precondition, If-Match on the S3 family), so a
+    write based on a stale read is refused instead of overwriting the newer
+    bytes. STAGED names a staging layer mirage does not have; a mount declaring it is
     refused at mount time, as ``read: pinned`` is.
     """
 

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConditionSupport } from '../../cache/types.ts'
+
 export const SCOPE_ERROR = 5000
 export const CONDITION_LOST_CODES: ReadonlySet<string> = new Set([
   '412',
@@ -40,3 +42,12 @@ export const MD5_ETAG_STORES: ReadonlySet<string> = new Set([
   'digitalocean',
   'wasabi',
 ])
+
+export const CONDITION_SUPPORT: ConditionSupport = {
+  put: ['absent', 'match'],
+  copy: ['match'],
+  delete: ['match'],
+}
+export const CUSTOM_CONDITION_SUPPORT: ConditionSupport = { put: ['absent', 'match'] }
+
+export const AWS_DOMAINS: readonly string[] = ['amazonaws.com', 'amazonaws.com.cn']

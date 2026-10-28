@@ -13,6 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
+ * A service answered a call with an error: the one base every backend's
+ * service error shares, so a caller catches any of them by one type and
+ * reads the status the same way. `status` is the HTTP status, null when the
+ * failure carried none (an `ok: false` payload, a body that is not the
+ * expected shape). A service's own error code stays on its subclass under
+ * the service's name for it: `code` on an Error is the filesystem
+ * condition here. Mirrors Python's mirage.core.api.errors.ApiError.
+ */
+export class ApiError extends Error {
+  readonly status: number | null
+
+  constructor(message: string, status: number | null = null) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+/**
  * A paginated endpoint handed back a cursor it had already sent. Following
  * it would request a page already collected, forever; stopping quietly
  * would return a listing that looks complete and is not. Either way the

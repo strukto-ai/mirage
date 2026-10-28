@@ -133,6 +133,7 @@ interface Step {
   runtime?: string
   stdin?: string
   add_runtime?: string
+  wait_job?: number
   add_policies?: PolicySpec[]
   // The default session's profile from this step on.
   profile?: Record<string, unknown>
@@ -1190,6 +1191,10 @@ async function performStep(
   }
   if (step.add_runtime !== undefined) {
     ws.addRuntime(step.add_runtime)
+    return []
+  }
+  if (step.wait_job !== undefined) {
+    await ws.jobTable.wait(step.wait_job, ws.defaultSessionId)
     return []
   }
   if (step.profile !== undefined) {

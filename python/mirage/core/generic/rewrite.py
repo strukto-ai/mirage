@@ -15,10 +15,10 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.cache.context import (
-    own_write_version,
     read_versioned,
+    write_condition,
 )
-from mirage.cache.types import OwnRead
+from mirage.cache.types import OwnRead, ReplaceRequest, RewriteWriteFn
 from mirage.errors.fs import eexist, einval, eisdir, enotsup
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.spool import ByteSpool
@@ -26,7 +26,7 @@ from mirage.io.types import ByteSource
 from mirage.types import FileStat, FileType, PathSpec, StatFn
 
 ReadFn = Callable[[PathSpec], Awaitable[bytes]]
-WriteFn = Callable[[PathSpec, bytes], Awaitable[FileStat | None]]
+WriteFn = RewriteWriteFn
 
 
 async def append_by_rewrite(
@@ -34,7 +34,8 @@ async def append_by_rewrite(
 ) -> FileStat | None:
     """Append by reading the file and writing it back whole.
 
-    Not atomic against a concurrent writer. A zero-byte append is an open
+    Existing-file rewrites follow the mount's write policy. Missing-file
+    creation requires atomic absence protection. A zero-byte append is an open
     for appending with nothing written after it (``cmd >> f`` opens ``f``
     before ``cmd`` runs): it creates a missing file and leaves an existing
     one alone, so it costs a stat rather than moving the whole object
@@ -52,25 +53,38 @@ async def append_by_rewrite(
         try:
             found = await stat(path)
         except FileNotFoundError:
-            with own_write_version(path, OwnRead.ABSENT):
-                return await write(path, data)
+            return await write(
+                ReplaceRequest(
+                    path,
+                    data,
+                    await write_condition(path, "put", own=OwnRead.ABSENT),
+                )
+            )
         if found.type == FileType.DIRECTORY:
             raise eisdir(path.virtual)
         return None
     try:
         existing, own = await read_versioned(path, lambda: read(path))
     except FileNotFoundError:
-        with own_write_version(path, OwnRead.ABSENT):
-            return await write(path, data)
-    with own_write_version(path, own):
-        return await write(path, existing + data)
+        return await write(
+            ReplaceRequest(
+                path,
+                data,
+                await write_condition(path, "put", own=OwnRead.ABSENT),
+            )
+        )
+    return await write(
+        ReplaceRequest(
+            path, existing + data, await write_condition(path, "put", own=own)
+        )
+    )
 
 
 async def append_by_streamed_rewrite(
     read: Callable[
         [PathSpec, Callable[[str | None], None]], AsyncIterator[bytes]
     ],
-    write: Callable[[PathSpec, ByteSource], Awaitable[FileStat | None]],
+    write: RewriteWriteFn,
     stat: StatFn,
     path: PathSpec,
     data: ByteSource,
@@ -94,8 +108,13 @@ async def append_by_streamed_rewrite(
             try:
                 found = await stat(path)
             except FileNotFoundError:
-                with own_write_version(path, OwnRead.ABSENT):
-                    return await write(path, b"")
+                return await write(
+                    ReplaceRequest(
+                        path,
+                        b"",
+                        await write_condition(path, "put", own=OwnRead.ABSENT),
+                    )
+                )
             if found.type == FileType.DIRECTORY:
                 raise eisdir(path)
             return None
@@ -112,13 +131,18 @@ async def append_by_streamed_rewrite(
                 if spool.size:
                     raise
                 own = OwnRead.ABSENT
-            with own_write_version(path, own):
-                return await write(path, _spliced(spool, spool.size, incoming))
+            return await write(
+                ReplaceRequest(
+                    path,
+                    _spliced(spool, spool.size, incoming),
+                    await write_condition(path, "put", own=own),
+                )
+            )
 
 
 async def pwrite_by_streamed_rewrite(
     read: Callable[[PathSpec, ByteSpool], Awaitable[str | None]],
-    write: Callable[[PathSpec, ByteSource], Awaitable[FileStat | None]],
+    write: RewriteWriteFn,
     stat: StatFn,
     path: PathSpec,
     data: ByteSource,
@@ -154,8 +178,13 @@ async def pwrite_by_streamed_rewrite(
             try:
                 found = await stat(path)
             except FileNotFoundError:
-                with own_write_version(path, OwnRead.ABSENT):
-                    await write(path, b"")
+                await write(
+                    ReplaceRequest(
+                        path,
+                        b"",
+                        await write_condition(path, "put", own=OwnRead.ABSENT),
+                    )
+                )
                 return
             if found.type == FileType.DIRECTORY:
                 raise eisdir(path.virtual)
@@ -174,8 +203,13 @@ async def pwrite_by_streamed_rewrite(
                 if missing is not None and missing.type == FileType.DIRECTORY:
                     raise eisdir(path.virtual)
                 own = OwnRead.ABSENT
-            with own_write_version(path, own):
-                await write(path, _spliced(spool, offset, incoming))
+            await write(
+                ReplaceRequest(
+                    path,
+                    _spliced(spool, offset, incoming),
+                    await write_condition(path, "put", own=own),
+                )
+            )
 
 
 async def _spliced(
@@ -225,15 +259,22 @@ async def truncate_by_rewrite(
         raise enotsup("emulated", "truncate --no-create", path)
     length = expect_offset(length, path)
     if length == 0:
-        await write(path, b"")
+        await write(
+            ReplaceRequest(path, b"", await write_condition(path, "put"))
+        )
         return
     own: str | OwnRead | None
     try:
         data, own = await read_versioned(path, lambda: read(path))
     except FileNotFoundError:
         data, own = b"", OwnRead.ABSENT
-    with own_write_version(path, own):
-        await write(path, data[:length].ljust(length, b"\0"))
+    await write(
+        ReplaceRequest(
+            path,
+            data[:length].ljust(length, b"\0"),
+            await write_condition(path, "put", own=own),
+        )
+    )
 
 
 def expect_offset(offset: int, path: PathSpec) -> int:

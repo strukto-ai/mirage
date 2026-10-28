@@ -12,6 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.cache.types import ConditionSupport
+
+AWS_DOMAINS = ("amazonaws.com", "amazonaws.com.cn")
+
+CONDITION_SUPPORT: ConditionSupport = {
+    "put": frozenset({"absent", "match"}),
+    "copy": frozenset({"match"}),
+    "delete": frozenset({"match"}),
+}
+
+CUSTOM_CONDITION_SUPPORT: ConditionSupport = {"put": CONDITION_SUPPORT["put"]}
+
 SCOPE_ERROR = 5000
 CONDITION_LOST_CODES = frozenset(
     {"412", "PreconditionFailed", "409", "ConditionalRequestConflict"}

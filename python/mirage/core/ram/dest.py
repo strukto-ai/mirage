@@ -212,8 +212,9 @@ def check_capacity(
     """Refuse with EDQUOT a key growing to ``size`` bytes past its store's
     capacity; an uncapped store takes any size.
 
-    Called just before the change, with no await between, so the check and
-    the change run as one step on the store's loop.
+    Called under ``store.lock`` just before the change, with no await
+    between, so the check and the change run as one step, on the store's
+    loop and across threads.
 
     Args:
         store (RAMStore): the RAM store.

@@ -40,7 +40,7 @@ from mirage.core.api.client import (
     stall_timeout,
     status_error,
 )
-from mirage.core.api.errors import ResponseTooLargeError
+from mirage.core.api.errors import ApiError, ResponseTooLargeError
 from mirage.utils.ranges import ByteWindow
 
 TARGET = "https://api.test/v1/thing"
@@ -89,7 +89,7 @@ async def test_an_error_status_maps_through_the_hook():
 async def test_status_error_carries_the_response_status():
     with aioresponses() as m:
         m.get(TARGET, status=500, body="broken")
-        with pytest.raises(aiohttp.ClientResponseError) as exc:
+        with pytest.raises(ApiError) as exc:
             await api_request("GET", TARGET, error_of=status_error)
     assert exc.value.status == 500
 

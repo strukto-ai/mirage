@@ -22,6 +22,7 @@ from typing import Any
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.capacity import count as _count
+from mirage.core.disk.capacity import is_counted
 from mirage.core.disk.capacity import size_of as _size_of
 from mirage.core.disk.copy import copy as _copy
 from mirage.core.disk.create import create as _create
@@ -175,13 +176,18 @@ class DiskVFS(BaseVFS):
             return await _rm_r(self.accessor, path)
 
     async def rename(self, src: PathSpec, dst: PathSpec) -> None:
-        async with self._charge(src), self._charge(dst):
+        async with self._charge(src) as source, self._charge(dst) as target:
+            if self.usage is not None and await is_counted(self.accessor, dst):
+                size = await _size_of(self.accessor, src, accounted=False)
+                target.grow_to(max(size - source.before, 0))
             await _rename(self.accessor, src, dst)
 
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
         async with self._charge(dst) as held:
             if self.usage is not None:
-                held.grow_to(await _size_of(self.accessor, src))
+                held.grow_to(
+                    await _size_of(self.accessor, src, accounted=False)
+                )
             await _copy(self.accessor, src, dst)
             if self.usage is not None:
                 copied = await _size_of(self.accessor, dst)

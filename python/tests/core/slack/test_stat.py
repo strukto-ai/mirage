@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.slack import SlackAccessor
+from mirage.core.slack.client import SlackApiError
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.stat import stat
 from mirage.types import ContentType, FileType, PathSpec
@@ -169,7 +170,7 @@ async def test_stat_non_date_dir_not_found(accessor):
         )
 
 
-SEALED = RuntimeError(
+SEALED = SlackApiError(
     "Slack API error (conversations.history): not_in_channel"
 )
 

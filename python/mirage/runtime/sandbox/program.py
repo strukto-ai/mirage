@@ -13,12 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import json
 import logging
 import os
 import socket
+import stat
 import sys
 import time
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import Context
 
@@ -53,6 +56,13 @@ Children = dict[
 
 # What a pipe's reader buffers, as asyncio.create_subprocess_exec sets it.
 STREAM_LIMIT = 2**16
+
+# Host folders a kernel mount in this process serves. A child started in
+# one, or from one, would wait inside its spawn on the loop that answers
+# for the folder, the very loop spawning it, so it starts outside and
+# EXEC_PRELUDE takes it in once the spawn has returned. Each name counts
+# the mounts recording it, so one going down leaves another at its path.
+SERVED: Counter[str] = Counter()
 
 
 async def run_program(
@@ -432,7 +442,8 @@ async def _spawn(
     exited: Callable[[], None] | None = None,
 ) -> tuple[asyncio.subprocess.Process, asyncio.SubprocessTransport]:
     """Start a child leading a process group of its own, keeping the
-    transport that closes our ends of its pipes (``stop_tree``).
+    transport that closes our ends of its pipes (``stop_tree``). One in
+    or from a ``SERVED`` folder starts through ``EXEC_PRELUDE``.
 
     Args:
         executable (str): the program.
@@ -446,6 +457,12 @@ async def _spawn(
         exited (Callable[[], None] | None): called the moment the child
             exits, which ``wait`` answers only once its pipes closed.
     """
+    if sys.platform != "win32" and (
+        _served(executable) or (cwd is not None and _served(cwd))
+    ):
+        await asyncio.to_thread(_check_interpreter, executable, cwd)
+        args = ["-c", EXEC_PRELUDE, "sh", cwd or ".", executable, *args]
+        executable, cwd = "/bin/sh", None
     loop = asyncio.get_running_loop()
     transport, protocol = await loop.subprocess_exec(
         lambda: _ExitWatch(exited, limit=STREAM_LIMIT, loop=loop),
@@ -459,6 +476,95 @@ async def _spawn(
         start_new_session=True,
     )
     return asyncio.subprocess.Process(transport, protocol, loop), transport
+
+
+def _check_interpreter(executable: str, cwd: str | None) -> None:
+    """Raise as the spawn would for a program that is no regular file, or
+    a script whose ``#!`` interpreter is missing or cannot run: through
+    ``EXEC_PRELUDE`` the shell's exec fails instead, with the shell's
+    status and words. Opened without waiting, so a FIFO fails rather
+    than hangs.
+
+    Args:
+        executable (str): the program.
+        cwd (str | None): where it starts, which a relative path names
+            from; None for this process's.
+    """
+    base = cwd or ""
+    try:
+        fd = os.open(
+            os.path.join(base, executable), os.O_RDONLY | os.O_NONBLOCK
+        )
+    except OSError as exc:
+        logger.debug("opening %s failed: %r", executable, exc)
+        return
+    try:
+        regular = stat.S_ISREG(os.fstat(fd).st_mode)
+        head = os.read(fd, 256) if regular else b""
+    except OSError as exc:
+        logger.debug("reading %s's first line failed: %r", executable, exc)
+        return
+    finally:
+        os.close(fd)
+    if not regular:
+        raise PermissionError(
+            errno.EACCES, os.strerror(errno.EACCES), executable
+        )
+    words = head[2:].split(b"\n", 1)[0].split() if head[:2] == b"#!" else []
+    if not words:
+        return
+    interpreter = os.path.join(base, os.fsdecode(words[0]))
+    if not os.path.exists(interpreter):
+        raise FileNotFoundError(
+            errno.ENOENT, os.strerror(errno.ENOENT), executable
+        )
+    if not os.access(interpreter, os.X_OK):
+        raise PermissionError(
+            errno.EACCES, os.strerror(errno.EACCES), executable
+        )
+
+
+def serve(folder: str) -> list[str]:
+    """Record ``folder`` in ``SERVED`` under each name a child's path may
+    give it: as given, made absolute, and with its parent's links
+    resolved. Only the parent is read, never the mount itself.
+
+    Args:
+        folder (str): a host folder a kernel mount here serves.
+
+    Returns:
+        list[str]: the names added, for ``unserve`` once the mount is gone.
+    """
+    given = os.path.abspath(folder)
+    parent, name = os.path.split(given)
+    names = [given, os.path.join(os.path.realpath(parent), name)]
+    SERVED.update(names)
+    return names
+
+
+def unserve(names: list[str]) -> None:
+    """Take one mount's names out of ``SERVED``; a name another mount
+    still records stays.
+
+    Args:
+        names (list[str]): what ``serve`` returned.
+    """
+    SERVED.subtract(names)
+    for name in names:
+        if SERVED[name] <= 0:
+            SERVED.pop(name, None)
+
+
+def _served(path: str) -> bool:
+    """Whether ``path`` lies in a folder a kernel mount here serves.
+
+    Args:
+        path (str): a host path.
+    """
+    return any(
+        path == folder or path.startswith(folder.rstrip("/") + "/")
+        for folder in tuple(SERVED)
+    )
 
 
 def reported_state(

@@ -23,17 +23,22 @@ import {
   captureRead,
   publishRead,
   runWithCacheManager,
-  runWithOwnVersion,
   runWithWriteContext,
   writeCondition,
   writesConditioned,
 } from './context.ts'
-import type { CacheInvalidator } from './types.ts'
+import {
+  ANY_WRITE,
+  type CacheInvalidator,
+  type ConditionSupport,
+  type ReplaceRequest,
+} from './types.ts'
 import { MountMode, PathSpec, WritePolicy } from '../types.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
 import { runInCommandScope } from './index/scope.ts'
 import { callsAs, currentCaller, runWithCaller, withCaller } from '../context/session_context.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
+import { materialize } from '../io/types.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 
@@ -182,16 +187,23 @@ it('a pending capture owns completed same-path bodies only weakly', async () => 
 describe('a conditional write on the fallback storage', () => {
   class S3Stub extends BaseVFS {
     override readonly name = 's3'
+    override get conditionSupport() {
+      return {
+        put: ['absent', 'match'],
+        copy: ['match'],
+        delete: ['match'],
+      } satisfies ConditionSupport
+    }
     override readonly cachesReads = true
     override close(): Promise<void> {
       return Promise.resolve()
     }
   }
 
-  async function conditional(): Promise<[MountEntry, PathSpec]> {
+  async function conditional(vfs: BaseVFS = new S3Stub()): Promise<[MountEntry, PathSpec]> {
     const entry = new MountEntry({
       prefix: '/s3/',
-      vfs: new S3Stub(),
+      vfs,
       mode: MountMode.WRITE,
       write: WritePolicy.CONDITIONAL,
     })
@@ -208,29 +220,96 @@ describe('a conditional write on the fallback storage', () => {
     const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
       runWithWriteContext('/s3/', entry.writeContext(), () => writeCondition(path, 'put')),
     )
-    expect(cond).toEqual({ ifMatch: 'v1' })
+    expect(cond).toEqual({ kind: 'match', version: 'v1' })
   })
 
-  it('keeps an own version every live frame agrees on', async () => {
+  it('settles explicit own evidence without an ambient frame', async () => {
     const [entry, path] = await conditional()
     const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
-      runWithOwnVersion(path, 'v2', () =>
-        runWithOwnVersion(path, 'v2', () => writeCondition(path, 'put')),
-      ),
+      writeCondition(path, 'put', 'v2'),
     )
-    expect(cond).toEqual({ ifMatch: 'v2' })
+    expect(cond).toEqual({ kind: 'match', version: 'v2' })
   })
 
-  it('refuses an own version the live frames disagree on', async () => {
-    const [entry, path] = await conditional()
-    await expect(
-      runWithWriteContext('/s3/', entry.writeContext(), () =>
-        runWithOwnVersion(path, 'v2', () =>
-          runWithOwnVersion(path, 'v3', () => writeCondition(path, 'put')),
-        ),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+  it('sends a protected positional rewrite through the explicit commit hook', async () => {
+    const commits: ReplaceRequest[] = []
+    class ReplacingVFS extends S3Stub {
+      override read(path: PathSpec): Promise<Uint8Array> {
+        const data = new Uint8Array([1])
+        publishRead(path.virtual, data, 'v1')
+        return Promise.resolve(data)
+      }
+      override write(): Promise<unknown> {
+        throw new Error('ordinary write received a protected replacement')
+      }
+      override async _replace(request: ReplaceRequest): Promise<unknown> {
+        commits.push({ ...request, body: await materialize(request.body) })
+        return null
+      }
+    }
+    const [entry] = await conditional(new ReplacingVFS())
+    await entry.call('pwrite', '/s3/f', [new Uint8Array([2]), 0])
+    expect(commits).toHaveLength(1)
+    expect(commits[0]?.condition).toEqual({ kind: 'match', version: 'v1' })
+    expect(commits[0]?.body).toEqual(new Uint8Array([2]))
   })
+
+  it('refuses a protected fallback when the backend has no explicit commit hook', async () => {
+    class ReadableVFS extends S3Stub {
+      override read(path: PathSpec): Promise<Uint8Array> {
+        const data = new Uint8Array([1])
+        publishRead(path.virtual, data, 'v1')
+        return Promise.resolve(data)
+      }
+      override write(): Promise<unknown> {
+        throw new Error('ordinary write received a protected replacement')
+      }
+    }
+    const [entry] = await conditional(new ReadableVFS())
+    await expect(entry.call('pwrite', '/s3/f', [new Uint8Array([2]), 0])).rejects.toMatchObject({
+      code: 'ENOTSUP',
+    })
+  })
+
+  it.each([
+    { kind: 'any' },
+    { kind: 'absent' },
+    { kind: 'match', version: 'older' },
+  ] satisfies ReplaceRequest['condition'][])(
+    'keeps another same-mount writer independent of a paused $kind replacement',
+    async (condition) => {
+      const [entry, path] = await conditional()
+      const context = entry.writeContext()
+      const [otherStarted, startOther] = gate()
+      const [replacementStarted, startReplacement] = gate()
+      const [otherFinished, finishOther] = gate()
+      class ReplacingVFS extends S3Stub {
+        override async _replace(request: ReplaceRequest): Promise<unknown> {
+          startReplacement()
+          await otherFinished
+          return request.condition
+        }
+      }
+      const vfs = new ReplacingVFS()
+      const first = runWithWriteContext('/s3/', context, async () => {
+        await otherStarted
+        return vfs._replace({ path, body: new Uint8Array(), condition })
+      })
+      const other = runWithWriteContext('/s3/', context, async () => {
+        startOther()
+        await replacementStarted
+        try {
+          return await writeCondition(path, 'put', 'new')
+        } finally {
+          finishOther()
+        }
+      })
+      expect(await Promise.all([first, other])).toEqual([
+        condition,
+        { kind: 'match', version: 'new' },
+      ])
+    },
+  )
 
   it.each([
     ['a sibling line nested in it', '/u/', true],
@@ -250,7 +329,7 @@ describe('a conditional write on the fallback storage', () => {
         : runWithWriteContext(plainPrefix, null, () =>
             runWithWriteContext('/s3/', entry.writeContext(), both),
           ))
-      expect([cond, other]).toEqual([{ ifMatch: 'v1' }, null])
+      expect([cond, other]).toEqual([{ kind: 'match', version: 'v1' }, ANY_WRITE])
     },
   )
 
@@ -288,15 +367,6 @@ describe('a conditional write on the fallback storage', () => {
       expect(got).toEqual(want)
     },
   )
-
-  it("leaves another path's own version alone", async () => {
-    const [entry, path] = await conditional()
-    const other = PathSpec.fromStrPath('/s3/o', '/o')
-    const cond = await runWithWriteContext('/s3/', entry.writeContext(), () =>
-      runWithOwnVersion(other, 'v9', () => writeCondition(path, 'put')),
-    )
-    expect(cond).toEqual({ ifMatch: 'v1' })
-  })
 })
 
 describe('listedThisCommand on the fallback storage', () => {
@@ -448,7 +518,7 @@ it.each([false, true])(
         },
         () =>
           runWithRecording(async () => {
-            expect(await writeCondition(path, 'put')).toEqual({ ifMatch: 'v1' })
+            expect(await writeCondition(path, 'put')).toEqual({ kind: 'match', version: 'v1' })
             const timer = startOp()
             markStarted()
             await held

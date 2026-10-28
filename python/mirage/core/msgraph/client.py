@@ -24,6 +24,7 @@ import aiohttp
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.api.client import RetryPolicy, api_request, header_delay
+from mirage.core.api.errors import ApiError
 from mirage.core.msgraph.config import MsGraphConfig, graph_api
 from mirage.core.msgraph.constants import MAX_BACKOFF, RETRY_STATUSES
 from mirage.utils.ranges import ByteWindow
@@ -63,11 +64,14 @@ def encoded_path(path: str) -> str:
     return "/".join(id_segment(part) for part in path.split("/") if part)
 
 
-class GraphError(RuntimeError):
+class GraphError(ApiError):
+    """A Microsoft Graph call that failed, worded with its status and code."""
+
     def __init__(self, status: int, code: str, message: str) -> None:
-        self.status = status
+        super().__init__(
+            f"Graph API error {status} ({code}): {message}", status
+        )
         self.code = code
-        super().__init__(f"Graph API error {status} ({code}): {message}")
 
 
 def _resolve_token(config: MsGraphConfig) -> str:

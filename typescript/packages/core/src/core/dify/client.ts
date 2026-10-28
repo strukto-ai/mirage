@@ -14,14 +14,14 @@
 
 import { sleep } from '../../utils/abort.ts'
 import type { DifyAccessor, DifyRequestOptions } from '../../accessor/dify.ts'
+import { ApiError } from '../api/errors.ts'
 
-class DifyHttpError extends Error {
-  readonly status: number
+class DifyHttpError extends ApiError {
+  declare readonly status: number
   readonly retryAfter: string | null
 
   constructor(status: number, retryAfter: string | null) {
-    super(`Dify request failed with status ${String(status)}`)
-    this.status = status
+    super(`Dify request failed with status ${String(status)}`, status)
     this.retryAfter = retryAfter
   }
 }

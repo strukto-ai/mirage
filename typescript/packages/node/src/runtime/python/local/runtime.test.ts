@@ -25,6 +25,7 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { DiskVFS } from '../../../vfs/disk/disk.ts'
 import { Workspace } from '../../../workspace.ts'
+import { serve, unserve } from '../../sandbox/program.ts'
 import { LocalRuntime } from './runtime.ts'
 
 const DEC = new TextDecoder()
@@ -471,25 +472,81 @@ describe('LocalRuntime', () => {
     }
   })
 
-  it('fails a program that cannot start as the shell would', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
-    const tool = join(dir, 'mirage-broken')
-    await writeFile(tool, '#!/no/such/interpreter\n')
-    await chmod(tool, 0o755)
-    const rt = new LocalRuntime({ captures: ['@external'] })
-    vi.stubEnv('PATH', dir)
-    try {
-      const result = await runProcess(rt, ['mirage-broken'], dir)
-      expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
-        126,
-        'mirage-broken: cannot execute: No such file or directory\n',
-      ])
-    } finally {
-      vi.unstubAllEnvs()
-      await rt.close()
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
+  it.each([false, true])(
+    'fails a program that cannot start as the shell would (served %s)',
+    async (inFolder) => {
+      const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
+      const tool = join(dir, 'mirage-broken')
+      await writeFile(tool, '#!/no/such/interpreter\n')
+      await chmod(tool, 0o755)
+      const rt = new LocalRuntime({ captures: ['@external'] })
+      vi.stubEnv('PATH', dir)
+      const names = inFolder ? serve(dir) : []
+      try {
+        const result = await runProcess(rt, ['mirage-broken'], dir)
+        expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
+          126,
+          'mirage-broken: cannot execute: No such file or directory\n',
+        ])
+      } finally {
+        unserve(names)
+        vi.unstubAllEnvs()
+        await rt.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.skipIf(process.platform === 'win32').each([false, true])(
+    'fails a FIFO instead of waiting on it (served %s)',
+    async (inFolder) => {
+      const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
+      const fifo = join(dir, 'mirage-fifo')
+      execFileSync('mkfifo', [fifo])
+      await chmod(fifo, 0o755)
+      const rt = new LocalRuntime({ captures: ['@external'] })
+      const names = inFolder ? serve(dir) : []
+      try {
+        const result = await runProcess(rt, ['./mirage-fifo'], dir)
+        expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
+          126,
+          './mirage-fifo: cannot execute: Permission denied\n',
+        ])
+      } finally {
+        unserve(names)
+        await rt.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  // The host follows a link before the `..` after it.
+  it.skipIf(process.platform === 'win32').each([false, true])(
+    'runs a script under its interpreter path as spelled (served %s)',
+    async (inFolder) => {
+      const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
+      const root = join(dir, 'José')
+      await mkdir(join(root, 'real', 'sub'), { recursive: true })
+      await mkdir(join(root, 'real', 'bin'))
+      await symlink('/bin/sh', join(root, 'real', 'bin', 'sh'))
+      await symlink(join(root, 'real', 'sub'), join(root, 'link'))
+      const tool = join(dir, 'mirage-spelled')
+      await writeFile(tool, `#!${root}/link/../bin/sh\necho ran\n`)
+      await chmod(tool, 0o755)
+      const rt = new LocalRuntime({ captures: ['@external'] })
+      vi.stubEnv('PATH', dir)
+      const names = inFolder ? serve(dir) : []
+      try {
+        const result = await runProcess(rt, ['mirage-spelled'], dir)
+        expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
+      } finally {
+        unserve(names)
+        vi.unstubAllEnvs()
+        await rt.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  )
 
   it('finds a program by its PATHEXT suffix on Windows', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))

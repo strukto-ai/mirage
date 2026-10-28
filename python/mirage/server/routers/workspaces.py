@@ -38,6 +38,7 @@ from mirage.server.clone import (
     build_override_mounts,
     clone_workspace_with_override,
 )
+from mirage.server.constants import MAX_SNAPSHOT_BYTES
 from mirage.server.multipart import (
     MAX_REQUEST_PART,
     MAX_SNAPSHOT_PART,
@@ -522,7 +523,12 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
             )
         try:
             ws = await Workspace.load(
-                source, mounts=mounts, secrets=secrets, s3=store
+                source,
+                mounts=mounts,
+                secrets=secrets,
+                s3=store,
+                max_snapshot_bytes=MAX_SNAPSHOT_BYTES,
+                max_snapshot_encoded_bytes=MAX_SNAPSHOT_PART,
             )
         except FileNotFoundError:
             raise HTTPException(

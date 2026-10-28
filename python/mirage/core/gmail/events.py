@@ -18,8 +18,6 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any
 
-import aiohttp
-
 from mirage.accessor.gmail import GmailAccessor
 from mirage.core.gmail.api import GmailApi
 from mirage.core.gmail.messages import _extract_attachments, _extract_header
@@ -29,6 +27,7 @@ from mirage.core.gmail.readdir import (
     _date_from_internal,
     _msg_filename,
 )
+from mirage.core.google.client import GoogleApiError
 from mirage.events.base import DeltaHook
 from mirage.events.delta import changes_between, changes_under, lost_at
 from mirage.types import Delta, FileChangeKind, PathSpec
@@ -184,7 +183,7 @@ class GmailDeltaHook:
         observed = datetime.now(timezone.utc)
         try:
             records, latest = await gmail.list_history(start)
-        except aiohttp.ClientResponseError as exc:
+        except GoogleApiError as exc:
             if exc.status != HTTPStatus.NOT_FOUND:
                 raise
             logger.debug("gmail history %s is gone: %s", start, exc)
@@ -217,7 +216,7 @@ class GmailDeltaHook:
                 continue
             try:
                 raw = await gmail.get_message_raw(mid)
-            except aiohttp.ClientResponseError as exc:
+            except GoogleApiError as exc:
                 if exc.status != HTTPStatus.NOT_FOUND:
                     raise
                 logger.debug("gmail message %s is gone: %s", mid, exc)

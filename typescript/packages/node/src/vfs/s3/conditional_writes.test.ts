@@ -262,6 +262,63 @@ describe('conditional writes on an S3 mount', () => {
     return data === undefined ? undefined : DEC.decode(data)
   }
 
+  it.each([WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL])(
+    'preserves a concurrent append when missing-file creation is delayed: %s',
+    async (policy) => {
+      const a = workspace(policy)
+      const b = workspace(policy)
+      let release = (): void => undefined
+      const allowed = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const waiting = new Promise<void>((resolve) => {
+        mock.before('PutObject', async () => {
+          resolve()
+          await allowed
+        })
+      })
+      const pending = run(a, "printf 'line_a\\n' >> /s3/new_f")
+      try {
+        await waiting
+        expect(await run(b, "printf 'line_b\\n' >> /s3/new_f")).toEqual([0, '', ''])
+        expect(object('new_f')).toBe('line_b\n')
+      } finally {
+        release()
+      }
+      const [code, , error] = await pending
+      expect(object('new_f')).toBe('line_b\n')
+      expect(code).toBe(1)
+      expect(error).toContain(STALE)
+    },
+  )
+
+  it.each(
+    [WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL].flatMap((policy) =>
+      (['append', 'pwrite', 'empty-pwrite', 'truncate'] as const).map((operation) => ({
+        policy,
+        operation,
+      })),
+    ),
+  )(
+    'preserves a competing creation during $operation under $policy',
+    async ({ policy, operation }) => {
+      const ws = workspace(policy)
+      mock.before('PutObject', () => {
+        theirs('new_f')
+      })
+      const task =
+        operation === 'append'
+          ? ws.vfs.append('/s3/new_f', ENC.encode('mine'))
+          : operation === 'truncate'
+            ? ws.vfs.truncate('/s3/new_f', 3)
+            : ws.vfs.pwrite('/s3/new_f', ENC.encode(operation === 'empty-pwrite' ? '' : 'mine'), 0)
+      await expect(task).rejects.toMatchObject({ code: 'STALE_WRITE' })
+      expect(object('new_f')).toBe('theirs\n')
+      expect(sent('PutObject')).toEqual([{ IfNoneMatch: '*' }])
+      expect(DEC.decode(await ws.vfs.read('/s3/new_f'))).toBe('theirs\n')
+    },
+  )
+
   it.each([
     [
       'redirect',
@@ -962,7 +1019,7 @@ describe('conditional writes on an S3 mount', () => {
     expect([code, err]).toEqual([0, ''])
   })
 
-  it('sends no condition from an unconditional mount', async () => {
+  it('leaves ordinary unconditional replacements unguarded', async () => {
     const ws = workspace(WritePolicy.UNCONDITIONAL)
     for (const line of [
       'cat /s3/f',
@@ -976,6 +1033,9 @@ describe('conditional writes on an S3 mount', () => {
       expect((await run(ws, line))[0], line).toBe(0)
     }
     expect(mutations().every(([, params]) => Object.keys(params).length === 0)).toBe(true)
+    mock.ledger.length = 0
+    expect(await run(ws, 'echo new >> /s3/new')).toEqual([0, '', ''])
+    expect(sent('PutObject')).toEqual([{ IfNoneMatch: '*' }, {}])
     // Nor does it keep a version without bytes: a read that keeps none
     // leaves no token behind.
     expect((await run(ws, 'head -c 1 /s3/g'))[0]).toBe(0)

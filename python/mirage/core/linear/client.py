@@ -19,6 +19,7 @@ import aiohttp
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.core.api.client import api_request
+from mirage.core.api.errors import ApiError
 from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.queries import (
     COMMENT_CREATE_MUTATION,
@@ -43,7 +44,9 @@ from mirage.types import JsonValue
 from mirage.vfs.secrets import reveal_secret
 
 
-class LinearAPIError(RuntimeError):
+class LinearAPIError(ApiError):
+    """A Linear call that failed; ``errors`` is the GraphQL error list."""
+
     def __init__(
         self,
         message: str,
@@ -51,9 +54,8 @@ class LinearAPIError(RuntimeError):
         errors: list[dict[str, Any]] | None = None,
         status: int | None = None,
     ) -> None:
-        super().__init__(message)
+        super().__init__(message, status)
         self.errors = errors if errors is not None else []
-        self.status = status
 
 
 def linear_headers(config: LinearConfig) -> dict[str, str]:

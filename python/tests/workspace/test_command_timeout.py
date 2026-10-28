@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import logging
 import time
 from functools import partial
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -31,6 +33,7 @@ from mirage.shell.console import Channel
 from mirage.types import Limit, OnExceed
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.executor.redirect import PipeRecorder
 from mirage.workspace.expand import parts as expand_parts
 from mirage.workspace.expand.brace import substitute
 from mirage.workspace.lookup.lookup import programs
@@ -198,6 +201,26 @@ async def test_a_job_runs_under_the_line_limit_from_its_own_start(job):
     assert (
         await done.console.snapshot(Channel.STDERR)
     ) == b"line: timed out after 0.2s\n"
+    assert not list(ws.processes.live())
+
+
+@pytest.mark.asyncio
+async def test_output_cleanup_failure_preserves_job_timeout(
+    monkeypatch, caplog
+):
+    take = AsyncMock(side_effect=OSError(errno.EIO, "spool lost a write"))
+    monkeypatch.setattr(PipeRecorder, "take", take)
+    ws = _ws(line=0.05)
+    with caplog.at_level(logging.DEBUG):
+        assert (await ws.shell("sleep 5 > /data/g &")).exit_code == 0
+        await ws.job_table.wait(1, ws.default_session_id)
+    done = ws.job_table.get(1, ws.default_session_id)
+    assert done.exit_code == 124
+    assert (await done.console.snapshot(Channel.STDERR)) == (
+        b"line: timed out after 0.05s\n"
+    )
+    take.assert_awaited_once()
+    assert "spool lost a write" in caplog.text
     assert not list(ws.processes.live())
 
 

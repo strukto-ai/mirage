@@ -16,6 +16,7 @@ from typing import Any
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import (
+    condition_version,
     native_condition,
     stale,
     write_condition,
@@ -93,8 +94,8 @@ async def retaken(
     """
     if cond is None or exc.status != CONFLICT_STATUS:
         return None
-    if cond.if_match and exc.conflict in (None, "file"):
-        return await stale(dst, version=cond.if_match)
+    if condition_version(cond) and exc.conflict in (None, "file"):
+        return await stale(dst, version=condition_version(cond))
     return await stale(dst, gone=True)
 
 

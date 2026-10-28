@@ -29,7 +29,11 @@ from mirage.runtime.sandbox.constants import (
 )
 from mirage.runtime.sandbox.e2b import sdk
 from mirage.runtime.sandbox.e2b.config import E2BConfig
-from mirage.runtime.sandbox.e2b.constants import BROKEN_PIPE, PTY_MARK, PTY_RAW
+from mirage.runtime.sandbox.e2b.constants import (
+    CLOSED_INPUT,
+    PTY_MARK,
+    PTY_RAW,
+)
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
@@ -179,7 +183,9 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
                     isinstance(exc, sdk.NotFoundException)
                     or (
                         isinstance(exc, sdk.SandboxException)
-                        and BROKEN_PIPE in str(exc)
+                        and any(
+                            message in str(exc) for message in CLOSED_INPUT
+                        )
                     )
                 ),
             )

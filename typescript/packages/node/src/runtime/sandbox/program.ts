@@ -15,9 +15,9 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process'
 import { constants, hostname } from 'node:os'
 import { once } from 'node:events'
-import { constants as fsConstants } from 'node:fs'
-import { access, stat } from 'node:fs/promises'
-import { delimiter, resolve } from 'node:path'
+import { constants as fsConstants, realpathSync } from 'node:fs'
+import { access, open, stat } from 'node:fs/promises'
+import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
@@ -37,8 +37,57 @@ import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import { shellJoin } from '@struktoai/mirage-core/shell/join'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
+
+/**
+ * Host folders a kernel mount in this process serves. A child started in
+ * one, or from one, would wait inside its spawn on the loop that answers
+ * for the folder, the very loop spawning it, so it starts outside and
+ * EXEC_PRELUDE takes it in once the spawn has returned. Each name counts the
+ * mounts recording it, so one going down leaves another at its path. Mirrors
+ * Python's `SERVED`.
+ */
+export const SERVED = new Map<string, number>()
+
+/**
+ * Record `folder` in `SERVED` under each name a child's path may give it: as
+ * given, made absolute, and with its parent's links resolved. Only the parent
+ * is read, never the mount, so recording it waits on no loop. Returns the
+ * names added, for `unserve` once the mount is gone. Mirrors Python's `serve`.
+ */
+export function serve(folder: string): string[] {
+  const given = resolve(folder)
+  const names = [given]
+  try {
+    names.push(join(realpathSync(dirname(given)), basename(given)))
+  } catch (err) {
+    debuglog('mirage')('cannot resolve the parent of %s: %s', given, err)
+  }
+  for (const name of names) SERVED.set(name, (SERVED.get(name) ?? 0) + 1)
+  return names
+}
+
+/**
+ * Take one mount's names out of `SERVED`; a name another mount still records
+ * stays. Mirrors Python's `unserve`.
+ */
+export function unserve(names: string[]): void {
+  for (const name of names) {
+    const left = (SERVED.get(name) ?? 0) - 1
+    if (left > 0) SERVED.set(name, left)
+    else SERVED.delete(name)
+  }
+}
+
+/** Whether `path` lies in a folder a kernel mount here serves. */
+function served(path: string): boolean {
+  for (const folder of SERVED.keys()) {
+    if (path === folder || path.startsWith(`${rstripSlash(folder)}/`)) return true
+  }
+  return false
+}
 
 /**
  * Where the host's own PATH finds a program, as Python's `shutil.which`
@@ -114,6 +163,65 @@ async function untilInputCloses<T>(
 }
 
 /**
+ * Reject as spawn would for a program that is no regular file, or a script
+ * whose `#!` interpreter is missing or cannot run: through `EXEC_PRELUDE` the
+ * shell's exec fails instead, with the shell's status and words. Opened
+ * without waiting, so a FIFO fails rather than hangs, and each path is kept as
+ * spelled, as the host follows its links before its `..`. Mirrors Python's
+ * `_check_interpreter`.
+ */
+async function checkInterpreter(executable: string, cwd: string | undefined): Promise<void> {
+  const base = cwd ?? '.'
+  const under = (path: string): string => (path.startsWith('/') ? path : `${base}/${path}`)
+  const failure = (code: 'ENOENT' | 'EACCES'): NodeJS.ErrnoException =>
+    Object.assign(new Error(`spawn ${executable} ${code}`), {
+      code,
+      errno: -constants.errno[code],
+      syscall: `spawn ${executable}`,
+      path: executable,
+    })
+  let head: Buffer | null
+  try {
+    const file = await open(under(executable), fsConstants.O_RDONLY | fsConstants.O_NONBLOCK)
+    try {
+      if ((await file.stat()).isFile()) {
+        const { buffer, bytesRead } = await file.read(Buffer.alloc(256), 0, 256, 0)
+        head = buffer.subarray(0, bytesRead)
+      } else head = null
+    } finally {
+      await file.close()
+    }
+  } catch (err) {
+    debuglog('mirage')("reading %s's first line failed: %s", executable, String(err))
+    return
+  }
+  if (head === null) throw failure('EACCES')
+  if (head[0] !== 0x23 || head[1] !== 0x21) return
+  const end = head.indexOf(0x0a, 2)
+  const name = head
+    .subarray(2, end === -1 ? head.length : end)
+    .toString('utf8')
+    .trim()
+    .split(/\s+/)[0]
+  if (name === undefined || name === '') return
+  const interpreter = under(name)
+  if (
+    !(await stat(interpreter).then(
+      () => true,
+      () => false,
+    ))
+  )
+    throw failure('ENOENT')
+  if (
+    !(await access(interpreter, fsConstants.X_OK).then(
+      () => true,
+      () => false,
+    ))
+  )
+    throw failure('EACCES')
+}
+
+/**
  * One process run to its end: its output and its exit status. The child
  * leads a process group of its own, and an aborted call kills the whole
  * group and stops reading the pipes: a grandchild left alive, or one that
@@ -125,7 +233,8 @@ async function untilInputCloses<T>(
  * with the runner. A missing executable rejects with `hint` when one is given, else with
  * spawn's own error. EPIPE means the command exited without draining its
  * stdin (`head`-like), so it is not an error. An input pull still pending
- * when the child exits is left to close on its own. Mirrors Python's
+ * when the child exits is left to close on its own. One in or from a
+ * `SERVED` folder starts through `EXEC_PRELUDE`. Mirrors Python's
  * `run_program`.
  */
 export async function runProgram(
@@ -139,12 +248,29 @@ export async function runProgram(
   signal?.throwIfAborted()
   // Read now: an abort's listener runs as the caller that aborted.
   const runner = currentCaller().process
-  const child = spawn(executable, args, {
-    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-    ...(options.env !== undefined ? { env: options.env } : {}),
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: process.platform !== 'win32',
-  })
+  const { cwd } = options
+  const prelude =
+    process.platform !== 'win32' && (served(executable) || (cwd !== undefined && served(cwd)))
+  if (prelude) {
+    try {
+      await checkInterpreter(executable, cwd)
+    } catch (error) {
+      throw (error as NodeJS.ErrnoException).code === 'ENOENT' && hint !== null
+        ? new Error(hint)
+        : error
+    }
+    if (signal?.aborted === true) throw makeAbortError(signal)
+  }
+  const child = spawn(
+    prelude ? '/bin/sh' : executable,
+    prelude ? ['-c', EXEC_PRELUDE, 'sh', cwd ?? '.', executable, ...args] : args,
+    {
+      ...(cwd !== undefined && !prelude ? { cwd } : {}),
+      ...(options.env !== undefined ? { env: options.env } : {}),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
+    },
+  )
   // Set by the abort listener, which flow analysis does not follow.
   let stopping = null as Promise<void> | null
   const abort = (): void => {

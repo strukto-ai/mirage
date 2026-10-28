@@ -16,9 +16,8 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
-import aiohttp
-
 from mirage.accessor.discord import DiscordAccessor
+from mirage.core.api.errors import ApiError
 from mirage.core.discord.channels import TEXT_CHANNEL_TYPES
 from mirage.core.discord.client import discord_get
 from mirage.core.discord.constants import (
@@ -113,7 +112,7 @@ class DiscordEventHook:
         if cached is None:
             try:
                 guild = await self._get(f"/guilds/{guild_id}")
-            except aiohttp.ClientResponseError as exc:
+            except ApiError as exc:
                 if exc.status != 404:
                     raise
                 logger.debug("discord guild %s is gone: %s", guild_id, exc)
@@ -134,7 +133,7 @@ class DiscordEventHook:
         if cached is None:
             try:
                 cached = await self._get(f"/channels/{channel_id}")
-            except aiohttp.ClientResponseError as exc:
+            except ApiError as exc:
                 if exc.status != 404:
                     raise
                 logger.debug("discord channel %s is gone: %s", channel_id, exc)

@@ -13,7 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import bz2
+import gzip
 import io
+import lzma
 import os
 from collections.abc import Iterator
 
@@ -24,12 +27,99 @@ from moto.server import ThreadedMotoServer
 from mirage import MountMode, Workspace
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3.config import S3Config
+from mirage.workspace.snapshot import api as snapshot_api
+from mirage.workspace.snapshot.tar_io import read_tar, write_tar
 
 CREDS = dict(
     aws_access_key_id="testing",
     aws_secret_access_key="testing",
     region_name="us-east-1",
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("compress", [None, "gz", "bz2", "xz"])
+async def test_stored_snapshot_uses_the_expanded_budget(monkeypatch, compress):
+    buffer = io.BytesIO()
+    write_tar(buffer, {"padding": "x" * 128_000}, {})
+    if compress is not None:
+        buffer = io.BytesIO(
+            {"gz": gzip.compress, "bz2": bz2.compress, "xz": lzma.compress}[
+                compress
+            ](buffer.getvalue())
+        )
+    requests = []
+
+    async def read(accessor, path, offset=0, size=None):
+        requests.append(size)
+        return buffer.getvalue()[:size]
+
+    monkeypatch.setattr(snapshot_api, "read", read)
+    with pytest.raises(
+        ValueError, match="snapshot exceeds expanded size limit"
+    ):
+        await Workspace.load(
+            "large.tar",
+            s3=S3Config(bucket="snaps"),
+            max_snapshot_bytes=32_768,
+            max_snapshot_encoded_bytes=262_144,
+        )
+    assert requests == [262_145]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_file_load_budget_is_optional(tmp_path):
+    ws = await _written()
+    path = tmp_path / "w.tar"
+    try:
+        size = await ws.snapshot(path)
+        with pytest.raises(
+            ValueError, match="snapshot exceeds expanded size limit"
+        ):
+            await Workspace.load(path, max_snapshot_bytes=1)
+        restored = await Workspace.load(path, max_snapshot_bytes=size)
+        try:
+            assert await _cat(restored) == "kept\n"
+        finally:
+            await restored.close()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_stored_compressed_snapshot_at_the_expanded_boundary(
+    monkeypatch,
+):
+    buffer = io.BytesIO()
+    write_tar(buffer, {}, {})
+    plain = buffer.getvalue()
+    data = gzip.compress(plain, compresslevel=0)
+    assert len(data) > len(plain) + 1
+    assert read_tar(io.BytesIO(data), max_bytes=len(plain)) == {}
+
+    async def read(accessor, path, offset=0, size=None):
+        return data[:size]
+
+    monkeypatch.setattr(snapshot_api, "read", read)
+    for encoded_limit in (None, len(data)):
+        assert (
+            await snapshot_api.read_snapshot(
+                "boundary.tar.gz",
+                s3=S3Config(bucket="snaps"),
+                max_bytes=len(plain),
+                max_encoded_bytes=encoded_limit,
+            )
+            == {}
+        )
+    with pytest.raises(
+        ValueError, match="snapshot exceeds encoded size limit"
+    ):
+        await snapshot_api.read_snapshot(
+            "boundary.tar.gz",
+            s3=S3Config(bucket="snaps"),
+            max_bytes=len(plain),
+            max_encoded_bytes=len(data) - 1,
+        )
 
 
 @pytest.fixture()

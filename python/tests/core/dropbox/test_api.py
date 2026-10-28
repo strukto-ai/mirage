@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.cache.types import WriteCondition
+from mirage.cache.types import MatchWrite
 from mirage.context.session_context import (
     bind_caller,
     current_caller,
@@ -232,7 +232,7 @@ async def _refuse(
     )
     try:
         path = PathSpec(virtual="/dbx/f", directory="/dbx/", vfs_path="/f")
-        got = await api.refused(path, exc, WriteCondition("s1"), sent)
+        got = await api.refused(path, exc, MatchWrite("s1"), sent)
     finally:
         reset_caller(prev)
     return store, got

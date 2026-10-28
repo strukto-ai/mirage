@@ -15,11 +15,11 @@
 import aiohttp
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from mirage.core.api.errors import ApiError
 
-class TiDBFilesystemApiError(Exception):
-    def __init__(self, status_code: int, message: str) -> None:
-        super().__init__(message)
-        self.status_code = status_code
+
+class TiDBFilesystemApiError(ApiError):
+    """A TiDB filesystem API call that failed."""
 
 
 class _ErrorBody(BaseModel):
@@ -34,14 +34,12 @@ def error_of(
         body = _ErrorBody.model_validate_json(text)
     except ValidationError:
         return TiDBFilesystemApiError(
-            response.status, text or f"HTTP {response.status}"
+            text or f"HTTP {response.status}", response.status
         )
     return TiDBFilesystemApiError(
-        response.status, body.error or text or f"HTTP {response.status}"
+        body.error or text or f"HTTP {response.status}", response.status
     )
 
 
 def has_status(exc: Exception, status: int) -> bool:
-    return isinstance(exc, TiDBFilesystemApiError) and (
-        exc.status_code == status
-    )
+    return isinstance(exc, TiDBFilesystemApiError) and (exc.status == status)

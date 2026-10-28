@@ -57,15 +57,23 @@ export async function snapshot(
  * themselves, or with `s3` a key of an S3-like store. With `staging`, a
  * file's disk mount files are extracted under that directory and come
  * back as host paths rather than bytes.
+ * `maxBytes` limits expanded and restored bytes; `maxEncodedBytes`
+ * independently limits the encoded object fetched from S3.
  */
 export async function readSnapshot(
   source: string | Uint8Array,
-  options: { s3?: S3Config; staging?: string } = {},
+  options: { s3?: S3Config; staging?: string; maxBytes?: number; maxEncodedBytes?: number } = {},
 ): Promise<unknown> {
-  if (typeof source !== 'string') return readSnapshotTar(source)
+  if (typeof source !== 'string') return readSnapshotTar(source, null, options.maxBytes)
   if (options.s3 !== undefined) {
-    return readSnapshotTar(await readObject(new S3Accessor(options.s3), keyPath(source)))
+    const data = await readObject(new S3Accessor(options.s3), keyPath(source), {
+      ...(options.maxEncodedBytes !== undefined ? { size: options.maxEncodedBytes + 1 } : {}),
+    })
+    if (options.maxEncodedBytes !== undefined && data.byteLength > options.maxEncodedBytes) {
+      throw new Error('snapshot exceeds encoded size limit')
+    }
+    return readSnapshotTar(data, null, options.maxBytes)
   }
-  if (options.staging !== undefined) return readTar(source, options.staging)
-  return readSnapshotTar(await readFileBytes(source))
+  if (options.staging !== undefined) return readTar(source, options.staging, options.maxBytes)
+  return readSnapshotTar(await readFileBytes(source), null, options.maxBytes)
 }

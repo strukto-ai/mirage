@@ -28,11 +28,11 @@ vi.mock('../../core/s3/write.ts', () => ({
 }))
 
 vi.mock('../../core/s3/read.ts', () => ({
-  read: (accessor: { config: S3Config }, path: PathSpec) => {
+  read: (accessor: { config: S3Config }, path: PathSpec, options: { size?: number } = {}) => {
     const data = objects.get(`${accessor.config.bucket}${path.virtual}`)
     if (data === undefined)
       return Promise.reject(Object.assign(new Error('gone'), { code: 'ENOENT' }))
-    return Promise.resolve(data)
+    return Promise.resolve(options.size === undefined ? data : data.subarray(0, options.size))
   },
 }))
 
@@ -57,6 +57,53 @@ afterEach(() => {
 })
 
 describe('Workspace.snapshot', () => {
+  it('keeps stored input and expanded archive limits independent', async () => {
+    const ws = await written()
+    try {
+      await ws.snapshot('limits.tar', { s3: STORE })
+      const data = objects.get('snaps/limits.tar')
+      if (data === undefined) throw new Error('snapshot was not stored')
+      const restored = await Workspace.load('limits.tar', {
+        s3: STORE,
+        maxSnapshotBytes: data.byteLength,
+        maxSnapshotEncodedBytes: data.byteLength,
+      })
+      try {
+        expect(await cat(restored)).toBe('kept\n')
+      } finally {
+        await restored.close()
+      }
+      await expect(
+        Workspace.load('limits.tar', {
+          s3: STORE,
+          maxSnapshotBytes: data.byteLength,
+          maxSnapshotEncodedBytes: data.byteLength - 1,
+        }),
+      ).rejects.toThrow('snapshot exceeds encoded size limit')
+      await expect(
+        Workspace.load('limits.tar', {
+          s3: STORE,
+          maxSnapshotBytes: 1,
+          maxSnapshotEncodedBytes: data.byteLength,
+        }),
+      ).rejects.toThrow('snapshot exceeds expanded size limit')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('applies the load budget to stored snapshots', async () => {
+    const ws = await written()
+    try {
+      await ws.snapshot('large.tar', { s3: STORE })
+      await expect(Workspace.load('large.tar', { s3: STORE, maxSnapshotBytes: 1 })).rejects.toThrow(
+        'snapshot exceeds expanded size limit',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('round-trips through the bytes it answers', async () => {
     const tar = await (await written()).snapshot()
     expect(tar.byteLength).toBeGreaterThan(0)

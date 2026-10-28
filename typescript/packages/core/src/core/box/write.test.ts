@@ -91,7 +91,8 @@ import { readdir } from './readdir.ts'
 import { rename } from './rename.ts'
 import { rmR, rmdir } from './rmdir.ts'
 import { unlink } from './unlink.ts'
-import { write } from './write.ts'
+import { replace, write } from './write.ts'
+import { runWithWriteContext } from '../../cache/context.ts'
 
 const STUB_TM = new BoxTokenManager({ accessToken: 't' })
 
@@ -145,6 +146,62 @@ describe('box write ops', () => {
     vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
       Promise.resolve(TREE[folderId] ?? []),
     )
+  })
+
+  it('commits the explicit condition instead of the ambient cached version', async () => {
+    vi.mocked(api.listFolderItems).mockImplementation((_tm, folder) =>
+      Promise.resolve(
+        folder === '100'
+          ? [{ type: 'file', id: '200', name: 'a.txt', size: 1, sha1: 'live', etag: '7' }]
+          : (TREE[folder] ?? []),
+      ),
+    )
+    const body = new Uint8Array([9])
+    await runWithWriteContext(
+      '/',
+      {
+        vfs: 'box',
+        conditions: ['put'],
+        readVersion: () => Promise.resolve('cached'),
+        readVersions: (paths) => Promise.resolve(paths.map(() => 'cached')),
+        drop: () => Promise.resolve(),
+        keep: () => Promise.resolve(),
+      },
+      () =>
+        replace(makeAccessor(), {
+          path: spec('/data/a.txt'),
+          body,
+          condition: { kind: 'match', version: 'live' },
+        }),
+    )
+    expect(api.uploadFileVersion).toHaveBeenCalledWith(STUB_TM, '200', 'a.txt', body, '7')
+  })
+
+  it('closes an already-started body when create-only is unsupported', async () => {
+    vi.mocked(api.uploadFileVersion).mockClear()
+    vi.mocked(api.uploadNewFile).mockClear()
+    const chunk = new Uint8Array([9])
+    let closed = false
+    async function* source() {
+      try {
+        yield await Promise.resolve(chunk)
+        yield chunk
+      } finally {
+        closed = true
+      }
+    }
+    const body = source()
+    await body.next()
+    await expect(
+      replace(makeAccessor(), {
+        path: spec('/data/a.txt'),
+        body,
+        condition: { kind: 'absent' },
+      }),
+    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+    expect(closed).toBe(true)
+    expect(api.uploadFileVersion).not.toHaveBeenCalled()
+    expect(api.uploadNewFile).not.toHaveBeenCalled()
   })
 
   it('uploads a new file under the resolved parent', async () => {

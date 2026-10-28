@@ -20,6 +20,7 @@ import aiohttp
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.readdir import readdir, stat_from_item
+from mirage.core.google.client import GoogleApiError
 from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 
@@ -170,7 +171,7 @@ async def tree(
         left = None if limit is None else limit - len(found) + 1
         try:
             children = await list_level(accessor, list(level.values()), left)
-        except (OSError, aiohttp.ClientError) as exc:
+        except (OSError, aiohttp.ClientError, GoogleApiError) as exc:
             logger.debug(
                 "drive tree of %s left to the walk: %s", path.virtual, exc
             )

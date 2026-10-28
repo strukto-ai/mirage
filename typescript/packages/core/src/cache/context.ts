@@ -20,6 +20,9 @@ import { currentCaller, liveCallers, runWithCaller } from '../context/session_co
 import { keyPath, underPath } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import {
+  ANY_WRITE,
+  ABSENT_WRITE,
+  type ConditionSupport,
   type CacheContextState,
   type CacheInvalidator,
   type KnownVersions,
@@ -27,6 +30,7 @@ import {
   OwnRead,
   type WriteCondition,
   type WriteContext,
+  type WriteBinding,
   type WriteKind,
 } from './types.ts'
 
@@ -127,18 +131,6 @@ export function publishRead(path: string, data: Uint8Array, fingerprint: string 
   }
 }
 
-/** The write context of the mount at `prefix`. */
-export interface WriteBinding {
-  prefix: string
-  context: WriteContext | null
-}
-
-/** The version a write's own read stamped on `path`. */
-export interface OwnVersionBinding {
-  path: string
-  version: string | OwnRead | null
-}
-
 // The cache a backend's writes report to, and what its reads and writes
 // note, on the caller: added here, where their shapes live, so the
 // caller's module imports no cache module.
@@ -147,7 +139,6 @@ declare module '../context/session_context.ts' {
     readonly cache: CacheContextState | null
     readonly readFacts: ReadFacts | null
     readonly write: WriteBinding | null
-    readonly ownVersion: OwnVersionBinding | null
   }
 }
 
@@ -198,32 +189,20 @@ function overlapping(path: PathSpec): FsError {
   return enotsup('workspace', 'conditional write (overlapping lines)', path)
 }
 
-/**
- * Hand the version an op just read to the write it makes next: a
- * read-modify-write op (an append, a descriptor pwrite, a resize) bases its
- * write on what it read itself, not on what the agent read.
- */
-export function runWithOwnVersion<T>(
-  path: PathSpec,
-  version: string | OwnRead | null,
-  fn: () => Promise<T>,
-): Promise<T> {
-  return runWithCaller({ ...currentCaller(), ownVersion: { path: path.virtual, version } }, fn)
+export function conditionVersion(condition: WriteCondition | null): string | null {
+  return condition?.kind === 'match' ? condition.version : null
 }
 
-/**
- * The version an op read itself, handed down to its write of the same path.
- * On the fallback storage another line's op may hold a frame at once; only
- * frames for this path answer, and those that disagree are refused rather
- * than read as "none", which would send the agent's version in place of the
- * op's own.
- */
-function ownVersion(path: PathSpec): string | OwnRead | null {
-  const states = liveCallers()
-    .flatMap((caller) => (caller.ownVersion === null ? [] : [caller.ownVersion]))
-    .filter((state) => state.path === path.virtual)
-  if (!agree(states, (state) => state.version)) throw overlapping(path)
-  return states[0]?.version ?? null
+export function requireSupported(
+  support: ConditionSupport,
+  vfs: string,
+  path: PathSpec,
+  kind: WriteKind,
+  condition: WriteCondition,
+): void {
+  if (condition.kind !== 'any' && !(support[kind] ?? []).includes(condition.kind)) {
+    throw enotsup(vfs, `conditional ${kind} (${condition.kind})`, path)
+  }
 }
 
 /**
@@ -242,22 +221,32 @@ export async function readVersioned<T>(
 }
 
 /**
- * The condition a write to `path` must carry, null when unconditional: the
- * op's own read's version, handed down by `runWithOwnVersion`, else the
- * mount's cached one; with none, the write goes out plain. Mirrors Python's
- * `write_condition`.
+ * Resolve explicit read evidence and mount policy into a destination condition.
+ * PUT returns Any, Absent, or Match; copy and delete return null outside
+ * conditional policy. Mirrors Python's `write_condition`.
  *
  * @throws a stale-write error when the op found removed a file the mount saw
  * @throws an ENOTSUP error when the backend cannot condition this op
  */
+export function writeCondition(
+  path: PathSpec,
+  kind: 'put',
+  own?: string | OwnRead | null,
+): Promise<WriteCondition>
+export function writeCondition(
+  path: PathSpec,
+  kind: 'copy' | 'delete',
+  own?: string | OwnRead | null,
+): Promise<WriteCondition | null>
 export async function writeCondition(
   path: PathSpec,
   kind: WriteKind,
+  own: string | OwnRead | null = null,
 ): Promise<WriteCondition | null> {
   const context = activeWriteContext(path)
-  if (context === null) return null
-  const cached = await context.readVersion(path)
-  return settle(context, path, kind, ownVersion(path), cached)
+  if (context === null)
+    return kind === 'put' ? (own === OwnRead.ABSENT ? ABSENT_WRITE : ANY_WRITE) : null
+  return settle(context, path, kind, own, await context.readVersion(path))
 }
 
 /**
@@ -294,9 +283,9 @@ export async function moveCondition(
   const context = activeWriteContext(dst)
   if (context === null) return [null, null]
   const [dstCached = null, srcCached = null] = await context.readVersions([dst, src])
-  const cond = await settle(context, dst, 'copy', ownVersion(dst), dstCached)
-  const source = await settle(context, src, 'delete', ownVersion(src), srcCached)
-  return [cond, source.ifMatch ?? null]
+  const cond = await settle(context, dst, 'copy', null, dstCached)
+  const source = await settle(context, src, 'delete', null, srcCached)
+  return [cond, conditionVersion(source)]
 }
 
 async function settle(
@@ -310,6 +299,7 @@ async function settle(
   if (read === OwnRead.ABSENT && cached !== null && cached !== '') {
     throw await stale(path, { gone: true })
   }
+  if (read === OwnRead.ABSENT && kind === 'put') return ABSENT_WRITE
   const mine = read === OwnRead.ABSENT ? null : read
   const ownToken = mine === '' ? null : mine
   const cachedToken = cached === '' ? null : cached
@@ -324,7 +314,7 @@ function condition(
 ): WriteCondition {
   // A put with no version goes out plain, so it needs no condition.
   if (kind !== 'put' || version !== null) require(context, path, kind)
-  return version !== null ? { ifMatch: version } : {}
+  return version !== null ? { kind: 'match', version } : ANY_WRITE
 }
 
 function require(context: WriteContext, path: PathSpec, kind: WriteKind): void {
@@ -341,14 +331,14 @@ export async function nativeCondition(
   live: LiveVersion | null,
   kind: WriteKind,
 ): Promise<string | null> {
-  const held = cond?.ifMatch
-  if (held === undefined || held === '') return null
+  if (cond?.kind === 'absent')
+    throw enotsup(activeWriteContext(path)?.vfs ?? 'native', `conditional ${kind} (absent)`, path)
+  const held = conditionVersion(cond)
+  if (held === null || held === '') return null
   if (live === null) throw await stale(path, { gone: true })
   if (live.content !== held) throw await stale(path, { version: held })
   if (live.native === null || live.native === '') {
-    const context = activeWriteContext(path)
-    if (context === null) throw new Error('nativeCondition: a held version outside a write context')
-    throw enotsup(context.vfs, `conditional ${kind}`, path)
+    throw enotsup(activeWriteContext(path)?.vfs ?? 'native', `conditional ${kind}`, path)
   }
   return live.native
 }

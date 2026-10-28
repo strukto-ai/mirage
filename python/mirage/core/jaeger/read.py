@@ -79,7 +79,7 @@ async def _read_trace(
     try:
         trace = await fetch_trace(accessor, match.slots["trace_id"])
     except JaegerApiError as exc:
-        if exc.status_code == 404:
+        if exc.status == 404:
             raise enoent(path.virtual) from exc
         raise
     # Reading by id would otherwise serve any trace through any service

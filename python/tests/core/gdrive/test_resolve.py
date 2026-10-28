@@ -12,10 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 import pytest
-from multidict import CIMultiDict, CIMultiDictProxy
-from yarl import URL
 
 from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.resolve import (
@@ -24,6 +21,7 @@ from mirage.core.gdrive.resolve import (
     parent_folder,
     root_context,
 )
+from mirage.core.google.client import GoogleApiError
 from mirage.types import FileStat, FileType, PathSpec
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
@@ -80,28 +78,23 @@ async def test_root_context_memoizes_drive_lookup(
     assert calls == 1
 
 
+@eacces_on_denied
+async def _denied(accessor, path: PathSpec) -> None:
+    raise GoogleApiError("denied", 403)
+
+
+@eacces_on_denied
+async def _server_error(accessor, path: PathSpec) -> None:
+    raise GoogleApiError("boom", 500)
+
+
 @pytest.mark.asyncio
 async def test_eacces_on_denied_maps_403():
-    request_info = aiohttp.RequestInfo(
-        url=URL("https://x"),
-        method="POST",
-        headers=CIMultiDictProxy(CIMultiDict()),
-        real_url=URL("https://x"),
-    )
-
-    @eacces_on_denied
-    async def denied(accessor, path: PathSpec) -> None:
-        raise aiohttp.ClientResponseError(request_info, (), status=403)
-
-    @eacces_on_denied
-    async def server_error(accessor, path: PathSpec) -> None:
-        raise aiohttp.ClientResponseError(request_info, (), status=500)
-
     spec = PathSpec.from_str_path("/gd/a.txt", "a.txt")
     with pytest.raises(PermissionError, match="/gd/a.txt"):
-        await denied(None, spec)
-    with pytest.raises(aiohttp.ClientResponseError):
-        await server_error(None, spec)
+        await _denied(None, spec)
+    with pytest.raises(GoogleApiError):
+        await _server_error(None, spec)
 
 
 @pytest.mark.asyncio

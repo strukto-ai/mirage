@@ -174,7 +174,8 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             # the shell. Joined, not normalized, so the host follows a
             # `..` past a symlink as written.
             program = os.path.join(cwd, name)
-            refusal = _unrunnable(name, program)
+            # Off the loop too: the path may be in a folder it serves.
+            refusal = await asyncio.to_thread(_unrunnable, name, program)
             if refusal is not None:
                 return refusal
         else:

@@ -24,6 +24,7 @@ import { apiRequest, stallTimeout } from '../api/client.ts'
 import { DEFAULT_TIMEOUT } from '../api/constants.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { BOX_API_BASE, BOX_TOKEN_URL, BOX_UPLOAD_BASE, TOKEN_BUFFER_SECONDS } from './constants.ts'
+import { ApiError } from '../api/errors.ts'
 
 export interface BoxConfig {
   timeout?: number
@@ -70,12 +71,11 @@ function uploadBaseOf(config: BoxConfig): string {
     : BOX_UPLOAD_BASE
 }
 
-export class BoxApiError extends Error {
-  readonly status: number
+export class BoxApiError extends ApiError {
+  declare readonly status: number
   readonly conflict: string | null
   constructor(message: string, status: number, conflict: string | null = null) {
-    super(message)
-    this.status = status
+    super(message, status)
     this.conflict = conflict
     this.name = 'BoxApiError'
   }

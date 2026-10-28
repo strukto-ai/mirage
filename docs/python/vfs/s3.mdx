@@ -164,6 +164,12 @@ from S3. This reduces API calls for repeated directory traversals. A configured 
 
 Under `write: conditional` a write carries the version of the file mirage read, and S3 refuses it when the file has changed since. The endpoint decides which writes can be conditioned: AWS's conditions every write, copy and delete; any other `endpoint_url` (or `AWS_ENDPOINT_URL_S3`/`AWS_ENDPOINT_URL`) only a write, so mirage refuses what would copy or delete there. An endpoint set only in an AWS profile is not read: give a non-AWS server its `endpoint_url`.
 
+An append or another rewrite that observes a missing file uses create-only
+commit under either write policy. S3 checks `If-None-Match: *` at PUT or final
+multipart completion, so a delayed creation cannot replace a competing
+writer's bytes. A lost condition returns an error without automatic retry.
+Existing-file appends under `unconditional` retain last-write-wins behavior.
+
 ## Refused keys
 
 When credentials cannot read an S3 object (S3 returns `AccessDenied`, or a bodiless HTTP 403 response on a `HEAD` request), Mirage reports `EACCES` (`Permission denied`) for that file operand.

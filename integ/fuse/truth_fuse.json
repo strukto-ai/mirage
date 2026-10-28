@@ -54,5 +54,6 @@
   "capacity_kernel_write_refused": true,
   "capacity_kernel_size_zero": true,
   "capacity_shared_with_shell": true,
-  "capacity_kernel_errno_edquot": true
+  "capacity_kernel_errno_edquot": true,
+  "local_program_in_folder": "a.txt"
 }

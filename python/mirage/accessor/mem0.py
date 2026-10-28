@@ -16,8 +16,22 @@ import httpx
 from mem0 import AsyncMemoryClient
 
 from mirage.accessor.base import Accessor
+from mirage.core.api.errors import ApiError
 from mirage.vfs.mem0.config import Mem0Config
 from mirage.vfs.secrets import reveal_secret
+
+
+class Mem0Error(ApiError):
+    """A Mem0 call that answered with a status the caller cannot use.
+
+    Args:
+        status (int): the HTTP status.
+    """
+
+    status: int
+
+    def __init__(self, status: int) -> None:
+        super().__init__(f"Mem0 request failed with status {status}", status)
 
 
 class Mem0Accessor(Accessor):

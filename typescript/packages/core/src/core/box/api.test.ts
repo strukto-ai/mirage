@@ -204,7 +204,7 @@ async function refuse(
   const { context, kept } = keptVersions('box')
   const path = new PathSpec({ virtual: '/box/f', directory: '/box/', vfsPath: '/f' })
   const got = await runWithWriteContext('/box/', context, () =>
-    refused(path, err, { ifMatch: 's1' }, sent),
+    refused(path, err, { kind: 'match', version: 's1' }, sent),
   )
   return [kept, got]
 }

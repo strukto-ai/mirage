@@ -13,17 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from urllib.parse import urlparse
 
 from mirage.cache.types import WriteKind
 from mirage.types import MountMode, WritePolicy
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.types import EndpointVFS
-from mirage.workspace.mount.constants import (
-    AWS_DOMAINS,
-    CUSTOM_ENDPOINT_CONDITIONS,
-    WRITE_CONDITIONS,
-)
 from mirage.workspace.mount.errors import WritePolicyError
 
 
@@ -55,30 +48,17 @@ def coerce_write_policy(value: str | WritePolicy | None) -> WritePolicy:
         ) from None
 
 
-def _aws_endpoint(endpoint: str) -> bool:
-    host = urlparse(endpoint).hostname or ""
-    return any(
-        host == domain or host.endswith("." + domain) for domain in AWS_DOMAINS
-    )
-
-
-def _endpoint(vfs: BaseVFS) -> str | None:
-    return vfs.resolved_endpoint() if isinstance(vfs, EndpointVFS) else None
-
-
 def write_conditions(vfs: BaseVFS) -> frozenset[WriteKind]:
     """The operations whose writes this mount's backend can condition.
 
     Args:
         vfs (BaseVFS): the backend being mounted.
     """
-    conditions = WRITE_CONDITIONS.get(vfs.name, frozenset())
-    if vfs.name != "s3":
-        return conditions
-    endpoint = _endpoint(vfs)
-    if endpoint and not _aws_endpoint(endpoint):
-        return CUSTOM_ENDPOINT_CONDITIONS
-    return conditions
+    return frozenset(
+        kind
+        for kind, modes in vfs.condition_support.items()
+        if "match" in modes
+    )
 
 
 def check_write_capability(

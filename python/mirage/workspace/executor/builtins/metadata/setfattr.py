@@ -18,6 +18,7 @@ import binascii
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_to_kwargs
+from mirage.core.api.errors import ApiError
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, word_text
@@ -135,7 +136,7 @@ async def handle_setfattr(
                 await dispatch(
                     "removexattr", target, name=remove, nofollow=nofollow
                 )
-        except OSError as exc:
+        except (OSError, ApiError) as exc:
             shown = target.raw_path or target.virtual
             errors.append(f"setfattr: {shown}: {attr_error(exc)}\n")
     return finish("setfattr", errors)

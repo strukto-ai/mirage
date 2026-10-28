@@ -632,26 +632,10 @@
         "redis",
         "opfs",
         "s3",
-        "databricks",
-        "gridfs",
         "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "tidb-filesystem",
-        "gdrive",
-        "gdrive-folder",
-        "box"
+        "ssh"
       ],
-      "command": "( : <>/data/new; test -f /data/new; echo created=$?; echo keep >/data/f; set -C; : <>/data/f; cat /data/f )",
+      "command": "( : <>/data/fd_readwrite_create; test -f /data/fd_readwrite_create; echo created=$?; echo keep >/data/f; set -C; : <>/data/f; cat /data/f; rm -f /data/fd_readwrite_create )",
       "expect": {
         "exit": 0,
         "stdout": "created=0\nkeep\n",
@@ -723,13 +707,13 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( echo abcdef >/data/f; exec 3<>/data/f; exec 4<&3; read -u3 -N2 x; printf XY >&4; read -u3 rest; echo $x:$rest; cat /data/f; exec 5<>/data/fnew; test -e /data/fnew && echo made; exec 5>&-; rm /data/fnew; (exec 1<>/data/f; echo XY); cat /data/f; (exec 0<>/data/f; read -n 1 c; echo Z >&0; echo got=$c); cat /data/f )",
+      "command": "( echo abcdef >/data/f; exec 3<>/data/f; exec 4<&3; read -u3 -N2 x; printf XY >&4; read -u3 rest; echo $x:$rest; cat /data/f; : >/data/fnew; exec 5<>/data/fnew; test -e /data/fnew && echo made; exec 5>&-; rm /data/fnew; (exec 1<>/data/f; echo XY); cat /data/f; (exec 0<>/data/f; read -n 1 c; echo Z >&0; echo got=$c); cat /data/f )",
       "expect": {
         "exit": 0,
         "stdout": "ab:ef\nabXYef\nmade\nXY\nYef\ngot=X\nXZ\nYef\n",
         "stderr": ""
       },
-      "note": "Pinned on Debian stable-slim: Bash 5.2.37; UTF-8 reads use C.UTF-8."
+      "note": "Pinned on Debian stable-slim: Bash 5.2.37; UTF-8 reads use C.UTF-8. The temporary fifth descriptor uses an existing file so the case isolates shared offsets. Separate read-write creation cases cover missing targets."
     },
     {
       "id": "shared_fd_read_shared_offset",
@@ -1119,10 +1103,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( export LC_ALL=C.UTF-8; printf '\u00e9abcd\n' >/data/f; exec 3<>/data/f; read -u3 -N1 x; printf XY >&3; cat /data/f )",
+      "command": "( export LC_ALL=C.UTF-8; printf 'éabcd\n' >/data/f; exec 3<>/data/f; read -u3 -N1 x; printf XY >&3; cat /data/f )",
       "expect": {
         "exit": 0,
-        "stdout": "\u00e9XYcd\n",
+        "stdout": "éXYcd\n",
         "stderr": ""
       },
       "note": "Pinned on Debian stable-slim: Bash 5.2.37; UTF-8 reads use C.UTF-8."
@@ -1450,6 +1434,35 @@
         "stderr": ""
       },
       "note": "Pinned against GNU Bash 5.2.37 in debian:stable-slim; aliases and the enclosing stdout share emission order."
+    },
+    {
+      "id": "shared_fd_readwrite_creates_refuses_unprotected_creation",
+      "seq": 982600,
+      "targets": [
+        "databricks",
+        "gridfs",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( : <>/data/fd_readwrite_create; test -f /data/fd_readwrite_create; echo created=$?; echo keep >/data/f; set -C; : <>/data/f; cat /data/f; rm -f /data/fd_readwrite_create )",
+      "expect": {
+        "exit": 0,
+        "stdout": "created=1\nkeep\n",
+        "stderr": "/data/fd_readwrite_create: Operation not supported\n"
+      },
+      "note": "Read-write redirection opens a missing file through append-open. Without native create-only it refuses and leaves no file, while an existing read-write target still preserves its contents under noclobber."
     }
   ]
 }

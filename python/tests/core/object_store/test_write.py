@@ -26,6 +26,7 @@ from mirage.core.object_store.write import (
     make_write,
 )
 from mirage.errors.fs import enoent
+from mirage.errors.types import OperationNotSupportedError
 from mirage.io.cooperative import chunks
 from mirage.observe.context import RecordingScope
 from mirage.types import FileStat, FileType
@@ -42,6 +43,26 @@ async def _stream(data):
 
 async def _reject_lookup(conn, key):
     raise AssertionError("write metadata must not issue a lookup")
+
+
+async def _missing_after_competing_creation(conn, key):
+    conn.objects[key] = b"completed-writer"
+    return None
+
+
+@pytest.mark.asyncio
+async def test_unversioned_missing_truncate_preserves_competing_creation(
+    accessor,
+):
+    store = FakeStore()
+    driver = replace(make_driver(store), get=_missing_after_competing_creation)
+    refused = None
+    try:
+        await make_truncate(driver)(accessor, spec("/f.bin"), 2)
+    except OperationNotSupportedError as exc:
+        refused = exc
+    assert store.objects["f.bin"] == b"completed-writer"
+    assert refused is not None
 
 
 def test_write_puts_the_object(accessor):
@@ -66,10 +87,13 @@ def test_truncate_pads_with_nul(accessor):
     assert store.objects["a/f.bin"] == b"0123"
 
 
-def test_truncate_extends_a_missing_key(accessor):
+def test_missing_truncate_refuses_without_create_only_support(accessor):
     store = FakeStore()
-    asyncio.run(make_truncate(make_driver(store))(accessor, spec("/f.bin"), 3))
-    assert store.objects["f.bin"] == b"\0\0\0"
+    with pytest.raises(OperationNotSupportedError):
+        asyncio.run(
+            make_truncate(make_driver(store))(accessor, spec("/f.bin"), 3)
+        )
+    assert store.objects == {}
 
 
 @pytest.mark.parametrize(
@@ -78,7 +102,7 @@ def test_truncate_extends_a_missing_key(accessor):
 def test_mutation_returns_confirmed_metadata_without_a_lookup(
     accessor, operation
 ):
-    store = FakeStore()
+    store = FakeStore({"a/result.txt": b"before"})
     meta = ObjectMeta(
         size=7,
         fingerprint="confirmed-token",
@@ -125,7 +149,9 @@ def test_mutation_returns_confirmed_metadata_without_a_lookup(
 
 @pytest.mark.parametrize("operation", ["write", "create", "truncate"])
 def test_mutation_without_metadata_returns_none(accessor, operation):
-    driver = replace(make_driver(FakeStore()), put=_put_silently)
+    driver = replace(
+        make_driver(FakeStore({"a/result.txt": b"before"})), put=_put_silently
+    )
     path = spec("/a/result.txt")
     calls = {
         "write": lambda: make_write(driver)(accessor, path, b"hello"),
@@ -288,7 +314,7 @@ async def _put_missing_container(
 
 
 def _enoent_from(fn, path: str) -> FileNotFoundError:
-    store = FakeStore()
+    store = FakeStore({path.strip("/"): b"before"})
     driver = replace(make_driver(store), put=_put_missing_container)
     try:
         asyncio.run(fn(driver, spec(path)))

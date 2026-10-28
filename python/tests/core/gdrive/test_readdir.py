@@ -21,7 +21,7 @@ import pytest
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.readdir import live_row, readdir
 from mirage.core.gdrive.stat import stat
-from mirage.core.google.client import TokenManager
+from mirage.core.google.client import GoogleApiError, TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.types import DirListing, FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
@@ -502,6 +502,6 @@ async def test_a_refused_lookup_of_a_listed_file_is_raised(
     listed = await entry_at(readdir, accessor, path)
     refused = drive_error(HTTPStatus.FORBIDDEN, "Forbidden", "files")
     monkeypatch.setattr(drive, "get_file", AsyncMock(side_effect=refused))
-    with pytest.raises(aiohttp.ClientResponseError) as raised:
+    with pytest.raises(GoogleApiError) as raised:
         await live_row(accessor, path, listed)
     assert raised.value is refused
