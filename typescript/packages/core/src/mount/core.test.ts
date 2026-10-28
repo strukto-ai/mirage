@@ -1972,7 +1972,7 @@ describe('MountCore past the memory limit', () => {
   const flags = (value: number) => openMode(value, fsConstants)
   const enc = new TextEncoder()
   const MiB = 1024 * 1024
-  const landed = (store: StreamedRAM, want: Uint8Array): void => {
+  const landed = (store: RAMVFS, want: Uint8Array): void => {
     expect(Buffer.compare(store.store.files.get('/f') ?? new Uint8Array(), want)).toBe(0)
   }
 
@@ -2049,7 +2049,7 @@ describe('MountCore past the memory limit', () => {
       await core.release(fh)
       const want = stored.slice()
       want.set(repeat(32), MiB)
-      expect(store.store.files.get('/f')).toEqual(want)
+      landed(store, want)
       if (pwrite === undefined) expect((store as StreamedRAM).bodies).toEqual(['stream'])
       else {
         const windows = pwrite.mock.calls.map(([, data]) => data.byteLength)

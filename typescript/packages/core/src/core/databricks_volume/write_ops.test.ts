@@ -85,7 +85,7 @@ describe('a large write', () => {
     let largest = 0
     setSpoolFactory(() =>
       Promise.resolve({
-        append: (part) => {
+        write: (_offset, part) => {
           stored += part.byteLength
           largest = Math.max(largest, part.byteLength)
           return Promise.resolve()
