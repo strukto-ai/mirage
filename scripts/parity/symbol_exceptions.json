@@ -431,6 +431,7 @@
     "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy."
    },
    "typescript_only": {
+    "answer": "Fastify sends a reply when send is called, so code holding a workspace id sets the status and returns the body, for Fastify to send once the id is released; FastAPI answers only after a route returns or raises, past its async with blocks.",
     "isBusy": "TypeScript awaits a capture inline and asks isBusy for the EBUSY that answers 409; Python's run_capture does both."
    }
   },
