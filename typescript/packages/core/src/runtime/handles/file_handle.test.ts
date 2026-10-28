@@ -118,7 +118,8 @@ describe('runStream', () => {
       [2, enc.encode('XY')],
       [data.byteLength, enc.encode('tail')],
     ])
-    expect(await materialize(runStream(group))).toEqual(folded[0]?.[1])
+    const want = folded[0]?.[1] ?? new Uint8Array()
+    expect(Buffer.compare(await materialize(runStream(group)), want)).toBe(0)
     await spool.close()
   })
 })

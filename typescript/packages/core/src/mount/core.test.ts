@@ -1972,6 +1972,9 @@ describe('MountCore past the memory limit', () => {
   const flags = (value: number) => openMode(value, fsConstants)
   const enc = new TextEncoder()
   const MiB = 1024 * 1024
+  const landed = (store: StreamedRAM, want: Uint8Array): void => {
+    expect(Buffer.compare(store.store.files.get('/f') ?? new Uint8Array(), want)).toBe(0)
+  }
 
   it('keeps the writes in a spool and lands them as one streamed write', async () => {
     const { core, store } = streamed()
@@ -1998,7 +2001,7 @@ describe('MountCore past the memory limit', () => {
     expect(ctx?.spool).toBeUndefined()
     const want = repeat(48)
     want.set(enc.encode('HEAD'), 0)
-    expect(store.store.files.get('/f')).toEqual(want)
+    landed(store, want)
   })
 
   it('keeps the tail of a longer file a spooled write lands in', async () => {
@@ -2009,7 +2012,7 @@ describe('MountCore past the memory limit', () => {
     await core.release(fh)
     const want = new Uint8Array(4 * MiB).fill(97)
     want.set(repeat(32), 0)
-    expect(store.store.files.get('/f')).toEqual(want)
+    landed(store, want)
   })
 
   it("lands an appending handle's spooled writes at the end", async () => {
@@ -2018,9 +2021,7 @@ describe('MountCore past the memory limit', () => {
     const fh = await core.open('/data/f', flags(fsConstants.O_WRONLY | fsConstants.O_APPEND))
     for (let i = 0; i < 24; i++) await core.write('/data/f', fh, BLOCK, 0)
     await core.release(fh)
-    expect(store.store.files.get('/f')).toEqual(
-      new Uint8Array([...enc.encode('head'), ...repeat(24)]),
-    )
+    landed(store, new Uint8Array([...enc.encode('head'), ...repeat(24)]))
   })
 
   it('keeps the spooled writes of a landing that fails for the retry', async () => {
@@ -2030,7 +2031,7 @@ describe('MountCore past the memory limit', () => {
     vi.spyOn(store, 'write').mockRejectedValueOnce(unnamedFsError('EACCES', 'denied'))
     await expect(core.flush('/data/f', fh)).rejects.toMatchObject({ code: 'EACCES' })
     await core.release(fh)
-    expect(store.store.files.get('/f')).toEqual(repeat(24))
+    landed(store, repeat(24))
   })
 
   it('cuts what one handle holds in its spool where another writes', async () => {
@@ -2046,6 +2047,6 @@ describe('MountCore past the memory limit', () => {
     await core.release(first)
     const want = repeat(24)
     want.set(enc.encode('SECOND'), MiB)
-    expect(store.store.files.get('/f')).toEqual(want)
+    landed(store, want)
   })
 })
