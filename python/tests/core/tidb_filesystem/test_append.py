@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from mirage.core.tidb_filesystem.append import append
+from mirage.errors.types import OperationNotSupportedError
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -59,17 +60,19 @@ async def test_an_inline_file_is_read_and_written_back(accessor, drive9):
 
 
 @pytest.mark.asyncio
-async def test_a_missing_file_is_made(accessor, drive9):
-    await append(accessor, _path("/fs/new.txt"), b"first")
-
-    assert drive9.files["/root/new.txt"] == b"first"
+async def test_a_missing_file_refuses_unprotected_creation(accessor, drive9):
+    with pytest.raises(OperationNotSupportedError):
+        await append(accessor, _path("/fs/new.txt"), b"first")
+    assert "/root/new.txt" not in drive9.files
+    assert drive9.count("PUT") == 0
 
 
 @pytest.mark.asyncio
-async def test_nothing_appended_makes_a_missing_file(accessor, drive9):
-    await append(accessor, _path("/fs/new.txt"), b"")
-
-    assert drive9.files["/root/new.txt"] == b""
+async def test_empty_append_refuses_unprotected_creation(accessor, drive9):
+    with pytest.raises(OperationNotSupportedError):
+        await append(accessor, _path("/fs/new.txt"), b"")
+    assert "/root/new.txt" not in drive9.files
+    assert drive9.count("PUT") == 0
     assert drive9.count("POST", "/root") == 0
 
 
@@ -94,8 +97,11 @@ async def test_a_directory_is_eisdir(accessor, drive9):
 
 
 @pytest.mark.asyncio
-async def test_a_missing_folder_is_enoent(accessor, drive9):
-    with pytest.raises(FileNotFoundError):
+async def test_missing_folder_creation_refuses_unsupported_guard(
+    accessor, drive9
+):
+    with pytest.raises(OperationNotSupportedError):
         await append(accessor, _path("/fs/nope/a.txt"), b"x")
 
     assert "/root/nope" not in drive9.dirs
+    assert drive9.count("PUT") == 0

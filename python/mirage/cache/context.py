@@ -13,14 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import Awaitable, Callable, Iterator
-from contextlib import contextmanager
-from typing import Literal, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import Literal, TypeVar, overload
 
 from mirage.cache.types import (
+    ABSENT_WRITE,
+    ANY_WRITE,
+    AbsentWrite,
+    AnyWrite,
     CacheInvalidator,
+    ConditionSupport,
     KnownVersions,
     LiveVersion,
+    MatchWrite,
     OwnRead,
     WriteCondition,
     WriteContext,
@@ -126,53 +131,55 @@ async def read_versioned(
     return data, token
 
 
-@contextmanager
-def own_write_version(
-    path: PathSpec, version: str | OwnRead | None
-) -> Iterator[None]:
-    """Hand the version an op just read to its write of the same path.
+def condition_version(condition: WriteCondition | None) -> str | None:
+    return condition.version if isinstance(condition, MatchWrite) else None
 
-    A read-modify-write op (an append, a pwrite through a descriptor, a
-    resize) bases its write on what it read itself, not on what the
-    agent read, so its write carries that read's version.
 
-    Args:
-        path (PathSpec): the path the op read and writes.
-        version (str | OwnRead | None): the token of the bytes the op
-            read, or ABSENT when its read found no file.
-    """
-    token = bind_caller(
-        current_caller().changed({"own_version": (path.virtual, version)})
-    )
-    try:
-        yield
-    finally:
-        reset_caller(token)
+def require_supported(
+    support: ConditionSupport,
+    vfs: str,
+    path: PathSpec,
+    kind: WriteKind,
+    condition: WriteCondition,
+) -> None:
+    if isinstance(condition, AnyWrite):
+        return
+    mode = "absent" if isinstance(condition, AbsentWrite) else "match"
+    if mode not in support.get(kind, frozenset()):
+        raise enotsup(vfs, f"conditional {kind} ({mode})", path)
+
+
+@overload
+async def write_condition(
+    path: PathSpec,
+    kind: Literal["put"],
+    *,
+    own: str | OwnRead | None = None,
+) -> WriteCondition: ...
+
+
+@overload
+async def write_condition(
+    path: PathSpec,
+    kind: Literal["copy", "delete"],
+    *,
+    own: str | OwnRead | None = None,
+) -> WriteCondition | None: ...
 
 
 async def write_condition(
-    path: PathSpec, kind: WriteKind
+    path: PathSpec,
+    kind: WriteKind,
+    *,
+    own: str | OwnRead | None = None,
 ) -> WriteCondition | None:
-    """The condition a write to ``path`` must carry, None when unconditional.
-
-    The version is the op's own read's, handed down by
-    :func:`own_write_version`, else the mount's cached one. With none, the
-    write goes out plain. An op's own read that found no file refuses a
-    write to a file the mount holds a version of: it was removed since.
-
-    Args:
-        path (PathSpec): the path written.
-        kind (WriteKind): put, copy or delete.
-
-    Raises:
-        StaleWriteError: the op found removed a file the mount saw.
-        OperationNotSupportedError: the backend cannot condition this op.
-    """
     context = current_caller().write_context
     if context is None:
-        return None
+        if kind != "put":
+            return None
+        return ABSENT_WRITE if own is OwnRead.ABSENT else ANY_WRITE
     cached = await context.read_version(path)
-    return await _settle(context, path, kind, _own_version_for(path), cached)
+    return await _settle(context, path, kind, own, cached)
 
 
 async def delete_condition(
@@ -221,18 +228,9 @@ async def move_condition(
     if context is None:
         return None, None
     dst_cached, src_cached = await context.read_versions([dst, src])
-    cond = await _settle(
-        context, dst, "copy", _own_version_for(dst), dst_cached
-    )
-    source = await _settle(
-        context, src, "delete", _own_version_for(src), src_cached
-    )
-    return cond, source.if_match
-
-
-def _own_version_for(path: PathSpec) -> str | OwnRead | None:
-    held = current_caller().own_version
-    return held[1] if held is not None and held[0] == path.virtual else None
+    cond = await _settle(context, dst, "copy", None, dst_cached)
+    source = await _settle(context, src, "delete", None, src_cached)
+    return cond, condition_version(source)
 
 
 async def _settle(
@@ -245,6 +243,8 @@ async def _settle(
     if own is OwnRead.ABSENT:
         if cached:
             raise await stale(path, gone=True)
+        if kind == "put":
+            return ABSENT_WRITE
         own = None
     return _condition(context, path, kind, own or cached)
 
@@ -255,7 +255,7 @@ def _condition(
     # A put with no version goes out plain, so it needs no condition.
     if kind != "put" or version:
         _require(context, path, kind)
-    return WriteCondition(if_match=version or None)
+    return MatchWrite(version) if version else ANY_WRITE
 
 
 def _require(context: WriteContext, path: PathSpec, kind: WriteKind) -> None:
@@ -285,7 +285,14 @@ async def native_condition(
         StaleWriteError: the file changed or went since it was read.
         OperationNotSupportedError: the backend gave no token to send.
     """
-    held = cond.if_match if cond is not None else None
+    if isinstance(cond, AbsentWrite):
+        context = current_caller().write_context
+        raise enotsup(
+            context.vfs if context else "backend",
+            f"conditional {kind} (absent)",
+            path,
+        )
+    held = condition_version(cond)
     if not held:
         return None
     if live is None:
@@ -294,8 +301,9 @@ async def native_condition(
         raise await stale(path, version=held)
     if not live.native:
         context = current_caller().write_context
-        assert context is not None
-        raise enotsup(context.vfs, f"conditional {kind}", path)
+        raise enotsup(
+            context.vfs if context else "backend", f"conditional {kind}", path
+        )
     return live.native
 
 

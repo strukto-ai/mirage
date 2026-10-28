@@ -19,7 +19,14 @@ import type { BaseVFS } from '../../vfs/base.ts'
 import { checkWriteCapability, coerceWritePolicy, writeConditions } from './write_policy.ts'
 import { S3Accessor } from '../../accessor/s3.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
+import {
+  CONDITION_SUPPORT as S3_SUPPORT,
+  CUSTOM_CONDITION_SUPPORT,
+} from '../../core/s3/constants.ts'
+import { CONDITION_SUPPORT as BOX_SUPPORT } from '../../core/box/constants.ts'
+import { CONDITION_SUPPORT as DROPBOX_SUPPORT } from '../../core/dropbox/constants.ts'
 import { S3VFSBase } from '../../vfs/s3/s3.ts'
+import type { ConditionSupport } from '../../cache/types.ts'
 
 const FIXTURES = new URL('../../../../../../integ/fixtures/write/', import.meta.url)
 
@@ -51,6 +58,20 @@ function stub(name: string, config?: S3Config): BaseVFS {
   const fields = {
     name,
     cachesReads: true,
+    ...(config === undefined
+      ? {
+          conditionSupport:
+            name === 'box'
+              ? BOX_SUPPORT
+              : name === 'dropbox'
+                ? DROPBOX_SUPPORT
+                : name === 'minio'
+                  ? CUSTOM_CONDITION_SUPPORT
+                  : (CONDITIONS.vfs[name]?.length ?? 0) > 0
+                    ? S3_SUPPORT
+                    : {},
+        }
+      : {}),
     ...(config !== undefined ? { accessor: new S3Accessor(config) } : {}),
   }
   const proto = config !== undefined ? S3VFSBase.prototype : Object.prototype
@@ -101,8 +122,20 @@ describe('writeConditions', () => {
 })
 
 describe('checkWriteCapability', () => {
+  it('refuses a conditional mount with only create-only support', () => {
+    const vfs = Object.assign(stub('s3'), {
+      conditionSupport: { put: ['absent'] } satisfies ConditionSupport,
+    })
+    expect(writeConditions(vfs)).toEqual([])
+    expect(() => {
+      checkWriteCapability('/x/', vfs, WritePolicy.CONDITIONAL, MountMode.WRITE, true)
+    }).toThrow(
+      "mount '/x/': write: conditional needs a backend that refuses a stale write; s3 does not",
+    )
+  })
+
   it.each(VERDICTS.map((c) => [c.name, c] as const))('matches the shared fixture: %s', (_n, c) => {
-    const vfs = { name: c.vfs, cachesReads: c.caches } as unknown as BaseVFS
+    const vfs = stub(c.vfs)
     const run = () => {
       checkWriteCapability('/x/', vfs, coerceWritePolicy(c.policy), c.mode as MountMode, c.caches)
     }

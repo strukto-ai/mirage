@@ -16,7 +16,6 @@ import { MountMode, WritePolicy } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { S3VFSBase } from '../../vfs/s3/s3.ts'
 import type { WriteKind } from '../../cache/types.ts'
-import { AWS_DOMAINS, CUSTOM_ENDPOINT_CONDITIONS, WRITE_CONDITIONS } from './constants.ts'
 import { WritePolicyError } from './errors.ts'
 
 /**
@@ -43,32 +42,10 @@ export function coerceWritePolicy(value: unknown): WritePolicy {
   return lowered as WritePolicy
 }
 
-function awsEndpoint(endpoint: string): boolean {
-  let host: string
-  try {
-    host = new URL(endpoint).hostname
-  } catch (err) {
-    // Not a URL the client could reach AWS at, so it gets the narrower row.
-    console.debug(`endpoint not parsed: ${endpoint}: ${String(err)}`)
-    return false
-  }
-  return AWS_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`))
-}
-
-/**
- * The operations whose writes this mount's backend can condition. A
- * presigned-URL config (the browser's fetch client) carries no condition at
- * all, so it has none.
- */
 export function writeConditions(vfs: BaseVFS): readonly WriteKind[] {
-  if (vfs instanceof S3VFSBase && vfs.presigned) return []
-  const conditions = WRITE_CONDITIONS[vfs.name] ?? []
-  if (vfs.name !== 's3' || !(vfs instanceof S3VFSBase)) return conditions
-  const endpoint = vfs.resolvedEndpoint
-  if (endpoint !== undefined && endpoint !== '' && !awsEndpoint(endpoint)) {
-    return CUSTOM_ENDPOINT_CONDITIONS
-  }
-  return conditions
+  return (['put', 'copy', 'delete'] satisfies WriteKind[]).filter((kind) =>
+    (vfs.conditionSupport[kind] ?? []).includes('match'),
+  )
 }
 
 /**

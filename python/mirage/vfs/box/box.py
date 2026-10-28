@@ -16,9 +16,11 @@ from typing import Any
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.types import ConditionSupport, ReplaceRequest
 from mirage.core.box.capacity import capacity as _capacity
 from mirage.core.box.checksum import checksum as _checksum
 from mirage.core.box.client import BoxTokenManager
+from mirage.core.box.constants import CONDITION_SUPPORT
 from mirage.core.box.copy import copy as _copy
 from mirage.core.box.create import create as _create
 from mirage.core.box.events import build_delta_hook
@@ -34,6 +36,7 @@ from mirage.core.box.search import files_containing as _files_containing
 from mirage.core.box.stat import stat as _stat
 from mirage.core.box.truncate import truncate as _truncate
 from mirage.core.box.unlink import unlink as _unlink
+from mirage.core.box.write import replace as _replace
 from mirage.core.box.write import write as _write
 from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
@@ -62,6 +65,19 @@ VFS_MD = """{prefix}
 
 
 class BoxVFS(BaseVFS):
+    @property
+    def condition_support(self) -> ConditionSupport:
+        return CONDITION_SUPPORT
+
+    async def _replace(
+        self,
+        request: ReplaceRequest,
+        *,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
+    ) -> FileStat | None:
+        return await _replace(self.accessor, request, entry, parent)
+
     accessor: BoxAccessor
     name: str = VFSName.BOX
     caches_reads: bool = True

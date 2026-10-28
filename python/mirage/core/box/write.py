@@ -13,10 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import native_condition, write_condition
+from mirage.cache.context import (
+    native_condition,
+    require_supported,
+    write_condition,
+    writes_conditioned,
+)
+from mirage.cache.types import AnyWrite, ReplaceRequest, WriteCondition
 from mirage.core.box.api import refused, upload_file_version, upload_new_file
 from mirage.core.box.client import BoxApiError
-from mirage.core.box.constants import CONFLICT_STATUS
+from mirage.core.box.constants import CONDITION_SUPPORT, CONFLICT_STATUS
 from mirage.core.box.fingerprint import live_of
 from mirage.core.box.readdir import stat_from_item
 from mirage.core.box.resolve import (
@@ -28,6 +34,7 @@ from mirage.core.box.resolve import (
 )
 from mirage.errors.fs import eisdir
 from mirage.io.spool import ByteSpool
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import FileStat, FileType, JsonValue, PathSpec
@@ -96,14 +103,60 @@ async def write(
     parts = path_parts(path)
     if not parts or (entry is not None and entry.type is FileType.DIRECTORY):
         raise eisdir(path.virtual)
-    tm = accessor.token_manager
     cond = await write_condition(path, "put")
+    require_supported(CONDITION_SUPPORT, "box", path, "put", cond)
+    return await upload_prepared(accessor, path, data, cond, entry, parent)
+
+
+async def replace(
+    accessor: BoxAccessor,
+    request: ReplaceRequest,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
+) -> FileStat | None:
+    try:
+        require_supported(
+            CONDITION_SUPPORT, "box", request.path, "put", request.condition
+        )
+    except BaseException:
+        await close_quietly(request.body)
+        raise
+    if not path_parts(request.path) or (
+        entry is not None and entry.type is FileType.DIRECTORY
+    ):
+        await close_quietly(request.body)
+        raise eisdir(request.path.virtual)
+    if isinstance(request.body, bytes):
+        return await upload_prepared(
+            accessor,
+            request.path,
+            request.body,
+            request.condition,
+            entry,
+            parent,
+        )
+    async with ByteSpool() as spool:
+        await spool.fill(request.body)
+        return await upload_prepared(
+            accessor, request.path, spool, request.condition, entry, parent
+        )
+
+
+async def upload_prepared(
+    accessor: BoxAccessor,
+    path: PathSpec,
+    data: bytes | ByteSpool,
+    cond: WriteCondition,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
+) -> FileStat | None:
+    tm = accessor.token_manager
     timer = start_op()
     # What is there now: the listed row can be older than the path's file,
     # and older than the read a held version came from.
     existing = (
         await live_item(accessor, path, item_of(entry))
-        if cond is not None
+        if writes_conditioned() or not isinstance(cond, AnyWrite)
         else await live_item_of(accessor, path, entry)
     )
     etag = await native_condition(path, cond, live_of(existing), "put")
@@ -115,13 +168,16 @@ async def write(
             reply = await upload_file_version(
                 tm, existing["id"], existing["name"], data, etag
             )
-        elif cond is None:
+        elif isinstance(cond, AnyWrite) and not writes_conditioned():
             reply = await _upload_new(
                 accessor, path, data, parent_folder(accessor, path, parent)
             )
         else:
             reply = await upload_new_file(
-                tm, parent_folder(accessor, path, parent), parts[-1], data
+                tm,
+                parent_folder(accessor, path, parent),
+                path_parts(path)[-1],
+                data,
             )
     except BoxApiError as exc:
         raise (await refused(path, exc, cond, etag)) or exc

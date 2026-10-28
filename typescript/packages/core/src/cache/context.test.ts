@@ -23,8 +23,9 @@ import {
   runWithCacheManager,
   runWithWriteContext,
   settleAfter,
+  writeCondition,
 } from './context.ts'
-import type { WriteContext } from './types.ts'
+import { ABSENT_WRITE, ANY_WRITE, OwnRead, type WriteContext } from './types.ts'
 
 class FakeManager {
   probedStat(): null {
@@ -132,9 +133,35 @@ describe('nativeCondition', () => {
     'names the op it cannot condition: %s',
     async (kind) => {
       const call = runWithWriteContext('/box/', context([]), () =>
-        nativeCondition(path, { ifMatch: 's1' }, { content: 's1', native: null }, kind),
+        nativeCondition(
+          path,
+          { kind: 'match', version: 's1' },
+          { content: 's1', native: null },
+          kind,
+        ),
       )
       await expect(call).rejects.toThrow(`conditional ${kind}`)
     },
   )
+
+  it.each(['put', 'copy', 'delete'] as const)(
+    'refuses a missing native token without a mount policy: %s',
+    async (kind) => {
+      await expect(
+        nativeCondition(
+          path,
+          { kind: 'match', version: 's1' },
+          { content: 's1', native: null },
+          kind,
+        ),
+      ).rejects.toMatchObject({ code: 'ENOTSUP' })
+    },
+  )
+})
+
+it('preserves absent evidence without optional mount policy', async () => {
+  const path = PathSpec.fromStrPath('/m/f')
+  expect(await writeCondition(path, 'put', OwnRead.ABSENT)).toEqual(ABSENT_WRITE)
+  expect(await writeCondition(path, 'put')).toEqual(ANY_WRITE)
+  expect(await writeCondition(path, 'copy')).toBeNull()
 })

@@ -20,12 +20,18 @@ import pytest
 from mirage.cache.context import (
     capture_read,
     native_condition,
-    own_write_version,
     publish_read,
     settle_after,
     write_condition,
 )
-from mirage.cache.types import LiveVersion, WriteCondition, WriteContext
+from mirage.cache.types import (
+    ABSENT_WRITE,
+    ANY_WRITE,
+    LiveVersion,
+    MatchWrite,
+    OwnRead,
+    WriteContext,
+)
 from mirage.context.session_context import (
     bind_caller,
     current_caller,
@@ -117,12 +123,9 @@ async def _noop(*_args: PathSpec | str) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "own_path, want", [("/s3/f", "v2"), ("/s3/o", "v1")], ids=["same", "other"]
-)
-async def test_an_own_version_conditions_only_its_own_path(own_path, want):
+@pytest.mark.parametrize("own, want", [("v2", "v2"), (None, "v1")])
+async def test_explicit_own_version_takes_precedence(own, want):
     path = PathSpec(virtual="/s3/f", directory="/s3/", vfs_path="/f")
-    other = PathSpec(virtual=own_path, directory="/s3/", vfs_path=own_path[3:])
     context = WriteContext(
         vfs="s3",
         conditions=frozenset({"put", "copy", "delete"}),
@@ -133,11 +136,29 @@ async def test_an_own_version_conditions_only_its_own_path(own_path, want):
     )
     prev = bind_caller(replace(current_caller(), write_context=context))
     try:
-        with own_write_version(other, "v2"):
-            cond = await write_condition(path, "put")
+        cond = await write_condition(path, "put", own=own)
     finally:
         reset_caller(prev)
-    assert cond is not None and cond.if_match == want
+    assert isinstance(cond, MatchWrite) and cond.version == want
+
+
+@pytest.mark.asyncio
+async def test_missing_write_requires_absence_without_a_mount_context():
+    path = PathSpec.from_str_path("/s3/f", "f")
+    assert (
+        await write_condition(path, "put", own=OwnRead.ABSENT) is ABSENT_WRITE
+    )
+    assert await write_condition(path, "put") is ANY_WRITE
+    assert await write_condition(path, "delete", own=OwnRead.ABSENT) is None
+
+
+@pytest.mark.asyncio
+async def test_match_without_a_native_token_refuses_without_mount_context():
+    path = PathSpec.from_str_path("/box/f", "f")
+    with pytest.raises(OperationNotSupportedError):
+        await native_condition(
+            path, MatchWrite("same"), LiveVersion("same", None), "put"
+        )
 
 
 @pytest.mark.asyncio
@@ -157,7 +178,7 @@ async def test_native_condition_names_the_op_it_cannot_condition(kind):
         with pytest.raises(OperationNotSupportedError) as info:
             await native_condition(
                 path,
-                WriteCondition(if_match="s1"),
+                MatchWrite("s1"),
                 LiveVersion(content="s1", native=None),
                 kind,
             )

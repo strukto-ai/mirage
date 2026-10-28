@@ -19,8 +19,10 @@ from typing import Any
 from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor
+from mirage.cache.types import ConditionSupport, ReplaceRequest
 from mirage.errors.fs import enotsup
 from mirage.events.base import DeltaHook
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
@@ -71,6 +73,10 @@ class BaseVFS:
     fill ``FileStat.fingerprint``, and a snapshot pins what it read
     while ``Workspace.load`` asks for the live VFS back.
     """
+
+    @property
+    def condition_support(self) -> ConditionSupport:
+        return {}
 
     name: str = "base"
     accessor: Accessor = Accessor()
@@ -467,6 +473,10 @@ class BaseVFS:
             path (PathSpec): the directory.
         """
         raise enotsup(self.name, "read_tree", path)
+
+    async def _replace(self, request: ReplaceRequest) -> FileStat | None:
+        await close_quietly(request.body)
+        raise enotsup(self.name, "conditional replacement", request.path)
 
     @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
     async def write(self, path: PathSpec, data: ByteSource) -> FileStat | None:

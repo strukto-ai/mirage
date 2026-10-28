@@ -111,10 +111,8 @@
         "disk",
         "ssh",
         "s3",
-        "redis",
         "ram+cache",
-        "disk+cache",
-        "redis+cache"
+        "disk+cache"
       ],
       "world": {
         "mounts": {
@@ -143,6 +141,54 @@
           },
           "expect": {
             "value": "\u0000\u0000ab"
+          }
+        }
+      ]
+    },
+    {
+      "id": "missing_pwrite_refuses_without_guarded_creation",
+      "backends": [
+        "redis",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "pwrite",
+            "path": "/data/new.txt",
+            "data": "ab",
+            "offset": 2
+          },
+          "expect": {
+            "errno": "ENOTSUP"
+          }
+        },
+        {
+          "facade": {
+            "method": "exists",
+            "path": "/data/new.txt"
+          },
+          "expect": {
+            "value": false
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/digits.txt"
+          },
+          "expect": {
+            "value": "0123456789"
           }
         }
       ]
@@ -225,10 +271,8 @@
         "disk",
         "ssh",
         "s3",
-        "redis",
         "ram+cache",
-        "disk+cache",
-        "redis+cache"
+        "disk+cache"
       ],
       "world": {
         "mounts": {
@@ -266,6 +310,54 @@
           },
           "expect": {
             "value": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "empty_missing_pwrite_refuses_without_guarded_creation",
+      "backends": [
+        "redis",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "pwrite",
+            "path": "/data/new.txt",
+            "data": "",
+            "offset": 0
+          },
+          "expect": {
+            "errno": "ENOTSUP"
+          }
+        },
+        {
+          "facade": {
+            "method": "exists",
+            "path": "/data/new.txt"
+          },
+          "expect": {
+            "value": false
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/digits.txt"
+          },
+          "expect": {
+            "value": "0123456789"
           }
         }
       ]

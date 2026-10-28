@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { requireSupported } from '../../cache/context.ts'
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -27,8 +28,8 @@ import { write } from './write.ts'
 /**
  * Add bytes to the end of a file. A file drive9 keeps in object storage takes
  * them natively, so only its last part and the new bytes move. Any other path
- * is read and written back whole, which makes a missing file and refuses a
- * directory.
+ * is read and written back whole. The fallback refuses missing-file creation
+ * because its upload cannot enforce create-only, and it refuses directories.
  */
 export async function append(
   accessor: TiDBFilesystemAccessor,
@@ -46,7 +47,10 @@ export async function append(
     }
     await appendByStreamedRewrite(
       (p) => readStream(accessor, p),
-      (p, body) => write(accessor, p, body),
+      (request) => {
+        requireSupported({}, 'tidb_filesystem', request.path, 'put', request.condition)
+        return write(accessor, request.path, request.body)
+      },
       (p) => stat(accessor, p),
       path,
       spool.stream(),

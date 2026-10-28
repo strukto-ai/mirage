@@ -45,12 +45,8 @@ async function retaken(
   if (cond === null || !(err instanceof DropboxApiError) || !err.summary.startsWith(TAKEN)) {
     return null
   }
-  if (
-    cond.ifMatch !== undefined &&
-    cond.ifMatch !== '' &&
-    !err.summary.startsWith(TAKEN_BY_FOLDER)
-  ) {
-    return stale(dst, { version: cond.ifMatch })
+  if (cond.kind === 'match' && cond.version !== '' && !err.summary.startsWith(TAKEN_BY_FOLDER)) {
+    return stale(dst, { version: cond.version })
   }
   return stale(dst, { gone: true })
 }
@@ -73,7 +69,7 @@ export async function replaceOnto<T>(
 ): Promise<[T, DropboxEntry | null]> {
   const cond = await writeCondition(dst, 'copy')
   let rev: string | null = null
-  if (cond?.ifMatch !== undefined && cond.ifMatch !== '') {
+  if (cond?.kind === 'match' && cond.version !== '') {
     rev = await nativeCondition(dst, cond, liveOf(await lookup(tm, to)), 'copy')
   }
   try {

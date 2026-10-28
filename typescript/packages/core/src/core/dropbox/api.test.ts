@@ -166,7 +166,7 @@ async function refuse(
   const { context, kept } = keptVersions('dropbox')
   const path = new PathSpec({ virtual: '/dbx/f', directory: '/dbx/', vfsPath: '/f' })
   const got = await runWithWriteContext('/dbx/', context, () =>
-    refused(path, err, { ifMatch: 's1' }, sent),
+    refused(path, err, { kind: 'match', version: 's1' }, sent),
   )
   return [kept, got]
 }

@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.tidb_filesystem import TiDBFilesystemAccessor
+from mirage.cache.context import require_supported
+from mirage.cache.types import ReplaceRequest
 from mirage.core.generic.rewrite import append_by_streamed_rewrite
 from mirage.core.tidb_filesystem.client import append_to
 from mirage.core.tidb_filesystem.path import backend_path
@@ -22,7 +24,17 @@ from mirage.core.tidb_filesystem.write import write
 from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
+
+
+async def _replace(
+    accessor: TiDBFilesystemAccessor, request: ReplaceRequest
+) -> FileStat | None:
+    require_supported(
+        {}, "tidb_filesystem", request.path, "put", request.condition
+    )
+    await write(accessor, request.path, request.body)
+    return None
 
 
 async def append(
@@ -32,8 +44,8 @@ async def append(
 
     A file drive9 keeps in object storage takes them natively, so only
     its last part and the new bytes move. Any other path is read and
-    written back whole, which makes a missing file and refuses a
-    directory.
+    written back whole. The fallback refuses missing-file creation because
+    its upload cannot enforce create-only, and it refuses directories.
 
     Args:
         accessor (TiDBFilesystemAccessor): the file system's accessor.
@@ -51,7 +63,7 @@ async def append(
             return
         await append_by_streamed_rewrite(
             lambda p, remember: read_stream(accessor, p),
-            lambda p, body: write(accessor, p, body),
+            lambda request: _replace(accessor, request),
             lambda p: stat(accessor, p),
             path,
             spool.stream(),

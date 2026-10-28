@@ -12,37 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.types import WriteKind
-
-_ALL: frozenset[WriteKind] = frozenset({"put", "copy", "delete"})
-
-# The ops each backend conditions (docs/home/yaml.mdx, conditions.json).
-WRITE_CONDITIONS: dict[str, frozenset[WriteKind]] = {
-    "s3": _ALL,
-    "seaweedfs": _ALL,
-    "minio": frozenset({"put"}),
-    "aliyun": _ALL,
-    "backblaze": _ALL,
-    "ceph": _ALL,
-    "digitalocean": _ALL,
-    "gcs": _ALL,
-    "oci": _ALL,
-    "qingstor": _ALL,
-    "r2": _ALL,
-    "scaleway": _ALL,
-    "supabase": _ALL,
-    "tencent": _ALL,
-    "wasabi": _ALL,
-    "box": _ALL,
-    "dropbox": _ALL,
-}
-
-# A custom `vfs: s3` endpoint may be MinIO, so it gets MinIO's row.
-CUSTOM_ENDPOINT_CONDITIONS: frozenset[WriteKind] = WRITE_CONDITIONS["minio"]
-
-# The domains AWS serves S3 from: the commercial partitions and China.
-AWS_DOMAINS = ("amazonaws.com", "amazonaws.com.cn")
-
 # What a backend function may declare to be handed, each filled from the
 # mount's stored listings: the stat of what is at its path and at its
 # path's parent, and the same two at a rename's or a copy's destination.

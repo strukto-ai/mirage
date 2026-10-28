@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ABSENT_WRITE, ANY_WRITE } from '@struktoai/mirage-core/cache/types'
 import { Writable } from 'node:stream'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
@@ -39,6 +40,32 @@ import { write } from './write.ts'
 
 const ENC = new TextEncoder()
 const A_TXT = spec('a.txt')
+
+it('closes a direct protected stream without starting an upload', async () => {
+  store = new FakeStore()
+  vi.mocked(clientMod.bucket).mockImplementation(() => {
+    throw new Error('protected stream must refuse before opening a bucket')
+  })
+  let closed = false
+  async function* source(): AsyncGenerator<Uint8Array> {
+    try {
+      yield ENC.encode('first')
+      await Promise.resolve()
+      yield ENC.encode('last')
+    } finally {
+      closed = true
+    }
+  }
+  const body = source()
+  await body.next()
+  const putStream = DRIVER.putStream
+  if (putStream === undefined) throw new Error('stream hook missing')
+  await expect(putStream(makeAccessor(store), 'a.txt', body, ABSENT_WRITE)).rejects.toMatchObject({
+    code: 'ENOTSUP',
+  })
+  expect(store.ids('a.txt')).toEqual([])
+  expect(closed).toBe(true)
+})
 
 describe('gridfs put token', () => {
   it('reports the new revision as the object token', async () => {
@@ -81,7 +108,7 @@ it.each([false, true])('streams a GridFS upload and aborts failures: %s', async 
     }
   }
   if (DRIVER.putStream === undefined) throw new Error('stream hook missing')
-  const result = DRIVER.putStream(accessor, 'a', source(), {})
+  const result = DRIVER.putStream(accessor, 'a', source(), ANY_WRITE)
   if (fail) {
     await expect(result).rejects.toThrow('producer failed')
     expect(abort).toHaveBeenCalledOnce()

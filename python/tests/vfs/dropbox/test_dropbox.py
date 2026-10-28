@@ -148,19 +148,20 @@ async def test_a_miss_asks_dropbox_only_past_an_earlier_listing(
 
 
 @pytest.mark.asyncio
-async def test_glob_append_preserves_listed_sibling_metadata():
-    with serve(FakeDropbox(files={"f": b"one\n"})) as dbx:
+async def test_glob_append_preserves_existing_target_and_sibling():
+    with serve(FakeDropbox(files={"f": b"one\n", "out": b""})) as dbx:
         ws = _workspace(dbx)
         try:
-            r = await ws.shell("echo /dbx/* >> /dbx/new")
+            r = await ws.shell("echo /dbx/* >> /dbx/out")
             err = await r.stderr_str()
         finally:
             await ws.close()
     assert (r.exit_code, err) == (0, "")
-    assert dbx.read("new") == b"/dbx/f\n"
+    assert dbx.read("out") == b"/dbx/f /dbx/out\n"
+    assert dbx.read("f") == b"one\n"
     assert [route for route, _ in dbx.log if route != "token"] == [
         "list_folder",
-        "upload",
+        "list_folder",
         "download",
         "upload",
     ]
@@ -196,10 +197,10 @@ async def test_truncate_with_no_row_keeps_the_file_dropbox_resolves():
             new_callable=AsyncMock,
             return_value=(b"abcdef", result),
         ),
-        patch.object(vfs, "write", write),
+        patch("mirage.core.dropbox.write.dropbox_upload", write),
     ):
         await vfs.truncate(
             PathSpec(virtual="/n", directory="/", vfs_path="n"), 4
         )
     assert write.await_args is not None
-    assert write.await_args.args[1] == b"abcd"
+    assert write.await_args.args[2] == b"abcd"

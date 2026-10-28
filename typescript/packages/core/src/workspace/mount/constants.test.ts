@@ -14,22 +14,28 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { WRITE_CONDITIONS } from './constants.ts'
+import {
+  CONDITION_SUPPORT as S3_SUPPORT,
+  CUSTOM_CONDITION_SUPPORT,
+} from '../../core/s3/constants.ts'
+import { CONDITION_SUPPORT as BOX_SUPPORT } from '../../core/box/constants.ts'
+import { CONDITION_SUPPORT as DROPBOX_SUPPORT } from '../../core/dropbox/constants.ts'
+import type { ConditionSupport } from '../../cache/types.ts'
 
 const FIXTURES = new URL('../../../../../../integ/fixtures/write/', import.meta.url)
-
 const CONDITIONS = JSON.parse(readFileSync(new URL('conditions.json', FIXTURES), 'utf-8')) as {
-  vfs: Record<string, string[]>
+  condition_modes: { vfs: Record<string, ConditionSupport>; 's3+endpoint': ConditionSupport }
 }
 
-function sortedRows(r: Record<string, readonly string[]>): Record<string, string[]> {
-  return Object.fromEntries(Object.entries(r).map(([k, v]) => [k, [...v].sort()]))
-}
-
-describe('the condition table', () => {
-  it('is the shared fixture, both ways', () => {
-    const rows = Object.entries(CONDITIONS.vfs).filter(([, ops]) => ops.length > 0)
-    expect(rows.length).toBeGreaterThan(0)
-    expect(sortedRows(WRITE_CONDITIONS)).toEqual(sortedRows(Object.fromEntries(rows)))
+describe('backend condition declarations', () => {
+  it.each([
+    ['s3', S3_SUPPORT],
+    ['box', BOX_SUPPORT],
+    ['dropbox', DROPBOX_SUPPORT],
+  ] as const)('matches shared condition modes for %s', (name, support) => {
+    expect(support).toEqual(CONDITIONS.condition_modes.vfs[name])
+  })
+  it('matches custom endpoint condition modes', () => {
+    expect(CUSTOM_CONDITION_SUPPORT).toEqual(CONDITIONS.condition_modes['s3+endpoint'])
   })
 })

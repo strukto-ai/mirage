@@ -174,7 +174,6 @@ const UNBOUND: Caller = {
   cache: null,
   readFacts: null,
   write: null,
-  ownVersion: null,
   started: null,
   command: null,
   declared: null,

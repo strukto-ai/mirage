@@ -62,29 +62,45 @@ describe('append', () => {
     expect(drive9.files.get('/root/a.txt')).toEqual(ENC.encode('hello world'))
   })
 
-  it('makes a missing file', async () => {
-    await append(accessor, spec('/fs/new.txt'), ENC.encode('first'))
-    expect(drive9.files.get('/root/new.txt')).toEqual(ENC.encode('first'))
+  it('refuses unprotected creation of a missing file', async () => {
+    await expect(append(accessor, spec('/fs/new.txt'), ENC.encode('first'))).rejects.toMatchObject({
+      code: 'ENOTSUP',
+    })
+    expect(drive9.files.has('/root/new.txt')).toBe(false)
+    expect(drive9.count('PUT')).toBe(0)
   })
 
-  it('makes a missing file and leaves an existing one alone when nothing is added', async () => {
-    drive9.files.set('/root/a.txt', ENC.encode('hello'))
-    await append(accessor, spec('/fs/new.txt'), new Uint8Array())
-    await append(accessor, spec('/fs/a.txt'), new Uint8Array())
-    expect(drive9.files.get('/root/new.txt')).toEqual(new Uint8Array())
-    expect(drive9.files.get('/root/a.txt')).toEqual(ENC.encode('hello'))
+  it('refuses unprotected creation when nothing is added', async () => {
+    await expect(append(accessor, spec('/fs/new.txt'), new Uint8Array())).rejects.toMatchObject({
+      code: 'ENOTSUP',
+    })
+    expect(drive9.files.has('/root/new.txt')).toBe(false)
+    expect(drive9.count('PUT')).toBe(0)
     expect(drive9.count('POST', '/root')).toBe(0)
   })
 
-  it('refuses a directory and a missing folder', async () => {
+  it('leaves an existing file alone when nothing is added', async () => {
+    drive9.files.set('/root/a.txt', ENC.encode('hello'))
+    await append(accessor, spec('/fs/a.txt'), new Uint8Array())
+    expect(drive9.files.get('/root/a.txt')).toEqual(ENC.encode('hello'))
+    expect(drive9.count('PUT')).toBe(0)
+    expect(drive9.count('POST', '/root')).toBe(0)
+  })
+
+  it('refuses a directory', async () => {
     drive9.dirs.add('/root/d')
     await expect(append(accessor, spec('/fs/d'), ENC.encode('x'))).rejects.toMatchObject({
       code: 'EISDIR',
     })
-    await expect(append(accessor, spec('/fs/nope/a.txt'), ENC.encode('x'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
     expect(drive9.files.has('/root/d')).toBe(false)
+  })
+
+  it('refuses an unsupported guard before creating a missing folder', async () => {
+    await expect(append(accessor, spec('/fs/nope/a.txt'), ENC.encode('x'))).rejects.toMatchObject({
+      code: 'ENOTSUP',
+    })
+    expect(drive9.files.has('/root/nope/a.txt')).toBe(false)
     expect(drive9.dirs.has('/root/nope')).toBe(false)
+    expect(drive9.count('PUT')).toBe(0)
   })
 })

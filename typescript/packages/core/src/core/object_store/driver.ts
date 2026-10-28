@@ -12,10 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { conditionVersion } from '../../cache/context.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import { dropCached, stale } from '../../cache/context.ts'
-import { type KnownVersions, OwnRead, type WriteCondition } from '../../cache/types.ts'
+import {
+  type ConditionSupport,
+  type KnownVersions,
+  OwnRead,
+  type WriteCondition,
+} from '../../cache/types.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import * as kp from '../../utils/key_prefix.ts'
@@ -143,6 +149,7 @@ export interface ObjectStoreConnection<C> {
  * stay unwired, which the dispatcher already surfaces as ENOTSUP.
  */
 export interface ObjectStoreDriver<A extends Accessor, C> {
+  readonly conditionSupport?: ConditionSupport
   /** VFS name, used in op records and log lines. */
   vfs: string
   /** Listing size above which readdir logs a warning. */
@@ -285,7 +292,7 @@ export function refused(
   err: ConditionLostError,
   cond: WriteCondition | null,
 ): Promise<StaleWriteError> {
-  return stale(path, { gone: err.gone, version: cond?.ifMatch ?? null })
+  return stale(path, { gone: err.gone, version: conditionVersion(cond) })
 }
 
 /**

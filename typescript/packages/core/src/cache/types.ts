@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat, PathSpec } from '../types.ts'
+import type { ByteSource } from '../io/types.ts'
 
 /** The active cache operations a backend needs from its cache manager. */
 export interface CacheInvalidator {
@@ -25,14 +26,35 @@ export interface CacheContextState {
   manager: CacheInvalidator | null
 }
 
-/**
- * The precondition one write carries; empty when mirage holds no version of
- * the object, so the write goes out plain, there being nothing to compare.
- * Mirrors Python's `WriteCondition`.
- */
-export interface WriteCondition {
-  /** The version the object must still have. */
-  readonly ifMatch?: string
+/** A replacement with no destination-state requirement. Mirrors Python's `AnyWrite`. */
+export interface AnyWrite {
+  readonly kind: 'any'
+}
+export interface AbsentWrite {
+  readonly kind: 'absent'
+}
+export interface MatchWrite {
+  readonly kind: 'match'
+  readonly version: string
+}
+export type WriteCondition = AnyWrite | AbsentWrite | MatchWrite
+export const ANY_WRITE: AnyWrite = { kind: 'any' }
+export const ABSENT_WRITE: AbsentWrite = { kind: 'absent' }
+export type ConditionMode = 'absent' | 'match'
+export type ConditionSupport = Readonly<Partial<Record<WriteKind, readonly ConditionMode[]>>>
+export interface ReplaceRequest {
+  readonly path: PathSpec
+  readonly body: ByteSource
+  readonly condition: WriteCondition
+}
+export type RewriteWriteFn<Written = FileStat | null> = (
+  request: ReplaceRequest,
+) => Promise<Written>
+
+/** The write context of the mount at `prefix`. */
+export interface WriteBinding {
+  prefix: string
+  context: WriteContext | null
 }
 
 /**

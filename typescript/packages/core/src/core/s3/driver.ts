@@ -12,15 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CONDITION_SUPPORT } from './constants.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { type ByteSource } from '../../io/types.ts'
 import { toIsoZ } from '../../utils/dates.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { VFSName } from '../../types.ts'
-import { eacces, enoent, unnamedFsError } from '../../errors/fs.ts'
+import { eacces, enoent, enotsup, unnamedFsError } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
+  ANY_WRITE,
   type KnownVersions,
   type Measured,
   OwnRead,
@@ -172,7 +174,7 @@ async function get(conn: S3Conn, key: string): Promise<Uint8Array | null> {
 }
 
 function put(conn: S3Conn, key: string, data: Uint8Array): Promise<ObjectMeta | null> {
-  return putIf(conn, key, data, {})
+  return putIf(conn, key, data, ANY_WRITE)
 }
 
 // Tokens are stored unquoted (`etagOf`); the wire takes the quoted form.
@@ -181,8 +183,14 @@ function quoted(token: string): string {
 }
 
 function condition(cond: WriteCondition): Record<string, string> {
-  if (cond.ifMatch !== undefined) return { IfMatch: quoted(cond.ifMatch) }
-  return {}
+  switch (cond.kind) {
+    case 'any':
+      return {}
+    case 'absent':
+      return { IfNoneMatch: '*' }
+    case 'match':
+      return { IfMatch: quoted(cond.version) }
+  }
 }
 
 /**
@@ -244,6 +252,8 @@ async function putIf(
   // write stamps and the token a later stat reports are one spelling.
   // A write carries no type of its own, so the mount's default is the one the
   // store keeps and serves back.
+  if (cond.kind !== 'any' && conn.config.presignedUrlProvider !== undefined)
+    throw enotsup('s3', 'conditional put', key)
   const contentType = conn.config.defaultContentType
   const resp = (await guarded(
     key,
@@ -257,7 +267,7 @@ async function putIf(
         ...condition(cond),
       }),
     ),
-    cond.ifMatch !== undefined,
+    cond.kind === 'match',
   )) as { ETag?: string; VersionId?: string }
   const etag = etagOf(resp)
   return {
@@ -276,9 +286,7 @@ async function putStream(
   // Presigned fetch has no multipart API; custom endpoints keep conditional PUT.
   if (
     conn.config.presignedUrlProvider !== undefined ||
-    (cond.ifMatch !== undefined &&
-      conn.config.endpoint !== undefined &&
-      conn.config.endpoint !== '')
+    (cond.kind !== 'any' && conn.config.endpoint !== undefined && conn.config.endpoint !== '')
   ) {
     const spool = new ByteSpool()
     try {
@@ -358,7 +366,7 @@ async function putStream(
           ...condition(cond),
         }),
       ),
-      cond.ifMatch !== undefined,
+      cond.kind === 'match',
     )) as { ETag?: string; VersionId?: string }
     upload = null
     return { size, fingerprint: etagOf(response) || null, revision: versionOf(response) }
@@ -412,7 +420,7 @@ async function copyIf(
   } catch (err) {
     // A 404 is lost only while the source is still there.
     let lost = isConditionLost(err)
-    if (!lost && cond.ifMatch !== undefined && isNotFound(err) && !isMissingBucket(err)) {
+    if (!lost && cond.kind === 'match' && isNotFound(err) && !isMissingBucket(err)) {
       try {
         lost = (await head(conn, srcKey)) !== null
       } catch (probeErr) {
@@ -453,11 +461,11 @@ async function copyLoser(
   source: string,
 ): Promise<[string, Measured]> {
   try {
-    if (cond.ifMatch !== undefined) {
+    if (cond.kind === 'match') {
       const meta = await head(conn, dstKey)
       if (meta === null) return [dstKey, OwnRead.ABSENT]
-      if (quoted(meta.fingerprint ?? '') !== quoted(cond.ifMatch)) {
-        return [dstKey, quoted(cond.ifMatch)]
+      if (quoted(meta.fingerprint ?? '') !== quoted(cond.version)) {
+        return [dstKey, quoted(cond.version)]
       }
     }
     if ((await head(conn, srcKey)) === null) return [srcKey, OwnRead.ABSENT]
@@ -671,16 +679,18 @@ async function movePrefixIf(
         const dstKey = dstOf(key)
         const heldVersion = held.get(dstKey)
         const cond: WriteCondition =
-          heldVersion !== undefined && heldVersion !== '' ? { ifMatch: heldVersion } : {}
+          heldVersion !== undefined && heldVersion !== ''
+            ? { kind: 'match', version: heldVersion }
+            : ANY_WRITE
         try {
           await copyObject(conn, key, dstKey, cond, token)
         } catch (err) {
           if (!lostCondition(err, true)) throw err
-          if (cond.ifMatch !== undefined) {
+          if (cond.kind === 'match') {
             const loser = await copyLoser(conn, key, dstKey, cond, token)
             lost.push(loser)
             // The end left alone keeps its version, as a file mv's.
-            if (loser[0] === key) untouched.set(dstKey, quoted(cond.ifMatch))
+            if (loser[0] === key) untouched.set(dstKey, quoted(cond.version))
             else untouched.set(key, quoted(token))
           } else {
             // A source gone (404) keeps no version: nothing newer to guard.
@@ -826,6 +836,7 @@ async function probePrefix(conn: S3Conn, pfx: string): Promise<boolean> {
 
 export const DRIVER: ObjectStoreDriver<S3Accessor, S3Conn> = {
   vfs: VFSName.S3,
+  conditionSupport: CONDITION_SUPPORT,
   scopeError: SCOPE_ERROR,
   keyPrefixOf,
   connect,

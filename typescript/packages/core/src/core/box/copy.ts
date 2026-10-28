@@ -72,11 +72,11 @@ export async function retaken(
 ): Promise<StaleWriteError | null> {
   if (cond === null || !(err instanceof BoxApiError) || err.status !== CONFLICT_STATUS) return null
   if (
-    cond.ifMatch !== undefined &&
-    cond.ifMatch !== '' &&
+    cond.kind === 'match' &&
+    cond.version !== '' &&
     (err.conflict === null || err.conflict === 'file')
   ) {
-    return stale(dst, { version: cond.ifMatch })
+    return stale(dst, { version: cond.version })
   }
   return stale(dst, { gone: true })
 }

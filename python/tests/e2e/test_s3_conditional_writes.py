@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import hashlib
 import io
 import os
@@ -1366,3 +1367,65 @@ async def test_an_unconditional_sed_write_failure_reads_as_before(
     fake.before("put_object", _denied)
     code, _, err = await _run(ws, "sed -i s/o/O/ /s3/f /s3/g")
     assert (code, err.startswith("sed: can't read ")) == (1, True), err
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy", [WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL]
+)
+async def test_missing_append_creation_cannot_erase_completed_append(
+    fake, workspaces, policy
+):
+    a, b = workspaces(policy), workspaces(policy)
+    waiting, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed_creation():
+        waiting.set()
+        await release.wait()
+
+    fake.before(PUT, delayed_creation)
+    pending = asyncio.create_task(_run(a, "printf 'line_a\\n' >> /s3/new_f"))
+    try:
+        await asyncio.wait_for(waiting.wait(), 5)
+        result_b = await _run(b, "printf 'line_b\\n' >> /s3/new_f")
+        assert result_b == (0, "", "")
+        assert fake.buckets["b"]["new_f"] == b"line_b\n"
+        release.set()
+        result_a = await asyncio.wait_for(pending, 5)
+        assert fake.buckets["b"]["new_f"] == b"line_b\n"
+        assert result_a[0] != 0
+        assert STALE in result_a[2]
+    finally:
+        release.set()
+        await pending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy", [WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL]
+)
+@pytest.mark.parametrize(
+    "operation", ["append", "pwrite", "empty_pwrite", "truncate"]
+)
+async def test_missing_rewrite_refuses_a_competing_creation(
+    fake, workspaces, policy, operation
+):
+    ws = workspaces(policy)
+    fake.before(PUT, lambda: _theirs(fake, "new_f"))
+    if operation == "truncate":
+        code, _, err = await _run(ws, "truncate -s 5 /s3/new_f")
+        assert code == 1 and STALE in err
+    else:
+        with pytest.raises(StaleWriteError):
+            if operation == "append":
+                await ws.vfs.append("/s3/new_f", b"ours\n")
+            else:
+                await ws.vfs.pwrite(
+                    "/s3/new_f",
+                    b"" if operation == "empty_pwrite" else b"ours\n",
+                    0,
+                )
+    assert fake.buckets["b"]["new_f"] == b"theirs\n"
+    assert [headers for op, headers in fake.ledger if op == PUT] == [
+        {"IfNoneMatch": "*"}
+    ]

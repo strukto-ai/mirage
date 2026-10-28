@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CONDITION_SUPPORT } from '../../core/dropbox/constants.ts'
+import type { ConditionSupport, ReplaceRequest } from '../../cache/types.ts'
 import { BaseVFS } from '../base.ts'
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { DropboxTokenManager } from '../../core/dropbox/client.ts'
@@ -32,7 +34,7 @@ import { stat as dropboxStat, tree as dropboxTree } from '../../core/dropbox/sta
 import { exists as dropboxExists } from '../../core/dropbox/exists.ts'
 import { truncateByRewrite } from '../../core/generic/rewrite.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { write as dropboxWrite } from '../../core/dropbox/write.ts'
+import { write as dropboxWrite, replace as dropboxReplace } from '../../core/dropbox/write.ts'
 import { create as dropboxCreate } from '../../core/dropbox/create.ts'
 import { mkdir as dropboxMkdir } from '../../core/dropbox/mkdir.ts'
 import { unlink as dropboxUnlink } from '../../core/dropbox/unlink.ts'
@@ -51,6 +53,10 @@ export interface DropboxVFSState {
 }
 
 export class DropboxVFS extends BaseVFS {
+  override get conditionSupport(): ConditionSupport {
+    return CONDITION_SUPPORT
+  }
+
   override readonly name: string = VFSName.DROPBOX
   override readonly cachesReads: boolean = true
   // list_folder carries an exact byte `size` for every file (0 included).
@@ -127,13 +133,15 @@ export class DropboxVFS extends BaseVFS {
         handed.entry === undefined || handed.entry === null
           ? dropboxReadByPath(this.accessor, p)
           : dropboxRead(this.accessor, p, undefined, handed.entry),
-      async (p, d) => {
-        await this.write(p, d)
-      },
+      (request) => this._replace(request),
       path,
       length,
       noCreate,
     )
+  }
+
+  override _replace(request: ReplaceRequest, signal?: AbortSignal): Promise<FileStat | null> {
+    return dropboxReplace(this.accessor, request, signal)
   }
 
   override create(path: PathSpec): Promise<FileStat | null> {

@@ -15,10 +15,20 @@
 import logging
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import aclosing, asynccontextmanager
-from typing import Any, BinaryIO, NoReturn, TypeVar
+from typing import Any, BinaryIO, NoReturn, TypeVar, assert_never
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.types import KnownVersions, Measured, OwnRead, WriteCondition
+from mirage.cache.context import condition_version
+from mirage.cache.types import (
+    ANY_WRITE,
+    AbsentWrite,
+    AnyWrite,
+    KnownVersions,
+    MatchWrite,
+    Measured,
+    OwnRead,
+    WriteCondition,
+)
 from mirage.core.object_store.driver import (
     ChildEntry,
     ObjectMeta,
@@ -36,6 +46,7 @@ from mirage.core.s3.client import (
 )
 from mirage.core.s3.constants import (
     CONDITION_LOST_CODES,
+    CONDITION_SUPPORT,
     MAX_PARTS,
     PART_DOUBLING,
     PART_SIZE,
@@ -167,7 +178,7 @@ async def _get(conn: S3Conn, key: str) -> bytes | None:
 
 
 async def _put(conn: S3Conn, key: str, data: bytes) -> ObjectMeta | None:
-    return await _put_if(conn, key, data, WriteCondition())
+    return await _put_if(conn, key, data, ANY_WRITE)
 
 
 def _quoted(token: str) -> str:
@@ -180,9 +191,13 @@ def _quoted(token: str) -> str:
 
 
 def _condition(cond: WriteCondition) -> dict[str, str]:
-    if cond.if_match is not None:
-        return {"IfMatch": _quoted(cond.if_match)}
-    return {}
+    if isinstance(cond, AbsentWrite):
+        return {"IfNoneMatch": "*"}
+    if isinstance(cond, MatchWrite):
+        return {"IfMatch": _quoted(cond.version)}
+    if isinstance(cond, AnyWrite):
+        return {}
+    assert_never(cond)
 
 
 async def _copy_object(
@@ -261,7 +276,7 @@ async def _put_if(
             **({"ContentType": content_type} if content_type else {}),
             **_condition(cond),
         ),
-        matched=cond.if_match is not None,
+        matched=condition_version(cond) is not None,
     )
     return ObjectMeta(
         size=len(data) if isinstance(data, bytes) else size or 0,
@@ -274,7 +289,7 @@ async def _put_stream(
     conn: S3Conn, key: str, data: ByteSource, cond: WriteCondition
 ) -> ObjectMeta:
     # Custom endpoints retain their established conditional PUT protocol.
-    if cond.if_match is not None and conn.config.endpoint_url:
+    if not isinstance(cond, AnyWrite) and conn.config.endpoint_url:
         async with ByteSpool() as spool:
             await spool.fill(data)
             if spool.size > 5 * 1024**3:
@@ -339,7 +354,7 @@ async def _put_stream(
                 MultipartUpload={"Parts": parts},
                 **_condition(cond),
             ),
-            matched=cond.if_match is not None,
+            matched=condition_version(cond) is not None,
         )
         upload = None
         return ObjectMeta(
@@ -390,7 +405,11 @@ async def _copy_if(
     except Exception as exc:
         # A 404 is lost only while the source is still there.
         lost = is_condition_lost(exc)
-        if not lost and cond.if_match is not None and is_key_gone(exc):
+        if (
+            not lost
+            and condition_version(cond) is not None
+            and is_key_gone(exc)
+        ):
             try:
                 lost = await _head(conn, src_key) is not None
             except Exception:
@@ -438,12 +457,13 @@ async def _copy_loser(
         on, ABSENT when it is gone.
     """
     try:
-        if cond.if_match is not None:
+        held = condition_version(cond)
+        if held is not None:
             meta = await _head(conn, dst_key)
             if meta is None:
                 return dst_key, OwnRead.ABSENT
-            if _quoted(meta.fingerprint or "") != _quoted(cond.if_match):
-                return dst_key, _quoted(cond.if_match)
+            if _quoted(meta.fingerprint or "") != _quoted(held):
+                return dst_key, _quoted(held)
         if await _head(conn, src_key) is None:
             return src_key, OwnRead.ABSENT
     except Exception:
@@ -692,7 +712,7 @@ async def _move_prefix_if(
             for key, token in listed:
                 dst_key = targets[key]
                 held_version = held.get(dst_key)
-                cond = WriteCondition(if_match=held_version)
+                cond = MatchWrite(held_version) if held_version else ANY_WRITE
                 try:
                     await _copy_object(conn, key, dst_key, cond, token)
                 except Exception as exc:
@@ -850,6 +870,7 @@ async def _probe_prefix(conn: S3Conn, pfx: str) -> bool:
 
 DRIVER: ObjectStoreDriver[S3Accessor, S3Conn] = ObjectStoreDriver(
     vfs="s3",
+    condition_support=CONDITION_SUPPORT,
     scope_error=SCOPE_ERROR,
     key_prefix_of=_key_prefix_of,
     connect=_connect,

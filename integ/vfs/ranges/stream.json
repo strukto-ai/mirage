@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "stream_whole_file",
+      "id": "stream_prepare_empty_targets",
       "seq": 950110,
       "targets": [
         "ram",
@@ -26,21 +26,16 @@
         "box",
         "opfs"
       ],
-      "command": "printf '0123456789\\nabc\\n' >> {mount}/stream.txt",
-      "note": "Appended, not written whole: a whole write keeps its bytes in the file cache, and the read would be served from there instead of streamed from the backend.",
-      "check": {
-        "read": "{mount}/stream.txt",
-        "stream": true
-      },
+      "command": ": > {mount}/stream.txt; : > {mount}/stream_empty.txt",
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "",
-        "check": "0123456789\nabc\n"
-      }
+        "stderr": ""
+      },
+      "note": "Intentional replacement creates the stream targets so the later append cases test backend streaming rather than missing-file append support."
     },
     {
-      "id": "stream_empty_file",
+      "id": "stream_whole_file",
       "seq": 950111,
       "targets": [
         "ram",
@@ -65,8 +60,48 @@
         "box",
         "opfs"
       ],
+      "command": "printf '0123456789\\nabc\\n' >> {mount}/stream.txt",
+      "note": "The preceding seed creates an existing empty target. Clearing the cache before this append keeps the checked stream on the backend, including when no bytes are appended.",
+      "check": {
+        "read": "{mount}/stream.txt",
+        "stream": true
+      },
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "check": "0123456789\nabc\n"
+      },
+      "clear_cache": true
+    },
+    {
+      "id": "stream_empty_file",
+      "seq": 950116,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix",
+        "databricks",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "sharepoint",
+        "sharepoint-prefix",
+        "hf",
+        "hf-prefix",
+        "box",
+        "opfs"
+      ],
       "command": "printf '' >> {mount}/stream_empty.txt",
-      "note": "Appended, not written whole: a whole write keeps its bytes in the file cache, and the read would be served from there instead of streamed from the backend.",
+      "note": "The preceding seed creates an existing empty target. Clearing the cache before this append keeps the checked stream on the backend, including when no bytes are appended.",
       "check": {
         "read": "{mount}/stream_empty.txt",
         "stream": true
@@ -76,7 +111,8 @@
         "stdout": "",
         "stderr": "",
         "check": ""
-      }
+      },
+      "clear_cache": true
     },
     {
       "id": "slack_stream_attachment_whole",

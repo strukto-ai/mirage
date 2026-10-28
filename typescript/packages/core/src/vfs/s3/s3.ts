@@ -12,10 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConditionSupport, ReplaceRequest } from '../../cache/types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { appendByStreamedRewrite } from '../../core/generic/rewrite.ts'
 import { checksum as s3Checksum } from '../../core/s3/checksum.ts'
-import { MD5_ETAG_STORES } from '../../core/s3/constants.ts'
+import {
+  AWS_DOMAINS,
+  CONDITION_SUPPORT,
+  CUSTOM_CONDITION_SUPPORT,
+  MD5_ETAG_STORES,
+} from '../../core/s3/constants.ts'
 import { copy as s3Copy, copyFrom as s3CopyFrom } from '../../core/s3/copy.ts'
 import { create as s3Create } from '../../core/s3/create.ts'
 import { exists as s3Exists } from '../../core/s3/exists.ts'
@@ -29,7 +35,7 @@ import { readRange as s3ReadRange, readStream as s3Stream } from '../../core/s3/
 import { truncate as s3Truncate } from '../../core/s3/truncate.ts'
 import { unlink as s3Unlink } from '../../core/s3/unlink.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { write as s3Write } from '../../core/s3/write.ts'
+import { write as s3Write, replace as s3Replace } from '../../core/s3/write.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
@@ -41,6 +47,24 @@ import { tree as s3Tree } from '../../core/s3/readdir.ts'
  * packages build over their own transport.
  */
 export class S3VFSBase extends BaseVFS<S3Accessor> {
+  override get conditionSupport(): ConditionSupport {
+    if (this.presigned) return {}
+    if (this.name === 'minio') return CUSTOM_CONDITION_SUPPORT
+    const endpoint = this.resolvedEndpoint
+    if (this.name === 's3' && endpoint !== undefined && endpoint !== '') {
+      let host: string
+      try {
+        host = new URL(endpoint).hostname
+      } catch (error) {
+        console.debug(`endpoint not parsed: ${endpoint}: ${String(error)}`)
+        return CUSTOM_CONDITION_SUPPORT
+      }
+      if (!AWS_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`)))
+        return CUSTOM_CONDITION_SUPPORT
+    }
+    return CONDITION_SUPPORT
+  }
+
   override readonly readsRanges: boolean = true
 
   /**
@@ -101,11 +125,15 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
   override append(path: PathSpec, data: ByteSource): Promise<FileStat | null | undefined> {
     return appendByStreamedRewrite(
       (p, remember) => s3Stream(this.accessor, p, remember),
-      (p, d) => this.write(p, d),
+      (request) => s3Replace(this.accessor, request),
       (p) => this.stat(p),
       path,
       data,
     )
+  }
+
+  override _replace(request: ReplaceRequest, signal?: AbortSignal): Promise<FileStat | null> {
+    return s3Replace(this.accessor, request, signal)
   }
 
   override create(path: PathSpec): Promise<FileStat | null> {

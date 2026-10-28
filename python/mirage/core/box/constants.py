@@ -12,6 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.cache.types import ConditionSupport
+
+CONDITION_SUPPORT: ConditionSupport = {
+    kind: frozenset({"match"}) for kind in ("put", "copy", "delete")
+}
+
 BOX_TOKEN_URL = "https://api.box.com/oauth2/token"
 BOX_API_BASE = "https://api.box.com/2.0"
 BOX_UPLOAD_BASE = "https://upload.box.com/api/2.0"

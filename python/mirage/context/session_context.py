@@ -46,7 +46,7 @@ from mirage.utils.path import norm, parent
 from mirage.view.types import SessionAccess
 
 if TYPE_CHECKING:
-    from mirage.cache.types import CacheInvalidator, OwnRead, WriteContext
+    from mirage.cache.types import CacheInvalidator, WriteContext
     from mirage.io.types import ByteSource, IOResult
     from mirage.observe.record import OpRecord, Recorder
     from mirage.policy.types import (
@@ -152,8 +152,6 @@ class Caller:
         read_facts (tuple | None): the tokens a fetch's bytes carried.
         write_context (WriteContext | None): what a conditional write is
             checked against.
-        own_version (tuple | None): the version a write's own read
-            stamped.
         command_started (int | None): when the running command started.
         command (str | None): the running command's name, which its walks
             resolve their ``walk_limit`` by.
@@ -199,7 +197,6 @@ class Caller:
     cache_manager: CacheInvalidator | None = None
     read_facts: tuple[str, list[tuple[bytes, str | None]]] | None = None
     write_context: WriteContext | None = None
-    own_version: tuple[str, str | OwnRead | None] | None = None
     command_started: int | None = None
     command: str | None = None
     declared: Limit | None = None

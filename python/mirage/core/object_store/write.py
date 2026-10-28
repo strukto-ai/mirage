@@ -12,8 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.context import own_write_version, write_condition
-from mirage.cache.types import OwnRead, WriteCondition
+from collections.abc import Awaitable, Callable
+
+from mirage.cache.context import require_supported, write_condition
+from mirage.cache.types import (
+    ANY_WRITE,
+    AnyWrite,
+    OwnRead,
+    ReplaceRequest,
+    WriteCondition,
+)
 from mirage.core.object_store.driver import (
     A,
     C,
@@ -66,7 +74,7 @@ async def _put(
     key: str,
     data: bytes,
     path_spec: PathSpec,
-    cond: WriteCondition | None = None,
+    cond: WriteCondition = ANY_WRITE,
 ) -> ObjectMeta | None:
     """Put one object, translating a missing container to ENOENT.
 
@@ -87,8 +95,7 @@ async def _put(
         key (str): the prefix-applied object key.
         data (bytes): the object body.
         path_spec (PathSpec): the operand, for the error's virtual path.
-        cond (WriteCondition | None): the condition a ``write:
-            conditional`` mount sends; None writes unconditionally.
+        cond (WriteCondition): the settled requirement for this commit.
 
     Returns:
         ObjectMeta | None: what the store's write response said about the
@@ -98,10 +105,14 @@ async def _put(
         StaleWriteError: the store refused the condition; the object is
             the newer one and the cached copy has been dropped.
     """
+    require_supported(
+        driver.condition_support, driver.vfs, path_spec, "put", cond
+    )
     try:
-        if cond is None:
+        if isinstance(cond, AnyWrite):
             return await driver.put(conn, key, data)
-        assert driver.put_if is not None
+        if driver.put_if is None:
+            raise enotsup(driver.vfs, "conditional put", path_spec)
         return await driver.put_if(conn, key, data, cond)
     except ConditionLostError as exc:
         raise await refused(path_spec, exc, cond) from exc
@@ -111,52 +122,69 @@ async def _put(
         raise
 
 
-def make_write(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
-    """Build the object write over one driver: bytes go up in one put, a
-    stream as it is produced where the store takes one, collected first
-    where it does not.
+def make_replace(
+    driver: ObjectStoreDriver[A, C],
+) -> Callable[[A, ReplaceRequest], Awaitable[FileStat | None]]:
+    """Build a commit that enforces its settled condition before mutation.
 
     Args:
-        driver (ObjectStoreDriver): the store's native surface.
+        driver (ObjectStoreDriver): the backend's native commit surface.
     """
+
+    async def replace(accessor: A, request: ReplaceRequest) -> FileStat | None:
+        path_spec, data, cond = request.path, request.body, request.condition
+        try:
+            require_supported(
+                driver.condition_support, driver.vfs, path_spec, "put", cond
+            )
+            if driver.put_stream is None:
+                data = await materialize(data)
+            key = kp.apply(
+                driver.key_prefix_of(accessor), path_spec.mount_path
+            )
+            timer = start_op()
+            if isinstance(data, bytes):
+                async with driver.connect(accessor) as conn:
+                    meta = await _put(driver, conn, key, data, path_spec, cond)
+                size = len(data)
+            else:
+                assert driver.put_stream is not None
+                async with driver.connect(accessor) as conn:
+                    meta = await driver.put_stream(conn, key, data, cond)
+                size = meta.size
+            record(
+                "write",
+                path_spec.virtual,
+                driver.vfs,
+                size,
+                timer,
+                fingerprint=meta.fingerprint if meta else None,
+            )
+            return written_stat(path_spec, meta)
+        except ConditionLostError as exc:
+            raise await refused(path_spec, exc, cond) from exc
+        except Exception as exc:
+            if driver.is_not_found(exc):
+                raise enoent(path_spec) from exc
+            raise
+        finally:
+            await close_quietly(data)
+
+    return replace
+
+
+def make_write(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
+    replace = make_replace(driver)
 
     async def write(
         accessor: A, path_spec: PathSpec, data: ByteSource
     ) -> FileStat | None:
-        if driver.put_stream is None:
-            data = await materialize(data)
-        key = kp.apply(driver.key_prefix_of(accessor), path_spec.mount_path)
-        cond = await write_condition(path_spec, "put")
-        timer = start_op()
-        if isinstance(data, bytes):
-            async with driver.connect(accessor) as conn:
-                meta = await _put(driver, conn, key, data, path_spec, cond)
-            size = len(data)
-        else:
-            assert driver.put_stream is not None
-            try:
-                async with driver.connect(accessor) as conn:
-                    meta = await driver.put_stream(
-                        conn, key, data, cond or WriteCondition()
-                    )
-            except ConditionLostError as exc:
-                raise await refused(path_spec, exc, cond) from exc
-            except Exception as exc:
-                if driver.is_not_found(exc):
-                    raise enoent(path_spec) from exc
-                raise
-            finally:
-                await close_quietly(data)
-            size = meta.size
-        record(
-            "write",
-            path_spec.virtual,
-            driver.vfs,
-            size,
-            timer,
-            fingerprint=meta.fingerprint if meta else None,
-        )
-        return written_stat(path_spec, meta)
+        try:
+            cond = await write_condition(path_spec, "put")
+        except BaseException:
+            await close_quietly(data)
+            raise
+        return await replace(accessor, ReplaceRequest(path_spec, data, cond))
 
     return write
 
@@ -224,9 +252,9 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
                     data = await driver.get(conn, key)
                 if data is None:
                     data = b""
+                    own = OwnRead.ABSENT
                 result = data[:length].ljust(length, b"\0")
-                with own_write_version(path_spec, own):
-                    cond = await write_condition(path_spec, "put")
+                cond = await write_condition(path_spec, "put", own=own)
             meta = await _put(driver, conn, key, result, path_spec, cond)
         record(
             "truncate",

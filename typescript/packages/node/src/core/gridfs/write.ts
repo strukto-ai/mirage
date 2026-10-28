@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeWrite } from '@struktoai/mirage-core/core/object_store/write'
+import { makeReplace, makeWrite } from '@struktoai/mirage-core/core/object_store/write'
 import { DRIVER } from './driver.ts'
 
 export const write = makeWrite(DRIVER)
+
+export const replace = makeReplace(DRIVER)

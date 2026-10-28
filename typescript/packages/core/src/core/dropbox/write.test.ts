@@ -42,6 +42,7 @@ vi.mock('./api.ts', async () => {
   return {
     ...actual,
     getMetadata: vi.fn(),
+    lookup: vi.fn(),
     createFolder: vi.fn(),
     deletePath: vi.fn(),
     movePath: vi.fn(),
@@ -63,7 +64,8 @@ import { rename } from './rename.ts'
 import { rmR } from './rm.ts'
 import { rmdir } from './rmdir.ts'
 import { unlink } from './unlink.ts'
-import { write } from './write.ts'
+import { replace, write } from './write.ts'
+import { runWithWriteContext } from '../../cache/context.ts'
 
 const STUB_TM = {} as DropboxTokenManager
 
@@ -106,6 +108,57 @@ function fileMetadata(): Record<string, unknown> {
 }
 
 describe('dropbox write', () => {
+  it('commits the explicit condition instead of the ambient cached version', async () => {
+    vi.mocked(api.lookup).mockResolvedValue({
+      ...fileEntry('/a.txt'),
+      content_hash: 'live',
+      rev: '7',
+    })
+    const body = new Uint8Array([9])
+    await runWithWriteContext(
+      '/',
+      {
+        vfs: 'dropbox',
+        conditions: ['put'],
+        readVersion: () => Promise.resolve('cached'),
+        readVersions: (paths) => Promise.resolve(paths.map(() => 'cached')),
+        drop: () => Promise.resolve(),
+        keep: () => Promise.resolve(),
+      },
+      () =>
+        replace(makeAccessor(), {
+          path: spec('/a.txt'),
+          body,
+          condition: { kind: 'match', version: 'live' },
+        }),
+    )
+    expect(client.dropboxUpload).toHaveBeenCalledWith(STUB_TM, '/a.txt', body, '7')
+  })
+
+  it('closes an already-started body when create-only is unsupported', async () => {
+    const chunk = new Uint8Array([9])
+    let closed = false
+    async function* source() {
+      try {
+        yield await Promise.resolve(chunk)
+        yield chunk
+      } finally {
+        closed = true
+      }
+    }
+    const body = source()
+    await body.next()
+    await expect(
+      replace(makeAccessor(), {
+        path: spec('/a.txt'),
+        body,
+        condition: { kind: 'absent' },
+      }),
+    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+    expect(closed).toBe(true)
+    expect(client.dropboxUpload).not.toHaveBeenCalled()
+  })
+
   it('uploads through the subfolder mount root', async () => {
     await write(makeAccessor('/Team/data'), spec('/note.txt'), new Uint8Array([104]))
     expect(client.dropboxUpload).toHaveBeenCalledWith(

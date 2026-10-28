@@ -18,6 +18,18 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import mirage.core.box.readdir as readdir_mod
+from mirage.cache.context import write_condition
+from mirage.cache.types import (
+    ABSENT_WRITE,
+    MatchWrite,
+    ReplaceRequest,
+    WriteContext,
+)
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.copy import copy
 from mirage.core.box.mkdir import mkdir
@@ -25,7 +37,8 @@ from mirage.core.box.readdir import readdir
 from mirage.core.box.rename import rename
 from mirage.core.box.rmdir import rm_r, rmdir
 from mirage.core.box.unlink import unlink
-from mirage.core.box.write import write
+from mirage.core.box.write import replace, write
+from mirage.errors.types import OperationNotSupportedError
 from mirage.observe.context import RecordingScope
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.box import BoxVFS
@@ -103,6 +116,93 @@ def _workspace(accessor) -> Workspace:
 def root_accessor(accessor):
     # Mount root is the account root "0".
     return accessor
+
+
+@pytest.mark.asyncio
+async def test_create_only_write_refuses_without_native_support(root_accessor):
+    path = _spec("/data/new.txt")
+    with (
+        patch(
+            "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
+        ) as create,
+        patch(
+            "mirage.core.box.write.upload_file_version", new_callable=AsyncMock
+        ) as overwrite,
+    ):
+        with pytest.raises(OperationNotSupportedError):
+            await replace(
+                root_accessor, ReplaceRequest(path, b"ours", ABSENT_WRITE)
+            )
+    create.assert_not_awaited()
+    overwrite.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_explicit_replacement_uses_its_condition_after_preparing_stream(
+    root_accessor,
+):
+    path = _spec("/data/a.txt")
+    item = {
+        "id": "200",
+        "name": "a.txt",
+        "type": "file",
+        "sha1": "live",
+        "etag": "native-live",
+        "size": 4,
+    }
+    context = WriteContext(
+        vfs="box",
+        conditions=frozenset({"put"}),
+        read_version=AsyncMock(return_value="cached"),
+        read_versions=AsyncMock(return_value=["cached"]),
+        drop=AsyncMock(),
+        keep=AsyncMock(),
+    )
+
+    async def body():
+        assert await write_condition(path, "put") == MatchWrite("cached")
+        yield b"ours"
+
+    token = bind_caller(current_caller().changed({"write_context": context}))
+    try:
+        with (
+            patch(
+                "mirage.core.box.write.live_item",
+                new=AsyncMock(return_value=item),
+            ),
+            patch(
+                "mirage.core.box.write.upload_file_version",
+                new_callable=AsyncMock,
+            ) as upload,
+        ):
+            await replace(
+                root_accessor, ReplaceRequest(path, body(), MatchWrite("live"))
+            )
+        assert upload.await_args.args[4] == "native-live"
+        assert await write_condition(path, "put") == MatchWrite("cached")
+    finally:
+        reset_caller(token)
+
+
+@pytest.mark.asyncio
+async def test_rejected_replacement_closes_started_source(root_accessor):
+    closed = []
+    path = _spec("/data/new.txt")
+
+    async def body():
+        try:
+            yield b"head"
+            yield b"tail"
+        finally:
+            closed.append(True)
+
+    source = body()
+    assert await anext(source) == b"head"
+    with pytest.raises(OperationNotSupportedError):
+        await replace(
+            root_accessor, ReplaceRequest(path, source, ABSENT_WRITE)
+        )
+    assert closed == [True]
 
 
 @pytest.mark.asyncio
