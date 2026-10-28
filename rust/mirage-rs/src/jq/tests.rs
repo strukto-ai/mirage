@@ -2484,6 +2484,119 @@ fn nul_dump_format_names_keep_sliced_progress_and_output() {
 }
 
 #[test]
+fn extrema_keep_only_the_input_and_key_collections() {
+    for steps in [7, u64::MAX] {
+        for (operation, memory, expected) in [
+            ("min", 1_000_000, "0"),
+            ("max", 1_000_000, "19999"),
+            ("min_by(.)", 4_000_000, "0"),
+            ("max_by(.)", 4_000_000, "19999"),
+        ] {
+            let program = format!("[range(20000)] | {operation}");
+            assert_eq!(
+                limited(serde_json::json!({"program":program,"memory":memory,"steps":steps})),
+                vec![Frame::Out(expected.into())],
+                "{operation}, {steps} steps"
+            );
+        }
+    }
+    for (program, expected) in [
+        (
+            "[] | [min,max,min_by(.),max_by(.)]",
+            "[null,null,null,null]",
+        ),
+        (
+            r#"[{k:1,v:"a"},{k:1,v:"b"}] | [min_by(.k),max_by(.k)]"#,
+            r#"[{"k":1,"v":"a"},{"k":1,"v":"b"}]"#,
+        ),
+        (
+            "[nan,1,nan,2] | [min,max,min_by(.),max_by(.)]",
+            "[null,2,null,2]",
+        ),
+        (
+            "[[1,2],[1,1],[1,2]] | [min,max,min_by(.),max_by(.)]",
+            "[[1,1],[1,2],[1,1],[1,2]]",
+        ),
+        (
+            "[9007199254740993,(9007199254740992+0),9007199254740992] | [min,max,min_by(.),max_by(.)]",
+            "[9007199254740992,9007199254740992,9007199254740992,9007199254740992]",
+        ),
+    ] {
+        for steps in [7, u64::MAX] {
+            assert_eq!(
+                run(program, "null", steps),
+                vec![Frame::Out(expected.into())]
+            );
+        }
+    }
+}
+
+#[test]
+fn pending_formats_and_extrema_cancel_and_reuse_the_stream() {
+    let array = format!("[{}null]", "null,".repeat(19999));
+    let string = serde_json::to_string(&"é".repeat(100000)).unwrap();
+    for (operation, input, expected) in [
+        (
+            r#"format("json\u0000tail") | length"#,
+            string.as_str(),
+            "100002",
+        ),
+        (
+            r#"format("json\u0000tail") | length"#,
+            array.as_str(),
+            "100001",
+        ),
+        (
+            r#"format("text\u0000tail") | length"#,
+            array.as_str(),
+            "100001",
+        ),
+        ("min", array.as_str(), "null"),
+        ("max", array.as_str(), "null"),
+        ("min_by(.)", array.as_str(), "null"),
+        ("max_by(.)", array.as_str(), "null"),
+    ] {
+        for steps in [7, u64::MAX] {
+            let program = format!(". as $x | input | $x | {operation}");
+            let mut stream = open(&program, steps);
+            for cancel in [false, true, false] {
+                let mut wire = Vec::new();
+                stream.begin(b"{}").unwrap();
+                stream.feed(input.as_bytes(), &mut wire).unwrap();
+                stream.finish(&mut wire).unwrap();
+                while stream.busy() {
+                    stream.drain(&mut wire).unwrap();
+                }
+                assert!(stream.request(&mut Vec::new()).is_some());
+                stream
+                    .respond(br#"{"kind":"value"}"#, b"0", &mut wire)
+                    .unwrap();
+                if cancel {
+                    if steps == 7 {
+                        for _ in 0..100 {
+                            assert!(stream.busy());
+                            stream.drain(&mut wire).unwrap();
+                        }
+                        assert!(wire.is_empty(), "{operation} emitted before completion");
+                    }
+                    assert!(stream.cancel());
+                }
+                settle(&mut *stream, &mut wire);
+                assert_eq!(
+                    frames(&wire),
+                    if cancel {
+                        vec![]
+                    } else {
+                        vec![Frame::Out(expected.into())]
+                    },
+                    "{operation}, {steps} steps"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn retirement_releases_cancelled_and_completed_pending_tasks() {
     for (program, input, drains) in [
         (

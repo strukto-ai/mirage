@@ -425,7 +425,7 @@ impl Sorting {
         let n = self.values.len();
         while *budget > 0 {
             *budget -= 1;
-            let step = if self.order.len() < n {
+            let step = if !matches!(self.pass, Pass::Min | Pass::Max) && self.order.len() < n {
                 self.order.push(self.order.len());
                 self.merged.push(0);
                 Ok(None)
@@ -537,9 +537,13 @@ impl Sorting {
     }
 
     fn pass(&mut self, budget: &mut u64) -> Result<Option<Value>, TooDeep> {
-        let n = self.order.len();
+        let n = self.values.len();
         if self.at < n {
-            let k = self.order[self.at];
+            let k = if matches!(self.pass, Pass::Min | Pass::Max) {
+                self.at
+            } else {
+                self.order[self.at]
+            };
             match self.pass {
                 Pass::Sort => self.out.push(self.values[k].clone()),
                 Pass::Group => {

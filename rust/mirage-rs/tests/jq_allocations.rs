@@ -271,3 +271,33 @@ fn repeated_key_reads_do_not_allocate_the_key_text() {
         }
     }
 }
+
+#[test]
+fn extrema_do_not_allocate_sort_index_buffers() {
+    let _serial = SERIAL.lock().unwrap();
+    drop(mirage_rs::open("jq_eval", br#"{"program":"0"}"#).unwrap());
+    let input = format!("[{}0]", "0,".repeat(19999));
+    let retained = LIVE.load(Ordering::Relaxed);
+    for steps in [7, u64::MAX] {
+        let (keys, control) = runtime_allocations(
+            &input,
+            ". as $x | input | $x | map([.]) | empty",
+            5_000_000,
+            steps,
+        );
+        assert!(control.is_empty(), "{control:?}");
+        assert!(keys > 0, "the collected key array must be counted");
+        for (operation, expected) in [
+            ("min", 0),
+            ("max", 0),
+            ("min_by(.)", keys),
+            ("max_by(.)", keys),
+        ] {
+            let program = format!(". as $x | input | $x | {operation} | empty");
+            let (extra, wire) = runtime_allocations(&input, &program, 5_000_000, steps);
+            assert_eq!(extra, expected, "{operation}: {extra} extra bytes");
+            assert!(wire.is_empty(), "{operation}: {wire:?}");
+            assert_eq!(LIVE.load(Ordering::Relaxed), retained);
+        }
+    }
+}
