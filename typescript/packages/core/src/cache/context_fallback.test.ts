@@ -283,6 +283,46 @@ describe('a conditional write on the fallback storage', () => {
     },
   )
 
+  it.each([
+    { kind: 'any' },
+    { kind: 'absent' },
+    { kind: 'match', version: 'older' },
+  ] satisfies ReplaceRequest['condition'][])(
+    'keeps another same-mount writer independent of a paused $kind replacement',
+    async (condition) => {
+      const [entry, path] = await conditional()
+      const context = entry.writeContext()
+      const [otherStarted, startOther] = gate()
+      const [replacementStarted, startReplacement] = gate()
+      const [otherFinished, finishOther] = gate()
+      const first = runWithWriteContext('/s3/', context, async () => {
+        await otherStarted
+        return runWithSettledWrite(
+          entry.vfs.accessor,
+          { path, body: new Uint8Array(), condition },
+          async () => {
+            startReplacement()
+            await otherFinished
+            return writeCondition(path, 'put', null, entry.vfs.accessor)
+          },
+        )
+      })
+      const other = runWithWriteContext('/s3/', context, async () => {
+        startOther()
+        await replacementStarted
+        try {
+          return await writeCondition(path, 'put', 'new', entry.vfs.accessor)
+        } finally {
+          finishOther()
+        }
+      })
+      expect(await Promise.all([first, other])).toEqual([
+        condition,
+        { kind: 'match', version: 'new' },
+      ])
+    },
+  )
+
   it('refuses incompatible settled requirements on overlapping frames', async () => {
     const [entry, path] = await conditional()
     const request = {
