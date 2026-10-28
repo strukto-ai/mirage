@@ -140,23 +140,26 @@ describe('runProgram', () => {
     expect(SERVED.has('/tmp/mirage-mp')).toBe(false)
   })
 
-  it('starts nothing once stopped while it checks a served program', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-served-'))
-    const tool = join(dir, 'tool')
-    const ran = join(dir, 'ran')
-    writeFileSync(tool, `#!/bin/sh\ntouch '${ran}'\n`, { mode: 0o755 })
-    const names = serve(dir)
-    const controller = new AbortController()
-    try {
-      const running = runProgram(tool, null, [], null, { signal: controller.signal })
-      controller.abort()
-      await expect(running).rejects.toMatchObject({ name: 'AbortError' })
-      await delay(300)
-      expect(existsSync(ran)).toBe(false)
-    } finally {
-      unserve(names)
-    }
-  })
+  it.each([undefined, null, new DOMException('timed out', 'TimeoutError')])(
+    'starts nothing once stopped while it checks a served program (reason %s)',
+    async (reason) => {
+      const dir = mkdtempSync(join(tmpdir(), 'mirage-served-'))
+      const tool = join(dir, 'tool')
+      const ran = join(dir, 'ran')
+      writeFileSync(tool, `#!/bin/sh\ntouch '${ran}'\n`, { mode: 0o755 })
+      const names = serve(dir)
+      const controller = new AbortController()
+      try {
+        const running = runProgram(tool, null, [], null, { signal: controller.signal })
+        controller.abort(reason)
+        await expect(running).rejects.toMatchObject({ name: 'AbortError' })
+        await delay(300)
+        expect(existsSync(ran)).toBe(false)
+      } finally {
+        unserve(names)
+      }
+    },
+  )
 
   it('starts a child in a served folder outside it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-served-'))

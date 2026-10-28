@@ -254,12 +254,12 @@ export async function runProgram(
   if (prelude) {
     try {
       await checkInterpreter(executable, cwd)
-      signal?.throwIfAborted()
     } catch (error) {
       throw (error as NodeJS.ErrnoException).code === 'ENOENT' && hint !== null
         ? new Error(hint)
         : error
     }
+    if (signal?.aborted === true) throw makeAbortError(signal)
   }
   const child = spawn(
     prelude ? '/bin/sh' : executable,
