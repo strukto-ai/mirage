@@ -160,8 +160,8 @@ terminal, so three `sleep 1` lines on session `a` take three seconds.
 A hybrid terminal keeps light Python on Monty and sends the rest to a Docker
 container: lines that use `numpy` or `pandas` by route policy, and every
 program Mirage does not have itself, such as `ffmpeg`, by `@external`. Redis
-holds the files, sessions, jobs and processes, so any number of server
-replicas serve the same sessions.
+holds the files, sessions, jobs and processes, so a terminal outlives the
+server process that runs it.
 
 | Line | Runs on |
 | --- | --- |
@@ -335,12 +335,11 @@ terminal:
   </Tab>
 </Tabs>
 
-- A terminal created on one replica runs on any other, in the directory it
-  left: the other replica builds the same workspace from Redis on its first
-  line. The replicas share one Docker daemon, which holds every terminal's
-  container. `jobs`, `kill %N` and `ps` work across replicas, as
-  [Jobs](/home/infrastructure/jobs#run-several-instances-of-one-workspace)
-  describes.
+- Send each terminal's requests to one replica, for example by hashing the
+  terminal id at the load balancer. A replica keeps a session in memory once
+  it has loaded it, so two replicas serving one terminal would each keep
+  their own working directory. After a restart, the replica reads the
+  terminal back from Redis, in the directory it left.
 - Every terminal's `/work` is the same Redis keys, so terminals share files.
   Give each `RedisVFS` its own `key_prefix` to keep them apart.
 - Remove a terminal's container with `docker rm -f box-<id>` when the
