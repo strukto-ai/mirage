@@ -312,6 +312,56 @@ async def test_a_program_that_cannot_start_fails_as_the_shell_would(
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="no FIFOs")
+@pytest.mark.parametrize("served", [False, True])
+async def test_a_fifo_fails_to_start_instead_of_waiting_on_it(
+    tmp_path, served
+):
+    fifo = tmp_path / "mirage-fifo"
+    os.mkfifo(fifo)
+    fifo.chmod(0o755)
+    runtime = LocalRuntime(captures=["@external"])
+    names = serve(str(tmp_path)) if served else []
+    try:
+        result = await asyncio.wait_for(
+            _process(runtime, ["./mirage-fifo"], tmp_path), 10
+        )
+    finally:
+        unserve(names)
+        await runtime.close()
+    assert (result.exit_code, result.stderr) == (
+        126,
+        b"./mirage-fifo: cannot execute: Permission denied\n",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="no #! scripts")
+@pytest.mark.parametrize("served", [False, True])
+async def test_a_script_runs_under_its_interpreter_path_as_spelled(
+    tmp_path, monkeypatch, served
+):
+    # The host follows a link before the `..` after it.
+    root = tmp_path / "José"
+    (root / "real" / "sub").mkdir(parents=True)
+    (root / "real" / "bin").mkdir()
+    (root / "real" / "bin" / "sh").symlink_to("/bin/sh")
+    (root / "link").symlink_to(root / "real" / "sub")
+    tool = tmp_path / "mirage-spelled"
+    tool.write_text(f"#!{root}/link/../bin/sh\necho ran\n")
+    tool.chmod(0o755)
+    runtime = LocalRuntime(captures=["@external"])
+    monkeypatch.setenv("PATH", str(tmp_path))
+    names = serve(str(tmp_path)) if served else []
+    try:
+        result = await _process(runtime, ["mirage-spelled"], tmp_path)
+    finally:
+        unserve(names)
+        await runtime.close()
+    assert (result.exit_code, result.stdout) == (0, b"ran\n")
+
+
+@pytest.mark.asyncio
 async def test_a_bare_home_found_through_an_empty_path_entry_runs(
     tmp_path, monkeypatch
 ):

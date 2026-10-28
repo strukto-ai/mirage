@@ -163,34 +163,16 @@ async function untilInputCloses<T>(
 }
 
 /**
- * Reject as spawn would for a script whose `#!` interpreter is missing or
- * cannot run: through `EXEC_PRELUDE` the shell's exec fails instead, with the
- * shell's status and words. Mirrors Python's `_check_interpreter`.
+ * Reject as spawn would for a program that is no regular file, or a script
+ * whose `#!` interpreter is missing or cannot run: through `EXEC_PRELUDE` the
+ * shell's exec fails instead, with the shell's status and words. Opened
+ * without waiting, so a FIFO fails rather than hangs, and each path is kept as
+ * spelled, as the host follows its links before its `..`. Mirrors Python's
+ * `_check_interpreter`.
  */
 async function checkInterpreter(executable: string, cwd: string | undefined): Promise<void> {
   const base = cwd ?? '.'
-  let head: Buffer
-  try {
-    const file = await open(resolve(base, executable), 'r')
-    try {
-      const { buffer, bytesRead } = await file.read(Buffer.alloc(256), 0, 256, 0)
-      head = buffer.subarray(0, bytesRead)
-    } finally {
-      await file.close()
-    }
-  } catch (err) {
-    debuglog('mirage')("reading %s's first line failed: %s", executable, String(err))
-    return
-  }
-  if (head[0] !== 0x23 || head[1] !== 0x21) return
-  const end = head.indexOf(0x0a, 2)
-  const name = head
-    .subarray(2, end === -1 ? head.length : end)
-    .toString('latin1')
-    .trim()
-    .split(/\s+/)[0]
-  if (name === undefined || name === '') return
-  const interpreter = resolve(base, name)
+  const under = (path: string): string => (path.startsWith('/') ? path : `${base}/${path}`)
   const failure = (code: 'ENOENT' | 'EACCES'): NodeJS.ErrnoException =>
     Object.assign(new Error(`spawn ${executable} ${code}`), {
       code,
@@ -198,6 +180,31 @@ async function checkInterpreter(executable: string, cwd: string | undefined): Pr
       syscall: `spawn ${executable}`,
       path: executable,
     })
+  let head: Buffer | null
+  try {
+    const file = await open(under(executable), fsConstants.O_RDONLY | fsConstants.O_NONBLOCK)
+    try {
+      if ((await file.stat()).isFile()) {
+        const { buffer, bytesRead } = await file.read(Buffer.alloc(256), 0, 256, 0)
+        head = buffer.subarray(0, bytesRead)
+      } else head = null
+    } finally {
+      await file.close()
+    }
+  } catch (err) {
+    debuglog('mirage')("reading %s's first line failed: %s", executable, String(err))
+    return
+  }
+  if (head === null) throw failure('EACCES')
+  if (head[0] !== 0x23 || head[1] !== 0x21) return
+  const end = head.indexOf(0x0a, 2)
+  const name = head
+    .subarray(2, end === -1 ? head.length : end)
+    .toString('utf8')
+    .trim()
+    .split(/\s+/)[0]
+  if (name === undefined || name === '') return
+  const interpreter = under(name)
   if (
     !(await stat(interpreter).then(
       () => true,
@@ -247,6 +254,7 @@ export async function runProgram(
   if (prelude) {
     try {
       await checkInterpreter(executable, cwd)
+      signal?.throwIfAborted()
     } catch (error) {
       throw (error as NodeJS.ErrnoException).code === 'ENOENT' && hint !== null
         ? new Error(hint)

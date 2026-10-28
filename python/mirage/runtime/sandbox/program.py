@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import socket
+import stat
 import sys
 import time
 from collections import Counter
@@ -478,9 +479,11 @@ async def _spawn(
 
 
 def _check_interpreter(executable: str, cwd: str | None) -> None:
-    """Raise as the spawn would for a script whose ``#!`` interpreter is
-    missing or cannot run: through ``EXEC_PRELUDE`` the shell's exec
-    fails instead, with the shell's status and words.
+    """Raise as the spawn would for a program that is no regular file, or
+    a script whose ``#!`` interpreter is missing or cannot run: through
+    ``EXEC_PRELUDE`` the shell's exec fails instead, with the shell's
+    status and words. Opened without waiting, so a FIFO fails rather
+    than hangs.
 
     Args:
         executable (str): the program.
@@ -489,11 +492,24 @@ def _check_interpreter(executable: str, cwd: str | None) -> None:
     """
     base = cwd or ""
     try:
-        with open(os.path.join(base, executable), "rb") as fh:
-            head = fh.read(256)
+        fd = os.open(
+            os.path.join(base, executable), os.O_RDONLY | os.O_NONBLOCK
+        )
+    except OSError as exc:
+        logger.debug("opening %s failed: %r", executable, exc)
+        return
+    try:
+        regular = stat.S_ISREG(os.fstat(fd).st_mode)
+        head = os.read(fd, 256) if regular else b""
     except OSError as exc:
         logger.debug("reading %s's first line failed: %r", executable, exc)
         return
+    finally:
+        os.close(fd)
+    if not regular:
+        raise PermissionError(
+            errno.EACCES, os.strerror(errno.EACCES), executable
+        )
     words = head[2:].split(b"\n", 1)[0].split() if head[:2] == b"#!" else []
     if not words:
         return

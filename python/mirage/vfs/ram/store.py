@@ -106,7 +106,7 @@ class RAMStore:
     usage: StorageUsage | None = None
 
     @property
-    def lock(self) -> AbstractContextManager[object]:
+    def lock(self) -> AbstractContextManager[bool | None]:
         """What a step that reads a key, checks its growth and stores it
         holds, so the three run as one across threads: the count's lock
         when a capacity caps the store, nothing otherwise."""
