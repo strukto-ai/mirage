@@ -25,6 +25,9 @@ import {
 } from '../types.ts'
 import { CHAR_MODE, DIR_MODE, DIR_SIZE, FILE_MODE, LINK_MODE } from '../utils/stat_view.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
+import { BaseVFS } from '../vfs/base.ts'
+import { runWithEvaluation } from '../context/session_context.ts'
+import { EvaluationContext } from '../workspace/evaluation.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { workspaceBridge } from './binding.ts'
 import { LISTING_ENTRY_CONCURRENCY } from './constants.ts'
@@ -624,5 +627,42 @@ describe('RuntimeFiles over a core', () => {
     } finally {
       await ws.close()
     }
+  })
+})
+
+/** A store with no pwrite whose write stops on an aborted signal, as an object store's streamed body does. */
+class AbortableRAM extends RAMVFS {
+  constructor() {
+    super()
+    Object.defineProperty(this, 'pwrite', { value: Reflect.get(BaseVFS.prototype, 'pwrite') })
+  }
+
+  override write(...args: Parameters<RAMVFS['write']>): ReturnType<RAMVFS['write']> {
+    args[2]?.throwIfAborted()
+    return super.write(...args)
+  }
+}
+
+describe('RuntimeFiles landing', () => {
+  it('lands what a stopped run wrote, its abort notwithstanding', async () => {
+    const store = new AbortableRAM()
+    const ws = new Workspace({ '/data/': store }, { mode: MountMode.WRITE })
+    const stop = new AbortController()
+    const files = new RuntimeFiles(
+      vi.fn<BridgeDispatchFn>(),
+      new PrefixResolver(() => ['/data/']),
+      null,
+      new MountCore(ws.vfs),
+      stop.signal,
+    )
+    const evaluation = new EvaluationContext(ws.getSession(ws.sessionManager.defaultId))
+    evaluation.frame.abortSignal = stop.signal
+    await runWithEvaluation(evaluation, async () => {
+      const fd = await files.open('/data/out.txt', parseMode('w'))
+      await files.pwrite(fd, 0, enc.encode('kept'))
+      stop.abort()
+      await files.close(fd)
+    })
+    expect(new TextDecoder().decode(store.store.files.get('/out.txt'))).toBe('kept')
   })
 })

@@ -38,7 +38,14 @@ import type { BridgeDispatchFn } from './types.ts'
 import { CallerResolver, workspaceBridge, type WorkspaceBinding } from './binding.ts'
 import { linkView } from '../commands/builtin/utils/links.ts'
 import type { Context } from '../commands/config.ts'
-import { awaitsAs, callsAs, currentCaller } from '../context/session_context.ts'
+import {
+  awaitsAs,
+  callsAs,
+  currentCaller,
+  runWithCaller,
+  type Caller,
+} from '../context/session_context.ts'
+import { EvaluationContext } from '../workspace/evaluation.ts'
 import { type FileStat, PathSpec, type SetAttrFields } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { entryName } from '../utils/remnants.ts'
@@ -366,17 +373,37 @@ export class RuntimeFiles {
    * runs however the run ended, as the run's end would land it anyway.
    */
   private async onCore<T>(op: (core: MountCore) => Promise<T>, lands = false): Promise<T> {
-    if (this.core === null) throw ebadf('/')
-    const signal = lands ? null : this.signal
-    if (signal === null) return op(this.core)
+    const core = this.core
+    if (core === null) throw ebadf('/')
+    if (lands) return runWithCaller(RuntimeFiles.unaborted(currentCaller()), () => op(core))
+    const signal = this.signal
+    if (signal === null) return op(core)
     signal.throwIfAborted()
     this.live.push(signal)
     try {
-      const out = await op(this.core)
+      const out = await op(core)
       signal.throwIfAborted()
       return out
     } finally {
       this.live.splice(this.live.indexOf(signal), 1)
+    }
+  }
+
+  /**
+   * A landing's caller: the run's, with its line's and its frame's abort
+   * channels dropped, since what a stopped guest wrote still lands, as a
+   * killed process's writes stay in its files. Python needs none: a
+   * cancelled task's cleanup runs uncancelled.
+   */
+  private static unaborted(caller: Caller): Caller {
+    const evaluation = caller.evaluation
+    if (evaluation === null) return { ...caller, lineAbort: null }
+    const frame = evaluation.frame.fork()
+    frame.abortSignal = null
+    return {
+      ...caller,
+      lineAbort: null,
+      evaluation: new EvaluationContext(evaluation.session, frame, evaluation.parent),
     }
   }
 
