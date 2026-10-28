@@ -20,13 +20,12 @@ from types import MappingProxyType
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.context import read_versioned, settled_write
-from mirage.cache.types import ABSENT_WRITE, ReplaceRequest
+from mirage.cache.context import read_versioned
+from mirage.cache.types import ABSENT_WRITE, ANY_WRITE, ReplaceRequest
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import Context, command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Argument
-from mirage.context.session_context import current_caller
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
@@ -55,15 +54,44 @@ def test_mount_accepts_root_prefix():
     assert m.prefix == "/"
 
 
-def test_a_new_mount_operation_clears_a_settled_requirement():
+@pytest.mark.asyncio
+@pytest.mark.parametrize("declared", [False, True])
+async def test_protected_replacement_requires_an_implemented_hook(
+    monkeypatch, declared
+):
+    if declared:
+        monkeypatch.setattr(
+            RAMVFS,
+            "condition_support",
+            {"put": frozenset({"absent", "match"})},
+        )
     mount = MountEntry("/data/", RAMVFS())
-    request = ReplaceRequest(
-        PathSpec.from_str_path("/data/f", "f"), b"", ABSENT_WRITE
-    )
-    with settled_write(id(mount.vfs.accessor), request):
-        assert current_caller().settled_write is not None
-        assert mount._on_mount(current_caller()).settled_write is None
-    assert current_caller().settled_write is None
+    path = PathSpec.from_str_path("/data/f", "f")
+    closed = []
+
+    async def body():
+        try:
+            yield b"head"
+            yield b"tail"
+        finally:
+            closed.append(True)
+
+    source = body()
+    assert await anext(source) == b"head"
+    with pytest.raises(OperationNotSupportedError):
+        await mount._replace(
+            mount.index, ReplaceRequest(path, source, ABSENT_WRITE)
+        )
+    assert not await mount.vfs.exists(path)
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_unconditional_replacement_uses_the_ordinary_writer():
+    mount = MountEntry("/data/", RAMVFS())
+    path = PathSpec.from_str_path("/data/f", "f")
+    await mount._replace(mount.index, ReplaceRequest(path, b"ours", ANY_WRITE))
+    assert await materialize(await mount.vfs.read(path)) == b"ours"
 
 
 def test_mount_rejects_no_leading_slash():

@@ -13,8 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import Awaitable, Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable
 from typing import Literal, TypeVar, overload
 
 from mirage.cache.types import (
@@ -28,8 +27,6 @@ from mirage.cache.types import (
     LiveVersion,
     MatchWrite,
     OwnRead,
-    ReplaceRequest,
-    SettledWrite,
     WriteCondition,
     WriteContext,
     WriteKind,
@@ -134,23 +131,6 @@ async def read_versioned(
     return data, token
 
 
-@contextmanager
-def settled_write(owner: int, request: ReplaceRequest) -> Iterator[None]:
-    token = bind_caller(
-        current_caller().changed(
-            {
-                "settled_write": SettledWrite(
-                    owner, request.path.mount_path, "put", request.condition
-                ),
-            }
-        )
-    )
-    try:
-        yield
-    finally:
-        reset_caller(token)
-
-
 def condition_version(condition: WriteCondition | None) -> str | None:
     return condition.version if isinstance(condition, MatchWrite) else None
 
@@ -175,7 +155,6 @@ async def write_condition(
     kind: Literal["put"],
     *,
     own: str | OwnRead | None = None,
-    owner: int | None = None,
 ) -> WriteCondition: ...
 
 
@@ -185,7 +164,6 @@ async def write_condition(
     kind: Literal["copy", "delete"],
     *,
     own: str | OwnRead | None = None,
-    owner: int | None = None,
 ) -> WriteCondition | None: ...
 
 
@@ -194,16 +172,7 @@ async def write_condition(
     kind: WriteKind,
     *,
     own: str | OwnRead | None = None,
-    owner: int | None = None,
 ) -> WriteCondition | None:
-    held = current_caller().settled_write
-    if (
-        held is not None
-        and held.owner == owner
-        and held.path == path.mount_path
-        and held.kind == kind
-    ):
-        return held.condition
     context = current_caller().write_context
     if context is None:
         if kind != "put":

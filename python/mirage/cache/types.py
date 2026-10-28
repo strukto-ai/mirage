@@ -68,14 +68,6 @@ RewriteWriteFn: TypeAlias = Callable[
 
 
 @dataclass(frozen=True, slots=True)
-class SettledWrite:
-    owner: int
-    path: str
-    kind: WriteKind
-    condition: WriteCondition
-
-
-@dataclass(frozen=True, slots=True)
 class LiveVersion:
     """A file's live tokens: the content token mirage compares, the native
     token the backend's condition takes.

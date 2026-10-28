@@ -197,10 +197,10 @@ async def test_truncate_with_no_row_keeps_the_file_dropbox_resolves():
             new_callable=AsyncMock,
             return_value=(b"abcdef", result),
         ),
-        patch.object(vfs, "write", write),
+        patch("mirage.core.dropbox.write.dropbox_upload", write),
     ):
         await vfs.truncate(
             PathSpec(virtual="/n", directory="/", vfs_path="n"), 4
         )
     assert write.await_args is not None
-    assert write.await_args.args[1] == b"abcd"
+    assert write.await_args.args[2] == b"abcd"

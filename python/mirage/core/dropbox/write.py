@@ -19,6 +19,7 @@ from mirage.cache.context import (
     require_supported,
     write_condition,
 )
+from mirage.cache.types import ReplaceRequest, WriteCondition
 from mirage.core.dropbox.api import lookup, refused
 from mirage.core.dropbox.client import DropboxApiError, dropbox_upload
 from mirage.core.dropbox.constants import CONDITION_SUPPORT
@@ -26,6 +27,7 @@ from mirage.core.dropbox.fingerprint import live_of
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.core.dropbox.readdir import stat_from_entry
 from mirage.io.spool import ByteSpool
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import FileStat, PathSpec
@@ -54,12 +56,46 @@ async def write(
         async with ByteSpool() as spool:
             await spool.fill(data)
             return await write(accessor, path, spool)
+    cond = await write_condition(path, "put")
+    require_supported(CONDITION_SUPPORT, "dropbox", path, "put", cond)
+    return await upload_prepared(accessor, path, data, cond)
+
+
+async def replace(
+    accessor: DropboxAccessor, request: ReplaceRequest
+) -> FileStat | None:
+    try:
+        require_supported(
+            CONDITION_SUPPORT,
+            "dropbox",
+            request.path,
+            "put",
+            request.condition,
+        )
+    except BaseException:
+        await close_quietly(request.body)
+        raise
+    if isinstance(request.body, bytes):
+        return await upload_prepared(
+            accessor, request.path, request.body, request.condition
+        )
+    async with ByteSpool() as spool:
+        await spool.fill(request.body)
+        return await upload_prepared(
+            accessor, request.path, spool, request.condition
+        )
+
+
+async def upload_prepared(
+    accessor: DropboxAccessor,
+    path: PathSpec,
+    data: bytes | ByteSpool,
+    cond: WriteCondition,
+) -> FileStat | None:
     tm = accessor.token_manager
     api_path = dropbox_path_of(accessor, path)
-    cond = await write_condition(path, "put", owner=id(accessor))
-    require_supported(CONDITION_SUPPORT, "dropbox", path, "put", cond)
     rev = None
-    if cond is not None and condition_version(cond):
+    if condition_version(cond):
         live = live_of(await lookup(tm, api_path))
         rev = await native_condition(path, cond, live, "put")
     timer = start_op()

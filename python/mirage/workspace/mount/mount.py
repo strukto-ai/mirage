@@ -45,7 +45,6 @@ from mirage.cache.context import (
     publish_read,
     read_versioned,
     require_supported,
-    settled_write,
 )
 from mirage.cache.file.io import latest_fingerprint
 from mirage.cache.index import NULL_INDEX
@@ -55,7 +54,7 @@ from mirage.cache.index.lock import index_lock
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
-from mirage.cache.types import ReplaceRequest, WriteContext
+from mirage.cache.types import AnyWrite, ReplaceRequest, WriteContext
 from mirage.commands.builtin.utils.links import dispatch_of, link_view
 from mirage.commands.builtin.utils.paths import (
     dispatch_stat,
@@ -1692,16 +1691,26 @@ class MountEntry:
     async def _replace(
         self, index: IndexCacheStore, request: ReplaceRequest
     ) -> FileStat | None:
-        require_supported(
-            self.vfs.condition_support,
-            self.vfs.name,
-            request.path,
-            "put",
-            request.condition,
-        )
-        with settled_write(id(self.vfs.accessor), request):
-            result = await self._write(index, request.path, request.body)
-        return result if isinstance(result, FileStat) else None
+        try:
+            require_supported(
+                self.vfs.condition_support,
+                self.vfs.name,
+                request.path,
+                "put",
+                request.condition,
+            )
+            if isinstance(request.condition, AnyWrite):
+                result = await self._write(index, request.path, request.body)
+                return result if isinstance(result, FileStat) else None
+            replace: Callable[..., Awaitable[FileStat | None]] = (
+                self.vfs._replace
+            )
+            handed = await self._handed(replace, request.path, {}, index)
+            return await replace(
+                request, **_handed_on(replace, NULL_INDEX, **handed)
+            )
+        finally:
+            await close_quietly(request.body)
 
     async def _append_by_rewrite(
         self,
@@ -2586,7 +2595,6 @@ class MountEntry:
                     caller.recorder, mount_id=self.mount_id
                 ),
                 "write_context": self.write_context(),
-                "settled_write": None,
             }
         )
 

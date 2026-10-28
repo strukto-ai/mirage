@@ -22,7 +22,6 @@ from mirage.cache.context import (
     native_condition,
     publish_read,
     settle_after,
-    settled_write,
     write_condition,
 )
 from mirage.cache.types import (
@@ -31,7 +30,6 @@ from mirage.cache.types import (
     LiveVersion,
     MatchWrite,
     OwnRead,
-    ReplaceRequest,
     WriteContext,
 )
 from mirage.context.session_context import (
@@ -125,12 +123,9 @@ async def _noop(*_args: PathSpec | str) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "own_path, want", [("/s3/f", "v2"), ("/s3/o", "v1")], ids=["same", "other"]
-)
-async def test_an_own_version_conditions_only_its_own_path(own_path, want):
+@pytest.mark.parametrize("own, want", [("v2", "v2"), (None, "v1")])
+async def test_explicit_own_version_takes_precedence(own, want):
     path = PathSpec(virtual="/s3/f", directory="/s3/", vfs_path="/f")
-    other = PathSpec(virtual=own_path, directory="/s3/", vfs_path=own_path[3:])
     context = WriteContext(
         vfs="s3",
         conditions=frozenset({"put", "copy", "delete"}),
@@ -141,8 +136,7 @@ async def test_an_own_version_conditions_only_its_own_path(own_path, want):
     )
     prev = bind_caller(replace(current_caller(), write_context=context))
     try:
-        with settled_write(7, ReplaceRequest(other, b"", MatchWrite("v2"))):
-            cond = await write_condition(path, "put", owner=7)
+        cond = await write_condition(path, "put", own=own)
     finally:
         reset_caller(prev)
     assert isinstance(cond, MatchWrite) and cond.version == want
@@ -156,22 +150,6 @@ async def test_missing_write_requires_absence_without_a_mount_context():
     )
     assert await write_condition(path, "put") is ANY_WRITE
     assert await write_condition(path, "delete", own=OwnRead.ABSENT) is None
-
-
-@pytest.mark.asyncio
-async def test_settled_requirement_is_bound_to_owner_path_and_operation():
-    path = PathSpec.from_str_path("/s3/f", "f")
-    other = PathSpec.from_str_path("/s3/g", "g")
-    original = current_caller().settled_write
-    with pytest.raises(_OpFailed):
-        with settled_write(7, ReplaceRequest(path, b"", ABSENT_WRITE)):
-            assert await write_condition(path, "put", owner=7) is ABSENT_WRITE
-            assert await write_condition(path, "put", owner=8) is ANY_WRITE
-            assert await write_condition(other, "put", owner=7) is ANY_WRITE
-            assert await write_condition(path, "copy", owner=7) is None
-            raise _OpFailed
-    assert current_caller().settled_write is original
-    assert await write_condition(path, "put", owner=7) is ANY_WRITE
 
 
 @pytest.mark.asyncio

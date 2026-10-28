@@ -180,7 +180,7 @@ def make_write(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
         accessor: A, path_spec: PathSpec, data: ByteSource
     ) -> FileStat | None:
         try:
-            cond = await write_condition(path_spec, "put", owner=id(accessor))
+            cond = await write_condition(path_spec, "put")
         except BaseException:
             await close_quietly(data)
             raise
