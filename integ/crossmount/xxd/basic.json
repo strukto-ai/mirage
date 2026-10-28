@@ -89,12 +89,59 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'ab' > /data/xm_xo; xxd /data/xm_xo /data2/xm_xo.hex; echo rc=$?; cat /data2/xm_xo.hex; xxd -r /data2/xm_xo.hex /data/xm_xo2; cat /data/xm_xo2; echo; rm /data/xm_xo /data/xm_xo2 /data2/xm_xo.hex",
+      "command": "printf 'ab' > /data/xm_xo; xxd /data/xm_xo /data2/xm_xo.hex; echo rc=$?; cat /data2/xm_xo.hex; : > /data/xm_xo2; xxd -r /data2/xm_xo.hex /data/xm_xo2; cat /data/xm_xo2; echo; rm /data/xm_xo /data/xm_xo2 /data2/xm_xo.hex",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\n00000000: 6162                                     ab\nab\n",
         "stderr": ""
-      }
+      },
+      "note": "The reverse output exists so this case isolates cross-mount hex conversion. Dedicated reverse-output creation cases cover native creation and unsupported create-only refusal."
+    },
+    {
+      "id": "xm_xxd_reverse_creates_missing_output",
+      "seq": 963300,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "ssh"
+      ],
+      "command": "printf '6162' > /data2/xm_xxd_missing.hex; xxd -r -p /data2/xm_xxd_missing.hex /data/xm_xxd_missing; echo reverse=$?; test -e /data/xm_xxd_missing; echo exists=$?; cat /data/xm_xxd_missing; echo; cat /data2/xm_xxd_missing.hex; echo; rm -f /data2/xm_xxd_missing.hex /data/xm_xxd_missing",
+      "expect": {
+        "exit": 0,
+        "stdout": "reverse=0\nexists=0\nab\n6162\n",
+        "stderr": ""
+      },
+      "note": "Native positional writers and S3 create-only commits can create a missing reverse output without weakening the destination-state requirement."
+    },
+    {
+      "id": "xm_xxd_reverse_refuses_missing_output_without_create_only",
+      "seq": 963301,
+      "targets": [
+        "redis",
+        "opfs",
+        "gridfs",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '6162' > /data2/xm_xxd_missing.hex; xxd -r -p /data2/xm_xxd_missing.hex /data/xm_xxd_missing; echo reverse=$?; test -e /data/xm_xxd_missing; echo exists=$?; cat /data2/xm_xxd_missing.hex; echo; rm -f /data2/xm_xxd_missing.hex /data/xm_xxd_missing",
+      "expect": {
+        "exit": 0,
+        "stdout": "reverse=3\nexists=1\n6162\n",
+        "stderr": "xxd: /data/xm_xxd_missing: Operation not supported\n"
+      },
+      "note": "The missing reverse output needs a positional rewrite with native create-only. An unsupported backend refuses, leaves no output, and preserves the hex input."
     }
   ]
 }

@@ -7,11 +7,7 @@
         "ram",
         "redis",
         "opfs",
-        "disk",
-        "databricks",
-        "databricks-prefix",
-        "gdrive",
-        "gdrive-folder"
+        "disk"
       ],
       "command": "mkdir -p /data/r8 && cd /data/r8 && echo k > keep && rm keep > nodir/f; echo rc=$? && { rm keep; } > nodir/g; echo rc=$? && rm keep >> nodir/h; echo rc=$? && ls; cd / && rm -r /data/r8",
       "expect": {
@@ -28,12 +24,7 @@
         "redis",
         "opfs",
         "disk",
-        "databricks",
-        "databricks-prefix",
-        "gdrive",
-        "gdrive-folder",
-        "ssh",
-        "tidb-filesystem"
+        "ssh"
       ],
       "command": "mkdir -p /data/r10 && cd /data/r10 && echo x > nodir/f; echo rc=$? && printf y >> nodir/g; echo rc=$? && : > nodir/h; echo rc=$? && printf -v v %s z > nodir/i; echo \"rc=$? v=$v\" && ls; cd / && rm -r /data/r10; (mkdir -p /data/redirect-open && cd /data/redirect-open; echo bad > missing/leaf > \"$(touch skipped; echo unused)\"; echo failed=$?; test ! -e skipped && echo unexpanded; echo bad 2>errors > missing/leaf; echo routed=$?; cat errors; printf '%d\\n' abc > out 2> missing/err; echo stderr=$?; test ! -s out && echo empty; echo bad > out 3> missing/err; echo fd=$?; test ! -s out && echo empty); rm -r /data/redirect-open",
       "expect": {
@@ -61,6 +52,41 @@
         "stdout": "rc=1 3 4\n",
         "stderr": "nodir/f: No such file or directory\n"
       }
+    },
+    {
+      "id": "redirect_unopenable_target_stops_the_command_refuses_unsupported_append_guard",
+      "seq": 501901,
+      "targets": [
+        "databricks",
+        "databricks-prefix",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/r8 && cd /data/r8 && echo k > keep && rm keep > nodir/f; echo rc=$? && { rm keep; } > nodir/g; echo rc=$? && rm keep >> nodir/h; echo rc=$? && ls; cd / && rm -r /data/r8",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nkeep\n",
+        "stderr": "nodir/f: No such file or directory\nnodir/g: No such file or directory\nnodir/h: Operation not supported\n"
+      },
+      "note": "The unsupported missing-file append guard refuses before the backend upload that would discover the missing parent. Ordinary replacement paths retain ENOENT, and the failed redirection prevents its command from running."
+    },
+    {
+      "id": "redirect_unopenable_target_of_an_output_only_builtin_refuses_unsupported_append_guard",
+      "seq": 501902,
+      "targets": [
+        "databricks",
+        "databricks-prefix",
+        "gdrive",
+        "gdrive-folder",
+        "tidb-filesystem"
+      ],
+      "command": "mkdir -p /data/r10 && cd /data/r10 && echo x > nodir/f; echo rc=$? && printf y >> nodir/g; echo rc=$? && : > nodir/h; echo rc=$? && printf -v v %s z > nodir/i; echo \"rc=$? v=$v\" && ls; cd / && rm -r /data/r10; (mkdir -p /data/redirect-open && cd /data/redirect-open; echo bad > missing/leaf > \"$(touch skipped; echo unused)\"; echo failed=$?; test ! -e skipped && echo unexpanded; echo bad 2>errors > missing/leaf; echo routed=$?; cat errors; printf '%d\\n' abc > out 2> missing/err; echo stderr=$?; test ! -s out && echo empty; echo bad > out 3> missing/err; echo fd=$?; test ! -s out && echo empty); rm -r /data/redirect-open",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1 v=\nfailed=1\nunexpanded\nrouted=1\nmissing/leaf: No such file or directory\nstderr=1\nempty\nfd=1\nempty\n",
+        "stderr": "nodir/f: No such file or directory\nnodir/g: Operation not supported\nnodir/h: No such file or directory\nnodir/i: No such file or directory\nmissing/leaf: No such file or directory\nmissing/err: No such file or directory\nmissing/err: No such file or directory\n"
+      },
+      "note": "The unsupported missing-file append guard refuses before the backend upload that would discover the missing parent. Ordinary replacement paths retain ENOENT, and the failed redirection prevents its command from running."
     }
   ]
 }

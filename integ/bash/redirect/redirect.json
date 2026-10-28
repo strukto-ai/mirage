@@ -714,12 +714,13 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo a >&2 2>> DL && cat DL",
+      "command": "(cd /data; : > DL; echo a >&2 2>> DL && cat DL)",
       "expect": {
         "exit": 0,
         "stdout": "",
         "stderr": "a\n"
-      }
+      },
+      "note": "The append target already exists so this case isolates descriptor duplication order. Missing-file append creation and refusal are covered by the exec-open cases."
     },
     {
       "id": "redirect_truncates",
@@ -1483,22 +1484,8 @@
         "redis",
         "opfs",
         "s3",
-        "databricks",
-        "gridfs",
         "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "tidb-filesystem",
-        "gdrive",
-        "gdrive-folder",
-        "box"
+        "ssh"
       ],
       "command": "mkdir -p /data/r6 && cd /data/r6 && echo hi > f && cat f > f && wc -c < f && wc -c f > f && cat f && ls > out && cat out && cat > f < f && wc -c < f && ls >> app && cat app; cd / && rm -r /data/r6",
       "expect": {
@@ -1599,12 +1586,13 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/redirect-many && cd /data/redirect-many && printf 'a\\n' > a.txt && printf 'b\\n' > b.txt; cat < *.txt; echo input=$?; echo bad > *.txt; echo output=$?; echo bad >> *.txt; echo append=$?; { echo bad; } > *.txt; echo compound=$?; true | cat < *.txt; echo pipe=$?; ! cat < *.txt; echo negated=$?; echo bad > *.txt > \"$(touch later; echo skipped)\"; echo ordered=$?; test ! -e later && echo unexpanded; (exec > *.txt); echo exec=$?; cat a.txt b.txt; rm b.txt; echo bad > b.txt > *.txt; echo created=$?; test ! -s b.txt && echo empty; cat a.txt; rm b.txt; echo bad >> b.txt >> *.txt; echo appended=$?; test ! -s b.txt && echo empty; rm b.txt; { echo bad; } > b.txt > *.txt; echo grouped=$?; rm b.txt; true | echo bad > b.txt > *.txt; echo piped=$?; rm b.txt; (exec > b.txt > *.txt); echo installed=$?; test ! -s b.txt && echo empty; echo bad > missing/ > \"$(touch skipped; echo unused)\"; echo failed=$?; test ! -e skipped && echo unexpanded; rm b.txt; echo bad 2>errors >b.txt >*.txt; echo routed=$?; cat errors; echo bad 2>>errors > missing/; echo refused=$?; tail -1 errors); rm -r /data/redirect-many",
+      "command": "(mkdir -p /data/redirect-many && cd /data/redirect-many && printf 'a\\n' > a.txt && printf 'b\\n' > b.txt; cat < *.txt; echo input=$?; echo bad > *.txt; echo output=$?; echo bad >> *.txt; echo append=$?; { echo bad; } > *.txt; echo compound=$?; true | cat < *.txt; echo pipe=$?; ! cat < *.txt; echo negated=$?; echo bad > *.txt > \"$(touch later; echo skipped)\"; echo ordered=$?; test ! -e later && echo unexpanded; (exec > *.txt); echo exec=$?; cat a.txt b.txt; rm b.txt; echo bad > b.txt > *.txt; echo created=$?; test ! -s b.txt && echo empty; cat a.txt; : > b.txt; echo bad >> b.txt >> *.txt; echo appended=$?; test ! -s b.txt && echo empty; rm b.txt; { echo bad; } > b.txt > *.txt; echo grouped=$?; rm b.txt; true | echo bad > b.txt > *.txt; echo piped=$?; rm b.txt; (exec > b.txt > *.txt); echo installed=$?; test ! -s b.txt && echo empty; echo bad > missing/ > \"$(touch skipped; echo unused)\"; echo failed=$?; test ! -e skipped && echo unexpanded; rm b.txt; echo bad 2>errors >b.txt >*.txt; echo routed=$?; cat errors; echo bad 2>>errors > missing/; echo refused=$?; tail -1 errors); rm -r /data/redirect-many",
       "expect": {
         "exit": 0,
         "stdout": "input=1\noutput=1\nappend=1\ncompound=1\npipe=1\nnegated=0\nordered=1\nunexpanded\nexec=1\na\nb\ncreated=1\nempty\na\nappended=1\nempty\ngrouped=1\npiped=1\ninstalled=1\nempty\nfailed=1\nunexpanded\nrouted=1\n*.txt: ambiguous redirect\nrefused=1\nmissing/: Is a directory\n",
         "stderr": "*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\nmissing/: Is a directory\n"
-      }
+      },
+      "note": "The append branch uses an existing empty target to isolate ambiguous-glob ordering. The preceding ordinary-output branch still verifies that opening the first missing target changes the second glob."
     },
     {
       "id": "redirect_glob_quotes_and_options",
@@ -2130,6 +2118,33 @@
         "stdout": "st=0\ngt=0\nlt=0\ntest=1\ncp=0\ndbl=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "redirect_target_is_emptied_before_the_command_refuses_unprotected_append_creation",
+      "seq": 501900,
+      "targets": [
+        "databricks",
+        "gridfs",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/r6 && cd /data/r6 && echo hi > f && cat f > f && wc -c < f && wc -c f > f && cat f && ls > out && cat out && cat > f < f && wc -c < f && ls >> app && cat app; test ! -e app && echo absent; cd / && rm -r /data/r6",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0 f\nf\nout\n0\nabsent\n",
+        "stderr": "app: Operation not supported\n"
+      },
+      "note": "Shared append-open cannot create a missing target without native create-only. Earlier deliberate replacements still truncate before their commands, and the refused append leaves no target."
     }
   ]
 }
