@@ -613,8 +613,8 @@
                   "typescript/setup/gslides",
                   "typescript/setup/onedrive",
                   "typescript/setup/sharepoint",
-                  "typescript/dropbox",
-                  "typescript/box",
+                  "typescript/setup/dropbox",
+                  "typescript/setup/box",
                   "typescript/setup/databricks_volume",
                   "typescript/setup/tidb_filesystem"
                 ]
@@ -628,8 +628,8 @@
                   "typescript/setup/linear",
                   "typescript/setup/wandb",
                   "typescript/setup/langfuse",
-                  "typescript/slack",
-                  "typescript/discord",
+                  "typescript/setup/slack",
+                  "typescript/setup/discord",
                   "typescript/setup/email"
                 ]
               },
