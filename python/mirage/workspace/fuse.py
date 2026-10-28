@@ -82,46 +82,50 @@ class FuseManager:
         """
         resolved = prepare_backend(backend)
         is_fskit = resolved is MountBackend.FSKIT
-        if mountpoint:
-            # Caller/deployment-owned mountpoints may be reused across process
-            # restarts, container lifecycles, or volume mounts. Mirage should
-            # unmount them, but must not delete the directory itself.
-            check_mountpoint(resolved, mountpoint)
-            self._mountpoint = mountpoint
-            self._owns_mountpoint = False
-            # An FSKit mount is a volume: the system creates the /Volumes
-            # entry when the filesystem goes live, and /Volumes is root-owned
-            # so makedirs would fail for a normal user anyway.
-            if not is_fskit:
-                os.makedirs(mountpoint, exist_ok=True)
-        else:
-            # FSKit refuses to mount outside /Volumes, so the default
-            # mountpoint moves there rather than the system temp dir. It is
-            # NAMED, never created: /Volumes is root-owned (drwxr-xr-x
-            # root:wheel), so mkdtemp there raises PermissionError for every
-            # non-root user, and the volume directory is the system's to
-            # create. Same shape as the WinFsp branch in _prepare_mountpoint.
-            if is_fskit:
-                self._mountpoint = (
-                    f"{FSKIT_MOUNT_ROOT}/mirage-{uuid4().hex[:8]}"
-                )
+        with blocking():
+            if mountpoint:
+                # Caller/deployment-owned mountpoints may be reused across
+                # process restarts, container lifecycles, or volume mounts.
+                # Mirage should unmount them, but must not delete the
+                # directory itself.
+                check_mountpoint(resolved, mountpoint)
+                self._mountpoint = mountpoint
+                self._owns_mountpoint = False
+                # An FSKit mount is a volume: the system creates the
+                # /Volumes entry when the filesystem goes live, and /Volumes
+                # is root-owned so makedirs would fail for a normal user
+                # anyway.
+                if not is_fskit:
+                    os.makedirs(mountpoint, exist_ok=True)
             else:
-                self._mountpoint = tempfile.mkdtemp(prefix="mirage-")
-            self._owns_mountpoint = True
-        self._kernel_mountpoint = (
-            canonical_mountpoint(self._mountpoint)
-            if sys.platform == "linux"
-            else self._mountpoint
-        )
-        self._thread = mount_background(
-            files,
-            self._kernel_mountpoint,
-            root_prefix=prefix,
-            session=session,
-            backend=resolved,
-            owner=owner,
-        )
-        self._served = serve(self._mountpoint)
+                # FSKit refuses to mount outside /Volumes, so the default
+                # mountpoint moves there rather than the system temp dir. It
+                # is NAMED, never created: /Volumes is root-owned (drwxr-xr-x
+                # root:wheel), so mkdtemp there raises PermissionError for
+                # every non-root user, and the volume directory is the
+                # system's to create. Same shape as the WinFsp branch in
+                # _prepare_mountpoint.
+                if is_fskit:
+                    self._mountpoint = (
+                        f"{FSKIT_MOUNT_ROOT}/mirage-{uuid4().hex[:8]}"
+                    )
+                else:
+                    self._mountpoint = tempfile.mkdtemp(prefix="mirage-")
+                self._owns_mountpoint = True
+            self._kernel_mountpoint = (
+                canonical_mountpoint(self._mountpoint)
+                if sys.platform == "linux"
+                else self._mountpoint
+            )
+            self._thread = mount_background(
+                files,
+                self._kernel_mountpoint,
+                root_prefix=prefix,
+                session=session,
+                backend=resolved,
+                owner=owner,
+            )
+            self._served = serve(self._mountpoint)
         return self._mountpoint
 
     def unmount(self) -> None:
@@ -139,24 +143,26 @@ class FuseManager:
                 pass
             else:
                 unmount_with_fusermount(self._kernel_mountpoint)
+            # An FSKit /Volumes entry is created and removed by the system,
+            # and is not ours to rmdir (nor could we: /Volumes is
+            # root-owned).
+            if self._owns_mountpoint and not self._mountpoint.startswith(
+                FSKIT_MOUNT_ROOT + "/"
+            ):
+                try:
+                    # Empty-directory cleanup only. If the mount is still
+                    # live or the directory has contents, leave it for the
+                    # caller/admin.
+                    os.rmdir(self._mountpoint)
+                except OSError as err:
+                    # Non-empty or busy: leave it for the caller or an admin.
+                    logger.debug(
+                        "fuse: removing mountpoint %s failed: %r",
+                        self._mountpoint,
+                        err,
+                    )
         unserve(self._served)
         self._served = []
-        # An FSKit /Volumes entry is created and removed by the system, and
-        # is not ours to rmdir (nor could we: /Volumes is root-owned).
-        if self._owns_mountpoint and not self._mountpoint.startswith(
-            FSKIT_MOUNT_ROOT + "/"
-        ):
-            try:
-                # Empty-directory cleanup only. If the mount is still live or
-                # the directory has contents, leave it for the caller/admin.
-                os.rmdir(self._mountpoint)
-            except OSError as err:
-                # Non-empty or busy: leave it for the caller or an admin.
-                logger.debug(
-                    "fuse: removing mountpoint %s failed: %r",
-                    self._mountpoint,
-                    err,
-                )
         self._mountpoint = None
         self._kernel_mountpoint = None
         self._owns_mountpoint = False

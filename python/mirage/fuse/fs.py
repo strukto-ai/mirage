@@ -62,11 +62,10 @@ class MirageFS:
     translation of mirage-native exceptions into ``OSError``. Every core
     op runs on the workspace's owner loop, the one its foreground calls
     run on, so a store's checks and the writes they guard never race a
-    second loop. While the owner is blocked on this mount coming up
-    (``starting`` names the loop its mounting thread blocks) or on a
-    mount going down, or while no owner runs, an op runs on a loop
-    thread of the mount's own instead; a capped store lets the two take
-    turns. All filesystem semantics live in MountCore, so an
+    second loop. While the owner is blocked on a mount coming up or
+    going down (``BLOCKED``), or while no owner runs, an op runs on a
+    loop thread of the mount's own instead; a capped store lets the two
+    take turns. All filesystem semantics live in MountCore, so an
     FSKit or File Provider adapter can reuse them unchanged.
 
     Args:
@@ -90,19 +89,13 @@ class MirageFS:
     ) -> None:
         self.core = MountCore(files, root_prefix=root_prefix, session=session)
         self._owner = owner
-        self.starting: asyncio.AbstractEventLoop | None = None
         self._loop = asyncio.new_event_loop()
         threading.Thread(target=self._loop.run_forever, daemon=True).start()
 
     def _serving(self) -> asyncio.AbstractEventLoop:
         """The loop the next op runs on: the owner when it can answer."""
         owner = self._owner()
-        if (
-            owner is not None
-            and owner is not self.starting
-            and owner.is_running()
-            and owner not in BLOCKED
-        ):
+        if owner is not None and owner.is_running() and owner not in BLOCKED:
             return owner
         return self._loop
 

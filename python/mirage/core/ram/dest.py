@@ -12,9 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-
 from mirage.errors.fs import (
     eexist,
     einval,
@@ -209,15 +206,15 @@ def check_mkdir_target(
         raise enotdir(named)
 
 
-@contextmanager
 def check_capacity(
     store: RAMStore, spec: PathSpec, key: str, size: int
-) -> Iterator[None]:
+) -> None:
     """Refuse with EDQUOT a key growing to ``size`` bytes past its store's
-    capacity, then let the body store it; an uncapped store takes any size.
+    capacity; an uncapped store takes any size.
 
-    The body holds the count's lock and awaits nothing, so the check and
-    the change run as one step, on the store's loop and across threads.
+    Called under ``store.lock`` just before the change, with no await
+    between, so the check and the change run as one step, on the store's
+    loop and across threads.
 
     Args:
         store (RAMStore): the RAM store.
@@ -225,9 +222,5 @@ def check_capacity(
         key (str): its normalized key.
         size (int): the key's length after the change.
     """
-    if store.usage is None:
-        yield
-        return
-    with store.usage.lock:
+    if store.usage is not None:
         store.usage.admit(spec, size - len(store.files.get(key, b"")))
-        yield

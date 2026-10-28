@@ -91,15 +91,16 @@ async def write(
         return
     if isinstance(data, bytes) or atomic:
         whole = await materialize(data)
-        if append and p in store.files:
-            if not whole:
-                return
-            with check_capacity(
-                store, path_spec, p, len(store.files[p]) + len(whole)
-            ):
+        with store.lock:
+            if append and p in store.files:
+                if not whole:
+                    return
+                check_capacity(
+                    store, path_spec, p, len(store.files[p]) + len(whole)
+                )
                 store.files[p] += whole
-        else:
-            with check_capacity(store, path_spec, p, len(whole)):
+            else:
+                check_capacity(store, path_spec, p, len(whole))
                 store.files[p] = whole
         store.modified[p] = now_iso()
         record(op, path_spec.virtual, "ram", len(whole), timer)
@@ -125,15 +126,18 @@ async def write(
             return
         try:
             data = b"".join(pending)
-            current = store.files.get(p, b"")
-            if append:
-                store.files[p] = current + data
-            else:
-                current = current.ljust(position, b"\0")
-                store.files[p] = (
-                    current[:position] + data + current[position + len(data) :]
-                )
-                position += len(data)
+            with store.lock:
+                current = store.files.get(p, b"")
+                if append:
+                    store.files[p] = current + data
+                else:
+                    current = current.ljust(position, b"\0")
+                    store.files[p] = (
+                        current[:position]
+                        + data
+                        + current[position + len(data) :]
+                    )
+                    position += len(data)
             store.modified[p] = now_iso()
         finally:
             pending.clear()

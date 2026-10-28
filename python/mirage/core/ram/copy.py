@@ -65,6 +65,7 @@ async def copy(
         await target.write(data, dst_spec)
         return
     check_write_target(store, dst_spec, d)
-    with check_capacity(store, dst_spec, d, len(data)):
+    with store.lock:
+        check_capacity(store, dst_spec, d, len(data))
         store.files[d] = data
     store.modified[d] = now_iso()

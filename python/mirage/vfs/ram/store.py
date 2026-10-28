@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Iterable, Iterator, MutableMapping
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Protocol, TypeVar, overload
 
@@ -55,8 +56,8 @@ class RAMFiles(MutableMapping[str, bytes]):
 
     Counting here, rather than at each op, means no change to the table
     can miss the count. It does not refuse anything: an op checks growth
-    with ``check_capacity``, which it stores under, as one step. Mirrors
-    the TS ``RAMFiles``.
+    with ``check_capacity`` before it stores, under ``RAMStore.lock``, as
+    one step. Mirrors the TS ``RAMFiles``.
     """
 
     def __init__(self, usage: StorageUsage | None = None) -> None:
@@ -103,3 +104,10 @@ class RAMStore:
     attrs: dict[str, dict[str, Any]] = field(default_factory=dict[str, Any])
     # The store's capacity and counted bytes, None when uncapped.
     usage: StorageUsage | None = None
+
+    @property
+    def lock(self) -> AbstractContextManager[object]:
+        """What a step that reads a key, checks its growth and stores it
+        holds, so the three run as one across threads: the count's lock
+        when a capacity caps the store, nothing otherwise."""
+        return self.usage.lock if self.usage is not None else nullcontext()

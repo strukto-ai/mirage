@@ -25,6 +25,7 @@ import pytest
 from mirage import RAMVFS, DiskVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.runtime.python import LocalRuntime
+from mirage.runtime.sandbox.program import serve, unserve
 from mirage.runtime.types import Program, RunResult
 from mirage.types import PathSpec
 
@@ -289,17 +290,20 @@ async def test_a_program_path_follows_dot_dot_past_a_symlink(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("served", [False, True])
 async def test_a_program_that_cannot_start_fails_as_the_shell_would(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, served
 ):
     tool = tmp_path / "mirage-broken"
     tool.write_text("#!/no/such/interpreter\n")
     tool.chmod(0o755)
     runtime = LocalRuntime(captures=["@external"])
     monkeypatch.setenv("PATH", str(tmp_path))
+    names = serve(str(tmp_path)) if served else []
     try:
         result = await _process(runtime, ["mirage-broken"], tmp_path)
     finally:
+        unserve(names)
         await runtime.close()
     assert (result.exit_code, result.stderr) == (
         126,

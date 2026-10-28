@@ -21,6 +21,7 @@ import tempfile
 import pytest
 
 from mirage import FuseManager, Mount, MountBackend, MountMode, Workspace
+from mirage.bridge.sync import BLOCKED
 from mirage.runtime.sandbox.program import SERVED
 from mirage.vfs.ram import RAMVFS
 
@@ -229,6 +230,42 @@ def test_a_mount_runs_on_the_owner_and_is_served_until_it_unmounts(
     ws.remove_fuse_mount("/")
     assert mp not in SERVED
     loop.close()
+
+
+@pytest.mark.asyncio
+async def test_setup_and_unmount_touch_paths_with_their_loop_blocked(
+    monkeypatch, tmp_path
+):
+    # A mountpoint inside another mount of the workspace is answered by
+    # that mount, which must not wait on the loop doing the setup.
+    loop = asyncio.get_running_loop()
+    blocked: list[tuple[str, bool]] = []
+
+    def record(step: str) -> None:
+        blocked.append((step, loop in BLOCKED))
+
+    def mkdtemp(prefix: str = "") -> str:
+        record("mkdtemp")
+        (tmp_path / "mp").mkdir()
+        return str(tmp_path / "mp")
+
+    def mount(*_args, **_kwargs) -> _FakeThread:
+        record("mount")
+        return _FakeThread()
+
+    monkeypatch.setattr(tempfile, "mkdtemp", mkdtemp)
+    monkeypatch.setattr("mirage.workspace.fuse.mount_background", mount)
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "mirage.workspace.fuse.unmount_with_fusermount",
+        lambda _mountpoint: None,
+    )
+    monkeypatch.setattr(os, "rmdir", lambda _path: record("rmdir"))
+    manager = FuseManager()
+    manager.setup(Workspace({"/": RAMVFS()}).vfs)
+    manager.unmount()
+    assert blocked == [("mkdtemp", True), ("mount", True), ("rmdir", True)]
+    assert loop not in BLOCKED
 
 
 def _as_macos(monkeypatch):

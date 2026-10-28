@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import json
 import logging
 import os
@@ -458,6 +459,7 @@ async def _spawn(
     if sys.platform != "win32" and (
         _served(executable) or (cwd is not None and _served(cwd))
     ):
+        await asyncio.to_thread(_check_interpreter, executable, cwd)
         args = ["-c", EXEC_PRELUDE, "sh", cwd or ".", executable, *args]
         executable, cwd = "/bin/sh", None
     loop = asyncio.get_running_loop()
@@ -475,11 +477,41 @@ async def _spawn(
     return asyncio.subprocess.Process(transport, protocol, loop), transport
 
 
+def _check_interpreter(executable: str, cwd: str | None) -> None:
+    """Raise as the spawn would for a script whose ``#!`` interpreter is
+    missing or cannot run: through ``EXEC_PRELUDE`` the shell's exec
+    fails instead, with the shell's status and words.
+
+    Args:
+        executable (str): the program.
+        cwd (str | None): where it starts, which a relative path names
+            from; None for this process's.
+    """
+    base = cwd or ""
+    try:
+        with open(os.path.join(base, executable), "rb") as fh:
+            head = fh.read(256)
+    except OSError as exc:
+        logger.debug("reading %s's first line failed: %r", executable, exc)
+        return
+    words = head[2:].split(b"\n", 1)[0].split() if head[:2] == b"#!" else []
+    if not words:
+        return
+    interpreter = os.path.join(base, os.fsdecode(words[0]))
+    if not os.path.exists(interpreter):
+        raise FileNotFoundError(
+            errno.ENOENT, os.strerror(errno.ENOENT), executable
+        )
+    if not os.access(interpreter, os.X_OK):
+        raise PermissionError(
+            errno.EACCES, os.strerror(errno.EACCES), executable
+        )
+
+
 def serve(folder: str) -> list[str]:
     """Record ``folder`` in ``SERVED`` under each name a child's path may
     give it: as given, made absolute, and with its parent's links
-    resolved. Only the parent is read, never the mount, so recording it
-    waits on no loop.
+    resolved. Only the parent is read, never the mount itself.
 
     Args:
         folder (str): a host folder a kernel mount here serves.

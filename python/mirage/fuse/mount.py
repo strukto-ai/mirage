@@ -23,6 +23,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from mirage.bridge.sync import blocking
 from mirage.fuse.backend import MountBackend, prepare_backend
 from mirage.fuse.darwin import install_macfuse_extensions, timespec_ns
 from mirage.fuse.fs import MirageFS
@@ -267,14 +268,13 @@ def mount_background(
     )
     fuse = load_fuse()
     fs = MirageFS(files, root_prefix=root_prefix, session=session, owner=owner)
-    fs.starting = asyncio._get_running_loop()
-    _prepare_mountpoint(mountpoint)
-    t = threading.Thread(
-        target=_run_fuse,
-        args=(fuse, fs, mountpoint, resolved),
-        daemon=True,
-    )
-    t.start()
-    _await_ready(t, mountpoint)
-    fs.starting = None
+    with blocking():
+        _prepare_mountpoint(mountpoint)
+        t = threading.Thread(
+            target=_run_fuse,
+            args=(fuse, fs, mountpoint, resolved),
+            daemon=True,
+        )
+        t.start()
+        _await_ready(t, mountpoint)
     return t

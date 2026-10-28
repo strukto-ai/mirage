@@ -16,7 +16,7 @@ import { type ChildProcess, execFile, spawn } from 'node:child_process'
 import { constants, hostname } from 'node:os'
 import { once } from 'node:events'
 import { constants as fsConstants, realpathSync } from 'node:fs'
-import { access, stat } from 'node:fs/promises'
+import { access, open, stat } from 'node:fs/promises'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -163,6 +163,58 @@ async function untilInputCloses<T>(
 }
 
 /**
+ * Reject as spawn would for a script whose `#!` interpreter is missing or
+ * cannot run: through `EXEC_PRELUDE` the shell's exec fails instead, with the
+ * shell's status and words. Mirrors Python's `_check_interpreter`.
+ */
+async function checkInterpreter(executable: string, cwd: string | undefined): Promise<void> {
+  const base = cwd ?? '.'
+  let head: Buffer
+  try {
+    const file = await open(resolve(base, executable), 'r')
+    try {
+      const { buffer, bytesRead } = await file.read(Buffer.alloc(256), 0, 256, 0)
+      head = buffer.subarray(0, bytesRead)
+    } finally {
+      await file.close()
+    }
+  } catch (err) {
+    debuglog('mirage')("reading %s's first line failed: %s", executable, String(err))
+    return
+  }
+  if (head[0] !== 0x23 || head[1] !== 0x21) return
+  const end = head.indexOf(0x0a, 2)
+  const name = head
+    .subarray(2, end === -1 ? head.length : end)
+    .toString('latin1')
+    .trim()
+    .split(/\s+/)[0]
+  if (name === undefined || name === '') return
+  const interpreter = resolve(base, name)
+  const failure = (code: 'ENOENT' | 'EACCES'): NodeJS.ErrnoException =>
+    Object.assign(new Error(`spawn ${executable} ${code}`), {
+      code,
+      errno: -constants.errno[code],
+      syscall: `spawn ${executable}`,
+      path: executable,
+    })
+  if (
+    !(await stat(interpreter).then(
+      () => true,
+      () => false,
+    ))
+  )
+    throw failure('ENOENT')
+  if (
+    !(await access(interpreter, fsConstants.X_OK).then(
+      () => true,
+      () => false,
+    ))
+  )
+    throw failure('EACCES')
+}
+
+/**
  * One process run to its end: its output and its exit status. The child
  * leads a process group of its own, and an aborted call kills the whole
  * group and stops reading the pipes: a grandchild left alive, or one that
@@ -192,6 +244,15 @@ export async function runProgram(
   const { cwd } = options
   const prelude =
     process.platform !== 'win32' && (served(executable) || (cwd !== undefined && served(cwd)))
+  if (prelude) {
+    try {
+      await checkInterpreter(executable, cwd)
+    } catch (error) {
+      throw (error as NodeJS.ErrnoException).code === 'ENOENT' && hint !== null
+        ? new Error(hint)
+        : error
+    }
+  }
   const child = spawn(
     prelude ? '/bin/sh' : executable,
     prelude ? ['-c', EXEC_PRELUDE, 'sh', cwd ?? '.', executable, ...args] : args,
