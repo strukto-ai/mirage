@@ -98,7 +98,7 @@ await ws.shell('slack send-message --channel general --text "report is up"')
 
 ## 설치
 
-- **Python** ≥ 3.11: `mirage-ai` 패키지와 `mirage` CLI
+- **Python** ≥ 3.12: `mirage-ai` 패키지와 `mirage` CLI
 - **Node.js** ≥ 20: TypeScript SDK
 - **macOS** 또는 **Linux** (FUSE 기반 마운트는 플랫폼 지원 필요)
 
@@ -122,8 +122,6 @@ npm install @struktoai/mirage-vercel    # Vercel AI 어댑터, 에이전트 프�
 ### CLI
 
 ```bash
-curl -fsSL https://strukto.ai/mirage/install.sh | sh
-# 또는
 npm install -g @struktoai/mirage-cli
 # 또는
 uvx mirage-ai

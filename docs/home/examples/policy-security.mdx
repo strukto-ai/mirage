@@ -1,0 +1,214 @@
+---
+title: Policy & Security
+icon: shield-halved
+description: One agent profile that hides files, denies and asks about commands, hides variables and runs a policy script, beside a coded policy on file writes.
+---
+
+Mirage judges every action an agent takes before it reaches a service: each
+command, each file call, including those a Python program makes, and each
+variable write. This example gives an analyst agent one profile and the
+workspace one coded policy, and walks through what the agent sees.
+
+| Layer | Controls | Here |
+| --- | --- | --- |
+| Profile `paths` | Which files the agent can see | Hides `/data/secrets` and every `*.pem`, shows `/data/secrets/README.md` back |
+| Profile `commands` | Which commands run | Denies `curl` and `slack send-message`, asks before `rm` under `/data/out` |
+| Profile `vars` | Which variables it can read | Hides `AWS_*` |
+| Profile `policy` | What the rules cannot express | A script refuses Python that deletes files |
+| Coded policy | Any action, in code | Writes only under `/data/out`, from a command or from Python |
+| `on_ask` | Who answers an ask | The host approves |
+
+## The policy script
+
+The script reads the command as JSON, opens the files it names through the
+workspace, and refuses a Python script whose code deletes files:
+
+```python guard.py
+import json, os
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+
+
+def deletes(path):
+    try:
+        code = open(path).read()
+    except OSError:
+        return False
+    return any(call in code for call in ("os.remove", "os.unlink", "shutil.rmtree"))
+
+
+if ctx["command"].startswith("python") and any(deletes(p) for p in ctx["paths"]):
+    print(json.dumps({"kind": "deny", "reason": "deleting files is disabled"}))
+```
+
+## The workspace
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import dataclasses
+    from pathlib import Path
+
+    from mirage import Decision, MountMode, Outcome, Scope, Workspace
+    from mirage.commands.cli.builtin.slack import SLACK
+    from mirage.policy import Deny, Policy, VfsContext
+    from mirage.runtime.types import ScriptSource
+    from mirage.vfs.s3 import S3Config, S3VFS
+
+
+    class WritesOnlyToOut(Policy):
+        async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
+            if ctx.write and not ctx.path.virtual.startswith("/data/out/"):
+                return Deny("the analyst writes only under /data/out")
+            return None
+
+
+    async def approve(record: Decision) -> Decision:
+        return dataclasses.replace(record, outcome=Outcome.ALLOW, scope=Scope.ONCE)
+
+
+    ws = Workspace(
+        {"/data": (S3VFS(S3Config(bucket="analytics")), MountMode.EXEC)},
+        clis={"slack": (SLACK, {"token": slack_bot_token})},
+        env={"AWS_SECRET_ACCESS_KEY": aws_secret_access_key, "TEAM": "growth"},
+        profiles={
+            "analyst": {
+                "cwd": "/data",
+                "paths": {"hide": ["/data/secrets", "*.pem"], "show": ["/data/secrets/README.md"]},
+                "commands": {
+                    "deny": ["curl", "slack send-message"],
+                    "ask": [{"commands": {"rm": ["/data/out/*"]}, "reason": "deletes need review"}],
+                },
+                "vars": {"hide": ["AWS_*"]},
+                "policy": {
+                    "pre_command": [{"script": ScriptSource(Path("guard.py").read_text()), "runtime": "monty"}],
+                },
+            },
+        },
+        policies=[WritesOnlyToOut()],
+        on_ask=approve,
+    )
+    agent = await ws.session("agent", profile="analyst")
+    await agent.shell("ls")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { readFileSync } from 'node:fs'
+    import {
+      MountMode,
+      Outcome,
+      S3VFS,
+      SLACK,
+      Scope,
+      ScriptSource,
+      Workspace,
+      parseSessionProfile,
+      type Policy,
+    } from '@struktoai/mirage-node'
+
+    const writesOnlyToOut: Policy = {
+      preVfs(ctx) {
+        if (ctx.write && !ctx.path.virtual.startsWith('/data/out/')) {
+          return { kind: 'deny', reason: 'the analyst writes only under /data/out' }
+        }
+        return null
+      },
+    }
+
+    const analyst = parseSessionProfile(
+      {
+        cwd: '/data',
+        paths: { hide: ['/data/secrets', '*.pem'], show: ['/data/secrets/README.md'] },
+        commands: {
+          deny: ['curl', 'slack send-message'],
+          ask: [{ commands: { rm: ['/data/out/*'] }, reason: 'deletes need review' }],
+        },
+        vars: { hide: ['AWS_*'] },
+        policy: {
+          pre_command: [{ script: new ScriptSource(readFileSync('guard.py', 'utf8'), 'python'), runtime: 'monty' }],
+        },
+      },
+      'profile `analyst`',
+    )
+
+    const ws = new Workspace(
+      { '/data': [new S3VFS({ bucket: 'analytics' }), MountMode.EXEC] },
+      {
+        clis: { slack: [SLACK, { token: slackBotToken }] },
+        env: { AWS_SECRET_ACCESS_KEY: awsSecretAccessKey, TEAM: 'growth' },
+        profiles: { analyst },
+        policies: [writesOnlyToOut],
+        onAsk: (record) => Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE }),
+      },
+    )
+    ws.createSession('agent', { profile: 'analyst' })
+    await ws.shell('ls', { sessionId: 'agent' })
+    ```
+  </Tab>
+</Tabs>
+
+## What the agent sees
+
+```console
+$ ls
+clean.py
+out
+reports
+secrets
+$ cat /data/secrets/aws.txt
+cat: /data/secrets/aws.txt: No such file or directory
+$ cat /data/secrets/README.md
+see #ops for credentials
+$ cat server.pem
+cat: server.pem: No such file or directory
+$ echo $AWS_SECRET_ACCESS_KEY $TEAM
+growth
+$ curl -s https://example.com
+curl: Permission denied
+$ slack send-message --channel general --text hi
+slack: Permission denied
+$ cat clean.py
+import os
+os.remove("/data/reports/q3.csv")
+$ python3 clean.py
+python3: Permission denied
+$ echo x > notes.txt
+notes.txt: Permission denied
+$ python3 -c "open('/data/notes.txt', 'w').write('x')"
+Traceback (most recent call last):
+  File "<python-input-0>", line 1, in <module>
+    open('/data/notes.txt', 'w').write('x')
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+PermissionError: [Errno 13] Permission denied: '/data/notes.txt'
+$ echo x > out/notes.txt
+$ rm out/notes.txt
+```
+
+- **Hidden files are absent, not refused.** `aws.txt` and `server.pem` read
+  as missing, and `ls` leaves `server.pem` out. `secrets` stays listed only
+  because `README.md` is shown back inside it.
+- **Hidden variables read as unset.** `$AWS_SECRET_ACCESS_KEY` expands to
+  nothing; `$TEAM` is untouched.
+- **Denied commands exit 126** with `Permission denied`, the same wording a
+  shell gives. The reason stays with the host.
+- **The script reads the file before it runs.** `python3 clean.py` is refused
+  because `clean.py` calls `os.remove`. A script that only reads runs.
+- **The coded policy sees every file call.** The write from `echo` and the
+  write from Python's `open()` both reach `pre_vfs`, and both are refused
+  outside `/data/out`.
+- **An ask goes to the host.** `rm out/notes.txt` matches the ask rule, so
+  `approve` answers it before the line runs. Without `on_ask`, the line
+  returns pending until the host answers.
+
+The profile applies only to sessions under `analyst`. The coded policy
+applies to every session of the workspace, so the host's own writes outside
+`/data/out` are refused as well.
+
+## Learn more
+
+- [Agent profiles](/home/profiles): every profile key and how rules match.
+- [Policies](/home/policy/policies): the eight methods and their answers.
+- [Scripts](/home/policy/scripts): what a policy script reads and prints.
+- [Explain](/home/policy/explain): check a line against the rules before it
+  runs.

@@ -98,7 +98,7 @@ await ws.shell('slack send-message --channel general --text "report is up"')
 
 ## 安装
 
-- **Python** ≥ 3.11，用于 `mirage-ai` 包和 `mirage` CLI
+- **Python** ≥ 3.12，用于 `mirage-ai` 包和 `mirage` CLI
 - **Node.js** ≥ 20，用于 TypeScript SDK
 - **macOS** 或 **Linux**（基于 FUSE 的挂载需要平台支持）
 
@@ -122,8 +122,6 @@ npm install @struktoai/mirage-vercel    # Vercel AI 适配器；每个 agent 框
 ### CLI
 
 ```bash
-curl -fsSL https://strukto.ai/mirage/install.sh | sh
-# 或
 npm install -g @struktoai/mirage-cli
 # 或
 uvx mirage-ai

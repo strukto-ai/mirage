@@ -247,6 +247,83 @@ A program reads the workspace as the session it judges for:
 - Monty has no `os.path`, `os.walk` or `Path.glob`; use `Path.exists()`,
   `Path.is_dir()` and `Path.iterdir()`, which run on every runtime.
 
+So a program can judge a file by what is in it. This one disables `rm`, and
+a Python script whose code deletes files:
+
+```python guard.py
+import json, os
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+
+
+def deletes(path):
+    try:
+        code = open(path).read()
+    except OSError:
+        return False
+    return any(call in code for call in ("os.remove", "os.unlink", "shutil.rmtree"))
+
+
+if ctx["command"] == "rm" or (
+    ctx["command"].startswith("python") and any(deletes(p) for p in ctx["paths"])
+):
+    print(json.dumps({"kind": "deny", "reason": "deleting files is disabled"}))
+```
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from pathlib import Path
+
+    from mirage import MountMode, Workspace
+    from mirage.runtime.types import ScriptSource
+    from mirage.vfs.s3 import S3Config, S3VFS
+
+    ws = Workspace(
+        {"/s3": (S3VFS(S3Config(bucket="my-bucket")), MountMode.WRITE)},
+        profiles={
+            "analyst": {
+                "policy": {
+                    "pre_command": [{"script": ScriptSource(Path("guard.py").read_text()), "runtime": "monty"}],
+                },
+            },
+        },
+        profile="analyst",
+    )
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { readFileSync } from 'node:fs'
+    import { MountMode, S3VFS, ScriptSource, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/s3': [new S3VFS({ bucket: 'my-bucket' }), MountMode.WRITE] },
+      {
+        profiles: {
+          analyst: {
+            policy: {
+              preCommand: [{ script: new ScriptSource(readFileSync('guard.py', 'utf8'), 'python'), runtime: 'monty' }],
+            },
+          },
+        },
+        profile: 'analyst',
+      },
+    )
+    ```
+  </Tab>
+</Tabs>
+
+```console
+$ cat /s3/clean.py
+import os
+os.remove("/s3/report.txt")
+$ rm /s3/report.txt
+rm: Permission denied
+$ python3 /s3/clean.py
+python3: Permission denied
+```
+
 ## When a program fails
 
 A program that exits non-zero, runs past 10 seconds, prints anything but
