@@ -37,6 +37,9 @@ import {
   runWithEvaluation,
   currentCaller,
   runWithCaller,
+  callerSignal,
+  inLanding,
+  runLanding,
 } from './session_context.ts'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
@@ -121,6 +124,28 @@ describe('the bound evaluation on the fallback storage', () => {
     })
     await Promise.all([running, entered])
     expect(seen).toBe(evaluation)
+  })
+})
+
+describe('a landing on the fallback storage', () => {
+  it('passes no call as one, so a stopped guest beside it stays stopped', async () => {
+    // The one slot shows a landing to every call beside it; a stopped
+    // guest's call made then must keep its abort.
+    const stop = new AbortController()
+    stop.abort()
+    const evaluation = new EvaluationContext(new SessionState({ sessionId: 'run', cwd: '/' }))
+    evaluation.frame.abortSignal = stop.signal
+    const [hold, release] = gate()
+    const landed = runLanding(async () => {
+      await hold
+      return inLanding()
+    })
+    const beside = await runWithEvaluation(evaluation, () =>
+      Promise.resolve(callerSignal()?.aborted),
+    )
+    release()
+    expect(await landed).toBe(false)
+    expect(beside).toBe(true)
   })
 })
 

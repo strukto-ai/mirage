@@ -30,7 +30,7 @@ import { BaseVFS } from '../vfs/base.ts'
 import { callsAs, runWithEvaluation } from '../context/session_context.ts'
 import { EvaluationContext } from '../workspace/evaluation.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { workspaceBridge, type WorkspaceBinding } from './binding.ts'
+import { captureBinding, workspaceBridge, type WorkspaceBinding } from './binding.ts'
 import { LISTING_ENTRY_CONCURRENCY } from './constants.ts'
 import { CrossMountError } from './errors.ts'
 import { parseMode } from './handles/index.ts'
@@ -695,9 +695,10 @@ describe('RuntimeFiles landing', () => {
       const evaluation = new EvaluationContext(ws.getSession(ws.sessionManager.defaultId))
       evaluation.frame.abortSignal = stop.signal
       const binding = Reflect.get(ws, 'runtimeBinding') as WorkspaceBinding
-      const files = callsAs({ ...context.caller, evaluation }, () =>
-        RuntimeFiles.of({ ...context.ctx, vfs: ws.vfs }, binding),
-      )()
+      // A run's files dispatch as the run itself, its abort included.
+      const run = { ...context.caller, evaluation }
+      const captured = captureBinding(binding, { ctx: { vfs: ws.vfs } }, run)
+      const files = callsAs(run, () => RuntimeFiles.of(captured.ctx, binding))()
       if (files === null) throw new Error('expected the run its files')
       const guest = files.withSignal(stop.signal)
       const fd = await guest.open('/data/out.txt', parseMode('w'))

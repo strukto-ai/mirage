@@ -42,10 +42,9 @@ import {
   awaitsAs,
   callsAs,
   currentCaller,
-  runWithCaller,
-  type Caller,
+  inLanding,
+  runLanding,
 } from '../context/session_context.ts'
-import { EvaluationContext } from '../workspace/evaluation.ts'
 import { type FileStat, PathSpec, type SetAttrFields } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { entryName } from '../utils/remnants.ts'
@@ -261,9 +260,6 @@ export class RuntimeFiles {
   private readonly dispatch: BridgeDispatchFn
   private readonly resolver: MountResolver
   private readonly noAppend = new Set<string>()
-  // The callers a landing (`onCore`) runs as, which the core's dispatch
-  // lets through however the run ended.
-  private static readonly landings = new Set<Caller>()
 
   /**
    * @param bridge the bridge every op rides, over the run's files; it also
@@ -340,19 +336,13 @@ export class RuntimeFiles {
             vfs.over(
               // A cancelled guest call sends nothing more, whichever op of
               // the core's was under way; a landing goes however it ended.
-              async (name, path, args, kwargs, report) => {
-                const landing = RuntimeFiles.landings.has(currentCaller())
-                const guests = landing ? [] : live
-                return runWithCaller(
-                  landing ? RuntimeFiles.unaborted(caller) : caller,
-                  async () => {
-                    for (const signal of guests) signal.throwIfAborted()
-                    const out = await vfs.dispatch(name, path, args, kwargs, report)
-                    for (const signal of guests) signal.throwIfAborted()
-                    return out
-                  },
-                )
-              },
+              awaitsAs(caller, async (name, path, args, kwargs, report) => {
+                const guests = inLanding() ? [] : live
+                for (const signal of guests) signal.throwIfAborted()
+                const out = await vfs.dispatch(name, path, args, kwargs, report)
+                for (const signal of guests) signal.throwIfAborted()
+                return out
+              }),
             ),
           ),
       null,
@@ -380,22 +370,14 @@ export class RuntimeFiles {
   /**
    * Run one op on the run's open-file core; EBADF when this adapter opens
    * nothing. An op that only lands what the guest already wrote (`lands`)
-   * runs however the run ended, as the run's end would land it anyway: as
-   * a caller of its own, which the core's dispatch knows a landing by, so
-   * a cancelled guest call under way beside it stops only itself.
+   * runs however the run ended, as the run's end would land it anyway
+   * (`runLanding`), so a cancelled guest call under way beside it stops only
+   * itself.
    */
   private async onCore<T>(op: (core: MountCore) => Promise<T>, lands = false): Promise<T> {
     const core = this.core
     if (core === null) throw ebadf('/')
-    if (lands) {
-      const landing = RuntimeFiles.unaborted(currentCaller())
-      RuntimeFiles.landings.add(landing)
-      try {
-        return await runWithCaller(landing, () => op(core))
-      } finally {
-        RuntimeFiles.landings.delete(landing)
-      }
-    }
+    if (lands) return runLanding(() => op(core))
     const signal = this.signal
     if (signal === null) return op(core)
     signal.throwIfAborted()
@@ -406,24 +388,6 @@ export class RuntimeFiles {
       return out
     } finally {
       this.live.splice(this.live.indexOf(signal), 1)
-    }
-  }
-
-  /**
-   * A landing's caller: the run's, with its line's and its frame's abort
-   * channels dropped, since what a stopped guest wrote still lands, as a
-   * killed process's writes stay in its files. Python needs none: a
-   * cancelled task's cleanup runs uncancelled.
-   */
-  private static unaborted(caller: Caller): Caller {
-    const evaluation = caller.evaluation
-    if (evaluation === null) return { ...caller, lineAbort: null }
-    const frame = evaluation.frame.fork()
-    frame.abortSignal = null
-    return {
-      ...caller,
-      lineAbort: null,
-      evaluation: new EvaluationContext(evaluation.session, frame, evaluation.parent),
     }
   }
 

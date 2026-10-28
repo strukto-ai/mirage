@@ -32,6 +32,9 @@ import {
   currentCaller,
   runWithCaller,
   withCaller,
+  callerSignal,
+  inLanding,
+  runLanding,
 } from './session_context.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import { MountMode, weakerMode } from '../types.ts'
@@ -476,5 +479,21 @@ describe('withCaller', () => {
       expect(currentCaller()).toBe(reader)
     })
     expect(seen).toEqual([1, 1, 1])
+  })
+})
+
+describe('runLanding', () => {
+  it('answers no signal inside it, the run stopped, and the abort beside it', async () => {
+    const stop = new AbortController()
+    stop.abort()
+    const evaluation = new EvaluationContext(new SessionState({ sessionId: 'run', cwd: '/' }))
+    evaluation.frame.abortSignal = stop.signal
+    await runWithEvaluation(evaluation, async () => {
+      expect(await runLanding(() => Promise.resolve([inLanding(), callerSignal()]))).toEqual([
+        true,
+        undefined,
+      ])
+      expect([inLanding(), callerSignal()?.aborted]).toEqual([false, true])
+    })
   })
 })
