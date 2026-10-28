@@ -193,6 +193,12 @@ right after a `tee` or `sed -i` downloads nothing.
 
 ## Conditional writes
 
+A rewrite that observes a missing file requires atomic create-only support,
+which this backend does not currently enable. Appending to a missing file
+therefore returns an unsupported-operation error under either write policy.
+An intentional write with `>` can create the file, and subsequent appends to
+that existing file retain the selected policy.
+
 A Box mount accepts `write: conditional`. A
 write or a file delete compares the `sha1` mirage holds with the one the
 folder listing it walks anyway shows, and refuses a file changed since it

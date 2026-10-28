@@ -112,8 +112,23 @@ count only their own writes.
 
 | Value | Behavior |
 | --- | --- |
-| `unconditional` | Every write lands; the last write wins. The default. |
+| `unconditional` | Replacements use last-write-wins. The default. |
 | `conditional` | Send the version the mount last saw, such as `If-Match` on the S3 family, so a write based on a stale read is refused. |
+
+The shared rewrite helpers and object-store truncate require a file observed
+missing to remain absent at commit, under either policy. These paths cover
+append-open and emulated append, positional write, and nonzero truncate. A
+competing creation is refused without replacing its bytes. A
+backend that cannot enforce create-only returns an unsupported-operation
+error. Ordinary replacement and zero-length truncate retain the selected
+write policy.
+
+Backend-specific native truncate implementations outside these shared paths
+retain their existing concurrency behavior.
+
+Conditional appends may refuse a competing update. Conflicts return an error
+without retrying the append or rerunning the command. Existing-file appends under
+`unconditional` remain last-write-wins.
 
 `read: pinned` and `write: staged` are reserved names. A mount that declares
 either is refused when it mounts.
