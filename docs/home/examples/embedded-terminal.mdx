@@ -4,7 +4,8 @@ icon: terminal
 description: A lightweight terminal inside a FastAPI or Express server, with Python on Monty and no container.
 ---
 
-An embedded terminal runs inside an application server. Each terminal is a
+Most of the time an agent does not need a sandbox, only a terminal-like
+interface. An embedded terminal runs inside an application server. Each terminal is a
 Mirage session with its own working directory, environment and history, and
 [Monty](/home/setup/runtime/monty) runs Python in-process, so a terminal
 starts with no container or VM. Mirage is async native, so one server process

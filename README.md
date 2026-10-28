@@ -292,8 +292,9 @@ the other stages a script can answer at.
 
 ## Embedded Terminal
 
-A lightweight terminal inside an application server. Each terminal is a Mirage
-session with its own working directory, environment and history, and Python
+Most of the time an agent does not need a sandbox, only a terminal-like
+interface, and Mirage embeds one in an application server. Each terminal is a
+Mirage session with its own working directory, environment and history, and Python
 runs in-process on Monty, so a terminal starts with no container or VM. Here
 it is in Express; the FastAPI version is in the
 [docs](https://docs.mirage.strukto.ai/home/examples/embedded-terminal).
