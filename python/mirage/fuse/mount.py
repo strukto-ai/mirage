@@ -26,7 +26,7 @@ from typing import Any
 from mirage.fuse.backend import MountBackend, prepare_backend
 from mirage.fuse.darwin import install_macfuse_extensions, timespec_ns
 from mirage.fuse.fs import MirageFS
-from mirage.runtime.sandbox.program import SERVED, serve
+from mirage.runtime.sandbox.program import serve, unserve
 from mirage.types import JsonValue
 from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.session.session import SessionState
@@ -207,7 +207,7 @@ def _run_fuse(
             **win_opts,
         )
     finally:
-        SERVED.difference_update(served)
+        unserve(served)
 
 
 def _await_ready(
@@ -267,7 +267,7 @@ def mount_background(
     )
     fuse = load_fuse()
     fs = MirageFS(files, root_prefix=root_prefix, session=session, owner=owner)
-    fs.starting = True
+    fs.starting = asyncio._get_running_loop()
     _prepare_mountpoint(mountpoint)
     t = threading.Thread(
         target=_run_fuse,
@@ -276,5 +276,5 @@ def mount_background(
     )
     t.start()
     _await_ready(t, mountpoint)
-    fs.starting = False
+    fs.starting = None
     return t

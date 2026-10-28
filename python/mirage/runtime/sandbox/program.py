@@ -19,6 +19,7 @@ import os
 import socket
 import sys
 import time
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import Context
 
@@ -57,8 +58,9 @@ STREAM_LIMIT = 2**16
 # Host folders a kernel mount in this process serves. A child started in
 # one, or from one, would wait inside its spawn on the loop that answers
 # for the folder, the very loop spawning it, so it starts outside and
-# EXEC_PRELUDE takes it in once the spawn has returned.
-SERVED: set[str] = set()
+# EXEC_PRELUDE takes it in once the spawn has returned. Each name counts
+# the mounts recording it, so one going down leaves another at its path.
+SERVED: Counter[str] = Counter()
 
 
 async def run_program(
@@ -473,7 +475,7 @@ async def _spawn(
     return asyncio.subprocess.Process(transport, protocol, loop), transport
 
 
-def serve(folder: str) -> set[str]:
+def serve(folder: str) -> list[str]:
     """Record ``folder`` in ``SERVED`` under each name a child's path may
     give it: as given, made absolute, and with its parent's links
     resolved. Only the parent is read, never the mount, so recording it
@@ -483,14 +485,26 @@ def serve(folder: str) -> set[str]:
         folder (str): a host folder a kernel mount here serves.
 
     Returns:
-        set[str]: the names added, for the caller to take out of
-        ``SERVED`` once the mount is gone.
+        list[str]: the names added, for ``unserve`` once the mount is gone.
     """
     given = os.path.abspath(folder)
     parent, name = os.path.split(given)
-    names = {given, os.path.join(os.path.realpath(parent), name)}
+    names = [given, os.path.join(os.path.realpath(parent), name)]
     SERVED.update(names)
     return names
+
+
+def unserve(names: list[str]) -> None:
+    """Take one mount's names out of ``SERVED``; a name another mount
+    still records stays.
+
+    Args:
+        names (list[str]): what ``serve`` returned.
+    """
+    SERVED.subtract(names)
+    for name in names:
+        if SERVED[name] <= 0:
+            SERVED.pop(name, None)
 
 
 def _served(path: str) -> bool:

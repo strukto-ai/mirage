@@ -20,6 +20,7 @@ import signal
 import socket
 import sys
 import time
+from collections import Counter
 from collections.abc import AsyncIterator
 
 import pytest
@@ -29,12 +30,14 @@ from mirage.process.table import ProcessTable
 from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
 from mirage.runtime.sandbox.program import (
     Children,
+    _served,
     close_children,
     host_run,
     open_program_pipe,
     reap_host_run,
     run_program,
     serve,
+    unserve,
 )
 from mirage.types import PathSpec
 
@@ -172,11 +175,21 @@ def test_a_served_folder_is_known_by_its_absolute_and_resolved_names(
     real.mkdir()
     (tmp_path / "link").symlink_to(real)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("mirage.runtime.sandbox.program.SERVED", set())
-    assert serve("link/mp") == {
+    monkeypatch.setattr("mirage.runtime.sandbox.program.SERVED", Counter())
+    assert serve("link/mp") == [
         str(tmp_path / "link" / "mp"),
         os.path.join(os.path.realpath(real), "mp"),
-    }
+    ]
+
+
+def test_a_folder_stays_served_while_another_mount_records_it(monkeypatch):
+    # A lazily released mount may end after a new one took its path.
+    monkeypatch.setattr("mirage.runtime.sandbox.program.SERVED", Counter())
+    old, new = serve("/tmp/mirage-mp"), serve("/tmp/mirage-mp")
+    unserve(old)
+    assert _served("/tmp/mirage-mp/a")
+    unserve(new)
+    assert not _served("/tmp/mirage-mp/a")
 
 
 @pytest.mark.asyncio
@@ -198,7 +211,7 @@ async def test_a_child_in_a_served_folder_starts_outside_it(
     monkeypatch.setattr(loop, "subprocess_exec", subprocess_exec)
     monkeypatch.setattr(
         "mirage.runtime.sandbox.program.SERVED",
-        {str(tmp_path)} if served else set(),
+        Counter([str(tmp_path)] if served else []),
     )
     ran = await run_program(
         sys.executable,

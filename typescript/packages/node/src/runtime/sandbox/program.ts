@@ -45,17 +45,17 @@ import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
  * Host folders a kernel mount in this process serves. A child started in
  * one, or from one, would wait inside its spawn on the loop that answers
  * for the folder, the very loop spawning it, so it starts outside and
- * EXEC_PRELUDE takes it in once the spawn has returned. Mirrors Python's
- * `SERVED`.
+ * EXEC_PRELUDE takes it in once the spawn has returned. Each name counts the
+ * mounts recording it, so one going down leaves another at its path. Mirrors
+ * Python's `SERVED`.
  */
-export const SERVED = new Set<string>()
+export const SERVED = new Map<string, number>()
 
 /**
  * Record `folder` in `SERVED` under each name a child's path may give it: as
  * given, made absolute, and with its parent's links resolved. Only the parent
  * is read, never the mount, so recording it waits on no loop. Returns the
- * names added, for the caller to take out of `SERVED` once the mount is gone.
- * Mirrors Python's `serve`.
+ * names added, for `unserve` once the mount is gone. Mirrors Python's `serve`.
  */
 export function serve(folder: string): string[] {
   const given = resolve(folder)
@@ -65,13 +65,25 @@ export function serve(folder: string): string[] {
   } catch (err) {
     debuglog('mirage')('cannot resolve the parent of %s: %s', given, err)
   }
-  for (const name of names) SERVED.add(name)
+  for (const name of names) SERVED.set(name, (SERVED.get(name) ?? 0) + 1)
   return names
+}
+
+/**
+ * Take one mount's names out of `SERVED`; a name another mount still records
+ * stays. Mirrors Python's `unserve`.
+ */
+export function unserve(names: string[]): void {
+  for (const name of names) {
+    const left = (SERVED.get(name) ?? 0) - 1
+    if (left > 0) SERVED.set(name, left)
+    else SERVED.delete(name)
+  }
 }
 
 /** Whether `path` lies in a folder a kernel mount here serves. */
 function served(path: string): boolean {
-  for (const folder of SERVED) {
+  for (const folder of SERVED.keys()) {
     if (path === folder || path.startsWith(`${rstripSlash(folder)}/`)) return true
   }
   return false

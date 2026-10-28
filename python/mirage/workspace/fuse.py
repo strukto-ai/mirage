@@ -34,7 +34,7 @@ from mirage.fuse.mount import (
     mount_background,
     unmount_with_fusermount,
 )
-from mirage.runtime.sandbox.program import SERVED, serve
+from mirage.runtime.sandbox.program import serve, unserve
 from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.session.session import SessionState
 
@@ -48,7 +48,7 @@ class FuseManager:
         # which the unmount looks up in the mount table.
         self._kernel_mountpoint: str | None = None
         self._thread: Thread | None = None
-        self._served: set[str] = set()
+        self._served: list[str] = []
         # True only for tempfile mountpoints Mirage created and may delete.
         self._owns_mountpoint: bool = False
 
@@ -139,7 +139,8 @@ class FuseManager:
                 pass
             else:
                 unmount_with_fusermount(self._kernel_mountpoint)
-        SERVED.difference_update(self._served)
+        unserve(self._served)
+        self._served = []
         # An FSKit /Volumes entry is created and removed by the system, and
         # is not ours to rmdir (nor could we: /Volumes is root-owned).
         if self._owns_mountpoint and not self._mountpoint.startswith(

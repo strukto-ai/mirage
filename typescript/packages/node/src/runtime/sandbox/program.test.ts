@@ -29,6 +29,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import {
   SERVED,
   serve,
+  unserve,
   closeChildren,
   hostRun,
   openProgramPipe,
@@ -126,8 +127,17 @@ describe('runProgram', () => {
       expect(names).toEqual([join(dir, 'link', 'mp'), join(realpathSync(join(dir, 'real')), 'mp')])
       expect(names.every((name) => SERVED.has(name))).toBe(true)
     } finally {
-      for (const name of names) SERVED.delete(name)
+      unserve(names)
     }
+  })
+
+  // A lazily released mount may end after a new one took its path.
+  it('keeps a folder served while another mount records it', () => {
+    const [old, current] = [serve('/tmp/mirage-mp'), serve('/tmp/mirage-mp')]
+    unserve(old)
+    expect(SERVED.has('/tmp/mirage-mp')).toBe(true)
+    unserve(current)
+    expect(SERVED.has('/tmp/mirage-mp')).toBe(false)
   })
 
   it('starts a child in a served folder outside it', async () => {
@@ -144,11 +154,11 @@ describe('runProgram', () => {
           )
         ).stdout,
       )
-    SERVED.add(dir)
+    const names = serve(dir)
     try {
       expect(await pwd()).toBe(dir)
     } finally {
-      SERVED.delete(dir)
+      unserve(names)
     }
     expect(await pwd()).toBe('')
   })

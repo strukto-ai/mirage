@@ -32,7 +32,7 @@ import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { checkMountpoint, FSKIT_MOUNT_ROOT, prepareBackend } from './backend.ts'
 import { UNMOUNT_POLL_MS, UNMOUNT_TIMEOUT_MS } from './constants.ts'
 import { MirageFS } from './fs.ts'
-import { SERVED, serve } from '../runtime/sandbox/program.ts'
+import { serve, unserve } from '../runtime/sandbox/program.ts'
 
 export interface FuseHandle {
   mountpoint: string
@@ -365,7 +365,7 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
       new Promise<void>((resolve, reject) => {
         fuse.unmount((err) => {
           if (err === null) {
-            for (const name of served) SERVED.delete(name)
+            unserve(served)
             resolve()
           } else reject(err)
         })
