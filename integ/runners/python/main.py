@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import io
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -533,6 +534,16 @@ async def main() -> None:
         target = manifest[target_id]
         if HOST not in target["hosts"]:
             print(f"skip [{target_id}]: not a {HOST} host", file=sys.stderr)
+            continue
+        if (
+            target.get("non_root")
+            and hasattr(os, "geteuid")
+            and os.geteuid() == 0
+        ):
+            print(
+                f"skip [{target_id}]: requires a non-root user",
+                file=sys.stderr,
+            )
             continue
         if target["mounts"][0]["vfs"] not in adapters.BUILDERS:
             print(f"skip [{target_id}]: no {HOST} adapter", file=sys.stderr)

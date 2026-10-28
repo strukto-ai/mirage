@@ -3987,6 +3987,7 @@
     },
     {
       "id": "disk-capacity-permissions",
+      "non_root": true,
       "hosts": ["python", "typescript-node"],
       "mounts": [
         {

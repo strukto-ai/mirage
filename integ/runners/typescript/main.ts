@@ -439,6 +439,10 @@ async function main(): Promise<void> {
       process.stderr.write(`skip [${id}]: not a typescript host\n`)
       continue
     }
+    if (target.non_root === true && process.geteuid?.() === 0) {
+      process.stderr.write(`skip [${id}]: requires a non-root user\n`)
+      continue
+    }
     if (!(target.mounts[0].vfs in ADAPTERS)) {
       process.stderr.write(`skip [${id}]: no typescript adapter\n`)
       unadapted.push(id)

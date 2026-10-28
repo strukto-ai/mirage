@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import check_case_targets as case_targets
 import shard
@@ -1703,6 +1704,71 @@ def selftest_shard() -> None:
     )
 
 
+def selftest_non_root_targets() -> None:
+    """A root run skips permission fixtures before opening a workspace."""
+    out = io.StringIO()
+    err = io.StringIO()
+    run = AsyncMock()
+    with (
+        patch.object(os, "geteuid", return_value=0),
+        patch.object(
+            sys,
+            "argv",
+            [str(MAIN), "--target", "disk-capacity-permissions", "--strict"],
+        ),
+        patch.object(runner_main, "run_target", run),
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+    ):
+        asyncio.run(runner_main.main())
+    check(
+        "non-root target (py): root skips without opening it",
+        run.await_count == 0 and "requires a non-root user" in err.getvalue(),
+        out.getvalue() + err.getvalue(),
+    )
+    for value in (1, "true", None):
+        data = {"targets": [{"id": "bad", "non_root": value}]}
+        check(
+            f"non-root target (py): rejects {value!r}",
+            *raises(lambda: harness.validate_targets(data), "non_root"),
+        )
+    if not TSX.is_file():
+        return
+    script = (
+        "process.geteuid = () => 0; "
+        "process.argv = ['node', 'main.ts', '--target', "
+        "'disk-capacity-permissions', '--strict']; "
+        "import('./runners/typescript/main.ts')"
+    )
+    proc = subprocess.run(
+        [str(TSX), "--eval", script], cwd=ROOT, capture_output=True, text=True
+    )
+    check(
+        "non-root target (ts): root skips the permission fixture",
+        proc.returncode == 0
+        and "requires a non-root user" in proc.stderr
+        and "0 passed" in proc.stdout,
+        proc.stdout + proc.stderr,
+    )
+    script = (
+        "import('./runners/typescript/harness.ts').then(m => { "
+        "for (const value of [1, 'true', null]) { "
+        "let caught = false; "
+        "try { m.validateTargets([{ id: 'bad', non_root: value }]); } "
+        "catch (e) { if (!String(e).includes('non_root')) throw e; caught = true; } "
+        "if (!caught) throw new Error('non_root accepted ' + String(value)); "
+        "} })"
+    )
+    proc = subprocess.run(
+        [str(TSX), "--eval", script], cwd=ROOT, capture_output=True, text=True
+    )
+    check(
+        "non-root target (ts): rejects invalid flags",
+        proc.returncode == 0,
+        proc.stderr,
+    )
+
+
 def main() -> None:
     selftest_services_table()
     selftest_case_validation()
@@ -1716,6 +1782,7 @@ def main() -> None:
     selftest_pool_runtime()
     selftest_case_targets()
     selftest_shard()
+    selftest_non_root_targets()
     selftest_typescript_gates("--require-ts" in sys.argv)
     print()
     if FAILURES:
