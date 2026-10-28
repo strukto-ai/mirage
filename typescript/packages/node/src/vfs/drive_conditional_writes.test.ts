@@ -442,6 +442,31 @@ describe('conditional writes only Box has', () => {
     expect(drive.text('f')).toBe('the')
   })
 
+  it.each([false, true])(
+    'completed empty Box reread without sha1 releases the old version (stream: %s)',
+    async (streamed) => {
+      const ws = await workspace(WritePolicy.CONDITIONAL, {
+        policy: ReadPolicy.FRESH,
+        ttl: DEFAULT_READ_TTL,
+      })
+      const a = await ws.session('a')
+      const path = '/box/f'
+      await a.vfs.read(path)
+      drive.put('f', '')
+      drive.box.unhashed.add(drive.box.idOf('f'))
+      await expect(a.vfs.write(path, ENC.encode('mine\n'))).rejects.toMatchObject({
+        code: 'STALE_WRITE',
+      })
+      if (streamed) {
+        const chunks: Uint8Array[] = []
+        for await (const chunk of await a.vfs.read(path, { stream: true })) chunks.push(chunk)
+        expect(chunks.reduce((n, c) => n + c.byteLength, 0)).toBe(0)
+      } else expect(await a.vfs.read(path)).toEqual(new Uint8Array(0))
+      await a.vfs.write(path, ENC.encode('mine\n'))
+      expect(drive.text('f')).toBe('mine\n')
+    },
+  )
+
   it('resizing a file Box keeps no sha1 for goes out plain', async () => {
     drive.box.unhashed.add(drive.box.idOf('f'))
     const ws = await workspace()

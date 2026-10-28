@@ -36,4 +36,6 @@ export async function* readStream(
   } catch (exc) {
     throw (await readError(accessor, path, exc)) ?? exc
   }
+
+  if (rec !== null) rec.complete = true
 }

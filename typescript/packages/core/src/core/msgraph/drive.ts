@@ -537,6 +537,8 @@ export async function* streamItem(
     if (error instanceof GraphError && error.status === 404) throw enoent(virtual)
     throw error
   }
+
+  if (rec !== null) rec.complete = true
 }
 
 export async function* iterTree(

@@ -104,14 +104,48 @@ it.each(['v1', null])('unstarted reads preserve the previous observation %s', (i
   for (let i = 0; i < 3; i++) {
     pending = record('read', null)
     pending.bytes = 0
+    pending.complete = false
     history.observe(scope, '/f', pending)
     expect(history.read(scope, '/f')).toBe(initial)
   }
+  pending.complete = true
   pending.fingerprint = 'empty-file-token'
   expect(history.read(scope, '/f')).toBe('empty-file-token')
   pending = record('read', null)
   pending.bytes = 0
+  pending.complete = false
   history.observe(scope, '/f', pending)
   pending.bytes = 1
   expect(history.read(scope, '/f')).toBeNull()
+})
+
+it.each([false, true])(
+  'completed empty reads can clear an unknown version (stream: %s)',
+  (streamed) => {
+    const history = new VersionHistory()
+    const scope = new VersionScope()
+    history.keep(scope, '/f', 'old')
+    const rec = record('read', null)
+    rec.bytes = 0
+    rec.complete = !streamed
+    history.observe(scope, '/f', rec)
+    if (streamed) {
+      expect(history.read(scope, '/f')).toBe('old')
+      rec.complete = true
+    }
+    expect(history.read(scope, '/f')).toBeNull()
+  },
+)
+
+it('response headers do not advance a read before bytes arrive', () => {
+  const history = new VersionHistory()
+  const scope = new VersionScope()
+  history.keep(scope, '/f', 'old')
+  const rec = record('read', 'new')
+  rec.bytes = 0
+  rec.complete = false
+  history.observe(scope, '/f', rec)
+  expect(history.read(scope, '/f')).toBe('old')
+  rec.complete = true
+  expect(history.read(scope, '/f')).toBe('new')
 })

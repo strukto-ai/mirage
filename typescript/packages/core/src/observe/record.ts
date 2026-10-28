@@ -162,6 +162,8 @@ export interface OpRecordInit {
 }
 
 export class OpRecord {
+  /** In-process transfer lifecycle; excluded from serialized observations. */
+  complete = true
   readonly executionId: string | null
   readonly op: string
   readonly path: string

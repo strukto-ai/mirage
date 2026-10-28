@@ -39,4 +39,6 @@ export async function* readStream(
     if (isNotFound(exc)) throw enoent(path.virtual)
     throw exc
   }
+
+  if (rec !== null) rec.complete = true
 }

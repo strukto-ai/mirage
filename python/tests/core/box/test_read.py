@@ -358,6 +358,10 @@ async def _recorded_stream(accessor, index, *chunks, close_after=None):
                     break
     finally:
         scope.close()
+    assert all(
+        r.complete == (close_after is None or len(got) < close_after)
+        for r in scope.records
+    )
     return got, [(r.op, r.bytes, r.fingerprint) for r in scope.records]
 
 

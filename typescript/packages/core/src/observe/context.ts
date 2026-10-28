@@ -319,6 +319,7 @@ export function record(
 
 /**
  * Append a streaming record whose bytes are filled in as it drains.
+ * Set `complete` after normal exhaustion, never after failure or early close.
  *
  * `path`: the full virtual path.
  */
@@ -342,6 +343,7 @@ export function recordStream(
     mountId: currentCaller().recording?.mountId ?? null,
     executionId: currentExecutionId(),
   })
+  rec.complete = false
   state.records.push(rec)
   charge(rec)
   return rec

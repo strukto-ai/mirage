@@ -92,4 +92,6 @@ export async function* readStream(
     const token = digest.digest()
     rec.fingerprint = conditioned ? token : readToken(found, token)
   }
+
+  if (rec !== null) rec.complete = true
 }

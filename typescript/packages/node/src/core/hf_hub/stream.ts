@@ -47,4 +47,6 @@ export async function* readStream(
   } catch (err) {
     throw asRefusal(path, err, REFUSED_STATUSES)
   }
+
+  if (rec !== null) rec.complete = true
 }

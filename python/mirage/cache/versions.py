@@ -50,7 +50,7 @@ class VersionHistory:
         if not isinstance(held, tuple):
             return held
         rec, previous = held
-        if rec.op == "read" and rec.bytes == 0 and rec.fingerprint is None:
+        if rec.op == "read" and not rec.complete and rec.bytes == 0:
             return previous
         return rec.fingerprint
 
@@ -84,8 +84,8 @@ class VersionHistory:
                 if under_path(name, key):
                     held[name] = None
         if rec.op in STAMP_FINGERPRINT_OPS:
-            # An unopened or failed stream has observed neither bytes nor a
-            # token. Keep the prior condition until its record proves a read.
+            # Headers alone are no observation: retain the prior condition
+            # until bytes arrive or the stream ends normally.
             held[key] = (rec, self.read(scope, key))
         else:
             held[key] = None

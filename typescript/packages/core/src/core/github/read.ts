@@ -126,6 +126,8 @@ export async function* readStream(
     if (rec !== null) rec.bytes += chunk.byteLength
     yield chunk
   }
+
+  if (rec !== null) rec.complete = true
 }
 
 /** The blob sha of the file at `path`, off its row. Mirrors Python's `_blob_sha`. */

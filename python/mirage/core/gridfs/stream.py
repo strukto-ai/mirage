@@ -72,3 +72,5 @@ async def read_stream(
             yield bytes(chunk)
     finally:
         await out.close()
+    if rec is not None:
+        rec.complete = True

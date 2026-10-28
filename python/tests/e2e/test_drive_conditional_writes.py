@@ -756,3 +756,28 @@ async def test_failed_stream_rereads_keep_the_refused_session_version(
     assert b"".join([chunk async for chunk in stream]) == peer
     await a.vfs.write(path, b"mine\n")
     assert drive.fake.read("f") == b"mine\n"
+
+
+@pytest.mark.asyncio
+@BOX
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_completed_empty_box_reread_without_sha1_releases_old_version(
+    drive, workspace, streamed
+):
+    ws = workspace(read=ReadSpec(policy=ReadPolicy.FRESH))
+    a = await ws.session("a")
+    path = "/box/f"
+    await a.vfs.read(path)
+    drive.put("f", b"")
+    drive.box.unhashed.add(drive.box.id_of("f"))
+    with pytest.raises(StaleWriteError):
+        await a.vfs.write(path, b"mine\n")
+    if streamed:
+        content = b"".join(
+            [chunk async for chunk in await a.vfs.read(path, stream=True)]
+        )
+    else:
+        content = await a.vfs.read(path)
+    assert content == b""
+    await a.vfs.write(path, b"mine\n")
+    assert drive.fake.read("f") == b"mine\n"

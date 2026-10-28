@@ -63,4 +63,6 @@ export async function* readStream(
     if (rec !== null) rec.bytes += pending.byteLength
     yield pending
   }
+
+  if (rec !== null) rec.complete = true
 }

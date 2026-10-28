@@ -447,7 +447,9 @@ def record_stream(
     partial consumption (e.g., head stopping early). The caller may
     also assign ``rec.fingerprint`` / ``rec.revision`` after the initial
     GET response is available; passing them here is a shortcut for the
-    common case where the values are known up front.
+    common case where the values are known up front. Set ``rec.complete``
+    after normal exhaustion, including an empty stream, never after failure
+    or early close.
 
     Returns ``None`` if no recording context is active.
 
@@ -478,6 +480,7 @@ def record_stream(
         mount_id=rec.mount_id,
         execution_id=current_execution_id(),
     )
+    op_rec.complete = False
     rec.sink.append(op_rec)
     _charge(op_rec)
     return op_rec

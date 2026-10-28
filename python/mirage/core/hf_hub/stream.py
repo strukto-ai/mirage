@@ -63,3 +63,5 @@ async def read_stream(
             if rec is not None:
                 rec.bytes += len(chunk)
             yield chunk
+    if rec is not None:
+        rec.complete = True

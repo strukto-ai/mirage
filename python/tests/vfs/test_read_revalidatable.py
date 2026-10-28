@@ -1094,6 +1094,7 @@ def test_an_unrecorded_read_stamps_the_stat_token(
             fingerprint=fingerprint,
             revision=revision,
         )
+        rec.complete = False
         records.append(rec)
         return rec
 
@@ -1128,6 +1129,7 @@ def test_an_unrecorded_read_stamps_the_stat_token(
     # The real record_stream returns None with no recorder bound, so no
     # stream read can stamp a token outside a capture at all. This row can
     # only show the stamp does not depend on the recorder check itself.
+    assert records[0].complete
     assert records[0].fingerprint is not None
     assert stat.fingerprint is not None
     assert records[0].fingerprint == stat.fingerprint

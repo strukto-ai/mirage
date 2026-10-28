@@ -52,3 +52,5 @@ async def read_stream(
                     yield chunk
                 if len(chunk) < chunk_size:
                     break
+    if rec is not None:
+        rec.complete = True

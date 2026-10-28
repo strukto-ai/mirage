@@ -65,3 +65,5 @@ async def read_stream(
         if is_missing(exc):
             raise enoent(path) from exc
         raise
+    if rec is not None:
+        rec.complete = True

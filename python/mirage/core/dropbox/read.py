@@ -148,3 +148,5 @@ async def read_stream(
         if refusal is not None:
             raise refusal from exc
         raise
+    if rec is not None:
+        rec.complete = True

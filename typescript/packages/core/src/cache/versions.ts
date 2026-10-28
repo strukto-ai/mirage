@@ -39,7 +39,7 @@ export class VersionHistory {
     const held = entries?.has(key) === true ? entries.get(key) : scope.pins.get(key)
     if (!Array.isArray(held)) return held ?? null
     const [rec, previous] = held
-    if (rec.op === 'read' && rec.bytes === 0 && rec.fingerprint === null) return previous
+    if (rec.op === 'read' && !rec.complete && rec.bytes === 0) return previous
     return rec.fingerprint
   }
 
@@ -66,8 +66,8 @@ export class VersionHistory {
         if (underPath(name, key)) held.set(name, null)
     }
     if (STAMP_FINGERPRINT_OPS.has(rec.op)) {
-      // An unopened or failed stream has observed neither bytes nor a token.
-      // Keep the prior condition until its record proves a read.
+      // Headers alone are no observation: retain the prior condition until
+      // bytes arrive or the stream ends normally.
       held.set(key, [rec, this.read(scope, key)])
     } else held.set(key, null)
     this.scopes.set(scope, held)

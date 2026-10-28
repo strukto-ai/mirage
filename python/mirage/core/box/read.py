@@ -103,3 +103,5 @@ async def read_stream(
     if rec is not None and digest is not None:
         token = digest.hexdigest()
         rec.fingerprint = token if conditioned else read_token(found, token)
+    if rec is not None:
+        rec.complete = True

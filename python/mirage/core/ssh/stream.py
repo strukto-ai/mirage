@@ -55,6 +55,8 @@ async def read_stream(
                 yield chunk
     except asyncssh.SFTPNoSuchFile:
         raise enoent(virtual)
+    if rec is not None:
+        rec.complete = True
 
 
 async def follow(
