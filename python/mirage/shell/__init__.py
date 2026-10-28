@@ -12,15 +12,38 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.shell.constants import BUILTIN_GROUP, GRAMMAR_BUILTINS, GROUP_TIER
-from mirage.shell.parse import parse
-from mirage.shell.types import (
-    BuiltinGroup,
-    BuiltinTier,
-    NodeType,
-    RedirectKind,
-    ShellBuiltin,
-)
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.shell.constants import (
+        BUILTIN_GROUP,
+        GRAMMAR_BUILTINS,
+        GROUP_TIER,
+    )
+    from mirage.shell.types import (
+        BuiltinGroup,
+        BuiltinTier,
+        NodeType,
+        RedirectKind,
+        ShellBuiltin,
+    )
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.shell.constants": (
+        "BUILTIN_GROUP",
+        "GRAMMAR_BUILTINS",
+        "GROUP_TIER",
+    ),
+    "mirage.shell.types": (
+        "BuiltinGroup",
+        "BuiltinTier",
+        "NodeType",
+        "RedirectKind",
+        "ShellBuiltin",
+    ),
+}
 
 __all__ = [
     "BUILTIN_GROUP",
@@ -31,5 +54,6 @@ __all__ = [
     "NodeType",
     "RedirectKind",
     "ShellBuiltin",
-    "parse",
 ]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

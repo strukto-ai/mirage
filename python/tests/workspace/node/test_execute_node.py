@@ -21,10 +21,10 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.runtime.types import RouteDecision
 from mirage.runtime.workspace import WorkspaceRuntime
-from mirage.shell import parse
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.errors import ReturnSignal
 from mirage.shell.job_table import JobTable
+from mirage.shell.parse import parse
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.evaluation import EvaluationContext
