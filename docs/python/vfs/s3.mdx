@@ -166,7 +166,7 @@ Under `write: conditional` a write carries the version of the file mirage read, 
 
 ## Refused keys
 
-When credentials cannot read an S3 object (S3 returns `AccessDenied` or an HTTP 403 response on a `HEAD` or `GET` request), Mirage reports `EACCES` (`Permission denied`) for that file operand.
+When credentials cannot read an S3 object (S3 returns `AccessDenied`, or a bodiless HTTP 403 response on a `HEAD` request), Mirage reports `EACCES` (`Permission denied`) for that file operand.
 
 Shell commands follow standard POSIX conventions:
 - `cat a b c` prints the contents of `a` and `c`, writes a permission error for `b` to `stderr`, and exits with a non-zero status.

@@ -12,6 +12,14 @@ requests for partial reads.
 For credential and server setup, see [Nextcloud Setup](/home/setup/nextcloud).
 For Python, see the [Nextcloud (Python)](/python/vfs/nextcloud) reference.
 
+## Install
+
+Nextcloud requires the optional `opendal` peer dependency:
+
+```bash
+pnpm add opendal
+```
+
 ## Config
 
 ```typescript
@@ -39,8 +47,8 @@ account password.
 | <code style={{ whiteSpace: 'nowrap' }}>url</code><br />required | WebDAV URL of the user's files, such as `https://cloud.example.com/remote.php/dav/files/alice/`. |
 | <code style={{ whiteSpace: 'nowrap' }}>username</code> | Basic Auth user name; unset sends requests without credentials. |
 | <code style={{ whiteSpace: 'nowrap' }}>password</code><br />secret | Basic Auth password; use an app password (Settings → Security) rather than the account password. |
-| <code style={{ whiteSpace: 'nowrap' }}>verifySsl</code><br />default `true` | Accepted but not applied: every request verifies the server's TLS certificate. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one WebDAV request may take before timing out. |
+| <code style={{ whiteSpace: 'nowrap' }}>verifySsl</code> | Accepted but not applied: every request verifies the server's TLS certificate. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one WebDAV request mirage sends itself (copy, checksum, quota, properties, search) may take; reads, writes and listings go through OpenDAL and its own timeouts. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table nextcloud end */}
@@ -117,10 +125,10 @@ against `<NEXTCLOUD_URL>/Documents/notes.md`.
 
 ## Cache
 
-The Nextcloud VFS caches directory listings in Mirage's index cache. Directory
-listings issue a single `PROPFIND Depth: 1` that populates file sizes, types,
-and ETags for child entries. Subsequent `stat` operations read from this cache,
-so operations like `ls` or directory scans cost one HTTP request instead of N.
+The Nextcloud VFS caches directory listings in Mirage's index cache. A listing
+usually needs one `PROPFIND Depth: 1`; each file missing a size needs an extra
+`stat` request. Cached child entries include sizes, types, and modification
+times, but not ETags. Subsequent `stat` operations can reuse those entries.
 
 ## Example
 

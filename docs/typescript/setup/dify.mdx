@@ -26,8 +26,10 @@ const vfs = new DifyVFS({
 const ws = new Workspace({ '/knowledge/': vfs }, { mode: MountMode.READ })
 ```
 
-The VFS is read-only. Restoring from a snapshot preserves configuration;
-cached entries are served as saved and un-cached reads query the live backend.
+The VFS is read-only. Snapshots redact credentials, so `Workspace.load` needs
+a live `DifyVFS` in its third argument for `/knowledge/` (e.g.
+`Workspace.load(snapshot, {}, { '/knowledge/': freshDifyVfs })`).
+Restored cache entries are served as saved and un-cached reads reach the live backend.
 
 {/* generated: config-table dify start */}
 | Field | Description |
@@ -38,8 +40,8 @@ cached entries are served as saved and un-cached reads query the live backend.
 | <code style={{ whiteSpace: 'nowrap' }}>slugMetadataName</code><br />default `'slug'` | Document metadata field whose value is the document's path in the mount. A document without it is mounted under its document name. |
 | <code style={{ whiteSpace: 'nowrap' }}>maxConcurrency</code><br />default `10` | The most Dify API requests in flight at once. |
 | <code style={{ whiteSpace: 'nowrap' }}>retryAttempts</code><br />default `4` | Attempts per request, the first included. A 429, a 5xx or a transport error is retried. |
-| <code style={{ whiteSpace: 'nowrap' }}>retryMaxDelay</code><br />default `30.0` | Longest wait in seconds before a retry, whether from backoff or `Retry-After`. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait before timing out. |
+| <code style={{ whiteSpace: 'nowrap' }}>retryMaxDelay</code><br />default `30` | Longest wait in seconds before a retry, whether from backoff or `Retry-After`. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table dify end */}

@@ -228,7 +228,7 @@ See [S3 Setup](/home/setup/s3) for credential setup.
 
 ## Refused keys
 
-When credentials cannot read an S3 object (S3 returns `AccessDenied` or an HTTP 403 response on a `HEAD` or `GET` request), Mirage reports `EACCES` (`Permission denied`) for that file operand.
+When credentials cannot read an S3 object (S3 returns `AccessDenied`, or a bodiless HTTP 403 response on a `HEAD` request), Mirage reports `EACCES` (`Permission denied`) for that file operand.
 
 Shell commands follow standard POSIX conventions:
 - `cat a b c` prints the contents of `a` and `c`, writes a permission error for `b` to `stderr`, and exits with a non-zero status.
@@ -241,7 +241,7 @@ Shell commands follow standard POSIX conventions:
 - **Scoped grants:** When access is granted below a specific prefix (for example, `s3:GetObject` on `bucket/dir/*` alongside `s3:ListBucket` on the bucket), Mirage treats `dir` as a directory during `stat`.
 - **Missing `ListBucket`:** Without `s3:ListBucket` permission, S3 returns HTTP 403 even for non-existent keys to avoid leaking existence. As a result, non-existent files report `Permission denied` (`EACCES`) instead of `No such file or directory` (`ENOENT`).
 - **Listed but unreadable keys:** If `ListObjectsV2` includes an object that your credentials cannot read, `stat` and `test -e` report that the file exists, while read attempts (`cat`) fail with `Permission denied`.
-- **Browser presigned URLs:** When fetching via presigned URLs in the browser, HTTP responses omit detailed XML error bodies. Any HTTP 403 status (including expired or misconfigured URLs) is handled as a permission refusal.
+- **Browser presigned URLs:** Mirage does not parse the HTTP error body when reading through presigned URLs in the browser. Any HTTP 403 status (including expired or misconfigured URLs) is handled as a permission refusal.
 
 ## Scoping a VFS to a key prefix
 
