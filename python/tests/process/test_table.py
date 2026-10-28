@@ -384,6 +384,40 @@ async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
     assert processes.live() == ()
 
 
+@pytest.mark.asyncio
+async def test_cancel_reaches_a_grandchild_past_an_exited_parent_below_the_leader():
+    processes = ProcessTable()
+    release = asyncio.Event()
+
+    async def run():
+        await release.wait()
+        return 0
+
+    async def quick():
+        return 0
+
+    def start(runner, parent_pid=None):
+        return processes.start(
+            session_id="a",
+            command="runner",
+            cwd=PathSpec.from_str_path("/"),
+            run=runner,
+            parent_pid=parent_pid,
+        )
+
+    root = start(run)
+    job = start(run, root.info.pid)
+    middle = start(quick, job.info.pid)
+    leaf = start(run, middle.info.pid)
+    await middle.join()
+    job.terminate()
+    async with asyncio.timeout(5):
+        assert (await leaf.join()).cancellation_requested
+    assert not root.info.cancellation_requested
+    release.set()
+    await root.join()
+
+
 async def _hangs() -> int:
     await asyncio.Event().wait()
     return 0

@@ -39,6 +39,7 @@ class ProcessTable:
         self._changed = changed
         self._next_pid = 1
         self._live: dict[int, tuple[int, ProcessHandle]] = {}
+        self._ancestors: dict[int, tuple[int, ...]] = {}
         self._generations: dict[str, int] = {}
         self._lock = RLock()
         self._stopped = False
@@ -127,6 +128,11 @@ class ProcessTable:
             )
             eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
+            self._ancestors[pid] = (
+                ()
+                if parent_pid is None
+                else (*self._ancestors.get(parent_pid, ()), parent_pid)
+            )
         if started is not None:
             started(handle.info)
         handle.start(eager=eager)
@@ -137,23 +143,27 @@ class ProcessTable:
     def terminate_children(self, pid: int, signal: int = 9) -> None:
         """Request cancellation of every live runner under ``pid``.
 
-        A runner is under ``pid`` when ``pid`` is its parent or started
-        its execution group, so grandchildren are reached after an
+        A runner is under ``pid`` when ``pid`` is its parent or an
+        ancestor further up, so grandchildren are reached after an
         intermediate runner has exited.
 
         Args:
-            pid (int): the parent or group leader.
+            pid (int): the parent or ancestor.
             signal (int): what the stop stands for, as the parent's.
         """
-        for child in self.live():
-            if child.info.parent_pid == pid or (
-                child.info.group_id == pid and child.info.pid != pid
-            ):
-                child.terminate(signal)
+        with self._lock:
+            under = [
+                handle
+                for _, handle in self._live.values()
+                if pid in self._ancestors.get(handle.info.pid, ())
+            ]
+        for child in under:
+            child.terminate(signal)
 
     def _retire(self, pid: int) -> None:
         with self._lock:
             self._live.pop(pid, None)
+            self._ancestors.pop(pid, None)
 
     def view(
         self,

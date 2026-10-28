@@ -1573,3 +1573,19 @@ async def test_a_job_past_its_limit_ends_while_a_reader_holds_its_output(
         await job.console.snapshot(Channel.STDERR)
     ) == b"line: timed out after 0.2s\n"
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_kill_reaches_a_grandchild_past_the_job_between_them():
+    ws = _workspace()
+    await ws.shell(
+        "{ { sleep 30 & } & wait $!; echo > /m/ready; sleep 30; } &"
+    )
+    async with asyncio.timeout(5):
+        while (await ws.shell("test -e /m/ready")).exit_code != 0:
+            await asyncio.sleep(0.02)
+    await ws.shell("kill %1")
+    async with asyncio.timeout(5):
+        while ws.processes.live():
+            await asyncio.sleep(0.02)
+    await ws.close()

@@ -10,6 +10,7 @@ import type { IdSource } from '../utils/ids.ts'
 export class ProcessTable {
   private nextPid = 1
   private readonly runners = new Map<number, { generation: number; handle: ProcessHandle }>()
+  private readonly ancestors = new Map<number, readonly number[]>()
   private readonly generations = new Map<string, number>()
   private stopped = false
 
@@ -98,6 +99,7 @@ export class ProcessTable {
       },
       (id) => {
         this.runners.delete(id)
+        this.ancestors.delete(id)
       },
       (signal) => {
         this.terminateChildren(pid, signal)
@@ -106,6 +108,10 @@ export class ProcessTable {
     )
     const eager = init.started !== undefined && !this.queued()
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
+    this.ancestors.set(
+      pid,
+      init.parentPid == null ? [] : [...(this.ancestors.get(init.parentPid) ?? []), init.parentPid],
+    )
     init.started?.(handle.info)
     handle.start(eager)
     this.changed?.()
@@ -114,15 +120,14 @@ export class ProcessTable {
 
   /**
    * Request cancellation of every live runner whose parent is `pid` or
-   * whose execution group `pid` started, so grandchildren are reached
-   * after an intermediate runner has exited.
+   * an ancestor further up, so grandchildren are reached after an
+   * intermediate runner has exited.
    *
    * @param signal what the stop stands for, as the parent's.
    */
   terminateChildren(pid: number, signal = 9): void {
     for (const child of this.live())
-      if (child.info.parentPid === pid || (child.info.groupId === pid && child.info.pid !== pid))
-        child.terminate(signal)
+      if (this.ancestors.get(child.info.pid)?.includes(pid) === true) child.terminate(signal)
   }
 
   view(

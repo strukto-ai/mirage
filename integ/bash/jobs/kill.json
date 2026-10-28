@@ -634,6 +634,42 @@
         "stderr": "bash: kill: (ab12:3) - No such process\nbash: kill: ab12:x: arguments must be process or job IDs\n"
       },
       "note": "mirage's own operand: owner:pid names a process another workspace on a shared store runs, as ps lists it, where bash refuses any non-numeric operand as not a process or job ID. One no live workspace runs is no such process, and ps -p of it selects nothing."
+    },
+    {
+      "id": "job_kill_stops_the_jobs_a_job_started",
+      "seq": 502428,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "({ { { sleep 0.5; echo leaked; } & } & wait $!; sleep 30; } & sleep 0.2; kill %1; wait 2>/dev/null; sleep 0.8; echo done)",
+      "expect": {
+        "exit": 0,
+        "stdout": "done\n",
+        "stderr": ""
+      },
+      "note": "mirage's own: kill stops the jobs a job started and theirs, even once the job between them has ended. A non-interactive bash 5.2 (debian:stable-slim) has no job control, so its kill %1 stops the job alone and the inner job prints leaked."
     }
   ]
 }

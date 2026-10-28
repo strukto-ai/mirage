@@ -417,6 +417,28 @@ describe('a job inside a job', () => {
       await ws.close()
     }
   })
+
+  it('is killed with the job past the job between them', async () => {
+    const ws = buildWs()
+    try {
+      await ws.shell('{ { sleep 30 & } & wait $!; echo > /m/ready; sleep 30; } &')
+      await vi.waitFor(
+        async () => {
+          expect((await ws.shell('test -e /m/ready')).exitCode).toBe(0)
+        },
+        { timeout: 5000, interval: 20 },
+      )
+      await ws.shell('kill %1')
+      await vi.waitFor(
+        () => {
+          expect(ws.processes.live()).toEqual([])
+        },
+        { timeout: 5000, interval: 20 },
+      )
+    } finally {
+      await ws.close()
+    }
+  })
 })
 
 describe('background conditions and function scope', () => {
