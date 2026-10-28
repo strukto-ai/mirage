@@ -20,6 +20,12 @@ async def numfmt_generic(
     to_mode: str = "none",
     from_mode: str = "none",
     suffix: str = "",
+    from_unit: str | None = None,
+    to_unit: str | None = None,
+    round_mode: str = "from-zero",
+    padding: str | None = None,
+    layout: str | None = None,
+    invalid: str = "abort",
     grouping: bool = False,
     fields: list[str] | None = None,
     delimiters: list[str] | None = None,
@@ -33,6 +39,17 @@ async def numfmt_generic(
             exit_code=1,
             stderr=b"numfmt: grouping cannot be combined with --to\n",
         )
+    if grouping and layout is not None:
+        return None, IOResult(
+            exit_code=1,
+            stderr=b"numfmt: --grouping cannot be combined with --format\n",
+        )
+    typed = {
+        "from_unit": from_unit,
+        "to_unit": to_unit,
+        "padding": padding,
+        "format": layout,
+    }
     config: dict[str, JsonValue] = {
         "to": to_mode,
         "from": from_mode,
@@ -42,6 +59,12 @@ async def numfmt_generic(
         "delimiters": [byte_view(text) for text in delimiters or []],
         "headers": [byte_view(text) for text in headers or []],
         "zero_terminated": zero_terminated,
+        "round": round_mode,
+        "invalid": invalid,
+        **{
+            name: None if text is None else byte_view(text)
+            for name, text in typed.items()
+        },
     }
     try:
         stream = open_stream("numfmt", config)
@@ -78,6 +101,10 @@ def _converted(
             io.exit_code, io.stderr = 2, f"{refusal.message}\n".encode()
             if refusal.output:
                 yield refusal.output
+        else:
+            # The fields --invalid let through, said of and counted.
+            io.exit_code = stream.status()
+            io.stderr = stream.take_stderr() or None
 
     async def close() -> None:
         await close_stream(stream)

@@ -703,6 +703,8 @@ WORD_CHOICE_OPTIONS = frozenset(
         ("tee", "--output-error"),
         ("numfmt", "--to"),
         ("numfmt", "--from"),
+        ("numfmt", "--round"),
+        ("numfmt", "--invalid"),
         ("date", "--iso-8601"),
         ("date", "--rfc-3339"),
     }

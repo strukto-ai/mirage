@@ -6,6 +6,7 @@ import { StreamRefusal } from '../../../rs/errors.ts'
 import { closeStream, openStream, streamOutputChunks, type OpenStream } from '../../../rs/stream.ts'
 import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 import { byteView } from '../../../shell/bytes.ts'
+import { concat } from '../../../utils/bytes.ts'
 import type { JsonValue } from '../../../types.ts'
 
 const ENC = new TextEncoder()
@@ -17,14 +18,24 @@ async function* converted(
   io: IOResult,
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
+  // The fields --invalid let through, said of and counted as each part
+  // comes, while the stream is open: closing it releases them.
+  const said: Uint8Array[] = []
   try {
-    yield* streamOutputChunks(stream, source, signal)
+    for await (const part of streamOutputChunks(stream, source, signal)) {
+      said.push(stream.takeStderr())
+      io.exitCode = stream.status()
+      yield part
+    }
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
     io.exitCode = 2
     io.stderr = ENC.encode(`${err.message}\n`)
     if (err.output.byteLength > 0) yield err.output
+    return
   }
+  const warnings = concat(said)
+  if (warnings.byteLength > 0) io.stderr = warnings
 }
 
 // Every typed value of an option, a bare --header counting one record.
@@ -49,6 +60,18 @@ export async function numfmtGeneric(
       }),
     ]
   }
+  const layout = fl.asStr('format')
+  if (fl.asBool('grouping') && layout !== undefined) {
+    return [
+      null,
+      new IOResult({
+        exitCode: 1,
+        stderr: ENC.encode('numfmt: --grouping cannot be combined with --format\n'),
+      }),
+    ]
+  }
+  const typedText = (text: string | undefined): string | null =>
+    text === undefined ? null : byteView(text)
   const config: Readonly<Record<string, JsonValue>> = {
     to,
     from: fl.asStr('from') ?? 'none',
@@ -58,6 +81,12 @@ export async function numfmtGeneric(
     delimiters: typed(fl, 'delimiter'),
     headers: typed(fl, 'header'),
     zero_terminated: fl.asBool('zero_terminated'),
+    from_unit: typedText(fl.asStr('from_unit')),
+    to_unit: typedText(fl.asStr('to_unit')),
+    round: fl.asStr('round') ?? 'from-zero',
+    padding: typedText(fl.asStr('padding')),
+    format: typedText(layout),
+    invalid: fl.asStr('invalid') ?? 'abort',
   }
   let stream: OpenStream
   try {

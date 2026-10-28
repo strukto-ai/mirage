@@ -98,7 +98,13 @@ export const SPECS: Record<string, CommandSpec> = {
     arguments: [
       new Argument('--to', { choices: ['none', 'si', 'iec', 'iec-i'] }),
       new Argument('--from', { choices: ['none', 'auto', 'si', 'iec', 'iec-i'] }),
+      new Argument('--from-unit'),
+      new Argument('--to-unit'),
+      new Argument('--round', { choices: ['up', 'down', 'from-zero', 'towards-zero', 'nearest'] }),
       new Argument('--suffix'),
+      new Argument('--padding'),
+      new Argument('--format'),
+      new Argument('--invalid', { choices: ['abort', 'fail', 'warn', 'ignore'] }),
       new Argument('--grouping', { action: 'store_true' }),
       new Argument(['-d', '--delimiter']),
       new Argument('--field'),

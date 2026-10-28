@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_padding_aligns_fields",
+      "seq": 16160005,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --padding=10 1000; numfmt --padding=-6 --to=si 1500; echo '|'; numfmt --padding=8 --field=2 'a 12 b'; numfmt --padding=5 --field=2 -d: a:12:b; numfmt --padding=0 1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "      1000\n1.5k  \n|\na       12 b\na:   12:b\nrc=1\n",
+        "stderr": "numfmt: invalid padding value '0'\n"
+      },
+      "flags": [
+        "padding",
+        "field"
+      ]
+    }
+  ]
+}

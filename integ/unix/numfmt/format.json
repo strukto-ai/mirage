@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_format_directive",
+      "seq": 16160006,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --format=%.3f 1000; numfmt --format=%010f 1000; numfmt --format=x%-6.1fy --to=si 1500; numfmt --format=%08.1f --to=si 1500; numfmt --format=%%%f%% 5; numfmt --format=%.2f 0.125; numfmt --format=%d 5; echo rc=$?; numfmt --format=abc 5; echo rc=$?; numfmt --format=%f --grouping 1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1000.000\n0000001000\nx1.5k  y\n000001.5k\n%5%%\n0.13\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "numfmt: invalid format '%d', directive must be %[0]['][-][N][.][N]f\nnumfmt: format 'abc' has no % directive\nnumfmt: --grouping cannot be combined with --format\n"
+      },
+      "flags": [
+        "format",
+        "to"
+      ]
+    }
+  ]
+}
