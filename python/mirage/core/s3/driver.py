@@ -34,7 +34,13 @@ from mirage.core.s3.client import (
     is_key_gone,
     is_not_found,
 )
-from mirage.core.s3.constants import CONDITION_LOST_CODES, SCOPE_ERROR
+from mirage.core.s3.constants import (
+    CONDITION_LOST_CODES,
+    MAX_PARTS,
+    PART_DOUBLING,
+    PART_SIZE,
+    SCOPE_ERROR,
+)
 from mirage.core.s3.types import S3Conn
 from mirage.errors.fs import enoent
 from mirage.io.cooperative import chunks
@@ -45,8 +51,6 @@ from mirage.utils.dates import to_iso_z
 logger = logging.getLogger(__name__)
 
 DELETE_BATCH = 1000
-PART_SIZE = 8 * 1024 * 1024
-MAX_PARTS = 10000
 
 
 def _key_prefix_of(accessor: S3Accessor) -> str:
@@ -282,11 +286,12 @@ async def _put_stream(
             return meta
     upload: str | None = None
     parts: list[dict[str, Any]] = []
+    # TODO(MIRAGE-38): spool parts past 64 MiB; this holds a whole part.
     buffer = bytearray()
     size = 0
     args = {"Bucket": conn.config.bucket, "Key": key}
 
-    async def send_part(body: bytes) -> None:
+    async def send_part(body: bytearray) -> None:
         if len(parts) >= MAX_PARTS:
             raise ValueError("s3: streamed upload exceeds 10000 parts")
         number = len(parts) + 1
@@ -298,9 +303,15 @@ async def _put_stream(
     try:
         async with aclosing(chunks(data)) as source:
             async for chunk in source:
-                buffer.extend(chunk)
                 size += len(chunk)
-                if len(buffer) >= PART_SIZE:
+                view = memoryview(chunk)
+                while view:
+                    part = PART_SIZE << (len(parts) // PART_DOUBLING)
+                    take = part - len(buffer)
+                    buffer += view[:take]
+                    view = view[take:]
+                    if len(buffer) < part:
+                        continue
                     if upload is None:
                         content_type = conn.config.default_content_type
                         opened = await conn.client.create_multipart_upload(
@@ -312,14 +323,14 @@ async def _put_stream(
                             ),
                         )
                         upload = opened["UploadId"]
-                    await send_part(bytes(buffer[:PART_SIZE]))
-                    del buffer[:PART_SIZE]
+                    await send_part(buffer)
+                    buffer = bytearray()
         if upload is None:
             meta = await _put_if(conn, key, bytes(buffer), cond)
             assert meta is not None
             return meta
         if buffer:
-            await send_part(bytes(buffer))
+            await send_part(buffer)
         response = await _guarded(
             key,
             conn.client.complete_multipart_upload(

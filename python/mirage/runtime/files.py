@@ -28,6 +28,8 @@ from mirage.context.session_context import (
     awaits_as,
     calls_as,
     current_caller,
+    in_landing,
+    run_landing,
 )
 from mirage.errors.fs import ebadf, einval, eloop, exdev, numbered
 from mirage.errors.types import OperationNotSupportedError
@@ -356,12 +358,13 @@ class RuntimeFiles:
             **kwargs: Any,
         ) -> tuple[Any, IOResult]:
             # A cancelled guest call sends nothing more, whichever op of
-            # the core's was under way.
-            for task in live:
+            # the core's was under way; a landing goes however it ended.
+            guests = () if in_landing() else live
+            for task in guests:
                 if task.cancelling():
                     raise asyncio.CancelledError()
             result = await dispatch(name, path, report=report, **kwargs)
-            for task in live:
+            for task in guests:
                 if task.cancelling():
                     raise asyncio.CancelledError()
             return result
@@ -458,7 +461,8 @@ class RuntimeFiles:
         """Run one op on the run's open-file core, as the run's caller.
         An op that only lands what the guest already wrote (``lands``)
         runs however the run ended, as the run's end would land it
-        anyway.
+        anyway (``run_landing``), so a cancelled guest call under way
+        beside it stops only itself.
 
         Args:
             op (Callable[[MountCore], Awaitable[T]]): the op, given the
@@ -476,6 +480,8 @@ class RuntimeFiles:
         live = self._live
 
         async def run() -> T:
+            if lands:
+                return await run_landing(call(core))
             if owner is None:
                 return await call(core)
             if owner.cancelling():

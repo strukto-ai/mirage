@@ -18,6 +18,7 @@ import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 
+// TODO(MIRAGE-36): an OPFS spool store, so spools spill here too.
 export class Workspace extends CoreWorkspace {
   /** A saved mount rebuilds through this package's VFS registry. */
   protected static override async buildSavedVfs(entry: MountSnapshot): Promise<BaseVFS | null> {

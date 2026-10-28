@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
+import tracemalloc
+from dataclasses import dataclass, field
+
 import pytest
 from opendal.exceptions import NotFound
 
@@ -88,3 +92,68 @@ async def test_create_into_a_missing_repo_names_the_virtual_path(make_acc):
     with pytest.raises(FileNotFoundError) as caught:
         await create(acc, PathSpec.from_str_path("/new.txt"))
     assert caught.value.filename == "/new.txt"
+
+
+class _DigestWriter:
+    """A ``wb`` file that keeps a digest of what it is sent, not the bytes."""
+
+    def __init__(self) -> None:
+        self.digest = hashlib.sha256()
+        self.closed = False
+
+    async def write(self, data: bytes) -> int:
+        self.digest.update(data)
+        return len(data)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+@dataclass
+class _DigestOperator(FakeAsyncOperator):
+    writer: _DigestWriter = field(default_factory=_DigestWriter)
+
+    async def open(self, key: str, mode: str = "rb"):
+        return self.writer
+
+
+@pytest.mark.asyncio
+async def test_a_large_streamed_write_holds_a_bounded_amount_of_memory(
+    make_acc,
+):
+    acc = make_acc({})
+    fake = _DigestOperator(files={})
+    acc.operator = lambda: fake
+    block = b"x" * (1024 * 1024)
+
+    async def source():
+        for _ in range(64):
+            yield block
+
+    tracemalloc.start()
+    try:
+        written = await write(
+            acc, PathSpec.from_str_path("/big.bin"), source()
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert fake.writer.closed
+    assert fake.writer.digest.hexdigest() == (
+        hashlib.sha256(block * 64).hexdigest()
+    )
+    assert written is not None and written.size == len(block) * 64
+    assert peak < 8 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_a_failed_stream_commits_nothing(make_acc):
+    acc = make_acc({})
+
+    async def source():
+        yield b"partial"
+        raise RuntimeError("producer failed")
+
+    with pytest.raises(RuntimeError, match="producer failed"):
+        await write(acc, PathSpec.from_str_path("/out.txt"), source())
+    assert acc._fake.files == {}

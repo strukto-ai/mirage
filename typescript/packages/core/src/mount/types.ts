@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSlice, ByteSpool } from '../io/spool.ts'
 import type { ChunkedHandle, OpenMode } from '../runtime/handles/index.ts'
 import type { FileStat } from '../types.ts'
 
@@ -46,7 +47,10 @@ export interface Handle {
    */
   mode: OpenMode
   data?: Uint8Array
-  writeBuf?: [number, Uint8Array][]
+  writeBuf?: [number, Uint8Array | ByteSlice][]
+  /** Where its writes wait past what memory holds, and the bytes handed it. */
+  spool?: ByteSpool
+  spooled?: number
   live?: boolean
   /** A large file reads a chunk at a time rather than hydrating whole. */
   chunked?: ChunkedHandle
@@ -73,4 +77,9 @@ export interface Handle {
    * read through it reports it rather than read what the name holds now.
    */
   lost?: Error
+  /**
+   * The ranges other writes took while a landing had its writes out, cut
+   * from those writes should they come back. Absent while none is.
+   */
+  cuts?: [number, number][]
 }

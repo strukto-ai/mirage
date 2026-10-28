@@ -996,7 +996,7 @@ class Dispatcher:
             async with self._admit_write(caller) as held:
                 return await self._bound(name, path, held, report, kwargs)
         finally:
-            if name in ("write", "append"):
+            if name in ("write", "append", "pwrite"):
                 await close_quietly(kwargs.get("data"))
 
     async def _bound(
@@ -2657,7 +2657,7 @@ class Dispatcher:
                     if _facts_of(mount).cacheable
                     else 0,
                 )
-                if call.name in ("write", "append")
+                if call.name in ("write", "append", "pwrite")
                 and not isinstance(kwargs.get("data"), bytes)
                 else None
             )

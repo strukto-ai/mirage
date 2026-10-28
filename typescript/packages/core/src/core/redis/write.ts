@@ -61,6 +61,7 @@ export async function write(
     await store.setModified(p, nowIso())
   }
   let size = 0
+  // TODO(MIRAGE-33): 1 MiB SETRANGEs, one timestamp each; native pwrite.
   for await (const chunk of chunks(data)) {
     if (chunk.byteLength === 0) continue
     if (append) await store.appendFile(p, chunk)

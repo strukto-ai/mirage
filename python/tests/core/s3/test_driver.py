@@ -12,6 +12,7 @@ from packaging.version import Version
 
 from mirage.cache.types import WriteCondition
 from mirage.core.object_store.errors import ConditionLostError
+from mirage.core.s3.constants import MAX_PARTS, PART_DOUBLING
 from mirage.core.s3.driver import DRIVER
 from mirage.core.s3.types import S3Conn
 from mirage.vfs.s3.config import S3Config
@@ -202,6 +203,61 @@ async def test_streamed_upload_uses_bounded_parts_and_conditions(size):
             == '"old"'
         )
     client.abort_multipart_upload.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_streamed_parts_carry_their_bytes_as_they_went():
+    client = Mock()
+    client.create_multipart_upload = AsyncMock(
+        return_value={"UploadId": "upload"}
+    )
+    bodies = []
+
+    async def upload_part(**kwargs):
+        bodies.append(bytes(kwargs["Body"]))
+        return {"ETag": '"part"'}
+
+    client.upload_part = upload_part
+    client.complete_multipart_upload = AsyncMock(return_value={})
+    part = 8 * 1024 * 1024
+    data = (bytes(range(251)) * (2 * part // 251 + 1))[: 2 * part + 37]
+
+    async def source():
+        for offset in range(0, len(data), 65521):
+            yield data[offset : offset + 65521]
+
+    await DRIVER.put_stream(
+        S3Conn(client, S3Config(bucket="b")), "k", source(), WriteCondition()
+    )
+    assert [len(body) for body in bodies] == [part, part, 37]
+    assert b"".join(bodies) == data
+
+
+@pytest.mark.asyncio
+async def test_streamed_parts_double_past_the_part_cap(monkeypatch):
+    monkeypatch.setattr("mirage.core.s3.driver.PART_SIZE", 16)
+    client = Mock()
+    client.create_multipart_upload = AsyncMock(
+        return_value={"UploadId": "upload"}
+    )
+    client.upload_part = AsyncMock(return_value={"ETag": '"part"'})
+    client.complete_multipart_upload = AsyncMock(return_value={})
+    size = MAX_PARTS * 16 + 1
+
+    async def source():
+        for offset in range(0, size, 16):
+            yield b"x" * min(16, size - offset)
+
+    result = await DRIVER.put_stream(
+        S3Conn(client, S3Config(bucket="b")), "k", source(), WriteCondition()
+    )
+    sizes = [len(c.kwargs["Body"]) for c in client.upload_part.call_args_list]
+    assert result.size == sum(sizes) == size
+    assert (
+        sizes[: 2 * PART_DOUBLING]
+        == [16] * PART_DOUBLING + [32] * PART_DOUBLING
+    )
+    assert len(sizes) < MAX_PARTS
 
 
 @pytest.mark.asyncio

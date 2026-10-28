@@ -28,7 +28,7 @@ from mirage.core.databricks_volume.stat import stat as _stat
 from mirage.core.databricks_volume.stream import read_stream as _read_stream
 from mirage.core.databricks_volume.unlink import unlink as _unlink
 from mirage.core.databricks_volume.write import write as _write
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.databricks_volume.config import DatabricksVolumeConfig
@@ -75,7 +75,7 @@ class DatabricksVolumeVFS(BaseVFS):
         return await _exists(self.accessor, path)
 
     async def write(self, path: PathSpec, data: ByteSource) -> None:
-        await _write(self.accessor, path, await materialize(data))
+        await _write(self.accessor, path, data)
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

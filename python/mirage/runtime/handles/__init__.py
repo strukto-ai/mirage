@@ -13,7 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.runtime.handles.chunked import ChunkedHandle
-from mirage.runtime.handles.file_handle import overlaid, write_runs
+from mirage.runtime.handles.file_handle import (
+    overlaid,
+    run_groups,
+    run_stream,
+    window_writes,
+    write_runs,
+)
 from mirage.runtime.handles.file_table import FileTable
 from mirage.runtime.handles.mode import parse_mode
 
@@ -22,5 +28,8 @@ __all__ = [
     "FileTable",
     "overlaid",
     "parse_mode",
+    "run_groups",
+    "run_stream",
+    "window_writes",
     "write_runs",
 ]

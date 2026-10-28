@@ -372,6 +372,32 @@ def awaits_as(
     return call
 
 
+# Set while what a stopped run wrote lands, apart from the caller, which a
+# layer below may bind to the run's own.
+_landing: ContextVar[bool] = ContextVar("mirage_landing", default=False)
+
+
+async def run_landing(call: Awaitable[T]) -> T:
+    """``call`` awaited as a landing of what a stopped run wrote, which
+    goes however the run ended, as a killed process's writes stay in its
+    files. Mirrors TypeScript's ``runLanding``.
+
+    Args:
+        call (Awaitable[T]): the landing.
+    """
+    token = _landing.set(True)
+    try:
+        return await call
+    finally:
+        _landing.reset(token)
+
+
+def in_landing() -> bool:
+    """Whether the current call is part of a landing. Mirrors
+    TypeScript's ``inLanding``."""
+    return _landing.get()
+
+
 async def with_caller(
     it: AsyncIterator[T], caller: Caller
 ) -> AsyncIterator[T]:

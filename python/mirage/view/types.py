@@ -451,7 +451,7 @@ class FileView(Protocol):
     async def pwrite(
         self,
         path: str | PathSpec,
-        data: bytes,
+        data: ByteSource,
         offset: int,
         *,
         session_id: str | None = None,

@@ -21,10 +21,13 @@ from dataclasses import replace
 from typing import Any, TypeVar, cast
 from weakref import WeakKeyDictionary
 
+from mirage.concurrency.limiter import owned_task
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, classify
 from mirage.errors.fs import ebadf, eexist, einval, eisdir, enoent, enotdir
 from mirage.errors.types import NoMountError, OperationNotSupportedError
+from mirage.io.spool import MEMORY_LIMIT, ByteSlice, ByteSpool
+from mirage.io.types import materialize
 from mirage.mount.constants import (
     FSTAT_ROW_SECONDS,
     LISTING_CONCURRENCY,
@@ -37,6 +40,9 @@ from mirage.runtime.handles import (
     ChunkedHandle,
     FileTable,
     overlaid,
+    run_groups,
+    run_stream,
+    window_writes,
     write_runs,
 )
 from mirage.runtime.handles.constants import READ_CHUNK
@@ -692,8 +698,9 @@ class MountCore:
             data = await self._op(self._files.read(self.resolve(path)))
             writes = self._writes_on(self.identity(path), None)
             if writes:
+                laid = await window_writes(writes, offset, size)
                 return await self._read_cached(
-                    path, overlaid(data[offset:], offset, size, writes)
+                    path, overlaid(data[offset:], offset, size, laid)
                 )
             return data[offset : offset + size]
         if not ctx.mode.readable:
@@ -730,7 +737,13 @@ class MountCore:
                 retained = True
             stored = held[offset : offset + size]
         writes = self._writes_on(ctx.key, ctx)
-        data = overlaid(stored, offset, size, writes) if writes else stored
+        data = (
+            overlaid(
+                stored, offset, size, await window_writes(writes, offset, size)
+            )
+            if writes
+            else stored
+        )
         if retained or writes:
             return await self._read_cached(ctx.path, data)
         return data
@@ -793,7 +806,7 @@ class MountCore:
             del runs[:landed]
             await self._changed(path)
 
-    async def _append(self, target: str, data: bytes) -> None:
+    async def _append(self, target: str, data: bytes | WriteBuf) -> None:
         """Extend a file by ``data`` at the end it has now. A mount with
         no append (S3) takes a write of the whole file, read fresh from
         the backend rather than from a copy, so a write another action
@@ -801,15 +814,23 @@ class MountCore:
 
         Args:
             target (str): the workspace path.
-            data (bytes): the bytes to add.
+            data (bytes | WriteBuf): the bytes to add, or a group of
+                buffered writes some of which wait in a spool, streamed.
         """
         mount = self._files.mount_of(target) or target
         if mount not in self._no_append:
             try:
-                await self._op(self._files.append(target, data))
+                await self._op(
+                    self._files.append(
+                        target,
+                        data if isinstance(data, bytes) else run_stream(data),
+                    )
+                )
                 return
             except OperationNotSupportedError:
                 self._no_append.add(mount)
+        if not isinstance(data, bytes):
+            data = await materialize(run_stream(data))
         try:
             base, _ = await self._op(
                 self._files.dispatch(
@@ -848,7 +869,7 @@ class MountCore:
             if ctx.mode.append:
                 offset = self._end(ctx)
             self._supersede(ctx.key, offset, len(data), ctx)
-            self._buffer(ctx, offset, data)
+            await self._buffer(ctx, offset, data)
             return len(data)
         key = self.identity(path)
         self._supersede(key, offset, len(data), None)
@@ -858,11 +879,14 @@ class MountCore:
         return len(data)
 
     @staticmethod
-    def _buffer(ctx: Handle, offset: int, data: bytes) -> None:
+    async def _buffer(ctx: Handle, offset: int, data: bytes) -> None:
         """Keep a write on its handle: one that starts inside the last run
         or right at its end folds into it, so a stream of writes stays
         one run; any other starts a run of its own, laid over the earlier
-        ones in order.
+        ones in order. Past ``MEMORY_LIMIT`` held in memory, the handle's
+        runs move to its spool, and a stream goes on at the spool's end.
+        A spool append starts before this yields, so it is queued in the
+        spool ahead of any read of the window it publishes.
 
         Args:
             ctx (Handle): the handle writing.
@@ -873,10 +897,56 @@ class MountCore:
             return
         if ctx.write_buf:
             start, last = ctx.write_buf[-1]
-            if start <= offset <= start + len(last):
+            end = start + len(last)
+            if isinstance(last, bytearray) and start <= offset <= end:
                 last[offset - start : offset - start + len(data)] = data
+                await MountCore._spill(ctx)
+                return
+            if (
+                isinstance(last, ByteSlice)
+                and offset == end
+                and last.source is ctx.spool
+                and last.offset + len(last) == ctx.spooled
+            ):
+                ctx.write_buf[-1] = (
+                    start,
+                    ByteSlice(last.source, last.offset, len(last) + len(data)),
+                )
+                ctx.spooled += len(data)
+                await asyncio.shield(owned_task(last.source.append(data)))
                 return
         ctx.write_buf.append((offset, bytearray(data)))
+        await MountCore._spill(ctx)
+
+    @staticmethod
+    async def _spill(ctx: Handle) -> None:
+        """Move a handle's runs held in memory to its spool once they hold
+        more than ``MEMORY_LIMIT``. Each takes its place in the spool
+        before the spool has its bytes, in one append, so a write or a
+        read meanwhile finds the run where it will be.
+
+        Args:
+            ctx (Handle): the handle writing.
+        """
+        held = [
+            (index, run)
+            for index, (_, run) in enumerate(ctx.write_buf)
+            if isinstance(run, bytearray)
+        ]
+        if sum(len(run) for _, run in held) <= MEMORY_LIMIT:
+            return
+        if ctx.spool is None:
+            ctx.spool, ctx.spooled = ByteSpool(), 0
+        for index, run in held:
+            at = ctx.write_buf[index][0]
+            ctx.write_buf[index] = (
+                at,
+                ByteSlice(ctx.spool, ctx.spooled, len(run)),
+            )
+            ctx.spooled += len(run)
+        await asyncio.shield(
+            owned_task(ctx.spool.append(b"".join(run for _, run in held)))
+        )
 
     def _supersede(
         self, key: str, offset: int, size: int, ctx: Handle | None
@@ -898,20 +968,46 @@ class MountCore:
         if ctx is not None and ctx.mode.append:
             # Its bytes land at the end the file has then, not here.
             return
-        end = offset + size
         for other in self._open_on(key):
             if other is ctx or other.mode.append:
                 continue
-            kept: WriteBuf = []
-            for at, run in other.write_buf:
-                if at >= end or at + len(run) <= offset:
-                    kept.append((at, run))
-                    continue
-                if at < offset:
-                    kept.append((at, run[: offset - at]))
-                if at + len(run) > end:
-                    kept.append((end, run[end - at :]))
-            other.write_buf = kept
+            other.write_buf = self._cut(other.write_buf, offset, size)
+            if other.cuts is not None:
+                other.cuts.append((offset, size))
+
+    @staticmethod
+    def _cut(writes: WriteBuf, offset: int, size: int) -> WriteBuf:
+        """``writes`` with the range a newer write took cut out of them.
+
+        Args:
+            writes (WriteBuf): a handle's writes.
+            offset (int): where the newer write starts.
+            size (int): its length.
+        """
+        end = offset + size
+        kept: WriteBuf = []
+        for at, run in writes:
+            if at >= end or at + len(run) <= offset:
+                kept.append((at, run))
+                continue
+            if at < offset:
+                kept.append((at, run[: offset - at]))
+            if at + len(run) > end:
+                kept.append((end, run[end - at :]))
+        return kept
+
+    def _put_back(self, ctx: Handle, writes: WriteBuf) -> None:
+        """Put a failed landing's writes back ahead of those made since,
+        less what other writes took meanwhile, so a retry never lands
+        bytes older than theirs.
+
+        Args:
+            ctx (Handle): the handle whose landing failed.
+            writes (WriteBuf): the writes it took out.
+        """
+        for offset, size in ctx.cuts or ():
+            writes = self._cut(writes, offset, size)
+        ctx.write_buf = [*writes, *ctx.write_buf]
 
     async def create(self, path: str, mode: int | None = None) -> int:
         """Create an empty file and return a fresh handle.
@@ -1213,7 +1309,8 @@ class MountCore:
         The buffer is detached before the await so a write arriving
         meanwhile is not lost to the clear, and the runs that did not land
         are restored ahead of those later writes when persistence fails,
-        so the acknowledged bytes stay for the handle's own flush to retry.
+        less what other writes took meanwhile, so the acknowledged bytes
+        stay for the handle's own flush to retry.
 
         Args:
             ctx (Handle): the handle whose buffer to land.
@@ -1221,32 +1318,142 @@ class MountCore:
         if not ctx.write_buf:
             return
         if ctx.detached is not None:
-            self._land_held(ctx, ctx.detached)
+            await self._land_held(ctx, ctx.detached)
             return
-        runs = write_runs(ctx.write_buf)
-        ctx.write_buf = []
+        held = [
+            (at, run)
+            for at, run in ctx.write_buf
+            if isinstance(run, bytearray)
+        ]
+        if len(held) < len(ctx.write_buf):
+            groups = run_groups(ctx.write_buf)
+            ctx.write_buf, ctx.cuts = [], []
+            try:
+                await self._land_spooled(ctx, groups)
+            except BaseException:
+                self._put_back(
+                    ctx, [write for group in groups for write in group]
+                )
+                raise
+            finally:
+                ctx.cuts = None
+            await self._free_spool(ctx)
+            return
+        runs = write_runs(held)
+        ctx.write_buf, ctx.cuts = [], []
         try:
             await self._apply_writes(ctx.path, runs, ctx.mode.append)
         except BaseException:
-            ctx.write_buf = [
-                *((at, bytearray(run)) for at, run in runs),
-                *ctx.write_buf,
-            ]
+            self._put_back(ctx, [(at, bytearray(run)) for at, run in runs])
             raise
+        finally:
+            ctx.cuts = None
 
-    def _land_held(self, ctx: Handle, row: FileStat) -> None:
+    async def _land_spooled(self, ctx: Handle, groups: list[WriteBuf]) -> None:
+        """Land a buffer whose writes wait in its spool, each group of
+        writes ``write_runs`` would fold into one run as a stream, in
+        order. A group from the file's start that reaches its stored end
+        leaves nothing of what is stored, so it lands as a write of the
+        whole file, which a store with no pwrite (S3) takes in parts
+        rather than reading the file back first; any other lands as one
+        streamed pwrite, and an appending handle's as appends. The
+        groups that landed leave ``groups``, as ``_apply_writes`` drops
+        its runs.
+
+        Args:
+            ctx (Handle): the handle whose buffer lands.
+            groups (list[WriteBuf]): its ``run_groups``; the landed ones
+                are removed.
+        """
+        target = self.resolve(ctx.path)
+        landed = 0
+        try:
+            for group in groups:
+                start = group[0][0]
+                end = max(at + len(run) for at, run in group)
+                if ctx.mode.append:
+                    await self._append(target, group)
+                elif start == 0 and await self._ends_by(ctx.path, end):
+                    # TODO(MIRAGE-34): hand a whole spool over, not a second copy.
+                    await self._op(
+                        self._files.write(target, run_stream(group))
+                    )
+                else:
+                    await self._op(
+                        self._files.pwrite(target, run_stream(group), start)
+                    )
+                landed += 1
+        finally:
+            del groups[:landed]
+            await self._changed(ctx.path)
+
+    async def _ends_by(self, path: str, end: int) -> bool:
+        """Whether the stored file at ``path`` is missing or ends at or
+        before ``end``, by a fresh stat, which waits out a write already
+        landing on the path, so an append under way is counted. A stat
+        refused (a policy may allow the write and not it) answers no, so
+        the group lands as a pwrite rather than not at all.
+
+        Args:
+            path (str): mount path of the file.
+            end (int): the offset it may reach.
+        """
+        try:
+            row = await self._op(
+                self._files.stat(self.resolve(path), fresh=True)
+            )
+        except FileNotFoundError:
+            return True
+        except PermissionError as exc:
+            logger.debug("fuse: %s lands as a pwrite, unsized: %r", path, exc)
+            return False
+        return row.size is not None and row.size <= end
+
+    @staticmethod
+    async def _free_spool(ctx: Handle) -> None:
+        """Close a handle's spool once none of its writes wait there.
+
+        Args:
+            ctx (Handle): the handle.
+        """
+        spool = ctx.spool
+        if spool is None or any(
+            isinstance(run, ByteSlice) for _, run in ctx.write_buf
+        ):
+            return
+        ctx.spool = None
+        await spool.close()
+
+    async def _land_held(self, ctx: Handle, row: FileStat) -> None:
         """Land a handle's writes on a file whose name went: on the bytes
         it holds, which every handle open on that file reads, as writes
         to an unlinked file stay with it. A handle reading a rendering
-        the stored bytes differ from keeps its own.
+        the stored bytes differ from keeps its own. The writes leave the
+        handle before its spool is read, an empty run at their end in
+        their place, so a write arriving meanwhile stays for the next
+        landing and an append starts past them; the spool stays the
+        handle's, closed once none of its writes wait there.
 
         Args:
             ctx (Handle): a detached handle with writes buffered.
             row (FileStat): the row it stats by.
         """
         held = ctx.data or b""
-        data = overlaid(held, 0, self._end(ctx), ctx.write_buf)
-        ctx.write_buf = []
+        end = self._end(ctx)
+        marker = bytearray()
+        writes, ctx.write_buf = ctx.write_buf, [(end, marker)]
+        ctx.cuts = []
+        try:
+            data = overlaid(held, 0, end, await window_writes(writes, 0, end))
+        except BaseException:
+            self._put_back(ctx, writes)
+            raise
+        finally:
+            ctx.cuts = None
+            ctx.write_buf = [
+                w for w in ctx.write_buf if w[1] is not marker or marker
+            ]
+        await self._free_spool(ctx)
         landed = row.model_copy(update={"size": len(data)})
         for other in self._open_on(ctx.key):
             if other is ctx or other.data is held:
@@ -1713,6 +1920,8 @@ class MountCore:
                 await self.flush(ctx.path, fh)
         finally:
             self._handles.pop(fh)
+            if ctx is not None and ctx.spool is not None:
+                await ctx.spool.close()
 
     def _mount_path(self, key: str, spelled: str) -> str:
         """The mount path the file ``key`` names, or ``spelled`` where it
@@ -1875,20 +2084,27 @@ class MountCore:
             raise ebadf(ctx.path)
         if length < 0:
             raise einval(ctx.path)
-        if ctx.detached is None:
+        row = ctx.detached
+        if row is None:
             await self.truncate(ctx.path, length)
             return
-        if ctx.write_buf:
-            self._land_held(ctx, ctx.detached)
-        held = ctx.data or b""
-        data = held[:length] + bytes(max(0, length - len(held)))
-        landed = ctx.detached.model_copy(update={"size": length})
-        for other in self._open_on(ctx.key):
-            if other is ctx or other.data is held:
-                other.data = data
-                other.detached = landed
-                other.write_buf = [
-                    (at, run[: length - at])
-                    for at, run in other.write_buf
-                    if at < length
-                ]
+
+        # In the file's turn, as a flush lands, so a read waits for the
+        # writes this lands first.
+        async def cut() -> None:
+            if ctx.write_buf:
+                await self._land_held(ctx, ctx.detached or row)
+            held = ctx.data or b""
+            data = held[:length] + bytes(max(0, length - len(held)))
+            landed = (ctx.detached or row).model_copy(update={"size": length})
+            for other in self._open_on(ctx.key):
+                if other is ctx or other.data is held:
+                    other.data = data
+                    other.detached = landed
+                    other.write_buf = [
+                        (at, run[: length - at])
+                        for at, run in other.write_buf
+                        if at < length
+                    ]
+
+        await self._mutate(ctx.key, cut)

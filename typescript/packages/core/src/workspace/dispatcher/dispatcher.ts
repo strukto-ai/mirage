@@ -819,7 +819,7 @@ export class Dispatcher {
     } finally {
       const data = args?.[0] ?? kwargs?.data
       if (
-        (name === 'write' || name === 'append') &&
+        (name === 'write' || name === 'append' || name === 'pwrite') &&
         data !== null &&
         typeof data === 'object' &&
         Symbol.asyncIterator in data
@@ -2309,7 +2309,10 @@ export class Dispatcher {
         ): Promise<unknown> => {
           line = activeRecords()
           before = await this.cachedBefore(call, mount)
-          if ((name === 'write' || name === 'append') && !(fullArgs[0] instanceof Uint8Array)) {
+          if (
+            (name === 'write' || name === 'append' || name === 'pwrite') &&
+            !(fullArgs[0] instanceof Uint8Array)
+          ) {
             const budget = factsOf(mount).cacheable ? drainBudget(this.cache) : 0
             payload = new LentPayload(fullArgs[0] as ByteSource, holds, budget)
             fullArgs[0] = payload.chunks()

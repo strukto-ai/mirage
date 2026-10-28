@@ -15,7 +15,7 @@
 import { fromUnits, units, visibilityMatcher } from '../rs/policy.ts'
 import { mergeSignals } from '../utils/abort.ts'
 import type { SessionAccess } from '../view/types.ts'
-import { createAsyncContext } from '../utils/async_context.ts'
+import { asyncContextIsolatesTasks, createAsyncContext } from '../utils/async_context.ts'
 import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
 import type { Redirect } from '../shell/types.ts'
 import type { JobConsole } from '../shell/console/index.ts'
@@ -337,14 +337,38 @@ export function lineSignal(session: SessionState): AbortSignal | undefined {
 /**
  * The signal the current call answers to: its evaluation frame's and its
  * line's, which withdraw a pipe read or copy that waits; Python cancels the
- * awaiting task instead.
+ * awaiting task instead. None in a landing (`runLanding`).
  */
 export function callerSignal(): AbortSignal | undefined {
+  if (inLanding()) return undefined
   const session = getCurrentSession()
   return mergeSignals(
     getCurrentEvaluation()?.frame.abortSignal,
     session === null ? undefined : lineSignal(session),
   )
+}
+
+// Bound while what a stopped run wrote lands, apart from the caller, which
+// a layer below may pin to the run's own.
+const landing = createAsyncContext<true>()
+
+/**
+ * `fn` run as a landing of what a stopped run wrote, which no abort stops,
+ * as a killed process's writes stay in its files: its calls answer to no
+ * signal, whatever caller they run as. Mirrors Python's `run_landing`.
+ */
+export function runLanding<T>(fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(landing.run(true, fn))
+}
+
+/**
+ * Whether the current call is part of a landing. Never without task
+ * isolation (a browser): there the one slot shows a landing to every call
+ * beside it, and a stopped guest's call must not pass as one, so the
+ * guest's stop wins over its landing. Mirrors Python's `in_landing`.
+ */
+export function inLanding(): boolean {
+  return asyncContextIsolatesTasks && landing.getStore() === true
 }
 
 /** Bind an evaluation with its session, as one binding. */

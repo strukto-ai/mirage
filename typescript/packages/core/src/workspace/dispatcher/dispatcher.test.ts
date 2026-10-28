@@ -250,6 +250,33 @@ it.each([
   }
 })
 
+/** A store with no pwrite, as S3, whose pwrite is a rewrite. */
+class RewrittenRAM extends RAMVFS {
+  constructor() {
+    super()
+    Object.defineProperty(this, 'pwrite', { value: Reflect.get(BaseVFS.prototype, 'pwrite') })
+  }
+}
+
+it.each([
+  ['a native', () => new RAMVFS()],
+  ['a rewritten', () => new RewrittenRAM()],
+])('lets %s streamed pwrite name go while its source waits', async (_, store) => {
+  const ws = new Workspace({ '/d/': store() }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.write('/d/f', '0123456789')
+    const source = async function* (): AsyncIterable<Uint8Array> {
+      yield ENC.encode('AB')
+      await ws.vfs.append('/d/f', ENC.encode('tail'))
+      yield ENC.encode('CD')
+    }
+    await ws.vfs.pwrite('/d/f', source(), 2)
+    expect(new TextDecoder().decode(await ws.vfs.read('/d/f'))).toBe('01ABCD6789tail')
+  } finally {
+    await ws.close()
+  }
+})
+
 it('keeps no copy from before an empty streamed append waited', async () => {
   const ws = new Workspace({ '/dst': new StreamWritingRAM() }, { mode: MountMode.WRITE })
   let asked = (): void => undefined
