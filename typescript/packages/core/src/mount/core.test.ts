@@ -21,7 +21,7 @@ import type { PathSpec } from '../types.ts'
 import type { Action, Policy, VfsContext } from '../policy/index.ts'
 import { enotsup, erofs, unnamedFsError } from '../errors/fs.ts'
 import { DIR_SIZE } from '../utils/stat_view.ts'
-import { ByteSlice, MEMORY_LIMIT } from '../io/spool.ts'
+import { ByteSlice, MEMORY_LIMIT, type ByteSpool } from '../io/spool.ts'
 import type { ByteSource } from '../io/types.ts'
 import type { Handed } from '../vfs/types.ts'
 import { READ_CHUNK } from '../runtime/handles/constants.ts'
@@ -2108,6 +2108,80 @@ describe('MountCore past the memory limit', () => {
     await appending
     await releasing
     landed(store, new Uint8Array([...repeat(24), ...enc.encode('TAIL')]))
+  })
+
+  /** Hold the next read of `spool` until `go`; `waiting` settles once it is held. */
+  const heldUp = (spool: ByteSpool): { waiting: Promise<void>; go: () => void } => {
+    const read = spool.read.bind(spool)
+    let reading = (): void => undefined
+    const waiting = new Promise<void>((resolve) => (reading = resolve))
+    let go = (): void => undefined
+    const gate = new Promise<void>((resolve) => (go = resolve))
+    vi.spyOn(spool, 'read').mockImplementationOnce(async (offset, size) => {
+      reading()
+      await gate
+      return read(offset, size)
+    })
+    return { waiting, go }
+  }
+
+  it('lands a spooled write a policy refuses to stat as a pwrite', async () => {
+    const store = new StreamedRAM()
+    const noStats: Policy = {
+      preVfs: (ctx: VfsContext): Action | null =>
+        ctx.call.name === 'stat' ? { kind: 'deny', reason: 'no stat' } : null,
+    }
+    const ws = new Workspace({ '/data/': store }, { mode: MountMode.WRITE, policies: [noStats] })
+    const core = new MountCore(ws.vfs)
+    const fh = await core.create('/data/f', 0o100644)
+    for (let i = 0; i < 24; i++) await core.write('/data/f', fh, BLOCK, i * BLOCK.byteLength)
+    await core.release(fh)
+    landed(store, repeat(24))
+  })
+
+  it('puts an append made while an unlinked handle lands past its writes', async () => {
+    const { core } = streamed()
+    const fh = await core.open(
+      '/data/f',
+      flags(fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_APPEND),
+    )
+    for (let i = 0; i < 24; i++) await core.write('/data/f', fh, BLOCK, 0)
+    await core.unlink('/data/f')
+    const ctx = core.handles.get(fh)
+    if (ctx?.spool === undefined) throw new Error('expected a spool')
+    const { waiting, go } = heldUp(ctx.spool)
+    const landing = core.flush('/data/f', fh)
+    await waiting
+    await core.write('/data/f', fh, enc.encode('LATE'), 0)
+    go()
+    await landing
+    await core.flush('/data/f', fh)
+    const want = new Uint8Array([...repeat(24), ...enc.encode('LATE')])
+    expect(Buffer.compare(ctx.data ?? new Uint8Array(), want)).toBe(0)
+    await core.release(fh)
+  })
+
+  it('spills a write made while an unlinked handle lands into its own spool', async () => {
+    const { core } = streamed()
+    const fh = await core.open(
+      '/data/f',
+      flags(fsConstants.O_RDWR | fsConstants.O_CREAT | fsConstants.O_TRUNC),
+    )
+    for (let i = 0; i < 24; i++) await core.write('/data/f', fh, BLOCK, i * BLOCK.byteLength)
+    await core.unlink('/data/f')
+    const spool = core.handles.get(fh)?.spool
+    if (spool === undefined) throw new Error('expected a spool')
+    const { waiting, go } = heldUp(spool)
+    const landing = core.flush('/data/f', fh)
+    await waiting
+    for (let i = 24; i < 48; i++) await core.write('/data/f', fh, BLOCK, i * BLOCK.byteLength)
+    expect(core.handles.get(fh)?.spool).toBe(spool)
+    go()
+    await landing
+    expect(spool.closed).toBe(false)
+    expect(await core.read('/data/f', fh, 47 * BLOCK.byteLength, 8)).toEqual(BLOCK.subarray(0, 8))
+    await core.release(fh)
+    expect(spool.closed).toBe(true)
   })
 
   it('has a read ready before a spill wait for the spilled bytes', async () => {

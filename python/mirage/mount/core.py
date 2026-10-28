@@ -1363,7 +1363,9 @@ class MountCore:
     async def _ends_by(self, path: str, end: int) -> bool:
         """Whether the stored file at ``path`` is missing or ends at or
         before ``end``, by a fresh stat, which waits out a write already
-        landing on the path, so an append under way is counted.
+        landing on the path, so an append under way is counted. A stat
+        refused (a policy may allow the write and not it) answers no, so
+        the group lands as a pwrite rather than not at all.
 
         Args:
             path (str): mount path of the file.
@@ -1375,6 +1377,9 @@ class MountCore:
             )
         except FileNotFoundError:
             return True
+        except PermissionError as exc:
+            logger.debug("fuse: %s lands as a pwrite, unsized: %r", path, exc)
+            return False
         return row.size is not None and row.size <= end
 
     @staticmethod
@@ -1396,9 +1401,11 @@ class MountCore:
         """Land a handle's writes on a file whose name went: on the bytes
         it holds, which every handle open on that file reads, as writes
         to an unlinked file stay with it. A handle reading a rendering
-        the stored bytes differ from keeps its own. The writes and their
-        spool leave the handle before the spool is read, so a write
-        arriving meanwhile stays for the next landing.
+        the stored bytes differ from keeps its own. The writes leave the
+        handle before its spool is read, an empty run at their end in
+        their place, so a write arriving meanwhile stays for the next
+        landing and an append starts past them; the spool stays the
+        handle's, closed once none of its writes wait there.
 
         Args:
             ctx (Handle): a detached handle with writes buffered.
@@ -1406,17 +1413,18 @@ class MountCore:
         """
         held = ctx.data or b""
         end = self._end(ctx)
-        writes, ctx.write_buf = ctx.write_buf, []
-        spool, ctx.spool = ctx.spool, None
+        marker = bytearray()
+        writes, ctx.write_buf = ctx.write_buf, [(end, marker)]
         try:
             data = overlaid(held, 0, end, await window_writes(writes, 0, end))
         except BaseException:
             ctx.write_buf = [*writes, *ctx.write_buf]
-            if ctx.spool is None:
-                ctx.spool = spool
             raise
-        if spool is not None:
-            await spool.close()
+        finally:
+            ctx.write_buf = [
+                w for w in ctx.write_buf if w[1] is not marker or marker
+            ]
+        await self._free_spool(ctx)
         landed = row.model_copy(update={"size": len(data)})
         for other in self._open_on(ctx.key):
             if other is ctx or other.data is held:

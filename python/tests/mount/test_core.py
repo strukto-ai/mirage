@@ -27,7 +27,7 @@ import pytest_asyncio
 
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.types import OperationNotSupportedError, ReadOnlyError
-from mirage.io.spool import MEMORY_LIMIT, ByteSlice
+from mirage.io.spool import MEMORY_LIMIT, ByteSlice, ByteSpool
 from mirage.mount import core as core_module
 from mirage.mount.constants import LISTING_CONCURRENCY
 from mirage.mount.core import MountCore
@@ -2041,6 +2041,77 @@ async def test_a_covering_landing_keeps_an_append_already_under_way(
     await appending
     await releasing
     assert store._store.files["/f"] == BLOCK * 24 + b"TAIL"
+
+
+def _held_up(spool: ByteSpool) -> tuple[asyncio.Event, asyncio.Event]:
+    """Hold every read of ``spool`` until the second event is set; the
+    first is set once a read is waiting."""
+    reading, go = asyncio.Event(), asyncio.Event()
+    read = spool.read
+
+    async def held_up(offset: int, size: int) -> bytes:
+        reading.set()
+        await go.wait()
+        return await read(offset, size)
+
+    spool.read = held_up  # type: ignore[method-assign]
+    return reading, go
+
+
+@pytest.mark.asyncio
+async def test_a_spooled_landing_a_policy_refuses_to_stat_lands_as_a_pwrite():
+    store = _StreamedRAM()
+    ws = Workspace({"/": store}, mode=MountMode.WRITE)
+    ws.policies.add(_NoStats())
+    core = MountCore(ws.vfs)
+    fh = await core.create("/f", stat.S_IFREG | 0o644)
+    for i in range(24):
+        await core.write("/f", BLOCK, i * len(BLOCK), fh)
+    await core.release(fh)
+    assert store._store.files["/f"] == BLOCK * 24
+
+
+@pytest.mark.asyncio
+async def test_an_append_while_an_unlinked_handle_lands_goes_past_its_writes():
+    core, store = _streamed_core()
+    fh = await core.open(
+        "/f", open_mode(os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+    )
+    for _ in range(24):
+        await core.write("/f", BLOCK, 0, fh)
+    await core.unlink("/f")
+    ctx = core.handles.get(fh)
+    reading, go = _held_up(ctx.spool)
+    landing = asyncio.create_task(core.flush("/f", fh))
+    await reading.wait()
+    await core.write("/f", b"LATE", 0, fh)
+    go.set()
+    await landing
+    await core.flush("/f", fh)
+    assert ctx.data == BLOCK * 24 + b"LATE"
+    await core.release(fh)
+
+
+@pytest.mark.asyncio
+async def test_a_spill_while_an_unlinked_handle_lands_stays_in_its_spool():
+    core, store = _streamed_core()
+    fh = await core.open("/f", open_mode(os.O_RDWR | os.O_CREAT | os.O_TRUNC))
+    for i in range(24):
+        await core.write("/f", BLOCK, i * len(BLOCK), fh)
+    await core.unlink("/f")
+    spool = core.handles.get(fh).spool
+    reading, go = _held_up(spool)
+    landing = asyncio.create_task(core.flush("/f", fh))
+    await reading.wait()
+    for i in range(24, 48):
+        await core.write("/f", BLOCK, i * len(BLOCK), fh)
+    assert core.handles.get(fh).spool is spool
+    go.set()
+    await landing
+    assert not spool.closed
+    assert await core.read("/f", 8, 47 * len(BLOCK), fh) == BLOCK[:8]
+    await core.release(fh)
+    assert spool.closed
 
 
 class _DigestRAM(_StreamedRAM):

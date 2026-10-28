@@ -1171,26 +1171,28 @@ export class MountCore {
    * Land a handle's writes on a file whose name went: on the bytes it holds,
    * which every handle open on that file reads, as writes to an unlinked
    * file stay with it. A handle reading a rendering the stored bytes differ
-   * from keeps its own. The writes and their spool leave the handle before
-   * the spool is read, so a write arriving meanwhile stays for the next
-   * landing. Mirrors Python's `_land_held`.
+   * from keeps its own. The writes leave the handle before its spool is read,
+   * an empty run at their end in their place, so a write arriving meanwhile
+   * stays for the next landing and an append starts past them; the spool
+   * stays the handle's, closed once none of its writes wait there. Mirrors
+   * Python's `_land_held`.
    */
   private async landHeld(ctx: Handle, row: FileStat): Promise<void> {
     const held = ctx.data ?? new Uint8Array()
     const end = MountCore.end(ctx)
     const writes = ctx.writeBuf ?? []
-    const spool = ctx.spool
-    ctx.writeBuf = []
-    delete ctx.spool
+    const marker = new Uint8Array()
+    ctx.writeBuf = [[end, marker]]
     let data: Uint8Array
     try {
       data = overlaid(held, 0, end, await windowWrites(writes, 0, end))
     } catch (err) {
       ctx.writeBuf = [...writes, ...ctx.writeBuf]
-      if (spool !== undefined && !('spool' in ctx)) ctx.spool = spool
       throw err
+    } finally {
+      ctx.writeBuf = ctx.writeBuf.filter(([, run]) => run !== marker)
     }
-    await spool?.close()
+    await MountCore.freeSpool(ctx)
     const landed = row.with({ size: data.byteLength })
     for (const other of this.openOn(ctx.key)) {
       if (other !== ctx && other.data !== held) continue
@@ -1303,15 +1305,20 @@ export class MountCore {
   /**
    * Whether the stored file at `path` is missing or ends at or before `end`,
    * by a fresh stat, which waits out a write already landing on the path, so
-   * an append under way is counted. Mirrors Python's `_ends_by`.
+   * an append under way is counted. A stat refused (a policy may allow the
+   * write and not it) answers no, so the group lands as a pwrite rather than
+   * not at all. Mirrors Python's `_ends_by`.
    */
   private async endsBy(path: string, end: number): Promise<boolean> {
     let row: FileStat
     try {
       row = await this.op(() => this.files.stat(this.resolve(path), undefined, { fresh: true }))
     } catch (err) {
-      if (classify(err) !== 'ENOENT') throw err
-      return true
+      const code = classify(err)
+      if (code === 'ENOENT') return true
+      if (code !== 'EACCES') throw err
+      console.debug(`fuse: ${path} lands as a pwrite, unsized: ${String(err)}`)
+      return false
     }
     return row.size !== null && row.size <= end
   }
