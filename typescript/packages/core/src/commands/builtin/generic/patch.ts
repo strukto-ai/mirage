@@ -162,7 +162,8 @@ class PatchFiles {
       }
       throw err
     }
-    return { kind: found.type === FileType.DIRECTORY ? 'dir' : 'file' }
+    const kind = found.type === FileType.DIRECTORY ? 'dir' : 'file'
+    return found.mode === null ? { kind } : { kind, mode: found.mode }
   }
 
   private async change(
@@ -256,8 +257,9 @@ function parseFlags(bag: Record<string, FlagValue>): PatchFlags {
 
 /**
  * The directory `-d` moves to from `cwd`, or GNU patch's fatal line when it
- * cannot move there. `stat` refuses a directory with EISDIR. Mirrors Python's
- * `_directory`.
+ * cannot move there. As chdir walks it, each entry a `.` or `..` steps out of
+ * must be a directory too. `stat` refuses a directory with EISDIR. Mirrors
+ * Python's `_directory`.
  */
 async function directory(
   typed: string,
@@ -265,18 +267,27 @@ async function directory(
   root: string,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<string | Uint8Array> {
-  const target = resolvePath(typed, cwd)
-  let why = 'No such file or directory'
-  if (typed !== '') {
+  const parts = typed.split('/')
+  const steps = parts.flatMap((part, at) =>
+    (part === '.' || part === '..') && parts.slice(0, at).some(Boolean)
+      ? [parts.slice(0, at).join('/')]
+      : [],
+  )
+  let why = typed === '' ? 'No such file or directory' : ''
+  for (const step of typed === '' ? [] : [...steps, typed]) {
+    const target = resolvePath(step, cwd)
     try {
       await stat(PathSpec.fromStrPath(target, mountKey(target, root)))
       why = 'Not a directory'
     } catch (err) {
-      if (isEisdir(err)) return target
+      if (isEisdir(err)) continue
       if (classify(err) === 'ENOTDIR') why = 'Not a directory'
-      else if (!isEnoent(err)) throw err
+      else if (isEnoent(err)) why = 'No such file or directory'
+      else throw err
     }
+    break
   }
+  if (why === '') return resolvePath(typed, cwd)
   return ENC.encode(`patch: **** Can't change to directory ${shellQuote(typed)} : ${why}\n`)
 }
 

@@ -18,6 +18,25 @@
         "format",
         "to"
       ]
+    },
+    {
+      "id": "numfmt_format_precision_bounds",
+      "seq": 16160009,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --format='%.999999999999999999999f' 1; echo rc=$?; numfmt --format='%.9223372036854775808f' 1; echo rc=$?; numfmt --format='%.9223372036854775807f' 1; echo rc=$?; numfmt --to=si --format='%.40f' 1; echo rc=$?; numfmt --to=si --format='%.999999999999999999999f' 1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=2\n1.0000000000000000000000000000000000000000\nrc=0\nrc=1\n",
+        "stderr": "numfmt: invalid precision in format '%.999999999999999999999f'\nnumfmt: invalid precision in format '%.9223372036854775808f'\nnumfmt: value/precision too large to be printed: '1/9223372036854775807' (consider using --to)\nnumfmt: invalid precision in format '%.999999999999999999999f'\n"
+      },
+      "flags": [
+        "format",
+        "to"
+      ]
     }
   ]
 }

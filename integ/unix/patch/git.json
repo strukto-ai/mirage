@@ -37,6 +37,44 @@
       "flags": [
         "p"
       ]
+    },
+    {
+      "id": "patch_git_moves_name_safety_modes_and_origfile",
+      "seq": 9941425,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_gitmv/sub && touch /data/patch_gitmv/sub/.keep; cd /data/patch_gitmv/sub || exit 1; echo hi > src; printf 'diff --git a/src b/dst\\nsimilarity index 100%%\\nrename from src\\nrename to ../outside\\n' | patch -p1; printf 'diff --git a/dst b/../outside\\nsimilarity index 90%%\\nrename from dst\\nrename to ../outside\\n--- a/dst\\n+++ b/../outside\\n@@ -1 +1 @@\\n-hi\\n+ho\\n' | patch -p1; echo rc=$?; printf 'diff --git a/../dst b/x\\nsimilarity index 100%%\\ncopy from ../dst\\ncopy to x\\n' | patch -p1; echo rc=$?; printf 'diff --git a/dst b/n m\\nsimilarity index 100%%\\ncopy from dst\\ncopy to n m\\n' | patch -p1; echo rc=$?; chmod 751 dst; printf 'diff --git a/dst b/new\\nsimilarity index 90%%\\ncopy from dst\\ncopy to new\\n--- a/dst\\n+++ b/new\\n@@ -1 +1 @@\\n-hi\\n+ho\\n' | patch -p1; stat -c '%n %a' dst new; echo one > target; printf 'diff --git a/old b/moved\\nsimilarity index 100%%\\nrename from old\\nrename to moved\\n' | patch -p1 target; ls; cat moved new; cd /; rm -r /data/patch_gitmv",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file dst (renamed from src)\nIgnoring potentially dangerous file name ../outside\nCannot rename file without two valid file names\n1 out of 1 hunk ignored\nrc=1\nCannot copy file without two valid file names\nrc=1\nCannot copy file without two valid file names\nrc=1\npatching file new (copied from dst)\ndst 751\nnew 751\npatching file moved (renamed from target)\ndst\nmoved\nnew\none\nho\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
     }
   ]
 }

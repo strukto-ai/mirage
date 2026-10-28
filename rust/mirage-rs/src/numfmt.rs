@@ -8,8 +8,8 @@ use crate::{Stream, StreamError, latin1, latin1_list, parse_config, quoted};
 
 const OUTPUT: usize = 64 * 1024;
 
-/// The most digits GNU prints a value with, its whole part and its
-/// decimals together: its long double's digits and one, 34 where that is
+/// The most digits GNU prints an unscaled value with, its whole part and
+/// its decimals together (a scaled one it prints with any number): its long double's digits and one, 34 where that is
 /// binary128 (aarch64, whose pins this follows; x86-64 stops at 19).
 const DIGITS: usize = 34;
 
@@ -99,7 +99,7 @@ struct Format {
     zero: bool,
     left: bool,
     width: Option<usize>,
-    precision: Option<usize>,
+    precision: Option<u64>,
 }
 
 /// Leading digits as a count, saturating, and the rest.
@@ -149,9 +149,20 @@ fn format_of(typed: &[u8]) -> Result<Format, StreamError> {
     }
     (format.width, rest) = count(rest);
     if let Some(tail) = rest.strip_prefix(b".") {
-        let (precision, tail) = count(tail);
-        format.precision = Some(precision.unwrap_or(0));
-        rest = tail;
+        let len = tail.iter().take_while(|b| b.is_ascii_digit()).count();
+        let digits = std::str::from_utf8(&tail[..len]).unwrap_or_default();
+        let precision = match len {
+            0 => Some(0),
+            _ => digits
+                .parse::<u64>()
+                .ok()
+                .filter(|p| i64::try_from(*p).is_ok()),
+        };
+        let Some(precision) = precision else {
+            return Err(refusal(format!("invalid precision in format '{shown}'")));
+        };
+        format.precision = Some(precision);
+        rest = &tail[len..];
     }
     let Some(suffix) = rest.strip_prefix(b"f") else {
         return Err(refusal(format!(
@@ -174,6 +185,20 @@ fn format_of(typed: &[u8]) -> Result<Format, StreamError> {
     }
     format.suffix = suffix.to_vec();
     Ok(format)
+}
+
+/// The decimals GNU prints a scaled value with: the precision as printf
+/// takes it, a C int, so past `i32::MAX` it wraps and a negative one is
+/// printf's default 6. GNU prints however many that is; mirage refuses
+/// more than `WIDEST`, as it refuses so wide a field.
+fn scaled_precision(typed: u64, shown: &str) -> Result<u64, StreamError> {
+    let places = u64::try_from(typed as i32).unwrap_or(6);
+    if places > WIDEST as u64 {
+        return Err(refusal(format!(
+            "invalid format '{shown}': precision too large"
+        )));
+    }
+    Ok(places)
 }
 
 /// A --from-unit or --to-unit size as GNU reads it: blanks and a `+`,
@@ -405,7 +430,7 @@ fn too_precise(
     value: &Value,
     numerator: &BigUint,
     denominator: &BigUint,
-    places: usize,
+    places: u64,
 ) -> StreamError {
     let magnitude = numerator.to_f64().unwrap_or(f64::MAX) / denominator.to_f64().unwrap_or(1.0);
     let signed = if value.negative {
@@ -421,12 +446,22 @@ fn too_precise(
     ))
 }
 
-/// Whether a value's whole digits and `places` decimals are more than GNU
-/// prints. A whole number has none to refuse: mirage prints every digit
-/// of one, where GNU refuses to read one so long (`value too large to be
-/// converted`).
-fn past_digits(numerator: &BigUint, denominator: &BigUint, places: usize) -> bool {
-    places > 0 && (numerator / denominator).to_string().len() + places > DIGITS
+/// `places` decimals for a value whose whole part is `numerator /
+/// denominator`, refused when its whole digits and those decimals are more
+/// than GNU prints. A whole number has none to refuse: mirage prints every
+/// digit of one, where GNU refuses to read one so long (`value too large
+/// to be converted`).
+fn within(
+    value: &Value,
+    numerator: &BigUint,
+    denominator: &BigUint,
+    places: u64,
+) -> Result<usize, StreamError> {
+    let whole = (numerator / denominator).to_string().len();
+    match usize::try_from(places) {
+        Ok(fits) if fits == 0 || fits <= DIGITS.saturating_sub(whole) => Ok(fits),
+        _ => Err(too_precise(value, numerator, denominator, places)),
+    }
 }
 
 fn fixed(negative: bool, scaled: &BigUint, places: usize, out: &mut Vec<u8>) {
@@ -456,7 +491,7 @@ fn format(
     value: &Value,
     to: Scale,
     round: Round,
-    precision: Option<usize>,
+    precision: Option<u64>,
     out: &mut Vec<u8>,
 ) -> Result<usize, StreamError> {
     let Value {
@@ -467,10 +502,8 @@ fn format(
     } = value;
     let start = out.len();
     if to == Scale::None {
-        let places = precision.unwrap_or(*decimals);
-        if past_digits(numerator, denominator, places) {
-            return Err(too_precise(value, numerator, denominator, places));
-        }
+        let typed = u64::try_from(*decimals).unwrap_or(u64::MAX);
+        let places = within(value, numerator, denominator, precision.unwrap_or(typed))?;
         let scaled = rounded(
             &(numerator * pow(10, places)),
             denominator,
@@ -492,10 +525,9 @@ fn format(
         denominator *= &base;
         power += 1;
     }
-    let places = precision.unwrap_or(usize::from(*numerator < &ten * &denominator));
-    if past_digits(numerator, &denominator, places) {
-        return Err(too_precise(value, numerator, &denominator, places));
-    }
+    let places = precision.map_or(usize::from(*numerator < &ten * &denominator), |typed| {
+        usize::try_from(typed).unwrap_or(WIDEST)
+    });
     let mut numerator = rounded(
         &(numerator * pow(10, places)),
         &denominator,
@@ -507,7 +539,10 @@ fn format(
         denominator *= &base;
         power += 1;
     }
-    let places = precision.unwrap_or(usize::from(power > 0 && numerator < &ten * &denominator));
+    let places = match precision {
+        Some(_) => places,
+        None => usize::from(power > 0 && numerator < &ten * &denominator),
+    };
     numerator *= pow(10, places);
     let scaled = half_even(&numerator, &denominator);
     fixed(*negative, &scaled, places, out);
@@ -570,7 +605,14 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let from_unit = unit(&config.from_unit)?;
     let to_unit = unit(&config.to_unit)?;
     let padding = config.padding.as_deref().map_or(Ok(0), padding_of)?;
-    let format = config.format.as_deref().map(format_of).transpose()?;
+    let mut format = config.format.as_deref().map(format_of).transpose()?;
+    if let Some(layout) = format.as_mut().filter(|_| config.to != Scale::None) {
+        let shown = quoted(config.format.as_deref().unwrap_or_default());
+        layout.precision = layout
+            .precision
+            .map(|typed| scaled_precision(typed, &shown))
+            .transpose()?;
+    }
     if config
         .delimiters
         .iter()
@@ -618,19 +660,20 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 }
 
 impl Numfmt {
-    /// One field converted. A field that is no number stops the run, or,
-    /// under --invalid, goes out as it came, said of unless ignored, and
-    /// fails the run at its end under `fail`.
-    fn field(&mut self, value: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+    /// One field converted, past the `lead` blanks it starts with. A field
+    /// that is no number stops the run, or, under --invalid, goes out as it
+    /// came, blanks and all, said of unless ignored, and fails the run at
+    /// its end under `fail`.
+    fn field(&mut self, field: &[u8], lead: usize, out: &mut Vec<u8>) -> Result<(), StreamError> {
         let mode = self.config.invalid;
-        match self.convert(value, out) {
+        match self.convert(&field[lead..], out) {
             Err(error) if mode != Invalid::Abort => {
                 if mode != Invalid::Ignore {
                     self.warnings.extend_from_slice(error.message.as_bytes());
                     self.warnings.push(b'\n');
                 }
                 self.invalid_seen |= mode == Invalid::Fail;
-                out.extend_from_slice(value);
+                out.extend_from_slice(field);
                 Ok(())
             }
             converted => converted,
@@ -707,7 +750,7 @@ impl Numfmt {
                 }
                 if self.selected(index as u64 + 1) {
                     let lead = field.iter().take_while(|b| blank(**b)).count();
-                    self.field(&field[lead..], out)?;
+                    self.field(field, lead, out)?;
                 } else {
                     out.extend_from_slice(field);
                 }
@@ -721,7 +764,7 @@ impl Numfmt {
             let end = at + lead + line[at + lead..].iter().take_while(|b| !blank(**b)).count();
             if self.selected(index) {
                 let mut converted = Vec::new();
-                self.field(&line[at + lead..end], &mut converted)?;
+                self.field(&line[at..end], lead, &mut converted)?;
                 if lead > 0 {
                     let width = end - at;
                     out.resize(out.len() + width.saturating_sub(converted.len()), b' ');
@@ -1133,6 +1176,40 @@ mod tests {
         );
         let (out, _, _, _) = converted(json!({"format": "%.33f"}), &["1"]);
         assert_eq!(out.len(), 36);
+        for format in ["%.999999999999999999999f", "%.9223372036854775808f"] {
+            for to in ["none", "si"] {
+                let (_, _, _, refusal) = converted(json!({"format": format, "to": to}), &["1"]);
+                let said = format!("numfmt: invalid precision in format '{format}'");
+                assert_eq!(refusal, Some(said), "{format} {to}");
+            }
+        }
+        let options = json!({"format": "%.9223372036854775807f"});
+        let (_, _, _, refusal) = converted(options, &["1"]);
+        assert_eq!(
+            refusal.as_deref(),
+            Some(
+                "numfmt: value/precision too large to be printed: \
+                 '1/9223372036854775807' (consider using --to)"
+            )
+        );
+        // A scaled value takes printf's int precision, and as many digits.
+        for (format, value, expected) in [
+            ("%.9223372036854775807f", "1", "1.000000\n"),
+            ("%.4294967301f", "1", "1.00000\n"),
+            (
+                "%.40f",
+                "1500",
+                "1.5000000000000000000000000000000000000000k\n",
+            ),
+        ] {
+            let (out, _, _, _) = converted(json!({"format": format, "to": "si"}), &[value]);
+            assert_eq!(out, expected, "{format}");
+        }
+        let (_, _, _, refusal) = converted(json!({"format": "%.2147483647f", "to": "si"}), &["1"]);
+        assert_eq!(
+            refusal.as_deref(),
+            Some("numfmt: invalid format '%.2147483647f': precision too large")
+        );
         let invalid = ["abc", "12", "def"];
         let said = "numfmt: invalid number: 'abc'\nnumfmt: invalid number: 'def'\n";
         assert_eq!(
@@ -1146,6 +1223,16 @@ mod tests {
         assert_eq!(
             converted(json!({"invalid": "ignore"}), &invalid),
             ("abc\n12\ndef\n".into(), String::new(), 0, None)
+        );
+        let split = json!({"invalid": "warn", "delimiters": [":"], "fields": ["2"]});
+        assert_eq!(
+            converted(split, &["a:  nope:b", "a:\t 2000:b"]),
+            (
+                "a:  nope:b\na:2000:b\n".into(),
+                "numfmt: invalid number: 'nope'\n".into(),
+                0,
+                None
+            )
         );
         let (out, _, _, refusal) = converted(json!({"invalid": "abort"}), &invalid);
         assert_eq!(

@@ -340,6 +340,80 @@ fn a_dry_run_checks_each_file_and_writes_nothing() {
 }
 
 #[test]
+fn git_moves_read_their_diff_line_refuse_dangerous_names_and_keep_modes() {
+    // The diff --git line names a move; its rename lines do not.
+    let differ =
+        "diff --git a/src b/dst\nsimilarity index 100%\nrename from src\nrename to ../outside\n";
+    let mut host = Host::with(&[("src", "hi\n")], differ);
+    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(
+        (status, out.as_str()),
+        (0, "patching file dst (renamed from src)\n")
+    );
+    let doubled =
+        "diff --git a/src b//abs/out\nsimilarity index 100%\ncopy from src\ncopy to /abs/out\n";
+    let mut host = Host::with(&[("src", "hi\n")], doubled);
+    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(out, "patching file abs/out (copied from src)\n");
+    let cannot = "Cannot rename file without two valid file names\n";
+    let spaced = "diff --git a/x y b/z\nsimilarity index 100%\nrename from x y\nrename to z\n";
+    let mut host = Host::with(&[("x y", "hi\n")], spaced);
+    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(
+        (status, out.as_str()),
+        (1, cannot),
+        "a blank in a name leaves the line no names"
+    );
+    // A dangerous target is said of, a dangerous source is not, and the
+    // hunks after either are ignored.
+    let hunk = "--- a/src\n+++ b/dst\n@@ -1 +1 @@\n-hi\n+ho\n";
+    for (header, said) in [
+        (
+            "diff --git a/src b/../outside\nsimilarity index 90%\n",
+            "Ignoring potentially dangerous file name ../outside\n",
+        ),
+        ("diff --git a/../src b/dst\nsimilarity index 90%\n", ""),
+        ("diff --git a/../a b/../b\nsimilarity index 90%\n", ""),
+    ] {
+        let diff = format!("{header}rename from x\nrename to y\n{hunk}");
+        let mut host = Host::with(&[("src", "hi\n"), ("../src", "hi\n")], &diff);
+        let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+        let expected = format!("{said}{cannot}1 out of 1 hunk ignored\n");
+        assert_eq!((status, out.as_str()), (1, expected.as_str()), "{header}");
+        assert_eq!(file(&host, "src").as_deref(), Some("hi\n"));
+    }
+    let missing = format!(
+        "diff --git a/gone b/dst\nsimilarity index 90%\nrename from gone\nrename to dst\n{hunk}"
+    );
+    let mut host = Host::with(&[], &missing);
+    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(out, format!("{cannot}1 out of 1 hunk ignored\n"));
+
+    // The target keeps the source's mode, through the hunks after it too.
+    let rename = "diff --git a/old b/new\nsimilarity index 100%\nrename from old\nrename to new\n";
+    let mut host = Host::with(&[("old", "x\n")], rename);
+    host.modes.insert("old".into(), 0o755);
+    patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(host.modes.get("new"), Some(&0o755));
+    let copy = "diff --git a/old b/new\nsimilarity index 90%\ncopy from old\ncopy to new\n--- a/old\n+++ b/new\n@@ -1 +1 @@\n-x\n+y\n";
+    let mut host = Host::with(&[("old", "x\n")], copy);
+    host.modes.insert("old".into(), 0o751);
+    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    assert_eq!(out, "patching file new (copied from old)\n");
+    assert_eq!(host.modes.get("new"), Some(&0o751));
+    assert_eq!(file(&host, "new").as_deref(), Some("y\n"));
+
+    // An ORIGFILE stands in for the source.
+    let edited = copy.replace("copy", "rename");
+    let mut host = Host::with(&[("old", "x\n"), ("target", "x\n")], &edited);
+    let (_, out, _) = patch(&mut host, r#"{"strip": 1, "file": "target"}"#);
+    assert_eq!(out, "patching file new (renamed from target)\n");
+    assert_eq!(file(&host, "new").as_deref(), Some("y\n"));
+    assert_eq!(file(&host, "old").as_deref(), Some("x\n"));
+    assert!(!host.files.contains_key("target"));
+}
+
+#[test]
 fn git_headers_move_files_set_modes_and_refuse_binary_patches() {
     let rename =
         "diff --git a/old b/renamed\nsimilarity index 100%\nrename from old\nrename to renamed\n";

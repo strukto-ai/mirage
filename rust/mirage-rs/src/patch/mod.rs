@@ -114,6 +114,12 @@ impl Files {
             .await
     }
 
+    /// A file's permission bits, where the host keeps them.
+    async fn mode(&self, name: &[u8]) -> Option<u32> {
+        let path = name.to_vec();
+        self.host.ask(Request::Stat { path }).await.0.mode
+    }
+
     /// Set a file's permission bits; false, with the failure said, when the
     /// host could not.
     async fn chmod(&self, name: &[u8], mode: u32) -> bool {
@@ -384,9 +390,11 @@ fn skip(files: &Files, section: &Section<'_>) -> Result<bool, i32> {
 
 /// A git rename or copy carried out, GNU's way, before its hunks: the file
 /// it leaves for them, what the report says after its name, and, for a run
-/// that only checks, the file the hunks are read from instead. A rename to
-/// a name that stands already is taken as done; none when the patch names
-/// no source and target or no source stands. Writing it or removing the
+/// that only checks, the file the hunks are read from instead. An ORIGFILE
+/// stands in for its source. A rename to a name that stands already is
+/// taken as done; none when the patch names no source and target, names a
+/// dangerous one (said of only for the target, as GNU says it) or no source
+/// stands. The target keeps the source's mode. Writing it or removing the
 /// source failing stops the run with status 1.
 async fn move_file(
     files: &mut Files,
@@ -398,9 +406,16 @@ async fn move_file(
     } else {
         (&moved.from, &moved.to)
     };
-    let (Some(from), Some(to)) = (from, to) else {
+    let (Some(from), Some(to)) = (config.file.as_ref().or(from.as_ref()), to) else {
         return Ok(None);
     };
+    if config.file.is_none() && dangerous(from) {
+        return Ok(None);
+    }
+    if dangerous(to) {
+        files.say(&[b"Ignoring potentially dangerous file name ", to]);
+        return Ok(None);
+    }
     let verb = if moved.copy {
         &b"copied"[..]
     } else {
@@ -420,9 +435,15 @@ async fn move_file(
     let Ok(data) = files.whole(from, Opening::File).await else {
         return Ok(None);
     };
+    let mode = files.mode(from).await;
     let made = files.missing(to).await.unwrap_or_default();
     if !files.make(made).await || !files.write(to.clone(), data).await {
         return Err(1);
+    }
+    if let Some(mode) = mode {
+        if !files.chmod(to, mode).await {
+            return Err(1);
+        }
     }
     let path = from.clone();
     if !moved.copy && !files.change(Request::Unlink { path }, from).await {
@@ -473,7 +494,7 @@ async fn patch_file(
             None => {
                 let verb = if moved.copy { &b"copy"[..] } else { b"rename" };
                 files.say(&[b"Cannot ", verb, b" file without two valid file names"]);
-                return Ok(true);
+                return skip(files, section);
             }
         },
         (None, Some(file)) => Some(file.clone()),

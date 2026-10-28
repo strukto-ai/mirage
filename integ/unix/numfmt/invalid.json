@@ -18,6 +18,26 @@
         "invalid",
         "field"
       ]
+    },
+    {
+      "id": "numfmt_invalid_keeps_a_fields_blanks",
+      "seq": 16160008,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'a:  nope:b\\n' | numfmt -d: --field=2 --invalid=ignore; printf 'a:\\t nope:b\\n' | numfmt -d: --field=2 --invalid=warn; echo rc=$?; printf 'a:  nope:b\\n' | numfmt -d: --field=2 --invalid=fail; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "a:  nope:b\na:\t nope:b\nrc=0\na:  nope:b\nrc=2\n",
+        "stderr": "numfmt: invalid number: 'nope'\nnumfmt: invalid number: 'nope'\n"
+      },
+      "flags": [
+        "invalid",
+        "field",
+        "delimiter"
+      ]
     }
   ]
 }

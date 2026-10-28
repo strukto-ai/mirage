@@ -206,7 +206,10 @@ class _PatchFiles:
                 return {"kind": "link"}
             logger.debug("nothing stands at %r: %s", path, exc)
             return {}
-        return {"kind": "dir" if found.type == FileType.DIRECTORY else "file"}
+        kind = "dir" if found.type == FileType.DIRECTORY else "file"
+        if found.mode is None:
+            return {"kind": kind}
+        return {"kind": kind, "mode": found.mode}
 
     async def _change(
         self, run: Callable[[PathSpec], Awaitable[None]], path: str
@@ -325,7 +328,8 @@ async def _directory(
     stat: Callable[[PathSpec], Awaitable[FileStat]],
 ) -> str | bytes:
     """The directory ``-d`` moves to from ``cwd``, or GNU patch's fatal
-    line when it cannot move there.
+    line when it cannot move there. As chdir walks it, each entry a ``.``
+    or ``..`` steps out of must be a directory too.
 
     Args:
         typed (str): the value as typed.
@@ -333,18 +337,28 @@ async def _directory(
         root (str): the root of the mount the command runs on.
         stat (Callable): stat refusing a directory with EISDIR.
     """
-    target = resolve_path(typed, cwd)
-    why = "No such file or directory"
-    if typed:
+    parts = typed.split("/")
+    steps = [
+        "/".join(parts[:at])
+        for at in range(1, len(parts))
+        if parts[at] in (".", "..") and any(parts[:at])
+    ]
+    why = "" if typed else "No such file or directory"
+    for step in [*steps, typed] if typed else []:
+        target = resolve_path(step, cwd)
         try:
             await stat(PathSpec.from_str_path(target, mount_key(target, root)))
             why = "Not a directory"
         except IsADirectoryError:
-            return target
+            continue
         except NotADirectoryError:
             why = "Not a directory"
         except FileNotFoundError as exc:
+            why = "No such file or directory"
             logger.debug("no directory at %r: %s", target, exc)
+        break
+    if not why:
+        return resolve_path(typed, cwd)
     label = shell_quote(typed)
     return f"patch: **** Can't change to directory {label} : {why}\n".encode()
 
