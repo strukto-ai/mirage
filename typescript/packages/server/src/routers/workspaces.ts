@@ -177,6 +177,16 @@ async function hasState(stateRoot: string, id: string): Promise<boolean> {
 }
 
 /**
+ * Set `reply`'s status and hand back `body` unsent. Code that holds an id
+ * answers this way, so the route sends only once the id is released and a
+ * client that read the answer finds the id free.
+ */
+function answer<T>(reply: FastifyReply, status: number, body: T): T {
+  void reply.status(status)
+  return body
+}
+
+/**
  * Run a create's `build` under the caller's claim on `id`, or answer 409
  * when the id is not theirs to create. A claim this create made is released
  * when the build answers anything but success or throws, so a failed
@@ -188,12 +198,12 @@ async function claimed(
   req: FastifyRequest,
   reply: FastifyReply,
   id: string,
-  build: () => Promise<FastifyReply>,
-): Promise<FastifyReply> {
+  build: () => Promise<unknown>,
+): Promise<unknown> {
   const stored = req.account !== null && (await hasState(deps.stateRoot, id))
   const claim = await deps.registry.claim(id, req.account, stored)
   if (claim === Claim.Taken) {
-    return reply.status(409).send({ detail: `workspace id already exists: ${id}` })
+    return answer(reply, 409, { detail: `workspace id already exists: ${id}` })
   }
   let built = false
   try {
@@ -216,10 +226,10 @@ function building(
   req: FastifyRequest,
   reply: FastifyReply,
   id: string,
-  build: () => Promise<FastifyReply>,
-): Promise<FastifyReply> {
+  build: () => Promise<unknown>,
+): Promise<unknown> {
   return deps.registry.creating(id, `build:${newWorkspaceId()}`, async (admitted) => {
-    if (!admitted) return reply.status(409).send({ detail: `workspace id already exists: ${id}` })
+    if (!admitted) return answer(reply, 409, { detail: `workspace id already exists: ${id}` })
     return claimed(deps, req, reply, id, build)
   })
 }
@@ -284,14 +294,14 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       const digest = configDigest(config)
       return deps.registry.creating(wid, digest, async (admitted) => {
         if (!admitted) {
-          return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
+          return answer(reply, 409, { detail: `workspace id already exists: ${wid}` })
         }
         if (deps.registry.has(wid) || deps.registry.removing(wid)) {
           const held = deps.registry.visible(wid, req.account)
           if (held === null || deps.registry.removing(wid) || held.configDigest !== digest) {
-            return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
+            return answer(reply, 409, { detail: `workspace id already exists: ${wid}` })
           }
-          return reply.status(200).send(await makeDetail(held))
+          return answer(reply, 200, await makeDetail(held))
         }
         return claimed(deps, req, reply, wid, async () => {
           let args: WorkspaceArgs
@@ -307,9 +317,9 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
               // config, not a backend that would not answer. Resolution moved
               // into configToWorkspaceArgs, so without this the same body that
               // python's create route refuses with 400 got a 502 here.
-              return reply.status(400).send({ detail: e.message })
+              return answer(reply, 400, { detail: e.message })
             }
-            return reply.status(502).send({ detail: `VFS build failed: ${(e as Error).message}` })
+            return answer(reply, 502, { detail: `VFS build failed: ${(e as Error).message}` })
           }
           // The Mounts ride through whole; see workspace_config.ts.
           const vfsMap: Record<string, MountSpec> = { ...args.mounts }
@@ -332,7 +342,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
               ownsStore: true,
             })
           } catch (e) {
-            return reply.status(400).send({ detail: (e as Error).message })
+            return answer(reply, 400, { detail: (e as Error).message })
           }
           let entry
           try {
@@ -343,9 +353,9 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
             entry.configDigest = digest
           } catch (e) {
             await ws.close()
-            return reply.status(409).send({ detail: (e as Error).message })
+            return answer(reply, 409, { detail: (e as Error).message })
           }
-          return reply.status(201).send(await makeDetail(entry))
+          return answer(reply, 201, await makeDetail(entry))
         })
       })
     },
@@ -398,7 +408,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         // is left for it to reject. Mirrors the python load route.
         overrides = await buildOverrideMounts(override ?? null, override?.secrets)
       } catch (e) {
-        return reply.status(400).send({ detail: `override build failed: ${(e as Error).message}` })
+        return answer(reply, 400, { detail: `override build failed: ${(e as Error).message}` })
       }
       let ws: Workspace
       try {
@@ -412,18 +422,18 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         )
       } catch (e) {
         if ((e as { code?: unknown }).code === 'ENOENT') {
-          return reply.status(400).send({ detail: `snapshot not found: ${String(key)}` })
+          return answer(reply, 400, { detail: `snapshot not found: ${String(key)}` })
         }
-        return reply.status(400).send({ detail: `load failed: ${(e as Error).message}` })
+        return answer(reply, 400, { detail: `load failed: ${(e as Error).message}` })
       }
       let entry
       try {
         entry = deps.registry.add(ws, wid, req.account)
       } catch (e) {
         await ws.close()
-        return reply.status(409).send({ detail: (e as Error).message })
+        return answer(reply, 409, { detail: (e as Error).message })
       }
-      return reply.status(201).send(await makeDetail(entry))
+      return answer(reply, 201, await makeDetail(entry))
     })
   })
 
@@ -533,9 +543,9 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
             // An override naming a source the host cannot resolve, or a
             // block the schema refuses, is the caller's mistake -- the
             // answer create, load and the historical clone already give.
-            return reply.status(400).send({ detail: e.message })
+            return answer(reply, 400, { detail: e.message })
           }
-          if (isBusy(e)) return reply.status(409).send({ detail: (e as Error).message })
+          if (isBusy(e)) return answer(reply, 409, { detail: (e as Error).message })
           throw e
         }
         let entry
@@ -543,9 +553,9 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           entry = deps.registry.add(newWs, wid, req.account)
         } catch (e) {
           await newWs.close()
-          return reply.status(409).send({ detail: (e as Error).message })
+          return answer(reply, 409, { detail: (e as Error).message })
         }
-        return reply.status(201).send(await makeDetail(entry))
+        return answer(reply, 201, await makeDetail(entry))
       })
     },
   )

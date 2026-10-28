@@ -23,6 +23,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { Workspace } from '@struktoai/mirage-node'
 
 import { buildApp } from '../app.ts'
+import { WorkspaceRegistry } from '../registry.ts'
 import type { AuthConfig, JWTConfig } from './config.ts'
 
 interface KeyMaterial {
@@ -522,6 +523,7 @@ describe('AuthMiddleware integration', () => {
     it('refuses a create of an id a load is building', async () => {
       // A create that took over a load's claim could register first, and the
       // load's failure would then drop the owner record of a live workspace.
+      // A slow release still frees the id before the load answers.
       const app = jwtApp()
       const alice = await bearer({ sub: 'alice' })
       let loading = (): void => undefined
@@ -536,6 +538,15 @@ describe('AuthMiddleware integration', () => {
         loading()
         await held
         throw new Error('not a snapshot')
+      })
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      const release = WorkspaceRegistry.prototype.release
+      vi.spyOn(WorkspaceRegistry.prototype, 'release').mockImplementation(async function (
+        this: WorkspaceRegistry,
+        id: string,
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        return release.call(this, id)
       })
       try {
         const load = app.inject({
