@@ -147,7 +147,7 @@ class PatchFiles {
     } catch (err) {
       if (isEisdir(err)) return { kind: 'dir' }
       if (err instanceof CycleError || isEnoent(err) || classify(err) === 'ENOTDIR') {
-        return this.linked(this.spec(path)) === null ? {} : { kind: 'file' }
+        return this.linked(this.spec(path)) === null ? {} : { kind: 'link' }
       }
       throw err
     }

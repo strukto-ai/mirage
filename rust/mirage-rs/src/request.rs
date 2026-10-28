@@ -87,7 +87,8 @@ pub(crate) enum Request {
     Unlink {
         path: Vec<u8>,
     },
-    /// What stands at a path: a directory, a file, or nothing.
+    /// What stands at a path: a directory, a file, a link that leads to
+    /// nothing found, or nothing.
     Stat {
         path: Vec<u8>,
     },

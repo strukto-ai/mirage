@@ -191,7 +191,7 @@ class _PatchFiles:
             return {"kind": "dir"}
         except (FileNotFoundError, NotADirectoryError, CycleError) as exc:
             if self._linked(self._spec(path)) is not None:
-                return {"kind": "file"}
+                return {"kind": "link"}
             logger.debug("nothing stands at %r: %s", path, exc)
             return {}
         return {"kind": "dir" if found.type == FileType.DIRECTORY else "file"}
