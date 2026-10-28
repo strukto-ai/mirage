@@ -63,8 +63,12 @@ async function loadPatchData(
   }
 }
 
+const ENC = new TextEncoder()
+
 /** What patch changes on a path besides writing it. */
 type PatchChanges = Readonly<Record<'mkdir' | 'unlink' | 'rmdir', (p: PathSpec) => Promise<void>>>
+/** How patch sets a file's permission bits. */
+type PatchChmod = (p: PathSpec, mode: number) => Promise<void>
 
 /**
  * The files mirage-rs's patch engine reads and writes, whole. The engine
@@ -91,6 +95,7 @@ class PatchFiles {
     private readonly stat: (p: PathSpec) => Promise<FileStat>,
     private readonly links: LinkView | undefined,
     private readonly changes: PatchChanges,
+    private readonly chmod: PatchChmod,
   ) {}
 
   /**
@@ -161,11 +166,11 @@ class PatchFiles {
   }
 
   private async change(
-    op: keyof PatchChanges,
+    run: (p: PathSpec) => Promise<void>,
     path: string,
   ): Promise<Record<string, util.JSONType>> {
     try {
-      await this.changes[op](this.spec(path, true))
+      await run(this.spec(path, true))
     } catch (err) {
       if (!isFsError(err)) throw err
       const errno = classify(err)
@@ -183,7 +188,11 @@ class PatchFiles {
     }
     if (request.op === 'stat') return { reply: await this.kind(path) }
     if (request.op === 'mkdir' || request.op === 'unlink' || request.op === 'rmdir') {
-      return { reply: await this.change(request.op, path) }
+      return { reply: await this.change(this.changes[request.op], path) }
+    }
+    if (request.op === 'chmod') {
+      const mode = Number(request.mode)
+      return { reply: await this.change((p) => this.chmod(p, mode), path) }
     }
     if (request.file !== true) {
       const patch = await loadPatchData(this.source, this.stdin, this.read)
@@ -225,6 +234,8 @@ interface PatchFlags {
   // -i as the parser classified it: a path keeps its typed spelling.
   readonly inputPath: PathSpec | string | null
   readonly forward: boolean
+  readonly directories: string[]
+  readonly dryRun: boolean
 }
 
 function parseFlags(bag: Record<string, FlagValue>): PatchFlags {
@@ -238,7 +249,42 @@ function parseFlags(bag: Record<string, FlagValue>): PatchFlags {
     reverse: fl.asBool('R'),
     inputPath: input instanceof PathSpec ? input : (fl.asStr('i') ?? null),
     forward: fl.asBool('N'),
+    directories: fl.asList('directory'),
+    dryRun: fl.asBool('dry_run'),
   }
+}
+
+/**
+ * The directory `-d` moves to from `cwd`, or GNU patch's fatal line when it
+ * cannot move there. `stat` refuses a directory with EISDIR. Mirrors Python's
+ * `_directory`.
+ */
+async function directory(
+  typed: string,
+  cwd: string,
+  root: string,
+  stat: (p: PathSpec) => Promise<FileStat>,
+): Promise<string | Uint8Array> {
+  const target = resolvePath(typed, cwd)
+  let why = 'No such file or directory'
+  if (typed !== '') {
+    try {
+      await stat(PathSpec.fromStrPath(target, mountKey(target, root)))
+      why = 'Not a directory'
+    } catch (err) {
+      if (isEisdir(err)) return target
+      if (classify(err) === 'ENOTDIR') why = 'Not a directory'
+      else if (!isEnoent(err)) throw err
+    }
+  }
+  return ENC.encode(`patch: **** Can't change to directory ${shellQuote(typed)} : ${why}\n`)
+}
+
+/** An operand typed relative, read from the directory `-d` left. */
+function moved(spec: PathSpec, cwd: string, root: string): PathSpec {
+  const typed = spec.rawPath !== '' ? spec.rawPath : spec.virtual
+  if (typed.startsWith('/') || typed === '-') return spec
+  return PathSpec.fromStrPath(typed, mountKey(resolvePath(typed, cwd), root), cwd)
 }
 
 export async function patchGeneric(
@@ -248,40 +294,53 @@ export async function patchGeneric(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   stat: (p: PathSpec) => Promise<FileStat>,
   changes: PatchChanges,
+  chmod: PatchChmod,
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(ctx.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.PATCH, paths[2]?.rawPath ?? '')
   const root = mountRoot(ctx)
+  let cwd = ctx.cwd.virtual
+  for (const typed of parsed.directories) {
+    const found = await directory(typed, cwd, root, stat)
+    if (found instanceof Uint8Array) return [null, new IOResult({ exitCode: 2, stderr: found })]
+    cwd = found
+  }
   // `patch [ORIGFILE [PATCHFILE]]`: the second operand is the patch file,
   // ahead of -i, and the first is the one file every hunk goes to in place
   // of the names the patch's headers carry, which otherwise resolve against
   // the working directory. A `-i` classified as a path keeps its typed
   // spelling, which the fatal line names. Mirrors Python's patch_generic.
   const input = parsed.inputPath
-  const source =
+  let source =
     paths[1] ??
     (input instanceof PathSpec
       ? input
       : input !== null
         ? PathSpec.fromStrPath(input, mountKey(input, root))
         : null)
+  if (parsed.directories.length > 0) {
+    paths = paths.map((path) => moved(path, cwd, root))
+    source = source === null ? null : moved(source, cwd, root)
+  }
   const orig = paths[0] ?? null
   const files = new PatchFiles(
     source,
     ctx.stdin,
     orig,
-    ctx.cwd.virtual,
+    cwd,
     root,
     read,
     write,
     stat,
     linksOf(ctx),
     changes,
+    chmod,
   )
   const engine = await openStream('patch', {
     strip: parsed.strip,
     reverse: parsed.reverse,
     forward: parsed.forward,
+    dry_run: parsed.dryRun,
     file: orig === null ? null : byteView(orig.rawPath),
   })
   try {

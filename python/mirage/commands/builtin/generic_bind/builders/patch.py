@@ -41,6 +41,9 @@ async def patch(
         await stat(path)
         return await materialize(files.read(path))
 
+    async def chmod(path: PathSpec, mode: int) -> None:
+        await files.set_attrs(path, {"mode": mode})
+
     return await patch_generic(
         paths,
         list(texts),
@@ -49,6 +52,7 @@ async def patch(
         files.write,
         stat,
         {"mkdir": files.mkdir, "unlink": files.unlink, "rmdir": files.rmdir},
+        chmod,
     )
 
 

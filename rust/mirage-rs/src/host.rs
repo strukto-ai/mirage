@@ -26,6 +26,8 @@ pub(crate) struct Host {
     pub(crate) files: HashMap<String, Vec<u8>>,
     pub(crate) faults: HashMap<String, Fault>,
     pub(crate) directories: Vec<String>,
+    /// The permission bits a `chmod` request set.
+    pub(crate) modes: HashMap<String, u32>,
     pub(crate) stdin: Vec<u8>,
     inputs: HashMap<u64, (Vec<u8>, Option<Fault>)>,
     spools: HashMap<u64, Vec<u8>>,
@@ -230,6 +232,15 @@ impl Host {
                     return (failure("EACCES", "Permission denied"), Vec::new());
                 }
                 self.directories.push(path);
+                (json!({}), Vec::new())
+            }
+            "chmod" => {
+                let path = text(&request["path"]);
+                if !self.files.contains_key(&path) {
+                    return (failure("ENOENT", "No such file or directory"), Vec::new());
+                }
+                let mode = request["mode"].as_u64().unwrap_or_default() as u32;
+                self.modes.insert(path, mode);
                 (json!({}), Vec::new())
             }
             "unlink" => match self.files.remove(&text(&request["path"])) {

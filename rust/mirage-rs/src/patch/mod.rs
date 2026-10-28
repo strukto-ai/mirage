@@ -24,7 +24,7 @@ use crate::request::{Opening, Reply, Request, WriteMode, bytes, read_failure};
 use crate::task::{self, Host};
 use crate::{Stream, StreamError, parse_config};
 
-use self::parse::{CUT, End, Section, chomp};
+use self::parse::{CUT, End, Move, Section, chomp};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,6 +41,9 @@ struct Config {
     /// the names the patch gives.
     #[serde(deserialize_with = "crate::latin1_opt")]
     file: Option<Vec<u8>>,
+    /// `--dry-run`: each file checked as it would be patched, and nothing
+    /// written.
+    dry_run: bool,
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
@@ -53,10 +56,11 @@ fn failed(reply: &Reply) -> bool {
 }
 
 /// The run's files on its host: each read whole, on a descriptor of its
-/// own, and each written whole.
+/// own, and each written whole, unless the run only checks them.
 struct Files {
     host: Host,
     fds: u32,
+    dry_run: bool,
 }
 
 impl Files {
@@ -91,6 +95,9 @@ impl Files {
     /// Ask the host to change a path; false, with the failure said, when it
     /// could not.
     async fn change(&self, request: Request, name: &[u8]) -> bool {
+        if self.dry_run {
+            return true;
+        }
         let (reply, _) = self.host.ask(request).await;
         if failed(&reply) {
             self.host.warn(&read_failure(b"patch", name, &reply));
@@ -105,6 +112,28 @@ impl Files {
         let mode = WriteMode::Whole;
         self.change(Request::Write { path, mode, data }, &name)
             .await
+    }
+
+    /// Set a file's permission bits; false, with the failure said, when the
+    /// host could not.
+    async fn chmod(&self, name: &[u8], mode: u32) -> bool {
+        let path = name.to_vec();
+        let mode = mode & 0o7777;
+        self.change(Request::Chmod { path, mode }, name).await
+    }
+
+    /// Make the directories a name needs, outermost first; false, with the
+    /// failure said, when one could not be made.
+    async fn make(&self, dirs: Vec<Vec<u8>>) -> bool {
+        for dir in dirs {
+            if !self
+                .change(Request::Mkdir { path: dir.clone() }, &dir)
+                .await
+            {
+                return false;
+            }
+        }
+        true
     }
 
     /// Whether something stands at a name, as lstat would find it: a link
@@ -155,7 +184,11 @@ struct Done {
 }
 
 async fn run(host: Host, config: Config) -> i32 {
-    let mut files = Files { host, fds: 0 };
+    let mut files = Files {
+        host,
+        fds: 0,
+        dry_run: config.dry_run,
+    };
     let raw = match files.whole(b"-", Opening::Name).await {
         Ok(patch) => patch,
         Err(reply) => {
@@ -343,8 +376,59 @@ fn fatal(files: &Files, end: &End) -> Result<(), i32> {
 /// patch turned out unreadable while they were read.
 fn skip(files: &Files, section: &Section<'_>) -> Result<bool, i32> {
     fatal(files, &section.end)?;
-    ignored(files, section.hunks.len());
+    if !section.hunks.is_empty() {
+        ignored(files, section.hunks.len());
+    }
     Ok(true)
+}
+
+/// A git rename or copy carried out, GNU's way, before its hunks: the file
+/// it leaves for them, what the report says after its name, and, for a run
+/// that only checks, the file the hunks are read from instead. A rename to
+/// a name that stands already is taken as done; none when the patch names
+/// no source and target or no source stands. Writing it or removing the
+/// source failing stops the run with status 1.
+async fn move_file(
+    files: &mut Files,
+    config: &Config,
+    moved: &Move,
+) -> Result<Option<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)>, i32> {
+    let (from, to) = if config.reverse {
+        (&moved.to, &moved.from)
+    } else {
+        (&moved.from, &moved.to)
+    };
+    let (Some(from), Some(to)) = (from, to) else {
+        return Ok(None);
+    };
+    let verb = if moved.copy {
+        &b"copied"[..]
+    } else {
+        b"renamed"
+    };
+    if !moved.copy && files.stands(to).await {
+        let note = [&b" (already "[..], verb, b" from ", from, b")"].concat();
+        return Ok(Some((to.clone(), note, None)));
+    }
+    if !files.stands(from).await {
+        return Ok(None);
+    }
+    let note = [&b" ("[..], verb, b" from ", from, b")"].concat();
+    if files.dry_run {
+        return Ok(Some((to.clone(), note, Some(from.clone()))));
+    }
+    let Ok(data) = files.whole(from, Opening::File).await else {
+        return Ok(None);
+    };
+    let made = files.missing(to).await.unwrap_or_default();
+    if !files.make(made).await || !files.write(to.clone(), data).await {
+        return Err(1);
+    }
+    let path = from.clone();
+    if !moved.copy && !files.change(Request::Unlink { path }, from).await {
+        return Err(1);
+    }
+    Ok(Some((to.clone(), note, None)))
 }
 
 /// Apply one section to its file, GNU patch's way: whether a hunk of it
@@ -364,6 +448,12 @@ async fn patch_file(
     if section.crlf {
         files.say(&[b"(Stripping trailing CRs from patch; use --binary to disable.)"]);
     }
+    let git = section.git.clone().unwrap_or_default();
+    if git.binary {
+        let name = section.names.last().map_or(&b""[..], Vec::as_slice);
+        files.say(&[b"File ", name, b": git binary diffs are not supported."]);
+        return Ok(true);
+    }
     let (from, to) = if config.reverse {
         (section.new_null, section.old_null)
     } else {
@@ -372,15 +462,29 @@ async fn patch_file(
     let (creates, deletes) = (from && !to, to && !from);
     let first = section.hunks.first().map(|hunk| hunk.tried(config.reverse));
     let fresh = creates || first.is_some_and(|hunk| hunk.old_start == 0 && hunk.sizes().0 == 0);
-    let picked = match &config.file {
-        Some(file) => Some(file.clone()),
-        None => pick(files, section, fresh, deletes).await,
+    let mut how = Vec::new();
+    let mut source = None;
+    let picked = match (&git.moved, &config.file) {
+        (Some(moved), _) => match move_file(files, config, moved).await? {
+            Some((name, note, from)) => {
+                (how, source) = (note, from);
+                Some(name)
+            }
+            None => {
+                let verb = if moved.copy { &b"copy"[..] } else { b"rename" };
+                files.say(&[b"Cannot ", verb, b" file without two valid file names"]);
+                return Ok(true);
+            }
+        },
+        (None, Some(file)) => Some(file.clone()),
+        (None, None) => pick(files, section, fresh, deletes).await,
     };
     let Some(name) = picked else {
         ask(files, config, lines, section);
         return skip(files, section);
     };
-    let original = match files.whole(&name, Opening::File).await {
+    let read = source.as_ref().unwrap_or(&name).clone();
+    let original = match files.whole(&read, Opening::File).await {
         Ok(original) => Some(original),
         Err(reply) if reply.names(&["EISDIR", "ELOOP"]) => {
             files.say(&[
@@ -414,7 +518,12 @@ async fn patch_file(
             }
         },
     };
-    files.say(&[b"patching file ", &name]);
+    let verb = if config.dry_run {
+        &b"checking file "[..]
+    } else {
+        b"patching file "
+    };
+    files.say(&[verb, &name, &how]);
     let text = parse::lines(original.as_deref().unwrap_or_default());
     let outcome = apply::section(&text, &section.hunks, config.reverse, config.forward);
     for note in &outcome.notes {
@@ -422,9 +531,10 @@ async fn patch_file(
     }
     fatal(files, &section.end)?;
     let mut refused = false;
+    let mut gone = false;
     if let Some(patched) = &outcome.lines {
         let patched = apply::text(patched);
-        if !outcome.exact && !done.written.contains(&name) {
+        if !outcome.exact && !done.written.contains(&name) && !config.dry_run {
             match &original {
                 None => files.say(&[b"Cannot stat file ", &name, b", skipping backup"]),
                 Some(original) => {
@@ -437,17 +547,16 @@ async fn patch_file(
         }
         if deletes && patched.is_empty() {
             remove(files, &name, config.file.is_none()).await?;
+            gone = true;
         } else {
-            if original.is_some() || outcome.rejected.len() < section.hunks.len() {
-                for dir in made {
-                    if !files
-                        .change(Request::Mkdir { path: dir.clone() }, &dir)
-                        .await
-                    {
-                        return Err(1);
-                    }
-                }
-                if !files.write(name.clone(), patched).await {
+            // A section with no hunks writes only the empty file it makes.
+            let writes = if section.hunks.is_empty() {
+                creates && original.is_none()
+            } else {
+                original.is_some() || outcome.rejected.len() < section.hunks.len()
+            };
+            if writes {
+                if !files.make(made).await || !files.write(name.clone(), patched).await {
                     return Err(1);
                 }
                 done.written.insert(name.clone());
@@ -460,6 +569,16 @@ async fn patch_file(
                 ]);
                 refused = true;
             }
+        }
+    }
+    let mode = if config.reverse {
+        git.old_mode
+    } else {
+        git.new_mode
+    };
+    if let Some(mode) = mode.filter(|_| !gone) {
+        if !files.chmod(&name, mode).await {
+            return Err(1);
         }
     }
     let cut = section.end == End::Cut;
@@ -487,6 +606,9 @@ async fn patch_file(
 /// directory above it that it leaves empty, as GNU does; a `.` names no
 /// directory of the name's own, and a `..` ends the walk.
 async fn remove(files: &Files, name: &[u8], parents: bool) -> Result<(), i32> {
+    if files.dry_run {
+        return Ok(());
+    }
     let path = name.to_vec();
     if !files.change(Request::Unlink { path }, name).await {
         return Err(1);
@@ -525,11 +647,17 @@ async fn save_rejects(
 ) -> bool {
     let total = section.hunks.len();
     let plural = if total == 1 { "" } else { "s" };
-    let counts = format!(
-        "{} out of {total} hunk{plural} {verb} -- saving rejects to file ",
-        rejected.len()
-    );
-    files.say(&[counts.as_bytes(), name, b".rej"]);
+    let counts = format!("{} out of {total} hunk{plural} {verb}", rejected.len());
+    if files.dry_run {
+        files.say(&[counts.as_bytes()]);
+        return true;
+    }
+    files.say(&[
+        counts.as_bytes(),
+        b" -- saving rejects to file ",
+        name,
+        b".rej",
+    ]);
     let (first, second) = if config.reverse {
         (&section.new_label, &section.old_label)
     } else {

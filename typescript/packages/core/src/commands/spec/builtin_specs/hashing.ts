@@ -100,6 +100,10 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-R', { action: 'store_true' }),
       new Argument('-i', { type: 'path' }),
       new Argument('-N', { action: 'store_true' }),
+      // Each -d changes directory from where the one before left it, before
+      // anything is read, the operands and -i included.
+      new Argument(['-d', '--directory'], { action: 'append' }),
+      new Argument('--dry-run', { action: 'store_true' }),
       PATH_OPERAND,
       PATH2_OPERAND,
     ],

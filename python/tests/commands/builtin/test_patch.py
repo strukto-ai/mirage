@@ -75,7 +75,9 @@ async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
     operands = [orig_path, input_path] if source == "operand" else []
     token = set_mount_gate(prefix + "/", MountMode.WRITE)
     try:
-        await patch_generic(operands, [], ctx, read, write, stat, {})
+        await patch_generic(
+            operands, [], ctx, read, write, stat, {}, AsyncMock()
+        )
     finally:
         reset_mount_gate(token)
     assert "hello.txt" in seen
