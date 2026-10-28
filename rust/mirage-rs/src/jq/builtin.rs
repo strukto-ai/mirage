@@ -853,9 +853,14 @@ pub(crate) fn call(f: Cfunc, args: &[Value], limits: Limits) -> Answer {
                 let keys = if f == Cfunc::Keys {
                     let keys = fields.sorted_keys();
                     let _charge = Charge::open(keys.capacity() * std::mem::size_of::<&Key>());
-                    Value::array(keys.iter().map(|&k| Value::string(&**k)).collect())
+                    Value::array(keys.iter().map(|&k| Value::String(k.text())).collect())
                 } else {
-                    Value::array(fields.iter().map(|(k, _)| Value::string(&**k)).collect())
+                    Value::array(
+                        fields
+                            .iter()
+                            .map(|(k, _)| Value::String(k.text()))
+                            .collect(),
+                    )
                 };
                 Ok(keys)
             }

@@ -254,3 +254,20 @@ fn formatter_allocation_peaks_cannot_bypass_the_memory_cap() {
         }
     }
 }
+
+#[test]
+fn repeated_key_reads_do_not_allocate_the_key_text() {
+    let _serial = SERIAL.lock().unwrap();
+    drop(mirage_rs::open("jq_eval", br#"{"program":"0"}"#).unwrap());
+    let input = format!("{{\"{}\":1}}", "x".repeat(NAME_BYTES));
+    let retained = LIVE.load(Ordering::Relaxed);
+    for steps in [7, u64::MAX] {
+        for operation in ["keys[]", "keys_unsorted[]", "path(.[])[]"] {
+            let program = format!(". as $x | input | [range(10) | $x | {operation}] | length");
+            let (extra, wire) = runtime_allocations(&input, &program, 2_000_000, steps);
+            assert_eq!(extra, 0, "{operation}: {extra} extra bytes");
+            assert_eq!(wire, vec![1, 2, 0, 0, 0, b'1', b'0']);
+            assert_eq!(LIVE.load(Ordering::Relaxed), retained);
+        }
+    }
+}

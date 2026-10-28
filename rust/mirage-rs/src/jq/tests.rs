@@ -2410,6 +2410,47 @@ fn memory_errors_cover_sort_dump_parse_and_program_constants() {
 }
 
 #[test]
+fn key_reads_share_large_text_through_arrays_and_paths() {
+    let input = format!("{{\"{}\":1}}", "x".repeat(90000));
+    for steps in [7, u64::MAX] {
+        for operation in ["keys[]", "keys_unsorted[]", "path(.[])[]"] {
+            let program = format!(
+                ". as $o | [range(10) | $o | {operation}] as $keys | input | $keys | length"
+            );
+            let config = serde_json::json!({"program":program,"steps":steps,"memory":300000});
+            let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+            for cancel in [false, true, false] {
+                let mut wire = Vec::new();
+                stream.begin(b"{}").unwrap();
+                stream.feed(input.as_bytes(), &mut wire).unwrap();
+                stream.finish(&mut wire).unwrap();
+                while stream.busy() {
+                    stream.drain(&mut wire).unwrap();
+                }
+                assert!(stream.request(&mut Vec::new()).is_some());
+                if cancel {
+                    assert!(stream.cancel());
+                } else {
+                    stream
+                        .respond(br#"{"kind":"value"}"#, b"0", &mut wire)
+                        .unwrap();
+                }
+                settle(&mut *stream, &mut wire);
+                assert_eq!(
+                    frames(&wire),
+                    if cancel {
+                        vec![]
+                    } else {
+                        vec![Frame::Out("10".into())]
+                    },
+                    "{operation}, {steps} steps"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn retirement_releases_cancelled_and_completed_pending_tasks() {
     for (program, input, drains) in [
         (

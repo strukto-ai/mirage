@@ -1089,7 +1089,7 @@ impl Vm {
                 items.get(at).cloned(),
             ),
             Value::Object(fields) => match fields.entry(at) {
-                Some((k, v)) => (fields.len(), Value::string(&**k), Some(v.clone())),
+                Some((k, v)) => (fields.len(), Value::String(k.text()), Some(v.clone())),
                 None => (fields.len(), Value::Null, None),
             },
             _ => unreachable!("EACH over a scalar"),

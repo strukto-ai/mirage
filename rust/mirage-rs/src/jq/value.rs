@@ -255,6 +255,12 @@ impl Hash for Text {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct Key(Arc<Text>);
 
+impl Key {
+    pub(crate) fn text(&self) -> Arc<Text> {
+        Arc::clone(&self.0)
+    }
+}
+
 impl Deref for Key {
     type Target = str;
 
