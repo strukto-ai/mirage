@@ -55,6 +55,7 @@ class DaemonRpcServer extends MirageRpcServer {
   ): Promise<JsonValue> {
     const ws = this.entry.runner.ws
     const sessionId = this.sessionId
+    if (!this.entry.acceptingJobs) throw new RpcError(RPC_INTERNAL_ERROR, 'workspace not found')
     const submitted = this.jobs.submit(
       this.entry.id,
       command,
@@ -98,9 +99,12 @@ class RpcEndpoint {
     sessionId: string | null,
     account: string | null,
   ): Promise<DaemonRpcServer | string> {
+    const entry = this.registry.visible(workspaceId, account)
+    if (entry === null) return 'workspace not found'
     const operations = await this.mcp.tools(workspaceId, sessionId, account)
     if (typeof operations === 'string') return operations
-    const entry = this.registry.get(workspaceId)
+    if (!entry.acceptingJobs || this.registry.visible(workspaceId, account) !== entry)
+      return 'workspace not found'
     return new DaemonRpcServer(
       entry,
       this.jobs,

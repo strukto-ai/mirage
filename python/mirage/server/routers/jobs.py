@@ -82,14 +82,14 @@ async def _require_job(request: Request, job_id: str) -> ExecutionRecord:
     table: ExecutionTable = request.app.state.jobs
     try:
         entry = table.get(job_id)
+        registry = request.app.state.registry
+        if not await registry.allows(
+            entry.workspace_id, request.state.account, entry.submitted_at
+        ):
+            raise HTTPException(status_code=404, detail="job not found")
+        return table.get(job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="job not found") from exc
-    registry = request.app.state.registry
-    if not await registry.allows(
-        entry.workspace_id, request.state.account, entry.submitted_at
-    ):
-        raise HTTPException(status_code=404, detail="job not found")
-    return entry
 
 
 @router.get("", response_model=list[JobBrief])
@@ -98,10 +98,16 @@ async def list_jobs(
 ) -> list[JobBrief]:
     registry = request.app.state.registry
     account = request.state.account
+    table = request.app.state.jobs
+    allowed = {
+        j.id
+        for j in table.list(workspace_id=workspace_id)
+        if await registry.allows(j.workspace_id, account, j.submitted_at)
+    }
     return [
         _to_brief(j)
-        for j in request.app.state.jobs.list(workspace_id=workspace_id)
-        if await registry.allows(j.workspace_id, account, j.submitted_at)
+        for j in table.list(workspace_id=workspace_id)
+        if j.id in allowed
     ]
 
 

@@ -15,6 +15,7 @@
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import type { DiskRecordClient, Workspace } from '@struktoai/mirage-node'
+import { ExecutionTable } from './jobs.ts'
 
 // Under the daemon's state root: one record per workspace id naming the
 // account that owns it.
@@ -38,6 +39,7 @@ export class WorkspaceEntry {
   readonly createdAt: number
   /** The fingerprint of the config it was created from, when it was. */
   configDigest: string | null = null
+  acceptingJobs = true
 
   constructor(id: string, runner: WorkspaceRunner, owner: string | null = null) {
     this.id = id
@@ -64,6 +66,7 @@ export interface WorkspaceRegistryOptions {
 }
 
 export class WorkspaceRegistry {
+  readonly jobs = new ExecutionTable()
   private entries = new Map<string, WorkspaceEntry>()
   private readonly removals = new Map<string, Promise<WorkspaceEntry>>()
   private readonly creates = new Map<string, { digest: string; done: Promise<unknown> }>()
@@ -203,7 +206,7 @@ export class WorkspaceRegistry {
 
   /**
    * Delete `id`: stop its runner and drop its state. The workspace's
-   * links, history, sessions, metadata and owner leave with it, so a
+   * links, history, sessions, metadata, jobs and owner leave with it, so a
    * workspace created later under the same id starts empty, for any
    * account.
    * `closeAll` (daemon shutdown) keeps them. The id stays registered
@@ -218,6 +221,7 @@ export class WorkspaceRegistry {
     if (removal === undefined) {
       const entry = this.entries.get(id)
       if (entry === undefined) throw new Error(`workspace not found: ${id}`)
+      entry.acceptingJobs = false
       removal = this.drop(entry)
       this.removals.set(id, removal)
     }
@@ -230,6 +234,7 @@ export class WorkspaceRegistry {
       await entry.runner.stop({ delete: true })
       if (this.owners !== null) await this.owners.delete([entry.id])
     } finally {
+      this.jobs.discardWorkspace(entry.id)
       this.removals.delete(entry.id)
       this.entries.delete(entry.id)
       if (this.entries.size === 0) this.startIdleTimer()
@@ -250,6 +255,7 @@ export class WorkspaceRegistry {
     if (removal === undefined) {
       const entry = this.entries.get(id)
       if (entry === undefined) throw new Error(`workspace not found: ${id}`)
+      entry.acceptingJobs = false
       this.entries.delete(id)
       removal = this.shut(entry)
       this.removals.set(id, removal)
@@ -274,7 +280,10 @@ export class WorkspaceRegistry {
     for (const id of ids) {
       const entry = this.entries.get(id)
       this.entries.delete(id)
-      if (entry !== undefined) await entry.runner.stop()
+      if (entry !== undefined) {
+        entry.acceptingJobs = false
+        await entry.runner.stop()
+      }
     }
   }
 

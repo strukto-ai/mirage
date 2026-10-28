@@ -21,6 +21,37 @@ from mirage import MountMode, Workspace
 from mirage.execution.types import ExecutionStatus
 from mirage.server.jobs import ExecutionTable
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.execution import ExecutionScope
+
+
+async def execution_result(scope: ExecutionScope) -> str:
+    await scope.start()
+    return "private output"
+
+
+@pytest.mark.asyncio
+async def test_discard_workspace_forgets_only_its_execution_records():
+    table = ExecutionTable()
+
+    deleted = table.submit(
+        "deleted", "probe", execution_result, session_id="one"
+    )
+    retained = table.submit(
+        "retained", "probe", execution_result, session_id="two"
+    )
+    try:
+        await table.wait(deleted.id)
+        await table.wait(retained.id)
+        table.discard_workspace("missing")
+        table.discard_workspace("deleted")
+        table.discard_workspace("deleted")
+        with pytest.raises(KeyError):
+            table.get(deleted.id)
+        assert table.list("deleted") == []
+        assert [job.id for job in table.list()] == [retained.id]
+        assert table.get(retained.id).result == "private output"
+    finally:
+        await table.close()
 
 
 @pytest.mark.asyncio

@@ -19,16 +19,28 @@ import { SignJWT, exportJWK, importPKCS8 } from 'jose'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '@struktoai/mirage-node'
 
 import { buildApp } from '../app.ts'
 import { WorkspaceRegistry } from '../registry.ts'
+import { DaemonToolOperations } from '../mcp/http.ts'
+import { MirageRpcServer } from '../rpc/server.ts'
+import { UploadStdin } from '../stdin.ts'
 import type { AuthConfig, JWTConfig } from './config.ts'
 
 interface KeyMaterial {
   privatePem: string
   publicPem: string
+}
+
+function gate() {
+  let release!: () => void
+  const wait = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return { wait, release }
 }
 
 function rsaKeys(): KeyMaterial {
@@ -388,6 +400,410 @@ describe('AuthMiddleware integration', () => {
         await app.close()
       }
     })
+
+    it.each(['bob', 'alice'])(
+      'never exposes deleted jobs when %s reuses and closes the workspace name',
+      async (nextOwner) => {
+        const app = jwtApp()
+        const alice = await bearer({ sub: 'alice' })
+        const successor = await bearer({ sub: nextOwner })
+        try {
+          let r = await app.inject({
+            method: 'POST',
+            url: '/v1/workspaces',
+            headers: alice,
+            payload: { ...RAM, id: 'w' },
+          })
+          expect(r.statusCode, r.body).toBe(201)
+          r = await app.inject({
+            method: 'POST',
+            url: '/v1/workspaces/w/shell',
+            headers: alice,
+            payload: { command: 'echo ALICE-SECRET >&2; echo ALICE-SECRET' },
+          })
+          expect(r.statusCode, r.body).toBe(200)
+          const oldJob = r.headers['x-mirage-job-id'] as string
+          r = await app.inject({ method: 'GET', url: `/v1/jobs/${oldJob}`, headers: alice })
+          expect(r.json<{ result: { stdout: string; stderr: string } }>().result).toMatchObject({
+            stdout: 'ALICE-SECRET\n',
+            stderr: 'ALICE-SECRET\n',
+          })
+          const entry = app.registry.get('w')
+          const tools = new DaemonToolOperations(entry, app.jobs, entry.runner.ws.defaultSessionId)
+          const answer = await tools.shell('echo MCP-SECRET')
+          expect(answer.content).toEqual([{ type: 'text', text: 'MCP-SECRET\n' }])
+          const oldJobs = app.jobs.list('w').map((job) => job.id)
+          expect(oldJobs).toHaveLength(2)
+          r = await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice })
+          expect(r.statusCode, r.body).toBe(200)
+          r = await app.inject({
+            method: 'POST',
+            url: '/v1/workspaces',
+            headers: successor,
+            payload: { ...RAM, id: 'w' },
+          })
+          expect(r.statusCode, r.body).toBe(201)
+          r = await app.inject({
+            method: 'POST',
+            url: '/v1/workspaces/w/shell',
+            headers: successor,
+            payload: { command: 'echo fresh' },
+          })
+          expect(r.statusCode, r.body).toBe(200)
+          const newJob = r.headers['x-mirage-job-id'] as string
+          for (const closed of [false, true]) {
+            if (closed) {
+              r = await app.inject({
+                method: 'POST',
+                url: '/v1/workspaces/w/close',
+                headers: successor,
+              })
+              expect(r.statusCode, r.body).toBe(200)
+            }
+            for (const oldJob of oldJobs) {
+              const denied: [string, string, Record<string, unknown> | undefined][] = [
+                ['GET', `/v1/jobs/${oldJob}`, undefined],
+                ['POST', `/v1/jobs/${oldJob}/wait`, {}],
+                ['DELETE', `/v1/jobs/${oldJob}`, undefined],
+              ]
+              for (const [method, url, payload] of denied) {
+                r = await app.inject({
+                  method: method as 'GET' | 'POST' | 'DELETE',
+                  url,
+                  headers: successor,
+                  ...(payload === undefined ? {} : { payload }),
+                })
+                expect(r.statusCode, `${String(closed)} ${method}: ${r.body}`).toBe(404)
+              }
+            }
+            for (const url of ['/v1/jobs', '/v1/jobs?workspace_id=w']) {
+              r = await app.inject({ method: 'GET', url, headers: successor })
+              expect(r.json<{ job_id: string }[]>().map((j) => j.job_id)).toEqual([newJob])
+            }
+            r = await app.inject({ method: 'GET', url: `/v1/jobs/${newJob}`, headers: successor })
+            expect(r.json<{ result: { stdout: string } }>().result.stdout).toBe('fresh\n')
+          }
+        } finally {
+          await app.close()
+        }
+      },
+    )
+
+    it.each(['get', 'list', 'filtered', 'wait', 'wait_start', 'cancel'])(
+      'does not let a job lookup outlive deletion (%s)',
+      async (operation) => {
+        const app = jwtApp(),
+          entered = gate(),
+          release = gate()
+        const alice = await bearer({ sub: 'alice' }),
+          bob = await bearer({ sub: 'bob' })
+        let pending: Promise<Awaited<ReturnType<typeof app.inject>>> | undefined
+        try {
+          expect(
+            (
+              await app.inject({
+                method: 'POST',
+                url: '/v1/workspaces',
+                headers: alice,
+                payload: { ...RAM, id: 'w' },
+              })
+            ).statusCode,
+          ).toBe(201)
+          const shell = await app.inject({
+            method: 'POST',
+            url: '/v1/workspaces/w/shell',
+            headers: alice,
+            payload: { command: 'echo ALICE-SECRET' },
+          })
+          const jobId = shell.headers['x-mirage-job-id'] as string
+          expect(
+            (await app.inject({ method: 'POST', url: '/v1/workspaces/w/close', headers: alice }))
+              .statusCode,
+          ).toBe(200)
+          const allows = app.registry.allows.bind(app.registry)
+          let blocked = true
+          const heldGet = vi.spyOn(app.registry, 'allows').mockImplementation(async (...args) => {
+            if (blocked) {
+              entered.release()
+              await release.wait
+            }
+            return allows(...args)
+          })
+          if (operation === 'wait_start') {
+            heldGet.mockRestore()
+            const wait = app.jobs.wait.bind(app.jobs)
+            vi.spyOn(app.jobs, 'wait').mockImplementation(async (...args) => {
+              entered.release()
+              await release.wait
+              return wait(...args)
+            })
+          }
+          const requests = {
+            get: { method: 'GET', url: `/v1/jobs/${jobId}` },
+            list: { method: 'GET', url: '/v1/jobs' },
+            filtered: { method: 'GET', url: '/v1/jobs?workspace_id=w' },
+            wait: { method: 'POST', url: `/v1/jobs/${jobId}/wait`, payload: {} },
+            wait_start: { method: 'POST', url: `/v1/jobs/${jobId}/wait`, payload: {} },
+            cancel: { method: 'DELETE', url: `/v1/jobs/${jobId}` },
+          } as const
+          pending = Promise.resolve(
+            app.inject({
+              ...requests[operation as keyof typeof requests],
+              headers: operation === 'wait_start' ? alice : bob,
+            }),
+          )
+          await entered.wait
+          blocked = false
+          expect(
+            (
+              await app.inject({
+                method: 'POST',
+                url: '/v1/workspaces',
+                headers: alice,
+                payload: { ...RAM, id: 'w' },
+              })
+            ).statusCode,
+          ).toBe(201)
+          expect(
+            (await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice }))
+              .statusCode,
+          ).toBe(200)
+          expect(app.jobs.list('w')).toEqual([])
+          expect(
+            (
+              await app.inject({
+                method: 'POST',
+                url: '/v1/workspaces',
+                headers: bob,
+                payload: { ...RAM, id: 'w' },
+              })
+            ).statusCode,
+          ).toBe(201)
+          expect(
+            (await app.inject({ method: 'POST', url: '/v1/workspaces/w/close', headers: bob }))
+              .statusCode,
+          ).toBe(200)
+          release.release()
+          const response = await pending
+          heldGet.mockRestore()
+          if (operation === 'list' || operation === 'filtered') {
+            expect(response.statusCode, response.body).toBe(200)
+            expect(response.json()).toEqual([])
+          } else {
+            expect(response.statusCode, response.body).toBe(404)
+          }
+        } finally {
+          release.release()
+          await pending
+          vi.restoreAllMocks()
+          await app.close()
+        }
+      },
+    )
+
+    it.each([
+      { background: true, closed: false },
+      { background: true, closed: true },
+      { background: false, closed: false },
+    ])(
+      'refuses an unfinished upload after deletion (background=$background, replacement closed=$closed)',
+      async ({ background, closed }) => {
+        const app = jwtApp(),
+          entered = gate(),
+          release = gate(),
+          input = new PassThrough()
+        const alice = await bearer({ sub: 'alice' }),
+          bob = await bearer({ sub: 'bob' })
+        let pending: Promise<Awaited<ReturnType<typeof app.inject>>> | undefined
+        try {
+          expect(
+            (
+              await app.inject({
+                method: 'POST',
+                url: '/v1/workspaces',
+                headers: alice,
+                payload: { ...RAM, id: 'w' },
+              })
+            ).statusCode,
+          ).toBe(201)
+          const discard = vi.spyOn(UploadStdin.prototype, 'discard')
+          if (!background) {
+            const ws = app.registry.get('w').runner.ws
+            const loaded = ws.ensureSessionsLoaded.bind(ws)
+            let paused = false
+            vi.spyOn(ws, 'ensureSessionsLoaded').mockImplementation(async () => {
+              await loaded()
+              if (paused) return
+              paused = true
+              entered.release()
+              await release.wait
+            })
+          }
+          const visible = app.registry.visible.bind(app.registry)
+          const observed = vi.spyOn(app.registry, 'visible').mockImplementation((id, account) => {
+            const entry = visible(id, account)
+            if (background && id === 'w' && account === 'alice') entered.release()
+            return entry
+          })
+          pending = Promise.resolve(
+            app.inject({
+              method: 'POST',
+              url: `/v1/workspaces/w/shell?background=${String(background)}`,
+              headers: { ...alice, 'content-type': 'multipart/form-data; boundary=boundary' },
+              payload: input,
+            }),
+          )
+          input.write(
+            '--boundary\r\nContent-Disposition: form-data; name="request"\r\n\r\n{"command":"echo ALICE-LATE-SECRET"}\r\n--boundary\r\nContent-Disposition: form-data; name="stdin"\r\n\r\ninput',
+          )
+          await entered.wait
+          observed.mockRestore()
+          if (!background) input.write(Buffer.alloc(2 * 1024 * 1024, 120))
+          expect(
+            (await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice }))
+              .statusCode,
+          ).toBe(200)
+          expect(
+            (
+              await app.inject({
+                method: 'POST',
+                url: '/v1/workspaces',
+                headers: bob,
+                payload: { ...RAM, id: 'w' },
+              })
+            ).statusCode,
+          ).toBe(201)
+          if (closed)
+            expect(
+              (await app.inject({ method: 'POST', url: '/v1/workspaces/w/close', headers: bob }))
+                .statusCode,
+            ).toBe(200)
+          input.end('\r\n--boundary--\r\n')
+          release.release()
+          const response = await pending
+          expect(response.statusCode, response.body).toBe(404)
+          if (!background) expect(discard).toHaveBeenCalled()
+          expect(app.jobs.list('w')).toEqual([])
+          expect(
+            (await app.inject({ method: 'GET', url: '/v1/jobs', headers: bob })).json(),
+          ).toEqual([])
+        } finally {
+          release.release()
+          input.end('\r\n--boundary--\r\n')
+          await pending
+          vi.restoreAllMocks()
+          await app.close()
+        }
+      },
+    )
+
+    it.each(['mcp', 'rpc', 'rpc_lookup', 'rpc_before_lookup'])(
+      'refuses a retained %s adapter after deletion',
+      async (protocol) => {
+        const app = jwtApp(),
+          entered = gate(),
+          release = gate()
+        const alice = await bearer({ sub: 'alice' }),
+          bob = await bearer({ sub: 'bob' })
+        let pending: Promise<Awaited<ReturnType<typeof app.inject>>> | undefined
+        try {
+          expect(
+            (
+              await app.inject({
+                method: 'POST',
+                url: '/v1/workspaces',
+                headers: alice,
+                payload: { ...RAM, id: 'w' },
+              })
+            ).statusCode,
+          ).toBe(201)
+          const tools = await app.mcp.tools('w', null, 'alice')
+          if (typeof tools === 'string') throw new Error(tools)
+          if (protocol === 'rpc_lookup' || protocol === 'rpc_before_lookup') {
+            const lookup = app.mcp.tools.bind(app.mcp)
+            vi.spyOn(app.mcp, 'tools').mockImplementation(async (...args) => {
+              if (protocol === 'rpc_before_lookup') {
+                entered.release()
+                await release.wait
+              }
+              const operations = await lookup(...args)
+              if (protocol === 'rpc_lookup') {
+                entered.release()
+                await release.wait
+              }
+              return operations
+            })
+          } else if (protocol === 'rpc') {
+            // eslint-disable-next-line @typescript-eslint/unbound-method -- The wrapper restores the receiver with call(this).
+            const original = MirageRpcServer.prototype.handle
+            vi.spyOn(MirageRpcServer.prototype, 'handle').mockImplementation(async function (
+              this: MirageRpcServer,
+              message,
+              signal,
+            ) {
+              entered.release()
+              await release.wait
+              return original.call(this, message, signal)
+            })
+          }
+          if (protocol !== 'mcp') {
+            const message = {
+              jsonrpc: '2.0',
+              id: 1,
+              method: 'shell',
+              params: { command: 'echo ALICE-LATE-SECRET' },
+            }
+            pending = Promise.resolve(
+              app.inject({
+                method: 'POST',
+                url: '/v1/workspaces/w/rpc',
+                headers: alice,
+                payload:
+                  protocol === 'rpc_before_lookup'
+                    ? [message, { ...message, id: 2, method: 'tools/shell' }]
+                    : message,
+              }),
+            )
+            await entered.wait
+          }
+          expect(
+            (await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice }))
+              .statusCode,
+          ).toBe(200)
+          expect(
+            (
+              await app.inject({
+                method: 'POST',
+                url: '/v1/workspaces',
+                headers: protocol === 'rpc_before_lookup' ? alice : bob,
+                payload: { ...RAM, id: 'w' },
+              })
+            ).statusCode,
+          ).toBe(201)
+          if (protocol === 'mcp') {
+            expect((await tools.shell('echo ALICE-LATE-SECRET')).isError).toBe(true)
+          } else {
+            release.release()
+            const response = await pending
+            if (protocol === 'rpc_lookup' || protocol === 'rpc_before_lookup') {
+              expect(response?.statusCode, response?.body).toBe(404)
+              expect(response?.json()).toEqual({ detail: 'workspace not found' })
+            } else {
+              expect(response?.json()).toHaveProperty('error')
+            }
+          }
+          expect(app.jobs.list('w')).toEqual([])
+          expect(
+            (await app.inject({ method: 'GET', url: '/v1/jobs', headers: bob })).json(),
+          ).toEqual([])
+        } finally {
+          release.release()
+          await pending
+          vi.restoreAllMocks()
+          await app.close()
+        }
+      },
+    )
 
     it('reopens a stored workspace only for its owner', async () => {
       const first = jwtApp()

@@ -1497,7 +1497,11 @@ class JobTable:
             live = await self.remote_processes()
             lease = self.store.lease_seconds
             if live and lease is not None:
-                await asyncio.sleep(lease)
+                deadline = time.monotonic() + lease
+                remaining = lease
+                while remaining > 0:
+                    await asyncio.sleep(remaining)
+                    remaining = deadline - time.monotonic()
                 await self.remote_processes()
         except Exception as exc:
             logger.debug("lapsed owners not swept: %s", exc)

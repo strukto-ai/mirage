@@ -54,16 +54,20 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
     const entry = deps.jobs.get(id)
     if (entry === null) return null
     return (await deps.registry.allows(entry.workspaceId, account, entry.submittedAt))
-      ? entry
+      ? deps.jobs.get(id)
       : null
   }
 
   app.get<{ Querystring: JobsListQuery }>('/v1/jobs', async (req) => {
-    const jobs: ExecutionRecord[] = []
+    const allowed = new Set<string>()
     for (const job of deps.jobs.list(req.query.workspace_id)) {
-      if (await deps.registry.allows(job.workspaceId, req.account, job.submittedAt)) jobs.push(job)
+      if (await deps.registry.allows(job.workspaceId, req.account, job.submittedAt))
+        allowed.add(job.id)
     }
-    return jobs.map(toBriefDict)
+    return deps.jobs
+      .list(req.query.workspace_id)
+      .filter((job) => allowed.has(job.id))
+      .map(toBriefDict)
   })
 
   app.get<{ Params: JobIdParams }>('/v1/jobs/:id', async (req, reply) => {
@@ -78,8 +82,14 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
       const { id } = req.params
       if ((await reachable(id, req.account)) === null)
         return reply.status(404).send({ detail: 'job not found' })
-      const entry = await deps.jobs.wait(id, req.body?.timeout_s)
-      return toDetail(entry)
+      try {
+        const entry = await deps.jobs.wait(id, req.body?.timeout_s)
+        return toDetail(entry)
+      } catch (error) {
+        if (deps.jobs.get(id) !== null) throw error
+        req.log.debug({ err: error }, 'job removed before wait')
+        return reply.status(404).send({ detail: 'job not found' })
+      }
     },
   )
 

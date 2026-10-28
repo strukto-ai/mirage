@@ -74,6 +74,9 @@ const KEPT_ON_SYSTEM_CLOCK: Record<string, string> = {
     'stamps seen_at on the process records, which a host reap compares with the start ' +
     "times ps prints, on the host's wall clock; a manual clock's time would prove " +
     "nothing about the host's processes",
+  'shell/job_table/table.ts performance.now':
+    "waits out another owner's lease on the same process clock the shared store " +
+    "uses; a table's injected clock may differ from other tables sharing the store",
   'shell/job_table/ram.ts performance.now':
     "an owner's lease is compared by every table sharing the store, and those " +
     'tables may hold different clocks, so it stays on the process monotonic ' +

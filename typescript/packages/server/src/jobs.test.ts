@@ -14,6 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import type { ExecutionScope } from '@struktoai/mirage-core/workspace/execution'
 import { ExecutionTable } from './jobs.ts'
 import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
 import { MAX_FINISHED_JOBS } from './constants.ts'
@@ -39,7 +40,31 @@ function submit(table: ExecutionTable, work: (signal: AbortSignal) => Promise<Js
   )
 }
 
+async function executionResult(_signal: AbortSignal, scope: ExecutionScope): Promise<string> {
+  await scope.start()
+  return 'private output'
+}
+
 describe('async execution ownership', () => {
+  it('discards only the deleted workspace execution records', async () => {
+    const table = new ExecutionTable()
+    const deleted = table.submit('deleted', 'probe', executionResult, 'one')
+    const retained = table.submit('retained', 'probe', executionResult, 'two')
+    try {
+      await table.wait(deleted.id)
+      await table.wait(retained.id)
+      table.discardWorkspace('missing')
+      table.discardWorkspace('deleted')
+      table.discardWorkspace('deleted')
+      expect(table.get(deleted.id)).toBeNull()
+      expect(table.list('deleted')).toEqual([])
+      expect(table.list().map((job) => job.id)).toEqual([retained.id])
+      expect(table.get(retained.id)?.result).toBe('private output')
+    } finally {
+      await table.close()
+    }
+  })
+
   it('passes the persisted execution identity into admission scope', async () => {
     const table = new ExecutionTable()
     const job = table.submit(

@@ -184,8 +184,10 @@ class Recorder(JobConsole, StreamOwner):
             entries, self.chunks = self.chunks, []
             storage, self.storage = self.storage, ByteSpool()
         if storage.size <= storage.memory_limit:
-            data = await storage.read(0, storage.size)
-            await storage.close()
+            try:
+                data = await storage.read(0, storage.size)
+            finally:
+                await storage.close()
             return [
                 (key, data[start : start + size])
                 for key, start, size in entries

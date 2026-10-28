@@ -299,6 +299,14 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
       const { body, stdin } = upload
       await entry.runner.ws.ensureSessionsLoaded()
       const sessionId = req.query.session_id ?? entry.runner.ws.defaultSessionId
+      if (!entry.acceptingJobs) {
+        try {
+          await upload.finish()
+        } catch (error) {
+          return refuse(req, reply, error)
+        }
+        return reply.status(404).send({ detail: 'workspace not found' })
+      }
       let opened!: (execution: ShellExecution | null) => void
       const execution = new Promise<ShellExecution | null>((resolve) => {
         opened = resolve

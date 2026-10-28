@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import json
 import threading
 import time
@@ -27,6 +28,10 @@ from httpx import ASGITransport, AsyncClient
 
 from mirage.server import build_app
 from mirage.server.auth.config import AuthConfig, JWTConfig
+from mirage.server.mcp.http import DaemonToolOperations
+from mirage.server.routers import shell as shell_router
+from mirage.server.rpc.server import MirageRpcServer
+from mirage.server.stdin import UploadStdin
 
 
 @dataclass
@@ -379,6 +384,336 @@ async def test_an_account_reaches_only_its_own_workspaces(rsa_keys, tmp_path):
         r = await bob.post("/v1/workspaces", json={**_RAM, "id": "a"})
         assert r.status_code == 409
         assert (await alice.get("/v1/workspaces/a")).status_code == 200
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
+@pytest.mark.parametrize("next_owner", ["bob", "alice"])
+async def test_reused_workspace_name_never_exposes_deleted_jobs(
+    rsa_keys, tmp_path, next_owner
+):
+    app = _jwt_app(rsa_keys, tmp_path)
+    alice = _client(app, _bearer(rsa_keys, {"sub": "alice"}))
+    successor = _client(app, _bearer(rsa_keys, {"sub": next_owner}))
+    try:
+        async with alice, successor:
+            r = await alice.post("/v1/workspaces", json={**_RAM, "id": "w"})
+            assert r.status_code == 201, r.text
+            r = await alice.post(
+                "/v1/workspaces/w/shell",
+                json={"command": "echo ALICE-SECRET >&2; echo ALICE-SECRET"},
+            )
+            assert r.status_code == 200, r.text
+            old_job = r.headers["X-Mirage-Job-Id"]
+            r = await alice.get(f"/v1/jobs/{old_job}")
+            assert r.json()["result"]["stdout"] == "ALICE-SECRET\n"
+            assert r.json()["result"]["stderr"] == "ALICE-SECRET\n"
+            entry = app.state.registry.get("w")
+            tools = DaemonToolOperations(
+                entry, app.state.jobs, entry.runner.ws.default_session_id
+            )
+            answer = await tools.shell("echo MCP-SECRET")
+            assert answer.text == "MCP-SECRET\n"
+            old_jobs = [job.id for job in app.state.jobs.list("w")]
+            assert len(old_jobs) == 2
+            assert (await alice.delete("/v1/workspaces/w")).status_code == 200
+            r = await successor.post(
+                "/v1/workspaces", json={**_RAM, "id": "w"}
+            )
+            assert r.status_code == 201, r.text
+            r = await successor.post(
+                "/v1/workspaces/w/shell", json={"command": "echo fresh"}
+            )
+            assert r.status_code == 200, r.text
+            new_job = r.headers["X-Mirage-Job-Id"]
+            for closed in (False, True):
+                if closed:
+                    r = await successor.post("/v1/workspaces/w/close")
+                    assert r.status_code == 200, r.text
+                for old_job in old_jobs:
+                    for method, path, body in [
+                        ("GET", f"/v1/jobs/{old_job}", None),
+                        ("POST", f"/v1/jobs/{old_job}/wait", {}),
+                        ("DELETE", f"/v1/jobs/{old_job}", None),
+                    ]:
+                        r = await successor.request(method, path, json=body)
+                        assert r.status_code == 404, (closed, method, r.text)
+                for path in ("/v1/jobs", "/v1/jobs?workspace_id=w"):
+                    r = await successor.get(path)
+                    assert [j["job_id"] for j in r.json()] == [new_job]
+                r = await successor.get(f"/v1/jobs/{new_job}")
+                assert r.json()["result"]["stdout"] == "fresh\n"
+    finally:
+        await app.state.jobs.close()
+        await app.state.registry.close_all()
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation", ["get", "list", "filtered", "wait", "wait_start", "cancel"]
+)
+async def test_job_lookup_cannot_outlive_deletion(
+    rsa_keys, tmp_path, monkeypatch, operation
+):
+    app = _jwt_app(rsa_keys, tmp_path)
+    entered, release = asyncio.Event(), asyncio.Event()
+    pending = None
+    try:
+        async with (
+            _client(app, _bearer(rsa_keys, {"sub": "alice"})) as alice,
+            _client(app, _bearer(rsa_keys, {"sub": "bob"})) as bob,
+        ):
+            assert (
+                await alice.post("/v1/workspaces", json={**_RAM, "id": "w"})
+            ).status_code == 201
+            r = await alice.post(
+                "/v1/workspaces/w/shell", json={"command": "echo ALICE-SECRET"}
+            )
+            job_id = r.headers["X-Mirage-Job-Id"]
+            assert (
+                await alice.post("/v1/workspaces/w/close")
+            ).status_code == 200
+            owners = app.state.registry._owners
+            get = owners.get
+            blocked = True
+
+            async def held_get(workspace_id):
+                if blocked:
+                    entered.set()
+                    await release.wait()
+                return await get(workspace_id)
+
+            if operation == "wait_start":
+                wait = app.state.jobs.wait
+
+                async def held_wait(job_id, timeout=None):
+                    entered.set()
+                    await release.wait()
+                    return await wait(job_id, timeout)
+
+                monkeypatch.setattr(app.state.jobs, "wait", held_wait)
+            else:
+                monkeypatch.setattr(owners, "get", held_get)
+            method, path = {
+                "get": ("GET", f"/v1/jobs/{job_id}"),
+                "list": ("GET", "/v1/jobs"),
+                "filtered": ("GET", "/v1/jobs?workspace_id=w"),
+                "wait": ("POST", f"/v1/jobs/{job_id}/wait"),
+                "wait_start": ("POST", f"/v1/jobs/{job_id}/wait"),
+                "cancel": ("DELETE", f"/v1/jobs/{job_id}"),
+            }[operation]
+            pending = asyncio.create_task(
+                (alice if operation == "wait_start" else bob).request(
+                    method,
+                    path,
+                    **({"json": {}} if operation.startswith("wait") else {}),
+                )
+            )
+            await asyncio.wait_for(entered.wait(), 5)
+            blocked = False
+            assert (
+                await alice.post("/v1/workspaces", json={**_RAM, "id": "w"})
+            ).status_code == 201
+            assert (await alice.delete("/v1/workspaces/w")).status_code == 200
+            assert app.state.jobs.list("w") == []
+            assert (
+                await bob.post("/v1/workspaces", json={**_RAM, "id": "w"})
+            ).status_code == 201
+            assert (
+                await bob.post("/v1/workspaces/w/close")
+            ).status_code == 200
+            release.set()
+            r = await pending
+            if operation in ("list", "filtered"):
+                assert r.status_code == 200, r.text
+                assert r.json() == []
+            else:
+                assert r.status_code == 404, r.text
+    finally:
+        release.set()
+        if pending is not None and not pending.done():
+            await pending
+        await app.state.jobs.close()
+        await app.state.registry.close_all()
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "background,closed", [(True, False), (True, True), (False, False)]
+)
+async def test_unfinished_upload_cannot_submit_after_deletion(
+    rsa_keys, tmp_path, monkeypatch, background, closed
+):
+    app = _jwt_app(rsa_keys, tmp_path)
+    entered, release = asyncio.Event(), asyncio.Event()
+    pending = None
+    try:
+        async with (
+            _client(app, _bearer(rsa_keys, {"sub": "alice"})) as alice,
+            _client(app, _bearer(rsa_keys, {"sub": "bob"})) as bob,
+        ):
+            assert (
+                await alice.post("/v1/workspaces", json={**_RAM, "id": "w"})
+            ).status_code == 201
+            require_entry = shell_router.require_entry
+            discard = UploadStdin.discard
+            discarded = False
+
+            async def observed_discard(stdin):
+                nonlocal discarded
+                await discard(stdin)
+                discarded = True
+
+            monkeypatch.setattr(UploadStdin, "discard", observed_discard)
+
+            def observed_entry(request, workspace_id):
+                entry = require_entry(request, workspace_id)
+                entered.set()
+                return entry
+
+            monkeypatch.setattr(shell_router, "require_entry", observed_entry)
+
+            async def body():
+                if not background:
+                    await release.wait()
+                yield (
+                    b"--boundary\r\n"
+                    b'Content-Disposition: form-data; name="request"\r\n\r\n'
+                    b'{"command":"echo ALICE-LATE-SECRET"}\r\n--boundary\r\n'
+                    b'Content-Disposition: form-data; name="stdin"\r\n\r\n'
+                )
+                yield b"input" if background else b"x" * (2 * 1024 * 1024)
+                yield (
+                    b"\r\n--boundary\r\n"
+                    b'Content-Disposition: form-data; name="ignored"\r\n\r\nextra'
+                )
+                if background:
+                    await release.wait()
+                yield b"\r\n--boundary--\r\n"
+
+            pending = asyncio.create_task(
+                alice.post(
+                    "/v1/workspaces/w/shell",
+                    params={"background": str(background).lower()},
+                    content=body(),
+                    headers={
+                        "Content-Type": "multipart/form-data; boundary=boundary"
+                    },
+                )
+            )
+            await asyncio.wait_for(entered.wait(), 5)
+            assert (await alice.delete("/v1/workspaces/w")).status_code == 200
+            assert (
+                await bob.post("/v1/workspaces", json={**_RAM, "id": "w"})
+            ).status_code == 201
+            if closed:
+                assert (
+                    await bob.post("/v1/workspaces/w/close")
+                ).status_code == 200
+            release.set()
+            r = await pending
+            assert r.status_code == 404, r.text
+            if not background:
+                assert discarded
+            assert app.state.jobs.list("w") == []
+            assert (await bob.get("/v1/jobs")).json() == []
+    finally:
+        release.set()
+        if pending is not None and not pending.done():
+            await pending
+        await app.state.jobs.close()
+        await app.state.registry.close_all()
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "protocol", ["mcp", "rpc", "rpc_lookup", "rpc_before_lookup"]
+)
+async def test_retained_adapter_cannot_submit_after_deletion(
+    rsa_keys, tmp_path, monkeypatch, protocol
+):
+    app = _jwt_app(rsa_keys, tmp_path)
+    entered, release = asyncio.Event(), asyncio.Event()
+    pending = None
+    try:
+        async with (
+            _client(app, _bearer(rsa_keys, {"sub": "alice"})) as alice,
+            _client(app, _bearer(rsa_keys, {"sub": "bob"})) as bob,
+        ):
+            assert (
+                await alice.post("/v1/workspaces", json={**_RAM, "id": "w"})
+            ).status_code == 201
+            tools = await app.state.mcp.tools("w", None, "alice")
+            if protocol in ("rpc_lookup", "rpc_before_lookup"):
+                lookup = app.state.mcp.tools
+
+                async def held_lookup(*args):
+                    if protocol == "rpc_before_lookup":
+                        entered.set()
+                        await release.wait()
+                    operations = await lookup(*args)
+                    if protocol == "rpc_lookup":
+                        entered.set()
+                        await release.wait()
+                    return operations
+
+                monkeypatch.setattr(app.state.mcp, "tools", held_lookup)
+            elif protocol == "rpc":
+                handle = MirageRpcServer.handle
+
+                async def held_handle(server, message):
+                    entered.set()
+                    await release.wait()
+                    return await handle(server, message)
+
+                monkeypatch.setattr(MirageRpcServer, "handle", held_handle)
+            if protocol != "mcp":
+                message = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "shell",
+                    "params": {"command": "echo ALICE-LATE-SECRET"},
+                }
+                payload = (
+                    [message, {**message, "id": 2, "method": "tools/shell"}]
+                    if protocol == "rpc_before_lookup"
+                    else message
+                )
+                pending = asyncio.create_task(
+                    alice.post(
+                        "/v1/workspaces/w/rpc",
+                        json=payload,
+                    )
+                )
+                await asyncio.wait_for(entered.wait(), 5)
+            assert (await alice.delete("/v1/workspaces/w")).status_code == 200
+            assert (
+                await (alice if protocol == "rpc_before_lookup" else bob).post(
+                    "/v1/workspaces", json={**_RAM, "id": "w"}
+                )
+            ).status_code == 201
+            if protocol == "mcp":
+                answer = await tools.shell("echo ALICE-LATE-SECRET")
+                assert answer.is_error
+            else:
+                release.set()
+                r = await pending
+                if protocol in ("rpc_lookup", "rpc_before_lookup"):
+                    assert r.status_code == 404, r.text
+                    assert r.json() == {"detail": "workspace not found"}
+                else:
+                    assert "error" in r.json(), r.text
+            assert app.state.jobs.list("w") == []
+            assert (await bob.get("/v1/jobs")).json() == []
+    finally:
+        release.set()
+        if pending is not None and not pending.done():
+            await pending
+        await app.state.jobs.close()
+        await app.state.registry.close_all()
 
 
 @pytest.mark.no_auth_override

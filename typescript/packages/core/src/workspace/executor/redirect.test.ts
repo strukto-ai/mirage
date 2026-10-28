@@ -16,6 +16,7 @@ import type { Handed } from '../../vfs/types.ts'
 import { EvaluationContext } from '../evaluation.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { SharedInput } from '../../io/async_line_iterator.ts'
+import { ByteSpool } from '../../io/spool.ts'
 import { DeviceInput, IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
@@ -1289,6 +1290,32 @@ describe('a redirect the store refuses', () => {
 })
 
 const refuseDispatch: DispatchFn = () => Promise.reject(new Error('unexpected dispatch'))
+
+it('preserves the timeout when output recovery fails', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  const captured: ByteSpool[] = []
+  const emit = vi
+    .spyOn(PipeRecorder.prototype, 'emit')
+    .mockRejectedValue(new CommandTimeoutError('line', 0.2))
+  const read = vi.spyOn(ByteSpool.prototype, 'read').mockImplementation(function (this: ByteSpool) {
+    captured.push(this)
+    return Promise.reject(Object.assign(new Error('spool lost a write'), { code: 'EIO' }))
+  })
+  try {
+    const io = await ws.shell('echo once > /data/r.txt; echo after')
+    expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([
+      124,
+      '',
+      'line: timed out after 0.2s\n',
+    ])
+    expect(captured.length).toBeGreaterThan(0)
+    expect(captured.every((spool) => spool.closed)).toBe(true)
+  } finally {
+    emit.mockRestore()
+    read.mockRestore()
+    await ws.close()
+  }
+})
 
 describe('JobRoute.release', () => {
   it('lands a job write still under way when the route releases', async () => {

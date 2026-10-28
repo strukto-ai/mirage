@@ -22,6 +22,7 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.errors.types import CommandTimeoutError
+from mirage.io.spool import ByteSpool
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.shell.console import Channel, JobConsole
@@ -1083,6 +1084,28 @@ async def test_a_timeout_on_upload_still_ends_the_line(line: str):
         io = await ws.shell(line)
         assert io.exit_code == 124
         assert await io.stdout_str() == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_output_recovery_preserves_the_timeout(monkeypatch):
+    ws = await _workspace()
+    timeout = CommandTimeoutError("line", 0.2)
+    captured: list[ByteSpool] = []
+
+    async def fail_read(self, offset, size):
+        captured.append(self)
+        raise OSError(errno.EIO, "spool lost a write")
+
+    monkeypatch.setattr(PipeRecorder, "emit", AsyncMock(side_effect=timeout))
+    monkeypatch.setattr(ByteSpool, "read", fail_read)
+    try:
+        io = await ws.shell("echo once > /data/r.txt; echo after")
+        assert io.exit_code == 124
+        assert await io.stdout_str() == ""
+        assert await io.stderr_str() == "line: timed out after 0.2s\n"
+        assert captured and all(spool.closed for spool in captured)
     finally:
         await ws.close()
 

@@ -114,6 +114,8 @@ class DaemonToolOperations(McpToolOperations):
         async def run(scope: ExecutionScope) -> JsonValue:
             return await runner.call(run_line(scope))
 
+        if not self._entry.accepting_jobs:
+            return ToolResult("workspace not found", True)
         job = self._jobs.submit(
             workspace_id=self._entry.id,
             command=command,

@@ -50,6 +50,13 @@ export class ExecutionTable {
       .filter((record) => workspaceId === undefined || record.workspaceId === workspaceId)
   }
 
+  /** Forget executions after their workspace's runner has stopped. */
+  discardWorkspace(workspaceId: string): void {
+    for (const [id, run] of this.runs) {
+      if (run.record.workspaceId === workspaceId) this.runs.delete(id)
+    }
+  }
+
   private prune(): void {
     const finished = [...this.runs.values()]
       .filter((run) => run.record.finishedAt !== null)

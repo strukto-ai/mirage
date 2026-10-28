@@ -175,9 +175,12 @@ export class Recorder extends JobConsole {
       storage = this.storage
     this.storage = new ByteSpool()
     if (storage.size <= storage.memoryLimit) {
-      const data = await storage.read(0, storage.size)
-      await storage.close()
-      return entries.map(([key, start, size]) => [key, data.slice(start, start + size)])
+      try {
+        const data = await storage.read(0, storage.size)
+        return entries.map(([key, start, size]) => [key, data.slice(start, start + size)])
+      } finally {
+        await storage.close()
+      }
     }
     let remaining = entries.length
     const release = async (): Promise<void> => {

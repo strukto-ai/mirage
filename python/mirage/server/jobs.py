@@ -66,6 +66,18 @@ class ExecutionTable:
             if workspace_id is None or run.record.workspace_id == workspace_id
         ]
 
+    def discard_workspace(self, workspace_id: str) -> None:
+        """Forget executions after their workspace's runner has stopped.
+
+        Args:
+            workspace_id (str): the deleted workspace.
+        """
+        self._runs = {
+            job_id: run
+            for job_id, run in self._runs.items()
+            if run.record.workspace_id != workspace_id
+        }
+
     def _prune(self) -> None:
         finished = sorted(
             (
