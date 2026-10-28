@@ -148,7 +148,9 @@ async def test_fetch_trace_without_observations_is_a_404():
 )
 async def test_an_sdk_failure_is_a_langfuse_api_error(body, message):
     api = MagicMock()
-    api.prompts.list = AsyncMock(side_effect=SdkError(status_code=401, body=body))
+    api.prompts.list = AsyncMock(
+        side_effect=SdkError(status_code=401, body=body)
+    )
 
     with pytest.raises(LangfuseApiError) as caught:
         await fetch_prompts(api)
