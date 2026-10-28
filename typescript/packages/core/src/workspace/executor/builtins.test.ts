@@ -1173,12 +1173,15 @@ describe('handleCd', () => {
     expect(s.cwd).toBe('/')
   })
 
-  it('rejects when stat throws ENOENT and path is not a mount root', async () => {
-    const dispatch = vi.fn<DispatchFn>(() => Promise.reject(enoent('/missing')))
+  it('reports an unstamped service error as itself, even at a mount root', async () => {
+    const err = new Error('S3 LIST failed: 404 Not Found')
+    const dispatch = vi.fn<DispatchFn>(() => Promise.reject(err))
     const s = new SessionState({ sessionId: 'test', cwd: '/' })
-    const [, io] = await handleCd(dispatch, () => false, '/missing', s)
+    const [, io] = await handleCd(dispatch, () => true, '/missing', s)
     expect(io.exitCode).toBe(1)
-    expect(decode(io.stderr as Uint8Array)).toMatch(/No such file or directory/)
+    expect(decode(io.stderr as Uint8Array)).toBe(
+      'bash: cd: /missing: S3 LIST failed: 404 Not Found\n',
+    )
     expect(s.cwd).toBe('/')
   })
 
