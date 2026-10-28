@@ -112,7 +112,16 @@ class AsyncMockS3Client:
             "CommonPrefixes": page.get("CommonPrefixes", [])[:MaxKeys],
         }
 
-    async def put_object(self, Bucket: str, Key: str, Body: bytes) -> dict:
+    async def put_object(
+        self,
+        Bucket: str,
+        Key: str,
+        Body: bytes,
+        *,
+        IfNoneMatch: str | None = None,
+    ) -> dict:
+        if IfNoneMatch == "*" and Key in self.objects:
+            raise _mock_s3_error("PreconditionFailed")
         self.objects[Key] = Body
         return {"ETag": f'"{hashlib.md5(Body).hexdigest()}"'}
 

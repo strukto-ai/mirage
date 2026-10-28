@@ -1116,6 +1116,24 @@
     "integ/crossmount/mv/over.json :: xm_mv_b_moves_the_target_aside_on_the_other_mount": {
       "hf": "hf has no rename op, so the backup that moves the occupied target aside on /data2 fails with `Operation not supported`, the same limit ln/flags.json, mv/backup.json and cp/backup.json omit hf for. hf still runs xm_mv_removes_the_target_before_it_copies beside it, where the target is removed instead of renamed.",
       "hf-prefix": "hf has no rename op, so the backup that moves the occupied target aside on /data2 fails with `Operation not supported`, the same limit ln/flags.json, mv/backup.json and cp/backup.json omit hf for. hf still runs xm_mv_removes_the_target_before_it_copies beside it, where the target is removed instead of renamed."
+    },
+    "integ/unix/write/conditional.json :: write_conditional_missing_append_creates_and_existing_append_preserves": {
+      "box": "box has no enabled create-only commit mode. The paired write_conditional_missing_append_refuses_without_create_only case asserts refusal without mutation, then verifies intentional creation and append to the existing file.",
+      "dropbox": "dropbox has no enabled create-only commit mode. The paired write_conditional_missing_append_refuses_without_create_only case asserts refusal without mutation, then verifies intentional creation and append to the existing file.",
+      "dropbox-root": "dropbox-root has no enabled create-only commit mode. The paired write_conditional_missing_append_refuses_without_create_only case asserts refusal without mutation, then verifies intentional creation and append to the existing file."
+    },
+    "integ/unix/write/conditional.json :: write_conditional_missing_append_refuses_without_create_only": {
+      "s3": "s3 enforces create-only. The paired write_conditional_missing_append_creates_and_existing_append_preserves case asserts successful missing-file creation and existing-file append instead of unsupported-mode refusal.",
+      "s3-prefix": "s3-prefix enforces create-only. The paired write_conditional_missing_append_creates_and_existing_append_preserves case asserts successful missing-file creation and existing-file append instead of unsupported-mode refusal."
+    },
+    "integ/unix/write/conditional.json :: write_unconditional_missing_append_creates_and_existing_append_preserves": {
+      "box": "box has no enabled create-only commit mode. The paired write_unconditional_missing_append_refuses_without_create_only case asserts refusal without mutation, then verifies intentional creation and append to the existing file.",
+      "dropbox": "dropbox has no enabled create-only commit mode. The paired write_unconditional_missing_append_refuses_without_create_only case asserts refusal without mutation, then verifies intentional creation and append to the existing file.",
+      "dropbox-root": "dropbox-root has no enabled create-only commit mode. The paired write_unconditional_missing_append_refuses_without_create_only case asserts refusal without mutation, then verifies intentional creation and append to the existing file."
+    },
+    "integ/unix/write/conditional.json :: write_unconditional_missing_append_refuses_without_create_only": {
+      "s3": "s3 enforces create-only. The paired write_unconditional_missing_append_creates_and_existing_append_preserves case asserts successful missing-file creation and existing-file append instead of unsupported-mode refusal.",
+      "s3-prefix": "s3-prefix enforces create-only. The paired write_unconditional_missing_append_creates_and_existing_append_preserves case asserts successful missing-file creation and existing-file append instead of unsupported-mode refusal."
     }
   }
 }
