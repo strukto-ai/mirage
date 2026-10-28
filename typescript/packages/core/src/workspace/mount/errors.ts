@@ -20,7 +20,10 @@ export class WritePolicyError extends Error {
   }
 }
 
-/** A mount would expose storage another mount of the workspace already does. Mirrors Python's `SharedStorageError`. */
+/**
+ * A mount would place one VFS object, or a disk on a folder another disk mount
+ * has, at a second prefix. Mirrors Python's `SharedStorageError`.
+ */
 export class SharedStorageError extends Error {
   constructor(prefix: string, existing: string, location: string | null) {
     super(

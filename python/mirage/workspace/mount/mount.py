@@ -580,8 +580,8 @@ class MountEntry:
         self.write = coerce_write_policy(write)
         # The store this mount runs its driver under, built by the
         # registry when the driver is placed; a bare entry gets a RAM
-        # store at the driver's TTL. ``index`` is the same store scoped by the cache
-        # manager, which is what ops and commands receive.
+        # store at the driver's TTL. ``index`` is the same store scoped by
+        # the cache manager, which is what ops and commands receive.
         self.index_store: IndexCacheStore = (
             index if index is not None else build_index(None, vfs.index_ttl)
         )

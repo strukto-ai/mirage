@@ -103,13 +103,13 @@ export class DiskVFS extends BaseVFS {
     if (!folderVersions) this.listingVersion = ListingVersion.NONE
     const resolved = path.resolve(options.root)
     mkdirSync(resolved, { recursive: true })
-    // Links resolved, as Python's Path.resolve, so one folder has one location.
+    // Links resolved so one folder has one location; `..` collapses before links here, unlike Python.
     this.root = realpathSync(resolved)
     this.accessor = new DiskAccessor(this.root, folderVersions)
   }
 
-  // The resolved root is the storage: two DiskVFS instances built on the same
-  // directory are one store, however they were spelled.
+  // The resolved root is the storage: two DiskVFS instances on one resolved
+  // directory are one store.
   override storageLocation(): string {
     return `${this.name}:${this.root}`
   }

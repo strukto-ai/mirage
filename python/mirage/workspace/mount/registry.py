@@ -390,7 +390,8 @@ class MountRegistry:
     def check_storage_unshared(
         self, prefix: str, vfs: BaseVFS, mounts: Iterable[MountEntry]
     ) -> None:
-        """Refuse a mount that would expose storage another mount already does.
+        """Refuse a mount that would place one VFS object at a second
+        prefix, or a disk on a folder a mounted disk already has.
 
         Args:
             prefix (str): the normalized prefix being placed.
@@ -407,9 +408,8 @@ class MountRegistry:
                 location is not None
                 and other.vfs.storage_location() == location
             ):
-                # shortcut: compares realpath'd roots only; another spelling of
-                # one folder (macOS case, bind mount) passes, upgrade to
-                # (st_dev, st_ino) if reported.
+                # shortcut: realpath only; a bind mount or macOS case spelling
+                # passes, upgrade to (st_dev, st_ino).
                 raise SharedStorageError(
                     prefix,
                     other.prefix,
@@ -466,77 +466,46 @@ class MountRegistry:
         if self._clocks_bound:
             vfs.accessor.bind_clock(self.clock, self)
         try:
-            return self._place(
+            if isinstance(vfs, DevVFS):
+                store = NULL_INDEX
+            elif store is None:
+                store = build_index(
+                    index,
+                    vfs.index_ttl,
+                    self.clock,
+                    self.workspace_id,
+                    self.ids,
+                )
+            m = MountEntry(
                 norm_prefix,
                 vfs,
                 mode,
-                read,
-                write,
-                index,
-                vfs_ref,
+                read if read is not None else self._default_read,
                 store,
+                vfs_ref,
+                index,
+                write if write is not None else self._default_write,
+                self.ids,
             )
+            # The shared set first, so a command the VFS replaces keeps its own
+            # spec, not the generic one of that name.
+            for cmd in (*GENERIC_COMMANDS, *GENERAL_COMMANDS):
+                m.register_general(cmd)
+            # Mirage's own commands for the backend, then the ones the VFS was
+            # handed, which are user commands and win.
+            m._register_builtins(backend_commands(vfs))
+            m.register_commands(vfs.commands())
+            self.settle_walk_limit(m)
+            self._attach_manager(m)
+            self._mounts.append(m)
+            self._mounts.sort(key=lambda x: len(x.prefix), reverse=True)
+            if norm_prefix == "/":
+                self._root = m
+            return m
         except BaseException:
             if self._clocks_bound:
                 vfs.accessor.release_clock(self)
             raise
-
-    def _place(
-        self,
-        norm_prefix: str,
-        vfs: BaseVFS,
-        mode: MountMode,
-        read: ReadSpec | None,
-        write: WritePolicy | None,
-        index: IndexConfig | None,
-        vfs_ref: str | None,
-        store: IndexCacheStore | None,
-    ) -> MountEntry:
-        """Build and register one mount, its clock already taken.
-
-        Args:
-            norm_prefix (str): the normalized prefix.
-            vfs (BaseVFS): the driver.
-            mode (MountMode): the mount's ceiling.
-            read (ReadSpec | None): its read policy, None for the default.
-            write (WritePolicy | None): its write policy, None for the
-                default.
-            index (IndexConfig | None): the index store to build.
-            vfs_ref (str | None): the ``vfs:`` value it was built from.
-            store (IndexCacheStore | None): a store the placement supplies.
-        """
-        if isinstance(vfs, DevVFS):
-            store = NULL_INDEX
-        elif store is None:
-            store = build_index(
-                index, vfs.index_ttl, self.clock, self.workspace_id, self.ids
-            )
-        m = MountEntry(
-            norm_prefix,
-            vfs,
-            mode,
-            read if read is not None else self._default_read,
-            store,
-            vfs_ref,
-            index,
-            write if write is not None else self._default_write,
-            self.ids,
-        )
-        # The shared set first, so a command the VFS replaces keeps its own
-        # spec, not the generic one of that name.
-        for cmd in (*GENERIC_COMMANDS, *GENERAL_COMMANDS):
-            m.register_general(cmd)
-        # Mirage's own commands for the backend, then the ones the VFS was
-        # handed, which are user commands and win.
-        m._register_builtins(backend_commands(vfs))
-        m.register_commands(vfs.commands())
-        self.settle_walk_limit(m)
-        self._attach_manager(m)
-        self._mounts.append(m)
-        self._mounts.sort(key=lambda x: len(x.prefix), reverse=True)
-        if norm_prefix == "/":
-            self._root = m
-        return m
 
     def bind_clocks(self) -> None:
         """Hand every mount's and CLI install's accessor the workspace
@@ -648,11 +617,6 @@ class MountRegistry:
         Args:
             entry (MountEntry): the mount, its own limits applied.
         """
-        entry.vfs.walk_limit = self._settled_walk_limit(entry)
-        entry.calls = entry.answered_calls()
-        self._rows = None
-
-    def _settled_walk_limit(self, entry: MountEntry) -> int:
         found = Limit.layered(
             (
                 entry.command_limits.get(ALL_COMMANDS),
@@ -661,8 +625,13 @@ class MountRegistry:
             )
         )
         if found is None:
-            return entry.backend_walk_limit
-        return -1 if found.walk_limit is None else found.walk_limit
+            entry.vfs.walk_limit = entry.backend_walk_limit
+        else:
+            entry.vfs.walk_limit = (
+                -1 if found.walk_limit is None else found.walk_limit
+            )
+        entry.calls = entry.answered_calls()
+        self._rows = None
 
     def limit_mount(self, prefix: str) -> MountEntry | None:
         """The mount a command's output guard resolves a stamped prefix
