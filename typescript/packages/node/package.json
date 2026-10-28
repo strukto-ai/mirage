@@ -128,7 +128,6 @@
     "@aws-sdk/client-s3": "^3.1116.0",
     "@daytonaio/sdk": "^0.207.0",
     "@lancedb/lancedb": "^0.30.0",
-    "@types/mailparser": "^3.4.6",
     "@types/nodemailer": "^8.0.0",
     "@types/pg": "^8.11.0",
     "@types/ssh2": "^1.15.0",
