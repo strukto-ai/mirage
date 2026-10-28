@@ -328,8 +328,10 @@ async def _directory(
     stat: Callable[[PathSpec], Awaitable[FileStat]],
 ) -> str | bytes:
     """The directory ``-d`` moves to from ``cwd``, or GNU patch's fatal
-    line when it cannot move there. As chdir walks it, each entry a ``.``
-    or ``..`` steps out of must be a directory too.
+    line when it cannot move there. It is walked a name at a time, as
+    chdir walks it: each entry a ``.`` or ``..`` steps out of must be a
+    directory too, checked once and in order, so the first that is not
+    stops the walk.
 
     Args:
         typed (str): the value as typed.
@@ -337,28 +339,33 @@ async def _directory(
         root (str): the root of the mount the command runs on.
         stat (Callable): stat refusing a directory with EISDIR.
     """
-    parts = typed.split("/")
-    steps = [
-        "/".join(parts[:at])
-        for at in range(1, len(parts))
-        if parts[at] in (".", "..") and any(parts[:at])
-    ]
     why = "" if typed else "No such file or directory"
-    for step in [*steps, typed] if typed else []:
-        target = resolve_path(step, cwd)
-        try:
-            await stat(PathSpec.from_str_path(target, mount_key(target, root)))
-            why = "Not a directory"
-        except IsADirectoryError:
-            continue
-        except NotADirectoryError:
-            why = "Not a directory"
-        except FileNotFoundError as exc:
-            why = "No such file or directory"
-            logger.debug("no directory at %r: %s", target, exc)
-        break
+    names = [] if typed.startswith("/") else [p for p in cwd.split("/") if p]
+    checked = len(names)
+    for name in [*typed.split("/"), "."] if typed else []:
+        if name in (".", "..") and len(names) > checked:
+            target = "/" + "/".join(names)
+            try:
+                await stat(
+                    PathSpec.from_str_path(target, mount_key(target, root))
+                )
+                why = "Not a directory"
+            except IsADirectoryError:
+                checked = len(names)
+            except NotADirectoryError:
+                why = "Not a directory"
+            except FileNotFoundError as exc:
+                why = "No such file or directory"
+                logger.debug("no directory at %r: %s", target, exc)
+            if why:
+                break
+        if name == "..":
+            del names[-1:]
+            checked = min(checked, len(names))
+        elif name not in ("", "."):
+            names.append(name)
     if not why:
-        return resolve_path(typed, cwd)
+        return "/" + "/".join(names)
     label = shell_quote(typed)
     return f"patch: **** Can't change to directory {label} : {why}\n".encode()
 

@@ -76,3 +76,55 @@ it.each(['', '/data', '/nested/data'])(
     }
   },
 )
+
+it('walks a long -d a name at a time', async () => {
+  const files = new Map<string, Uint8Array>([
+    ['a', ENC.encode('a\n')],
+    ['f', ENC.encode('x\n')],
+    ['p.diff', ENC.encode('--- a\n+++ a\n@@ -1 +1 @@\n-a\n+b\n')],
+  ])
+  const stats: string[] = []
+  const stat = (path: PathSpec): Promise<FileStat> => {
+    stats.push(path.virtual)
+    if (!files.has(path.vfsPath))
+      return Promise.reject(Object.assign(new Error('gone'), { code: 'ENOENT' }))
+    return Promise.resolve(new FileStat({ name: path.vfsPath, type: FileType.FILE }))
+  }
+  const read = (path: PathSpec): Promise<Uint8Array> => {
+    const bytes = files.get(path.vfsPath)
+    if (bytes === undefined) throw new Error('missing fixture')
+    return Promise.resolve(bytes)
+  }
+  const write = (path: PathSpec, data: Uint8Array): Promise<void> => {
+    files.set(path.vfsPath, data)
+    return Promise.resolve()
+  }
+  const unexpected = (): Promise<void> => Promise.reject(new Error('unexpected change'))
+  const run = (directory: string) =>
+    runWithMountGate('/', MountMode.WRITE, () =>
+      patchGeneric(
+        [],
+        {
+          vfs: new Files(() => Promise.reject(new Error('no dispatch'))),
+          cwd: PathSpec.fromStrPath('/'),
+          flags: { directory: [directory], i: 'p.diff' },
+          stdin: null,
+        },
+        read,
+        write,
+        stat,
+        { mkdir: unexpected, unlink: unexpected, rmdir: unexpected },
+        unexpected,
+      ),
+    )
+  const dots = './'.repeat(50_000)
+  const refused = await run(`${dots}f/..`)
+  expect(refused?.[1].exitCode).toBe(2)
+  expect(await refused?.[1].stderrStr()).toBe(
+    `patch: **** Can't change to directory ${dots}f/.. : Not a directory\n`,
+  )
+  expect(stats).toEqual(['/f'])
+  const done = await run(dots)
+  expect(done?.[1].exitCode).toBe(0)
+  expect(DEC.decode(files.get('a'))).toBe('b\n')
+})

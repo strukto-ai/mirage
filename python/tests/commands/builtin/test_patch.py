@@ -22,6 +22,12 @@ from mirage.context import reset_mount_gate, set_mount_gate
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
+from tests.commands.builtin.conftest import (
+    file_workspace,
+    output_bytes,
+    run_raw,
+    stderr_text,
+)
 from tests.fixtures.readers import readers
 
 
@@ -82,3 +88,16 @@ async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
         reset_mount_gate(token)
     assert "hello.txt" in seen
     assert files["hello.txt"] == b"hello\nuniverse\n"
+
+
+def test_patch_walks_a_long_directory_a_name_at_a_time():
+    diff = b"--- a\n+++ a\n@@ -1 +1 @@\n-a\n+b\n"
+    ws = file_workspace(a=b"a\n", f=b"x\n", **{"p.diff": diff})
+    dots = "./" * 50_000
+    _, io = run_raw(ws, f"patch -d {dots}f/.. -i p.diff", cwd="/data")
+    assert io.exit_code == 2
+    assert stderr_text(io) == (
+        f"patch: **** Can't change to directory {dots}f/.. : Not a directory\n"
+    )
+    stdout, io = run_raw(ws, f"patch -d {dots} -i p.diff", cwd="/data")
+    assert (io.exit_code, output_bytes(stdout)) == (0, b"patching file a\n")
