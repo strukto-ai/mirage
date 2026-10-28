@@ -26,7 +26,13 @@ from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import parse_mode
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSEntry, VFSStat
-from mirage.types import DEVICE_NUMBERS_KEY, ContentType, FileStat, FileType
+from mirage.types import (
+    DEVICE_NUMBERS_KEY,
+    ContentType,
+    FileStat,
+    FileType,
+    PathSpec,
+)
 from mirage.utils.dates import ns_to_iso
 from mirage.utils.stat_view import (
     CHAR_MODE,
@@ -678,3 +684,57 @@ async def test_an_fstat_sees_a_change_by_path_at_once():
             assert (await asyncio.to_thread(files.fstat, fh)).size == 8
         finally:
             await asyncio.to_thread(files.close, fh)
+
+
+class _HeldStatRAM(RAMVFS):
+    """A RAM mount whose next stat, once armed, answers only when the
+    gate opens."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.armed: asyncio.Future[None] | None = None
+        self.entered = asyncio.Event()
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        row = await super().stat(path)
+        gate, self.armed = self.armed, None
+        if gate is not None:
+            self.entered.set()
+            await gate
+        return row
+
+
+@pytest.mark.asyncio
+async def test_a_landing_goes_through_beside_a_cancelled_guest_call():
+    # A run cancelled with a guest call still under way lands what it
+    # wrote all the same; only that call stops.
+    store = _HeldStatRAM()
+    with Workspace({"/data": store}, mode=MountMode.WRITE) as ws:
+        await ws.vfs.write("/data/slow", b"")
+        loop = asyncio.get_running_loop()
+        built: asyncio.Future[RuntimeFiles] = loop.create_future()
+
+        async def run() -> None:
+            files = RuntimeFiles.of(
+                ws.runtime_context().ctx, ws._runtime_binding
+            )
+            assert files is not None
+            built.set_result(files)
+            await asyncio.Event().wait()
+
+        owner = asyncio.create_task(run())
+        files = await built
+        fh = await asyncio.to_thread(
+            files.open, "/data/out.txt", parse_mode("w")
+        )
+        await asyncio.to_thread(files.pwrite, fh, 0, b"kept")
+        gate: asyncio.Future[None] = loop.create_future()
+        store.armed = gate
+        slow = asyncio.create_task(asyncio.to_thread(files.stat, "/data/slow"))
+        await store.entered.wait()
+        owner.cancel()
+        await asyncio.to_thread(files.close, fh)
+        gate.set_result(None)
+        await asyncio.wait([slow, owner])
+        assert slow.cancelled() or slow.exception() is not None
+        assert await ws.vfs.read("/data/out.txt") == b"kept"

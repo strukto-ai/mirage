@@ -261,6 +261,9 @@ export class RuntimeFiles {
   private readonly dispatch: BridgeDispatchFn
   private readonly resolver: MountResolver
   private readonly noAppend = new Set<string>()
+  // The callers a landing (`onCore`) runs as, which the core's dispatch
+  // lets through however the run ended.
+  private static readonly landings = new Set<Caller>()
 
   /**
    * @param bridge the bridge every op rides, over the run's files; it also
@@ -336,13 +339,20 @@ export class RuntimeFiles {
         : new MountCore(
             vfs.over(
               // A cancelled guest call sends nothing more, whichever op of
-              // the core's was under way.
-              awaitsAs(caller, async (name, path, args, kwargs, report) => {
-                for (const signal of live) signal.throwIfAborted()
-                const out = await vfs.dispatch(name, path, args, kwargs, report)
-                for (const signal of live) signal.throwIfAborted()
-                return out
-              }),
+              // the core's was under way; a landing goes however it ended.
+              async (name, path, args, kwargs, report) => {
+                const landing = RuntimeFiles.landings.has(currentCaller())
+                const guests = landing ? [] : live
+                return runWithCaller(
+                  landing ? RuntimeFiles.unaborted(caller) : caller,
+                  async () => {
+                    for (const signal of guests) signal.throwIfAborted()
+                    const out = await vfs.dispatch(name, path, args, kwargs, report)
+                    for (const signal of guests) signal.throwIfAborted()
+                    return out
+                  },
+                )
+              },
             ),
           ),
       null,
@@ -370,12 +380,22 @@ export class RuntimeFiles {
   /**
    * Run one op on the run's open-file core; EBADF when this adapter opens
    * nothing. An op that only lands what the guest already wrote (`lands`)
-   * runs however the run ended, as the run's end would land it anyway.
+   * runs however the run ended, as the run's end would land it anyway: as
+   * a caller of its own, which the core's dispatch knows a landing by, so
+   * a cancelled guest call under way beside it stops only itself.
    */
   private async onCore<T>(op: (core: MountCore) => Promise<T>, lands = false): Promise<T> {
     const core = this.core
     if (core === null) throw ebadf('/')
-    if (lands) return runWithCaller(RuntimeFiles.unaborted(currentCaller()), () => op(core))
+    if (lands) {
+      const landing = RuntimeFiles.unaborted(currentCaller())
+      RuntimeFiles.landings.add(landing)
+      try {
+        return await runWithCaller(landing, () => op(core))
+      } finally {
+        RuntimeFiles.landings.delete(landing)
+      }
+    }
     const signal = this.signal
     if (signal === null) return op(core)
     signal.throwIfAborted()

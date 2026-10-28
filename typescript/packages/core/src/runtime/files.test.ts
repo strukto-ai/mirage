@@ -14,6 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { enotsup } from '../errors/fs.ts'
+import { MEMORY_LIMIT } from '../io/spool.ts'
 import { MountCore } from '../mount/core.ts'
 import {
   ContentType,
@@ -26,10 +27,10 @@ import {
 import { CHAR_MODE, DIR_MODE, DIR_SIZE, FILE_MODE, LINK_MODE } from '../utils/stat_view.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { BaseVFS } from '../vfs/base.ts'
-import { runWithEvaluation } from '../context/session_context.ts'
+import { callsAs, runWithEvaluation } from '../context/session_context.ts'
 import { EvaluationContext } from '../workspace/evaluation.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { workspaceBridge } from './binding.ts'
+import { workspaceBridge, type WorkspaceBinding } from './binding.ts'
 import { LISTING_ENTRY_CONCURRENCY } from './constants.ts'
 import { CrossMountError } from './errors.ts'
 import { parseMode } from './handles/index.ts'
@@ -643,6 +644,24 @@ class AbortableRAM extends RAMVFS {
   }
 }
 
+/** An `AbortableRAM` whose next stat, once armed, answers only when the gate opens. */
+class HeldStatRAM extends AbortableRAM {
+  armed: Promise<void> | null = null
+  private enter = (): void => undefined
+  readonly entered = new Promise<void>((resolve) => (this.enter = resolve))
+
+  override async stat(...args: Parameters<RAMVFS['stat']>): ReturnType<RAMVFS['stat']> {
+    const row = await super.stat(...args)
+    const gate = this.armed
+    this.armed = null
+    if (gate !== null) {
+      this.enter()
+      await gate
+    }
+    return row
+  }
+}
+
 describe('RuntimeFiles landing', () => {
   it('lands what a stopped run wrote, its abort notwithstanding', async () => {
     const store = new AbortableRAM()
@@ -664,5 +683,37 @@ describe('RuntimeFiles landing', () => {
       await files.close(fd)
     })
     expect(new TextDecoder().decode(store.store.files.get('/out.txt'))).toBe('kept')
+  })
+
+  it('streams what a stopped run wrote beside its cancelled calls, as the run builds its files', async () => {
+    const store = new HeldStatRAM()
+    const ws = new Workspace({ '/data/': store }, { mode: MountMode.WRITE })
+    try {
+      await ws.vfs.write('/data/slow', new Uint8Array())
+      const stop = new AbortController()
+      const context = ws.runtimeContext()
+      const evaluation = new EvaluationContext(ws.getSession(ws.sessionManager.defaultId))
+      evaluation.frame.abortSignal = stop.signal
+      const binding = Reflect.get(ws, 'runtimeBinding') as WorkspaceBinding
+      const files = callsAs({ ...context.caller, evaluation }, () =>
+        RuntimeFiles.of({ ...context.ctx, vfs: ws.vfs }, binding),
+      )()
+      if (files === null) throw new Error('expected the run its files')
+      const guest = files.withSignal(stop.signal)
+      const fd = await guest.open('/data/out.txt', parseMode('w'))
+      const kept = Uint8Array.from({ length: 2 * MEMORY_LIMIT }, (_, i) => i % 256)
+      await guest.pwrite(fd, 0, kept)
+      let go = (): void => undefined
+      store.armed = new Promise<void>((resolve) => (go = resolve))
+      const slow = guest.stat('/data/slow')
+      await store.entered
+      stop.abort()
+      await guest.close(fd)
+      go()
+      await expect(slow).rejects.toThrow()
+      expect(Buffer.compare(store.store.files.get('/out.txt') ?? new Uint8Array(), kept)).toBe(0)
+    } finally {
+      await ws.close()
+    }
   })
 })

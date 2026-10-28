@@ -17,7 +17,7 @@ import dataclasses
 import logging
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, ClassVar, TypeVar
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.commands.builtin.utils.links import link_view
@@ -285,6 +285,10 @@ class RuntimeFiles:
             however the run ended.
     """
 
+    # The callers a landing (``_on_core``) runs as, which the core's
+    # dispatch lets through however the run ended.
+    _landings: ClassVar[set[Caller]] = set()
+
     def __init__(
         self,
         dispatch: DispatchFn,
@@ -357,12 +361,13 @@ class RuntimeFiles:
             **kwargs: Any,
         ) -> tuple[Any, IOResult]:
             # A cancelled guest call sends nothing more, whichever op of
-            # the core's was under way.
-            for task in live:
+            # the core's was under way; a landing goes however it ended.
+            guests = () if current_caller() in cls._landings else live
+            for task in guests:
                 if task.cancelling():
                     raise asyncio.CancelledError()
             result = await dispatch(name, path, report=report, **kwargs)
-            for task in live:
+            for task in guests:
                 if task.cancelling():
                     raise asyncio.CancelledError()
             return result
@@ -459,7 +464,9 @@ class RuntimeFiles:
         """Run one op on the run's open-file core, as the run's caller.
         An op that only lands what the guest already wrote (``lands``)
         runs however the run ended, as the run's end would land it
-        anyway.
+        anyway: as its own copy of the caller, which the core's dispatch
+        knows a landing by, so a cancelled guest call under way beside it
+        stops only itself.
 
         Args:
             op (Callable[[MountCore], Awaitable[T]]): the op, given the
@@ -472,11 +479,23 @@ class RuntimeFiles:
         core = self._core
         if core is None:
             raise ebadf("/")
-        call = op if self._caller is None else awaits_as(self._caller, op)
+        landing = (
+            dataclasses.replace(self._caller)
+            if lands and self._caller is not None
+            else None
+        )
+        caller = self._caller if landing is None else landing
+        call = op if caller is None else awaits_as(caller, op)
         owner = None if lands else self._owner
         live = self._live
 
         async def run() -> T:
+            if landing is not None:
+                RuntimeFiles._landings.add(landing)
+                try:
+                    return await call(core)
+                finally:
+                    RuntimeFiles._landings.discard(landing)
             if owner is None:
                 return await call(core)
             if owner.cancelling():
