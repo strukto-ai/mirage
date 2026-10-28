@@ -778,17 +778,24 @@ async def test_a_create_waits_out_a_load_of_the_same_id(
 ):
     # A create that took over a load's claim could register first, and the
     # load's failure would then drop the owner record of a live workspace.
+    # A slow release still frees the id before the load answers.
     secret = "s" * 32
     app = _jwt_app(secret, tmp_path / "state", snapshot_store=snapshot_store)
     loading = asyncio.Event()
     finish = asyncio.Event()
+    release = WorkspaceRegistry.release
 
     async def held_load(*args, **kwargs):
         loading.set()
         await finish.wait()
         raise ValueError("not a snapshot")
 
+    async def slow_release(self, workspace_id):
+        await asyncio.sleep(0.05)
+        await release(self, workspace_id)
+
     monkeypatch.setattr(Workspace, "load", held_load)
+    monkeypatch.setattr(WorkspaceRegistry, "release", slow_release)
     async with _account(app, secret, "alice") as alice:
         load = asyncio.create_task(
             alice.post("/v1/workspaces/load", json={"key": "s.tar", "id": "w"})
