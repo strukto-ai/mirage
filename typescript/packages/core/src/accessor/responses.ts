@@ -38,7 +38,8 @@ export class ResponseCache<K, V> {
 
   /**
    * Keep answers no longer than a mount's read policy allows. A client
-   * mounted at several prefixes keeps the strictest.
+   * governed by several mounts (other workspaces, CLI installs) keeps the
+   * strictest.
    */
   govern(read: ReadSpec): void {
     const bound = read.policy === ReadPolicy.FRESH ? 0 : read.ttl

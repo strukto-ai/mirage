@@ -368,8 +368,6 @@ async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
     vfs.load_state({"files": {"/file": b"old"}})
     ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
     cache = ws.cache
-    ws.add_mount("/alias", vfs)
-    alias_entries = await ws.vfs.readdir("/alias")
     entered = asyncio.Event()
     release = asyncio.Event()
     store = cache if cache_kind == "file" else ws.mount("/data").index_store
@@ -390,7 +388,6 @@ async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
     removing = asyncio.create_task(ws.unmount("data/"))
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
-        await ws.mount("/alias").ensure_ready()
         with pytest.raises(ValueError, match="duplicate mount prefix"):
             ws.add_mount("/data", RAMVFS())
         with pytest.raises(OSError) as reading:
@@ -414,7 +411,6 @@ async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
         assert await cache.get("/data") is None
         assert await cache.get("/data/file") is None
         assert await cache.get("/database/file") == b"peer"
-        assert await ws.vfs.readdir("/alias") == alias_entries
         ws.add_mount("/data", RAMVFS())
     finally:
         release.set()
@@ -434,14 +430,12 @@ async def test_mount_change_invalidates_index_before_replacement(
         if not url:
             pytest.skip("REDIS_URL not set")
         config = RedisIndexConfig(url=url, key_prefix=f"lifecycle:{uuid4()}:")
-    vfs = RAMVFS()
-    ws = Workspace({"/" if shadow else "/data": vfs}, index=config)
-    ws.add_mount("/alias", vfs)
+    ws = Workspace({"/" if shadow else "/data": RAMVFS()}, index=config)
     index = ws.mount("/" if shadow else "/data").index_store
     entry = FileStat(name="private.txt", type=FileType.FILE, fingerprint="old")
     try:
         await index.put("/data", entry)
-        for path in ("/data", "/data/nested", "/database", "/alias"):
+        for path in ("/data", "/data/nested", "/database"):
             await index.set_dir(path, [("private.txt", entry)])
         if not shadow:
             await ws.unmount("/data")
@@ -459,10 +453,9 @@ async def test_mount_change_invalidates_index_before_replacement(
                 ).status == LookupStatus.NOT_FOUND
             for path in ("/data", "/data/nested"):
                 assert (await candidate.list_dir(path)).entries in (None, [])
-        for path in ("/database", "/alias"):
-            assert (await index.list_dir(path)).entries == [
-                f"{path}/private.txt"
-            ]
+        assert (await index.list_dir("/database")).entries == [
+            "/database/private.txt"
+        ]
     finally:
         await index.clear()
         await ws.close()
@@ -851,10 +844,9 @@ async def test_close_settles_pending_profile_persistence(
         ("df", False),
     ],
 )
-@pytest.mark.parametrize("alias", [None, "initial", "dynamic"])
 @pytest.mark.parametrize("borrowed", [False, True])
 async def test_unmount_waits_for_admitted_vfs_use(
-    monkeypatch, surface, streaming, alias, borrowed
+    monkeypatch, surface, streaming, borrowed
 ):
     vfs = RAMVFS()
     entered = asyncio.Event()
@@ -893,16 +885,12 @@ async def test_unmount_waits_for_admitted_vfs_use(
 
     monkeypatch.setattr(vfs, "capacity", capacity)
     mounts = {"/data": vfs}
-    if alias == "initial":
-        mounts["/alias"] = vfs
     owner = Workspace(mounts)
     ws = (
         await Workspace.from_state(await to_state_dict(owner), mounts=mounts)
         if borrowed
         else owner
     )
-    if alias == "dynamic":
-        ws.add_mount("/alias", vfs)
     override(vfs, "read", read)
     ws.mount("/data").register(
         Command(
@@ -953,20 +941,9 @@ async def test_unmount_waits_for_admitted_vfs_use(
     removing = None
     try:
         await asyncio.wait_for(entered.wait(), 5)
-        if alias:
-            await ws.unmount("/data")
-            assert not closed
-        assert not index_closed
-        removing = asyncio.create_task(
-            ws.unmount("/alias" if alias else "/data")
-        )
+        removing = asyncio.create_task(ws.unmount("/data"))
         async with asyncio.timeout(5):
-            while (
-                ws._registry.try_mount_for_prefix(
-                    "/alias" if alias else "/data"
-                )
-                is not None
-            ):
+            while ws._registry.try_mount_for_prefix("/data") is not None:
                 await asyncio.sleep(0)
         assert not removing.done()
         assert not closed

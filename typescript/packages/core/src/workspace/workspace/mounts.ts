@@ -104,10 +104,8 @@ export function normalizeMounts(
   // Every mount spelling converges here, which is why this is where a
   // read policy is checked against what its backend can honour: one
   // verdict per mount, whatever entry point declared it.
-  const effectiveIndexes = new Map<BaseVFS, IndexConfig | undefined>()
   for (const [prefix, vfs] of Object.entries(bare)) {
-    if (!effectiveIndexes.has(vfs)) effectiveIndexes.set(vfs, indexes[prefix] ?? index)
-    checkReadCapability(prefix, vfs, read[prefix] ?? defaultRead, effectiveIndexes.get(vfs))
+    checkReadCapability(prefix, vfs, read[prefix] ?? defaultRead, indexes[prefix] ?? index)
     checkWriteCapability(
       prefix,
       vfs,
@@ -155,9 +153,9 @@ export interface UnmountDeps {
 }
 
 /**
- * Remove one mount, closing its owned VFS when its last alias leaves. The virtual
- * root, the device mount, and the history view are permanent. Mirrors the
- * Python `unmount` in `workspace/mounts.py`.
+ * Remove one mount, closing its owned VFS. The virtual root, the device
+ * mount, and the history view are permanent. Mirrors the Python `unmount` in
+ * `workspace/mounts.py`.
  */
 export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<void> {
   const norm = normDir(prefix)
@@ -189,16 +187,12 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
     throw error
   }
   const vfs = entry.vfs
-  const remaining = deps.registry.allMounts()
-  const stillMounted = remaining.some((m) => m.vfs === vfs)
-  if (!stillMounted) {
-    const closing = closeVfs(deps, entry)
-    deps.registry.retiringMounts.set(vfs, closing)
-    try {
-      await closing
-    } finally {
-      deps.registry.retiringMounts.delete(vfs)
-    }
+  const closing = closeVfs(deps, entry)
+  deps.registry.retiringMounts.set(vfs, closing)
+  try {
+    await closing
+  } finally {
+    deps.registry.retiringMounts.delete(vfs)
   }
 }
 

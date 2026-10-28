@@ -401,21 +401,6 @@ describe('Workspace fresh on a listing cache', () => {
         ),
     ).toThrow(/caches reads or listings/)
   })
-
-  it('judges an alias on the index it shares', async () => {
-    // A second mount of one driver shares the first mount's store, so the
-    // workspace index it would otherwise be given is not the one it runs.
-    const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/a': new Mount(ram, { index: { ttl: 600 } }) },
-      { index: { ttl: 0 } },
-    )
-    try {
-      expect(ws.addMount('/b', ram, MountMode.READ, FRESH).read.policy).toBe(ReadPolicy.FRESH)
-    } finally {
-      await ws.close()
-    }
-  })
 })
 
 describe('Workspace dynamic mount index', () => {
@@ -433,9 +418,7 @@ describe('Workspace dynamic mount index', () => {
                   keyPrefix: `lifecycle:${crypto.randomUUID()}:`,
                 }
               : { type }
-          const vfs = new RAMVFS()
-          const ws = new Workspace({ [shadow ? '/' : '/data']: vfs }, { index: config })
-          ws.addMount('/alias', vfs)
+          const ws = new Workspace({ [shadow ? '/' : '/data']: new RAMVFS() }, { index: config })
           const index = ws.mount(shadow ? '/' : '/data').indexStore
           const entry = new FileStat({
             name: 'private.txt',
@@ -444,7 +427,7 @@ describe('Workspace dynamic mount index', () => {
           })
           try {
             await index.put('/data', entry)
-            for (const path of ['/data', '/data/nested', '/database', '/alias']) {
+            for (const path of ['/data', '/data/nested', '/database']) {
               await index.setDir(path, [['private.txt', entry]])
             }
             if (!shadow) await ws.unmount('/data')
@@ -458,9 +441,7 @@ describe('Workspace dynamic mount index', () => {
                 expect((await candidate.listDir(path)).entries ?? []).toEqual([])
               }
             }
-            for (const path of ['/database', '/alias']) {
-              expect((await index.listDir(path)).entries).toEqual([`${path}/private.txt`])
-            }
+            expect((await index.listDir('/database')).entries).toEqual(['/database/private.txt'])
           } finally {
             await index.clear()
             await ws.close()
@@ -493,18 +474,17 @@ describe('Workspace dynamic mount index', () => {
     }
   })
 
-  it('keeps the index coherent across aliases and duplicate attempts', async () => {
+  it('keeps the index coherent across duplicate attempts', async () => {
     const ws = new Workspace({}, { index: { ttl: 3600 } })
     const vfs = new RAMVFS()
     const index = ws.addMount('/late', vfs, MountMode.WRITE).indexStore
     const rejected = new RAMVFS()
     try {
       await index.setDir('/late', [])
-      expect(ws.addMount('/alias', vfs).indexStore).toBe(index)
-      expect((await index.listDir('/late')).entries).toEqual([])
       expect(() => ws.addMount('late/', rejected)).toThrow('duplicate mount prefix')
       expect(ws.mount('/late').indexStore).toBe(index)
-      // Mutations must evict the configured store, including after aliasing.
+      expect((await index.listDir('/late')).entries).toEqual([])
+      // Mutations must evict the configured store.
       await ws.vfs.write('/late/new.txt', 'new')
       expect((await index.listDir('/late')).status).toBe(LookupStatus.NOT_FOUND)
     } finally {
@@ -656,9 +636,7 @@ describe('Workspace.unmount', () => {
       vfs.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('old') } })
       const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
       const cache = ws.cache
-      ws.addMount('/alias', vfs)
       const index = ws.mount('/data').indexStore
-      const aliasEntries = await ws.vfs.readdir('/alias')
       let enter = (): void => undefined
       let resume = (): void => undefined
       const entered = new Promise<void>((resolve) => {
@@ -694,7 +672,6 @@ describe('Workspace.unmount', () => {
       )
       try {
         await entered
-        expect((await ws.resolve('/alias'))[0]).toBe(vfs)
         expect(() => ws.addMount('/data', new RAMVFS())).toThrow('duplicate mount prefix')
         await expect(ws.vfs.readdir('/data')).rejects.toMatchObject({ code: 'EBUSY' })
         await expect(ws.vfs.write('/data/file', bytes.encode('changed'))).rejects.toMatchObject({
@@ -716,7 +693,6 @@ describe('Workspace.unmount', () => {
         expect(await cache.get('/data')).toBeNull()
         expect(await cache.get('/data/file')).toBeNull()
         expect(await cache.get('/database/file')).toEqual(bytes.encode('peer'))
-        expect(await ws.vfs.readdir('/alias')).toEqual(aliasEntries)
         ws.addMount('/data', new RAMVFS())
       } finally {
         resume()
@@ -1282,34 +1258,6 @@ it('unmount drains metadata globs and their index writes', async () => {
     await Promise.allSettled([expanding, ...(removing === undefined ? [] : [removing])])
     await ws.close()
   }
-})
-
-it('constructor alias uses the first mount index', async () => {
-  const vfs = new RAMVFS()
-  const ws = new Workspace({
-    '/first': new Mount(vfs, { index: { ttl: 600 } }),
-    '/alias': new Mount(vfs, { index: { ttl: 0 }, read: { policy: ReadPolicy.FRESH, ttl: 600 } }),
-  })
-  try {
-    expect(ws.mount('/alias').indexStore).toBe(ws.mount('/first').indexStore)
-    expect(ws.mount('/alias').indexStore.ttl).toBe(600)
-  } finally {
-    await ws.close()
-  }
-})
-
-it('constructor alias cannot enable a disabled shared index', () => {
-  const vfs = new RAMVFS()
-  expect(
-    () =>
-      new Workspace({
-        '/first': new Mount(vfs, { index: { ttl: 0 } }),
-        '/alias': new Mount(vfs, {
-          index: { ttl: 600 },
-          read: { policy: ReadPolicy.FRESH, ttl: 600 },
-        }),
-      }),
-  ).toThrow(/caches reads or listings/)
 })
 
 async function globWs(): Promise<Workspace> {

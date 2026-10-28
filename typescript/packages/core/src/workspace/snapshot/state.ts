@@ -14,7 +14,6 @@
 import { CommandSpec } from '../../commands/spec/types.ts'
 
 import { indexConfigDump, restoreIndexConfig } from './config.ts'
-import type { IndexConfig } from '../../cache/index/config.ts'
 import { tokenOrNull } from '../../cache/file/utils.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheEntry } from '../../cache/file/entry.ts'
@@ -83,7 +82,7 @@ import {
   type Namespace,
   type NodeMeta,
 } from '../mount/namespace/namespace.ts'
-import { MountOverrideError, WritePolicyError } from '../mount/errors.ts'
+import { WritePolicyError } from '../mount/errors.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionManager } from '../session/manager.ts'
 import { SessionState, varsFromFields, varsToFields } from '../session/session.ts'
@@ -131,7 +130,6 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   for (const mount of mounted) await mount.ensureReady()
   const mounts = mounted.filter((m) => !skip.has(m.prefix) && m.vfs.name !== 'document')
   const mountSnapshots: MountSnapshot[] = []
-  const firstPrefix = new Map<BaseVFS, string>()
   for (let i = 0; i < mounts.length; i++) {
     const m = mounts[i]
     if (m === undefined) continue
@@ -141,9 +139,6 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
     // returned state to the snapshot format's union.
     const state = (await m.use(() => Promise.resolve(m.vfs.getState()))) as VFSState
     const dumped = indexConfigDump(m.indexConfig)
-    // Each later prefix on one VFS names the first, so a load builds it once.
-    const leader = firstPrefix.get(m.vfs) ?? m.prefix
-    firstPrefix.set(m.vfs, leader)
     mountSnapshots.push({
       index: i,
       prefix: m.prefix,
@@ -162,7 +157,6 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
       ...(m.commandLimits.size > 0
         ? { command_limits: commandLimitsToJSON(Object.fromEntries(m.commandLimits)) }
         : {}),
-      ...(leader !== m.prefix ? { same_vfs_as: leader } : {}),
     })
   }
   const ramCache = ws.cache instanceof RAMFileCacheStore ? ws.cache : null
@@ -339,47 +333,6 @@ function savedName(value: unknown): string {
   return typeof value === 'string' ? value : String(value as number)
 }
 
-/**
- * Each saved prefix mapped to the first prefix of the VFS it shares. A
- * row with no `same_vfs_as` leads its own group; a snapshot written
- * before the key existed is all leaders, and loads as it always did.
- * Throws when a row names a prefix that is not an earlier row leading its
- * own group. Mirrors Python `vfs_groups`.
- */
-export function vfsGroups(state: WorkspaceStateDict): Map<string, string> {
-  const groups = new Map<string, string>()
-  for (const m of state.mounts) {
-    const prefix = normDir(m.prefix)
-    // Widened deliberately: a file can carry anything under the key.
-    if (!('same_vfs_as' in m)) {
-      groups.set(prefix, prefix)
-      continue
-    }
-    const raw = (m as { same_vfs_as?: unknown }).same_vfs_as
-    const leader = typeof raw === 'string' ? normDir(raw) : null
-    if (leader === null || leader === prefix || groups.get(leader) !== leader) {
-      const named = typeof raw === 'string' ? raw : JSON.stringify(raw)
-      throw new Error(
-        `Workspace.load: mount '${m.prefix}' shares the VFS of '${named}', which no earlier ` +
-          `mount leads; regenerate the snapshot`,
-      )
-    }
-    groups.set(prefix, leader)
-  }
-  return groups
-}
-
-/** Each saved prefix mapped to the first saved row of the VFS it shares. Mirrors Python `vfs_leaders`. */
-export function vfsLeaders(state: WorkspaceStateDict): Map<string, MountSnapshot> {
-  const rows = new Map(state.mounts.map((m) => [normDir(m.prefix), m]))
-  const leaders = new Map<string, MountSnapshot>()
-  for (const [prefix, lead] of vfsGroups(state)) {
-    const row = rows.get(lead)
-    if (row !== undefined) leaders.set(prefix, row)
-  }
-  return leaders
-}
-
 export function buildMountArgs(
   state: WorkspaceStateDict,
   overrides: Record<string, BaseVFS | Mount> = {},
@@ -393,52 +346,18 @@ export function buildMountArgs(
     normalized[normDir(prefix)] = vfs
     overridePrefixes.add(normDir(prefix))
   }
-  const groups = vfsGroups(state)
-  const groupOf = (m: MountSnapshot): string => groups.get(normDir(m.prefix)) ?? normDir(m.prefix)
-  const leaders = vfsLeaders(state)
   const userPrefixes = userOverrides ?? overridePrefixes
-  // An override supplies its group's VFS and label, else the first row does.
-  const placedAt = new Map<string, [BaseVFS, string | null]>()
-  const supplied = new Map<string, [BaseVFS, string | null][]>()
-  for (const m of state.mounts) {
-    const override = normalized[normDir(m.prefix)]
-    if (override === undefined) continue
-    // A rebuild came through the saved reference, so it keeps it.
-    const source: [BaseVFS, string | null] =
-      userPrefixes.has(normDir(m.prefix)) || override instanceof Mount
-        ? placedVfs(override, m)
-        : [override, savedRef(m)]
-    placedAt.set(normDir(m.prefix), source)
-    const held = supplied.get(groupOf(m)) ?? []
-    if (!held.some(([vfs]) => vfs === source[0])) held.push(source)
-    supplied.set(groupOf(m), held)
-  }
-  const split = (m: MountSnapshot): boolean => (supplied.get(groupOf(m))?.length ?? 0) > 1
-  const ambiguous = state.mounts
-    .filter((m) => normalized[normDir(m.prefix)] === undefined && split(m))
-    .map((m) => m.prefix)
-  if (ambiguous.length > 0) {
-    const given = state.mounts
-      .filter((m) => normalized[normDir(m.prefix)] !== undefined && split(m))
-      .map((m) => m.prefix)
-    throw new MountOverrideError(
-      `Workspace.load: mounts= gives different VFSs for ${given.join(', ')}, which were saved ` +
-        `as one VFS; override ${ambiguous.join(', ')} too, or give them all one VFS`,
-    )
-  }
-  // A VFS nothing supplies by now is one nobody can build: its first row
-  // asked to be handed back live or was saved with a redacted secret, or
-  // the registry `withRebuiltMounts` consulted had nothing for its ref or
-  // type. Only a VFS this builder restores itself is exempt. Refusing is
-  // what Python's `requires_vfs_override` does for a class it cannot
-  // import; an empty RAMVFS in its place would lose the backend without
-  // a word. It is named once, by the first prefix: an override at any prefix
-  // serves all.
+  // A mount with no override by now is one nobody can build: it asked to
+  // be handed back live or was saved with a redacted secret, or the
+  // registry `withRebuiltMounts` consulted had nothing for its ref or
+  // type. Only a mount this builder restores itself is exempt. Refusing
+  // is what Python's `requires_vfs_override` does for a class it
+  // cannot import; an empty RAMVFS in its place would lose the
+  // backend without a word.
   const missing = state.mounts
     .filter(
       (m) =>
-        groupOf(m) === normDir(m.prefix) &&
-        !supplied.has(groupOf(m)) &&
+        normalized[normDir(m.prefix)] === undefined &&
         (vfsStateRequiresOverride(m.vfs_state) || !restoresAsFreshRAM(m)),
     )
     .map((m) => m.prefix)
@@ -451,21 +370,8 @@ export function buildMountArgs(
     )
   }
   const mountArgs: Record<string, Mount> = {}
-  const built = new Map<string, [BaseVFS, string | null]>()
-  // A VFS runs one index, its first prefix's (the registry aliases the
-  // rest): an override's index if one came with it, else the saved one.
-  const givenIndex = new Map<BaseVFS, IndexConfig>()
-  for (const m of state.mounts) {
-    const override = normalized[normDir(m.prefix)]
-    if (override instanceof Mount && override.options.index !== undefined) {
-      if (!givenIndex.has(override.vfs)) givenIndex.set(override.vfs, override.options.index)
-    }
-  }
-  const indexed = new Set<BaseVFS>()
   let anchored = false
-  const foreign = new Set([...userPrefixes].map((p) => groups.get(normDir(p)) ?? normDir(p)))
   for (const m of state.mounts) {
-    const group = groupOf(m)
     if (!VALID_MODES.includes(m.mode)) {
       throw new Error(`Workspace.fromState: mount '${m.prefix}' has invalid mode '${m.mode}'`)
     }
@@ -502,9 +408,8 @@ export function buildMountArgs(
     // reconstructs from the saved state itself, which is the same
     // backend. Python reads it off the overrides it was handed; here
     // `fromState` merges its rebuilds into the same map first, so it names
-    // its callers' set. A prefix sharing an overridden VFS sits on that
-    // backend too.
-    const read: ReadSpec = foreign.has(group)
+    // its callers' set.
+    const read: ReadSpec = userPrefixes.has(normDir(m.prefix))
       ? (placed?.options.read ?? DEFAULT_READ_SPEC)
       : savedSpec
     // The saved policy survives an override, as `mode` does.
@@ -534,17 +439,15 @@ export function buildMountArgs(
         ? named
         : parseCommandLimits(m.command_limits)
     // A prefix carries the label of what supplied its VFS, so a second
-    // round trip rebuilds through the same entry point.
-    let source = placedAt.get(normDir(m.prefix)) ?? supplied.get(group)?.[0]
-    if (source === undefined) {
-      source = built.get(group) ?? [new RAMVFS(), savedRef(leaders.get(normDir(m.prefix)) ?? m)]
-      built.set(group, source)
-    }
-    const [vfs, vfsRef] = source
-    const index = indexed.has(vfs)
-      ? undefined
-      : restoreIndexConfig(m.index_config, givenIndex.get(vfs), m.prefix)
-    indexed.add(vfs)
+    // round trip rebuilds through the same entry point; a rebuild came
+    // through the saved reference, so it keeps it.
+    const [vfs, vfsRef]: [BaseVFS, string | null] =
+      override === undefined
+        ? [new RAMVFS(), savedRef(m)]
+        : userPrefixes.has(normDir(m.prefix)) || override instanceof Mount
+          ? placedVfs(override, m)
+          : [override, savedRef(m)]
+    const index = restoreIndexConfig(m.index_config, placed?.options.index, m.prefix)
     mountArgs[m.prefix] = new Mount(vfs, {
       mode: m.mode as MountMode,
       read,
@@ -678,10 +581,9 @@ export function savedVfsBuild(
 }
 
 /**
- * The overrides `buildMountArgs` restores with: the caller's, plus one
- * build per saved VFS the caller supplies none for, from its first row,
- * which `buildMountArgs` then mounts at every prefix of that VFS. A VFS
- * that asks to be handed back live (`vfsStateRequiresOverride`) is never
+ * The overrides `buildMountArgs` restores with: the caller's, plus every
+ * mount the builder can rebuild from its saved state. A mount that asks
+ * to be handed back live (`vfsStateRequiresOverride`) is never
  * built here, so the refusal `buildMountArgs` raises for it stands.
  */
 export async function withRebuiltMounts(
@@ -691,12 +593,9 @@ export async function withRebuiltMounts(
 ): Promise<Record<string, BaseVFS | Mount>> {
   checkFormatVersion(state)
   const merged: Record<string, BaseVFS | Mount> = { ...overrides }
-  // One build per saved VFS, at its first prefix, and none for one an override supplies.
-  const groups = vfsGroups(state)
-  const held = new Set(Object.keys(overrides).map((p) => groups.get(normDir(p)) ?? normDir(p)))
+  const held = new Set(Object.keys(overrides).map(normDir))
   for (const m of state.mounts) {
-    const prefix = normDir(m.prefix)
-    if (groups.get(prefix) !== prefix || held.has(prefix)) continue
+    if (held.has(normDir(m.prefix))) continue
     if (vfsStateRequiresOverride(m.vfs_state)) continue
     const built = await build(m)
     if (built !== null) merged[m.prefix] = built
@@ -724,8 +623,8 @@ export async function withRebuiltMounts(
  * hydrates, where a checkout onto a running workspace keeps its own
  * sessions' narrowing and decisions, and a table's mount caps only narrow
  * them. `shared` names the prefixes whose mount a copy shares with its
- * origin: their VFS's content is already there, so no state is loaded
- * into it at any prefix.
+ * origin: their content is already there, so no state is loaded into
+ * them.
  * The target's VFS.md and SKILL.md bindings are dropped, since a
  * snapshot never carries them. Mirrors Python `apply_state_dict`.
  */
@@ -739,7 +638,6 @@ export async function applyStateDict(
   } = {},
 ): Promise<void> {
   checkFormatVersion(state)
-  const groups = vfsGroups(state)
   const [sessions, seed] = await gateRestoredState(ws, state, options.builtForState === true)
   // A snapshot holds no document bindings, so a load into a live
   // workspace drops its own: one left in place would shadow a file the
@@ -748,15 +646,7 @@ export async function applyStateDict(
   if (options.replaceCache === true) await ws.cache.clear()
   // Every state is prepared before any mount loads, so a captured disk
   // file that is gone or now a link fails the load with no mount changed.
-  // A VFS saved at several prefixes loads once, and a shared one never.
   const loads: [BaseVFS, VFSStateBase][] = []
-  const sharedVfs = new Set(
-    ws.registry
-      .allMounts()
-      .filter((mount) => options.shared?.has(mount.prefix) === true)
-      .map((mount) => mount.vfs),
-  )
-  const loaded = new Map<BaseVFS, Set<string>>()
   for (const m of state.mounts) {
     // Exact-prefix lookup, mirroring Python: a snapshot prefix the new
     // workspace does not mount is skipped, never resolved to an
@@ -775,11 +665,7 @@ export async function applyStateDict(
       )
       continue
     }
-    const group = groups.get(normDir(m.prefix)) ?? normDir(m.prefix)
-    const taken = loaded.get(mount.vfs) ?? new Set<string>()
-    if (sharedVfs.has(mount.vfs) || taken.has(group)) continue
-    taken.add(group)
-    loaded.set(mount.vfs, taken)
+    if (options.shared?.has(mount.prefix) === true) continue
     // A disk restored into another mount that keeps content (one
     // overriding loadState, as the fresh RAM stand-in of
     // `restoresAsFreshRAM`, redis and OPFS do, under any name) takes the

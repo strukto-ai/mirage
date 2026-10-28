@@ -2312,35 +2312,6 @@ async def test_offset_writes_to_one_path_all_land_on_a_splicing_store():
         assert bytes(got) == b"A12B45C78D"
 
 
-@pytest.mark.asyncio
-async def test_offset_writes_through_two_mounts_of_one_store_all_land():
-    # One store mounted twice holds one file under two names: the writes
-    # are one writer at a time by the store's own key, not by the name.
-    store = _SplicingRAMVFS()
-    with Workspace({"/a/": store, "/b/": store}, mode=MountMode.WRITE) as ws:
-        await ws.dispatch(
-            "write", PathSpec.from_str_path("/a/f"), data=b"0123456789"
-        )
-        await asyncio.gather(
-            *(
-                ws.dispatch(
-                    "pwrite",
-                    PathSpec.from_str_path(name),
-                    data=letter,
-                    offset=offset,
-                )
-                for name, letter, offset in (
-                    ("/a/f", b"A", 0),
-                    ("/b/f", b"B", 3),
-                    ("/a/f", b"C", 6),
-                    ("/b/f", b"D", 9),
-                )
-            )
-        )
-        got, _ = await ws.dispatch("read", PathSpec.from_str_path("/b/f"))
-        assert bytes(got) == b"A12B45C78D"
-
-
 class Tape(BaseVFS):
     """A cached store whose stream hands out 10-byte chunks, counting
     each one the backend delivered."""
@@ -3363,25 +3334,6 @@ async def test_a_command_a_registered_one_runs_keeps_none_of_its_limit():
         result = await ws.shell("outer")
         assert await result.stderr_str() == (
             "chmod: more than 2 files in scope (walk_limit); narrow the path\n"
-        )
-
-
-@pytest.mark.asyncio
-async def test_two_mounts_of_one_vfs_settle_on_one_walk_limit():
-    capped = {ALL_COMMANDS: Limit(walk_limit=2)}
-    vfs = _limited(RAMVFS, 3)
-    with pytest.raises(ValueError, match="2 differs from /b/'s 10000"):
-        Workspace({"/a/": (vfs, MountMode.READ, capped), "/b/": vfs})
-    vfs = _limited(RAMVFS, 3)
-    with Workspace(
-        {
-            "/a/": (vfs, MountMode.READ, capped),
-            "/b/": (vfs, MountMode.READ, capped),
-        }
-    ) as ws:
-        result = await ws.shell("ls -R /b/d")
-        assert result.stderr == (
-            b"ls: /b/d: stopped after 2 files (walk_limit); narrow the path\n"
         )
 
 

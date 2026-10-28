@@ -550,8 +550,8 @@ class MountEntry:
         self.mount_id = (ids if ids is not None else SystemIdSource()).uuid7()
         self.prefix = prefix
         self.vfs = vfs
-        # The backend's own walk_limit, kept from before any mount
-        # settles the VFS's; a later mount of the VFS takes the first's.
+        # The backend's own walk_limit, kept from before the mount
+        # settles the VFS's.
         self.backend_walk_limit = vfs.walk_limit
         self.calls = self.answered_calls()
         self.mode = mode
@@ -579,9 +579,8 @@ class MountEntry:
         # Coerced so an embedder's bare string still matches `is`.
         self.write = coerce_write_policy(write)
         # The store this mount runs its driver under, built by the
-        # registry when the driver is placed and shared with any alias
-        # of the same instance; a bare entry gets a RAM store at the
-        # driver's TTL. ``index`` is the same store scoped by the cache
+        # registry when the driver is placed; a bare entry gets a RAM
+        # store at the driver's TTL. ``index`` is the same store scoped by the cache
         # manager, which is what ops and commands receive.
         self.index_store: IndexCacheStore = (
             index if index is not None else build_index(None, vfs.index_ttl)

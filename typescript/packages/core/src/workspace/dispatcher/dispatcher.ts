@@ -2922,15 +2922,12 @@ export class Dispatcher {
         const path = rstripSlash(target.virtual) || '/'
         const mount = this.namespace.tryMountFor(path)
         if (mount === null || taken(target, mount)) continue
-        const kept: [CacheManager, PathSpec, string | null][] = []
-        for (const [owner, alias] of this.aliases(mount, path)) {
-          if (owner.cacheManager === null) continue
-          const spec = PathSpec.fromStrPath(alias)
-          kept.push([owner.cacheManager, spec, await owner.cacheManager.readVersion(spec)])
-        }
+        const manager = mount.cacheManager
+        const spec = PathSpec.fromStrPath(path)
+        const version = manager === null ? null : await manager.readVersion(spec)
         await this.changed(path, FileChangeKind.UNKNOWN, null, { times: false })
-        for (const [manager, spec, version] of kept) {
-          if (version !== null && version !== '') await manager.keepVersion(spec, version)
+        if (manager !== null && version !== null && version !== '') {
+          await manager.keepVersion(spec, version)
         }
       } catch (err) {
         console.debug(`evicting after a failed ${name}: ${String(err)}`)
@@ -2944,9 +2941,7 @@ export class Dispatcher {
       try {
         const mount = this.namespace.tryMountFor(key)
         if (mount === null || taken(target, mount)) continue
-        for (const [owner, alias] of this.aliases(mount, key)) {
-          await owner.cacheManager?.keepVersion(PathSpec.fromStrPath(alias), version)
-        }
+        await mount.cacheManager?.keepVersion(PathSpec.fromStrPath(key), version)
       } catch (err) {
         console.debug(`keeping ${key} after a refusal: ${String(err)}`)
       }
@@ -3851,35 +3846,10 @@ export class Dispatcher {
     const path = rstripSlash(rawPath) || '/'
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return
-    if (options.times ?? true) {
-      for (const [, name] of this.aliases(mount, path)) {
-        await this.namespace.clearTimes(name, options.observed ?? null)
-      }
-    }
+    if (options.times ?? true) await this.namespace.clearTimes(path, options.observed ?? null)
     await mount.cacheManager?.invalidate(path, kind, row, {
       leaf: kind === FileChangeKind.DELETE,
     })
-  }
-
-  /**
-   * `path` under each mount of its store, its own mount first.
-   *
-   * One store mounted at two prefixes holds one file under two names, so what
-   * a write makes stale under one name is stale under each. A name another
-   * mount holds is that mount's file and is left out. Mirrors Python's
-   * Dispatcher._aliases.
-   */
-  private aliases(mount: MountEntry, path: string): [MountEntry, string][] {
-    const key = mountKey(path, rstripSlash(mount.prefix))
-    const found: [MountEntry, string][] = [[mount, path]]
-    for (const prefix of this.namespace.mountPrefixes()) {
-      const other = this.namespace.mountFor(prefix)
-      if (other === mount || other.vfs !== mount.vfs) continue
-      const base = rstripSlash(other.prefix)
-      const name = key === '' ? base || '/' : `${base}/${key}`
-      if (this.namespace.tryMountFor(name) === other) found.push([other, name])
-    }
-    return found
   }
 
   /**

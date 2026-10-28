@@ -79,9 +79,6 @@ export class CacheManager {
     // cached listing; undefined serves them all.
     private readonly mayServeListing?: (folder: string, version: string | null) => Promise<boolean>,
     private readonly excludedPrefixes: () => readonly string[] = () => [],
-    // The managers of the other live mounts of this mount's VFS, whose caches
-    // hold the same files under other names.
-    private readonly aliases: () => readonly CacheManager[] = () => [],
   ) {
     this.fileCache = fileCache
     this.index = index
@@ -114,9 +111,7 @@ export class CacheManager {
    * The index is expired rather than cleared, while this mount still owns it:
    * a cleared index reads exactly like one that was never filled, so a
    * backend whose index *is* its listing (github seeds the whole tree once)
-   * could not tell the drop from an empty repository. A VFS mounted at
-   * several prefixes holds each file under each of them, so the bodies under
-   * every alias go too. Over-evicts when this mount is the root and another
+   * could not tell the drop from an empty repository. Over-evicts when this mount is the root and another
    * mount sits beneath it, since keys are compared by prefix; a refetch is
    * the safe direction to be wrong in. Mirrors Python's `CacheManager.drop`.
    *
@@ -128,9 +123,7 @@ export class CacheManager {
       this.retire()
       if (this.ownsPath(this.prefix || '/')) await this.index?.invalidate()
       if (!bodies || !this.cachesReads || this.fileCache === null) return
-      for (const manager of [this, ...this.aliases()]) {
-        await this.fileCache.remove(manager.prefix || '/', { subtree: true })
-      }
+      await this.fileCache.remove(this.prefix || '/', { subtree: true })
     })
   }
 
@@ -686,12 +679,8 @@ export class CacheManager {
   }
 
   /**
-   * Drop what a change at `path` made stale, under every name its store has
-   * here.
-   *
-   * One store mounted at several prefixes holds one file under each, so the
-   * change lands under every name a live mount of it owns. The kind decides
-   * how far down it reaches:
+   * Drop what a change at `path` made stale. The kind decides how far down it
+   * reaches:
    *
    * - CREATE, UPDATE, and MOVE at its landing: the body, and the path's entry
    *   in its parent's listing. A CREATE that answered its new entry's stat
@@ -727,29 +716,20 @@ export class CacheManager {
    * @param options.probed the backend's answer the change was found by, which
    *   this command's probe keeps serving for `path` (`probedStat`) past the
    *   retire.
-   * @param options.own only this mount's name, as a freshness probe drops what
-   *   it found: the store's other names answer to their own mount's read
-   *   policy.
    */
   async invalidate(
     path: string | PathSpec,
     kind: FileChangeKind,
     row: FileStat | null = null,
-    options: { leaf?: boolean; probed?: FileStat | null; own?: boolean } = {},
+    options: { leaf?: boolean; probed?: FileStat | null } = {},
   ): Promise<void> {
-    const key = mountKey(path instanceof PathSpec ? path.virtual : path, this.prefix)
-    for (const manager of options.own === true ? [this] : [this, ...this.aliases()]) {
-      const name = manager.name(key)
-      if (manager === this || manager.ownsPath(name)) {
-        await manager.invalidateKey(
-          name,
-          kind,
-          row,
-          options.leaf === true,
-          manager === this ? (options.probed ?? null) : null,
-        )
-      }
-    }
+    await this.invalidateKey(
+      this.cacheKey(path),
+      kind,
+      row,
+      options.leaf === true,
+      options.probed ?? null,
+    )
   }
 
   // The ancestors go even when the path's own invalidation fails; a failure of

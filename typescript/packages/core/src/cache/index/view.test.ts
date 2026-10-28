@@ -43,6 +43,13 @@ class Indexed extends RAMVFS {
   }
 }
 
+/** Wait for an unmount to free `prefix`; it closes the VFS only once its calls finish. */
+async function vacated(ws: Workspace, prefix: string): Promise<void> {
+  while (ws.registry.tryMountForPrefix(prefix, true) !== null) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+}
+
 const cases = ['backend', 'store'].flatMap((phase) =>
   ['setDir', 'setPartialDir'].flatMap((method) =>
     [false, true].map((shadow) => ({ phase, method, shadow })),
@@ -68,7 +75,6 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         const vfs = new Indexed()
         const backend: BaseVFS = vfs
         const ws = new Workspace({ '/data': vfs }, { index: config, mode: MountMode.WRITE })
-        ws.addMount('/alias', vfs)
         const index = ws.mount('/data').indexStore
         let enter = (): void => undefined
         let resume = (): void => undefined
@@ -106,9 +112,11 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
           () => undefined,
           (err: unknown) => (err instanceof Error && 'code' in err ? err.code : undefined),
         )
+        let removing: Promise<void> | undefined
         try {
           await entered
-          await ws.unmount('/data')
+          removing = ws.unmount('/data')
+          await vacated(ws, '/data')
           const fresh = ws.addMount('/data', new RAMVFS()).indexStore
           await ws.vfs.readdir('/data')
           await fresh.put(
@@ -117,13 +125,14 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
           )
           resume()
           expect(await reading).toBe(op === 'rename' ? 'EACCES' : 'EINVAL')
+          await removing
           for (const candidate of [index, fresh]) {
             expect((await candidate.get('/data/stale')).status).toBe(LookupStatus.NOT_FOUND)
           }
           expect((await fresh.get('/data/fresh')).entry?.fingerprint).toBe('new')
         } finally {
           resume()
-          await reading
+          await Promise.allSettled([reading, removing])
           await index.clear()
           await ws.close()
         }
@@ -146,7 +155,6 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         const backend: BaseVFS = vfs
         const prefix = shadow ? '/' : '/data'
         const ws = new Workspace({ [prefix]: vfs }, { index: config })
-        ws.addMount('/alias', vfs)
         const index = ws.mount(prefix).indexStore
         const entry = new FileStat({ name: 'stale', type: FileType.FILE, fingerprint: 'old' })
         let enter = (): void => undefined
@@ -202,8 +210,10 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
             expect(changed).toBe(false)
             resume()
           }
-          await changing
-          if (!shadow) {
+          if (shadow) {
+            await changing
+          } else {
+            await vacated(ws, '/data')
             ws.addMount('/data', replacement)
             await ws.vfs.readdir('/data')
           }
@@ -214,6 +224,7 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
           )
           resume()
           await reading
+          await changing
           for (const candidate of [index, fresh]) {
             expect((await candidate.get('/data/stale')).status).toBe(LookupStatus.NOT_FOUND)
             expect((await candidate.listDir('/data')).entries ?? []).not.toContain('/data/stale')

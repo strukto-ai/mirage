@@ -163,13 +163,14 @@ def normalize_mounts(
                     write=default_write,
                 )
             )
-    indexes: dict[int, IndexConfig | None] = {}
     for spec in specs:
         check_vfs(spec.prefix, spec.vfs)
-        effective = indexes.setdefault(
-            id(spec.vfs), spec.index if spec.index is not None else index
+        check_read_capability(
+            spec.prefix,
+            spec.vfs,
+            spec.read,
+            spec.index if spec.index is not None else index,
         )
-        check_read_capability(spec.prefix, spec.vfs, spec.read, effective)
         check_write_capability(
             spec.prefix,
             spec.vfs,
@@ -222,7 +223,6 @@ def install_mounts(
     Returns:
         bool: whether the root mount was synthesized.
     """
-    placed: list[tuple[MountSpec, MountEntry]] = []
     for spec in specs:
         registry.check_vfs_available(spec.vfs)
         entry = registry.mount(
@@ -234,16 +234,11 @@ def install_mounts(
             index=spec.index if spec.index is not None else index,
             vfs_ref=spec.vfs_ref,
         )
-        placed.append((spec, entry))
-    # Every mount's limits before any settles: two mounts of one VFS
-    # settle against each other.
-    for spec, entry in placed:
         if spec.command_limits:
             check_command_limits(
                 spec.command_limits, f"mount {spec.prefix}", takes_line=False
             )
             entry.command_limits.update(spec.command_limits)
-    for _, entry in placed:
         registry.settle_walk_limit(entry)
     implicit_root = registry.root_mount is None
     if implicit_root:
@@ -301,14 +296,14 @@ async def unmount(
     is_shutting_down: Callable[[], bool],
     shared_mounts: set[int],
 ) -> None:
-    """Remove one mount, closing its VFS if nothing else uses it.
+    """Remove one mount and close its VFS.
 
     The virtual root, the device mount, and the history view are
-    permanent. The VFS is closed only when no remaining mount
-    holds the same instance. Admitted calls and streams finish first;
-    callers must consume or close streams. Closed instances cannot be
-    mounted again. Commands and operations belong to each
-    mount, so removing one leaves other mounts of the same kind intact.
+    permanent. A VFS another workspace shares stays open. Admitted
+    calls and streams finish first; callers must consume or close
+    streams. Closed instances cannot be mounted again. Commands and
+    operations belong to each mount, so removing one leaves other
+    mounts of the same kind intact.
 
     Args:
         registry (MountRegistry): the workspace's mount table.
@@ -347,19 +342,16 @@ async def unmount(
     except BaseException:
         entry.retiring = False
         raise
-    remaining = registry.mounts()
-    still_instance = any(m.vfs is removed.vfs for m in remaining)
     # The mount owns its op table, so dropping the mount drops the ops
     # with it; the facade keeps no second registry to clean up.
-    if not still_instance:
-        identity = id(removed.vfs)
-        shared = identity in shared_mounts
-        if not shared:
-            registry.retired_mounts[identity] = removed.vfs
-        closing = asyncio.create_task(_close_vfs(registry, removed, shared))
-        registry.retiring_mounts[identity] = closing
-        closing.add_done_callback(partial(_release_vfs, registry, identity))
-        await asyncio.shield(closing)
+    identity = id(removed.vfs)
+    shared = identity in shared_mounts
+    if not shared:
+        registry.retired_mounts[identity] = removed.vfs
+    closing = asyncio.create_task(_close_vfs(registry, removed, shared))
+    registry.retiring_mounts[identity] = closing
+    closing.add_done_callback(partial(_release_vfs, registry, identity))
+    await asyncio.shield(closing)
 
 
 async def _close_vfs(

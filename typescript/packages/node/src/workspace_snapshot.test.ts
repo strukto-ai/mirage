@@ -19,28 +19,20 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Accessor } from '@struktoai/mirage-core/accessor/base'
 import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS, type RAMVFSState } from '@struktoai/mirage-core/vfs/ram/ram'
-import type { RAMFileCacheStore } from '@struktoai/mirage-core/cache/file/ram'
 import {
   ContentType,
-  DEFAULT_READ_SPEC,
   FileStat,
   FileType,
   Limit,
   MountMode,
   type PathSpec,
-  ReadPolicy,
   WritePolicy,
 } from '@struktoai/mirage-core/types'
 import { ALL_COMMANDS } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
-import { MountOverrideError } from '@struktoai/mirage-core/workspace/mount/errors'
 import { MountKey } from '@struktoai/mirage-core/workspace/snapshot/keys'
-import {
-  applyStateDict,
-  buildMountArgs,
-  toStateDict,
-} from '@struktoai/mirage-core/workspace/snapshot/state'
+import { buildMountArgs, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { DiskVFS } from './vfs/disk/disk.ts'
 import { RedisVFS } from './vfs/redis/redis.ts'
 import { buildVfs, registerVfs } from './vfs/registry.ts'
@@ -154,25 +146,7 @@ class ConfigOnlyRAM extends RAMVFS {
 }
 
 async function rootOnLive(live: RAMVFS): Promise<Workspace> {
-  const ws = new Workspace({ '/a': new RAMVFS() }, { mode: MountMode.WRITE })
-  let state: WorkspaceStateDict
-  try {
-    ws.addMount('/x', ws.mount('/').vfs, MountMode.WRITE)
-    state = await toStateDict(ws)
-  } finally {
-    await ws.close()
-  }
-  return Workspace.fromState(state, {}, { '/x': live })
-}
-
-/** Counts the states loaded into it. */
-class CountingRAM extends RAMVFS {
-  loads = 0
-
-  override loadState(state: RAMVFSState): void {
-    this.loads += 1
-    super.loadState(state)
-  }
+  return Workspace.fromState(await savedState({ '/a': new RAMVFS() }), {}, { '/': live })
 }
 
 describe('snapshot rebuild through the registry', () => {
@@ -455,221 +429,32 @@ describe('the write policy in a snapshot', () => {
   })
 })
 
-// One VFS mounted at two prefixes stays one store through a copy or a load:
-// a write through one shows at the other.
-describe('a VFS mounted at several prefixes', () => {
-  it.each([
-    ['ram', 'copy'],
-    ['ram', 'load'],
-    ['disk', 'copy'],
-    ['disk', 'load'],
-  ])('stays one store (%s, %s)', async (backend, route) => {
-    const dir = await mkdtemp(join(tmpdir(), 'mirage-same-vfs-'))
-    try {
-      const vfs = backend === 'ram' ? new RAMVFS() : new DiskVFS({ root: join(dir, 'd') })
-      const ws = new Workspace({ '/a': vfs, '/b': vfs }, { mode: MountMode.WRITE })
-      let restored: Workspace
-      try {
-        expect((await ws.shell('echo old > /a/x')).exitCode).toBe(0)
-        if (route === 'copy') {
-          restored = await ws.copy()
-        } else {
-          await ws.snapshot(join(dir, 's.tar'))
-          restored = await Workspace.load(join(dir, 's.tar'))
-        }
-      } finally {
-        await ws.close()
-      }
-      try {
-        expect(restored.mount('/a/').vfs).toBe(restored.mount('/b/').vfs)
-        expect((await restored.shell('echo hi > /b/x')).exitCode).toBe(0)
-        expect((await restored.shell('cat /a/x')).stdoutText).toBe('hi\n')
-      } finally {
-        await restored.close()
-      }
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  // A registered VFS is rebuilt through the registry once, at the first
-  // prefix, or not at all when an override for any prefix supplies it.
-  it.each([
-    ['no override', false],
-    ['an override at the later prefix', true],
-  ])('rebuilds a registered VFS once (%s)', async (_label, overridden) => {
-    registerVfs('notes-test', () => Promise.resolve(new Notes()))
-    const notes = new Notes({ 'a.md': 'one\n' })
-    const state = await savedState({ '/a': notes, '/b': notes })
-    const standIn = new Notes()
-    const restored = await Workspace.fromState(state, {}, overridden ? { '/b/': standIn } : {})
-    try {
-      const vfs = restored.mount('/a/').vfs
-      expect(vfs).toBeInstanceOf(Notes)
-      expect(restored.mount('/b/').vfs).toBe(vfs)
-      if (overridden) expect(vfs).toBe(standIn)
-    } finally {
-      await restored.close()
-    }
-  })
-
-  it('names the first prefix of its store on every later row', async () => {
-    const shared = new RAMVFS()
-    const state = await savedState({ '/a': shared, '/b': shared, '/c': new RAMVFS() })
-    const rows = Object.fromEntries(state.mounts.map((m) => [m.prefix, m]))
-    expect(rows['/a/']).not.toHaveProperty(MountKey.SAME_VFS_AS)
-    expect(rows['/b/']?.same_vfs_as).toBe('/a/')
-    expect(rows['/c/']).not.toHaveProperty(MountKey.SAME_VFS_AS)
-  })
-
-  // An override for one prefix supplies the store for every prefix of the
-  // group with none of its own, and that prefix then sits on the
-  // override's backend, so it takes the default read policy as the
-  // overridden one does.
-  it.each([
-    ['/a/', '/b/'],
-    ['/b/', '/a/'],
-  ])('takes an override for %s as the store of all', async (named, other) => {
-    const s3 = s3Vfs()
-    const ws = new Workspace(
-      { '/a': s3, '/b': s3 },
-      { mode: MountMode.WRITE, read: { policy: ReadPolicy.FRESH, ttl: 600 } },
-    )
-    let state: WorkspaceStateDict
-    try {
-      state = await toStateDict(ws)
-    } finally {
-      await ws.close()
-    }
-    const standIn = new RAMVFS()
-    const commandLimits = { cat: new Limit({ maxLines: 1 }) }
-    const restored = await Workspace.fromState(
-      state,
-      {},
-      { [named]: new Mount(standIn, { commandLimits }) },
-    )
-    try {
-      expect(restored.mount(other).vfs).toBe(standIn)
-      expect(restored.mount(named).read).toEqual(DEFAULT_READ_SPEC)
-      expect(restored.mount(other).read).toEqual(DEFAULT_READ_SPEC)
-      expect(restored.mount(named).commandLimits.size).toBe(1)
-      expect(restored.mount(other).commandLimits.size).toBe(0)
-    } finally {
-      await restored.close()
-    }
-  })
-
-  it('refuses two overrides for one store that leave the rest ambiguous', async () => {
-    const shared = new RAMVFS()
-    const state = await savedState({ '/a': shared, '/b': shared, '/c': shared })
-    const refused = (): unknown => buildMountArgs(state, { '/a': new RAMVFS(), '/b': new RAMVFS() })
-    expect(refused).toThrow(MountOverrideError)
-    expect(refused).toThrow(
-      'Workspace.load: mounts= gives different VFSs for /a/, /b/, which were saved as one VFS; ' +
-        'override /c/ too, or give them all one VFS',
-    )
-    const same = new RAMVFS()
-    expect(buildMountArgs(state, { '/a': same, '/b': same }).mountArgs['/c/']?.vfs).toBe(same)
-    const split = buildMountArgs(state, {
-      '/a': new RAMVFS(),
-      '/b': new RAMVFS(),
-      '/c': new RAMVFS(),
-    })
-    expect(new Set(['/a/', '/b/', '/c/'].map((p) => split.mountArgs[p]?.vfs)).size).toBe(3)
-  })
-
-  it.each([
-    ['/nope/', '/nope/'],
-    ['/b/', '/b/'],
-    ['/c/', '/c/'],
-    [null, 'null'],
-    [['/a/'], '["/a/"]'],
-  ])('refuses a row naming %j as its VFS', async (target, shown) => {
-    const shared = new RAMVFS()
-    const state = await savedState({ '/a': shared, '/b': shared, '/c': shared })
-    const row = state.mounts.find((m) => m.prefix === '/c/')
-    if (row === undefined) throw new Error('no /c/ row')
-    ;(row as { same_vfs_as?: unknown }).same_vfs_as = target
-    expect(() => buildMountArgs(state)).toThrow(
-      `Workspace.load: mount '/c/' shares the VFS of '${shown}', which no earlier mount ` +
-        `leads; regenerate the snapshot`,
-    )
-  })
-
-  // A checkout loads every saved row into the mount at its prefix, so two
-  // separate live mounts each take the saved VFS's state.
-  it('loads each of two split mounts on a checkout', async () => {
-    const shared = new RAMVFS()
-    const source = new Workspace({ '/a': shared, '/b': shared }, { mode: MountMode.WRITE })
-    let state: WorkspaceStateDict
-    try {
-      expect((await source.shell('echo hi > /a/x')).exitCode).toBe(0)
-      state = await toStateDict(source)
-    } finally {
-      await source.close()
-    }
-    const target = new Workspace(
-      { '/a': new RAMVFS(), '/b': new RAMVFS() },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await applyStateDict(target, state)
-      for (const prefix of ['/a', '/b']) {
-        expect((await target.shell(`cat ${prefix}/x`)).stdoutText).toBe('hi\n')
-      }
-    } finally {
-      await target.close()
-    }
-  })
-
-  // The first saved row of a VFS decides how the load builds it, and every
-  // prefix on one VFS carries the label of what supplied it, so the result
+describe('the scratch root and overrides through a copy or a load', () => {
+  // A bare override of another class carries no saved label, so the result
   // copies and loads again.
   it('gives a bare override of another class no saved label', async () => {
     const slack = await buildVfs('slack', { token: 'xoxb-secret' })
-    const state = await savedState({
-      '/a': new Mount(slack, { vfsRef: 'slack' }),
-      '/b': new Mount(slack, { vfsRef: 'slack' }),
-    })
-    const restored = await Workspace.fromState(state, {}, { '/b/': new RAMVFS() })
+    const state = await savedState({ '/a': new Mount(slack, { vfsRef: 'slack' }) })
+    const restored = await Workspace.fromState(state, {}, { '/a/': new RAMVFS() })
     try {
-      expect(['/a/', '/b/'].map((p) => restored.mount(p).vfsRef)).toEqual([null, null])
+      expect(restored.mount('/a/').vfsRef).toBeNull()
       await (await restored.copy()).close()
     } finally {
       await restored.close()
     }
   })
 
-  it('lets the first row decide a VFS saved under two labels', async () => {
-    registerVfs('seeded-test', () => Promise.resolve(new SeededRAM()))
-    const seeded = new SeededRAM()
-    const state = await savedState({
-      '/a': seeded,
-      '/b': new Mount(seeded, { vfsRef: 'seeded-test' }),
-    })
-    const restored = await Workspace.fromState(state)
-    try {
-      expect(restored.mount('/a/').vfs).toBe(restored.mount('/b/').vfs)
-      expect(['/a/', '/b/'].map((p) => restored.mount(p).vfsRef)).toEqual([null, null])
-    } finally {
-      await restored.close()
-    }
-  })
-
-  // The scratch root nobody mounted stays the anchor; a second prefix on its
-  // VFS comes back on the root the load mounts, not on a store of its own.
-  it.each(['copy', 'load'])('keeps a second prefix on the scratch root (%s)', async (route) => {
+  // The scratch root nobody mounted stays the anchor and keeps its files.
+  it.each(['copy', 'load'])('keeps the scratch root and its files (%s)', async (route) => {
     const ws = new Workspace({ '/a': new RAMVFS() }, { mode: MountMode.WRITE })
     let restored: Workspace
     try {
-      ws.addMount('/x', ws.mount('/').vfs, MountMode.WRITE)
-      expect((await ws.shell('echo hi > /x/f')).exitCode).toBe(0)
+      expect((await ws.shell('echo hi > /f')).exitCode).toBe(0)
       restored = route === 'copy' ? await ws.copy() : await Workspace.load(await ws.snapshot())
     } finally {
       await ws.close()
     }
     try {
-      expect(restored.mount('/x/').vfs).toBe(restored.mount('/').vfs)
       expect((await restored.shell('cat /f')).stdoutText).toBe('hi\n')
       expect(restored.syntheticRoot).toBe(true)
       const root = (await toStateDict(restored)).mounts.find((m) => m.prefix === '/')
@@ -679,14 +464,13 @@ describe('a VFS mounted at several prefixes', () => {
     }
   })
 
-  it('reaches a scratch root shared with another prefix with the copy mode', async () => {
+  it('reaches the scratch root with the copy mode', async () => {
     const ws = new Workspace({ '/a': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
-      ws.addMount('/x', ws.mount('/').vfs, MountMode.WRITE)
       const copy = await ws.copy({ mode: MountMode.READ })
       try {
         expect(copy.mount('/').mode).toBe(MountMode.READ)
-        expect(copy.mount('/x/').mode).toBe(MountMode.WRITE)
+        expect(copy.mount('/a/').mode).toBe(MountMode.WRITE)
       } finally {
         await copy.close()
       }
@@ -695,126 +479,28 @@ describe('a VFS mounted at several prefixes', () => {
     }
   })
 
-  it('loads the state of a VFS saved at two prefixes once', async () => {
-    const shared = new RAMVFS()
-    const state = await savedState({ '/a': shared, '/b': shared })
-    const counting = new CountingRAM()
-    const restored = await Workspace.fromState(state, {}, { '/a': counting })
-    try {
-      expect(counting.loads).toBe(1)
-    } finally {
-      await restored.close()
-    }
-  })
-
-  it('refuses a bad row on a checkout before it drops the cache', async () => {
-    const shared = new RAMVFS()
-    const state = await savedState({ '/a': shared, '/b': shared })
-    const row = state.mounts.find((m) => m.prefix === '/b/')
-    if (row === undefined) throw new Error('no /b/ row')
-    row.same_vfs_as = '/nope/'
-    const target = new Workspace(
-      { '/a': new RAMVFS(), '/b': new RAMVFS() },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      const cache = target.cache as RAMFileCacheStore
-      await cache.set('/a/kept', ENC.encode('kept'))
-      await target.vfsMd('/a/VFS.md')
-      await expect(applyStateDict(target, state, { replaceCache: true })).rejects.toThrow('/nope/')
-      expect(await cache.get('/a/kept')).toEqual(ENC.encode('kept'))
-      expect((await target.shell('cat /a/VFS.md')).exitCode).toBe(0)
-    } finally {
-      await target.close()
-    }
-  })
-
   it('refuses a newer format before it reads the rows', async () => {
-    const shared = new RAMVFS()
-    const state = await savedState({ '/a': shared, '/b': shared })
-    const row = state.mounts[1]
-    if (row === undefined) throw new Error('no second row')
-    row.same_vfs_as = '/nope/'
+    let built = 0
+    registerVfs('notes-test', () => {
+      built += 1
+      return Promise.resolve(new Notes())
+    })
+    const state = await savedState({ '/a': new Notes() })
     await expect(Workspace.fromState({ ...state, version: 999 })).rejects.toThrow(
       'snapshot format v999',
     )
-  })
-
-  // A copy hands back the live VFSs it shares, the scratch root's among them,
-  // and the root stays the scratch root.
-  it('keeps a shared scratch root the scratch root through a copy', async () => {
-    const loaded = await rootOnLive(new LiveRAM())
-    try {
-      const copied = await loaded.copy()
-      try {
-        expect(copied.mount('/').vfs).toBe(loaded.mount('/x/').vfs)
-        expect(copied.syntheticRoot).toBe(true)
-      } finally {
-        await copied.close()
-      }
-    } finally {
-      await loaded.close()
-    }
-  })
-
-  it('keeps the label of a VFS rebuilt through it', async () => {
-    registerVfs('notes-test', () => Promise.resolve(new Notes()))
-    const seeded = new SeededRAM()
-    const state = await savedState({
-      '/a': new Mount(seeded, { vfsRef: 'notes-test' }),
-      '/b': new Mount(seeded, { vfsRef: 'notes-test' }),
-    })
-    const restored = await Workspace.fromState(state)
-    try {
-      expect(restored.mount('/a/').vfs).toBeInstanceOf(Notes)
-      expect(['/a/', '/b/'].map((p) => restored.mount(p).vfsRef)).toEqual([
-        'notes-test',
-        'notes-test',
-      ])
-    } finally {
-      await restored.close()
-    }
-  })
-
-  it('names each saved VFS once when an override is missing', async () => {
-    const slack = await buildVfs('slack', { token: 'xoxb-secret' })
-    const state = await savedState({ '/a': slack, '/b': slack })
-    expect(() => buildMountArgs(state)).toThrow('must include overrides for: /a/. ')
-  })
-
-  it('loads each of two saved VFSs into one live VFS', async () => {
-    const source = new Workspace(
-      { '/a': new RAMVFS(), '/b': new RAMVFS() },
-      { mode: MountMode.WRITE },
-    )
-    let state: WorkspaceStateDict
-    try {
-      expect((await source.shell('echo one > /a/f')).exitCode).toBe(0)
-      expect((await source.shell('echo two > /b/f')).exitCode).toBe(0)
-      state = await toStateDict(source)
-    } finally {
-      await source.close()
-    }
-    const counting = new CountingRAM()
-    const restored = await Workspace.fromState(state, {}, { '/a': counting, '/b': counting })
-    try {
-      expect(counting.loads).toBe(2)
-      expect((await restored.shell('cat /a/f')).stdoutText).toBe('two\n')
-    } finally {
-      await restored.close()
-    }
+    expect(built).toBe(0)
   })
 
   // The scratch root is restored like any other prefix: a copy hands back
-  // the live VFS it sits on, alone or not, and it stays the scratch root.
+  // the live VFS it sits on, and it stays the scratch root.
   it.each([
     ['LiveRAM', () => new LiveRAM()],
     ['ConfigOnlyRAM', () => new ConfigOnlyRAM()],
   ])('shares a scratch root left alone on a live VFS through a copy (%s)', async (_n, live) => {
     const loaded = await rootOnLive(live())
     try {
-      expect((await loaded.shell('echo hi > /x/f')).exitCode).toBe(0)
-      await loaded.unmount('/x')
+      expect((await loaded.shell('echo hi > /f')).exitCode).toBe(0)
       const copied = await loaded.copy()
       try {
         expect(copied.mount('/').vfs).toBe(loaded.mount('/').vfs)
@@ -832,7 +518,6 @@ describe('a VFS mounted at several prefixes', () => {
     const loaded = await rootOnLive(new LiveRAM())
     let state: WorkspaceStateDict
     try {
-      await loaded.unmount('/x')
       state = await toStateDict(loaded)
     } finally {
       await loaded.close()
@@ -852,15 +537,6 @@ describe('a VFS mounted at several prefixes', () => {
     } finally {
       await restored.close()
     }
-  })
-
-  it('refuses a number even when it names a mount', async () => {
-    const shared = new RAMVFS()
-    const state = await savedState({ '/5': shared, '/b': shared })
-    const row = state.mounts.find((m) => m.prefix === '/b/')
-    if (row === undefined) throw new Error('no /b/ row')
-    ;(row as { same_vfs_as?: unknown }).same_vfs_as = 5
-    expect(() => buildMountArgs(state)).toThrow("shares the VFS of '5'")
   })
 
   // A scratch root takes the workspace's index, as the root a workspace adds
@@ -911,20 +587,6 @@ describe('a VFS mounted at several prefixes', () => {
     expect(buildMountArgs(state).anchored).toBeUndefined()
   })
 
-  // A VFS shared by several prefixes runs one index, the first prefix's, so
-  // an override's index serves every prefix and none asks for credentials.
-  it.each(['/a/', '/b/'])(
-    "serves every prefix of a VFS with an override's index (%s)",
-    async (named) => {
-      const shared = new RAMVFS()
-      const redis = { type: 'redis' as const, url: 'redis://u:pw@localhost:6379/0', ttl: 30 }
-      const state = await savedState({ '/a': new Mount(shared, { index: redis }), '/b': shared })
-      const fresh = { type: 'ram' as const, ttl: 5 }
-      const args = buildMountArgs(state, { [named]: new Mount(new RAMVFS(), { index: fresh }) })
-      expect(args.mountArgs['/a/']?.options.index?.ttl).toBe(5)
-    },
-  )
-
   it("keeps a scratch root's own index equal to the workspace's through a copy", async () => {
     const index = { type: 'ram' as const, ttl: 41 }
     const state = await savedState({ '/a': new RAMVFS() })
@@ -944,23 +606,4 @@ describe('a VFS mounted at several prefixes', () => {
       await loaded.close()
     }
   })
-
-  it.each([[['/a/', '/b/']], [['/b/', '/a/']]])(
-    "takes the first saved prefix's override index (%j)",
-    async (order) => {
-      const shared = new RAMVFS()
-      const state = await savedState({ '/a': shared, '/b': shared })
-      const live = new RAMVFS()
-      const given: Record<string, Mount> = {
-        '/a/': new Mount(live, { index: { type: 'ram', ttl: 600 } }),
-        '/b/': new Mount(live, { index: { type: 'ram', ttl: 1 } }),
-      }
-      const overrides: Record<string, Mount> = {}
-      for (const p of order) {
-        const mount = given[p]
-        if (mount !== undefined) overrides[p] = mount
-      }
-      expect(buildMountArgs(state, overrides).mountArgs['/a/']?.options.index?.ttl).toBe(600)
-    },
-  )
 })

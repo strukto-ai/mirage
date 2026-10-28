@@ -2837,33 +2837,6 @@ def test_add_mount_carries_the_read_spec_onto_the_entry():
     asyncio.run(ws.close())
 
 
-def test_add_mount_keeps_a_shared_vfs_open_until_its_last_unmount():
-    closed = []
-
-    class TrackingRAM(RAMVFS):
-        async def close(self):
-            closed.append("closed")
-
-    vfs = TrackingRAM()
-    ws = Workspace({})
-    ws.add_mount("/a", vfs, MountMode.WRITE)
-    ws.add_mount("/b", vfs, MountMode.WRITE)
-
-    async def run():
-        try:
-            await ws.vfs.write("/a/file.txt", b"shared")
-            await ws.unmount("/a")
-            assert closed == []
-            assert await ws.vfs.read("/b/file.txt") == b"shared"
-            await ws.unmount("/b")
-            assert closed == ["closed"]
-        finally:
-            await ws.close()
-        assert closed == ["closed"]
-
-    asyncio.run(run())
-
-
 @pytest.mark.parametrize("explicit_root", [False, True])
 def test_unmount_preserves_root_operations(explicit_root):
     mounts = {"/data": RAMVFS()}

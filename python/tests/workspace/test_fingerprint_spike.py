@@ -814,7 +814,6 @@ def _s3(bucket: str) -> S3VFS:
 _SHAPES = {
     "siblings": ("/a", "/b", "grep -r v /a/ /b/"),
     "nested": ("/x", "/x/y", "grep -r v /x/"),
-    "shared-vfs": ("/a", "/b", "grep -r v /a/ /b/"),
 }
 
 
@@ -836,11 +835,10 @@ def test_one_line_serves_each_mount_under_its_own_policy(
 
     Every axis separates a wrong implementation the others let pass.
     `shape` reaches both executor paths (`siblings` goes through the
-    cross-mount handler, `nested` through the traversal fan-out) and
-    `shared-vfs` puts one VFS instance under both prefixes, the only
-    shape a policy keyed by VFS rather than by mount fails. The mount
-    whose policy equals `default` inherits it, so a policy read from the
-    workspace is wrong on the other leg whichever way `default` points.
+    cross-mount handler, `nested` through the traversal fan-out). The
+    mount whose policy equals `default` inherits it, so a policy read
+    from the workspace is wrong on the other leg whichever way `default`
+    points.
     `fresh_side` matters because a manager leaking from the first leg
     into the second leaves the bytes right when the bounded leg runs
     first; only the fresh leg's missing probe shows it.
@@ -862,7 +860,7 @@ def test_one_line_serves_each_mount_under_its_own_policy(
     )
     client = session._client
     fresh_vfs = _s3("fresh-bkt")
-    bounded_vfs = fresh_vfs if shape == "shared-vfs" else _s3("bounded-bkt")
+    bounded_vfs = _s3("bounded-bkt")
 
     def mount(vfs: S3VFS, read: ReadSpec) -> Mount:
         if read.policy is default:
@@ -938,7 +936,6 @@ def test_one_line_serves_each_mount_under_its_own_policy(
         "the bounded leg must send nothing; a probe or a refetch "
         "here means the fresh mount's policy reached it"
     )
-    # One bucket in shared-vfs, so this is the whole line's cost there.
     assert {k: n for k, n in line_calls.items() if k[1] == "fresh-bkt"} == {
         ("list_objects_v2", "fresh-bkt"): 1,
         ("head_object", "fresh-bkt"): 1,

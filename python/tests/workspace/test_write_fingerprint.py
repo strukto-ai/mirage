@@ -521,29 +521,6 @@ def _config(bucket: str) -> S3Config:
     )
 
 
-def test_a_write_drops_what_another_mount_of_the_store_holds():
-    # One store mounted at two prefixes holds one file under two names,
-    # so the second write leaves no copy of the first under either.
-    session = MultiBucketSession({"test-bucket": {}}, etag_suffix=SUFFIX)
-    with patch_s3_session(session):
-        vfs = S3VFS(_config("test-bucket"))
-        ws = Workspace(
-            {"/a": (vfs, MountMode.WRITE), "/b": (vfs, MountMode.WRITE)},
-            mode=MountMode.WRITE,
-            read=ReadSpec(policy=ReadPolicy.BOUNDED),
-        )
-
-        async def run() -> bytes:
-            try:
-                await ws.vfs.write("/a/f", b"one")
-                await ws.vfs.write("/b/f", b"two")
-                return await ws.vfs.read("/a/f")
-            finally:
-                await ws.close()
-
-        assert asyncio.run(run()) == b"two"
-
-
 def test_a_write_keeps_nothing_for_a_name_a_new_mount_took():
     # A mount added and readied (its cache cleared) while the write runs
     # owns the name by the time the bytes would be kept, so the next read
@@ -575,37 +552,6 @@ def test_a_write_keeps_nothing_for_a_name_a_new_mount_took():
                 await ws.close()
 
         assert asyncio.run(run()) == b"child"
-
-
-def test_a_write_leaves_a_name_another_mount_holds():
-    # /b/c is its own mount, so a write to /a/c/f through the store at /a
-    # and /b is not the file at /b/c/f and leaves its saved time alone.
-    session = MultiBucketSession(
-        {"test-bucket": {}, "child-bucket": {"f": b"x"}}, etag_suffix=SUFFIX
-    )
-    with patch_s3_session(session):
-        vfs = S3VFS(_config("test-bucket"))
-        ws = Workspace(
-            {
-                "/a": (vfs, MountMode.WRITE),
-                "/b": (vfs, MountMode.WRITE),
-                "/b/c": (S3VFS(_config("child-bucket")), MountMode.WRITE),
-            },
-            mode=MountMode.WRITE,
-            read=ReadSpec(policy=ReadPolicy.BOUNDED),
-        )
-
-        async def run() -> bytes:
-            try:
-                io = await ws.shell("touch -d '2001-02-03 04:05:06' /b/c/f")
-                await io.materialize_stdout()
-                await ws.vfs.write("/a/c/f", b"y")
-                io = await ws.shell("stat -c %y /b/c/f")
-                return await io.materialize_stdout()
-            finally:
-                await ws.close()
-
-        assert asyncio.run(run()).startswith(b"2001-02-03 04:05:06")
 
 
 def test_an_append_extends_the_copy_the_rewrite_proves():

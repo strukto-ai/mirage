@@ -37,8 +37,6 @@ export interface MountSnapshot {
   anchor?: true
   // The mount's own command limits, its "@all" walk_limit among them.
   command_limits?: Record<string, unknown>
-  // The first prefix mounting the same VFS, on every later one.
-  same_vfs_as?: string
 }
 
 export interface CacheEntrySnapshot {

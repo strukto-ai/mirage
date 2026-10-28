@@ -1860,32 +1860,6 @@ describe('dispatch runs writers to one path one at a time', () => {
       await ws.close()
     }
   })
-
-  it('holds one store mounted twice as one file', async () => {
-    // The same store under two names: one writer at a time by the store's
-    // own key, not by the name. Mirrors python's
-    // test_offset_writes_through_two_mounts_of_one_store_all_land.
-    const store = new SplicingRAMVFS()
-    const ws = new Workspace({ '/a': store, '/b': store }, { mode: MountMode.WRITE })
-    try {
-      await ws.dispatch('write', '/a/f', [ENC.encode('0123456789')])
-      await Promise.all(
-        (
-          [
-            ['/a/f', 'A', 0],
-            ['/b/f', 'B', 3],
-            ['/a/f', 'C', 6],
-            ['/b/f', 'D', 9],
-          ] as const
-        ).map(([name, letter, offset]) =>
-          ws.dispatch('pwrite', name, [ENC.encode(letter), offset]),
-        ),
-      )
-      expect(DEC.decode((await ws.dispatch('read', '/b/f')) as Uint8Array)).toBe('A12B45C78D')
-    } finally {
-      await ws.close()
-    }
-  })
 })
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
@@ -3345,28 +3319,6 @@ describe('a hide filters a one-call read', () => {
       const result = await ws.shell('outer')
       expect(new TextDecoder().decode(result.stderr)).toBe(
         'chmod: more than 2 files in scope (walk_limit); narrow the path\n',
-      )
-    } finally {
-      await ws.close()
-    }
-  })
-
-  // Twin of test_two_mounts_of_one_vfs_settle_on_one_walk_limit.
-  it('settles two mounts of one VFS on one walk limit', async () => {
-    const capped = { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }
-    const lone = limited(RAMVFS, 3)
-    expect(() => new Workspace({ '/a': [lone, MountMode.READ, capped], '/b': lone })).toThrow(
-      "mount /a/: walk_limit 2 differs from /b/'s 10000 on the same VFS",
-    )
-    const vfs = limited(RAMVFS, 3)
-    const ws = new Workspace({
-      '/a': [vfs, MountMode.READ, capped],
-      '/b': [vfs, MountMode.READ, capped],
-    })
-    try {
-      const result = await ws.shell('ls -R /b/d')
-      expect(new TextDecoder().decode(result.stderr)).toBe(
-        'ls: /b/d: stopped after 2 files (walk_limit); narrow the path\n',
       )
     } finally {
       await ws.close()

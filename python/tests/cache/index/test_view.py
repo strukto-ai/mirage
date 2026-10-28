@@ -58,7 +58,6 @@ async def test_late_index_write_cannot_cross_mount_ownership(
     vfs = RAMVFS()
     prefix = "/" if shadow else "/data"
     ws = Workspace({prefix: vfs}, index=config)
-    ws.add_mount("/alias", vfs)
     index = ws.mount(prefix).index_store
     entry = FileStat(name="stale", type=FileType.FILE, fingerprint="old")
     entered = asyncio.Event()
@@ -98,8 +97,13 @@ async def test_late_index_write_cannot_cross_mount_ownership(
         if phase == "store":
             assert not changing.done()
             release.set()
-        await asyncio.wait_for(changing, timeout=5)
-        if not shadow:
+        if shadow:
+            await asyncio.wait_for(changing, timeout=5)
+        else:
+            # The unmount frees the prefix before the read lets it close.
+            async with asyncio.timeout(5):
+                while ws._registry.try_mount_for_prefix("/data") is not None:
+                    await asyncio.sleep(0)
             ws.add_mount("/data", replacement)
             await ws.vfs.readdir("/data")
         replaced = ws.mount("/data").index_store
@@ -107,6 +111,7 @@ async def test_late_index_write_cannot_cross_mount_ownership(
         await replaced.put("/data/fresh", fresh)
         release.set()
         await asyncio.wait_for(reading, timeout=5)
+        await asyncio.wait_for(changing, timeout=5)
         for candidate in (index, replaced):
             assert (
                 await candidate.get("/data/stale")

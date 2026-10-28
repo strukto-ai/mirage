@@ -1394,15 +1394,15 @@ export class Workspace {
    * does: a mount added here is no more able to declare a policy its
    * backend cannot honour than one declared in config.
    *
-   * `index` is the mount's own index; left out, the workspace's. A VFS
-   * already mounted elsewhere keeps the index of that mount, as in the
-   * constructor, and this one goes unused -- though a typo in it is still
-   * refused, before the read policy is judged.
+   * `index` is the mount's own index; left out, the workspace's.
    *
    * `write` is the mount's write policy; left out or null, the workspace
    * default, as Python's None.
    * It is judged on the mount's mode and on whether the cache keeps
    * anything, as the constructor does.
+   *
+   * @throws SharedStorageError when the VFS, or a disk on the same folder, is
+   *   already mounted.
    */
   addMount(
     prefix: string,
@@ -1417,9 +1417,7 @@ export class Workspace {
     const own = index === undefined ? this.indexConfig : normalizeIndexConfig(index)
     this.registry.checkVfsAvailable(vfs)
     const resolvedRead = read ?? this.readDefault
-    // An alias keeps the index of the VFS's other mount.
-    const alias = this.registry.allMounts().find((m) => m.vfs === vfs)
-    checkReadCapability(prefix, vfs, resolvedRead, alias !== undefined ? alias.indexConfig : own)
+    checkReadCapability(prefix, vfs, resolvedRead, own)
     const resolvedWrite = write == null ? this.writeDefault : coerceWritePolicy(write)
     checkWriteCapability(
       prefix,
@@ -1446,8 +1444,8 @@ export class Workspace {
   }
 
   /**
-   * Remove a mount by prefix. Closes the owned VFS when its last alias
-   * leaves, including mounts used without an explicit open. Drops cache entries under the
+   * Remove a mount by prefix. Closes the owned VFS, including mounts used
+   * without an explicit open. Drops cache entries under the
    * unmounted prefix. Forbidden prefixes: cache root, history view, /dev/.
    * Waits for admitted calls and returned streams before closing the VFS.
    * Callers must consume or close streams; closed instances cannot be remounted.

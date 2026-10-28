@@ -34,6 +34,14 @@ class RootedVFS extends BaseVFS {
   }
 }
 
+// Two instances naming one store, the way two redis mounts on one keyspace do.
+class SharedStoreVFS extends BaseVFS {
+  override readonly name = 'ram'
+  override storageLocation(): string {
+    return 'ram:shared'
+  }
+}
+
 const spec = (virtual: string): PathSpec =>
   new PathSpec({
     virtual,
@@ -45,20 +53,9 @@ const keyFor = (mounts: Record<string, BaseVFS>): ((p: PathSpec) => string) =>
   makeStorageKey(new MountRegistry(mounts, MountMode.WRITE))
 
 describe('makeStorageKey', () => {
-  it('treats one VFS at two prefixes as one storage (#154)', () => {
-    const shared = new StoreVFS()
-    const key = keyFor({ '/m1': shared, '/m2': shared })
-    expect(key(spec('/m1/x.txt'))).toBe(key(spec('/m2/x.txt')))
-  })
-
   it('keeps distinct mounts distinct so a real move still works', () => {
     const key = keyFor({ '/m1': new StoreVFS(), '/m2': new StoreVFS() })
     expect(key(spec('/m1/x.txt'))).not.toBe(key(spec('/m2/x.txt')))
-  })
-
-  it('uses the config identity, so two instances on one root match', () => {
-    const key = keyFor({ '/d1': new RootedVFS('/tmp/r'), '/d2': new RootedVFS('/tmp/r') })
-    expect(key(spec('/d1/x.txt'))).toBe(key(spec('/d2/x.txt')))
   })
 
   it('keeps different roots separate', () => {
@@ -66,15 +63,8 @@ describe('makeStorageKey', () => {
     expect(key(spec('/d1/x.txt'))).not.toBe(key(spec('/d2/x.txt')))
   })
 
-  it('keeps distinct paths in one storage distinct', () => {
-    const shared = new StoreVFS()
-    const key = keyFor({ '/m1': shared, '/m2': shared })
-    expect(key(spec('/m1/x.txt'))).not.toBe(key(spec('/m2/other.txt')))
-  })
-
   it('preserves the ancestor boundary cp/mv test with startsWith(key + "/")', () => {
-    const shared = new StoreVFS()
-    const key = keyFor({ '/m1': shared, '/m2': shared })
+    const key = keyFor({ '/m1': new SharedStoreVFS(), '/m2': new SharedStoreVFS() })
     expect(key(spec('/m2/dir/sub')).startsWith(`${key(spec('/m1/dir'))}/`)).toBe(true)
     expect(key(spec('/m2/dirty')).startsWith(`${key(spec('/m1/dir'))}/`)).toBe(false)
   })

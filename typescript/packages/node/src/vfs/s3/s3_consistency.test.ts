@@ -374,7 +374,6 @@ describe('S3 cache consistency (mocked)', () => {
   const SHAPES = {
     siblings: ['/a', '/b', 'grep -r v /a/ /b/'],
     nested: ['/x', '/x/y', 'grep -r v /x/'],
-    'shared-vfs': ['/a', '/b', 'grep -r v /a/ /b/'],
   } as const
   const GRID = Object.keys(SHAPES).flatMap((shape) =>
     (['first', 'second'] as const).flatMap((freshSide) =>
@@ -391,8 +390,7 @@ describe('S3 cache consistency (mocked)', () => {
       mock.store.set('fresh-bkt', 'f.txt', ENC.encode('v1\n'))
       mock.store.set('bounded-bkt', 'f.txt', ENC.encode('v1\n'))
       const freshVfs = new S3VFS({ ...makeConfig(), bucket: 'fresh-bkt' })
-      const boundedVfs =
-        shape === 'shared-vfs' ? freshVfs : new S3VFS({ ...makeConfig(), bucket: 'bounded-bkt' })
+      const boundedVfs = new S3VFS({ ...makeConfig(), bucket: 'bounded-bkt' })
       const mount = (vfs: S3VFS, read: ReadSpec): Mount =>
         read.policy === fallback
           ? new Mount(vfs, { mode: MountMode.WRITE })

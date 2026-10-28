@@ -234,12 +234,13 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
             for task in list(deps.registry.retiring_mounts.values())
         )
     )
-    mounts = {
-        id(mount.vfs): mount.vfs
-        for mount in deps.registry.mounts()
-        if id(mount.vfs) not in deps.shared_mounts
-    }
-    await settle(*(vfs.close() for vfs in mounts.values()))
+    await settle(
+        *(
+            mount.vfs.close()
+            for mount in deps.registry.mounts()
+            if id(mount.vfs) not in deps.shared_mounts
+        )
+    )
     stores = {
         id(mount.index_store): mount.index_store
         for mount in deps.registry.mounts()

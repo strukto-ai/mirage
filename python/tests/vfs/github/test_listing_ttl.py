@@ -363,10 +363,11 @@ async def test_the_first_reader_after_the_ttl_sees_the_remote_change(
 
 
 @pytest.mark.asyncio
-async def test_two_prefixes_over_one_vfs_keep_their_own_bound():
+async def test_two_mounts_of_one_repo_keep_their_own_bound():
     with serve(_hub()) as hub:
-        vfs = _vfs(hub)
-        ws = Workspace({"/a": _mount(vfs, ttl=1), "/b": _mount(vfs, ttl=600)})
+        ws = Workspace(
+            {"/a": _mount(_vfs(hub), ttl=1), "/b": _mount(_vfs(hub), ttl=600)}
+        )
         try:
             assert await _out(ws, "ls /a/docs") == LISTED
             assert await _out(ws, "ls /b/docs") == LISTED
@@ -653,30 +654,5 @@ async def test_a_complete_tree_walk_still_reads_the_tree():
             hub.log.clear()
             await _out(ws, "find /gh")
             assert hub.counts() == (1, 0, 0)
-        finally:
-            await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_fresh_tree_refill_preserves_nested_shared_index():
-    with serve(_hub()) as hub:
-        vfs = _vfs(hub)
-        ws = Workspace(
-            {
-                "/gh": _mount(vfs, ReadPolicy.FRESH, 600),
-                "/gh/sub/nested": _mount(vfs, ReadPolicy.FRESH, 600),
-            }
-        )
-        try:
-            await _out(ws, "ls /gh")
-            await _out(ws, "ls /gh/sub/nested")
-            index = ws.mount("/gh").index_store
-            before = await index.list_dir("/gh/sub/nested")
-            assert before.entries
-            await _out(ws, "ls /gh")
-            assert (
-                await index.list_dir("/gh/sub/nested")
-            ).entries == before.entries
-            assert (await index.get(before.entries[0])).entry is not None
         finally:
             await ws.close()

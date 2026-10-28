@@ -469,17 +469,11 @@ it.each(['gate', 'shell'])('reconciles GitHub IDs before the %s reread', async (
   }
 })
 
-it.each([
-  [false, false],
-  [false, true],
-  [true, false],
-  [true, true],
-])(
-  're-list preserves a nested mount subtree (shared=%s, replacement=%s)',
-  async (shared, replacement) => {
-    const parent = new RAMVFS()
+it.each([false, true])(
+  're-list preserves a nested mount subtree (replacement=%s)',
+  async (replacement) => {
     const ws = new Workspace(
-      { '/data': parent, '/data/sub/nested': shared ? parent : new RAMVFS() },
+      { '/data': new RAMVFS(), '/data/sub/nested': new RAMVFS() },
       { index: { ttl: 600 } },
     )
     try {

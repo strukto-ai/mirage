@@ -207,27 +207,12 @@ describe('CacheManager', () => {
     expect((await index.listDir('/a')).entries ?? null).toBeNull()
   })
 
-  it("drops this mount's and its aliases' bodies without touching a neighbour, and expires its listings", async () => {
+  it("drops this mount's bodies without touching a neighbour, and expires its listings", async () => {
     const [cache, index] = await seeded()
-    await cache.set('/mirror/arch/h.txt', new TextEncoder().encode('same'))
     await cache.set('/other/keep.txt', new TextEncoder().encode('safe'))
-    const aliases = (): CacheManager[] => [new CacheManager(cache, index, '/mirror/', true)]
-    const none = undefined
-    const manager = new CacheManager(
-      cache,
-      index,
-      '/data/',
-      true,
-      none,
-      none,
-      none,
-      none,
-      none,
-      aliases,
-    )
+    const manager = new CacheManager(cache, index, '/data/', true)
     await manager.drop()
     expect(await cache.exists('/data/arch/h.txt')).toBe(false)
-    expect(await cache.exists('/mirror/arch/h.txt')).toBe(false)
     expect(await cache.exists('/other/keep.txt')).toBe(true)
     // Expired, not cleared: a backend whose index is its listing can tell the
     // drop from an empty folder.

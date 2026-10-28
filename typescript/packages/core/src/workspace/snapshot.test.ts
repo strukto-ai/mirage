@@ -68,12 +68,10 @@ afterAll(() => {
   rmSync(tempDir, { recursive: true, force: true })
 })
 
-it('preserves effective mount index settings and aliases through snapshots', async () => {
-  const driver = new RAMVFS()
+it('preserves effective mount index settings through snapshots', async () => {
   const ws = new Workspace(
     {
-      '/first': new Mount(driver, { index: { ttl: 37 } }),
-      '/alias': new Mount(driver, { index: { ttl: 99 } }),
+      '/first': new Mount(new RAMVFS(), { index: { ttl: 37 } }),
       '/default': new RAMVFS(),
     },
     { index: { ttl: 73 } },
@@ -82,7 +80,7 @@ it('preserves effective mount index settings and aliases through snapshots', asy
     const restored = await Workspace.fromState(await toStateDict(ws), {})
     try {
       for (const entry of restored.mounts()) {
-        if (['/first/', '/alias/', '/default/'].includes(entry.prefix)) {
+        if (['/first/', '/default/'].includes(entry.prefix)) {
           const ttl = entry.prefix === '/default/' ? 73 : 37
           expect(entry.indexConfig?.ttl).toBe(ttl)
           expect(entry.indexStore.ttl).toBe(ttl)
@@ -1399,20 +1397,17 @@ it('copy preserves live Box mount policy and provenance', async () => {
       read: { policy: ReadPolicy.FRESH, ttl: 45 },
       vfsRef: 'box',
     }),
-    '/alias': new Mount(vfs, { read: { policy: ReadPolicy.BOUNDED, ttl: 75 }, vfsRef: 'box' }),
   })
   const clone = await ws.copy()
   try {
-    for (const prefix of ['/box', '/alias']) {
-      const original = ws.mount(prefix)
-      const copied = clone.mount(prefix)
-      expect(copied.read).toEqual(original.read)
-      expect(copied.mode).toBe(original.mode)
-      expect(copied.vfsRef).toBe('box')
-      expect(copied.vfs).toBe(original.vfs)
-      expect(copied.indexStore).not.toBe(original.indexStore)
-      expect(copied.cacheManager).not.toBe(original.cacheManager)
-    }
+    const original = ws.mount('/box')
+    const copied = clone.mount('/box')
+    expect(copied.read).toEqual(original.read)
+    expect(copied.mode).toBe(original.mode)
+    expect(copied.vfsRef).toBe('box')
+    expect(copied.vfs).toBe(original.vfs)
+    expect(copied.indexStore).not.toBe(original.indexStore)
+    expect(copied.cacheManager).not.toBe(original.cacheManager)
   } finally {
     await clone.close()
     await ws.close()
