@@ -314,7 +314,6 @@ describe('an operator token where bash reads a word', () => {
 
   it.each([
     ['[[ a == b ]]', '=='],
-    ['[ a =~ b ]', '=~'],
     ['(( 1 == 1 ))', '=='],
   ])('keeps the operator inside %j an operator', (line, operator) => {
     const expression = parse(line).namedChildren[0]?.namedChildren[0]
@@ -329,9 +328,9 @@ function nodesOf(node: TSNodeLike, kind: string): TSNodeLike[] {
   return found
 }
 
-describe('a [ that bash reads as a command', () => {
-  // `[` is a command to bash: its words stop at a list or pipe operator and
-  // need a `]` of their own, where the grammar builds a test anyway.
+describe('a [ is a command', () => {
+  // `[` is a command to bash: its words stop at a list or pipe operator,
+  // need a `]` of their own, and reach test whole.
   it.each([
     [
       '[ a && b ]',
@@ -358,26 +357,23 @@ describe('a [ that bash reads as a command', () => {
     ],
     ['[ c', [['[', 'c']]],
     ['[ \\( a \\) ]', [['[', '\\(', 'a', '\\)', ']']]],
+    [
+      '[ a ] && [ b ]',
+      [
+        ['[', 'a', ']'],
+        ['[', 'b', ']'],
+      ],
+    ],
+    ['[ ! --x ]', [['[', '!', '--x', ']']]],
+    ['[ -1 -lt 2 -a ~x ]', [['[', '-1', '-lt', '2', '-a', '~x', ']']]],
+    ['( [ a ])', [['[', 'a', ']']]],
+    ['[ ]', [['[', ']']]],
   ])('parses %j as plain commands', (line, commands) => {
     const root = parse(line)
     expect(root.error).toBeNull()
     expect(nodesOf(root, NT.COMMAND).map((c) => getParts(c).map((p) => getText(p)))).toEqual(
       commands,
     )
-  })
-
-  it.each([
-    '[ a ] && [ b ]',
-    '[ a -a b ]',
-    '[ "a && b" ]',
-    '[ a ]>/dev/null',
-    '( [ a ])',
-    '[ ! a ]',
-  ])('keeps %j a test', (line) => {
-    const root = parse(line)
-    expect(nodesOf(root, NT.TEST_COMMAND).length).toBeGreaterThan(0)
-    const heads = nodesOf(root, NT.COMMAND).map((c) => getParts(c).map((p) => getText(p))[0])
-    expect(heads).not.toContain('[')
   })
 })
 

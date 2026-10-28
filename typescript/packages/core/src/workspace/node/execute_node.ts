@@ -100,7 +100,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 
 import { ExecutionNode } from '../types.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
-import { expandDoubleBracket, expandTestExpr } from './test_expr.ts'
+import { expandDoubleBracket } from './test_expr.ts'
 import { executeProgram } from './program.ts'
 import { installExecRedirects } from '../executor/builtins/exec/index.ts'
 import { executeCommand } from './command_dispatch.ts'
@@ -1503,27 +1503,14 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.TEST) {
-    const opener = node.children[0]?.type ?? '['
-    // The shell's own test, which no command gate admits: it is admitted by
+    // The shell's own `[[`, which no command gate admits: it is admitted by
     // its own name on what it tests.
     const signal = mergeSignals(deps.signal, context.frame.abortSignal)
     const claimant = claimantFor(node, deps.handed)
     const admitted = (words: string[]): Promise<Admitted> =>
-      admitTest(
-        opener === '[[' ? '[[' : '[',
-        words,
-        session,
-        registry,
-        deps.namespace,
-        signal,
-        claimant,
-      )
-    if (opener === '[[') {
-      const tree = await expandDoubleBracket(node, context, executeFn, callStack, view)
-      return handleTest(dispatch, deps.namespace, tree, session, '[[', view, admitted, signal)
-    }
-    const expanded = await expandTestExpr(node, context, executeFn, callStack, view)
-    return handleTest(dispatch, deps.namespace, expanded, session, '[', view, admitted)
+      admitTest('[[', words, session, registry, deps.namespace, signal, claimant)
+    const tree = await expandDoubleBracket(node, context, executeFn, callStack, view)
+    return handleTest(dispatch, deps.namespace, tree, session, '[[', view, admitted, signal)
   }
 
   if (kind === NodeKind.NEGATED) {

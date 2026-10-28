@@ -12,15 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.shell.helpers import get_text
 from mirage.shell.parse import parse
 from mirage.shell.types import NodeType as NT
 from mirage.workspace.node.test_tokens import (
     CondParser,
-    ExprToken,
     cond_leaves,
     cond_tokens,
-    flat_tokens,
 )
 
 
@@ -32,26 +29,6 @@ def _test_node(line: str):
             return node
         stack.extend(reversed(node.children))
     raise AssertionError(f"no test in {line!r}")
-
-
-def _spelled(token: ExprToken) -> str:
-    if token.op is not None:
-        return token.op
-    return ("-" if token.negative else "") + get_text(token.operand)
-
-
-def test_flat_tokens_are_the_words_test_is_given():
-    # A `-N` the parser splits is one operand again, as test reads it.
-    node = _test_node("[ -e x -o ! 1 -lt -2 ]")
-    assert [_spelled(t) for t in flat_tokens(node)] == [
-        "-e",
-        "x",
-        "-o",
-        "!",
-        "1",
-        "-lt",
-        "-2",
-    ]
 
 
 def test_cond_leaves_are_each_test_in_source_order():

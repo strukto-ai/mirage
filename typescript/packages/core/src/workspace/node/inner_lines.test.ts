@@ -150,8 +150,6 @@ describe('innerLines', () => {
 
 describe('readsOfTest', () => {
   it.each<[string, [string[], boolean][]]>([
-    ['[ -e /x ]', [[['[', '-e', '/x', ']'], true]]],
-    ['[ 1 -lt -2 ]', [[['[', '1', '-lt', '-2', ']'], true]]],
     [
       '[[ ! -e /x && a == b* ]]',
       [

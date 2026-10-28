@@ -806,7 +806,7 @@
       }
     },
     {
-      "id": "tst_unsupported_op",
+      "id": "tst_socket_op",
       "seq": 502623,
       "targets": [
         "ram",
@@ -836,8 +836,8 @@
       "command": "[ -S /data/a.txt ]; echo $?",
       "expect": {
         "exit": 0,
-        "stdout": "2\n",
-        "stderr": "bash: [: -S: unsupported operator\n"
+        "stdout": "1\n",
+        "stderr": ""
       }
     },
     {
@@ -1852,6 +1852,111 @@
       "expect": {
         "exit": 0,
         "stdout": "y\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tst_bracket_words_reach_test_whole",
+      "seq": 18500018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "[ --x ] && echo a; [ x = --x ]; echo $?; [ -n --x ]; echo $?; [ ! --x ]; echo $?; [ -1 -lt 2 -a ~x ]; echo $?; [ ]; echo $?; printf '<%s>' { } [ ]; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n1\n0\n1\n0\n1\n<{><}><[><]>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tst_file_ops_no_store_keeps",
+      "seq": 18500019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/tst_ops && cd /data/tst_ops && printf x > f; [[ -S f ]]; s=$?; [ -b f ]; b=$?; [[ -t 1 ]]; t=$?; test -t x; tx=$?; [[ -O f ]]; o=$?; [ -G f ]; g=$?; [[ -O nosuch ]]; on=$?; [[ -a f ]]; a=$?; [ -a f ]; ta=$?; echo $s $b $t $tx $o $g $on $a $ta; cd /; rm -r /data/tst_ops",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 1 1 1 0 0 1 0 0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tst_option_and_nameref_ops",
+      "seq": 18500020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( set -e; [[ -o errexit ]] && echo on; set +e; [[ -o errexit ]] || echo off; [[ -o nosuch ]] || echo none; [ -o braceexpand ] && echo brace; declare -n r=x; x=1; [[ -R r ]] && echo ref; [[ -R x ]] || echo plain; declare -n r2; [[ -R r2 ]] || echo unaimed )",
+      "expect": {
+        "exit": 0,
+        "stdout": "on\noff\nnone\nbrace\nref\nplain\nunaimed\n",
         "stderr": ""
       }
     }

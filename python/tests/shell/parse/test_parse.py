@@ -225,7 +225,7 @@ def test_select():
         ("foo() { echo hello; }", NT.FUNCTION_DEFINITION),
         ("export FOO=bar", NT.DECLARATION_COMMAND),
         ("unset FOO", NT.UNSET_COMMAND),
-        ("[ -f /file ]", NT.TEST_COMMAND),
+        ("[ -f /file ]", NT.COMMAND),
         ("[[ -f /file ]]", NT.TEST_COMMAND),
         (
             "for f in $(ls /data/); do cat $f | grep error > /out/$f; done",
@@ -497,7 +497,7 @@ def test_the_translation_marker_stays_with_its_string():
 
 @pytest.mark.parametrize(
     "line, operator",
-    [("[[ a == b ]]", "=="), ("[ a =~ b ]", "=~"), ("(( 1 == 1 ))", "==")],
+    [("[[ a == b ]]", "=="), ("(( 1 == 1 ))", "==")],
 )
 def test_an_operator_inside_a_test_stays_an_operator(line, operator):
     expression = parse(line).named_children[0].named_children[0]
@@ -524,35 +524,21 @@ def _nodes(node, kind: str) -> list:
         ("[ a; echo x", [["[", "a"], ["echo", "x"]]),
         ("[ c", [["[", "c"]]),
         ("[ \\( a \\) ]", [["[", "\\(", "a", "\\)", "]"]]),
+        ("[ a ] && [ b ]", [["[", "a", "]"], ["[", "b", "]"]]),
+        ("[ ! --x ]", [["[", "!", "--x", "]"]]),
+        ("[ -1 -lt 2 -a ~x ]", [["[", "-1", "-lt", "2", "-a", "~x", "]"]]),
+        ("( [ a ])", [["[", "a", "]"]]),
+        ("[ ]", [["[", "]"]]),
     ],
 )
-def test_a_bracket_bash_reads_as_a_command_parses_as_one(line, commands):
-    # `[` is a command to bash: its words stop at a list or pipe operator
-    # and need a `]` of their own, where the grammar builds a test anyway.
+def test_a_bracket_is_a_command(line, commands):
+    # `[` is a command to bash: its words stop at a list or pipe operator,
+    # need a `]` of their own, and reach test whole.
     root = parse(line)
     assert root.error is None
     assert [
         [get_text(p) for p in get_parts(c)] for c in _nodes(root, NT.COMMAND)
     ] == commands
-
-
-@pytest.mark.parametrize(
-    "line",
-    [
-        "[ a ] && [ b ]",
-        "[ a -a b ]",
-        '[ "a && b" ]',
-        "[ a ]>/dev/null",
-        "( [ a ])",
-        "[ ! a ]",
-    ],
-)
-def test_a_well_formed_bracket_test_stays_a_test(line):
-    root = parse(line)
-    assert _nodes(root, NT.TEST_COMMAND)
-    assert not any(
-        get_command_name(c) == "[" for c in _nodes(root, NT.COMMAND)
-    )
 
 
 @pytest.mark.parametrize(

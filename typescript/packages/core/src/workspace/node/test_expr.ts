@@ -18,42 +18,9 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import type { CondNode } from '../executor/builtins/condition/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { ExecuteFn } from '../expand/types.ts'
-import { expandChunks, expandNode } from '../expand/node.ts'
+import { expandNode } from '../expand/node.ts'
 import { expandPattern, expandRegex } from '../expand/pattern.ts'
-import { splitFields } from '../expand/fields.ts'
-import { ifsValue } from '../expand/variable.ts'
-import { unmarkGlobs } from '../../utils/glob_walk.ts'
-import { CondParser, type CondTree, PATTERN_OPS, condTokens, flatTokens } from './test_tokens.ts'
-
-/**
- * Expand a test_command `[ ... ]` into flat argv, tokens in source order.
- *
- * The parser nests `-a`/`-o` chains by its own precedence, so the shape is
- * discarded: every operator token and expanded operand is re-serialized
- * and the flat bash arity rules take over. Unquoted expansions
- * word-split like bash (an empty one drops out of argv).
- */
-export async function expandTestExpr(
-  node: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  cs: CallStack | null,
-  view?: SessionView,
-): Promise<string[]> {
-  const session = context.session
-  const result: string[] = []
-  for (const token of flatTokens(node)) {
-    if (token.op !== null) {
-      result.push(token.op)
-    } else if (token.negative) {
-      result.push('-' + (await expandNode(token.operand, context, executeFn, cs, view)))
-    } else {
-      const chunks = await expandChunks(token.operand, context, executeFn, cs, view)
-      for (const word of splitFields(chunks, ifsValue(session, cs))) result.push(unmarkGlobs(word))
-    }
-  }
-  return result
-}
+import { CondParser, type CondTree, PATTERN_OPS, condTokens } from './test_tokens.ts'
 
 /**
  * Build a structured condition tree from a `[[ ... ]]` node.

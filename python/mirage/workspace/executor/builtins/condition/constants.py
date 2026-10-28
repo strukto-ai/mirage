@@ -32,18 +32,36 @@ NUMERIC_BINARY = frozenset(INT_COMPARATORS)
 FILE_PAIR_BINARY = frozenset({"-nt", "-ot", "-ef"})
 STRING_UNARY = frozenset({"-n", "-z"})
 # `-v NAME` asks whether the variable (or the `NAME[sub]` element) is
-# set; it reads session state, not a path.
-VAR_UNARY = frozenset({"-v"})
+# set and `-R NAME` whether it is a nameref aimed at a name; `-o OPT`
+# whether a `set -o` option is on, and `-t FD` whether a descriptor is a
+# terminal. They read session state, not a path.
+SESSION_UNARY = frozenset({"-v", "-R", "-o", "-t"})
+# `-a` is bash's old spelling of `-e`. Mirage keeps one user who owns
+# every entry it reaches (`-O`, `-G`), modes only where a store keeps
+# them (`-u`, `-g`, `-k`), and no socket or block device (`-S`, `-b`).
 FILE_UNARY = frozenset(
-    {"-e", "-f", "-d", "-c", "-p", "-s", "-r", "-w", "-x", "-L", "-h"}
-)
-# Real GNU operators mirage cannot answer truthfully: the VFS has no
-# socket or block-device node types, no uid/gid ownership or setuid
-# bits, and no controlling terminal. (Character devices and FIFOs ARE
-# modelled, so -c and -p are supported above.) Failing loudly beats the
-# silent-false this module used to produce.
-UNSUPPORTED_UNARY = frozenset(
-    {"-S", "-b", "-g", "-k", "-u", "-O", "-G", "-N", "-t"}
+    {
+        "-a",
+        "-e",
+        "-f",
+        "-d",
+        "-c",
+        "-p",
+        "-b",
+        "-S",
+        "-s",
+        "-r",
+        "-w",
+        "-x",
+        "-u",
+        "-g",
+        "-k",
+        "-O",
+        "-G",
+        "-N",
+        "-L",
+        "-h",
+    }
 )
 BINARY_OPS = STRING_BINARY | NUMERIC_BINARY | FILE_PAIR_BINARY
-UNARY_OPS = STRING_UNARY | VAR_UNARY | FILE_UNARY | UNSUPPORTED_UNARY
+UNARY_OPS = STRING_UNARY | SESSION_UNARY | FILE_UNARY

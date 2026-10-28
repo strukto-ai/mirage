@@ -23,7 +23,7 @@ import { MountMode } from '../../types.ts'
 import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
-describe('expandTestExpr', () => {
+describe('[ as a command', () => {
   it.each([
     ['[ a == a ] && echo y', 'y\n', ''],
     ['[ $ ] && echo y', 'y\n', ''],

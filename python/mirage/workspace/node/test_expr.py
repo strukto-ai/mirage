@@ -16,8 +16,6 @@ from functools import partial
 
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import TSNodeLike
-from mirage.types import PathSpec
-from mirage.utils.glob_walk import unmark_globs
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.condition.types import (
@@ -31,60 +29,14 @@ from mirage.workspace.executor.builtins.condition.types import (
     CondWord,
 )
 from mirage.workspace.expand import expand_node
-from mirage.workspace.expand.fields import split_fields
-from mirage.workspace.expand.node import expand_chunks
 from mirage.workspace.expand.pattern import expand_pattern, expand_regex
 from mirage.workspace.expand.types import ExecuteFn
-from mirage.workspace.expand.variable import ifs_value
 from mirage.workspace.node.test_tokens import (
     PATTERN_OPS,
     CondParser,
     CondTree,
     cond_tokens,
-    flat_tokens,
 )
-
-
-async def expand_test_expr(
-    node: TSNodeLike,
-    context: EvaluationContext,
-    execute_fn: ExecuteFn,
-    cs: CallStack | None,
-    view: SessionView | None = None,
-) -> list[str | PathSpec]:
-    """Expand a test_command ``[ ... ]`` into flat argv, tokens in
-    source order.
-
-    The parser nests ``-a``/``-o`` chains by its own precedence, so the shape
-    is discarded: every operator token and expanded operand is
-    re-serialized and the flat bash arity rules take over. Unquoted
-    expansions word-split like bash (an empty one drops out of argv).
-
-    Args:
-        node (TSNodeLike): the test_command node.
-        context (EvaluationContext): the evaluation expanding it.
-        execute_fn (ExecuteFn): workspace execute for command substitutions.
-        cs (CallStack | None): call stack for positional parameters.
-    """
-    session = context.session
-    result: list[str | PathSpec] = []
-    for token in flat_tokens(node):
-        if token.op is not None:
-            result.append(token.op)
-        elif token.negative:
-            expanded = await expand_node(
-                token.operand, context, execute_fn, cs, view=view
-            )
-            result.append("-" + expanded)
-        else:
-            chunks = await expand_chunks(
-                token.operand, context, execute_fn, cs, view=view
-            )
-            result.extend(
-                unmark_globs(word)
-                for word in split_fields(chunks, ifs_value(session, cs))
-            )
-    return result
 
 
 async def expand_double_bracket(

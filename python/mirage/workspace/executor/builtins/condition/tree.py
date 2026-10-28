@@ -22,7 +22,6 @@ from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY,
     INT_COMPARATORS,
-    UNARY_OPS,
 )
 from mirage.workspace.executor.builtins.condition.operators import (
     apply_file_pair,
@@ -105,8 +104,6 @@ async def _eval_leaf(
         node (CondUnary | CondBinary | CondWord): the test.
     """
     if isinstance(node, CondUnary):
-        if node.op not in UNARY_OPS:
-            raise CondError("mirage: conditional unary operator expected")
         return 0 if await apply_unary(ctx, node.op, node.operand) else 1
     if isinstance(node, CondBinary):
         if node.op == "=~":

@@ -14,9 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { CondParser, type ExprToken, condLeaves, condTokens, flatTokens } from './test_tokens.ts'
+import { CondParser, condLeaves, condTokens } from './test_tokens.ts'
 import { parse } from '../../shell/parse/parse.ts'
 
 // Mirrors python/tests/workspace/node/test_test_tokens.py.
@@ -30,18 +29,7 @@ function testNode(line: string): TSNodeLike {
   throw new Error(`no test in ${JSON.stringify(line)}`)
 }
 
-function spelled(token: ExprToken): string {
-  if (token.op !== null) return token.op
-  return (token.negative ? '-' : '') + getText(token.operand)
-}
-
 describe('test tokens', () => {
-  it('flat tokens are the words test is given', () => {
-    // A `-N` the parser splits is one operand again, as test reads it.
-    const node = testNode('[ -e x -o ! 1 -lt -2 ]')
-    expect(flatTokens(node).map(spelled)).toEqual(['-e', 'x', '-o', '!', '1', '-lt', '-2'])
-  })
-
   it('cond leaves are each test in source order', () => {
     const node = testNode('[[ ! -e a && ( b == c* || -n d ) ]]')
     const leaves = condLeaves(new CondParser(condTokens(node)).parse())

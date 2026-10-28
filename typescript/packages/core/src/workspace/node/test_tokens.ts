@@ -20,47 +20,15 @@ const CONTAINER_TYPES = new Set<string>([
   NT.NEGATION_EXPRESSION,
   NT.PARENTHESIZED_EXPRESSION,
 ])
-// `[` is a command, so every operator the grammar folds into the test
-// reaches it as an operand word for test to judge (`=~` and `+` are refused
-// there, not dropped); `&&` and `||` end the command in bash.
-const FLAT_SKIP_TOKENS = new Set(['&&', '||'])
-const BRACKETS = new Set(['[', ']', '[[', ']]'])
 // A comparison's right side is a pattern the run renders in its matcher's
 // dialect (quoted segments escaped, `=~`'s quotes kept apart), never the
 // word a reader of the line holds.
 export const PATTERN_OPS: ReadonlySet<string> = new Set(['=', '==', '!=', '=~'])
 
-/**
- * Detect a unary_expression that is really a negative number word.
- * The parser reads `-1` inside a test as a unary_expression with a bare
- * `-` token; the flat argv needs it back as one operand.
- */
-function negativeNumberChild(node: TSNodeLike): TSNodeLike | null {
-  if (node.type !== NT.UNARY_EXPRESSION) return null
-  const children = node.children
-  const first = children[0]
-  const second = children[1]
-  if (
-    children.length === 2 &&
-    first !== undefined &&
-    second !== undefined &&
-    first.isNamed !== true &&
-    first.type === '-' &&
-    second.isNamed === true &&
-    second.type !== NT.TEST_OPERATOR
-  ) {
-    return second
-  }
-  return null
-}
-
-/**
- * One token of a test expression: an operator's text, or an operand node
- * (`negative` for a `-N` a `[` test splits into `-` and N).
- */
+/** One token of a `[[ ]]` expression: an operator's text, or an operand node. */
 export type ExprToken =
-  | { readonly op: string; readonly operand: null; readonly negative: false }
-  | { readonly op: null; readonly operand: TSNodeLike; readonly negative: boolean }
+  | { readonly op: string; readonly operand: null }
+  | { readonly op: null; readonly operand: TSNodeLike }
 
 /** A parsed `[[ ]]` expression, its leaves holding their operand nodes. */
 export type CondTree =
@@ -91,53 +59,15 @@ function condInto(node: TSNodeLike, out: ExprToken[]): void {
     const ctype = child.type
     if (ctype === '[[' || ctype === ']]' || ctype === NT.COMMENT) continue
     if (child.isNamed !== true && ctype !== '$') {
-      out.push({ op: ctype, operand: null, negative: false })
+      out.push({ op: ctype, operand: null })
     } else if (ctype === NT.TEST_OPERATOR) {
-      out.push({ op: child.text, operand: null, negative: false })
+      out.push({ op: child.text, operand: null })
     } else if (CONTAINER_TYPES.has(ctype)) {
       condInto(child, out)
     } else {
       // A lone `$` is the parser's anonymous token, and a word.
-      out.push({ op: null, operand: child, negative: false })
+      out.push({ op: null, operand: child })
     }
-  }
-}
-
-/**
- * The tokens of a `[ ]` node in source order, the words `[` is given once
- * each operand is expanded: every reader of the test reads these.
- * The parser nests `-a`/`-o` chains by its own precedence, so the shape is
- * discarded and test's own arity rules read the words.
- */
-export function flatTokens(node: TSNodeLike): ExprToken[] {
-  const out: ExprToken[] = []
-  flatInto(node, out)
-  return out
-}
-
-/** Append the flat tokens of one test-expression node to `out`. */
-function flatInto(node: TSNodeLike, out: ExprToken[]): void {
-  for (const child of node.children) {
-    const ctype = child.type
-    if (BRACKETS.has(ctype)) continue
-    if (child.isNamed !== true) {
-      if (!FLAT_SKIP_TOKENS.has(ctype)) out.push({ op: child.text, operand: null, negative: false })
-      continue
-    }
-    if (CONTAINER_TYPES.has(ctype)) {
-      const negative = negativeNumberChild(child)
-      if (negative !== null) {
-        out.push({ op: null, operand: negative, negative: true })
-        continue
-      }
-      flatInto(child, out)
-      continue
-    }
-    if (ctype === NT.TEST_OPERATOR) {
-      out.push({ op: child.text, operand: null, negative: false })
-      continue
-    }
-    out.push({ op: null, operand: child, negative: false })
   }
 }
 

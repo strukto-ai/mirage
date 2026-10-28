@@ -18,14 +18,7 @@ import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { hasGlob, markEscapedGlobs } from '../../utils/glob_walk.ts'
 import { patternShape } from '../../utils/fnmatch.ts'
 import { parseBashArgs } from '../executor/builtins/script/bash.ts'
-import {
-  CondParser,
-  type ExprToken,
-  PATTERN_OPS,
-  condLeaves,
-  condTokens,
-  flatTokens,
-} from './test_tokens.ts'
+import { CondParser, PATTERN_OPS, condLeaves, condTokens } from './test_tokens.ts'
 
 /**
  * One word of a line as the gate reads it: `raw` as typed, `text` what
@@ -56,7 +49,7 @@ export function readWord(node: TSNodeLike, home: string | null = null): Word {
 }
 
 /**
- * One test of a `[ ]` or `[[ ]]` as the gate admits it: its opener, then
+ * One test of a `[[ ]]` as the gate admits it: its opener, then
  * what it tests. `stated` says whether the gate admits it on these very
  * words once each is literal; a comparison's pattern side is read in the
  * matcher's dialect instead, so a question about one is left to the gate.
@@ -67,21 +60,15 @@ export interface TestRead {
 }
 
 /**
- * A `[ ]` or `[[ ]]` as the tests the gate admits, read with the tokens and
- * the grammar the run evaluates it by. `home` is the home directory a
- * leading tilde names.
- *
- * A `[ ]` is one test, admitted whole on its words and its closing `]`, as
- * the command `[` is. A `[[ ]]` is a test per leaf, each admitted as the
- * run reaches it, since a branch never reached never expands; every reader
- * of the line reads the same leaves, so a question one asked is the one the
- * gate answers. Mirrors Python's reads_of_test.
+ * A `[[ ]]` as the tests the gate admits, read with the tokens and the
+ * grammar the run evaluates it by: a test per leaf, each admitted as the run
+ * reaches it, since a branch never reached never expands; every reader of
+ * the line reads the same leaves, so a question one asked is the one the
+ * gate answers. (`[` is a command, admitted on its words as any command
+ * is.) `home` is the home directory a leading tilde names. Mirrors Python's
+ * reads_of_test.
  */
 export function readsOfTest(node: TSNodeLike, home: string | null = null): TestRead[] {
-  if (node.children[0]?.type !== '[[') {
-    const words = flatTokens(node).map((token) => tokenWord(token, home))
-    return [{ words: [{ raw: '[', text: '[' }, ...words, { raw: ']', text: ']' }], stated: true }]
-  }
   const opener: Word = { raw: '[[', text: '[[' }
   return condLeaves(new CondParser(condTokens(node)).parse()).map((leaf) => {
     let words: Word[]
@@ -99,15 +86,6 @@ export function readsOfTest(node: TSNodeLike, home: string | null = null): TestR
     const stated = leaf.kind !== 'binary' || !PATTERN_OPS.has(leaf.op)
     return { words: [opener, ...words], stated }
   })
-}
-
-/** One token of a test as a word of the line. */
-function tokenWord(token: ExprToken, home: string | null): Word {
-  if (token.op !== null) return { raw: token.op, text: token.op }
-  const word = readWord(token.operand, home)
-  if (!token.negative) return word
-  const text = word.text === null ? null : '-' + word.text
-  return { raw: '-' + word.raw, text, glob: word.glob === true }
 }
 
 /** The text the gate works with: the literal when it has one, the word as typed otherwise. */

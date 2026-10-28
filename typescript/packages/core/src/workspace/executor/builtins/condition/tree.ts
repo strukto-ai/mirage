@@ -21,7 +21,7 @@ import { assignElement } from '../../../session/elements.ts'
 import { ArithError, ReadonlyError } from '../../../../shell/errors.ts'
 import { makeArray } from '../../../../shell/array.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
-import { FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS } from './constants.ts'
+import { FILE_PAIR_BINARY, INT_COMPARATORS } from './constants.ts'
 import { applyFilePair, applyUnary } from './operators.ts'
 import { runWithAdmission } from '../../../../context/session_context.ts'
 import { CondError } from './types.ts'
@@ -67,9 +67,6 @@ async function evalLeaf(
   node: Extract<CondNode, { kind: 'word' | 'unary' | 'binary' }>,
 ): Promise<number> {
   if (node.kind === 'unary') {
-    if (!UNARY_OPS.has(node.op)) {
-      throw new CondError('mirage: conditional unary operator expected')
-    }
     return (await applyUnary(ctx, node.op, node.operand)) ? 0 : 1
   }
   if (node.kind === 'binary') {

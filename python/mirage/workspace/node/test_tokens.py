@@ -25,47 +25,18 @@ _CONTAINER_TYPES = (
     NT.NEGATION_EXPRESSION,
     NT.PARENTHESIZED_EXPRESSION,
 )
-# `[` is a command, so every operator the grammar folds into the test
-# reaches it as an operand word for test to judge (`=~` and `+` are
-# refused there, not dropped); `&&` and `||` end the command in bash.
-_FLAT_SKIP_TOKENS = frozenset({"&&", "||"})
-_BRACKETS = frozenset({"[", "]", "[[", "]]"})
 # A comparison's right side is a pattern the run renders in its matcher's
 # dialect (quoted segments escaped, `=~`'s quotes kept apart), never the
 # word a reader of the line holds.
 PATTERN_OPS = frozenset({"=", "==", "!=", "=~"})
 
 
-def _negative_number_child(node: TSNodeLike) -> TSNodeLike | None:
-    """Detect a unary_expression that is really a negative number word.
-
-    The parser reads ``-1`` inside a test as a unary_expression with a
-    bare ``-`` token; the flat argv needs it back as one operand.
-
-    Args:
-        node: the container node.
-    """
-    if node.type != NT.UNARY_EXPRESSION:
-        return None
-    children = list(node.children)
-    if (
-        len(children) == 2
-        and not children[0].is_named
-        and children[0].type == "-"
-        and children[1].is_named
-        and children[1].type != NT.TEST_OPERATOR
-    ):
-        return children[1]
-    return None
-
-
-# One token of a test expression: an operator's text, or an operand node
-# (``negative`` for a ``-N`` a ``[`` test splits into ``-`` and N).
+# One token of a ``[[ ]]`` expression: an operator's text, or an operand
+# node.
 @dataclass(frozen=True, slots=True)
 class ExprToken:
     op: str | None = None
     operand: Any = None
-    negative: bool = False
 
 
 # A parsed ``[[ ]]`` expression: its kind, then its parts.
@@ -110,49 +81,6 @@ def _cond_into(node: TSNodeLike, out: list[ExprToken]) -> None:
         else:
             # A lone `$` is the parser's anonymous token, and a word.
             out.append(ExprToken(operand=child))
-
-
-def flat_tokens(node: TSNodeLike) -> list[ExprToken]:
-    """The tokens of a ``[ ]`` node in source order, the words ``[`` is
-    given once each operand is expanded: every reader of the test reads
-    these. The parser nests ``-a``/``-o`` chains by its own precedence,
-    so the shape is discarded and test's own arity rules read the
-    words.
-
-    Args:
-        node (TSNodeLike): the test_command node opened with ``[``.
-    """
-    out: list[ExprToken] = []
-    _flat_into(node, out)
-    return out
-
-
-def _flat_into(node: TSNodeLike, out: list[ExprToken]) -> None:
-    """Append the flat tokens of one test-expression node to ``out``.
-
-    Args:
-        node (TSNodeLike): parsed node to serialize.
-        out (list[ExprToken]): accumulator.
-    """
-    for child in node.children:
-        ctype = child.type
-        if ctype in _BRACKETS:
-            continue
-        if not child.is_named:
-            if ctype not in _FLAT_SKIP_TOKENS:
-                out.append(ExprToken(op=get_text(child)))
-            continue
-        if ctype in _CONTAINER_TYPES:
-            negative = _negative_number_child(child)
-            if negative is not None:
-                out.append(ExprToken(operand=negative, negative=True))
-                continue
-            _flat_into(child, out)
-            continue
-        if ctype == NT.TEST_OPERATOR:
-            out.append(ExprToken(op=get_text(child)))
-            continue
-        out.append(ExprToken(operand=child))
 
 
 class CondParser:

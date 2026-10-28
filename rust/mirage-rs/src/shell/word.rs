@@ -123,11 +123,15 @@ impl Parser<'_> {
         Ok(())
     }
 
-    /// Lone `{ } [ ]` words separated only by blanks, which the grammar
-    /// reads as one word.
+    /// Lone `[ ]` words of an array literal separated only by blanks,
+    /// which bash reads as one element, as it reads a subscript to its
+    /// `]` (`x=( [ ] )` holds `[ ]`). Elsewhere a blank ends every word.
     fn special_run(&mut self, ctx: Ctx) -> Option<Syn> {
+        if !matches!(self.frames.last(), Some(super::parser::Frame::Array)) {
+            return None;
+        }
         let lone = |at: usize, s: &[u8]| {
-            matches!(s.get(at), Some(b'{' | b'}' | b'[' | b']'))
+            matches!(s.get(at), Some(b'[' | b']'))
                 && s.get(at + 1).is_none_or(|next| {
                     is_blank(*next)
                         || *next == b'\n'
@@ -135,21 +139,14 @@ impl Parser<'_> {
                 })
         };
         let at = self.i;
-        if !lone(at, self.s)
-            || (ctx.brace && self.peek() == b'}')
-            || (ctx.bracket && self.peek() == b']')
-        {
-            return None;
-        }
-        if self.peek() == b'{' && self.brace_expression_at(at) {
+        if !lone(at, self.s) || (ctx.bracket && self.peek() == b']') {
             return None;
         }
         let mut end = at + 1;
         let mut next = end;
         loop {
             next = blank_end(self.s, next);
-            let closes = (ctx.brace && self.s.get(next) == Some(&b'}'))
-                || (ctx.bracket && self.s.get(next) == Some(&b']'));
+            let closes = ctx.bracket && self.s.get(next) == Some(&b']');
             if next > end && lone(next, self.s) && !closes {
                 end = next + 1;
                 next = end;
@@ -162,10 +159,6 @@ impl Parser<'_> {
         }
         self.i = end;
         Some(Syn::leaf("word", at, end))
-    }
-
-    fn brace_expression_at(&self, at: usize) -> bool {
-        self.probe(at).brace_expression().is_some()
     }
 
     /// Whether the next byte continues the word before it.

@@ -420,10 +420,34 @@ fn deep_nesting_is_refused_not_overflowed() {
 }
 
 #[test]
-fn backtracking_over_nested_input_is_bounded() {
+fn a_bracket_is_a_command_whose_words_reach_test_whole() {
+    assert_eq!(
+        read("[ --x = -1 ]"),
+        "(program (command name: (command_name (word=[)) argument: (word=--x) \
+         argument: (word==) argument: (number=-1) argument: (word=])))"
+    );
+    assert_eq!(
+        read("[ ]"),
+        "(program (command name: (command_name (word=[)) argument: (word=])))"
+    );
+    // A blank ends every word but an array literal's lone brackets.
+    assert_eq!(
+        read("echo { } [ ]"),
+        "(program (command name: (command_name (word=echo)) argument: (word={) \
+         argument: (word=}) argument: (word=[) argument: (word=])))"
+    );
+    assert_eq!(
+        read("x=( [ ] )"),
+        "(program (variable_assignment name: (variable_name=x) value: (array (word=[ ]))))"
+    );
+}
+
+#[test]
+fn nested_bracket_commands_read_once() {
+    // `[` is a command whose words need no `]` to parse, so a nest of
+    // them reads straight through, as bash reads it.
     let nested = format!("{}a{}", "[ $(".repeat(40), ")".repeat(40));
-    let tree = parse(nested.as_bytes());
-    assert!(tree.error.is_some());
+    assert_eq!(parse(nested.as_bytes()).error, None);
 }
 
 #[test]
