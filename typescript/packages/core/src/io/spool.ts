@@ -108,8 +108,8 @@ export class ByteSpool {
       }
     }
     this.pendingSize += data.length
-    if (this.store !== null && this.pendingSize >= IO_BUFFER_SIZE) await this.flush()
     this.size += data.length
+    if (this.store !== null && this.pendingSize >= IO_BUFFER_SIZE) await this.flush()
   }
 
   private async flush(): Promise<void> {

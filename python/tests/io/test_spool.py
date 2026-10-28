@@ -1,8 +1,10 @@
+import asyncio
 import errno
+import threading
 
 import pytest
 
-from mirage.io.spool import ByteSlice, ByteSpool
+from mirage.io.spool import IO_BUFFER_SIZE, ByteSlice, ByteSpool
 from mirage.io.types import materialize
 
 
@@ -84,6 +86,32 @@ async def test_a_read_whose_flush_failed_writes_the_bytes_again_in_place(
             await spool.read(0, 3)
         assert await spool.read(0, 3) == b"abc"
         assert await spool.read(3, 3) == b""
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_append_leaves_the_spool_usable(monkeypatch):
+    async with ByteSpool(0) as spool:
+        await spool.append(b"abc")
+        entered, release = threading.Event(), threading.Event()
+        write = spool._write
+
+        def held(data: bytes, offset: int) -> None:
+            monkeypatch.undo()
+            entered.set()
+            release.wait()
+            write(data, offset)
+
+        monkeypatch.setattr(spool, "_write", held)
+        task = asyncio.create_task(spool.append(bytes(IO_BUFFER_SIZE)))
+        await asyncio.to_thread(entered.wait)
+        task.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await spool.append(b"xyz")
+        assert await materialize(spool.stream()) == (
+            b"abc" + bytes(IO_BUFFER_SIZE) + b"xyz"
+        )
 
 
 @pytest.mark.asyncio
