@@ -6,6 +6,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from mirage import RAMVFS, MountMode, PathSpec
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FileTooLargeError, FsCondition, StaleWriteError
 from mirage.server.app import build_app
 from mirage.server.routers import vfs
 from mirage.vfs.call import vfs_call
@@ -32,6 +34,19 @@ from mirage.workspace.workspace import Session
             OSError(errno.EDQUOT, "backend token=secret"),
             507,
             {"detail": "Disk quota exceeded", "errno": "EDQUOT"},
+        ),
+        (
+            StaleWriteError("backend token=secret"),
+            409,
+            {
+                "detail": posix_phrase(FsCondition.STALE_WRITE),
+                "errno": "STALE_WRITE",
+            },
+        ),
+        (
+            FileTooLargeError("backend token=secret"),
+            400,
+            {"detail": "File too large", "errno": "EFBIG"},
         ),
     ],
 )
@@ -60,6 +75,10 @@ async def test_failures_keep_private_details_in_logs(
             assert response.status_code == status
             assert response.json() == body
             assert "backend token=secret" in caplog.text
+
+
+def test_every_condition_has_a_status():
+    assert set(vfs.STATUS) == set(FsCondition)
 
 
 class PeekVFS(RAMVFS):

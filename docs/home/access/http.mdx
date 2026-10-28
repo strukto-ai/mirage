@@ -126,7 +126,7 @@ A `200` means the server ran the line, not that the line succeeded: check
 | `401` | The token is missing or wrong. |
 | `403` | A policy or mount mode refused the call. |
 | `404` | The workspace, session, job or file does not exist. |
-| `409` | The id is taken, or the workspace is busy. |
+| `409` | The id is taken, the workspace is busy, or a file changed since it was read. |
 | `413` | The request is too large. |
 | `422` | The request body is invalid. |
 | `429` | Too many requests. The TypeScript server only; see [its limits](/typescript/access/server#what-is-particular-to-this-server). |
