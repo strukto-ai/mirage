@@ -16,8 +16,7 @@ import { readVersioned, runWithOwnVersion } from '../../cache/context.ts'
 import { OwnRead } from '../../cache/types.ts'
 import { eexist, einval, eisdir, enotsup, isEnotdir, isMissingPath } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec, type StatFn } from '../../types.ts'
-import { spliceWindow } from '../../utils/ranges.ts'
-import { chunks } from '../../io/cooperative.ts'
+import { CHUNK_SIZE, chunks } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 
@@ -116,53 +115,87 @@ export async function appendByStreamedRewrite<Written>(
 }
 
 /**
- * Write at an offset by reading the file and writing it back whole.
+ * Write at an offset by spooling the file and writing it back whole, its
+ * head, the new bytes and its tail streamed, so memory holds a chunk at a
+ * time whatever the sizes.
  *
  * A zero-length pwrite(2) on an existing file changes nothing and must not
  * read the file back: a concurrent writer's update between the stat and a
  * write would be clobbered by the stale contents. On a missing file it
  * creates an empty one. A key store answers a read of a directory's name as
  * a missing key, so a read that misses is checked against stat before
- * writing: writing there would put an object beside the directory. Mirrors
- * Python's `pwrite_by_rewrite`.
+ * writing: writing there would put an object beside the directory. `read`
+ * fills a spool with the whole file and answers the version the read
+ * carried. Mirrors Python's `pwrite_by_streamed_rewrite`.
  */
-export async function pwriteByRewrite(
-  read: ReadFn,
-  write: WriteFn,
+export async function pwriteByStreamedRewrite(
+  read: (path: PathSpec, spool: ByteSpool) => Promise<string | null>,
+  write: (path: PathSpec, data: ByteSource) => Promise<unknown>,
   stat: StatFn,
   path: PathSpec,
-  data: Uint8Array,
+  data: ByteSource,
   offset: number,
 ): Promise<void> {
-  if (data.length === 0) {
-    let found: FileStat
-    try {
-      found = await stat(path)
-    } catch (error) {
-      if (!isMissingPath(error)) throw error
-      await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, data))
+  const source = chunks(data)[Symbol.asyncIterator]()
+  const spool = new ByteSpool()
+  try {
+    const first = await source.next()
+    if (first.done) {
+      let found: FileStat
+      try {
+        found = await stat(path)
+      } catch (error) {
+        if (!isMissingPath(error)) throw error
+        await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, new Uint8Array()))
+        return
+      }
+      if (found.type === FileType.DIRECTORY) throw eisdir(path)
       return
     }
-    if (found.type === FileType.DIRECTORY) throw eisdir(path)
-    return
-  }
-  let existing: Uint8Array
-  let own: string | OwnRead | null = null
-  try {
-    ;[existing, own] = await readVersioned(path, () => read(path))
-  } catch (error) {
-    if (!isMissingPath(error)) throw error
-    let missing: FileStat | null = null
+    let own: string | OwnRead | null
     try {
-      missing = await stat(path)
-    } catch (statError) {
-      if (!isMissingPath(statError)) throw statError
+      own = await read(path, spool)
+    } catch (error) {
+      if (!isMissingPath(error) || spool.size > 0) throw error
+      let missing: FileStat | null = null
+      try {
+        missing = await stat(path)
+      } catch (statError) {
+        if (!isMissingPath(statError)) throw statError
+      }
+      if (missing !== null && missing.type === FileType.DIRECTORY) throw eisdir(path)
+      own = OwnRead.ABSENT
     }
-    if (missing !== null && missing.type === FileType.DIRECTORY) throw eisdir(path)
-    existing = new Uint8Array()
-    own = OwnRead.ABSENT
+    await runWithOwnVersion(path, own, () =>
+      write(path, spliced(spool, offset, first.value, source)),
+    )
+  } finally {
+    await source.return?.()
+    await spool.close()
   }
-  await runWithOwnVersion(path, own, () => write(path, spliceWindow(existing, offset, data)))
+}
+
+/**
+ * The spooled file with new bytes laid over it from `offset`: its head,
+ * zeros where it ends before `offset`, the new bytes, then what it holds past
+ * them. Mirrors Python's `_spliced`.
+ */
+async function* spliced(
+  spool: ByteSpool,
+  offset: number,
+  first: Uint8Array,
+  rest: AsyncIterator<Uint8Array>,
+): AsyncGenerator<Uint8Array> {
+  yield* spool.stream(0, offset)
+  for (let at = spool.size; at < offset; at += CHUNK_SIZE)
+    yield new Uint8Array(Math.min(CHUNK_SIZE, offset - at))
+  let end = offset + first.byteLength
+  yield first
+  for (let part = await rest.next(); part.done !== true; part = await rest.next()) {
+    end += part.value.byteLength
+    yield part.value
+  }
+  yield* spool.stream(end)
 }
 
 /**

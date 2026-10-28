@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from mirage.io.spool import MEMORY_LIMIT
+from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, MountMode
 from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount.mount import MountEntry
@@ -131,10 +133,14 @@ async def test_a_native_append_skips_the_rewrite():
 
 @pytest.mark.asyncio
 async def test_pwrite_is_a_rewrite_where_the_vfs_only_writes():
-    write = AsyncMock()
-    mount = _mount(write=write)
+    written = []
+
+    async def write(path, data, **_):
+        written.append(await materialize(data))
+
+    mount = _mount(write=AsyncMock(side_effect=write))
     await mount.call("pwrite", PATH, b"XY", 1)
-    assert _written(write) == [b"dXYa"]
+    assert written == [b"dXYa"]
 
 
 @pytest.mark.asyncio
@@ -147,6 +153,35 @@ async def test_a_native_pwrite_gets_the_offset_and_index():
     assert pwrite.await_args.kwargs == {"index": mount.index}
     mount.vfs.read.assert_not_awaited()
     write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("parts", "windows"),
+    [
+        ([], [(b"", 3)]),
+        (
+            [b"x" * MEMORY_LIMIT, b"x" * MEMORY_LIMIT + b"!"],
+            [
+                (b"x" * MEMORY_LIMIT, 3),
+                (b"x" * MEMORY_LIMIT, 3 + MEMORY_LIMIT),
+                (b"!", 3 + 2 * MEMORY_LIMIT),
+            ],
+        ),
+    ],
+)
+async def test_a_native_pwrite_takes_a_stream_a_window_at_a_time(
+    parts, windows
+):
+    pwrite = AsyncMock()
+    mount = _mount(pwrite=pwrite)
+
+    async def stream():
+        for part in parts:
+            yield part
+
+    await mount.call("pwrite", PATH, stream(), 3)
+    assert [c.args[1:] for c in pwrite.await_args_list] == windows
 
 
 @pytest.mark.asyncio

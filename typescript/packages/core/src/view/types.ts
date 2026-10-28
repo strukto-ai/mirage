@@ -290,7 +290,7 @@ export interface FileView {
   append(path: string | PathSpec, data: ByteSource, sessionId?: string): Promise<void>
   pwrite(
     path: string | PathSpec,
-    data: Uint8Array,
+    data: ByteSource,
     offset: number,
     sessionId?: string,
   ): Promise<void>

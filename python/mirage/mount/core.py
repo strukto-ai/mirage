@@ -1329,7 +1329,7 @@ class MountCore:
         leaves nothing of what is stored, so it lands as a write of the
         whole file, which a store with no pwrite (S3) takes in parts
         rather than reading the file back first; any other lands as one
-        pwrite of its bytes, and an appending handle's as appends. The
+        streamed pwrite, and an appending handle's as appends. The
         groups that landed leave ``groups``, as ``_apply_writes`` drops
         its runs.
 
@@ -1352,9 +1352,9 @@ class MountCore:
                         self._files.write(target, run_stream(group))
                     )
                 else:
-                    # TODO(MIRAGE-35): stream this pwrite rather than hold the group.
-                    data = await materialize(run_stream(group))
-                    await self._op(self._files.pwrite(target, data, start))
+                    await self._op(
+                        self._files.pwrite(target, run_stream(group), start)
+                    )
                 landed += 1
         finally:
             del groups[:landed]

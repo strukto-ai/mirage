@@ -996,7 +996,7 @@ class Dispatcher:
             async with self._admit_write(caller) as held:
                 return await self._bound(name, path, held, report, kwargs)
         finally:
-            if name in ("write", "append"):
+            if name in ("write", "append", "pwrite"):
                 await close_quietly(kwargs.get("data"))
 
     async def _bound(

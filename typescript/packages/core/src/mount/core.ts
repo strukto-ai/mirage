@@ -1270,7 +1270,7 @@ export class MountCore {
    * the file's start that reaches its stored end leaves nothing of what is
    * stored, so it lands as a write of the whole file, which a store with no
    * pwrite (S3) takes in parts rather than reading the file back first; any
-   * other lands as one pwrite of its bytes, and an appending handle's as
+   * other lands as one streamed pwrite, and an appending handle's as
    * appends. The groups that landed leave `groups`, as `applyWrites` drops
    * its runs. Mirrors Python's `_land_spooled`.
    */
@@ -1290,9 +1290,7 @@ export class MountCore {
           // TODO(MIRAGE-34): hand a whole spool over, not a second copy.
           await this.op(() => this.files.write(target, runStream(group)))
         } else {
-          // TODO(MIRAGE-35): stream this pwrite rather than hold the group.
-          const data = await materialize(runStream(group))
-          await this.op(() => this.files.pwrite(target, data, start))
+          await this.op(() => this.files.pwrite(target, runStream(group), start))
         }
         landed += 1
       }

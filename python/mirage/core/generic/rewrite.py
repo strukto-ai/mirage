@@ -21,11 +21,10 @@ from mirage.cache.context import (
 )
 from mirage.cache.types import OwnRead
 from mirage.errors.fs import eexist, einval, eisdir, enotsup
-from mirage.io.cooperative import chunks
+from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, FileType, PathSpec, StatFn
-from mirage.utils.ranges import splice_window
 
 ReadFn = Callable[[PathSpec], Awaitable[bytes]]
 WriteFn = Callable[[PathSpec, bytes], Awaitable[FileStat | None]]
@@ -117,15 +116,17 @@ async def append_by_streamed_rewrite(
                 return await write(path, spool.stream())
 
 
-async def pwrite_by_rewrite(
-    read: ReadFn,
-    write: WriteFn,
+async def pwrite_by_streamed_rewrite(
+    read: Callable[[PathSpec, ByteSpool], Awaitable[str | None]],
+    write: Callable[[PathSpec, ByteSource], Awaitable[FileStat | None]],
     stat: StatFn,
     path: PathSpec,
-    data: bytes,
+    data: ByteSource,
     offset: int,
 ) -> None:
-    """Write at an offset by reading the file and writing it back whole.
+    """Write at an offset by spooling the file and writing it back whole,
+    its head, the new bytes and its tail streamed, so memory holds a
+    chunk at a time whatever the sizes.
 
     A zero-length pwrite(2) on an existing file changes nothing and must
     not read the file back: a concurrent writer's update between the
@@ -136,36 +137,68 @@ async def pwrite_by_rewrite(
     the directory.
 
     Args:
-        read (ReadFn): whole-file reader.
-        write (WriteFn): whole-file replacement.
+        read (Callable): fills a spool with the whole file and answers
+            the version the read carried.
+        write (Callable): streaming replacement.
         stat (StatFn): point lookup.
         path (PathSpec): the file.
-        data (bytes): the bytes to write.
+        data (ByteSource): the bytes to write, consumed once.
         offset (int): where they start, already checked non-negative.
     """
-    if not data:
-        try:
-            found = await stat(path)
-        except FileNotFoundError:
-            with own_write_version(path, OwnRead.ABSENT):
-                await write(path, data)
+    async with aclosing(chunks(data)) as source:
+        first = await anext(source, None)
+        if first is None:
+            try:
+                found = await stat(path)
+            except FileNotFoundError:
+                with own_write_version(path, OwnRead.ABSENT):
+                    await write(path, b"")
+                return
+            if found.type == FileType.DIRECTORY:
+                raise eisdir(path.virtual)
             return
-        if found.type == FileType.DIRECTORY:
-            raise eisdir(path.virtual)
-        return
-    own: str | OwnRead | None = None
-    try:
-        existing, own = await read_versioned(path, lambda: read(path))
-    except FileNotFoundError:
-        try:
-            missing: FileStat | None = await stat(path)
-        except FileNotFoundError:
-            missing = None
-        if missing is not None and missing.type == FileType.DIRECTORY:
-            raise eisdir(path.virtual)
-        existing, own = b"", OwnRead.ABSENT
-    with own_write_version(path, own):
-        await write(path, splice_window(existing, offset, data))
+        async with ByteSpool() as spool:
+            own: str | OwnRead | None
+            try:
+                own = await read(path, spool)
+            except FileNotFoundError:
+                if spool.size:
+                    raise
+                try:
+                    missing: FileStat | None = await stat(path)
+                except FileNotFoundError:
+                    missing = None
+                if missing is not None and missing.type == FileType.DIRECTORY:
+                    raise eisdir(path.virtual)
+                own = OwnRead.ABSENT
+            with own_write_version(path, own):
+                await write(path, _spliced(spool, offset, first, source))
+
+
+async def _spliced(
+    spool: ByteSpool, offset: int, first: bytes, rest: AsyncIterator[bytes]
+) -> AsyncIterator[bytes]:
+    """The spooled file with new bytes laid over it from ``offset``: its
+    head, zeros where it ends before ``offset``, the new bytes, then what
+    it holds past them.
+
+    Args:
+        spool (ByteSpool): the stored file.
+        offset (int): where the new bytes start.
+        first (bytes): their first chunk.
+        rest (AsyncIterator[bytes]): the chunks after it.
+    """
+    async for chunk in spool.stream(0, offset):
+        yield chunk
+    for at in range(spool.size, offset, CHUNK_SIZE):
+        yield bytes(min(CHUNK_SIZE, offset - at))
+    end = offset + len(first)
+    yield first
+    async for chunk in rest:
+        end += len(chunk)
+        yield chunk
+    async for chunk in spool.stream(end):
+        yield chunk
 
 
 async def truncate_by_rewrite(

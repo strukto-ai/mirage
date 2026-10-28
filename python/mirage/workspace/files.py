@@ -440,7 +440,7 @@ class Files:
                 finally:
                     # A write owns its source even when it never reaches
                     # the dispatcher (an unknown session refused at the bind).
-                    if op in ("write", "append"):
+                    if op in ("write", "append", "pwrite"):
                         await close_quietly(kwargs.get("data"))
         finally:
             if token is not None:
@@ -675,7 +675,7 @@ class Files:
     async def pwrite(
         self,
         path: str | PathSpec,
-        data: bytes,
+        data: ByteSource,
         offset: int,
         *,
         session_id: str | None = None,
@@ -685,11 +685,12 @@ class Files:
         pwrite(2): the bytes outside ``[offset, offset + len(data))``
         stay, a gap past the end reads back as zeros, and a missing file
         is created. It is one write at the dispatcher, so a session that may
-        write the file and not read it can still do it.
+        write the file and not read it can still do it. A stream is
+        written under the path's hold until it ends.
 
         Args:
             path (str | PathSpec): Virtual path.
-            data (bytes): The bytes to write.
+            data (ByteSource): Bytes or a single-consumer async byte source.
             offset (int): Where the first of them lands.
             session_id (str | None): Session to run as outside a line.
         """

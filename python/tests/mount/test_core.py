@@ -37,6 +37,7 @@ from mirage.runtime.handles.mode import OpenMode, open_mode, parse_mode
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.stat_view import DIR_SIZE, mtime_ns
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import render
@@ -2075,3 +2076,36 @@ async def test_a_large_write_holds_a_bounded_amount_of_memory():
         tracemalloc.stop()
     assert store.digest == hashlib.sha256(block * 64).hexdigest()
     assert peak < 8 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store", ["no_pwrite", "disk"])
+async def test_a_large_write_inside_a_longer_file_holds_a_bounded_amount(
+    store, tmp_path
+):
+    mib = 1024 * 1024
+    stored = bytes(range(251)) * (32 * mib // 251 + 1)
+    stored = stored[: 32 * mib]
+    if store == "disk":
+        (tmp_path / "f").write_bytes(stored)
+        vfs: BaseVFS = DiskVFS(str(tmp_path))
+    else:
+        vfs = _DigestRAM()
+        vfs._store.files["/f"] = stored
+    core = MountCore(Workspace({"/": vfs}, mode=MountMode.WRITE).vfs)
+    block = BLOCK * 4
+    fh = await core.open("/f", open_mode(os.O_WRONLY))
+    tracemalloc.start()
+    try:
+        for i in range(64):
+            await core.write("/f", block, mib + i * len(block), fh)
+        await core.release(fh)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    want = stored[:mib] + block * 64 + stored[17 * mib :]
+    if store == "disk":
+        assert (tmp_path / "f").read_bytes() == want
+    else:
+        assert vfs.digest == hashlib.sha256(want).hexdigest()
+    assert peak < 8 * mib

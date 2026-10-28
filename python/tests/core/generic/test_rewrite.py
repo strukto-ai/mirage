@@ -20,10 +20,11 @@ import pytest
 from mirage.core.generic.rewrite import (
     append_by_rewrite,
     expect_offset,
-    pwrite_by_rewrite,
+    pwrite_by_streamed_rewrite,
     refuse_taken,
     truncate_by_rewrite,
 )
+from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 
 PATH = PathSpec.from_str_path("/x/a.txt", "a.txt")
@@ -31,6 +32,23 @@ PATH = PathSpec.from_str_path("/x/a.txt", "a.txt")
 
 def _file(kind: FileType = FileType.FILE) -> FileStat:
     return FileStat(name="a.txt", type=kind)
+
+
+def _reads(*answers):
+    replies = iter(answers)
+
+    async def read(path, spool):
+        reply = next(replies)
+        if isinstance(reply, BaseException):
+            raise reply
+        await spool.append(reply)
+
+    return read
+
+
+async def _stream(*parts):
+    for part in parts:
+        yield part
 
 
 @pytest.mark.asyncio
@@ -90,7 +108,7 @@ async def test_an_empty_write_stats_instead_of_rewriting(by_rewrite):
         if by_rewrite == "append":
             await append_by_rewrite(read, write, stat, PATH, b"")
         else:
-            await pwrite_by_rewrite(read, write, stat, PATH, b"", 0)
+            await pwrite_by_streamed_rewrite(read, write, stat, PATH, b"", 0)
 
     await run()
     write.assert_not_awaited()
@@ -104,35 +122,37 @@ async def test_an_empty_write_stats_instead_of_rewriting(by_rewrite):
 
 @pytest.mark.asyncio
 async def test_pwrite_splices_pads_and_creates_missing():
-    read = AsyncMock(side_effect=[b"hello", b"ab", FileNotFoundError()])
+    read = _reads(b"hello", b"ab", FileNotFoundError())
     stat = AsyncMock(side_effect=FileNotFoundError())
-    write = AsyncMock()
-    for data, offset in ((b"XY", 1), (b"z", 4), (b"new", 2)):
-        await pwrite_by_rewrite(read, write, stat, PATH, data, offset)
-    assert [call.args[1] for call in write.await_args_list] == [
-        b"hXYlo",
-        b"ab\0\0z",
-        b"\0\0new",
-    ]
+    written = []
+
+    async def write(path, data):
+        written.append(await materialize(data))
+
+    for data, offset in ((_stream(b"X", b"Y"), 1), (b"z", 4), (b"new", 2)):
+        await pwrite_by_streamed_rewrite(read, write, stat, PATH, data, offset)
+    assert written == [b"hXYlo", b"ab\0\0z", b"\0\0new"]
 
 
 @pytest.mark.asyncio
 async def test_pwrite_keeps_a_failed_read():
-    read = AsyncMock(side_effect=PermissionError(PATH.virtual))
+    read = _reads(PermissionError(PATH.virtual))
     write = AsyncMock()
     with pytest.raises(PermissionError):
-        await pwrite_by_rewrite(read, write, AsyncMock(), PATH, b"new", 0)
+        await pwrite_by_streamed_rewrite(
+            read, write, AsyncMock(), PATH, b"new", 0
+        )
     write.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_pwrite_never_writes_beside_a_directory():
     # A key store answers a read of a directory's name as a missing key.
-    read = AsyncMock(side_effect=FileNotFoundError())
+    read = _reads(FileNotFoundError())
     stat = AsyncMock(return_value=_file(FileType.DIRECTORY))
     write = AsyncMock()
     with pytest.raises(IsADirectoryError):
-        await pwrite_by_rewrite(read, write, stat, PATH, b"new", 0)
+        await pwrite_by_streamed_rewrite(read, write, stat, PATH, b"new", 0)
     write.assert_not_awaited()
 
 

@@ -25,6 +25,7 @@ from collections.abc import (
 )
 from contextlib import (
     AbstractAsyncContextManager,
+    aclosing,
     asynccontextmanager,
     contextmanager,
     nullcontext,
@@ -40,7 +41,7 @@ from typing import (
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.context import publish_read
+from mirage.cache.context import publish_read, read_versioned
 from mirage.cache.file.io import latest_fingerprint
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexConfig, LookupStatus
@@ -91,12 +92,13 @@ from mirage.core.dev.pipe import DevicePipe
 from mirage.core.generic.rewrite import (
     append_by_rewrite,
     expect_offset,
-    pwrite_by_rewrite,
+    pwrite_by_streamed_rewrite,
     refuse_taken,
     truncate_by_rewrite,
 )
 from mirage.errors.fs import ebusy, enotdir, enotsup
-from mirage.io.stream import OutputStream, close_quietly
+from mirage.io.spool import MEMORY_LIMIT, ByteSpool
+from mirage.io.stream import OutputStream, close_quietly, rechunk
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
     RecordingScope,
@@ -104,6 +106,7 @@ from mirage.observe.context import (
     command_records,
     with_mount_context,
 )
+from mirage.observe.record import OpRecord
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -437,20 +440,34 @@ async def _collected(
         return found
     if not whole:
         return await materialize(found)
+    data, records = await _recorded(materialize(found), clock)
+    publish_read(path.virtual, data, latest_fingerprint(records, path.virtual))
+    return data
+
+
+async def _recorded(
+    pull: Awaitable[T], clock: Clock
+) -> tuple[T, list[OpRecord]]:
+    """Run a whole read's pull with the records it makes its own, which
+    reach the block around it too.
+
+    Args:
+        pull (Awaitable[T]): the pull of the read's stream.
+        clock (Clock): the workspace clock a read outside a line records
+            on.
+    """
     held = current_caller().command_sink
     outer = held[1] if held is not None and held[1] is not held[0] else None
     scope = RecordingScope(active=active_recorder() is None, clock=clock)
     try:
         with command_records() as records:
             try:
-                data = await materialize(found)
+                return await pull, records
             finally:
                 if outer is not None:
                     outer.extend(records)
     finally:
         scope.close()
-    publish_read(path.virtual, data, latest_fingerprint(records, path.virtual))
-    return data
 
 
 async def _read_window(
@@ -1683,12 +1700,12 @@ class MountEntry:
     async def _pwrite_by_rewrite(
         self,
         path: PathSpec,
-        data: bytes,
+        data: ByteSource,
         offset: int,
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
-        await pwrite_by_rewrite(
-            functools.partial(self._read, index),
+        await pwrite_by_streamed_rewrite(
+            functools.partial(self._read_into, index),
             functools.partial(self._write, index),
             functools.partial(self._stat, index),
             path,
@@ -1722,6 +1739,29 @@ class MountEntry:
             await self._answer(index, path), path, True, index.clock
         )
 
+    async def _read_into(
+        self, index: IndexCacheStore, path: PathSpec, spool: ByteSpool
+    ) -> str | None:
+        """Fill ``spool`` with the VFS's read of a whole file, answering
+        the version the read carried, as ``_read`` publishes it.
+
+        Args:
+            index (IndexCacheStore): the mount's index.
+            path (PathSpec): the file, keyed below the mount.
+            spool (ByteSpool): where its bytes go.
+        """
+
+        async def fetch() -> ByteSource:
+            answer = await self._answer(index, path)
+            return await answer if inspect.isawaitable(answer) else answer
+
+        found, version = await read_versioned(path, fetch)
+        if isinstance(found, bytes):
+            await spool.fill(found)
+            return version
+        _, records = await _recorded(spool.fill(found), index.clock)
+        return latest_fingerprint(records, path.virtual)
+
     async def _answer(
         self, index: IndexCacheStore, path: PathSpec
     ) -> Awaitable[ByteSource] | AsyncIterator[bytes]:
@@ -1737,7 +1777,7 @@ class MountEntry:
         return read(path, **_handed_on(read, index, **handed))
 
     async def _write(
-        self, index: IndexCacheStore, path: PathSpec, data: bytes
+        self, index: IndexCacheStore, path: PathSpec, data: ByteSource
     ) -> Any:
         """The VFS's write of a whole file, handed what is at its path
         and the directory it goes in.
@@ -1745,7 +1785,7 @@ class MountEntry:
         Args:
             index (IndexCacheStore): the mount's index.
             path (PathSpec): the file, keyed below the mount.
-            data (bytes): its whole content.
+            data (ByteSource): its whole content, consumed once.
         """
         write: Callable[..., Awaitable[Any]] = self.vfs.write
         handed = await self._handed(write, path, {}, index)
@@ -1756,17 +1796,35 @@ class MountEntry:
     async def _pwrite(
         self,
         path: PathSpec,
-        data: bytes,
+        data: ByteSource,
         offset: int,
         index: IndexCacheStore = NULL_INDEX,
         entry: FileStat | None = None,
     ) -> Any:
-        return await self.vfs.pwrite(
-            path,
-            data,
-            expect_offset(offset, path),
-            **_handed_on(self.vfs.pwrite, index, entry=entry),
-        )
+        """A pwrite handed to the VFS's ``pwrite``: bytes as they came, a
+        stream a window at a time at increasing offsets, so memory holds
+        one window whatever its length.
+
+        Args:
+            path (PathSpec): the file, keyed below the mount.
+            data (ByteSource): the bytes to write, consumed once.
+            offset (int): where they start.
+            index (IndexCacheStore): the mount's index.
+            entry (FileStat | None): what is at the path, if handed.
+        """
+        at = expect_offset(offset, path)
+        pwrite: Callable[..., Awaitable[Any]] = self.vfs.pwrite
+        handed = _handed_on(pwrite, index, entry=entry)
+        if isinstance(data, bytes):
+            return await pwrite(path, data, at, **handed)
+        result = None
+        async with aclosing(rechunk(data, MEMORY_LIMIT)) as windows:
+            async for window in windows:
+                result = await pwrite(path, window, at, **handed)
+                at += len(window)
+        if at == offset:
+            result = await pwrite(path, b"", at, **handed)
+        return result
 
     async def _mkdir(
         self,

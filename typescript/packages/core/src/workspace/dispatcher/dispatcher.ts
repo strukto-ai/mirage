@@ -819,7 +819,7 @@ export class Dispatcher {
     } finally {
       const data = args?.[0] ?? kwargs?.data
       if (
-        (name === 'write' || name === 'append') &&
+        (name === 'write' || name === 'append' || name === 'pwrite') &&
         data !== null &&
         typeof data === 'object' &&
         Symbol.asyncIterator in data

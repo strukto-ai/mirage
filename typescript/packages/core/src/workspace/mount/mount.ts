@@ -46,7 +46,7 @@ import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import {
   appendByRewrite,
   expectOffset,
-  pwriteByRewrite,
+  pwriteByStreamedRewrite,
   truncateByRewrite,
   refuseTaken,
 } from '../../core/generic/rewrite.ts'
@@ -58,10 +58,12 @@ import type { Clock } from '../../utils/clock.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
-import { closeQuietly } from '../../io/stream.ts'
+import { closeQuietly, rechunk } from '../../io/stream.ts'
+import type { ByteSpool } from '../../io/spool.ts'
+import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
 import { CommandSpec, type CommandSpecInit, type FlagValue } from '../../commands/spec/types.ts'
-import { publishRead, runWithWriteContext } from '../../cache/context.ts'
+import { publishRead, readVersioned, runWithWriteContext } from '../../cache/context.ts'
 import { latestFingerprint } from '../../cache/file/io.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { type WriteContext } from '../../cache/types.ts'
@@ -148,12 +150,6 @@ type ReadFn = (
 
 function cmdKey(name: string, filetype: string | null): CmdKey {
   return `${name}\u0000${filetype ?? ''}`
-}
-
-function writeData(args: readonly unknown[]): Uint8Array {
-  const first = args[0]
-  if (first instanceof Uint8Array) return first
-  throw new TypeError('write op requires a Uint8Array as the first arg')
 }
 
 function writeSource(args: readonly unknown[]): ByteSource {
@@ -261,22 +257,32 @@ async function collected(
   const found = await answer
   if (found instanceof Uint8Array) return found
   if (!whole) return materialize(found)
+  const [data, records] = await recorded(() => materialize(found), clock)
+  publishRead(path.virtual, data, latestFingerprint(records, path.virtual))
+  return data
+}
+
+/**
+ * Run a whole read's pull with the records it makes its own, which reach the
+ * block around it too. Mirrors Python's `_recorded`.
+ */
+async function recorded<T>(
+  pull: () => Promise<T>,
+  clock: Clock,
+): Promise<readonly [T, OpRecord[]]> {
   const held = currentCaller().commandSink
   const outer = held !== null && held[1] !== held[0] ? held[1] : null
-  const collect = (): Promise<readonly [Uint8Array, OpRecord[]]> =>
+  const collect = (): Promise<readonly [T, OpRecord[]]> =>
     commandRecords(async (records) => {
       try {
-        return [await materialize(found), records] as const
+        return [await pull(), records] as const
       } finally {
         outer?.push(...records)
       }
     })
-  const [data, records] =
-    activeRecords() === undefined
-      ? (await runWithRecording(collect, null, clock))[0]
-      : await collect()
-  publishRead(path.virtual, data, latestFingerprint(records, path.virtual))
-  return data
+  return activeRecords() === undefined
+    ? (await runWithRecording(collect, null, clock))[0]
+    : await collect()
 }
 
 /**
@@ -897,7 +903,7 @@ export class MountEntry {
       if (!vfs.supports('write')) return []
       return [
         (scope, args, kw) =>
-          this.pwriteByRewrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
+          this.pwriteByRewrite(scope, writeSource(args), offsetArg(args[1], scope), kw.index),
       ]
     }
     if (declared(vfs.constructor, name) === null) return []
@@ -910,12 +916,12 @@ export class MountEntry {
       case 'pwrite':
         return [
           (scope, args, kw) =>
-            vfs.pwrite(
+            this.pwriteSource(
+              vfs,
               scope,
-              writeData(args),
+              writeSource(args),
               offsetArg(args[1], scope),
               handedOf(kw),
-              callerSignal(),
             ),
         ]
       case 'create':
@@ -1030,14 +1036,39 @@ export class MountEntry {
     )
   }
 
+  /**
+   * A pwrite handed to the VFS's `pwrite`: bytes as they came, a stream a
+   * window at a time at increasing offsets, so memory holds one window
+   * whatever its length. Mirrors Python's `MountEntry._pwrite`.
+   */
+  private async pwriteSource(
+    vfs: BaseVFS,
+    path: PathSpec,
+    data: ByteSource,
+    offset: number,
+    handed: Handed | undefined,
+  ): Promise<unknown> {
+    if (data instanceof Uint8Array) return vfs.pwrite(path, data, offset, handed, callerSignal())
+    let at = offset
+    let result: unknown
+    for await (const window of rechunk(data, MEMORY_LIMIT)) {
+      result = await vfs.pwrite(path, window, at, handed, callerSignal())
+      at += window.byteLength
+    }
+    if (at === offset) {
+      result = await vfs.pwrite(path, new Uint8Array(), at, handed, callerSignal())
+    }
+    return result
+  }
+
   private pwriteByRewrite(
     path: PathSpec,
-    data: Uint8Array,
+    data: ByteSource,
     offset: number,
     index: IndexCacheStore = this.index,
   ): Promise<void> {
-    return pwriteByRewrite(
-      (p) => this.readAt(index, p),
+    return pwriteByStreamedRewrite(
+      (p, spool) => this.readInto(index, p, spool),
       (p, d) => this.writeAt(index, p, d),
       (p) => this.statAt(index, p),
       path,
@@ -1067,6 +1098,24 @@ export class MountEntry {
   }
 
   /**
+   * Fill `spool` with the VFS's read of a whole file, answering the version
+   * the read carried, as `readAt` publishes it. Mirrors Python's `_read_into`.
+   */
+  private async readInto(
+    index: IndexCacheStore,
+    path: PathSpec,
+    spool: ByteSpool,
+  ): Promise<string | null> {
+    const [found, version] = await readVersioned(path, () => this.answer(this.vfs, index, path))
+    if (found instanceof Uint8Array) {
+      await spool.fill(found)
+      return version
+    }
+    const [, records] = await recorded(() => spool.fill(found), index.clock)
+    return latestFingerprint(records, path.virtual)
+  }
+
+  /**
    * What `vfs`'s read of a whole file answers, called with the stats it
    * declares. Mirrors Python's `_answer`.
    */
@@ -1083,7 +1132,7 @@ export class MountEntry {
   private async writeAt(
     index: IndexCacheStore,
     path: PathSpec,
-    data: Uint8Array,
+    data: ByteSource,
   ): Promise<unknown> {
     return this.vfs.write(
       path,

@@ -2034,6 +2034,31 @@ describe('MountCore past the memory limit', () => {
     landed(store, repeat(24))
   })
 
+  it.each([true, false])(
+    'streams a large overwrite inside a longer file, native pwrite %s',
+    async (native) => {
+      const store = native ? new RAMVFS() : new StreamedRAM()
+      const ws = new Workspace({ '/data/': store }, { mode: MountMode.WRITE })
+      const core = new MountCore(ws.vfs)
+      const stored = Uint8Array.from({ length: 4 * MiB }, (_, i) => i % 251)
+      store.store.files.set('/f', stored.slice())
+      const pwrite = native ? vi.spyOn(store, 'pwrite') : undefined
+      const fh = await core.open('/data/f', flags(fsConstants.O_WRONLY))
+      for (let i = 0; i < 32; i++)
+        await core.write('/data/f', fh, BLOCK, MiB + i * BLOCK.byteLength)
+      await core.release(fh)
+      const want = stored.slice()
+      want.set(repeat(32), MiB)
+      expect(store.store.files.get('/f')).toEqual(want)
+      if (pwrite === undefined) expect((store as StreamedRAM).bodies).toEqual(['stream'])
+      else {
+        const windows = pwrite.mock.calls.map(([, data]) => data.byteLength)
+        expect(Math.max(...windows)).toBeLessThanOrEqual(MEMORY_LIMIT)
+        expect(windows.reduce((a, b) => a + b, 0)).toBe(2 * MiB)
+      }
+    },
+  )
+
   it('cuts what one handle holds in its spool where another writes', async () => {
     const { core, store } = streamed()
     const first = await core.open(

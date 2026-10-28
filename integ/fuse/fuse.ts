@@ -113,7 +113,8 @@ class StreamedRAM extends RAMVFS {
 
 // Big-write probe: a file larger than a handle keeps in memory, written
 // through the kernel with its head rewritten last, lands whole as one
-// streamed write on a store with no pwrite.
+// streamed write on a store with no pwrite, and so does a large overwrite
+// inside it, keeping its head and tail.
 async function runBigWriteProbe(
   result: Record<string, string | number | boolean | null>,
 ): Promise<void> {
@@ -136,6 +137,19 @@ async function runBigWriteProbe(
     }
     result.big_write_body_matches = Buffer.compare(await readFile(path), want) === 0
     result.big_write_lands_as_one_stream = store.bodies.length === 1 && store.bodies[0] === 'stream'
+    store.bodies.length = 0
+    const reversed = block.slice().reverse()
+    const again = await open(path, 'r+')
+    try {
+      for (let i = 8; i < 40; i++)
+        await again.write(reversed, 0, reversed.byteLength, i * reversed.byteLength)
+    } finally {
+      await again.close()
+    }
+    for (let i = 8; i < 40; i++) want.set(reversed, i * reversed.byteLength)
+    result.big_overwrite_body_matches = Buffer.compare(await readFile(path), want) === 0
+    result.big_overwrite_lands_as_one_stream =
+      store.bodies.length === 1 && store.bodies[0] === 'stream'
   } finally {
     await handle.unmount()
   }

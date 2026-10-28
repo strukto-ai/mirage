@@ -457,7 +457,7 @@ export class Files {
     } finally {
       // A write owns its source even when it never reaches the dispatcher
       // (an unknown session refused at the bind).
-      if (op === 'write' || op === 'append')
+      if (op === 'write' || op === 'append' || op === 'pwrite')
         await closeQuietly((args[0] ?? kwargs.data ?? null) as ByteSource | null)
     }
     if ((op === 'write' && kwargs.admit_only === true) || 'retained' in kwargs) {
@@ -547,11 +547,12 @@ export class Files {
    * facade's `pwrite`). pwrite(2): the bytes outside the window stay, a gap
    * past the end reads back as zeros, and a missing file is created. It is
    * one write at the dispatcher, so a session that may write the file and not
-   * read it can still do it.
+   * read it can still do it. A stream is written under the path's hold until
+   * it ends.
    */
   async pwrite(
     path: string | PathSpec,
-    data: Uint8Array,
+    data: ByteSource,
     offset: number,
     sessionId?: string,
   ): Promise<void> {

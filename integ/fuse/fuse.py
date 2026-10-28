@@ -417,7 +417,8 @@ class StreamedRAM(RAMVFS):
 def run_big_write_probe(result: dict[str, ProbeValue]) -> None:
     """Record that a file larger than a handle keeps in memory, written
     through the kernel with its head rewritten last, lands whole as one
-    streamed write on a store with no pwrite.
+    streamed write on a store with no pwrite, and so does a large
+    overwrite inside it, keeping its head and tail.
 
     Args:
         result (dict[str, ProbeValue]): the probe result to extend.
@@ -437,8 +438,21 @@ def run_big_write_probe(result: dict[str, ProbeValue]) -> None:
             fh.write(b"HEAD")
         with open(path, "rb") as fh:
             body = fh.read()
-        result["big_write_body_matches"] = body == b"HEAD" + (block * 48)[4:]
+        want = bytearray(b"HEAD" + (block * 48)[4:])
+        result["big_write_body_matches"] = body == want
         result["big_write_lands_as_one_stream"] = store.bodies == ["stream"]
+        store.bodies.clear()
+        with open(path, "r+b") as fh:
+            fh.seek(len(block) * 8)
+            for _ in range(32):
+                fh.write(block[::-1])
+        with open(path, "rb") as fh:
+            body = fh.read()
+        want[len(block) * 8 : len(block) * 40] = block[::-1] * 32
+        result["big_overwrite_body_matches"] = body == want
+        result["big_overwrite_lands_as_one_stream"] = store.bodies == [
+            "stream"
+        ]
     finally:
         if sys.platform == "darwin":
             subprocess.run(
