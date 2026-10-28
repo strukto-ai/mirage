@@ -68,7 +68,7 @@ For a smaller runnable example, see `examples/typescript/vfs/new/basevfs_views.t
 Its read-only `NotesVFS` connects to a nested mount, a namespace symlink,
 a CLI using namespace and session views, and the filesystem and runtime APIs.
 
-The driver never sees the mount it runs under. The index store and the `vfs:` reference it was built from live on the mount, built when the driver is placed and shared with any alias of the same instance. The loader recognizes a driver by the `VFS_BRAND` symbol `BaseVFS` stamps, so a script file that loaded its own copy of the package still mounts.
+The driver never sees the mount it runs under. The index store and the `vfs:` reference it was built from live on the mount, built when the driver is placed. One VFS mounts at one prefix: a second mount of it, or a second disk mount on the same folder, is refused; mount a separate VFS instead. The loader recognizes a driver by the `VFS_BRAND` symbol `BaseVFS` stamps, so a script file that loaded its own copy of the package still mounts.
 
 ### Add functions as the resource grows
 

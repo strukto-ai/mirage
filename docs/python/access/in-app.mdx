@@ -162,7 +162,7 @@ await ws.snapshot(target, *, compress=None, s3=None) -> int
 await Workspace.load(source, *, s3=None, ...) -> Workspace
 ```
 
-Save the workspace to a tar and rebuild it from one. `target` and `source` are a path or a file object, or an object key with `s3=`. `snapshot` answers the tar's size in bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`); disk mount files are streamed, never held whole. The tar carries the profiles and command limits (the workspace's and each mount's), and each session loads back under the restrictions it ran with. A VFS mounted at several prefixes comes back as one store at all of them; a `mounts=` override for one of those prefixes replaces it at every prefix that has no override of its own, and overrides giving those prefixes different VFSs while leaving one out raise `MountOverrideError`. The scratch root, the RAM root a workspace adds when nothing is mounted at `/`, comes back as the scratch root, an override for it included.
+Save the workspace to a tar and rebuild it from one. `target` and `source` are a path or a file object, or an object key with `s3=`. `snapshot` answers the tar's size in bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`); disk mount files are streamed, never held whole. The tar carries the profiles and command limits (the workspace's and each mount's), and each session loads back under the restrictions it ran with. The scratch root, the RAM root a workspace adds when nothing is mounted at `/`, comes back as the scratch root, an override for it included.
 
 ```python
 await ws.snapshot("run.tar")
@@ -175,7 +175,7 @@ restored = await Workspace.load("run.tar")
 await ws.copy() -> Workspace
 ```
 
-A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original; a disk mount's copy lives in a new temporary directory. Sessions, history, profiles, command limits (the workspace's and each mount's), secrets declarations and CLIs come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policy objects and the route policy are not copied. A VFS mounted at several prefixes stays one store at all of them in the copy.
+A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original; a disk mount's copy lives in a new temporary directory. Sessions, history, profiles, command limits (the workspace's and each mount's), secrets declarations and CLIs come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policy objects and the route policy are not copied.
 
 ```python
 fork = await ws.copy()

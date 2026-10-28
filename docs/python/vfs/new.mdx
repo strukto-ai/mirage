@@ -218,7 +218,7 @@ one. A copy leaves the source's links behind. A custom
 function that declares a reserved effect raises `TypeError` when its class is defined.
 To delete, move or copy, define the function with the reserved name.
 
-The driver never sees the mount it runs under. The index store and the `vfs:` reference it was built from live on the mount, built when the driver is placed and shared with any alias of the same instance.
+The driver never sees the mount it runs under. The index store and the `vfs:` reference it was built from live on the mount, built when the driver is placed. One VFS mounts at one prefix: a second mount of it, or a second disk mount on the same folder, is refused; mount a separate VFS instead.
 
 ### How the driver connects to a workspace
 

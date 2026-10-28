@@ -81,6 +81,7 @@ import {
   NextcloudVFS,
   OCIVFS,
   OneDriveVFS,
+  PathSpec,
   PostgresVFS,
   QdrantVFS,
   QingStorVFS,
@@ -353,22 +354,16 @@ function permissionOptions(target: Target): {
 
 async function openRam(target: Target): Promise<Open> {
   const mounts: Record<string, RAMVFS | [RAMVFS, MountMode]> = {}
-  const built: Record<string, RAMVFS> = {}
   for (const m of target.mounts) {
-    // alias_of gives two prefixes one store: the shape that made
-    // cross-mount mv copy an object onto itself and then unlink the
-    // source. Every other path here allocates fresh storage.
-    const existing = m.alias_of !== undefined ? built[m.alias_of] : undefined
-    if (m.alias_of !== undefined && existing === undefined) {
-      throw new Error(`alias_of names no built mount: ${m.alias_of}`)
-    }
-    const vfs =
-      existing ??
-      (['command-service', 'metadata-service'].includes(m.backend ?? '')
-        ? new CommandService(m.backend === 'metadata-service')
-        : new RAMVFS())
+    const vfs = ['command-service', 'metadata-service'].includes(m.backend ?? '')
+      ? new CommandService(m.backend === 'metadata-service')
+      : new RAMVFS()
     if (m.caches_reads === true) (vfs as unknown as { cachesReads: boolean }).cachesReads = true
-    built[m.path] = vfs
+    for (const [relative, text] of Object.entries(m.files ?? {})) {
+      const path = PathSpec.fromStrPath('/' + relative)
+      await vfs.mkdir(path.parent, true)
+      await vfs.write(path, new TextEncoder().encode(text))
+    }
     mounts[m.path] =
       m.mode === 'read' ? [vfs, MountMode.READ] : m.mode === 'exec' ? [vfs, MountMode.EXEC] : vfs
   }

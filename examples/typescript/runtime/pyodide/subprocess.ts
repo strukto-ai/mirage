@@ -14,10 +14,14 @@ const LOG =
   '09:05 ERROR timeout talking to db\n'
 
 async function main(): Promise<void> {
-  const ram = new RAMVFS()
-  const ws = new Workspace({ '/data': ram }, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
-  ws.addMount('/ro', ram, MountMode.READ)
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.EXEC, runtimes: ['pyodide'] },
+  )
+  ws.addMount('/ro', new RAMVFS(), MountMode.WRITE)
   await ws.vfs.write('/data/app.log', LOG)
+  await ws.vfs.write('/ro/app.log', LOG)
+  ws.setMountMode('/ro', MountMode.READ)
   await ws.vfs.write(
     '/data/subprocess.py',
     new Uint8Array(readFileSync(resolve(HERE, 'subprocess.py'))),

@@ -22,7 +22,7 @@ directory to mount. Both `READ` and `WRITE` modes are supported.
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `root` | required | The host directory the mount mirrors. |
+| `root` | required | The host directory the mount mirrors. A second disk mount whose root resolves to a folder already mounted is refused; a folder inside one is fine. |
 | `folder_versions` | `True` | Store each listing at its folder's version, so a `read: fresh` mount re-lists only folders that changed. Must be a boolean. Turn it off for a network or FUSE root. |
 
 ## VFS.md

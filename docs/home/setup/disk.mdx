@@ -23,6 +23,9 @@ mounts:
 `ls /data` lists that directory. Set `mode: write` to allow changes to its
 files through Mirage.
 
+A second disk mount whose `root` resolves to a folder already mounted is
+refused; a folder inside one is fine.
+
 ## SDK guides
 
 - [Python Disk VFS](/python/vfs/disk)
