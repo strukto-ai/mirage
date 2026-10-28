@@ -341,12 +341,12 @@ async def test_a_repository_it_cannot_see_keeps_the_overlay():
             err = await _fails(ws, f"cat {PATH}")
             # The HTTP error propagates as the cold read's message, unchanged
             # from any other refused github read; it is never ENOENT.
-            assert err == "cat: HTTP 404 Not Found\n"
+            assert err == "cat: Not Found\n"
             assert _kept(ws)
             err = await _fails(ws, f"cp {PATH} /r/x")
             # cp renders a backend error without its own prefix, as it does
             # for any backend (unchanged here).
-            assert err == "HTTP 404 Not Found\n"
+            assert err == "Not Found\n"
             assert _kept(ws)
         finally:
             await ws.close()
@@ -368,7 +368,7 @@ async def test_a_refused_token_keeps_the_overlay():
                 }
             )
             err = await _fails(ws, f"cat {PATH}")
-            assert err == "cat: HTTP 401 Unauthorized\n"
+            assert err == "cat: Bad credentials\n"
             assert _kept(ws)
         finally:
             await ws.close()
@@ -431,7 +431,7 @@ async def test_the_dispatcher_never_reads_cannot_see_as_gone():
         try:
             await _cleared_with_overlay(ws, hub)
             err = await _fails(ws, f"cp {PATH} /r/x")
-            assert err == "HTTP 401 Unauthorized\n"
+            assert err == "Bad credentials\n"
             assert _kept(ws)
         finally:
             await ws.close()
@@ -444,7 +444,7 @@ async def test_the_xattr_call_never_reads_cannot_see_as_gone():
         try:
             await _cleared_with_overlay(ws, hub)
             err = await _fails(ws, f"getfattr -d {PATH}")
-            assert err == "HTTP 401 Unauthorized\n"
+            assert err == f"getfattr: {PATH}: Bad credentials\n"
             assert _kept(ws)
         finally:
             await ws.close()

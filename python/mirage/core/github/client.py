@@ -26,7 +26,6 @@ from mirage.core.api.client import (
     api_request,
     api_stream,
     lowered_headers,
-    status_error,
 )
 from mirage.core.api.errors import ApiError
 from mirage.core.github.constants import (
@@ -137,7 +136,7 @@ async def github_get(
     data: dict[str, Any] = await api_request(
         "GET",
         github_url(path, account.config.base_url, **kwargs),
-        error_of=status_error,
+        error_of=_error_of,
         headers=github_headers(account.config.token),
         params=params,
         session=account.pool,
@@ -339,7 +338,7 @@ def stream_blob(
     config = account.config
     return api_stream(
         github_url(blob_path(owner, repo, sha), config.base_url),
-        error_of=status_error,
+        error_of=_error_of,
         headers={**github_headers(config.token), "Accept": RAW_MEDIA_TYPE},
         session=account.pool,
     )
