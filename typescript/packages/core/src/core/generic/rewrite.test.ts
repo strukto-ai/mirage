@@ -17,7 +17,12 @@ import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { materialize } from '../../io/types.ts'
 import type { ByteSpool } from '../../io/spool.ts'
-import { appendByRewrite, pwriteByStreamedRewrite, truncateByRewrite } from './rewrite.ts'
+import {
+  appendByRewrite,
+  appendByStreamedRewrite,
+  pwriteByStreamedRewrite,
+  truncateByRewrite,
+} from './rewrite.ts'
 
 const PATH = PathSpec.fromStrPath('/m/f')
 
@@ -62,6 +67,38 @@ describe('pwriteByStreamedRewrite', () => {
     await pwriteByStreamedRewrite(read, write, stat, PATH, enc.encode('z'), 4)
     await pwriteByStreamedRewrite(read, write, stat, PATH, enc.encode('new'), 2)
     expect(written).toEqual(['hXYlo', 'ab\0\0z', '\0\0new'])
+  })
+})
+
+describe('a streamed rewrite', () => {
+  it.each([
+    ['append', '0123456789tailABCD'],
+    ['pwrite', '01ABCD6789tail'],
+  ])('keeps a write landing while its %s source runs', async (kind, want) => {
+    const enc = new TextEncoder()
+    let stored: Uint8Array = enc.encode('0123456789')
+    async function* source(): AsyncGenerator<Uint8Array> {
+      yield await Promise.resolve(enc.encode('AB'))
+      stored = new Uint8Array([...stored, ...enc.encode('tail')])
+      yield enc.encode('CD')
+    }
+    const write = async (_path: PathSpec, data: Parameters<typeof materialize>[0]) => {
+      stored = await materialize(data)
+    }
+    const stat = () => Promise.reject(enoent(PATH))
+    if (kind === 'append') {
+      async function* read(): AsyncGenerator<Uint8Array> {
+        yield await Promise.resolve(stored)
+      }
+      await appendByStreamedRewrite(read, write, stat, PATH, source())
+    } else {
+      const read = async (_path: PathSpec, spool: ByteSpool): Promise<string | null> => {
+        await spool.append(stored)
+        return null
+      }
+      await pwriteByStreamedRewrite(read, write, stat, PATH, source(), 2)
+    }
+    expect(new TextDecoder().decode(stored)).toBe(want)
   })
 })
 

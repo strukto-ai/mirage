@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import aclosing
 
 from mirage.cache.context import (
     own_write_version,
@@ -21,7 +20,7 @@ from mirage.cache.context import (
 )
 from mirage.cache.types import OwnRead
 from mirage.errors.fs import eexist, einval, eisdir, enotsup
-from mirage.io.cooperative import CHUNK_SIZE, chunks
+from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, FileType, PathSpec, StatFn
@@ -78,6 +77,10 @@ async def append_by_streamed_rewrite(
 ) -> FileStat | None:
     """Stage a read-modify-write with bounded RAM and the read's version.
 
+    The new bytes are spooled before the file is read: a streamed write
+    lets its path go while its source is pulled, so a write landing
+    meanwhile is in the file the replacement is made from.
+
     Args:
         read (Callable): streaming reader.
         write (Callable): streaming replacement.
@@ -85,9 +88,9 @@ async def append_by_streamed_rewrite(
         path (PathSpec): the destination.
         data (ByteSource): additional bytes, consumed once.
     """
-    async with aclosing(chunks(data)) as source:
-        first = await anext(source, None)
-        if first is None:
+    async with ByteSpool() as incoming:
+        await incoming.fill(data)
+        if not incoming.size:
             try:
                 found = await stat(path)
             except FileNotFoundError:
@@ -109,11 +112,8 @@ async def append_by_streamed_rewrite(
                 if spool.size:
                     raise
                 own = OwnRead.ABSENT
-            await spool.append(first)
-            async for part in source:
-                await spool.append(part)
             with own_write_version(path, own):
-                return await write(path, spool.stream())
+                return await write(path, _spliced(spool, spool.size, incoming))
 
 
 async def pwrite_by_streamed_rewrite(
@@ -126,7 +126,10 @@ async def pwrite_by_streamed_rewrite(
 ) -> None:
     """Write at an offset by spooling the file and writing it back whole,
     its head, the new bytes and its tail streamed, so memory holds a
-    chunk at a time whatever the sizes.
+    chunk at a time whatever the sizes. The new bytes are spooled before
+    the file is read: a streamed write lets its path go while its source
+    is pulled, so a write landing meanwhile is in the file the
+    replacement is made from.
 
     A zero-length pwrite(2) on an existing file changes nothing and must
     not read the file back: a concurrent writer's update between the
@@ -145,9 +148,9 @@ async def pwrite_by_streamed_rewrite(
         data (ByteSource): the bytes to write, consumed once.
         offset (int): where they start, already checked non-negative.
     """
-    async with aclosing(chunks(data)) as source:
-        first = await anext(source, None)
-        if first is None:
+    async with ByteSpool() as incoming:
+        await incoming.fill(data)
+        if not incoming.size:
             try:
                 found = await stat(path)
             except FileNotFoundError:
@@ -172,11 +175,11 @@ async def pwrite_by_streamed_rewrite(
                     raise eisdir(path.virtual)
                 own = OwnRead.ABSENT
             with own_write_version(path, own):
-                await write(path, _spliced(spool, offset, first, source))
+                await write(path, _spliced(spool, offset, incoming))
 
 
 async def _spliced(
-    spool: ByteSpool, offset: int, first: bytes, rest: AsyncIterator[bytes]
+    spool: ByteSpool, offset: int, incoming: ByteSpool
 ) -> AsyncIterator[bytes]:
     """The spooled file with new bytes laid over it from ``offset``: its
     head, zeros where it ends before ``offset``, the new bytes, then what
@@ -185,19 +188,15 @@ async def _spliced(
     Args:
         spool (ByteSpool): the stored file.
         offset (int): where the new bytes start.
-        first (bytes): their first chunk.
-        rest (AsyncIterator[bytes]): the chunks after it.
+        incoming (ByteSpool): the new bytes.
     """
     async for chunk in spool.stream(0, offset):
         yield chunk
     for at in range(spool.size, offset, CHUNK_SIZE):
         yield bytes(min(CHUNK_SIZE, offset - at))
-    end = offset + len(first)
-    yield first
-    async for chunk in rest:
-        end += len(chunk)
+    async for chunk in incoming.stream():
         yield chunk
-    async for chunk in spool.stream(end):
+    async for chunk in spool.stream(offset + incoming.size):
         yield chunk
 
 

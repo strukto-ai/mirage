@@ -250,8 +250,19 @@ it.each([
   }
 })
 
-it('lets a streamed pwrite name go while its source waits', async () => {
-  const ws = new Workspace({ '/d/': new RAMVFS() }, { mode: MountMode.WRITE })
+/** A store with no pwrite, as S3, whose pwrite is a rewrite. */
+class RewrittenRAM extends RAMVFS {
+  constructor() {
+    super()
+    Object.defineProperty(this, 'pwrite', { value: Reflect.get(BaseVFS.prototype, 'pwrite') })
+  }
+}
+
+it.each([
+  ['a native', () => new RAMVFS()],
+  ['a rewritten', () => new RewrittenRAM()],
+])('lets %s streamed pwrite name go while its source waits', async (_, store) => {
+  const ws = new Workspace({ '/d/': store() }, { mode: MountMode.WRITE })
   try {
     await ws.vfs.write('/d/f', '0123456789')
     const source = async function* (): AsyncIterable<Uint8Array> {

@@ -16,7 +16,7 @@ import { readVersioned, runWithOwnVersion } from '../../cache/context.ts'
 import { OwnRead } from '../../cache/types.ts'
 import { eexist, einval, eisdir, enotsup, isEnotdir, isMissingPath } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec, type StatFn } from '../../types.ts'
-import { CHUNK_SIZE, chunks } from '../../io/cooperative.ts'
+import { CHUNK_SIZE } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 
@@ -67,7 +67,12 @@ export async function appendByRewrite<Written>(
   return await runWithOwnVersion(path, own, () => write(path, joined))
 }
 
-/** Stage a read-modify-write with bounded RAM and the read's version. */
+/**
+ * Stage a read-modify-write with bounded RAM and the read's version. The new
+ * bytes are spooled before the file is read: a streamed write lets its path
+ * go while its source is pulled, so a write landing meanwhile is in the file
+ * the replacement is made from.
+ */
 export async function appendByStreamedRewrite<Written>(
   read: (path: PathSpec, onVersion: (version: string | null) => void) => AsyncIterable<Uint8Array>,
   write: (path: PathSpec, data: ByteSource) => Promise<Written>,
@@ -75,11 +80,11 @@ export async function appendByStreamedRewrite<Written>(
   path: PathSpec,
   data: ByteSource,
 ): Promise<Written | undefined> {
-  const source = chunks(data)[Symbol.asyncIterator]()
+  const incoming = new ByteSpool()
   const spool = new ByteSpool()
   try {
-    const first = await source.next()
-    if (first.done) {
+    await incoming.fill(data)
+    if (incoming.size === 0) {
       let found: FileStat
       try {
         found = await stat(path)
@@ -101,15 +106,11 @@ export async function appendByStreamedRewrite<Written>(
       if (!isMissingPath(error) || spool.size > 0) throw error
       own = OwnRead.ABSENT
     }
-    await spool.append(first.value)
-    for (;;) {
-      const part = await source.next()
-      if (part.done) break
-      await spool.append(part.value)
-    }
-    return await runWithOwnVersion(path, own, () => write(path, spool.stream()))
+    return await runWithOwnVersion(path, own, () =>
+      write(path, spliced(spool, spool.size, incoming)),
+    )
   } finally {
-    await source.return?.()
+    await incoming.close()
     await spool.close()
   }
 }
@@ -117,7 +118,9 @@ export async function appendByStreamedRewrite<Written>(
 /**
  * Write at an offset by spooling the file and writing it back whole, its
  * head, the new bytes and its tail streamed, so memory holds a chunk at a
- * time whatever the sizes.
+ * time whatever the sizes. The new bytes are spooled before the file is
+ * read: a streamed write lets its path go while its source is pulled, so a
+ * write landing meanwhile is in the file the replacement is made from.
  *
  * A zero-length pwrite(2) on an existing file changes nothing and must not
  * read the file back: a concurrent writer's update between the stat and a
@@ -136,11 +139,11 @@ export async function pwriteByStreamedRewrite(
   data: ByteSource,
   offset: number,
 ): Promise<void> {
-  const source = chunks(data)[Symbol.asyncIterator]()
+  const incoming = new ByteSpool()
   const spool = new ByteSpool()
   try {
-    const first = await source.next()
-    if (first.done) {
+    await incoming.fill(data)
+    if (incoming.size === 0) {
       let found: FileStat
       try {
         found = await stat(path)
@@ -166,11 +169,9 @@ export async function pwriteByStreamedRewrite(
       if (missing !== null && missing.type === FileType.DIRECTORY) throw eisdir(path)
       own = OwnRead.ABSENT
     }
-    await runWithOwnVersion(path, own, () =>
-      write(path, spliced(spool, offset, first.value, source)),
-    )
+    await runWithOwnVersion(path, own, () => write(path, spliced(spool, offset, incoming)))
   } finally {
-    await source.return?.()
+    await incoming.close()
     await spool.close()
   }
 }
@@ -183,19 +184,13 @@ export async function pwriteByStreamedRewrite(
 async function* spliced(
   spool: ByteSpool,
   offset: number,
-  first: Uint8Array,
-  rest: AsyncIterator<Uint8Array>,
+  incoming: ByteSpool,
 ): AsyncGenerator<Uint8Array> {
   yield* spool.stream(0, offset)
   for (let at = spool.size; at < offset; at += CHUNK_SIZE)
     yield new Uint8Array(Math.min(CHUNK_SIZE, offset - at))
-  let end = offset + first.byteLength
-  yield first
-  for (let part = await rest.next(); part.done !== true; part = await rest.next()) {
-    end += part.value.byteLength
-    yield part.value
-  }
-  yield* spool.stream(end)
+  yield* incoming.stream()
+  yield* spool.stream(offset + incoming.size)
 }
 
 /**

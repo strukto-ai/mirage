@@ -19,6 +19,7 @@ import pytest
 
 from mirage.core.generic.rewrite import (
     append_by_rewrite,
+    append_by_streamed_rewrite,
     expect_offset,
     pwrite_by_streamed_rewrite,
     refuse_taken,
@@ -132,6 +133,40 @@ async def test_pwrite_splices_pads_and_creates_missing():
     for data, offset in ((_stream(b"X", b"Y"), 1), (b"z", 4), (b"new", 2)):
         await pwrite_by_streamed_rewrite(read, write, stat, PATH, data, offset)
     assert written == [b"hXYlo", b"ab\0\0z", b"\0\0new"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("by_rewrite", "want"),
+    [("append", b"0123456789tailABCD"), ("pwrite", b"01ABCD6789tail")],
+)
+async def test_a_write_landing_while_the_source_runs_stays(by_rewrite, want):
+    stored = {PATH.virtual: b"0123456789"}
+
+    async def source():
+        yield b"AB"
+        stored[PATH.virtual] += b"tail"
+        yield b"CD"
+
+    async def write(path, data):
+        stored[path.virtual] = await materialize(data)
+
+    async def read_whole(path, spool):
+        await spool.append(stored[path.virtual])
+
+    async def read_streamed(path, remember):
+        remember(None)
+        yield stored[path.virtual]
+
+    if by_rewrite == "append":
+        await append_by_streamed_rewrite(
+            read_streamed, write, AsyncMock(), PATH, source()
+        )
+    else:
+        await pwrite_by_streamed_rewrite(
+            read_whole, write, AsyncMock(), PATH, source(), 2
+        )
+    assert stored[PATH.virtual] == want
 
 
 @pytest.mark.asyncio
