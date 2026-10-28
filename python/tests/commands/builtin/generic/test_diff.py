@@ -243,16 +243,17 @@ async def test_unified_headers_read_in_the_tz_zone_with_every_digit():
     ]
 
 
+async def _unreachable(path: PathSpec) -> FileStat:
+    raise ApiError("HTTP 503 Service Unavailable", 503)
+
+
 @pytest.mark.asyncio
 async def test_a_service_failure_is_trouble_not_a_difference():
-    async def unreachable(path: PathSpec) -> FileStat:
-        raise ApiError("HTTP 503 Service Unavailable", 503)
-
     out, io = await diff(
         [_operand("a", "/d/a"), _operand("b", "/d/b")],
         stream=_readdir,
         readdir_fn=_readdir,
-        stat_fn=unreachable,
+        stat_fn=_unreachable,
         flags=DiffFlags(recursive=True),
     )
     assert (out, io.exit_code) == (None, 2)
