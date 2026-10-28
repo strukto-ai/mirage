@@ -2620,9 +2620,10 @@ class Dispatcher:
     async def _serial_write(self, call: _Call, mount: MountEntry) -> Any:
         """Run a write with its names held, one writer at a time per name.
 
-        Held by the store's own object, so one store mounted twice is one
-        file, and a rename holds both of its names, taken in one order so
-        two renames between the same pair cannot deadlock. What the write
+        Held per VFS object and mount-relative name, so writes to one name
+        of one backend run one at a time; a rename holds both of its names,
+        taken in one order so two renames between the same pair cannot
+        deadlock. What the write
         changes beside the store (caches, the node table's links and
         attributes) changes under the same hold: a chain of renames
         finishing out of order would move one name's attributes onto
@@ -3169,14 +3170,12 @@ class Dispatcher:
             except Exception as exc:
                 logger.debug("evicting after a failed %s: %s", name, exc)
         lost = active_lost()
-        if lost is None:
+        if lost is None or manager is None:
             return
         for key in list(lost.marks):
             version = lost.version(key)
-            if (
-                manager is None
-                or not version
-                or not any(under_path(key, target.virtual) for target in names)
+            if not version or not any(
+                under_path(key, target.virtual) for target in names
             ):
                 continue
             try:

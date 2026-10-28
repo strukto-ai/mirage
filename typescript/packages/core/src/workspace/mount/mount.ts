@@ -402,9 +402,8 @@ export class MountEntry {
   readonly mountId: string
   readonly prefix: string
   readonly vfs: BaseVFS
-  // The backend's own walkLimit, kept from before any mount settles the
-  // VFS's; a later mount of the VFS takes the first's.
-  backendWalkLimit: number
+  // The backend's own walkLimit, kept from before any mount settles the VFS's.
+  readonly backendWalkLimit: number
   // The functions the VFS answers itself, read once when it is mounted: each
   // dispatcher call it defines, and `read_range` when a read fetches only the
   // range asked for. A command asks its mount's row (`MountView.answers`).
@@ -418,7 +417,7 @@ export class MountEntry {
   readonly indexConfig: IndexConfig | undefined
   readonly inheritsIndex: boolean
   readonly vfsRef: string | null
-  activity = new Activity()
+  readonly activity = new Activity()
   retiring = false
   beforeUse: (() => Promise<void>) | null = null
   private readonly readyLock = new KeyLock()

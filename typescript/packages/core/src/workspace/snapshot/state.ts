@@ -341,12 +341,10 @@ export function buildMountArgs(
 ): MountArgs {
   checkFormatVersion(state)
   const normalized: Record<string, BaseVFS | Mount> = {}
-  const overridePrefixes = new Set<string>()
   for (const [prefix, vfs] of Object.entries(overrides)) {
     normalized[normDir(prefix)] = vfs
-    overridePrefixes.add(normDir(prefix))
   }
-  const userPrefixes = userOverrides ?? overridePrefixes
+  const userPrefixes = userOverrides ?? new Set(Object.keys(normalized))
   // A mount with no override by now is one nobody can build: it asked to
   // be handed back live or was saved with a redacted secret, or the
   // registry `withRebuiltMounts` consulted had nothing for its ref or

@@ -18,7 +18,8 @@ class WritePolicyError(ValueError):
 
 
 class SharedStorageError(ValueError):
-    """A mount would expose storage another mount of the workspace already does."""
+    """A mount would place one VFS object, or a disk on a folder another
+    disk mount has, at a second prefix."""
 
     def __init__(
         self, prefix: str, existing: str, location: str | None

@@ -522,14 +522,7 @@ class CacheManager:
         Args:
             path (PathSpec): Path to key; only ``virtual`` is read.
         """
-        return self._name(mount_key(path.virtual, self._prefix))
-
-    def _name(self, key: str) -> str:
-        """The cache key of a mount-relative ``key`` under this mount.
-
-        Args:
-            key (str): the path below the mount, without a leading slash.
-        """
+        key = mount_key(path.virtual, self._prefix)
         return f"{self._prefix}/{key}" if key else self._prefix or "/"
 
     def _readable_cache(self, key: str) -> FileCacheMixin | None:
@@ -863,16 +856,7 @@ class CacheManager:
                 found by, which this command's probe keeps serving for
                 ``path`` (``probed_stat``) past the retire.
         """
-        await self._invalidate(self._cache_key(path), kind, row, leaf, probed)
-
-    async def _invalidate(
-        self,
-        key: str,
-        kind: FileChangeKind,
-        row: FileStat | None,
-        leaf: bool,
-        probed: FileStat | None,
-    ) -> None:
+        key = self._cache_key(path)
         try:
             self.retire()
             started = command_started()

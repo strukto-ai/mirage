@@ -434,8 +434,8 @@ export class MountRegistry {
   }
 
   /**
-   * Refuse a mount that would expose storage another mount already does: the
-   * same VFS object, or a disk whose resolved root a mounted disk already has.
+   * Refuse a mount that would place one VFS object at a second prefix, or a
+   * disk on a folder a mounted disk already has.
    * Mirrors Python's `check_storage_unshared`.
    *
    * @throws SharedStorageError naming the mount already there.
@@ -444,9 +444,7 @@ export class MountRegistry {
     const location = vfs.name === VFSName.DISK ? vfs.storageLocation() : null
     for (const other of mounts) {
       if (other.vfs === vfs || (location !== null && other.vfs.storageLocation() === location)) {
-        // shortcut: compares realpath'd roots only; another spelling of one
-        // folder (macOS case, bind mount, `..` after a link) passes, upgrade to
-        // (dev, ino) if reported.
+        // shortcut: realpath only; a bind mount, macOS case spelling or `..` after a link passes, upgrade to (dev, ino).
         throw new SharedStorageError(prefix, other.prefix, other.vfs === vfs ? null : location)
       }
     }
@@ -607,12 +605,6 @@ export class MountRegistry {
    * Mirrors Python's `settle_walk_limit`.
    */
   settleWalkLimit(entry: MountEntry): void {
-    entry.vfs.walkLimit = this.settledWalkLimit(entry)
-    entry.calls = entry.answeredCalls()
-    this.rowCache = null
-  }
-
-  private settledWalkLimit(entry: MountEntry): number {
     const found = Limit.layered([
       entry.commandLimits.get(ALL_COMMANDS) ?? null,
       Object.hasOwn(this.commandLimits, ALL_COMMANDS)
@@ -620,7 +612,9 @@ export class MountRegistry {
         : null,
       new Limit({ walkLimit: entry.backendWalkLimit }),
     ])
-    return found === null ? entry.backendWalkLimit : (found.walkLimit ?? -1)
+    entry.vfs.walkLimit = found === null ? entry.backendWalkLimit : (found.walkLimit ?? -1)
+    entry.calls = entry.answeredCalls()
+    this.rowCache = null
   }
 
   /**

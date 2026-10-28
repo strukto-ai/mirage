@@ -175,8 +175,8 @@ class DiskVFS(BaseVFS):
         return self.accessor.root is not None
 
     def storage_location(self) -> str:
-        # The resolved root is the storage: two DiskVFS instances built on the
-        # same directory are one store, however they were spelled.
+        # The resolved root is the storage: two DiskVFS instances on one
+        # resolved directory are one store.
         return f"{self.name}:{self.root}"
 
     async def capacity(self) -> CapacityResult:

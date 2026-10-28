@@ -2275,9 +2275,10 @@ export class Dispatcher {
         result =
           whole || !(kept instanceof Uint8Array) ? kept : sliceWindow(kept, readOffset, readSize)
       } else if (SERIAL_WRITE_OPS.has(name)) {
-        // Held by the store's own object, so one store mounted twice is one
-        // file, and a rename or a copy holds both of its names, taken in one
-        // order so two between the same pair cannot deadlock. What the write
+        // Held per VFS object and mount-relative name, so writes to one name
+        // of one backend run one at a time; a rename or a copy holds both of
+        // its names, taken in one order so two between the same pair cannot
+        // deadlock. What the write
         // changes beside the store (caches, the node table's links and
         // attributes) changes under the same hold: a chain of renames
         // finishing out of order would move one name's attributes onto

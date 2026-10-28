@@ -111,9 +111,10 @@ export class CacheManager {
    * The index is expired rather than cleared, while this mount still owns it:
    * a cleared index reads exactly like one that was never filled, so a
    * backend whose index *is* its listing (github seeds the whole tree once)
-   * could not tell the drop from an empty repository. Over-evicts when this mount is the root and another
-   * mount sits beneath it, since keys are compared by prefix; a refetch is
-   * the safe direction to be wrong in. Mirrors Python's `CacheManager.drop`.
+   * could not tell the drop from an empty repository. Over-evicts when this
+   * mount is the root and another mount sits beneath it, since keys are
+   * compared by prefix; a refetch is the safe direction to be wrong in.
+   * Mirrors Python's `CacheManager.drop`.
    *
    * @param bodies drop the bodies too; false when the caller clears the whole
    *   file cache itself.
@@ -436,11 +437,7 @@ export class CacheManager {
    * Mirrors Python `CacheManager._cache_key`.
    */
   private cacheKey(path: string | PathSpec): string {
-    return this.name(mountKey(path instanceof PathSpec ? path.virtual : path, this.prefix))
-  }
-
-  /** The cache key of a mount-relative `key` (no leading slash) under this mount. */
-  private name(key: string): string {
+    const key = mountKey(path instanceof PathSpec ? path.virtual : path, this.prefix)
     if (key === '') return this.prefix === '' ? '/' : this.prefix
     return `${this.prefix}/${key}`
   }
@@ -723,26 +720,11 @@ export class CacheManager {
     row: FileStat | null = null,
     options: { leaf?: boolean; probed?: FileStat | null } = {},
   ): Promise<void> {
-    await this.invalidateKey(
-      this.cacheKey(path),
-      kind,
-      row,
-      options.leaf === true,
-      options.probed ?? null,
-    )
-  }
-
-  // The ancestors go even when the path's own invalidation fails; a failure of
-  // both throws both.
-  private async invalidateKey(
-    key: string,
-    kind: FileChangeKind,
-    row: FileStat | null,
-    leaf: boolean,
-    probed: FileStat | null,
-  ): Promise<void> {
+    const key = this.cacheKey(path)
+    // The ancestors go even when the path's own invalidation fails; a failure
+    // of both throws both.
     try {
-      await this.invalidateOwn(key, kind, row, leaf, probed)
+      await this.invalidateOwn(key, kind, row, options.leaf === true, options.probed ?? null)
     } catch (error) {
       try {
         await this.invalidateAncestors(key)
