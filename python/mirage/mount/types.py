@@ -67,9 +67,7 @@ class Handle:
     live: bool = False
     data: bytes | None = None
     write_buf: WriteBuf = field(default_factory=list)
-    # Where its writes wait past what memory holds, and how many bytes it
-    # has been handed, there yet or not, so a write knows its place in it
-    # before the spool has it.
+    # Where its writes wait past what memory holds, and the bytes handed it.
     spool: ByteSpool | None = None
     spooled: int = 0
     # A large file reads a chunk at a time rather than hydrating whole.

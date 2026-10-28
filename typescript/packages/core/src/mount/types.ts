@@ -48,11 +48,7 @@ export interface Handle {
   mode: OpenMode
   data?: Uint8Array
   writeBuf?: [number, Uint8Array | ByteSlice][]
-  /**
-   * Where its writes wait past what memory holds, and how many bytes it has
-   * been handed, there yet or not, so a write knows its place in it before
-   * the spool has it.
-   */
+  /** Where its writes wait past what memory holds, and the bytes handed it. */
   spool?: ByteSpool
   spooled?: number
   live?: boolean
