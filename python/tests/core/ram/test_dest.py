@@ -1,16 +1,20 @@
+import threading
+
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.copy import copy
-from mirage.core.ram.dest import lookup_error
+from mirage.core.ram.dest import check_capacity, lookup_error
 from mirage.core.ram.read import read
 from mirage.core.ram.rename import rename
 from mirage.core.ram.rmdir import rmdir
 from mirage.core.ram.set_attrs import set_attrs
 from mirage.core.ram.stat import stat
 from mirage.core.ram.unlink import unlink
+from mirage.errors.types import QuotaExceededError
 from mirage.types import PathSpec
-from mirage.vfs.ram.store import RAMStore
+from mirage.vfs.capacity import StorageUsage
+from mirage.vfs.ram.store import RAMFiles, RAMStore
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -69,3 +73,35 @@ async def test_every_lookup_names_a_plain_file_parent(accessor, name):
     assert exc.value.filename == "/a.txt/x"
     with pytest.raises(FileNotFoundError):
         await op(accessor, _spec("/nope/x"))
+
+
+def test_a_capacity_check_and_its_store_are_one_step_across_threads():
+    usage = StorageUsage(8, used=0)
+    store = RAMStore(files=RAMFiles(usage), usage=usage)
+    inside, release = threading.Event(), threading.Event()
+    refused: list[QuotaExceededError] = []
+
+    def fill() -> None:
+        with check_capacity(store, _spec("/a"), "/a", 8):
+            inside.set()
+            release.wait()
+            store.files["/a"] = b"x" * 8
+
+    def add() -> None:
+        try:
+            with check_capacity(store, _spec("/b"), "/b", 1):
+                store.files["/b"] = b"y"
+        except QuotaExceededError as exc:
+            refused.append(exc)
+
+    first = threading.Thread(target=fill)
+    first.start()
+    inside.wait()
+    second = threading.Thread(target=add)
+    second.start()
+    second.join(0.05)
+    release.set()
+    first.join()
+    second.join()
+    assert len(refused) == 1
+    assert ("/b" in store.files, usage.used) == (False, 8)

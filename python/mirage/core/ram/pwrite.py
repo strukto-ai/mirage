@@ -56,9 +56,8 @@ async def pwrite(
     check_write_target(store, path_spec, p)
     if active_device(accessor, p) is None:
         current = store.files.get(p, b"")
-        if data:
-            end = max(len(current), offset + len(data))
-            check_capacity(store, path_spec, p, end)
-        store.files[p] = splice_window(current, offset, data)
+        end = max(len(current), offset + len(data)) if data else len(current)
+        with check_capacity(store, path_spec, p, end):
+            store.files[p] = splice_window(current, offset, data)
     store.modified[p] = now_iso()
     record("pwrite", path_spec.virtual, "ram", len(data), timer)

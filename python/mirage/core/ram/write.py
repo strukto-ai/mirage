@@ -94,13 +94,13 @@ async def write(
         if append and p in store.files:
             if not whole:
                 return
-            check_capacity(
+            with check_capacity(
                 store, path_spec, p, len(store.files[p]) + len(whole)
-            )
-            store.files[p] += whole
+            ):
+                store.files[p] += whole
         else:
-            check_capacity(store, path_spec, p, len(whole))
-            store.files[p] = whole
+            with check_capacity(store, path_spec, p, len(whole)):
+                store.files[p] = whole
         store.modified[p] = now_iso()
         record(op, path_spec.virtual, "ram", len(whole), timer)
         return

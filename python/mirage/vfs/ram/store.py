@@ -55,8 +55,8 @@ class RAMFiles(MutableMapping[str, bytes]):
 
     Counting here, rather than at each op, means no change to the table
     can miss the count. It does not refuse anything: an op checks growth
-    with ``check_capacity`` before it stores, in the same synchronous
-    step. Mirrors the TS ``RAMFiles``.
+    with ``check_capacity``, which it stores under, as one step. Mirrors
+    the TS ``RAMFiles``.
     """
 
     def __init__(self, usage: StorageUsage | None = None) -> None:
@@ -64,8 +64,8 @@ class RAMFiles(MutableMapping[str, bytes]):
         self.usage = usage
 
     def _count(self, delta: int) -> None:
-        if self.usage is not None and self.usage.used is not None:
-            self.usage.used += delta
+        if self.usage is not None:
+            self.usage.land(0, delta)
 
     def __getitem__(self, key: str) -> bytes:
         return self._data[key]
@@ -85,8 +85,11 @@ class RAMFiles(MutableMapping[str, bytes]):
         return len(self._data)
 
     def clear(self) -> None:
-        self._data.clear()
-        if self.usage is not None:
+        if self.usage is None:
+            self._data.clear()
+            return
+        with self.usage.lock:
+            self._data.clear()
             self.usage.used = 0
 
 

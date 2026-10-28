@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing, asynccontextmanager
 
@@ -37,8 +38,9 @@ class StorageUsage:
     stream or an awaiting write admitted and has not landed yet. ``active``
     holds the writes in flight. Every method but
     ``counted`` is synchronous, so a check and the change it guards run as
-    one step on the store's event loop, which is what makes parallel
-    writers safe without a lock. Two writes in flight on overlapping paths
+    one step on the store's event loop, and ``lock`` keeps them one step
+    across threads, as a FUSE mount can serve from a loop of its own
+    beside the owner. Two writes in flight on overlapping paths
     (a file and its folder) can both measure the same bytes, so they lose
     the credit for the bytes they replace and mark the count for a
     recount, which waits until no write is in flight. It serves one
@@ -58,6 +60,7 @@ class StorageUsage:
         self.dirty = False
         self._counting: asyncio.Future[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self.lock = threading.RLock()
 
     async def counted(self, count: CountAll) -> None:
         """Count the store when it is uncounted, or marked for a recount
@@ -66,16 +69,20 @@ class StorageUsage:
         Args:
             count (CountAll): the bytes the whole store holds.
         """
-        self._bind()
-        while (
-            self.used is None
-            or self._counting is not None
-            or (self.dirty and not self.active)
-        ):
-            if self._counting is None:
-                self.dirty = False
-                self._counting = asyncio.ensure_future(self._count(count))
-            await asyncio.shield(self._counting)
+        while True:
+            with self.lock:
+                self._bind()
+                if not (
+                    self.used is None
+                    or self._counting is not None
+                    or (self.dirty and not self.active)
+                ):
+                    return
+                if self._counting is None:
+                    self.dirty = False
+                    self._counting = asyncio.ensure_future(self._count(count))
+                counting = self._counting
+            await asyncio.shield(counting)
 
     async def _count(self, count: CountAll) -> None:
         try:
@@ -113,11 +120,12 @@ class StorageUsage:
         Args:
             held (Charge): the write's charge.
         """
-        self._bind()
-        for other in self.active:
-            if _overlaps(other.path, held.path):
-                other.contended = held.contended = self.dirty = True
-        self.active.append(held)
+        with self.lock:
+            self._bind()
+            for other in self.active:
+                if _overlaps(other.path, held.path):
+                    other.contended = held.contended = self.dirty = True
+            self.active.append(held)
 
     def leave(self, held: "Charge") -> None:
         """Mark a write done.
@@ -125,7 +133,8 @@ class StorageUsage:
         Args:
             held (Charge): the charge ``enter`` took.
         """
-        self.active.remove(held)
+        with self.lock:
+            self.active.remove(held)
 
     def admit(self, path: PathSpec, growth: int) -> None:
         """Raise ``edquot(path)`` when positive growth would pass the limit.
@@ -135,12 +144,13 @@ class StorageUsage:
             growth (int): bytes the change adds; zero or less always passes,
                 and reaching the limit exactly passes.
         """
-        self._bind()
-        if growth <= 0:
-            return
-        assert self.used is not None
-        if self.used + self.pending + growth > self.limit:
-            raise edquot(path)
+        with self.lock:
+            self._bind()
+            if growth <= 0:
+                return
+            assert self.used is not None
+            if self.used + self.pending + growth > self.limit:
+                raise edquot(path)
 
     def hold(self, path: PathSpec, size: int) -> None:
         """Admit ``size`` and keep it in ``pending`` until it lands.
@@ -149,8 +159,9 @@ class StorageUsage:
             path (PathSpec): the operand a refusal names.
             size (int): the bytes about to be written.
         """
-        self.admit(path, size)
-        self.pending += size
+        with self.lock:
+            self.admit(path, size)
+            self.pending += size
 
     def land(self, held: int, delta: int) -> None:
         """Take ``held`` out of ``pending`` and add the measured ``delta``.
@@ -159,9 +170,10 @@ class StorageUsage:
             held (int): bytes this writer put in ``pending``.
             delta (int): the change the store really took.
         """
-        self.pending -= held
-        if self.used is not None:
-            self.used += delta
+        with self.lock:
+            self.pending -= held
+            if self.used is not None:
+                self.used += delta
 
     def report(self) -> CapacityResult:
         """df's QUOTA row: total is the limit, available never below 0."""

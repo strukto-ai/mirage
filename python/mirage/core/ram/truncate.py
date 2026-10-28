@@ -58,7 +58,7 @@ async def truncate(
         if no_create:
             return
         data = b""
-    check_capacity(store, path, p, length)
-    store.files[p] = data[:length].ljust(length, b"\0")
+    with check_capacity(store, path, p, length):
+        store.files[p] = data[:length].ljust(length, b"\0")
     store.modified[p] = now_iso()
     record("truncate", path.virtual, "ram", 0, timer)
