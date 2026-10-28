@@ -1173,8 +1173,8 @@ describe('handleCd', () => {
     expect(s.cwd).toBe('/')
   })
 
-  it('rejects when stat throws not-found and path is not a mount root', async () => {
-    const dispatch = vi.fn<DispatchFn>(() => Promise.reject(new Error('not found: /x')))
+  it('rejects when stat throws ENOENT and path is not a mount root', async () => {
+    const dispatch = vi.fn<DispatchFn>(() => Promise.reject(enoent('/missing')))
     const s = new SessionState({ sessionId: 'test', cwd: '/' })
     const [, io] = await handleCd(dispatch, () => false, '/missing', s)
     expect(io.exitCode).toBe(1)

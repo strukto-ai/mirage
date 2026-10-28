@@ -14,7 +14,7 @@
 
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
 import { dottedSpelling, resolvePath, CycleError, posixNormpath } from '../../../../utils/path.ts'
-import { fsStrerror } from '../../../../errors/fs.ts'
+import { fsStrerror, isEnoent } from '../../../../errors/fs.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PathSpec, type StatFn, FileType } from '../../../../types.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -162,13 +162,11 @@ export async function handleCd(
       const [s] = await dispatch('stat', scope)
       stat = s as { type?: string } | null
     } catch (exc) {
-      const msg = exc instanceof Error ? exc.message : String(exc)
-      const code = (exc as { code?: string }).code
-      if (code === 'ENOENT' || /not found|no such file/i.test(msg)) {
+      if (isEnoent(exc)) {
         notFound = true
       } else {
-        error = `bash: cd: ${named}: ${fsStrerror(exc) ?? msg}
-`
+        const msg = exc instanceof Error ? exc.message : String(exc)
+        error = `bash: cd: ${named}: ${fsStrerror(exc) ?? msg}\n`
         continue
       }
     }
