@@ -1266,14 +1266,17 @@ describe('the read policy survives a snapshot round trip', () => {
       const target = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
       try {
         await target.cache.set('/d/live.txt', new TextEncoder().encode('live'))
+        await target.vfsMd('/d/VFS.md')
         // With replaceCache, which is the `version checkout` path. The
-        // check sits above `cache.clear()`; moved one line below it a
-        // refused checkout would already have wiped the live cache while
-        // still rejecting, so the rejection alone does not pin the order.
+        // check sits above `documents.clear()` and `cache.clear()`; moved
+        // below either a refused checkout would already have wiped the live
+        // cache or VFS.md binding while still rejecting, so the rejection
+        // alone does not pin the order.
         await expect(
           applyStateDict(target, { ...state, version }, { replaceCache: true }),
         ).rejects.toThrow(`v${String(version)} not supported`)
         expect(await target.cache.exists('/d/live.txt')).toBe(true)
+        expect((await target.shell('cat /d/VFS.md')).exitCode).toBe(0)
       } finally {
         await target.close()
       }

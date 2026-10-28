@@ -1089,6 +1089,47 @@ async def test_apply_state_dict_runs_the_version_check_too(version):
 
 
 @pytest.mark.asyncio
+async def test_a_refused_checkout_keeps_the_cache_and_document_bindings():
+    state = await _saved_state({"/d/": RAMVFS()})
+    state[StateKey.VERSION] = 3
+    target = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await target.cache.set("/d/live", b"x")
+        await target.vfs_md("/d/VFS.md")
+        with pytest.raises(
+            ValueError, match="snapshot format v3 not supported"
+        ):
+            await apply_state_dict(target, state, replace_cache=True)
+        assert await target.cache.get("/d/live") == b"x"
+        assert (await target.shell("cat /d/VFS.md")).exit_code == 0
+    finally:
+        await target.close()
+
+
+class CountingRAM(RAMVFS):
+    """Counts its constructions, so a test sees whether a load built one."""
+
+    builds = 0
+
+    def __init__(self) -> None:
+        super().__init__()
+        type(self).builds += 1
+
+
+@pytest.mark.asyncio
+async def test_a_newer_format_is_refused_before_any_vfs_is_built(monkeypatch):
+    register_vfs("counting", CountingRAM)
+    state = await _saved_state(
+        {"/c/": Mount(vfs=build_vfs("counting"), vfs_ref="counting")}
+    )
+    state[StateKey.VERSION] = 999
+    monkeypatch.setattr(CountingRAM, "builds", 0)
+    with pytest.raises(ValueError, match="snapshot format v999"):
+        await Workspace.from_state(state)
+    assert CountingRAM.builds == 0
+
+
+@pytest.mark.asyncio
 async def test_an_overridden_mount_takes_the_default_read_spec():
     """The saved policy belongs to the backend that was saved.
 

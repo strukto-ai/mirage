@@ -738,7 +738,7 @@ describe('Workspace.unmount', () => {
     }
   })
 
-  it('closes each VFS separately as its last mount leaves', async () => {
+  it('closes each VFS when its own mount leaves', async () => {
     const content = new TextEncoder().encode('mock data\n')
     class ReadingVFS extends MockVFS {
       override read(): Promise<Uint8Array> {
