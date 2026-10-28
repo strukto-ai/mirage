@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize, type ByteSource } from '../../io/types.ts'
+import type { ByteSource } from '../../io/types.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { copy as dbxCopy } from '../../core/databricks_volume/copy.ts'
 import { create as dbxCreate } from '../../core/databricks_volume/create.ts'
@@ -67,8 +67,8 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
     return dbxExists(this.accessor, path)
   }
 
-  override async write(path: PathSpec, data: ByteSource): Promise<void> {
-    return dbxWrite(this.accessor, path, await materialize(data))
+  override write(path: PathSpec, data: ByteSource): Promise<void> {
+    return dbxWrite(this.accessor, path, data)
   }
 
   override create(path: PathSpec): Promise<void> {

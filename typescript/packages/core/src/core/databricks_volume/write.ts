@@ -15,11 +15,13 @@
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { getDirectoryMetadata, getMetadata, upload } from './client.ts'
+import { ByteSpool } from '../../io/spool.ts'
+import type { ByteSource } from '../../io/types.ts'
+import { getDirectoryMetadata, getMetadata, MAX_UPLOAD_SIZE, upload } from './client.ts'
 import { ensurePathSpec, parentPath } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
-import { enoent, enotdir } from '../../errors/fs.ts'
+import { efbig, enoent, enotdir } from '../../errors/fs.ts'
 
 async function ensureParentDirectory(
   accessor: DatabricksVolumeAccessor,
@@ -41,21 +43,32 @@ async function ensureParentDirectory(
   throw enotdir(virtualTarget)
 }
 
+/**
+ * Write a file in one PUT streamed from a spool, which knows its length; one
+ * past the PUT's cap is refused before any request. Mirrors Python's `write`.
+ */
 export async function write(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
-  data: Uint8Array,
+  data: ByteSource,
 ): Promise<void> {
   const p = ensurePathSpec(path)
   const remoteParent = backendPath(accessor.config, parentPath(p))
   const remotePath = backendPath(accessor.config, p)
-  const timer = startOp()
-  await ensureParentDirectory(accessor, remoteParent, p.virtual)
+  const spool = new ByteSpool()
   try {
-    await upload(accessor, remotePath, data, true)
-  } catch (exc) {
-    if (isNotFound(exc)) throw enoent(p.virtual)
-    throw exc
+    await spool.fill(data)
+    if (spool.size > MAX_UPLOAD_SIZE) throw efbig(p.virtual)
+    const timer = startOp()
+    await ensureParentDirectory(accessor, remoteParent, p.virtual)
+    try {
+      await upload(accessor, remotePath, spool, true)
+    } catch (exc) {
+      if (isNotFound(exc)) throw enoent(p.virtual)
+      throw exc
+    }
+    record('write', p.virtual, VFSName.DATABRICKS_VOLUME, spool.size, timer)
+  } finally {
+    await spool.close()
   }
-  record('write', p.virtual, VFSName.DATABRICKS_VOLUME, data.byteLength, timer)
 }

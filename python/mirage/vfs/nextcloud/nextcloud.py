@@ -20,7 +20,7 @@ from mirage.core.nextcloud.stream import read_stream as _read_stream
 from mirage.core.nextcloud.truncate import truncate as _truncate
 from mirage.core.nextcloud.unlink import unlink as _unlink
 from mirage.core.nextcloud.write import write as _write
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.nextcloud.config import NextcloudConfig
@@ -69,8 +69,7 @@ class NextcloudVFS(BaseVFS):
         return await _exists(self.accessor, path)
 
     async def write(self, path: PathSpec, data: ByteSource) -> None:
-        # TODO(MIRAGE-32): stream the upload; this holds the whole file.
-        await _write(self.accessor, path, await materialize(data))
+        await _write(self.accessor, path, data)
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

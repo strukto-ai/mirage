@@ -1,5 +1,9 @@
 export const SCOPE_ERROR = 5000
 export const DEFAULT_CHUNK_SIZE = 8192
+// A write past one chunk goes up through Nextcloud's chunked upload, which
+// takes at most 10,000 chunks of at least 5 MiB but the last.
+export const UPLOAD_CHUNK_SIZE = 10 * 1024 * 1024
+export const MAX_UPLOAD_CHUNKS = 10000
 
 export const QUOTA_PROPFIND =
   '<?xml version="1.0" encoding="utf-8"?>' +

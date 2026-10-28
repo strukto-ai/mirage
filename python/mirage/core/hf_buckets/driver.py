@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass
 
 from opendal import AsyncOperator
@@ -21,6 +21,7 @@ from opendal.exceptions import NotFound
 from opendal.types import EntryMode
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
+from mirage.cache.types import WriteCondition
 from mirage.core.hf_buckets.constants import SCOPE_ERROR
 from mirage.core.hf_buckets.hub import fetch_row
 from mirage.core.hf_hub.client import HfHubError
@@ -30,6 +31,8 @@ from mirage.core.object_store.driver import (
     ObjectStoreDriver,
     TreeEntry,
 )
+from mirage.io.cooperative import chunks
+from mirage.io.types import ByteSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +183,23 @@ async def _put(conn: HfConn, key: str, data: bytes) -> ObjectMeta | None:
     return None
 
 
+async def _put_stream(
+    conn: HfConn, key: str, data: ByteSource, cond: WriteCondition
+) -> ObjectMeta:
+    # opendal's hf writer streams each write into the bucket's xet upload
+    # and commits the file on close, so a write that fails is never closed
+    # and commits nothing. The meta confirms only the size, as _put's
+    # absence of a token does.
+    file = await conn.op.open(key, "wb")
+    size = 0
+    async with aclosing(chunks(data)) as source:
+        async for chunk in source:
+            await file.write(chunk)
+            size += len(chunk)
+    await file.close()
+    return ObjectMeta(size=size)
+
+
 async def _delete_file(conn: HfConn, key: str) -> None:
     try:
         await conn.op.delete(key)
@@ -216,7 +236,6 @@ def _is_not_found(exc: Exception) -> bool:
     return isinstance(exc, NotFound)
 
 
-# TODO(MIRAGE-32): stream the upload; this holds the whole file.
 DRIVER: ObjectStoreDriver[HfBucketsAccessor, HfConn] = ObjectStoreDriver(
     vfs="hf",
     scope_error=SCOPE_ERROR,
@@ -227,6 +246,7 @@ DRIVER: ObjectStoreDriver[HfBucketsAccessor, HfConn] = ObjectStoreDriver(
     head=_head,
     get=_get,
     put=_put,
+    put_stream=_put_stream,
     delete_file=_delete_file,
     delete_prefix=_delete_prefix,
     probe_prefix=_probe_prefix,

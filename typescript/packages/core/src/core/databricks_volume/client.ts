@@ -15,11 +15,15 @@
 import { z } from 'zod'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
+import { ByteSpool } from '../../io/spool.ts'
 import { apiRequest, apiStream, NO_RETRY } from '../api/client.ts'
 import { DatabricksVolumeApiError, DatabricksVolumeCredentialError } from './errors.ts'
 import type { DirectoryEntry, FileMetadata } from './types.ts'
 
 type Endpoint = 'files' | 'directories'
+
+/** The Files API takes a file in one PUT of at most 5 GiB. */
+export const MAX_UPLOAD_SIZE = 5 * 1024 ** 3
 
 const ENTRY = z.object({
   path: z.string(),
@@ -171,16 +175,21 @@ export async function* downloadStream(
   })
 }
 
-// TODO(MIRAGE-32): stream the upload; this holds the whole file.
+/**
+ * Put one file in a single PUT, at most `MAX_UPLOAD_SIZE` bytes; a spool goes
+ * up as its fetch body, streamed from where it spilled. Mirrors Python's
+ * `upload`.
+ */
 export async function upload(
   accessor: DatabricksVolumeAccessor,
   path: string,
-  data: Uint8Array,
+  data: Uint8Array | ByteSpool,
   overwrite: boolean,
 ): Promise<void> {
+  const body = data instanceof ByteSpool ? await data.body('fetch') : new Uint8Array(data)
   await request(accessor, 'PUT', 'files', path, {
     params: { overwrite },
-    body: new Uint8Array(data),
+    body: body as Uint8Array<ArrayBuffer> | Blob,
     read: 'none',
   })
 }

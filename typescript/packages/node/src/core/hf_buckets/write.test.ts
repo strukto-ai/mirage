@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CHUNK_SIZE } from '@struktoai/mirage-core/io/cooperative'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { errorVirtualPath } from '@struktoai/mirage-core/errors/fs'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
@@ -65,6 +66,46 @@ describe('hf write', () => {
       Buffer.from('x'),
     )
     expect(fake.files.has('sub/out.txt')).toBe(true)
+  })
+})
+
+describe('hf streamed write', () => {
+  it('hands the writer one chunk at a time and commits on close', async () => {
+    const { accessor, fake } = await setup()
+    let total = 0
+    let largest = 0
+    let closed = false
+    fake.writer = () =>
+      Promise.resolve({
+        write: (data: Buffer) => {
+          total += data.byteLength
+          largest = Math.max(largest, data.byteLength)
+          return Promise.resolve()
+        },
+        close: () => {
+          closed = true
+          return Promise.resolve()
+        },
+      })
+    const block = new Uint8Array(1024 * 1024)
+    async function* source(): AsyncGenerator<Uint8Array> {
+      for (let i = 0; i < 64; i++) yield await Promise.resolve(block)
+    }
+    const written = await write(accessor, PathSpec.fromStrPath('/big.bin'), source())
+    expect([total, closed, written?.size]).toEqual([64 * block.byteLength, true, total])
+    expect(largest).toBeLessThanOrEqual(CHUNK_SIZE)
+  })
+
+  it('commits nothing when the stream fails', async () => {
+    const { accessor, fake } = await setup()
+    async function* source(): AsyncGenerator<Uint8Array> {
+      yield await Promise.resolve(new TextEncoder().encode('partial'))
+      throw new Error('producer failed')
+    }
+    await expect(write(accessor, PathSpec.fromStrPath('/out.txt'), source())).rejects.toThrow(
+      'producer failed',
+    )
+    expect(fake.files.size).toBe(0)
   })
 })
 

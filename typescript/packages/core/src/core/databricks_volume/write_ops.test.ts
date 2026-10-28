@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MEMORY_LIMIT, setSpoolFactory } from '../../io/spool.ts'
 import { create } from './create.ts'
 import { mkdir } from './mkdir.ts'
 import { rmRecursive } from './rm.ts'
@@ -31,6 +32,7 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  setSpoolFactory(null)
 })
 
 const ENC = new TextEncoder()
@@ -73,6 +75,57 @@ describe('writeBytes', () => {
       (e: unknown) => e,
     )) as Error & { code?: string }
     expect(err.code).toBe('ENOTDIR')
+  })
+})
+
+describe('a large write', () => {
+  it('goes up as the spool body, holding a bounded amount of memory', async () => {
+    const spilled = new Blob()
+    let stored = 0
+    let largest = 0
+    setSpoolFactory(() =>
+      Promise.resolve({
+        append: (part) => {
+          stored += part.byteLength
+          largest = Math.max(largest, part.byteLength)
+          return Promise.resolve()
+        },
+        read: () => Promise.reject(new Error('the upload reads no window')),
+        body: () => Promise.resolve(spilled),
+        close: () => Promise.resolve(),
+      }),
+    )
+    const { fetch, calls } = routedFetch(() => new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+    const block = new Uint8Array(1024 * 1024)
+    async function* source(): AsyncGenerator<Uint8Array> {
+      for (let i = 0; i < 64; i++) yield await Promise.resolve(block)
+    }
+    await write(makeAccessor(), spec('/volume/big.bin'), source())
+    expect(calls.find((c) => c.method === 'PUT')?.body).toBe(spilled)
+    expect(stored).toBe(64 * block.byteLength)
+    expect(largest).toBeLessThan(MEMORY_LIMIT)
+  })
+
+  it('past the PUT cap is refused before any request', async () => {
+    vi.resetModules()
+    vi.doMock('./client.ts', async (original) => ({
+      ...(await original<Record<string, unknown>>()),
+      MAX_UPLOAD_SIZE: 4,
+    }))
+    try {
+      const { write: capped } = await import('./write.ts')
+      const fresh = await import('../../../tests/core/databricks_volume/_test_util.ts')
+      const { fetch, calls } = routedFetch(() => new Response(null, { status: 200 }))
+      vi.stubGlobal('fetch', fetch)
+      await expect(
+        capped(fresh.makeAccessor(), fresh.spec('/volume/big.bin'), ENC.encode('12345')),
+      ).rejects.toMatchObject({ code: 'EFBIG', message: '/volume/big.bin' })
+      expect(calls).toEqual([])
+    } finally {
+      vi.doUnmock('./client.ts')
+      vi.resetModules()
+    }
   })
 })
 

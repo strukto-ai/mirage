@@ -1,7 +1,11 @@
+import tracemalloc
 from contextlib import nullcontext
+from unittest.mock import patch
 
+import httpx
 import pytest
 
+from mirage.core.nextcloud.constants import UPLOAD_CHUNK_SIZE
 from mirage.core.nextcloud.copy import copy, dir_copy
 from mirage.core.nextcloud.create import create
 from mirage.core.nextcloud.rename import rename
@@ -18,6 +22,95 @@ async def test_write_bytes_uploads(make_acc):
     acc = make_acc({})
     await write(acc, PathSpec.from_str_path("/hello.txt"), b"hi there")
     assert acc._fake.files == {"hello.txt": b"hi there"}
+
+
+UPLOADS = "https://cloud.example.com/remote.php/dav/uploads/user"
+
+
+class _Uploads:
+    """Answers a chunked upload's requests, keeping each one's method,
+    target, headers and body size, never the body.
+
+    Args:
+        fail (str | None): the method answered 500.
+    """
+
+    def __init__(self, fail: str | None = None) -> None:
+        self.fail = fail
+        self.calls: list[tuple[str, str, dict[str, str] | None, int]] = []
+
+    async def __call__(
+        self, accessor, method, url, headers=None, content=None
+    ):
+        size = 0
+        if content is not None:
+            async for piece in content:
+                size += len(piece)
+        self.calls.append((method, url, headers, size))
+        status = 500 if method == self.fail else 201
+        return httpx.Response(status, request=httpx.Request(method, url))
+
+
+@pytest.mark.asyncio
+async def test_a_large_write_goes_up_in_chunks_in_bounded_memory(make_acc):
+    acc = make_acc({})
+    uploads = _Uploads()
+    block = b"x" * (1024 * 1024)
+
+    async def source():
+        for _ in range(64):
+            yield block
+
+    with patch("mirage.core.nextcloud.write.dav_request", uploads):
+        tracemalloc.start()
+        try:
+            await write(acc, PathSpec.from_str_path("/d/big.bin"), source())
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+    folder = uploads.calls[0][1]
+    target = {"Destination": f"{ROOT}/d/big.bin"}
+    total = {**target, "OC-Total-Length": str(len(block) * 64)}
+    sizes = [UPLOAD_CHUNK_SIZE] * 6 + [4 * len(block)]
+    assert folder.startswith(f"{UPLOADS}/mirage-")
+    assert uploads.calls == [
+        ("MKCOL", folder, target, 0),
+        *(
+            (
+                "PUT",
+                f"{folder}/{number:05d}",
+                {**total, "Content-Length": str(size)},
+                size,
+            )
+            for number, size in enumerate(sizes, 1)
+        ),
+        ("MOVE", f"{folder}/.file", total, 0),
+    ]
+    assert acc._fake.dirs == {"d/"}
+    assert acc._fake.files == {}
+    assert peak < 8 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_a_failed_chunked_upload_deletes_its_folder(make_acc):
+    uploads = _Uploads(fail="MOVE")
+    with (
+        patch("mirage.core.nextcloud.write.dav_request", uploads),
+        pytest.raises(httpx.HTTPStatusError),
+    ):
+        await write(
+            make_acc({}),
+            PathSpec.from_str_path("/big.bin"),
+            b"x" * (UPLOAD_CHUNK_SIZE + 1),
+        )
+    assert [call[0] for call in uploads.calls] == [
+        "MKCOL",
+        "PUT",
+        "PUT",
+        "MOVE",
+        "DELETE",
+    ]
+    assert uploads.calls[-1][1] == uploads.calls[0][1]
 
 
 @pytest.mark.asyncio

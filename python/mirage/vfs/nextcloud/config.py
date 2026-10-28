@@ -28,9 +28,10 @@ class NextcloudConfig(BaseModel):
     rather than the account password."""
     verify_ssl: bool = True
     """Verify the server's TLS certificate on the WebDAV requests mirage
-    sends itself (copy, checksum, quota, properties, search); reads, writes
-    and listings go through OpenDAL, which always verifies."""
+    sends itself (copy, checksum, quota, properties, search, the chunks of
+    a large write); reads, other writes and listings go through OpenDAL,
+    which always verifies."""
     timeout: int = 30
     """Seconds one WebDAV request mirage sends itself (copy, checksum,
-    quota, properties, search) may take; reads, writes and listings go
-    through OpenDAL and its own timeouts."""
+    quota, properties, search, the chunks of a large write) may take; reads,
+    other writes and listings go through OpenDAL and its own timeouts."""

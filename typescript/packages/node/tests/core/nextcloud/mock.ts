@@ -58,6 +58,11 @@ export class FakeNextcloudOperator {
     return Promise.resolve()
   }
 
+  write(key: string, data: Buffer): Promise<void> {
+    this.files.set(key, Buffer.from(data))
+    return Promise.resolve()
+  }
+
   // MKCOL creates missing parents, so the fake records them too.
   delete(key: string): Promise<void> {
     if (key.endsWith('/')) {

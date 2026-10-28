@@ -1,4 +1,5 @@
-from urllib.parse import quote
+from collections.abc import AsyncIterable
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
@@ -9,6 +10,7 @@ from mirage.core.nextcloud.search.types import XmlElement
 from mirage.core.nextcloud.search.xml import dav
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.types import PathSpec
+from mirage.vfs.secrets import reveal_secret
 
 
 def dav_url(
@@ -26,12 +28,33 @@ def dav_url(
     return url + "/" if folder else url
 
 
+def uploads_url(accessor: NextcloudAccessor) -> str | None:
+    """The collection the mount's user uploads chunks into,
+    ``<server>/remote.php/dav/uploads/<user>``, or None for a URL that
+    names no user.
+
+    Args:
+        accessor (NextcloudAccessor): Nextcloud accessor.
+    """
+    config = accessor.config
+    url = urlsplit(config.url)
+    head, files, rest = url.path.partition("/remote.php/dav/files/")
+    user = rest.partition("/")[0]
+    if not files:
+        head, webdav, _ = url.path.partition("/remote.php/webdav")
+        user = quote(reveal_secret(config.username) or "") if webdav else ""
+    if not user:
+        return None
+    path = f"{head}/remote.php/dav/uploads/{user}"
+    return urlunsplit((url.scheme, url.netloc, path, "", ""))
+
+
 async def dav_request(
     accessor: NextcloudAccessor,
     method: str,
     url: str,
     headers: dict[str, str] | None = None,
-    content: bytes | None = None,
+    content: bytes | AsyncIterable[bytes] | None = None,
 ) -> httpx.Response:
     """Send one WebDAV request with the mount's credentials.
 
@@ -40,7 +63,9 @@ async def dav_request(
         method (str): the WebDAV method.
         url (str): the target, from :func:`dav_url`.
         headers (dict[str, str] | None): extra request headers.
-        content (bytes | None): the request body.
+        content (bytes | AsyncIterable[bytes] | None): the request body;
+            a stream goes up as it is read, sized by a ``Content-Length``
+            in ``headers``.
     """
     config = accessor.config
     async with httpx.AsyncClient(

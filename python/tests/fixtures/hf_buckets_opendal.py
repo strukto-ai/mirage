@@ -75,6 +75,23 @@ class _FakeFile:
 
 
 @dataclass
+class _FakeWriter:
+    """A ``wb`` file, which lands its bytes only on close, as opendal's
+    hf writer commits only then."""
+
+    files: dict[str, bytes]
+    key: str
+    parts: list[bytes] = field(default_factory=list)
+
+    async def write(self, data: bytes) -> int:
+        self.parts.append(bytes(data))
+        return len(data)
+
+    async def close(self) -> None:
+        self.files[self.key] = b"".join(self.parts)
+
+
+@dataclass
 class FakeAsyncOperator:
     """The opendal hf operator over a bucket, the way the binding behaves.
 
@@ -130,6 +147,8 @@ class FakeAsyncOperator:
         return self.files[full]
 
     async def open(self, key: str, mode: str = "rb"):
+        if mode == "wb":
+            return _FakeWriter(self.files, self._key(key))
         self._refuse("open")
         full = self._key(key)
         if full not in self.files:

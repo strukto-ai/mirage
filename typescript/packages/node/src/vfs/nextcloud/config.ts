@@ -29,7 +29,7 @@ const NextcloudConfigSchema = z.object({
     .describe("Accepted but not applied: every request verifies the server's TLS certificate."),
   timeout: z.number().optional().meta({
     description:
-      'Seconds one WebDAV request mirage sends itself (copy, checksum, quota, properties, search) may take; reads, writes and listings go through OpenDAL and its own timeouts.',
+      'Seconds one WebDAV request mirage sends itself (copy, checksum, quota, properties, search, the chunks of a large write) may take; reads, other writes and listings go through OpenDAL and its own timeouts.',
     default: 30,
   }),
 })

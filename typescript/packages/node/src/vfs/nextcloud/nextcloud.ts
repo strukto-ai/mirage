@@ -1,5 +1,5 @@
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import {
@@ -84,9 +84,8 @@ export class NextcloudVFS extends BaseVFS {
     return exists(this.accessor, path)
   }
 
-  override async write(path: PathSpec, data: ByteSource): Promise<void> {
-    // TODO(MIRAGE-32): stream the upload; this holds the whole file.
-    return write(this.accessor, path, await materialize(data))
+  override write(path: PathSpec, data: ByteSource): Promise<void> {
+    return write(this.accessor, path, data)
   }
 
   override create(path: PathSpec): Promise<void> {

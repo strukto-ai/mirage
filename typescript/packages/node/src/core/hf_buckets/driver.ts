@@ -19,6 +19,8 @@ import type {
   ObjectStoreDriver,
   TreeEntry,
 } from '@struktoai/mirage-core/core/object_store/driver'
+import { chunks } from '@struktoai/mirage-core/io/cooperative'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { Metadata, Operator } from 'opendal'
 import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
@@ -169,6 +171,21 @@ async function put(conn: HfConn, key: string, data: Uint8Array): Promise<ObjectM
   return null
 }
 
+async function putStream(conn: HfConn, key: string, data: ByteSource): Promise<ObjectMeta> {
+  // opendal's hf writer streams each write into the bucket's xet upload and
+  // commits the file on close, so a write that fails is never closed and
+  // commits nothing. The meta confirms only the size, as put's absence of a
+  // token does.
+  const writer = await conn.op.writer(key)
+  let size = 0
+  for await (const chunk of chunks(data)) {
+    await writer.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength))
+    size += chunk.byteLength
+  }
+  await writer.close()
+  return { size }
+}
+
 async function deleteFile(conn: HfConn, key: string): Promise<void> {
   try {
     await conn.op.delete(key)
@@ -207,7 +224,6 @@ function isNotFound(err: unknown): boolean {
   return err instanceof Error && err.message.startsWith('NotFound')
 }
 
-// TODO(MIRAGE-32): stream the upload; this holds the whole file.
 export const DRIVER: ObjectStoreDriver<HfBucketsAccessor, HfConn> = {
   vfs: 'hf',
   scopeError: SCOPE_ERROR,
@@ -218,6 +234,7 @@ export const DRIVER: ObjectStoreDriver<HfBucketsAccessor, HfConn> = {
   head,
   get,
   put,
+  putStream,
   deleteFile,
   deletePrefix,
   probePrefix,
