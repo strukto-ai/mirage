@@ -112,6 +112,32 @@ describe('conditional writes on an S3 mount', () => {
     built.push(ws)
     return ws
   }
+  it.each([
+    ['rm /s3/f', 'f'],
+    ['rm -f /s3/f', 'f'],
+    ['echo mine > /s3/f', 'f'],
+    ['cp /s3/g /s3/f', 'f'],
+    ['mv /s3/f /s3/new', 'f'],
+    ['mv /s3/g /s3/f', 'f'],
+    ['rm -r /s3/d', 'd/a'],
+  ])('live session refuses peer mutation: %s', async (line, key) => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    const read = await ws.shell(`cat /s3/${key}`, { sessionId: 'a' })
+    expect(DEC.decode(read.stdout)).toBe(SEED[key])
+    expect((await ws.shell(`echo peer > /s3/${key}`, { sessionId: 'b' })).exitCode).toBe(0)
+    for (let i = 0; i < 2; i++) {
+      const refused = await ws.shell(line, { sessionId: 'a' })
+      expect(refused.exitCode).not.toBe(0)
+      expect(DEC.decode(refused.stderr)).toContain(STALE)
+      expect(DEC.decode(mock.store.get('b', key))).toBe('peer\n')
+    }
+    expect(DEC.decode((await ws.shell(`cat /s3/${key}`, { sessionId: 'a' })).stdout)).toBe('peer\n')
+    const accepted = await ws.shell(line, { sessionId: 'a' })
+    expect(accepted.exitCode, DEC.decode(accepted.stderr)).toBe(0)
+  })
+
   const mutations = (): [string, Record<string, string>][] =>
     mock.ledger.filter(([op]) => MUTATIONS.has(op))
   const sent = (op: string): Record<string, string>[] =>

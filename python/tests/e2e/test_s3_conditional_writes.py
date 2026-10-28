@@ -1366,3 +1366,35 @@ async def test_an_unconditional_sed_write_failure_reads_as_before(
     fake.before("put_object", _denied)
     code, _, err = await _run(ws, "sed -i s/o/O/ /s3/f /s3/g")
     assert (code, err.startswith("sed: can't read ")) == (1, True), err
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'line,key',
+    [
+        ('rm /s3/f', 'f'),
+        ('rm -f /s3/f', 'f'),
+        ('echo mine > /s3/f', 'f'),
+        ('cp /s3/g /s3/f', 'f'),
+        ('mv /s3/f /s3/new', 'f'),
+        ('mv /s3/g /s3/f', 'f'),
+        ('rm -r /s3/d', 'd/a'),
+    ],
+)
+async def test_live_session_refuses_peer_mutation(workspaces, fake, line, key):
+    ws = workspaces()
+    ws.create_session('a')
+    ws.create_session('b')
+    read = await ws.shell(f'cat /s3/{key}', session_id='a')
+    assert await read.stdout_str() == SEED[key].decode()
+    wrote = await ws.shell(f'echo peer > /s3/{key}', session_id='b')
+    assert wrote.exit_code == 0
+    for _ in range(2):
+        refused = await ws.shell(line, session_id='a')
+        assert refused.exit_code != 0
+        assert STALE in await refused.stderr_str()
+        assert fake.buckets['b'][key] == b'peer\n'
+    refreshed = await ws.shell(f'cat /s3/{key}', session_id='a')
+    assert await refreshed.stdout_str() == 'peer\n'
+    accepted = await ws.shell(line, session_id='a')
+    assert accepted.exit_code == 0, await accepted.stderr_str()
