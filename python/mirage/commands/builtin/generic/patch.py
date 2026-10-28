@@ -1,7 +1,6 @@
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from functools import partial
 from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import UINTMAX
@@ -244,7 +243,7 @@ class _PatchFiles:
         if request["op"] == "chmod":
             mode = int(str(request["mode"]))
             return Served(
-                await self._change(partial(self.chmod, mode=mode), path)
+                await self._change(lambda spec: self.chmod(spec, mode), path)
             )
         if request.get("file") is not True:
             patch = await _load_patch_data(

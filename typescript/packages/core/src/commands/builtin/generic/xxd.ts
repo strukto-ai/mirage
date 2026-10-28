@@ -398,7 +398,7 @@ function parseFlags(bag: Record<string, FlagValue>): XxdFlags {
   // Only a dump outside -p caps the count. -c 0 is a dump's default 16, and
   // puts all of a -p dump on one line, whose default is 30.
   const typed = typedCols === undefined ? undefined : Number(typedCols)
-  const cols = plain ? (typed ?? 30) : typed || 16
+  const cols = plain ? (typed ?? 30) : typed === 0 ? 16 : (typed ?? 16)
   return {
     reverse: fl.asBool('r'),
     plain,
