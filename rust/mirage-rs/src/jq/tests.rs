@@ -2597,6 +2597,275 @@ fn pending_formats_and_extrema_cancel_and_reuse_the_stream() {
 }
 
 #[test]
+fn parameter_shadowing_preserves_value_evaluation_and_filter_lookup() {
+    for steps in [7, u64::MAX] {
+        for (program, expected) in [
+            ("def f($x; x): $x; f(1;2)", vec![Frame::Out("1".into())]),
+            (
+                "def f(x; $x): [$x,x]; f(1;2)",
+                vec![Frame::Out("[2,2]".into())],
+            ),
+            (
+                "def f(x; x): x; f(error(\"unused\");2)",
+                vec![Frame::Out("2".into())],
+            ),
+            (
+                "def f($x; $x): $x; f(error(\"shadowed\");2)",
+                vec![Frame::Err("shadowed".into())],
+            ),
+            (
+                "def f($x; $x): $x; f((1,2);(3,4))",
+                vec![
+                    Frame::Out("3".into()),
+                    Frame::Out("4".into()),
+                    Frame::Out("3".into()),
+                    Frame::Out("4".into()),
+                ],
+            ),
+            (
+                "def f($x; x): [$x,x]; f(1;(2,3))",
+                vec![Frame::Out("[1,2,3]".into())],
+            ),
+            (
+                "10 as $v | def f($x; x): $x + $v; 20 as $v | f(1;2)",
+                vec![Frame::Out("11".into())],
+            ),
+            (
+                "def f($x; $y): [$x,$y]; f((1,2);(3,4))",
+                vec![
+                    Frame::Out("[1,3]".into()),
+                    Frame::Out("[1,4]".into()),
+                    Frame::Out("[2,3]".into()),
+                    Frame::Out("[2,4]".into()),
+                ],
+            ),
+        ] {
+            assert_eq!(
+                run(program, "null", steps),
+                expected,
+                "{program}, {steps} steps"
+            );
+        }
+        for (program, expected, requests) in [
+            ("def f($x; $x): $x; f(input;2)", "2", 1),
+            ("def f($x; $x): $x; f(input;input)", "20", 2),
+            ("def f($x; $y): [$x,$y]; f(input;input)", "[10,20]", 2),
+        ] {
+            let mut stream = open(program, steps);
+            let mut wire = Vec::new();
+            stream.feed(b"null", &mut wire).unwrap();
+            stream.finish(&mut wire).unwrap();
+            let mut count = 0;
+            loop {
+                while stream.busy() {
+                    stream.drain(&mut wire).unwrap();
+                }
+                let Some(request) = stream.request(&mut Vec::new()) else {
+                    break;
+                };
+                assert_eq!(request, br#"{"op":"input"}"#);
+                count += 1;
+                assert!(count <= requests);
+                stream
+                    .respond(
+                        br#"{"kind":"value"}"#,
+                        (count * 10).to_string().as_bytes(),
+                        &mut wire,
+                    )
+                    .unwrap();
+            }
+            assert_eq!(count, requests, "{program}");
+            assert_eq!(
+                frames(&wire),
+                vec![Frame::Out(expected.into())],
+                "{program}"
+            );
+        }
+    }
+}
+
+#[test]
+fn regex_array_limit_transfers_storage_without_a_false_memory_peak() {
+    let long = serde_json::to_string(&"a".repeat(101)).unwrap();
+    for steps in [7, u64::MAX] {
+        for memory in [40000, 55000, 100000] {
+            let config = serde_json::json!({
+                "program":r#"try match(".";"g") catch ."#, "items":100,
+                "memory":memory, "steps":steps,
+            });
+            let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+            for (input, cancel) in [
+                (long.as_str(), false),
+                ("\"a\"", false),
+                (long.as_str(), true),
+                (long.as_str(), false),
+            ] {
+                let mut wire = Vec::new();
+                stream.begin(b"{}").unwrap();
+                stream.feed(input.as_bytes(), &mut wire).unwrap();
+                stream.finish(&mut wire).unwrap();
+                if cancel {
+                    if steps == 7 {
+                        for _ in 0..10 {
+                            stream.drain(&mut wire).unwrap();
+                        }
+                    }
+                    assert!(stream.cancel());
+                }
+                settle(&mut *stream, &mut wire);
+                let expected = if cancel {
+                    vec![]
+                } else if input == long && memory == 40000 {
+                    vec![Frame::Err("jq memory limit of 40000 bytes exceeded".into())]
+                } else if input == long {
+                    vec![Frame::Out(
+                        "\"jq array limit of 100 elements exceeded\"".into(),
+                    )]
+                } else {
+                    vec![Frame::Out(
+                        r#"{"offset":0,"length":1,"string":"a","captures":[]}"#.into(),
+                    )]
+                };
+                assert_eq!(
+                    frames(&wire),
+                    expected,
+                    "{memory} bytes, {steps} steps, cancel {cancel}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn regex_array_limit_keeps_named_owners_until_matching_drops() {
+    for steps in [7, u64::MAX] {
+        let meter = Arc::new(Meter::default());
+        let _installed = meter::install(&meter);
+        let args = [
+            Value::string("abc"),
+            Value::string("(?<letter>.)"),
+            Value::string("g"),
+            Value::False,
+        ];
+        let mut matching =
+            super::regex::Matching::begin(&args).unwrap_or_else(|_| panic!("valid regex"));
+        let before = meter.live();
+        let result = loop {
+            let mut budget = steps;
+            if let Some(result) = matching.run(&mut budget, Limits { items: 1, ..LIMITS }) {
+                break result;
+            }
+        };
+        assert!(matches!(&result, Err(super::builtin::Fault::Error(_))));
+        drop(result);
+        assert_eq!(meter.live(), before);
+        drop(matching);
+        drop(args);
+        assert_eq!(meter.live(), 0);
+    }
+}
+
+#[test]
+fn long_numbers_accept_extreme_exponents_without_overflow() {
+    for steps in [7, u64::MAX] {
+        for zeros in [4096, 5000] {
+            for sign in ["", "-"] {
+                for exponent in [
+                    "9223372036854775807",
+                    "-9223372036854775807",
+                    "9223372036854775808",
+                    "-9223372036854775808",
+                ] {
+                    let source = format!("{sign}1{}e{exponent}", "0".repeat(zeros));
+                    for chunk in [1, 997, source.len()] {
+                        let mut stream = open("type", steps);
+                        let mut wire = Vec::new();
+                        for bytes in source.as_bytes().chunks(chunk) {
+                            stream.feed(bytes, &mut wire).unwrap();
+                        }
+                        stream.finish(&mut wire).unwrap();
+                        assert!(wire.is_empty());
+                        assert!(stream.busy());
+                        settle(&mut *stream, &mut wire);
+                        assert_eq!(
+                            frames(&wire),
+                            vec![Frame::Out("\"number\"".into())],
+                            "{zeros} zeros, exponent {exponent}, sign {sign}, chunk {chunk}, {steps} steps"
+                        );
+                    }
+                }
+            }
+        }
+        let source = format!("1{}e-4095", "0".repeat(4096));
+        let expected = format!("10.{}", "0".repeat(4095));
+        assert_eq!(run(".", &source, steps), vec![Frame::Out(expected)]);
+    }
+}
+
+#[test]
+fn chunked_documents_reuse_pending_capacity_within_the_memory_cap() {
+    let input = format!("{}null", " ".repeat(39996));
+    let overflow = format!("{}null", " ".repeat(44997));
+    for steps in [7, u64::MAX] {
+        let config = serde_json::json!({"program":".", "memory":45000, "steps":steps});
+        let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+        for (source, split, cancel) in [
+            (input.as_str(), false, false),
+            (input.as_str(), true, false),
+            (overflow.as_str(), true, false),
+            (input.as_str(), true, true),
+            (input.as_str(), true, false),
+            ("null", false, false),
+        ] {
+            let mut wire = Vec::new();
+            stream.begin(b"{}").unwrap();
+            if split {
+                for chunk in [&source[..20000], &source[20000..22000], &source[22000..]] {
+                    stream.feed(chunk.as_bytes(), &mut wire).unwrap();
+                    assert!(wire.is_empty());
+                    assert!(!stream.busy());
+                }
+            } else {
+                stream.feed(source.as_bytes(), &mut wire).unwrap();
+            }
+            if cancel {
+                assert!(stream.cancel());
+            } else {
+                stream.finish(&mut wire).unwrap();
+                if source != overflow {
+                    assert!(wire.is_empty(), "{:?}", frames(&wire));
+                    assert!(stream.busy());
+                }
+            }
+            settle(&mut *stream, &mut wire);
+            let expected = if cancel {
+                vec![]
+            } else if source == overflow {
+                vec![Frame::Err("jq memory limit of 45000 bytes exceeded".into())]
+            } else {
+                vec![Frame::Out("null".into())]
+            };
+            assert_eq!(
+                frames(&wire),
+                expected,
+                "split {split}, cancel {cancel}, {steps} steps"
+            );
+        }
+        let mut wire = Vec::new();
+        stream.begin(b"{}").unwrap();
+        for chunk in [&input[..30000], &input[30000..]] {
+            stream.feed(chunk.as_bytes(), &mut wire).unwrap();
+        }
+        stream.finish(&mut wire).unwrap();
+        settle(&mut *stream, &mut wire);
+        assert_eq!(
+            frames(&wire),
+            vec![Frame::Err("jq memory limit of 45000 bytes exceeded".into())]
+        );
+    }
+}
+
+#[test]
 fn long_number_scratch_limits_are_terminal_and_reset_between_runs() {
     let number = format!("1{}", "0".repeat(4999));
     let invalid = format!("{number}e");

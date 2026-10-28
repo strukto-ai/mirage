@@ -119,6 +119,26 @@
         "n",
         "c"
       ]
+    },
+    {
+      "id": "jq_engine_long_number_exponents",
+      "seq": 18613007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[\"9223372036854775807\",\"-9223372036854775807\",\"9223372036854775808\",\"-9223372036854775808\"][] as $e | (\"1\" + (\"0\" * 4096) + \"e\" + $e) | fromjson | type'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"number\"\n\"number\"\n\"number\"\n\"number\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
     }
   ]
 }

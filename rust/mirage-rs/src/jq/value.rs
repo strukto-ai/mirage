@@ -1554,7 +1554,7 @@ impl NumberReading {
                 self.digits = self.digits.max(1);
                 self.adjusted = self.exp.saturating_add(self.digits as i64 - 1);
                 self.scientific = self.exp > 0 || self.adjusted < -6;
-                self.point = self.digits as i64 + self.exp;
+                self.point = (self.digits as i64).saturating_add(self.exp);
                 self.at = self.first.unwrap_or(self.end);
                 if bytes[self.start] == b'-' {
                     self.out.push('-');

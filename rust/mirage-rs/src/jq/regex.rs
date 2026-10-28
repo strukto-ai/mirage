@@ -219,6 +219,8 @@ impl Matching {
                 return None;
             }
             if self.found.len() > limits.items {
+                self.charge
+                    .set(self.names.capacity() * std::mem::size_of::<Value>());
                 return Some(array_limit(std::mem::take(&mut self.found), limits));
             }
             if !self.global || next > text.len() {

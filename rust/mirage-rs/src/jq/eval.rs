@@ -327,8 +327,12 @@ impl Stream for Eval {
             return Err(StreamError::new("jq_eval: begin the next document first"));
         }
         let _metered = meter::install(&self.meter);
-        if self.input_limited || self.meter.live().saturating_add(input.len()) > self.limits.memory
-        {
+        let growth = self
+            .pending
+            .len()
+            .saturating_add(input.len())
+            .saturating_sub(self.pending.capacity());
+        if self.input_limited || self.meter.live().saturating_add(growth) > self.limits.memory {
             self.input_limited = true;
             return Ok(());
         }
