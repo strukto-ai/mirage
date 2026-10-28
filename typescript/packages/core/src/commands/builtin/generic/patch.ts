@@ -257,9 +257,10 @@ function parseFlags(bag: Record<string, FlagValue>): PatchFlags {
 
 /**
  * The directory `-d` moves to from `cwd`, or GNU patch's fatal line when it
- * cannot move there. As chdir walks it, each entry a `.` or `..` steps out of
- * must be a directory too. `stat` refuses a directory with EISDIR. Mirrors
- * Python's `_directory`.
+ * cannot move there. It is walked a name at a time, as chdir walks it: each
+ * entry a `.` or `..` steps out of must be a directory too, checked once and
+ * in order, so the first that is not stops the walk. `stat` refuses a
+ * directory with EISDIR. Mirrors Python's `_directory`.
  */
 async function directory(
   typed: string,
@@ -267,27 +268,31 @@ async function directory(
   root: string,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<string | Uint8Array> {
-  const parts = typed.split('/')
-  const steps = parts.flatMap((part, at) =>
-    (part === '.' || part === '..') && parts.slice(0, at).some(Boolean)
-      ? [parts.slice(0, at).join('/')]
-      : [],
-  )
   let why = typed === '' ? 'No such file or directory' : ''
-  for (const step of typed === '' ? [] : [...steps, typed]) {
-    const target = resolvePath(step, cwd)
-    try {
-      await stat(PathSpec.fromStrPath(target, mountKey(target, root)))
-      why = 'Not a directory'
-    } catch (err) {
-      if (isEisdir(err)) continue
-      if (classify(err) === 'ENOTDIR') why = 'Not a directory'
-      else if (isEnoent(err)) why = 'No such file or directory'
-      else throw err
+  const names = typed.startsWith('/') ? [] : cwd.split('/').filter(Boolean)
+  let checked = names.length
+  for (const name of typed === '' ? [] : [...typed.split('/'), '.']) {
+    if ((name === '.' || name === '..') && names.length > checked) {
+      const target = `/${names.join('/')}`
+      try {
+        await stat(PathSpec.fromStrPath(target, mountKey(target, root)))
+        why = 'Not a directory'
+      } catch (err) {
+        if (isEisdir(err)) checked = names.length
+        else if (classify(err) === 'ENOTDIR') why = 'Not a directory'
+        else if (isEnoent(err)) why = 'No such file or directory'
+        else throw err
+      }
+      if (why !== '') break
     }
-    break
+    if (name === '..') {
+      names.pop()
+      checked = Math.min(checked, names.length)
+    } else if (name !== '' && name !== '.') {
+      names.push(name)
+    }
   }
-  if (why === '') return resolvePath(typed, cwd)
+  if (why === '') return `/${names.join('/')}`
   return ENC.encode(`patch: **** Can't change to directory ${shellQuote(typed)} : ${why}\n`)
 }
 
