@@ -135,6 +135,36 @@ describe('conditional writes on an S3 mount', () => {
     return data === undefined ? undefined : DEC.decode(data)
   }
 
+  it.each([WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL])(
+    'preserves a concurrent append when missing-file creation is delayed: %s',
+    async (policy) => {
+      const a = workspace(policy)
+      const b = workspace(policy)
+      let release = (): void => undefined
+      const allowed = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const waiting = new Promise<void>((resolve) => {
+        mock.before('PutObject', async () => {
+          resolve()
+          await allowed
+        })
+      })
+      const pending = run(a, "printf 'line_a\\n' >> /s3/new_f")
+      try {
+        await waiting
+        expect(await run(b, "printf 'line_b\\n' >> /s3/new_f")).toEqual([0, '', ''])
+        expect(object('new_f')).toBe('line_b\n')
+      } finally {
+        release()
+      }
+      const [code, , error] = await pending
+      expect(object('new_f')).toBe('line_b\n')
+      expect(code).toBe(1)
+      expect(error).toContain(STALE)
+    },
+  )
+
   it.each([
     [
       'redirect',
