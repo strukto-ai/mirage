@@ -29,7 +29,7 @@ import { fsStrerror, isEisdir, isEnoent, isFsError } from '../../../errors/fs.ts
 import { shellQuote } from '../../../utils/quote.ts'
 import { openStream, serveRequests, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
-import { linksOf, mountRoot } from '../utils/links.ts'
+import { linksOf, mountRoot, nameLocation } from '../utils/links.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import type { LinkView } from '../../../view/types.ts'
 import { UINTMAX } from '../constants.ts'
@@ -73,8 +73,8 @@ type PatchChanges = Readonly<Record<'mkdir' | 'unlink' | 'rmdir', (p: PathSpec) 
  * the working directory, as GNU's does; `.orig` and `.rej` after either name
  * its companions. It stats the names it picks the file among, makes the
  * directories a file it creates needs, and removes a file it empties with
- * the directories that leaves empty. A file that is not there or is a
- * directory is the engine's to report; any other failure is the command's.
+ * the directories that leaves empty. A file that is not there, is a directory
+ * or is a link is the engine's to report; any other failure is the command's.
  * Mirrors Python's _PatchFiles.
  */
 class PatchFiles {
@@ -106,7 +106,10 @@ class PatchFiles {
       const typed = byteView(this.orig.rawPath)
       if (path.startsWith(typed)) {
         const suffix = textView(path.slice(typed.length))
-        return suffix === '' ? this.orig : companion(this.orig, suffix)
+        if (suffix === '') return this.orig
+        const where = this.linked(this.orig)
+        if (where === null) return companion(this.orig, suffix)
+        return PathSpec.fromStrPath(where + suffix, mountKey(where + suffix, this.root))
       }
     }
     let name = textView(path)
@@ -118,6 +121,22 @@ class PatchFiles {
     return PathSpec.fromStrPath(name, key, this.cwd)
   }
 
+  /**
+   * Where the link a name ends in stands, null when it ends in none. Mirrors
+   * Python's `_linked`.
+   */
+  private linked(spec: PathSpec): string | null {
+    if (this.links === undefined) return null
+    let where: string | null
+    try {
+      where = nameLocation(this.links, spec, this.cwd)
+    } catch (err) {
+      if (err instanceof CycleError) return null
+      throw err
+    }
+    return where !== null && this.links.statAt(where) !== null ? where : null
+  }
+
   private async kind(path: string): Promise<Record<string, util.JSONType>> {
     let found: FileStat
     try {
@@ -126,9 +145,10 @@ class PatchFiles {
       if (real !== spec.virtual) spec = PathSpec.fromStrPath(real, mountKey(real, this.root))
       found = await this.stat(spec)
     } catch (err) {
-      if (err instanceof CycleError) return {}
       if (isEisdir(err)) return { kind: 'dir' }
-      if (isEnoent(err) || classify(err) === 'ENOTDIR') return {}
+      if (err instanceof CycleError || isEnoent(err) || classify(err) === 'ENOTDIR') {
+        return this.linked(this.spec(path)) === null ? {} : { kind: 'file' }
+      }
       throw err
     }
     return { kind: found.type === FileType.DIRECTORY ? 'dir' : 'file' }
@@ -164,8 +184,10 @@ class PatchFiles {
       if (typeof patch === 'string') return { reply: { line: byteView(patch) } }
       return { reply: { end: true }, data: patch }
     }
+    const spec = this.spec(path)
     try {
-      return { reply: { end: true }, data: await this.read(this.spec(path)) }
+      if (this.linked(spec) !== null) return { reply: { errno: 'ELOOP' } }
+      return { reply: { end: true }, data: await this.read(spec) }
     } catch (err) {
       if (isEisdir(err)) return { reply: { errno: 'EISDIR' } }
       if (isEnoent(err) || classify(err) === 'ENOTDIR') return { reply: { errno: 'ENOENT' } }

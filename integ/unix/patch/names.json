@@ -104,6 +104,41 @@
         "stdout": "patching file link/new.txt\nrc=0\nn\nInvalid file name flink/new.txt -- skipping patch\nrc=1\npatching file e/./f\nrc=0\nn\nIgnoring potentially dangerous file name g/../h\ncan't find file to patch at input line 3\nPerhaps you used the wrong -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|--- /dev/null\n|+++ g/../h\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\nrc=1\ncan't find file to patch at input line 3\nPerhaps you used the wrong -p or --strip option?\nThe text leading up to this was:\n--------------------------\n|--- file/\n|+++ file/\n--------------------------\nFile to patch: \nSkip this patch? [y] \nSkipping patch.\n1 out of 1 hunk ignored\nrc=1\nq\npatching file ./e/f\nrc=0\nd\nfile\nflink\nlink\n/data/patch_9941419\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "patch_refuses_a_link_it_would_patch",
+      "seq": 9941420,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941420 && touch /data/patch_9941420/.keep; cd /data/patch_9941420 || exit 1; printf 'a\\n' > target; ln -s target link; printf -- '--- link\\n+++ /dev/null\\n@@ -1 +0,0 @@\\n-a\\n' | patch -p0; echo rc=$?; printf -- '--- x\\n+++ x\\n@@ -1 +1 @@\\n-a\\n+b\\n' | patch link; echo rc=$?; ln -s nowhere dead; printf -- '--- dead\\n+++ dead\\n@@ -1 +1 @@\\n-a\\n+b\\n' | patch -p0; echo rc=$?; cat target; cat link.rej; ls; cd /; rm -r /data/patch_9941420",
+      "expect": {
+        "exit": 0,
+        "stdout": "File link is not a regular file -- refusing to patch\n1 out of 1 hunk ignored -- saving rejects to file link.rej\nrc=1\nFile link is not a regular file -- refusing to patch\n1 out of 1 hunk ignored -- saving rejects to file link.rej\nrc=1\nFile dead is not a regular file -- refusing to patch\n1 out of 1 hunk ignored -- saving rejects to file dead.rej\nrc=1\na\n--- x\n+++ x\n@@ -1 +1 @@\n-a\n+b\ndead\ndead.rej\nlink\nlink.rej\ntarget\n",
+        "stderr": ""
+      }
     }
   ]
 }
