@@ -221,18 +221,47 @@ export function callsAs<A extends unknown[], R>(
   fn: (...args: A) => R,
 ): (...args: A) => R {
   return (...args) => {
-    if (!asyncContextIsolatesTasks) {
-      for (const held of liveCallers()) {
-        const write = caller.write?.context != null ? caller.write : held.write
-        if (
-          write?.context != null &&
-          (held.session !== null || held.write?.context != null) &&
-          (caller.session?.versions ?? null) !== (held.session?.versions ?? null)
-        )
-          throw enotsup('workspace', 'conditional write (overlapping sessions)', write.prefix)
-      }
+    if (asyncContextIsolatesTasks) return callerStorage.run(caller, () => fn(...args)) as R
+    const conflict = callerConflict(caller)
+    if (conflict !== null)
+      throw enotsup('workspace', 'conditional write (overlapping sessions)', conflict)
+    try {
+      const result = callerStorage.run(caller, () => fn(...args))
+      if (result instanceof Promise) return result.finally(flushCloses) as R
+      flushCloses()
+      return result
+    } catch (error) {
+      flushCloses()
+      throw error
     }
-    return callerStorage.run(caller, () => fn(...args)) as R
+  }
+}
+
+/** The conditional mount whose live caller conflicts with this binding. */
+function callerConflict(caller: Caller): string | null {
+  if (asyncContextIsolatesTasks) return null
+  for (const held of liveCallers()) {
+    const write = caller.write?.context != null ? caller.write : held.write
+    if (
+      write?.context != null &&
+      (held.session !== null || held.write?.context != null) &&
+      (caller.session?.versions ?? null) !== (held.session?.versions ?? null)
+    )
+      return write.prefix
+  }
+  return null
+}
+
+const pendingCloses = new Map<() => Promise<unknown>, Caller>()
+
+/** Drain deferred closes after a fallback caller releases its frame. */
+function flushCloses(): void {
+  for (const [finish, caller] of pendingCloses) {
+    if (callerConflict(caller) !== null) continue
+    pendingCloses.delete(finish)
+    void runWithCaller(caller, finish).catch((error: unknown) => {
+      console.debug('deferred stream closer failed:', error)
+    })
   }
 }
 
@@ -262,7 +291,12 @@ export async function* withCaller<T>(source: AsyncIterable<T>, caller: Caller): 
     }
   } finally {
     const finish = iterator.return?.bind(iterator)
-    if (finish !== undefined) await runWithCaller(caller, () => finish())
+    if (finish !== undefined) {
+      // A conflicting operation may itself await this close. Queue cleanup
+      // without binding over that operation or waiting for it to finish.
+      if (callerConflict(caller) !== null) pendingCloses.set(finish, caller)
+      else await runWithCaller(caller, () => finish())
+    }
   }
 }
 

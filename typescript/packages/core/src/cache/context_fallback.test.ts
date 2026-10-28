@@ -32,7 +32,7 @@ import type { CacheInvalidator } from './types.ts'
 import { MountMode, PathSpec, WritePolicy } from '../types.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
 import { runInCommandScope } from './index/scope.ts'
-import { callsAs, currentCaller, runWithCaller } from '../context/session_context.ts'
+import { callsAs, currentCaller, runWithCaller, withCaller } from '../context/session_context.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
@@ -479,6 +479,91 @@ it.each([false, true])(
     expect(entered).toBe(false)
     expect(sent).toBe(true)
     expect(a.versions.read(manager.versionScope, '/f')).toBe('v2')
+    expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
+  },
+)
+
+it.each([
+  ['return', false],
+  ['return', true],
+  ['next', false],
+  ['next', true],
+] as const)(
+  'closes a paused peer stream after %s during conditional work (failed: %s)',
+  async (action, failed) => {
+    const manager = new CacheManager(
+      null,
+      null,
+      '/s3/',
+      true,
+      () => true,
+      600,
+      undefined,
+      undefined,
+      () => [],
+      true,
+    )
+    const a = new SessionState({ sessionId: 'a' })
+    const b = new SessionState({ sessionId: 'b' })
+    const base = currentCaller()
+    const context = {
+      vfs: 's3',
+      conditions: ['put'] as const,
+      readVersion: (p: PathSpec) => manager.readVersion(p),
+      readVersions: (paths: readonly PathSpec[]) => manager.readVersions(paths),
+      drop: () => Promise.resolve(),
+      keep: (p: PathSpec, version: string) => manager.keepVersion(p, version),
+      observe: (rec: OpRecord) => {
+        manager.observe(rec)
+      },
+    }
+    const [closed, markClosed] = gate()
+    let closeCount = 0
+    let cancelled = 0
+    const body = new ReadableStream<number>({
+      start(controller) {
+        controller.enqueue(1)
+      },
+      cancel() {
+        cancelled++
+      },
+    })
+    async function* source(): AsyncGenerator<number> {
+      const reader = body.getReader()
+      try {
+        const chunk = await reader.read()
+        if (!chunk.done) yield chunk.value
+      } finally {
+        await reader.cancel()
+        reader.releaseLock()
+        expect(currentCaller().session).toBe(b)
+        closeCount++
+        markClosed()
+      }
+    }
+    const stream = withCaller(source(), { ...base, session: b, write: { prefix: '/s3/', context } })
+    expect(await stream.next()).toEqual({ done: false, value: 1 })
+    const upload = runWithCaller({ ...base, session: a }, () =>
+      runWithWriteContext('/s3/', context, () =>
+        runWithRecording(async () => {
+          if (action === 'next')
+            await expect(stream.next()).rejects.toMatchObject({ code: 'ENOTSUP' })
+          else await stream.return(undefined)
+          expect(closeCount).toBe(0)
+          expect(currentCaller().session).toBe(a)
+          if (failed) throw new Error('upload failed')
+          record('write', '/s3/f', 's3', 1, startOp(), { fingerprint: 'v2' })
+        }),
+      ),
+    )
+    if (failed) await expect(upload).rejects.toThrow('upload failed')
+    else await upload
+    await closed
+    await stream.return(undefined)
+    expect(closeCount).toBe(1)
+    expect(cancelled).toBe(1)
+    expect(body.locked).toBe(false)
+    expect(a.versions.read(manager.versionScope, '/f')).toBe(failed ? null : 'v2')
     expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
   },
 )
