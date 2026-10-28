@@ -37,6 +37,7 @@ import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import { shellJoin } from '@struktoai/mirage-core/shell/join'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
 
@@ -71,7 +72,7 @@ export function serve(folder: string): string[] {
 /** Whether `path` lies in a folder a kernel mount here serves. */
 function served(path: string): boolean {
   for (const folder of SERVED) {
-    if (path === folder || path.startsWith(`${folder.replace(/\/+$/, '')}/`)) return true
+    if (path === folder || path.startsWith(`${rstripSlash(folder)}/`)) return true
   }
   return false
 }
