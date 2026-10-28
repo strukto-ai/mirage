@@ -1,14 +1,282 @@
 // Adapted from jq 1.8.2 (MIT), src/builtin.c, src/jv.c and src/jv_aux.c. See licenses/third_party/jq.txt.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::ops::Deref;
 use std::sync::Arc;
 
+use super::meter::{self, Charge};
 use super::parse::parse_value;
-use super::value::{List, MAX_DEPTH, Number, Object, TooDeep, Value, try_compare};
+use super::value::{Comparing, Key, List, MAX_DEPTH, Number, Object, TooDeep, Value, try_compare};
 use super::vm::Limits;
 
 const PATH_DEPTH: usize = 10000;
 const INDEX_MAX: f64 = (i32::MAX >> 2) as f64;
+
+/// How jq binds a builtin: a C function takes its arguments inline, a
+/// jq-coded one as closures, which are compiled after the body calling
+/// it.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Kind {
+    Native,
+    Jq,
+}
+
+/// Every builtin jq 1.8.2 binds, by name and arity, in the order
+/// builtins_bind leaves them: builtin.c's function_list bound last
+/// first, then its bytecoded builtins, then builtin.jq's definitions in
+/// order, then `builtins` itself. `builtins` lists them in this order
+/// with the underscored ones left out, as block_list_funcs does.
+pub(crate) const BUILTINS: &[(&str, usize, Kind)] = &[
+    ("have_literal_numbers", 0, Kind::Native),
+    ("have_decnum", 0, Kind::Native),
+    ("input_line_number", 0, Kind::Native),
+    ("input_filename", 0, Kind::Native),
+    ("now", 0, Kind::Native),
+    ("localtime", 0, Kind::Native),
+    ("gmtime", 0, Kind::Native),
+    ("mktime", 0, Kind::Native),
+    ("strflocaltime", 1, Kind::Native),
+    ("strftime", 1, Kind::Native),
+    ("strptime", 1, Kind::Native),
+    ("stderr", 0, Kind::Native),
+    ("debug", 0, Kind::Native),
+    ("input", 0, Kind::Native),
+    ("modulemeta", 0, Kind::Native),
+    ("_match_impl", 3, Kind::Native),
+    ("get_jq_origin", 0, Kind::Native),
+    ("get_prog_origin", 0, Kind::Native),
+    ("get_search_list", 0, Kind::Native),
+    ("halt_error", 1, Kind::Native),
+    ("halt", 0, Kind::Native),
+    ("env", 0, Kind::Native),
+    ("format", 1, Kind::Native),
+    ("error", 0, Kind::Native),
+    ("_max_by_impl", 1, Kind::Native),
+    ("_min_by_impl", 1, Kind::Native),
+    ("max", 0, Kind::Native),
+    ("min", 0, Kind::Native),
+    ("bsearch", 1, Kind::Native),
+    ("_unique_by_impl", 1, Kind::Native),
+    ("unique", 0, Kind::Native),
+    ("_group_by_impl", 1, Kind::Native),
+    ("_sort_by_impl", 1, Kind::Native),
+    ("sort", 0, Kind::Native),
+    ("nan", 0, Kind::Native),
+    ("infinite", 0, Kind::Native),
+    ("isnormal", 0, Kind::Native),
+    ("isnan", 0, Kind::Native),
+    ("isinfinite", 0, Kind::Native),
+    ("type", 0, Kind::Native),
+    ("utf8bytelength", 0, Kind::Native),
+    ("length", 0, Kind::Native),
+    ("contains", 1, Kind::Native),
+    ("has", 1, Kind::Native),
+    ("delpaths", 1, Kind::Native),
+    ("getpath", 1, Kind::Native),
+    ("setpath", 2, Kind::Native),
+    ("rtrim", 0, Kind::Native),
+    ("ltrim", 0, Kind::Native),
+    ("trim", 0, Kind::Native),
+    ("_strindices", 1, Kind::Native),
+    ("implode", 0, Kind::Native),
+    ("explode", 0, Kind::Native),
+    ("split", 1, Kind::Native),
+    ("endswith", 1, Kind::Native),
+    ("startswith", 1, Kind::Native),
+    ("keys_unsorted", 0, Kind::Native),
+    ("keys", 0, Kind::Native),
+    ("tostring", 0, Kind::Native),
+    ("toboolean", 0, Kind::Native),
+    ("tonumber", 0, Kind::Native),
+    ("fromjson", 0, Kind::Native),
+    ("tojson", 0, Kind::Native),
+    ("_negate", 0, Kind::Native),
+    ("_greatereq", 2, Kind::Native),
+    ("_greater", 2, Kind::Native),
+    ("_lesseq", 2, Kind::Native),
+    ("_less", 2, Kind::Native),
+    ("_notequal", 2, Kind::Native),
+    ("_equal", 2, Kind::Native),
+    ("_mod", 2, Kind::Native),
+    ("_divide", 2, Kind::Native),
+    ("_multiply", 2, Kind::Native),
+    ("_minus", 2, Kind::Native),
+    ("_plus", 2, Kind::Native),
+    ("lgamma_r", 0, Kind::Native),
+    ("frexp", 0, Kind::Native),
+    ("modf", 0, Kind::Native),
+    ("ldexp", 2, Kind::Native),
+    ("trunc", 0, Kind::Native),
+    ("significand", 0, Kind::Native),
+    ("scalbln", 2, Kind::Native),
+    ("scalb", 2, Kind::Native),
+    ("round", 0, Kind::Native),
+    ("rint", 0, Kind::Native),
+    ("nexttoward", 2, Kind::Native),
+    ("nextafter", 2, Kind::Native),
+    ("nearbyint", 0, Kind::Native),
+    ("logb", 0, Kind::Native),
+    ("log1p", 0, Kind::Native),
+    ("lgamma", 0, Kind::Native),
+    ("gamma", 0, Kind::Native),
+    ("fmod", 2, Kind::Native),
+    ("fmin", 2, Kind::Native),
+    ("fmax", 2, Kind::Native),
+    ("fma", 3, Kind::Native),
+    ("fdim", 2, Kind::Native),
+    ("fabs", 0, Kind::Native),
+    ("expm1", 0, Kind::Native),
+    ("exp10", 0, Kind::Native),
+    ("erfc", 0, Kind::Native),
+    ("erf", 0, Kind::Native),
+    ("drem", 2, Kind::Native),
+    ("copysign", 2, Kind::Native),
+    ("ceil", 0, Kind::Native),
+    ("yn", 2, Kind::Native),
+    ("jn", 2, Kind::Native),
+    ("y1", 0, Kind::Native),
+    ("y0", 0, Kind::Native),
+    ("tgamma", 0, Kind::Native),
+    ("tanh", 0, Kind::Native),
+    ("tan", 0, Kind::Native),
+    ("sqrt", 0, Kind::Native),
+    ("sinh", 0, Kind::Native),
+    ("sin", 0, Kind::Native),
+    ("remainder", 2, Kind::Native),
+    ("pow", 2, Kind::Native),
+    ("log2", 0, Kind::Native),
+    ("log10", 0, Kind::Native),
+    ("log", 0, Kind::Native),
+    ("j1", 0, Kind::Native),
+    ("j0", 0, Kind::Native),
+    ("hypot", 2, Kind::Native),
+    ("floor", 0, Kind::Native),
+    ("exp2", 0, Kind::Native),
+    ("exp", 0, Kind::Native),
+    ("cosh", 0, Kind::Native),
+    ("cos", 0, Kind::Native),
+    ("cbrt", 0, Kind::Native),
+    ("atanh", 0, Kind::Native),
+    ("atan2", 2, Kind::Native),
+    ("atan", 0, Kind::Native),
+    ("asinh", 0, Kind::Native),
+    ("asin", 0, Kind::Native),
+    ("acosh", 0, Kind::Native),
+    ("acos", 0, Kind::Native),
+    ("empty", 0, Kind::Jq),
+    ("not", 0, Kind::Jq),
+    ("path", 1, Kind::Jq),
+    ("last", 1, Kind::Jq),
+    ("range", 2, Kind::Jq),
+    ("halt_error", 0, Kind::Jq),
+    ("error", 1, Kind::Jq),
+    ("map", 1, Kind::Jq),
+    ("select", 1, Kind::Jq),
+    ("sort_by", 1, Kind::Jq),
+    ("group_by", 1, Kind::Jq),
+    ("unique_by", 1, Kind::Jq),
+    ("max_by", 1, Kind::Jq),
+    ("min_by", 1, Kind::Jq),
+    ("add", 1, Kind::Jq),
+    ("add", 0, Kind::Jq),
+    ("del", 1, Kind::Jq),
+    ("abs", 0, Kind::Jq),
+    ("_assign", 2, Kind::Jq),
+    ("_modify", 2, Kind::Jq),
+    ("map_values", 1, Kind::Jq),
+    ("recurse", 1, Kind::Jq),
+    ("recurse", 2, Kind::Jq),
+    ("recurse", 0, Kind::Jq),
+    ("to_entries", 0, Kind::Jq),
+    ("from_entries", 0, Kind::Jq),
+    ("with_entries", 1, Kind::Jq),
+    ("reverse", 0, Kind::Jq),
+    ("indices", 1, Kind::Jq),
+    ("index", 1, Kind::Jq),
+    ("rindex", 1, Kind::Jq),
+    ("paths", 0, Kind::Jq),
+    ("paths", 1, Kind::Jq),
+    ("isfinite", 0, Kind::Jq),
+    ("arrays", 0, Kind::Jq),
+    ("objects", 0, Kind::Jq),
+    ("iterables", 0, Kind::Jq),
+    ("booleans", 0, Kind::Jq),
+    ("numbers", 0, Kind::Jq),
+    ("normals", 0, Kind::Jq),
+    ("finites", 0, Kind::Jq),
+    ("strings", 0, Kind::Jq),
+    ("nulls", 0, Kind::Jq),
+    ("values", 0, Kind::Jq),
+    ("scalars", 0, Kind::Jq),
+    ("join", 1, Kind::Jq),
+    ("_flatten", 1, Kind::Jq),
+    ("flatten", 1, Kind::Jq),
+    ("flatten", 0, Kind::Jq),
+    ("range", 1, Kind::Jq),
+    ("fromdateiso8601", 0, Kind::Jq),
+    ("todateiso8601", 0, Kind::Jq),
+    ("fromdate", 0, Kind::Jq),
+    ("todate", 0, Kind::Jq),
+    ("ltrimstr", 1, Kind::Jq),
+    ("rtrimstr", 1, Kind::Jq),
+    ("trimstr", 1, Kind::Jq),
+    ("match", 2, Kind::Jq),
+    ("match", 1, Kind::Jq),
+    ("test", 2, Kind::Jq),
+    ("test", 1, Kind::Jq),
+    ("capture", 2, Kind::Jq),
+    ("capture", 1, Kind::Jq),
+    ("scan", 2, Kind::Jq),
+    ("scan", 1, Kind::Jq),
+    ("splits", 2, Kind::Jq),
+    ("splits", 1, Kind::Jq),
+    ("split", 2, Kind::Jq),
+    ("sub", 3, Kind::Jq),
+    ("sub", 2, Kind::Jq),
+    ("gsub", 3, Kind::Jq),
+    ("gsub", 2, Kind::Jq),
+    ("while", 2, Kind::Jq),
+    ("until", 2, Kind::Jq),
+    ("limit", 2, Kind::Jq),
+    ("skip", 2, Kind::Jq),
+    ("range", 3, Kind::Jq),
+    ("first", 1, Kind::Jq),
+    ("isempty", 1, Kind::Jq),
+    ("all", 2, Kind::Jq),
+    ("any", 2, Kind::Jq),
+    ("all", 1, Kind::Jq),
+    ("any", 1, Kind::Jq),
+    ("all", 0, Kind::Jq),
+    ("any", 0, Kind::Jq),
+    ("nth", 2, Kind::Jq),
+    ("first", 0, Kind::Jq),
+    ("last", 0, Kind::Jq),
+    ("nth", 1, Kind::Jq),
+    ("combinations", 0, Kind::Jq),
+    ("combinations", 1, Kind::Jq),
+    ("transpose", 0, Kind::Jq),
+    ("in", 1, Kind::Jq),
+    ("inside", 1, Kind::Jq),
+    ("repeat", 1, Kind::Jq),
+    ("inputs", 0, Kind::Jq),
+    ("ascii_downcase", 0, Kind::Jq),
+    ("ascii_upcase", 0, Kind::Jq),
+    ("truncate_stream", 1, Kind::Jq),
+    ("fromstream", 1, Kind::Jq),
+    ("tostream", 0, Kind::Jq),
+    ("walk", 1, Kind::Jq),
+    ("pick", 1, Kind::Jq),
+    ("debug", 1, Kind::Jq),
+    ("INDEX", 2, Kind::Jq),
+    ("INDEX", 1, Kind::Jq),
+    ("JOIN", 2, Kind::Jq),
+    ("JOIN", 3, Kind::Jq),
+    ("JOIN", 4, Kind::Jq),
+    ("IN", 1, Kind::Jq),
+    ("IN", 2, Kind::Jq),
+    ("builtins", 0, Kind::Native),
+];
 
 /// Why a native builtin produced no value.
 pub(crate) enum Fault {
@@ -30,54 +298,310 @@ fn order(a: &Value, b: &Value) -> Result<Ordering, Fault> {
     try_compare(a, b).map_err(deep_compare)
 }
 
-/// Sort stably by `key`, failing when a comparison went too deep. A
-/// merge sort of our own: jq's number order is not total (a literal and
-/// a computed number compare by different rules, Number::cmp_exact), and
-/// the standard library's sort may panic on such an order.
-fn sort_by_key<T>(items: &mut Vec<T>, key: impl Fn(&T) -> &Value) -> Result<(), Fault> {
-    let n = items.len();
-    let mut deep = false;
-    let mut order: Vec<usize> = (0..n).collect();
-    let mut merged = vec![0; n];
-    let mut width = 1;
-    while width < n {
-        let mut start = 0;
-        while start < n {
-            let mid = (start + width).min(n);
-            let end = (start + 2 * width).min(n);
-            let (mut i, mut j) = (start, mid);
-            for slot in &mut merged[start..end] {
-                let left = i < mid
-                    && (j >= end
-                        || try_compare(key(&items[order[i]]), key(&items[order[j]]))
-                            .unwrap_or_else(|_| {
-                                deep = true;
-                                Ordering::Equal
-                            })
-                            != Ordering::Greater);
-                if left {
-                    *slot = order[i];
-                    i += 1;
-                } else {
-                    *slot = order[j];
-                    j += 1;
-                }
-            }
-            start = end;
-        }
-        std::mem::swap(&mut order, &mut merged);
-        width *= 2;
-    }
-    if deep {
-        return Err(fail("Comparison too deep"));
-    }
-    let mut slots: Vec<Option<T>> = items.drain(..).map(Some).collect();
-    items.extend(order.into_iter().filter_map(|at| slots[at].take()));
-    Ok(())
+#[derive(Clone, Copy)]
+enum Pass {
+    Sort,
+    Group,
+    Unique,
+    Min,
+    Max,
 }
 
-fn fail(message: impl Into<String>) -> Fault {
-    Fault::Error(Value::string(message.into()))
+/// A sort-family call in progress: a stable bottom-up merge sort over
+/// indices, then the pass that builds the answer from the sorted pairs,
+/// with every loop variable held here so a slice can stop between any
+/// two comparisons. A merge sort of our own: jq's number order is not
+/// total (a literal and a computed number compare by different rules),
+/// and the standard library's sort may panic on
+/// such an order. `min` and `max` skip the sort and walk the input.
+pub(crate) struct Sorting {
+    pass: Pass,
+    keys: Arc<List>,
+    values: Arc<List>,
+    order: Vec<usize>,
+    merged: Vec<usize>,
+    width: usize,
+    start: usize,
+    i: usize,
+    j: usize,
+    slot: usize,
+    at: usize,
+    last: Option<usize>,
+    best: usize,
+    out: Vec<Value>,
+    groups: Vec<Value>,
+    comparing: Option<Comparing>,
+    charge: Charge,
+}
+
+/// The sort-family call `f` over `args`, its operands checked as jq
+/// checks them.
+pub(crate) fn sorting(f: Cfunc, args: &[Value]) -> Result<Sorting, Fault> {
+    let input = &args[0];
+    let a = args.get(1).unwrap_or(&Value::Null);
+    let (pass, values, keys) = match f {
+        Cfunc::Sort => (Pass::Sort, input, input),
+        Cfunc::Unique => (Pass::Unique, input, input),
+        Cfunc::SortByImpl => (Pass::Sort, input, a),
+        Cfunc::GroupByImpl => (Pass::Group, input, a),
+        Cfunc::UniqueByImpl => (Pass::Unique, input, a),
+        Cfunc::Min => (Pass::Min, input, input),
+        Cfunc::Max => (Pass::Max, input, input),
+        Cfunc::MinByImpl => (Pass::Min, input, a),
+        Cfunc::MaxByImpl => (Pass::Max, input, a),
+        other => unreachable!("{other:?} is not a sort"),
+    };
+    let lists = match (values, keys) {
+        (Value::Array(v), Value::Array(k)) => Some((Arc::clone(v), k.clone())),
+        _ => None,
+    };
+    let (values, keys) = match (pass, lists) {
+        (Pass::Min | Pass::Max, None) => {
+            return Err(type_error2(values, keys, "cannot be iterated over"));
+        }
+        (Pass::Min | Pass::Max, Some((v, k))) if v.len() != k.len() => {
+            return Err(type_error2(values, keys, "have wrong length"));
+        }
+        (_, Some((v, k))) if v.len() == k.len() => (v, k),
+        _ if f == Cfunc::Sort || f == Cfunc::Unique => {
+            return Err(type_error(input, "cannot be sorted, as it is not an array"));
+        }
+        _ => {
+            return Err(type_error2(
+                values,
+                keys,
+                "cannot be sorted, as they are not both arrays",
+            ));
+        }
+    };
+    let n = values.len();
+    let width = match pass {
+        Pass::Min | Pass::Max => n,
+        _ => 1,
+    };
+    Ok(Sorting {
+        pass,
+        keys,
+        values,
+        order: Vec::new(),
+        merged: Vec::new(),
+        width,
+        start: 0,
+        i: 0,
+        j: width.min(n),
+        slot: 0,
+        at: 0,
+        last: None,
+        best: 0,
+        out: Vec::new(),
+        groups: Vec::new(),
+        comparing: None,
+        charge: Charge::open(0),
+    })
+}
+
+impl Sorting {
+    pub(crate) fn retire(&mut self) -> Option<Value> {
+        if let Some(comparing) = &mut self.comparing {
+            if let Some(value) = comparing.retire() {
+                return Some(value);
+            }
+            self.comparing = None;
+        }
+        if let Some(value) = self.out.pop().or_else(|| self.groups.pop()) {
+            return Some(value);
+        }
+        if !self.values.is_empty() {
+            return Some(Value::Array(std::mem::take(&mut self.values)));
+        }
+        if !self.keys.is_empty() {
+            return Some(Value::Array(std::mem::take(&mut self.keys)));
+        }
+        None
+    }
+
+    /// The answer once the pass finishes, or None when its budget runs out.
+    pub(crate) fn run(&mut self, budget: &mut u64) -> Option<Result<Value, Fault>> {
+        let n = self.values.len();
+        while *budget > 0 {
+            *budget -= 1;
+            let step = if self.order.len() < n {
+                self.order.push(self.order.len());
+                self.merged.push(0);
+                Ok(None)
+            } else if self.width < n {
+                self.merge(budget).map(|()| None)
+            } else {
+                self.pass(budget)
+            };
+            self.recharge();
+            if meter::should_pause() {
+                if let Ok(Some(value)) = step {
+                    self.out.push(value);
+                }
+                *budget = 0;
+                return None;
+            }
+            match step {
+                Ok(None) => {}
+                Ok(Some(value)) => return Some(Ok(value)),
+                Err(_) => return Some(Err(deep_compare(TooDeep))),
+            }
+        }
+        None
+    }
+
+    fn recharge(&mut self) {
+        self.charge.set(
+            (self.order.capacity() + self.merged.capacity()) * std::mem::size_of::<usize>()
+                + (self.out.capacity() + self.groups.capacity()) * std::mem::size_of::<Value>(),
+        );
+    }
+
+    fn array(&mut self, groups: bool) -> Value {
+        let items = if groups {
+            std::mem::take(&mut self.groups)
+        } else {
+            std::mem::take(&mut self.out)
+        };
+        self.recharge();
+        Value::array(items)
+    }
+
+    pub(crate) fn finish(mut self) -> Result<Value, Fault> {
+        let _recording = meter::record_only();
+        let mut budget = u64::MAX;
+        self.run(&mut budget)
+            .unwrap_or_else(|| unreachable!("an unbounded budget finishes the sort"))
+    }
+
+    fn compare(
+        &mut self,
+        a: usize,
+        b: usize,
+        budget: &mut u64,
+        equality: bool,
+    ) -> Result<Option<Ordering>, TooDeep> {
+        if *budget == 0 {
+            *budget = 1;
+        }
+        let comparing = self.comparing.get_or_insert_with(|| {
+            if equality {
+                Comparing::equality(self.keys[a].clone(), self.keys[b].clone())
+            } else {
+                Comparing::begin(self.keys[a].clone(), self.keys[b].clone())
+            }
+        });
+        match comparing.run(budget) {
+            Some(answer) => {
+                self.comparing = None;
+                answer.map(Some)
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn merge(&mut self, budget: &mut u64) -> Result<(), TooDeep> {
+        let n = self.order.len();
+        let mid = (self.start + self.width).min(n);
+        let end = (self.start + 2 * self.width).min(n);
+        if self.slot < end {
+            let left = if self.i >= mid {
+                false
+            } else if self.j >= end {
+                true
+            } else {
+                let Some(order) =
+                    self.compare(self.order[self.i], self.order[self.j], budget, false)?
+                else {
+                    return Ok(());
+                };
+                order != Ordering::Greater
+            };
+            let from = if left { &mut self.i } else { &mut self.j };
+            self.merged[self.slot] = self.order[*from];
+            *from += 1;
+            self.slot += 1;
+            return Ok(());
+        }
+        self.start = end;
+        if self.start >= n {
+            std::mem::swap(&mut self.order, &mut self.merged);
+            self.width *= 2;
+            self.start = 0;
+        }
+        self.i = self.start;
+        self.j = (self.start + self.width).min(n);
+        self.slot = self.start;
+        Ok(())
+    }
+
+    fn pass(&mut self, budget: &mut u64) -> Result<Option<Value>, TooDeep> {
+        let n = self.order.len();
+        if self.at < n {
+            let k = self.order[self.at];
+            match self.pass {
+                Pass::Sort => self.out.push(self.values[k].clone()),
+                Pass::Group => {
+                    if let Some(prev) = self.last {
+                        let Some(order) = self.compare(prev, k, budget, true)? else {
+                            return Ok(None);
+                        };
+                        if order != Ordering::Equal {
+                            let group = self.array(false);
+                            self.groups.push(group);
+                        }
+                    }
+                    self.out.push(self.values[k].clone());
+                    self.last = Some(k);
+                }
+                Pass::Unique => {
+                    let same = match self.last {
+                        Some(prev) => {
+                            let Some(order) = self.compare(prev, k, budget, true)? else {
+                                return Ok(None);
+                            };
+                            order == Ordering::Equal
+                        }
+                        None => false,
+                    };
+                    if !same {
+                        self.out.push(self.values[k].clone());
+                        self.last = Some(k);
+                    }
+                }
+                Pass::Min | Pass::Max => {
+                    if self.at > 0 {
+                        let Some(order) = self.compare(k, self.best, budget, false)? else {
+                            return Ok(None);
+                        };
+                        let less = order == Ordering::Less;
+                        if less == matches!(self.pass, Pass::Min) {
+                            self.best = k;
+                        }
+                    }
+                }
+            }
+            self.at += 1;
+            return Ok(None);
+        }
+        Ok(Some(match self.pass {
+            Pass::Sort | Pass::Unique => self.array(false),
+            Pass::Group => {
+                if !self.out.is_empty() {
+                    let group = self.array(false);
+                    self.groups.push(group);
+                }
+                self.array(true)
+            }
+            Pass::Min | Pass::Max if n == 0 => Value::Null,
+            Pass::Min | Pass::Max => self.values[self.best].clone(),
+        }))
+    }
+}
+
+pub(super) fn fail(message: impl Into<String>) -> Fault {
+    Fault::Error(StringBuffer::from(message.into()).into_value())
 }
 
 pub(super) fn type_error(bad: &Value, message: &str) -> Fault {
@@ -219,6 +743,13 @@ cfuncs! {
     Scalb = "scalb" / 2,
     Scalbln = "scalbln" / 2,
     Fma = "fma" / 3,
+    NextAfter = "nextafter" / 2,
+    NextToward = "nexttoward" / 2,
+    Builtins = "builtins" / 0,
+    ModuleMeta = "modulemeta" / 0,
+    GetSearchList = "get_search_list" / 0,
+    GetJqOrigin = "get_jq_origin" / 0,
+    GetProgOrigin = "get_prog_origin" / 0,
     Now = "now" / 0,
     Mktime = "mktime" / 0,
     Gmtime = "gmtime" / 0,
@@ -254,27 +785,30 @@ fn math2(a: &Value, b: &Value, f: fn(f64, f64) -> f64) -> Answer {
     Ok(Value::number(f(num(a)?, num(b)?)))
 }
 
-fn string_limit(text: String, limits: Limits) -> Answer {
-    if text.len() > limits.bytes {
-        return Err(fail(format!(
-            "jq string limit of {} bytes exceeded",
-            limits.bytes
-        )));
-    }
-    Ok(Value::string(text))
+pub(super) fn string_too_long(limits: Limits) -> Fault {
+    fail(format!(
+        "jq string limit of {} bytes exceeded",
+        limits.bytes
+    ))
+}
+
+pub(super) fn string_limit(text: String, limits: Limits) -> Answer {
+    StringBuffer::from(text).finish(limits)
 }
 
 pub(super) fn array_limit(items: Vec<Value>, limits: Limits) -> Answer {
+    let mut charge = Charge::open(items.capacity() * std::mem::size_of::<Value>());
     if items.len() > limits.items {
         return Err(fail(format!(
             "jq array limit of {} elements exceeded",
             limits.items
         )));
     }
+    charge.set(0);
     Ok(Value::array(items))
 }
 
-pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
+pub(crate) fn call(f: Cfunc, args: &[Value], limits: Limits) -> Answer {
     let input = &args[0];
     let a = args.get(1).unwrap_or(&Value::Null);
     let b = args.get(2).unwrap_or(&Value::Null);
@@ -316,19 +850,14 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
         },
         Cfunc::Keys | Cfunc::KeysUnsorted => match input {
             Value::Object(fields) => {
-                let keys: Vec<Value> = if f == Cfunc::Keys {
-                    fields
-                        .sorted_keys()
-                        .into_iter()
-                        .map(|k| Value::String(Arc::clone(k)))
-                        .collect()
+                let keys = if f == Cfunc::Keys {
+                    let keys = fields.sorted_keys();
+                    let _charge = Charge::open(keys.capacity() * std::mem::size_of::<&Key>());
+                    Value::array(keys.iter().map(|&k| Value::string(&**k)).collect())
                 } else {
-                    fields
-                        .iter()
-                        .map(|(k, _)| Value::String(Arc::clone(k)))
-                        .collect()
+                    Value::array(fields.iter().map(|(k, _)| Value::string(&**k)).collect())
                 };
-                Ok(Value::array(keys))
+                Ok(keys)
             }
             Value::Array(items) => Ok(Value::array(
                 (0..items.len()).map(|i| Value::number(i as f64)).collect(),
@@ -336,11 +865,11 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
             _ => Err(type_error(input, "has no keys")),
         },
         Cfunc::StartsWith => match (input, a) {
-            (Value::String(s), Value::String(p)) => Ok(Value::bool(s.starts_with(&**p))),
+            (Value::String(s), Value::String(p)) => Ok(Value::bool(s.starts_with(p.as_str()))),
             _ => Err(fail("startswith() requires string inputs")),
         },
         Cfunc::EndsWith => match (input, a) {
-            (Value::String(s), Value::String(p)) => Ok(Value::bool(s.ends_with(&**p))),
+            (Value::String(s), Value::String(p)) => Ok(Value::bool(s.ends_with(p.as_str()))),
             _ => Err(fail("endswith() requires string inputs")),
         },
         Cfunc::Split => match (input, a) {
@@ -412,47 +941,13 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
         Cfunc::IsNormal => Ok(Value::bool(input.as_f64().is_some_and(f64::is_normal))),
         Cfunc::Infinite => Ok(Value::number(f64::INFINITY)),
         Cfunc::Nan => Ok(Value::number(f64::NAN)),
-        Cfunc::Sort => match input {
-            Value::Array(items) => {
-                let mut sorted: Vec<Value> = items.to_vec();
-                sort_by_key(&mut sorted, |v| v)?;
-                Ok(Value::array(sorted))
-            }
-            _ => Err(type_error(input, "cannot be sorted, as it is not an array")),
-        },
-        Cfunc::SortByImpl => {
-            let pairs = keyed(input, a, "cannot be sorted, as they are not both arrays")?;
-            Ok(Value::array(pairs.into_iter().map(|(_, v)| v).collect()))
-        }
-        Cfunc::GroupByImpl => {
-            let pairs = keyed(input, a, "cannot be sorted, as they are not both arrays")?;
-            let mut groups: Vec<Value> = Vec::new();
-            let mut group: Vec<Value> = Vec::new();
-            let mut last: Option<Value> = None;
-            for (key, value) in pairs {
-                if let Some(prev) = &last {
-                    if order(prev, &key)? != Ordering::Equal {
-                        groups.push(Value::array(std::mem::take(&mut group)));
-                    }
-                }
-                group.push(value);
-                last = Some(key);
-            }
-            if !group.is_empty() {
-                groups.push(Value::array(group));
-            }
-            Ok(Value::array(groups))
-        }
-        Cfunc::Unique => match input {
-            Value::Array(_) => unique(input, input),
-            _ => Err(type_error(input, "cannot be sorted, as it is not an array")),
-        },
-        Cfunc::UniqueByImpl => unique(input, a),
+        Cfunc::Sort
+        | Cfunc::SortByImpl
+        | Cfunc::GroupByImpl
+        | Cfunc::Unique
+        | Cfunc::UniqueByImpl => sorting(f, args)?.finish(),
         Cfunc::Bsearch => bsearch(input, a),
-        Cfunc::Min => minmax(input, input, true),
-        Cfunc::Max => minmax(input, input, false),
-        Cfunc::MinByImpl => minmax(input, a, true),
-        Cfunc::MaxByImpl => minmax(input, a, false),
+        Cfunc::Min | Cfunc::Max | Cfunc::MinByImpl | Cfunc::MaxByImpl => sorting(f, args)?.finish(),
         Cfunc::Error => Err(Fault::Error(input.clone())),
         Cfunc::Format => format(input, a, limits),
         Cfunc::Halt => Err(Fault::Halt(None, None)),
@@ -542,6 +1037,19 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
             let c = args.get(3).unwrap_or(&Value::Null);
             Ok(Value::number(num(a)?.mul_add(num(b)?, num(c)?)))
         }
+        Cfunc::NextAfter | Cfunc::NextToward => math2(a, b, nextafter),
+        Cfunc::Builtins => Ok(builtins()),
+        Cfunc::ModuleMeta => match input {
+            Value::String(name) => Err(fail(module_error(name))),
+            _ => Err(fail("modulemeta input module name must be a string")),
+        },
+        Cfunc::GetSearchList => Ok(Value::array(
+            ["~/.jq", "$ORIGIN/../lib/jq", "$ORIGIN/../lib"]
+                .into_iter()
+                .map(Value::string)
+                .collect(),
+        )),
+        Cfunc::GetJqOrigin | Cfunc::GetProgOrigin => Ok(Value::Null),
         Cfunc::Now
         | Cfunc::Mktime
         | Cfunc::Gmtime
@@ -550,8 +1058,9 @@ pub(crate) fn call(f: Cfunc, args: Vec<Value>, limits: Limits) -> Answer {
         | Cfunc::StrfLocaltime
         | Cfunc::Strptime => unreachable!("the VM runs the time builtins with its clock"),
         Cfunc::MatchImpl => {
+            let _recording = meter::record_only();
             let mut budget = u64::MAX;
-            super::regex::Matching::begin(&args)?
+            super::regex::Matching::begin(args)?
                 .run(&mut budget, limits)
                 .unwrap_or_else(|| unreachable!("an unlimited search paused"))
         }
@@ -566,6 +1075,54 @@ impl Value {
             _ => 0,
         }
     }
+}
+
+fn builtins() -> Value {
+    Value::array(
+        BUILTINS
+            .iter()
+            .filter(|(name, _, _)| !name.starts_with('_'))
+            .map(|(name, arity, _)| Value::string(format!("{name}/{arity}")))
+            .collect(),
+    )
+}
+
+pub(crate) fn module_error(path: &str) -> String {
+    if path.contains('\0') {
+        return "Module path contains a NUL byte".into();
+    }
+    if path.contains('\\') {
+        return format!("Modules must be named by relative paths using '/', not '\\' ({path})");
+    }
+    let mut previous = None;
+    for component in path.split('/') {
+        if component == ".." {
+            return format!(
+                "Relative paths to modules may not traverse to parent directories ({path})"
+            );
+        }
+        if Some(component) == previous {
+            return format!("module names must not have equal consecutive components: {path}");
+        }
+        previous = Some(component);
+    }
+    format!("module not found: {path}")
+}
+
+/// nextafter: the double adjacent to `x` on `y`'s side.
+fn nextafter(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y.is_nan() {
+        return f64::NAN;
+    }
+    if x == y {
+        return y;
+    }
+    if x == 0.0 {
+        return f64::from_bits(1).copysign(y);
+    }
+    let bits = x.to_bits();
+    let away = (y > x) == (x > 0.0);
+    f64::from_bits(if away { bits + 1 } else { bits - 1 })
 }
 
 fn frexp(x: f64) -> (f64, i32) {
@@ -635,7 +1192,7 @@ fn plus(a: &Value, b: &Value, limits: Limits) -> Answer {
         (Value::Object(x), Value::Object(y)) => {
             let mut merged: Object = (**x).clone();
             for (k, v) in y.iter() {
-                merged.insert(Arc::clone(k), v.clone());
+                merged.insert(k.clone(), v.clone());
             }
             Ok(Value::object(merged))
         }
@@ -663,7 +1220,10 @@ pub(crate) struct Subtracting {
     from: Arc<List>,
     without: Arc<List>,
     at: usize,
+    against: usize,
     kept: Vec<Value>,
+    comparing: Option<Comparing>,
+    charge: Charge,
 }
 
 impl Subtracting {
@@ -674,7 +1234,10 @@ impl Subtracting {
                 from: Arc::clone(from),
                 without: Arc::clone(without),
                 at: 0,
+                against: 0,
                 kept: Vec::new(),
+                comparing: None,
+                charge: Charge::open(0),
             }),
             _ => None,
         }
@@ -682,30 +1245,59 @@ impl Subtracting {
 
     /// Scans on, spending `budget`: None when it ran out before the end.
     pub(crate) fn run(&mut self, budget: &mut u64) -> Option<Result<Value, Fault>> {
-        let cost = (self.without.len() as u64 / 16).max(1);
-        if *budget == 0 {
-            *budget = 1;
-        }
         while self.at < self.from.len() {
             if *budget == 0 {
                 return None;
             }
-            *budget = budget.saturating_sub(cost);
+            *budget -= 1;
             let item = &self.from[self.at];
-            if !self.without.iter().any(|other| item.equals(other)) {
+            if let Some(other) = self.without.get(self.against) {
+                if *budget == 0 {
+                    *budget = 1;
+                }
+                let comparing = self
+                    .comparing
+                    .get_or_insert_with(|| Comparing::equality(item.clone(), other.clone()));
+                let answer = comparing.run(budget)?;
+                self.comparing = None;
+                if answer.is_ok_and(|order| order == Ordering::Equal) {
+                    self.at += 1;
+                    self.against = 0;
+                } else {
+                    self.against += 1;
+                }
+            } else {
                 self.kept.push(item.clone());
+                self.charge
+                    .set(self.kept.capacity() * std::mem::size_of::<Value>());
+                if meter::should_pause() {
+                    *budget = 0;
+                    return None;
+                }
+                self.at += 1;
+                self.against = 0;
             }
-            self.at += 1;
         }
+        self.charge.set(0);
         Some(Ok(Value::array(std::mem::take(&mut self.kept))))
     }
 
-    /// The values a cancelled scan holds, for the VM to free in slices.
-    pub(crate) fn into_values(self) -> Vec<Value> {
-        let mut values = self.kept;
-        values.push(Value::Array(self.from));
-        values.push(Value::Array(self.without));
-        values
+    pub(crate) fn retire(&mut self) -> Option<Value> {
+        if let Some(comparing) = &mut self.comparing {
+            if let Some(value) = comparing.retire() {
+                return Some(value);
+            }
+            self.comparing = None;
+        }
+        self.kept.pop().or_else(|| {
+            if !self.from.is_empty() {
+                Some(Value::Array(std::mem::take(&mut self.from)))
+            } else if !self.without.is_empty() {
+                Some(Value::Array(std::mem::take(&mut self.without)))
+            } else {
+                None
+            }
+        })
     }
 }
 
@@ -725,7 +1317,7 @@ fn multiply(a: &Value, b: &Value, limits: Limits) -> Answer {
             if (s.len() as u64).saturating_mul(times as u64) > limits.bytes as u64 {
                 return Err(fail("Repeat string result too long"));
             }
-            Ok(Value::string(s.repeat(times)))
+            Ok(StringBuffer::from(s.repeat(times)).into_value())
         }
         (Value::Object(_), Value::Object(_)) => merge_deep(a, b),
         _ => Err(type_error2(a, b, "cannot be multiplied")),
@@ -739,7 +1331,7 @@ fn merge_deep(a: &Value, b: &Value) -> Answer {
         merged: Object,
         from: Arc<Object>,
         at: usize,
-        key: Option<Arc<str>>,
+        key: Option<Key>,
     }
     let (Value::Object(x), Value::Object(y)) = (a, b) else {
         return Ok(b.clone());
@@ -753,11 +1345,7 @@ fn merge_deep(a: &Value, b: &Value) -> Answer {
     loop {
         let depth = stack.len();
         let top = stack.last_mut().expect("a level is open");
-        if let Some((k, v)) = top
-            .from
-            .entry(top.at)
-            .map(|(k, v)| (Arc::clone(k), v.clone()))
-        {
+        if let Some((k, v)) = top.from.entry(top.at).map(|(k, v)| (k.clone(), v.clone())) {
             top.at += 1;
             match (top.merged.get(&k), &v) {
                 (Some(Value::Object(old)), Value::Object(new)) => {
@@ -879,7 +1467,7 @@ fn implode(input: &Value, limits: Limits) -> Answer {
     let Value::Array(items) = input else {
         return Err(fail("implode input must be an array"));
     };
-    let mut text = String::with_capacity(items.len());
+    let mut text = StringBuffer::with_capacity(items.len());
     for item in items.iter() {
         let Some(point) = item.as_f64().filter(|p| !p.is_nan()) else {
             return Err(type_error(
@@ -894,7 +1482,7 @@ fn implode(input: &Value, limits: Limits) -> Answer {
             .unwrap_or('\u{FFFD}');
         text.push(ch);
     }
-    string_limit(text, limits)
+    text.finish(limits)
 }
 
 fn has(t: &Value, k: &Value) -> Answer {
@@ -938,7 +1526,7 @@ fn enter<'a>(a: &'a Value, b: &'a Value, stack: &mut Vec<Containment<'a>>) -> Op
             stack.push(Containment::Array(x, y, 0, 0));
             None
         }
-        (Value::String(x), Value::String(y)) => Some(x.contains(&**y)),
+        (Value::String(x), Value::String(y)) => Some(x.contains(y.as_str())),
         _ => Some(a.equals(b)),
     }
 }
@@ -1008,57 +1596,6 @@ fn contains(a: &Value, b: &Value) -> Result<bool, Fault> {
     }
 }
 
-fn keyed(values: &Value, keys: &Value, message: &str) -> Result<Vec<(Value, Value)>, Fault> {
-    match (values, keys) {
-        (Value::Array(v), Value::Array(k)) if v.len() == k.len() => {
-            let mut pairs: Vec<(Value, Value)> = k.iter().cloned().zip(v.iter().cloned()).collect();
-            sort_by_key(&mut pairs, |p| &p.0)?;
-            Ok(pairs)
-        }
-        _ => Err(type_error2(values, keys, message)),
-    }
-}
-
-fn unique(values: &Value, keys: &Value) -> Answer {
-    let pairs = keyed(
-        values,
-        keys,
-        "cannot be sorted, as they are not both arrays",
-    )?;
-    let mut out: Vec<Value> = Vec::new();
-    let mut last: Option<Value> = None;
-    for (key, value) in pairs {
-        if let Some(prev) = &last {
-            if order(prev, &key)? == Ordering::Equal {
-                continue;
-            }
-        }
-        out.push(value);
-        last = Some(key);
-    }
-    Ok(Value::array(out))
-}
-
-fn minmax(values: &Value, keys: &Value, is_min: bool) -> Answer {
-    let (Value::Array(v), Value::Array(k)) = (values, keys) else {
-        return Err(type_error2(values, keys, "cannot be iterated over"));
-    };
-    if v.len() != k.len() {
-        return Err(type_error2(values, keys, "have wrong length"));
-    }
-    if v.is_empty() {
-        return Ok(Value::Null);
-    }
-    let mut best = 0;
-    for i in 1..v.len() {
-        let less = order(&k[i], &k[best])? == Ordering::Less;
-        if less == is_min {
-            best = i;
-        }
-    }
-    Ok(v[best].clone())
-}
-
 fn bsearch(input: &Value, target: &Value) -> Answer {
     let Value::Array(items) = input else {
         return Err(type_error(input, "cannot be searched from"));
@@ -1075,21 +1612,86 @@ fn bsearch(input: &Value, target: &Value) -> Answer {
     Ok(Value::number(-1.0 - start as f64))
 }
 
-fn escape(text: &str, table: &[(char, &str)]) -> String {
-    let mut out = String::with_capacity(text.len());
+struct FormatInput<'a> {
+    text: Cow<'a, str>,
+    _charge: Charge,
+}
+
+impl Deref for FormatInput<'_> {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.text
+    }
+}
+
+struct StringBuffer {
+    text: String,
+    charge: Charge,
+}
+
+impl From<String> for StringBuffer {
+    fn from(text: String) -> Self {
+        let charge = Charge::open(text.capacity());
+        Self { text, charge }
+    }
+}
+
+impl StringBuffer {
+    fn with_capacity(capacity: usize) -> Self {
+        String::with_capacity(capacity).into()
+    }
+
+    fn push(&mut self, ch: char) {
+        let capacity = self.text.capacity();
+        self.text.push(ch);
+        if self.text.capacity() != capacity {
+            self.charge.set(self.text.capacity());
+        }
+    }
+
+    fn push_str(&mut self, text: &str) {
+        let capacity = self.text.capacity();
+        self.text.push_str(text);
+        if self.text.capacity() != capacity {
+            self.charge.set(self.text.capacity());
+        }
+    }
+
+    fn into_value(mut self) -> Value {
+        self.charge.set(0);
+        Value::string(self.text)
+    }
+
+    fn finish(self, limits: Limits) -> Answer {
+        if self.text.len() > limits.bytes {
+            return Err(string_too_long(limits));
+        }
+        Ok(self.into_value())
+    }
+}
+
+fn escape(text: &str, table: &[(char, &str)], out: &mut StringBuffer) {
     for c in text.chars() {
         match table.iter().find(|(from, _)| *from == c) {
             Some((_, to)) => out.push_str(to),
             None => out.push(c),
         }
     }
-    out
 }
 
-fn to_text(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.to_string(),
-        other => other.dump(),
+fn to_text(v: &Value) -> FormatInput<'_> {
+    let text = match v {
+        Value::String(s) => Cow::Borrowed(s.as_str()),
+        other => Cow::Owned(other.dump()),
+    };
+    let charge = Charge::open(match &text {
+        Cow::Borrowed(_) => 0,
+        Cow::Owned(text) => text.capacity(),
+    });
+    FormatInput {
+        text,
+        _charge: charge,
     }
 }
 
@@ -1099,11 +1701,22 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
     let Value::String(name) = fmt else {
         return Err(type_error(fmt, "is not a valid format"));
     };
-    let text = match &**name {
-        "json" => input.dump(),
-        "text" => to_text(input),
+    let dispatch = name
+        .split_once('\0')
+        .map_or(name.as_str(), |(prefix, _)| prefix);
+    let text = match dispatch {
+        "json" => StringBuffer::from(input.dump()),
+        "text" => match input {
+            Value::String(text) => {
+                if text.len() > limits.bytes {
+                    return Err(string_too_long(limits));
+                }
+                return Ok(input.clone());
+            }
+            other => StringBuffer::from(other.dump()),
+        },
         "csv" | "tsv" => {
-            let csv = &**name == "csv";
+            let csv = dispatch == "csv";
             let Value::Array(items) = input else {
                 return Err(type_error(
                     input,
@@ -1114,26 +1727,28 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
                     },
                 ));
             };
-            let mut line = String::new();
+            let mut line = StringBuffer::with_capacity(0);
             for (i, x) in items.iter().enumerate() {
                 if i > 0 {
                     line.push_str(if csv { "," } else { "\t" });
                 }
                 match x {
                     Value::Null => {}
-                    Value::True | Value::False => line.push_str(&x.dump()),
+                    Value::True => line.push_str("true"),
+                    Value::False => line.push_str("false"),
                     Value::Number(n) if n.value().is_nan() => {}
-                    Value::Number(_) => line.push_str(&x.dump()),
+                    Value::Number(_) => line.push_str(&to_text(x)),
                     Value::String(s) => {
                         if csv {
                             line.push('"');
-                            line.push_str(&escape(s, &[('"', "\"\"")]));
+                            escape(s, &[('"', "\"\"")], &mut line);
                             line.push('"');
                         } else {
-                            line.push_str(&escape(
+                            escape(
                                 s,
                                 &[('\t', "\\t"), ('\r', "\\r"), ('\n', "\\n"), ('\\', "\\\\")],
-                            ));
+                                &mut line,
+                            );
                         }
                     }
                     _ => return Err(type_error(x, "is not valid in a csv row")),
@@ -1141,33 +1756,73 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
             }
             line
         }
-        "html" => escape(
-            &to_text(input),
-            &[
-                ('&', "&amp;"),
-                ('<', "&lt;"),
-                ('>', "&gt;"),
-                ('\'', "&apos;"),
-                ('"', "&quot;"),
-            ],
-        ),
+        "html" => {
+            let text = to_text(input);
+            let mut out = StringBuffer::with_capacity(text.len());
+            escape(
+                &text,
+                &[
+                    ('&', "&amp;"),
+                    ('<', "&lt;"),
+                    ('>', "&gt;"),
+                    ('\'', "&apos;"),
+                    ('"', "&quot;"),
+                ],
+                &mut out,
+            );
+            out
+        }
         "uri" => {
-            let mut out = String::new();
-            for byte in to_text(input).bytes() {
+            let text = to_text(input);
+            let mut out = StringBuffer::with_capacity(text.len());
+            const HEX: &[u8; 16] = b"0123456789ABCDEF";
+            for byte in text.bytes() {
                 if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
                     out.push(byte as char);
                 } else {
-                    out.push_str(&format!("%{byte:02X}"));
+                    out.push('%');
+                    out.push(HEX[(byte >> 4) as usize] as char);
+                    out.push(HEX[(byte & 0xf) as usize] as char);
                 }
             }
             out
         }
-        "sh" => {
-            let items: Vec<Value> = match input {
-                Value::Array(items) => items.to_vec(),
-                other => vec![other.clone()],
+        "urid" => {
+            let text = to_text(input);
+            let bad = || {
+                type_error(
+                    &Value::string(text.chars().take(30).collect::<String>()),
+                    "is not a valid uri encoding",
+                )
             };
-            let mut line = String::new();
+            let bytes = text.as_bytes();
+            let mut out = Vec::with_capacity(bytes.len());
+            let mut charge = Charge::open(out.capacity());
+            let mut at = 0;
+            while at < bytes.len() {
+                if bytes[at] != b'%' {
+                    out.push(bytes[at]);
+                    at += 1;
+                    continue;
+                }
+                let digits = bytes.get(at + 1..at + 3).ok_or_else(bad)?;
+                if !digits.iter().all(u8::is_ascii_hexdigit) {
+                    return Err(bad());
+                }
+                let hex = std::str::from_utf8(digits).map_err(|_| bad())?;
+                out.push(u8::from_str_radix(hex, 16).map_err(|_| bad())?);
+                at += 3;
+            }
+            let decoded = String::from_utf8(out).map_err(|_| bad())?;
+            charge.set(0);
+            StringBuffer::from(decoded)
+        }
+        "sh" => {
+            let items: &[Value] = match input {
+                Value::Array(items) => items,
+                other => std::slice::from_ref(other),
+            };
+            let mut line = StringBuffer::with_capacity(0);
             for (i, x) in items.iter().enumerate() {
                 if i > 0 {
                     line.push(' ');
@@ -1175,13 +1830,13 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
                 match x {
                     Value::String(s) => {
                         line.push('\'');
-                        line.push_str(&escape(s, &[('\'', "'\\''")]));
+                        escape(s, &[('\'', "'\\''")], &mut line);
                         line.push('\'');
                     }
                     Value::Array(_) | Value::Object(_) => {
                         return Err(type_error(x, "can not be escaped for shell"));
                     }
-                    _ => line.push_str(&x.dump()),
+                    _ => line.push_str(&to_text(x)),
                 }
             }
             line
@@ -1189,7 +1844,7 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
         "base64" => {
             let data = to_text(input);
             let bytes = data.as_bytes();
-            let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+            let mut out = StringBuffer::with_capacity(bytes.len().div_ceil(3) * 4);
             for chunk in bytes.chunks(3) {
                 let mut code = 0u32;
                 for j in 0..3 {
@@ -1208,6 +1863,7 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
         "base64d" => {
             let data = to_text(input);
             let mut out: Vec<u8> = Vec::new();
+            let mut charge = Charge::open(0);
             let mut code = 0u32;
             let mut read = 0;
             for byte in data.bytes() {
@@ -1220,7 +1876,11 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
                 code = (code << 6) | value as u32;
                 read += 1;
                 if read == 4 {
+                    let capacity = out.capacity();
                     out.extend_from_slice(&[(code >> 16) as u8, (code >> 8) as u8, code as u8]);
+                    if out.capacity() != capacity {
+                        charge.set(out.capacity());
+                    }
                     read = 0;
                     code = 0;
                 }
@@ -1231,11 +1891,28 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
                 1 => return Err(type_error(input, "trailing base64 byte found")),
                 _ => {}
             }
-            String::from_utf8_lossy(&out).into_owned()
+            charge.set(out.capacity());
+            match String::from_utf8(out) {
+                Ok(text) => {
+                    charge.set(0);
+                    StringBuffer::from(text)
+                }
+                Err(error) => {
+                    let text =
+                        StringBuffer::from(String::from_utf8_lossy(error.as_bytes()).into_owned());
+                    drop(error);
+                    charge.set(0);
+                    text
+                }
+            }
         }
-        other => return Err(fail(format!("{other} is not a valid format"))),
+        _ => {
+            return Err(Fault::Error(
+                StringBuffer::from(format!("{name} is not a valid format")).into_value(),
+            ));
+        }
     };
-    string_limit(text, limits)
+    text.finish(limits)
 }
 
 /// jv_get: index `t` by `k`.
@@ -1265,9 +1942,10 @@ pub(crate) fn get(t: &Value, k: &Value) -> Result<Value, Value> {
         (Value::String(s), Value::Object(slice)) => {
             let len = s.chars().count();
             let (start, end) = parse_slice(len, slice)?;
-            Ok(Value::string(
-                s.chars().skip(start).take(end - start).collect::<String>(),
-            ))
+            Ok(
+                StringBuffer::from(s.chars().skip(start).take(end - start).collect::<String>())
+                    .into_value(),
+            )
         }
         (Value::Array(items), Value::Array(needle)) => Ok(array_indexes(items, needle)),
         (Value::Null, Value::String(_) | Value::Number(_) | Value::Object(_)) => Ok(Value::Null),
@@ -1336,12 +2014,12 @@ fn parse_slice(len: usize, slice: &Object) -> Result<(usize, usize), Value> {
 fn set(t: Value, k: &Value, v: Value, limits: Limits) -> Answer {
     match (t, k) {
         (Value::Object(mut fields), Value::String(key)) => {
-            Arc::make_mut(&mut fields).insert(Arc::clone(key), v);
+            Arc::make_mut(&mut fields).insert(key.clone().into(), v);
             Ok(Value::Object(fields))
         }
         (Value::Null, Value::String(key)) => {
             let mut fields = Object::default();
-            fields.insert(Arc::clone(key), v);
+            fields.insert(key.clone().into(), v);
             Ok(Value::object(fields))
         }
         (t @ (Value::Array(_) | Value::Null), Value::Number(n)) => {
@@ -1371,10 +2049,7 @@ fn set(t: Value, k: &Value, v: Value, limits: Limits) -> Answer {
                     limits.items
                 )));
             }
-            if idx >= list.len() {
-                list.resize(idx + 1, Value::Null);
-            }
-            list[idx] = v;
+            list.set(idx, v);
             Ok(Value::Array(items))
         }
         (t @ (Value::Array(_) | Value::Null), Value::Object(slice)) => {
@@ -1570,13 +2245,15 @@ fn delpaths_sorted(object: Value, paths: &[Vec<Value>], limits: Limits) -> Answe
 }
 
 fn delpaths(object: Value, paths: &Value, limits: Limits) -> Answer {
-    let Value::Array(list) = paths else {
+    if !matches!(paths, Value::Array(_)) {
         return Err(fail("Paths must be specified as an array"));
+    }
+    let sorted = sorting(Cfunc::Sort, std::slice::from_ref(paths))?.finish()?;
+    let Value::Array(sorted) = &sorted else {
+        unreachable!("a sort answers an array")
     };
-    let mut sorted: Vec<Value> = list.to_vec();
-    sort_by_key(&mut sorted, |v| v)?;
     let mut keys: Vec<Vec<Value>> = Vec::with_capacity(sorted.len());
-    for path in &sorted {
+    for path in sorted.iter() {
         let Value::Array(items) = path else {
             return Err(fail(format!(
                 "Path must be specified as array, not {}",
@@ -1595,4 +2272,183 @@ fn delpaths(object: Value, paths: &Value, limits: Limits) -> Answer {
         return Ok(Value::Null);
     }
     delpaths_sorted(object, &keys, limits)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::meter::{self, Meter};
+    use super::*;
+
+    const LIMITS: Limits = Limits {
+        blocks: 1 << 20,
+        items: 1 << 24,
+        bytes: 1 << 28,
+        memory: 1 << 30,
+    };
+
+    #[test]
+    fn runtime_strings_charge_capacity_before_value_transfer_or_rejection() {
+        for bytes in [0, 1000] {
+            let meter = Arc::new(Meter::limited(150));
+            let _installed = meter::install(&meter);
+            let mut text = String::with_capacity(200);
+            text.push('x');
+            let answer = string_limit(text, Limits { bytes, ..LIMITS });
+            assert_eq!(answer.is_ok(), bytes > 0);
+            assert!(meter.exceeded());
+            drop(answer);
+            assert_eq!(meter.live(), 0);
+        }
+        let a = Value::string("x".repeat(100));
+        let b = Value::string("y".repeat(100));
+        let meter = Arc::new(Meter::limited(150));
+        let _installed = meter::install(&meter);
+        let answer = plus(&a, &b, Limits { bytes: 1, ..LIMITS });
+        assert!(answer.is_err());
+        assert!(meter.exceeded());
+        drop(answer);
+        assert_eq!(meter.live(), 0);
+    }
+
+    #[test]
+    fn runtime_string_transfers_do_not_charge_the_same_buffer_twice() {
+        let meter = Arc::new(Meter::limited(150));
+        let _installed = meter::install(&meter);
+        let answer = string_limit("x".repeat(100), LIMITS).unwrap_or_else(|_| unreachable!());
+        assert!(!meter.exceeded());
+        drop(answer);
+        assert_eq!(meter.live(), 0);
+        drop(_installed);
+        let meter = Arc::new(Meter::limited(50));
+        let _installed = meter::install(&meter);
+        let answer = array_limit(vec![Value::Null], LIMITS).unwrap_or_else(|_| unreachable!());
+        assert!(!meter.exceeded());
+        drop(answer);
+        assert_eq!(meter.live(), 0);
+    }
+
+    #[test]
+    fn discarded_string_and_array_capacities_still_latch_the_peak() {
+        let meter = Arc::new(Meter::limited(150));
+        let _installed = meter::install(&meter);
+        let mut text = String::with_capacity(200);
+        text.push('x');
+        let error = fail(text);
+        assert!(meter.exceeded());
+        drop(error);
+        assert_eq!(meter.live(), 0);
+        meter.reset();
+        let mut items = Vec::with_capacity(100);
+        items.push(Value::Null);
+        let error = array_limit(items, Limits { items: 0, ..LIMITS });
+        assert!(error.is_err());
+        assert!(meter.exceeded());
+        drop(error);
+        assert_eq!(meter.live(), 0);
+    }
+
+    #[test]
+    fn string_slice_capacity_is_observed_before_it_shrinks() {
+        let text = Value::string("€".repeat(32768) + &"a".repeat(32768));
+        let mut fields = Object::default();
+        fields.insert("start".into(), Value::number(0.0));
+        fields.insert("end".into(), Value::number(32768.0));
+        let slice = Value::object(fields);
+        let meter = Arc::new(Meter::limited(110000));
+        let _installed = meter::install(&meter);
+        let answer = get(&text, &slice).unwrap_or_else(|_| unreachable!());
+        assert!(meter.exceeded());
+        drop(answer);
+        assert_eq!(meter.live(), 0);
+    }
+
+    #[test]
+    fn sorted_key_scratch_stays_charged_until_the_result_is_owned() {
+        let mut fields = Object::default();
+        for index in 0..1000 {
+            fields.insert(index.to_string().into(), Value::Null);
+        }
+        let input = Value::object(fields);
+        let output_bytes = {
+            let meter = Arc::new(Meter::default());
+            let _installed = meter::install(&meter);
+            let answer = call(Cfunc::Keys, std::slice::from_ref(&input), LIMITS)
+                .unwrap_or_else(|_| unreachable!());
+            let bytes = meter.live();
+            drop(answer);
+            assert_eq!(meter.live(), 0);
+            bytes
+        };
+        for function in [Cfunc::KeysUnsorted, Cfunc::Keys] {
+            let meter = Arc::new(Meter::limited(output_bytes + 4000));
+            let _installed = meter::install(&meter);
+            let answer = call(function, std::slice::from_ref(&input), LIMITS)
+                .unwrap_or_else(|_| unreachable!());
+            assert_eq!(meter.exceeded(), function == Cfunc::Keys);
+            drop(answer);
+            assert_eq!(meter.live(), 0);
+        }
+    }
+
+    #[test]
+    fn sort_buffers_are_lazy_charged_and_released() {
+        let meter = Arc::new(Meter::default());
+        let _installed = meter::install(&meter);
+        let input = Value::array(
+            (0..10000)
+                .rev()
+                .map(|i| Value::number(f64::from(i)))
+                .collect(),
+        );
+        let before = meter.live();
+        let mut task =
+            sorting(Cfunc::Sort, std::slice::from_ref(&input)).unwrap_or_else(|_| unreachable!());
+        assert_eq!(meter.live(), before);
+        assert!(task.run(&mut 1).is_none());
+        assert_eq!(task.order.len(), 1);
+        assert_eq!(task.merged.len(), 1);
+        assert!(meter.live() > before);
+        drop(task);
+        assert_eq!(meter.live(), before);
+        drop(input);
+        assert_eq!(meter.live(), 0);
+    }
+
+    #[test]
+    fn sort_buffer_transfers_do_not_latch_a_false_memory_error() {
+        let meter = Arc::new(Meter::limited(75000));
+        let _installed = meter::install(&meter);
+        let input = Value::array(
+            (0..1000)
+                .rev()
+                .map(|i| Value::number(f64::from(i)))
+                .collect(),
+        );
+        let mut task =
+            sorting(Cfunc::Sort, std::slice::from_ref(&input)).unwrap_or_else(|_| unreachable!());
+        let output = loop {
+            if let Some(answer) = task.run(&mut 128) {
+                break answer.unwrap_or_else(|_| unreachable!());
+            }
+        };
+        assert!(!meter.exceeded());
+        assert!(matches!(output,Value::Array(items) if items.len()==1000));
+        drop(task);
+        drop(input);
+        assert_eq!(meter.live(), 0);
+    }
+
+    #[test]
+    fn subtraction_yields_inside_one_right_operand_scan() {
+        let from = Value::array(vec![Value::number(-1.0)]);
+        let without = Value::array((0..100000).map(|i| Value::number(f64::from(i))).collect());
+        let mut task = Subtracting::begin(&[Value::Null, from, without]).unwrap();
+        assert!(task.run(&mut 1).is_none());
+        assert_eq!(task.at, 0);
+        assert!(task.against <= 1);
+        assert!(task.kept.is_empty());
+        assert!(task.run(&mut 1).is_none());
+        assert_eq!(task.at, 0);
+        assert!(task.against <= 1);
+    }
 }

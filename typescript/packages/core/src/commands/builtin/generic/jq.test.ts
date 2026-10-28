@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import * as rs from '../../../rs/stream.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
 import { jqOptions, type JqOptions } from '../../../core/jq/index.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { materialize, type ByteSource, type IOResult } from '../../../io/types.ts'
@@ -817,15 +819,8 @@ describe('jq_eval', () => {
   })
 
   it('runs a program jq_eval refuses in the worker', async () => {
-    const saved = process.env.TZ
-    process.env.TZ = 'America/New_York'
-    try {
-      const result = await ranOver([], '0 | localtime | .[3]', { null_input: true })
-      expect(result).toEqual({ stdout: '19\n', stderr: '', exitCode: 0 })
-    } finally {
-      if (saved === undefined) delete process.env.TZ
-      else process.env.TZ = saved
-    }
+    const result = await ranOver([], '"a" | test("\\\\X")', { null_input: true })
+    expect(result).toEqual({ stdout: 'true\n', stderr: '', exitCode: 0 })
   })
 
   it('runs dates, the clock and a rule zone in jq_eval', async () => {
@@ -886,5 +881,207 @@ describe('jq_eval clock', () => {
       null_input: true,
     })
     expect(result).toEqual({ stdout: '"done"\n', stderr: '', exitCode: 0 })
+  })
+})
+
+describe('local timezone fallback', () => {
+  it.each(['Europe/Paris', 'America/New_York'])(
+    'defers host-zone time calls before debug under %s',
+    async (zone) => {
+      const saved = process.env.TZ
+      process.env.TZ = zone
+      const open = rs.openStream
+      const refused: string[] = []
+      const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
+        try {
+          return await open(kind, config)
+        } catch (error) {
+          if (kind === 'jq_eval' && error instanceof StreamRefusal) refused.push(error.message)
+          throw error
+        }
+      })
+      try {
+        for (const program of [
+          '1 | debug | (0 | localtime) | 42',
+          '1 | debug | (try (0 | strflocaltime("%Z")) catch .) | 42',
+          '1 | debug | (try ("0" | strptime("%s")) catch .) | 42',
+          '"%Z" as $format | 1 | debug | (try (0 | strflocaltime($format)) catch .) | 42',
+        ]) {
+          expect(await ranOver([], program, { null_input: true })).toEqual({
+            stdout: '42\n',
+            stderr: '',
+            exitCode: 0,
+          })
+        }
+        expect(refused.length).toBeGreaterThan(0)
+        expect(refused.every((message) => message === 'jq_eval: no time zone for local time')).toBe(
+          true,
+        )
+        refused.length = 0
+        expect(await ranOver([], '0 | strftime("%Z")', { null_input: true })).toEqual({
+          stdout: '"UTC"\n',
+          stderr: '',
+          exitCode: 0,
+        })
+        expect(refused).toEqual([])
+      } finally {
+        patched.mockRestore()
+        if (saved === undefined) delete process.env.TZ
+        else process.env.TZ = saved
+      }
+    },
+  )
+
+  it.each([
+    '/usr/share/zoneinfo/Europe/Paris',
+    ':/usr/share/zoneinfo/Europe/Paris',
+    'posix/Europe/Paris',
+    ':posix/Europe/Paris',
+    'right/Europe/Paris',
+    ':right/Europe/Paris',
+  ])('falls back before debug for timezone file %s and leaves UTC native', async (zone) => {
+    const saved = process.env.TZ
+    process.env.TZ = zone
+    const open = rs.openStream
+    const refused: string[] = []
+    const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
+      try {
+        return await open(kind, config)
+      } catch (error) {
+        if (kind === 'jq_eval' && error instanceof StreamRefusal) refused.push(error.message)
+        throw error
+      }
+    })
+    try {
+      expect(await ranOver([], '1 | debug | (0 | localtime) | 42', { null_input: true })).toEqual({
+        stdout: '42\n',
+        stderr: '',
+        exitCode: 0,
+      })
+      expect(refused.length).toBeGreaterThan(0)
+      expect(refused.every((message) => message === 'jq_eval: no time zone for local time')).toBe(
+        true,
+      )
+      refused.length = 0
+      expect(await ranOver([], '0 | gmtime | .[3]', { null_input: true })).toEqual({
+        stdout: '0\n',
+        stderr: '',
+        exitCode: 0,
+      })
+      expect(await ranOver([], '41+1', { null_input: true })).toEqual({
+        stdout: '42\n',
+        stderr: '',
+        exitCode: 0,
+      })
+      expect(refused).toEqual([])
+    } finally {
+      patched.mockRestore()
+      if (saved === undefined) delete process.env.TZ
+      else process.env.TZ = saved
+    }
+  })
+})
+
+describe('deferred evaluator refusal boundaries', () => {
+  it('falls back for an initial drain refusal before output or requests', async () => {
+    const open = rs.openStream
+    let refused = false
+    const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
+      const stream = await open(kind, config)
+      if (kind === 'jq_eval') {
+        const drain = stream.drain.bind(stream)
+        vi.spyOn(stream, 'drain').mockImplementation(() => {
+          if (!refused) {
+            refused = true
+            throw new StreamRefusal('initial fixture', new Uint8Array())
+          }
+          return drain()
+        })
+      }
+      return stream
+    })
+    try {
+      expect(await ranOver([], '41+1', { null_input: true })).toEqual({
+        stdout: '42\n',
+        stderr: '',
+        exitCode: 0,
+      })
+      expect(refused).toBe(true)
+    } finally {
+      patched.mockRestore()
+    }
+  })
+
+  it('does not replay after an input request', async () => {
+    const open = rs.openStream
+    const message = 'reply fixture'
+    const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
+      const stream = await open(kind, config)
+      if (kind === 'jq_eval') {
+        vi.spyOn(stream, 'respond').mockImplementation(() => {
+          throw new StreamRefusal(message, new Uint8Array())
+        })
+      }
+      return stream
+    })
+    try {
+      await expect(ranOver(['/d/one.json'], 'input', { null_input: true })).rejects.toThrow(message)
+    } finally {
+      patched.mockRestore()
+    }
+  })
+
+  it('does not replay after debug output', async () => {
+    const open = rs.openStream
+    let seen = false
+    let refused = false
+    const message = 'drain fixture'
+    const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
+      const stream = await open(kind, config)
+      if (kind === 'jq_eval') {
+        const drain = stream.drain.bind(stream)
+        vi.spyOn(stream, 'drain').mockImplementation(() => {
+          if (seen && !refused) {
+            refused = true
+            throw new StreamRefusal(message, new Uint8Array())
+          }
+          const output = drain()
+          seen ||= output.byteLength > 0
+          return output
+        })
+      }
+      return stream
+    })
+    try {
+      await expect(ranOver([], '1|debug|until(false;.)', { null_input: true })).rejects.toThrow(
+        message,
+      )
+    } finally {
+      patched.mockRestore()
+    }
+  })
+
+  it('rejects an unknown request without reading input', async () => {
+    const open = rs.openStream
+    const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
+      const stream = await open(kind, config)
+      if (kind === 'jq_eval') {
+        vi.spyOn(stream, 'request').mockReturnValue([{ op: 'unknown-fixture' }, new Uint8Array()])
+      }
+      return stream
+    })
+    let reads = 0
+    async function* read(): AsyncIterable<Uint8Array> {
+      reads += 1
+      yield* yieldBytes(ENC.encode('1'))
+    }
+    try {
+      await expect(ranOver(['/d/one.json'], 'input', { null_input: true }, read)).rejects.toThrow(
+        'unknown host request',
+      )
+      expect(reads).toBe(0)
+    } finally {
+      patched.mockRestore()
+    }
   })
 })

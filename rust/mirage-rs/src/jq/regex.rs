@@ -3,8 +3,9 @@
 use std::sync::Arc;
 
 use super::builtin::{Fault, array_limit, type_error};
+use super::meter::{self, Charge};
 use super::onig::{Options, Regex, Region, Search};
-use super::value::{Object, Value};
+use super::value::{Key, Object, Text, Value};
 use super::vm::Limits;
 use crate::regex::Step;
 
@@ -39,13 +40,14 @@ pub(crate) fn unsupported(pattern: &str, modifiers: Option<&str>) -> Option<Stri
 /// when the step budget runs out and go on at the next drain.
 pub(crate) struct Matching {
     regex: Regex,
-    input: Arc<str>,
+    input: Arc<Text>,
     test: bool,
     global: bool,
     search: Search,
     found: Vec<Value>,
     names: Vec<Value>,
     chars: Chars,
+    charge: Charge,
 }
 
 /// Counts characters up to a byte offset as jq's offsets do, going on
@@ -104,8 +106,8 @@ fn starts_char(text: &[u8], pos: usize) -> bool {
     text.get(pos).is_none_or(|b| !(0x80..0xC0).contains(b))
 }
 
-fn key(name: &str) -> Arc<str> {
-    Arc::from(name)
+fn key(name: &str) -> Key {
+    name.into()
 }
 
 fn number(n: usize) -> Value {
@@ -113,6 +115,10 @@ fn number(n: usize) -> Value {
 }
 
 impl Matching {
+    pub(crate) fn retire(&mut self) -> Option<Value> {
+        self.found.pop().or_else(|| self.names.pop())
+    }
+
     /// Checks the operands as f_match does and compiles the pattern.
     pub(crate) fn begin(args: &[Value]) -> Result<Matching, Fault> {
         let input = &args[0];
@@ -160,6 +166,7 @@ impl Matching {
                 names[group - 1] = name.clone();
             }
         }
+        let charge = Charge::open(names.capacity() * std::mem::size_of::<Value>());
         Ok(Matching {
             regex,
             input: Arc::clone(text),
@@ -169,6 +176,7 @@ impl Matching {
             found: Vec::new(),
             names,
             chars: Chars::default(),
+            charge,
         })
     }
 
@@ -203,6 +211,13 @@ impl Matching {
                 (self.match_value(text, &region, start, end), end)
             };
             self.found.push(value);
+            self.charge.set(
+                (self.found.capacity() + self.names.capacity()) * std::mem::size_of::<Value>(),
+            );
+            if meter::should_pause() {
+                *budget = 0;
+                return None;
+            }
             if self.found.len() > limits.items {
                 return Some(array_limit(std::mem::take(&mut self.found), limits));
             }
@@ -211,6 +226,8 @@ impl Matching {
             }
             self.search.restart(next);
         }
+        self.charge
+            .set(self.names.capacity() * std::mem::size_of::<Value>());
         Some(Ok(if self.test {
             Value::False
         } else {

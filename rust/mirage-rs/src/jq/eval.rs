@@ -5,15 +5,17 @@ use crate::{Stream, StreamError};
 
 use super::builtin::Cfunc;
 use super::compile::{self, Refusal};
-use super::host::{Host, Message, Reply};
+use super::host::{Host, Message, Reply, Request};
+use super::meter::{self, Charge, Meter};
 use super::time::{Clock, Zone};
-use super::value::{Object, Value, parse_json};
+use super::value::{Dumping, Object, Parsing, Value, parse_json};
 use super::vm::{Halt, Limits, Next, Op, Program, Raise, Vm};
 
 const STEPS: u64 = 1 << 16;
 const BLOCKS: usize = 1 << 20;
 const ITEMS: usize = 1 << 24;
 const BYTES: usize = 1 << 28;
+const MEMORY: usize = 1 << 30;
 const RETIRE: usize = 1 << 14;
 
 pub(crate) const OUTPUT: u8 = 1;
@@ -40,6 +42,8 @@ struct Config {
     items: usize,
     #[serde(default = "bytes")]
     bytes: usize,
+    #[serde(default = "memory")]
+    memory: usize,
     #[serde(default)]
     zone: Option<String>,
 }
@@ -60,8 +64,13 @@ fn bytes() -> usize {
     BYTES
 }
 
+fn memory() -> usize {
+    MEMORY
+}
+
 enum State {
     Feeding,
+    Reading(Box<Parsing>),
     Running(Box<Vm>),
     Retiring(Box<Vm>),
     Ended,
@@ -102,6 +111,67 @@ struct InputReply {
     now: f64,
 }
 
+enum PrintKind {
+    Output,
+    Error(bool),
+    HaltMessage(bool, Option<f64>),
+    HaltPayload,
+}
+
+struct Printing {
+    dumping: Dumping,
+    kind: PrintKind,
+}
+
+impl Printing {
+    fn output(value: Value) -> Self {
+        Self {
+            dumping: Dumping::begin(value),
+            kind: PrintKind::Output,
+        }
+    }
+
+    fn error(mut raise: Raise) -> Self {
+        let value = loop {
+            match raise {
+                Raise::Error(value) => break value,
+                Raise::Wrapped(inner) => raise = *inner,
+            }
+        };
+        let string = matches!(value, Value::String(_));
+        let dumping = if let Value::String(text) = value {
+            Dumping::raw(text)
+        } else {
+            Dumping::begin(value)
+        };
+        Self {
+            dumping,
+            kind: PrintKind::Error(string),
+        }
+    }
+
+    fn halt(halt: Halt) -> Self {
+        match halt.message {
+            None | Some(Value::Null) => Self {
+                dumping: Dumping::halt(None, false, halt.code),
+                kind: PrintKind::HaltPayload,
+            },
+            Some(value) => {
+                let string = matches!(value, Value::String(_));
+                let dumping = if let Value::String(text) = value {
+                    Dumping::raw(text)
+                } else {
+                    Dumping::begin(value)
+                };
+                Self {
+                    dumping,
+                    kind: PrintKind::HaltMessage(string, halt.code),
+                }
+            }
+        }
+    }
+}
+
 /// One jq program run over documents one at a time, on the host's own
 /// thread: `open` compiles it, each document is fed, `finish` starts the
 /// run, and every `drain` executes a bounded number of VM steps, so a
@@ -110,7 +180,9 @@ struct InputReply {
 /// `drain` writes frames: an output's compact dump, an error that ended
 /// the run (a string flag, then its text), a halt (JSON), what `debug`
 /// prints (the compact dump of `["DEBUG:", value]`), and what `stderr`
-/// writes (the bytes). `begin` readies the stream for the next document,
+/// writes (the bytes). An output is dumped on the same step budget, so
+/// a large one takes several drains and its frame goes out whole once
+/// it is written. `begin` readies the stream for the next document,
 /// with the reader's position; `cancel` retires the run's stack a bounded
 /// slice per `drain`.
 ///
@@ -119,14 +191,20 @@ struct InputReply {
 /// of the stream, or the reader's parse error, as jq's input callback
 /// answers it, and the reader's position after it.
 struct Eval {
-    program: Arc<Program>,
+    program: Option<Arc<Program>>,
     limits: Limits,
+    meter: Arc<Meter>,
     steps: u64,
     env: Value,
     position: Position,
     asking: Asking,
     clock: Clock,
     pending: Vec<u8>,
+    pending_charge: Charge,
+    input_limited: bool,
+    compile_limited: bool,
+    receiving: Option<Box<Parsing>>,
+    printing: Option<Printing>,
     state: State,
 }
 
@@ -136,6 +214,8 @@ struct Eval {
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = serde_json::from_slice(config)
         .map_err(|e| StreamError::new(format!("bad jq_eval config: {e}")))?;
+    let meter = Arc::new(Meter::limited(config.memory));
+    let _metered = meter::install(&meter);
     let mut globals = HashMap::new();
     for (name, text) in &config.named {
         if is_ident(name) {
@@ -151,27 +231,51 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     };
     // jq binds `$ENV` to the environment over an `--arg ENV` (compile.c).
     globals.insert("ENV".to_string(), env.clone());
-    let program = compile::compile(&config.program, &globals).map_err(|refusal| match refusal {
-        Refusal::Invalid(report) => StreamError::new(report),
-        Refusal::Unsupported(why) => StreamError::new(format!("jq_eval: {why}")),
-    })?;
+    let program = match compile::compile(&config.program, &globals) {
+        Ok(program) => Some(Arc::new(program)),
+        Err(Refusal::Unsupported(_)) if meter.exceeded() => None,
+        Err(Refusal::Invalid(report)) => return Err(StreamError::new(report)),
+        Err(Refusal::Unsupported(why)) => {
+            return Err(StreamError::new(format!("jq_eval: {why}")));
+        }
+    };
     let clock = Clock {
         zone: config.zone.as_deref().and_then(Zone::parse).map(Arc::new),
     };
-    needs_host(&program, &clock)?;
+    let compile_limited = meter.exceeded();
+    if !compile_limited
+        && clock.zone.is_none()
+        && program.as_ref().is_some_and(|program| {
+            program.bytecodes.iter().flat_map(|bc| &bc.ops).any(|op| {
+                matches!(
+                    op,
+                    Op::CallBuiltin(Cfunc::Localtime | Cfunc::StrfLocaltime | Cfunc::Strptime, _)
+                )
+            })
+        })
+    {
+        return Err(StreamError::new("jq_eval: no time zone for local time"));
+    }
     Ok(Box::new(Eval {
-        program: Arc::new(program),
+        program,
         limits: Limits {
             blocks: config.blocks,
             items: config.items,
             bytes: config.bytes,
+            memory: config.memory,
         },
+        meter,
         steps: config.steps.max(1),
         env,
         position: Position::default(),
         asking: Asking::No,
         clock,
         pending: Vec::new(),
+        pending_charge: Charge::open(0),
+        input_limited: compile_limited,
+        compile_limited,
+        receiving: None,
+        printing: None,
         state: State::Feeding,
     }))
 }
@@ -188,25 +292,7 @@ fn message_frames(host: &mut Host, out: &mut Vec<u8>) {
             Message::Stderr(text) => frame(STDERR, text.as_bytes(), out),
         }
     }
-    host.queued = 0;
-}
-
-/// A program that reads the local time zone runs here only when the host
-/// gave one this engine reads; otherwise it is refused, as an unknown
-/// builtin is, and the host runs it elsewhere. `strptime` counts, as its
-/// `%s` reads the zone.
-fn needs_host(program: &Program, clock: &Clock) -> Result<(), StreamError> {
-    let calls = |wanted: &[Cfunc]| {
-        program
-            .bytecodes
-            .iter()
-            .flat_map(|bytecode| &bytecode.ops)
-            .any(|op| matches!(op, Op::CallBuiltin(f, _) if wanted.contains(f)))
-    };
-    if clock.zone.is_none() && calls(&[Cfunc::Localtime, Cfunc::StrfLocaltime, Cfunc::Strptime]) {
-        return Err(StreamError::new("jq_eval: no time zone for local time"));
-    }
-    Ok(())
+    host.reset_messages();
 }
 
 fn json(text: &str) -> Result<Value, StreamError> {
@@ -227,41 +313,12 @@ fn frame(tag: u8, payload: &[u8], out: &mut Vec<u8>) {
     out.extend_from_slice(payload);
 }
 
-fn message(value: &Value) -> (bool, String) {
-    match value {
-        Value::String(s) => (true, s.to_string()),
-        other => (false, other.dump()),
-    }
-}
-
-fn error_frame(raise: Raise, out: &mut Vec<u8>) {
-    let mut raise = raise;
-    let value = loop {
-        match raise {
-            Raise::Error(value) => break value,
-            Raise::Wrapped(inner) => raise = *inner,
-        }
-    };
-    let (string, text) = message(&value);
-    let mut payload = vec![u8::from(string)];
-    payload.extend_from_slice(text.as_bytes());
-    frame(ERROR, &payload, out);
-}
-
-fn halt_frame(halt: Halt, out: &mut Vec<u8>) {
-    let (string, text) = match &halt.message {
-        None | Some(Value::Null) => (false, None),
-        Some(value) => {
-            let (string, text) = message(value);
-            (string, Some(text))
-        }
-    };
-    let payload = serde_json::json!({
-        "message": text,
-        "string": string,
-        "code": halt.code,
-    });
-    frame(HALT, payload.to_string().as_bytes(), out);
+fn memory_error_frame(limits: Limits, out: &mut Vec<u8>) {
+    let text = format!("jq memory limit of {} bytes exceeded", limits.memory);
+    out.push(ERROR);
+    out.extend_from_slice(&((text.len() + 1) as u32).to_le_bytes());
+    out.push(1);
+    out.extend_from_slice(text.as_bytes());
 }
 
 impl Stream for Eval {
@@ -269,96 +326,244 @@ impl Stream for Eval {
         if !matches!(self.state, State::Feeding) {
             return Err(StreamError::new("jq_eval: begin the next document first"));
         }
+        let _metered = meter::install(&self.meter);
+        if self.input_limited || self.meter.live().saturating_add(input.len()) > self.limits.memory
+        {
+            self.input_limited = true;
+            return Ok(());
+        }
         self.pending.extend_from_slice(input);
+        self.pending_charge.set(self.pending.capacity());
+        self.input_limited |= self.meter.exceeded();
         Ok(())
     }
 
-    fn finish(&mut self, _out: &mut Vec<u8>) -> Result<(), StreamError> {
+    fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         if !matches!(self.state, State::Feeding) {
             return Err(StreamError::new("jq_eval: begin the next document first"));
         }
-        let text = std::str::from_utf8(&self.pending)
-            .map_err(|_| StreamError::new("jq_eval: document is not UTF-8"))?;
-        let input = parse_json(text).map_err(StreamError::new)?;
-        self.pending.clear();
-        let mut vm = Vm::start(Arc::clone(&self.program), input, self.limits);
-        vm.host.env = self.env.clone();
-        place(&mut vm.host, std::mem::take(&mut self.position));
-        vm.set_clock(self.clock.clone());
-        self.state = State::Running(Box::new(vm));
+        let _metered = meter::install(&self.meter);
+        if self.input_limited || self.meter.exceeded() {
+            memory_error_frame(self.limits, out);
+            self.pending = Vec::new();
+            self.pending_charge.set(0);
+            self.state = State::Ended;
+            return Ok(());
+        }
+        let text = std::mem::take(&mut self.pending);
+        self.pending_charge.set(0);
+        self.state = State::Reading(Box::new(Parsing::document(text)));
         Ok(())
     }
 
     fn busy(&self) -> bool {
         match self.state {
             State::Running(_) => self.asking == Asking::No,
-            State::Retiring(_) => true,
+            State::Retiring(_) | State::Reading(_) => true,
             State::Feeding | State::Ended => false,
         }
     }
 
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let _metered = meter::install(&self.meter);
+        let mut budget = self.steps;
+        if let State::Reading(parsing) = &mut self.state {
+            let result = parsing.run(&mut budget);
+            let limit = self.meter.exceeded();
+            if result.is_none() && !limit {
+                return Ok(());
+            }
+            if !limit {
+                if let Some(Err(message)) = result {
+                    return Err(StreamError::new(message));
+                }
+            }
+            let State::Reading(parsing) = std::mem::replace(&mut self.state, State::Ended) else {
+                unreachable!()
+            };
+            let (input, retired) = match result {
+                Some(Ok(value)) if !limit => (value, None),
+                Some(Ok(value)) => (Value::Null, Some(value)),
+                _ => (Value::Null, None),
+            };
+            let mut vm = if limit {
+                Box::new(Vm::retiring(
+                    self.compiled(),
+                    self.limits,
+                    Arc::clone(&self.meter),
+                ))
+            } else {
+                self.start_vm(input)
+            };
+            vm.retire_reading(parsing);
+            if let Some(value) = retired {
+                vm.retire_value(value);
+            }
+            self.state = if limit {
+                State::Retiring(vm)
+            } else {
+                State::Running(vm)
+            };
+            if limit {
+                memory_error_frame(self.limits, out);
+                return Ok(());
+            }
+        }
         match &mut self.state {
             State::Running(_) if self.asking != Asking::No => {}
             State::Running(vm) => {
-                let mut budget = self.steps;
                 let start = out.len();
+                if let Some(parsing) = &mut self.receiving {
+                    let result = parsing.run(&mut budget);
+                    let limit = self.meter.exceeded();
+                    if result.is_none() && !limit {
+                        return Ok(());
+                    }
+                    if let Some(Err(message)) = &result {
+                        if message == "jq_eval: document is not UTF-8" {
+                            return Err(StreamError::new(message));
+                        }
+                    }
+                    vm.retire_reading(self.receiving.take().expect("the host document reader"));
+                    if limit {
+                        if let Some(Ok(value)) = result {
+                            vm.retire_value(value);
+                        }
+                        memory_error_frame(self.limits, out);
+                    } else {
+                        vm.host
+                            .set_reply(match result.expect("a document or parse error") {
+                                Ok(value) => Reply::Value(value),
+                                Err(message) => Reply::Error(message),
+                            });
+                    }
+                    if limit {
+                        let State::Running(vm) = std::mem::replace(&mut self.state, State::Ended)
+                        else {
+                            unreachable!()
+                        };
+                        self.state = State::Retiring(vm);
+                        return Ok(());
+                    }
+                }
                 loop {
-                    let next = vm.next(&mut budget);
-                    message_frames(&mut vm.host, out);
-                    match next {
-                        Next::Output(value) => {
-                            frame(OUTPUT, value.dump().as_bytes(), out);
-                            if budget == 0 || out.len() - start >= crate::PIECE {
-                                return Ok(());
+                    if let Some(printing) = &mut self.printing {
+                        let text = printing.dumping.run(&mut budget);
+                        if self.meter.exceeded() {
+                            memory_error_frame(self.limits, out);
+                            break;
+                        }
+                        let Some(text) = text else { return Ok(()) };
+                        let printing = self.printing.take().expect("the completed output renderer");
+                        vm.retire_output(printing.dumping);
+                        match printing.kind {
+                            PrintKind::Output => frame(OUTPUT, text.as_bytes(), out),
+                            PrintKind::Error(string) => {
+                                out.push(ERROR);
+                                out.extend_from_slice(&((text.len() + 1) as u32).to_le_bytes());
+                                out.push(u8::from(string));
+                                out.extend_from_slice(text.as_bytes());
+                                break;
+                            }
+                            PrintKind::HaltMessage(string, code) => {
+                                self.printing = Some(Printing {
+                                    dumping: Dumping::halt(Some(text), string, code),
+                                    kind: PrintKind::HaltPayload,
+                                });
+                                continue;
+                            }
+                            PrintKind::HaltPayload => {
+                                frame(HALT, text.as_bytes(), out);
+                                break;
                             }
                         }
+                        if budget == 0 || out.len() - start >= crate::PIECE {
+                            return Ok(());
+                        }
+                    }
+                    let next = vm.next(&mut budget);
+                    if self.meter.exceeded() {
+                        memory_error_frame(self.limits, out);
+                        break;
+                    }
+                    message_frames(&mut vm.host, out);
+                    match next {
+                        Next::Output(value) => self.printing = Some(Printing::output(value)),
                         Next::Paused => return Ok(()),
                         Next::Input => {
                             self.asking = Asking::Pending;
                             return Ok(());
                         }
                         Next::Done => break,
-                        Next::Error(raise) => {
-                            error_frame(raise, out);
-                            break;
-                        }
-                        Next::Halt(halt) => {
-                            halt_frame(halt, out);
-                            break;
-                        }
+                        Next::Error(raise) => self.printing = Some(Printing::error(raise)),
+                        Next::Halt(halt) => self.printing = Some(Printing::halt(halt)),
                     }
                 }
-                let State::Running(vm) = std::mem::replace(&mut self.state, State::Ended) else {
+                let State::Running(mut vm) = std::mem::replace(&mut self.state, State::Ended)
+                else {
                     unreachable!()
                 };
+                if let Some(dumping) = self.printing.take() {
+                    vm.retire_output(dumping.dumping);
+                }
                 self.state = State::Retiring(vm);
                 self.retire();
             }
             State::Retiring(_) => self.retire(),
+            State::Reading(_) => unreachable!(),
             State::Feeding | State::Ended => {}
         }
         Ok(())
     }
 
     fn cancel(&mut self) -> bool {
+        let _metered = meter::install(&self.meter);
+        if matches!(self.state, State::Reading(_)) {
+            let State::Reading(parsing) = std::mem::replace(&mut self.state, State::Ended) else {
+                unreachable!()
+            };
+            let mut vm = Box::new(Vm::retiring(
+                self.compiled(),
+                self.limits,
+                Arc::clone(&self.meter),
+            ));
+            vm.retire_reading(parsing);
+            self.state = State::Retiring(vm);
+        }
         if let State::Running(_) = self.state {
             let State::Running(vm) = std::mem::replace(&mut self.state, State::Ended) else {
                 unreachable!()
             };
             self.state = State::Retiring(vm);
         }
+        if let Some(parsing) = self.receiving.take() {
+            if let State::Retiring(vm) = &mut self.state {
+                vm.retire_reading(parsing);
+            }
+        }
         self.asking = Asking::No;
-        self.pending.clear();
+        self.pending = Vec::new();
+        self.pending_charge.set(0);
+        if let Some(dumping) = self.printing.take() {
+            if let State::Retiring(vm) = &mut self.state {
+                vm.retire_output(dumping.dumping);
+            }
+        }
         true
     }
 
     fn begin(&mut self, config: &[u8]) -> Result<(), StreamError> {
-        if matches!(self.state, State::Running(_) | State::Retiring(_)) {
+        if matches!(
+            self.state,
+            State::Running(_) | State::Retiring(_) | State::Reading(_)
+        ) {
             return Err(StreamError::new("jq_eval: the run has not ended"));
         }
+        let _metered = meter::install(&self.meter);
         self.position = crate::parse_config(config)?;
         self.pending.clear();
+        self.input_limited = self.compile_limited;
+        self.meter.reset();
         self.state = State::Feeding;
         Ok(())
     }
@@ -371,31 +576,67 @@ impl Stream for Eval {
         let State::Running(vm) = &mut self.state else {
             return None;
         };
-        let op = vm.host.asking.take().unwrap_or("input");
         self.asking = Asking::Taken;
-        Some(format!(r#"{{"op":"{op}"}}"#).into_bytes())
+        let request = match vm.host.asking.unwrap_or(Request::Input) {
+            Request::Now => serde_json::json!({"op":"now"}),
+            Request::Input => serde_json::json!({"op":"input"}),
+        };
+        Some(request.to_string().into_bytes())
     }
 
     fn respond(&mut self, reply: &[u8], data: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let _ = out;
         let State::Running(vm) = &mut self.state else {
             return Err(StreamError::new("jq_eval: the host answered no request"));
         };
         if self.asking != Asking::Taken {
             return Err(StreamError::new("jq_eval: the host answered no request"));
         }
+        let _metered = meter::install(&self.meter);
         let reply: InputReply = crate::parse_config(reply)?;
-        if reply.kind == "now" {
-            vm.host.now = Some(reply.now);
-            self.asking = Asking::No;
-            return Ok(());
+        let asked = vm.host.asking.take().unwrap_or(Request::Input);
+        match asked {
+            Request::Now if reply.kind == "now" => {
+                vm.host.now = Some(reply.now);
+                self.asking = Asking::No;
+                return Ok(());
+            }
+            Request::Now => {
+                return Err(StreamError::new(format!(
+                    "jq_eval: unknown reply {}",
+                    reply.kind
+                )));
+            }
+            Request::Input => {}
         }
-        let text = std::str::from_utf8(data)
-            .map_err(|_| StreamError::new("jq_eval: document is not UTF-8"))?;
-        vm.host.reply = Some(match reply.kind.as_str() {
-            "value" => parse_json(text).map_or_else(Reply::Error, Reply::Value),
+        vm.host.set_reply(match reply.kind.as_str() {
+            "value" => {
+                if self.meter.live().saturating_add(data.len()) > self.limits.memory {
+                    memory_error_frame(self.limits, out);
+                    let State::Running(vm) = std::mem::replace(&mut self.state, State::Ended)
+                    else {
+                        unreachable!()
+                    };
+                    self.state = State::Retiring(vm);
+                    self.asking = Asking::No;
+                    return Ok(());
+                }
+                self.receiving = Some(Box::new(Parsing::document(data.to_vec())));
+                self.asking = Asking::No;
+                place(
+                    &mut vm.host,
+                    Position {
+                        filename: reply.filename,
+                        line: reply.line,
+                    },
+                );
+                return Ok(());
+            }
             "end" => Reply::End,
-            "error" => Reply::Error(text.to_string()),
+            "error" => Reply::Error(
+                std::str::from_utf8(data)
+                    .map_err(|_| StreamError::new("jq_eval: document is not UTF-8"))?
+                    .to_string(),
+            ),
             other => return Err(StreamError::new(format!("jq_eval: unknown reply {other}"))),
         });
         place(
@@ -410,7 +651,31 @@ impl Stream for Eval {
     }
 }
 
+impl Drop for Eval {
+    fn drop(&mut self) {
+        let _metered = meter::install(&self.meter);
+        self.printing = None;
+        drop(std::mem::replace(&mut self.state, State::Ended));
+    }
+}
+
 impl Eval {
+    fn compiled(&self) -> Arc<Program> {
+        Arc::clone(
+            self.program
+                .as_ref()
+                .expect("a runnable stream has compiled bytecode"),
+        )
+    }
+
+    fn start_vm(&mut self, input: Value) -> Box<Vm> {
+        let mut vm = Vm::start(self.compiled(), input, self.limits, Arc::clone(&self.meter));
+        vm.host.env = self.env.clone();
+        place(&mut vm.host, std::mem::take(&mut self.position));
+        vm.set_clock(self.clock.clone());
+        Box::new(vm)
+    }
+
     fn retire(&mut self) {
         if let State::Retiring(vm) = &mut self.state {
             if vm.retire(RETIRE) {

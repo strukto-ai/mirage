@@ -6796,5 +6796,800 @@
   "outputs": [],
   "stderr": "jq: error: $y is not defined at <top-level>, line 1, column 16:\n    1 as $x | [$x, $y] | .[$z]\n                   ^^\njq: error: $z is not defined at <top-level>, line 1, column 24:\n    1 as $x | [$x, $y] | .[$z]\n                           ^^\njq: 2 compile errors\n",
   "exit": 3
+ },
+ {
+  "id": "probe_0148",
+  "program": "import \"a\" as a; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0149",
+  "program": "include \"a\"; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0150",
+  "program": "import \"a\" as $a; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0151",
+  "program": "import \"a/b\" as a; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: a/b\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0152",
+  "program": "import \"a\" as a; import \"b\" as b; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: b\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0153",
+  "program": "def f: 1; import \"a\" as a; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: syntax error, unexpected import, expecting end of file at <top-level>, line 1, column 11:\n    def f: 1; import \"a\" as a; .\n              ^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0154",
+  "program": "import \"../a\" as a; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Relative paths to modules may not traverse to parent directories (../a)\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0155",
+  "program": "import \"a\" as a; a::b",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0156",
+  "program": "import \"a\" as a; import \"../b\" as b; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Relative paths to modules may not traverse to parent directories (../b)\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0157",
+  "program": "import \"../a\" as a; import \"b\" as b; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: b\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0158",
+  "program": "import \"a/../b\" as b; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Relative paths to modules may not traverse to parent directories (a/../b)\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0159",
+  "program": "import \"./a\" as a; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: ./a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0160",
+  "program": "import \"\" as a; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: \n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0161",
+  "program": "import \"a/a\" as a; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module names must not have equal consecutive components: a/a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0162",
+  "program": "import \"a\\\\b\" as a; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Modules must be named by relative paths using '/', not '\\' (a\\b)\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0163",
+  "program": "import \"a\\u0000b\" as a; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Module path contains a NUL byte\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0164",
+  "program": "import \"a\" as a {search: \"x\"}; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0165",
+  "program": "import \"a\" as a {optional: true}; .",
+  "input": "null",
+  "outputs": [
+   "null"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0166",
+  "program": "import \"a\" as a {optional: true}; a::f",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: a::f/0 is not defined at <top-level>, line 1, column 35:\n    import \"a\" as a {optional: true}; a::f\n                                      ^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0167",
+  "program": "import \"a\" as a {optional: true}; import \"b\" as b; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: b\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0168",
+  "program": "import \"a\" as a {optional: 1}; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0169",
+  "program": "module {a:1}; import \"a\" as a; .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0170",
+  "program": "import \"a\" as a; $x",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: module not found: a\n\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0171",
+  "program": "$$$$x | .",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: x/-1 is not defined at <top-level>, line 1, column 1:\n    $$$$x | .\n    ^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0172",
+  "program": "1 | $$$$abc",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: abc/-1 is not defined at <top-level>, line 1, column 5:\n    1 | $$$$abc\n        ^^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0173",
+  "program": "$$$$x + $$$$y",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: x/-1 is not defined at <top-level>, line 1, column 1:\n    $$$$x + $$$$y\n    ^^^^^\njq: error: y/-1 is not defined at <top-level>, line 1, column 9:\n    $$$$x + $$$$y\n            ^^^^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0174",
+  "program": "$$$$x as $y | $y",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: x/-1 is not defined at <top-level>, line 1, column 1:\n    $$$$x as $y | $y\n    ^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0175",
+  "program": "1 as $x | $$$$x",
+  "input": "null",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0176",
+  "program": "1 as $x | [$$$$x, $x]",
+  "input": "null",
+  "outputs": [
+   "[1,null]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0177",
+  "program": "$$$$ENV | type",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: ENV/-1 is not defined at <top-level>, line 1, column 1:\n    $$$$ENV | type\n    ^^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0178",
+  "program": "def f($x): $$$$x; f(1)",
+  "input": "null",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0179",
+  "program": "1 as $x | def g($y): $$$$y + $$$$x; [g(2), $x]",
+  "input": "null",
+  "outputs": [
+   "[3,null]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0180",
+  "program": "\"\\é\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid escape at line 1, column 6 (while parsing '\"\\�\"') at <top-level>, line 1, column 2:\n    \"\\é\"\n     ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0181",
+  "program": "\"ab\\éc\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid escape at line 1, column 6 (while parsing '\"\\�\"') at <top-level>, line 1, column 4:\n    \"ab\\éc\"\n       ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0182",
+  "program": "\"\\€x\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Unfinished string at EOF at line 1, column 5 (while parsing '\"\\�') at <top-level>, line 1, column 2:\n    \"\\€x\"\n     ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0183",
+  "program": "\"\\ébc\\q\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid escape at line 1, column 6 (while parsing '\"\\�\"') at <top-level>, line 1, column 2:\n    \"\\ébc\\q\"\n     ^^\njq: error: Invalid escape at line 1, column 4 (while parsing '\"\\q\"') at <top-level>, line 1, column 7:\n    \"\\ébc\\q\"\n          ^^\njq: 2 compile errors\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0184",
+  "program": "\"x\\q\\é\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid escape at line 1, column 8 (while parsing '\"\\q\\�\"') at <top-level>, line 1, column 3:\n    \"x\\q\\é\"\n      ^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0185",
+  "program": "\"é\\é\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid escape at line 1, column 6 (while parsing '\"\\�\"') at <top-level>, line 1, column 4:\n    \"é\\é\"\n       ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0186",
+  "program": "\"\\(1)\\é\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid escape at line 1, column 6 (while parsing '\"\\�\"') at <top-level>, line 1, column 6:\n    \"\\(1)\\é\"\n         ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0187",
+  "program": "\"\\😀\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Unfinished string at EOF at line 1, column 5 (while parsing '\"\\�') at <top-level>, line 1, column 2:\n    \"\\😀\"\n     ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0188",
+  "program": "\"a\\(1 | \"\\é\")b\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid escape at line 1, column 6 (while parsing '\"\\�\"') at <top-level>, line 1, column 10:\n    \"a\\(1 | \"\\é\")b\"\n             ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0189",
+  "program": "\"\\u12\\é\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid characters in \\uXXXX escape at line 1, column 10 (while parsing '\"\\u12\\�\"') at <top-level>, line 1, column 2:\n    \"\\u12\\é\"\n     ^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0190",
+  "program": "\"\\ud800\\é\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid \\uXXXX\\uXXXX surrogate pair escape at line 1, column 12 (while parsing '\"\\ud800\\�\"') at <top-level>, line 1, column 2:\n    \"\\ud800\\é\"\n     ^^^^^^^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0191",
+  "program": "\"\\é\\(1)\"",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error: Invalid escape at line 1, column 6 (while parsing '\"\\�\"') at <top-level>, line 1, column 2:\n    \"\\é\\(1)\"\n     ^^\njq: 1 compile error\n",
+  "exit": 3
+ },
+ {
+  "id": "probe_0192",
+  "program": "\"x\" | modulemeta",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): module not found: x\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0193",
+  "program": "1 | modulemeta",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): modulemeta input module name must be a string\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0194",
+  "program": "get_search_list",
+  "input": "null",
+  "outputs": [
+   "[\"~/.jq\",\"$ORIGIN/../lib/jq\",\"$ORIGIN/../lib\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0195",
+  "program": "get_jq_origin",
+  "input": "null",
+  "outputs": [
+   "\"/private/tmp/jq-resume-20261027/oracle/install/bin\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0196",
+  "program": "get_prog_origin",
+  "input": "null",
+  "outputs": [
+   "\"/private/tmp/claude-501/-Users-sonmh-code-mirage--claude-worktrees-jq-close-1868-a3745c/ba16d198-f7fc-496f-acd0-16e25c78909b/scratchpad/wt-engine\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0197",
+  "program": "$ARGS",
+  "input": "null",
+  "outputs": [
+   "{\"positional\":[],\"named\":{}}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0198",
+  "program": "$JQ_BUILD_CONFIGURATION",
+  "input": "null",
+  "outputs": [
+   "\"--disable-maintainer-mode --with-oniguruma=builtin --prefix=/private/tmp/jq-resume-20261027/oracle/install\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0199",
+  "program": "builtins | length",
+  "input": "null",
+  "outputs": [
+   "226"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0200",
+  "program": "[builtins | .[0:12], .[-6:]]",
+  "input": "null",
+  "outputs": [
+   "[[\"have_literal_numbers/0\",\"have_decnum/0\",\"input_line_number/0\",\"input_filename/0\",\"now/0\",\"localtime/0\",\"gmtime/0\",\"mktime/0\",\"strflocaltime/1\",\"strftime/1\",\"strptime/1\",\"stderr/0\"],[\"JOIN/2\",\"JOIN/3\",\"JOIN/4\",\"IN/1\",\"IN/2\",\"builtins/0\"]]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0201",
+  "program": "builtins | sort",
+  "input": "null",
+  "outputs": [
+   "[\"IN/1\",\"IN/2\",\"INDEX/1\",\"INDEX/2\",\"JOIN/2\",\"JOIN/3\",\"JOIN/4\",\"abs/0\",\"acos/0\",\"acosh/0\",\"add/0\",\"add/1\",\"all/0\",\"all/1\",\"all/2\",\"any/0\",\"any/1\",\"any/2\",\"arrays/0\",\"ascii_downcase/0\",\"ascii_upcase/0\",\"asin/0\",\"asinh/0\",\"atan/0\",\"atan2/2\",\"atanh/0\",\"booleans/0\",\"bsearch/1\",\"builtins/0\",\"capture/1\",\"capture/2\",\"cbrt/0\",\"ceil/0\",\"combinations/0\",\"combinations/1\",\"contains/1\",\"copysign/2\",\"cos/0\",\"cosh/0\",\"debug/0\",\"debug/1\",\"del/1\",\"delpaths/1\",\"drem/2\",\"empty/0\",\"endswith/1\",\"env/0\",\"erf/0\",\"erfc/0\",\"error/0\",\"error/1\",\"exp/0\",\"exp10/0\",\"exp2/0\",\"explode/0\",\"expm1/0\",\"fabs/0\",\"fdim/2\",\"finites/0\",\"first/0\",\"first/1\",\"flatten/0\",\"flatten/1\",\"floor/0\",\"fma/3\",\"fmax/2\",\"fmin/2\",\"fmod/2\",\"format/1\",\"frexp/0\",\"from_entries/0\",\"fromdate/0\",\"fromdateiso8601/0\",\"fromjson/0\",\"fromstream/1\",\"gamma/0\",\"get_jq_origin/0\",\"get_prog_origin/0\",\"get_search_list/0\",\"getpath/1\",\"gmtime/0\",\"group_by/1\",\"gsub/2\",\"gsub/3\",\"halt/0\",\"halt_error/0\",\"halt_error/1\",\"has/1\",\"have_decnum/0\",\"have_literal_numbers/0\",\"hypot/2\",\"implode/0\",\"in/1\",\"index/1\",\"indices/1\",\"infinite/0\",\"input/0\",\"input_filename/0\",\"input_line_number/0\",\"inputs/0\",\"inside/1\",\"isempty/1\",\"isfinite/0\",\"isinfinite/0\",\"isnan/0\",\"isnormal/0\",\"iterables/0\",\"j0/0\",\"j1/0\",\"jn/2\",\"join/1\",\"keys/0\",\"keys_unsorted/0\",\"last/0\",\"last/1\",\"ldexp/2\",\"length/0\",\"lgamma/0\",\"lgamma_r/0\",\"limit/2\",\"localtime/0\",\"log/0\",\"log10/0\",\"log1p/0\",\"log2/0\",\"logb/0\",\"ltrim/0\",\"ltrimstr/1\",\"map/1\",\"map_values/1\",\"match/1\",\"match/2\",\"max/0\",\"max_by/1\",\"min/0\",\"min_by/1\",\"mktime/0\",\"modf/0\",\"modulemeta/0\",\"nan/0\",\"nearbyint/0\",\"nextafter/2\",\"nexttoward/2\",\"normals/0\",\"not/0\",\"now/0\",\"nth/1\",\"nth/2\",\"nulls/0\",\"numbers/0\",\"objects/0\",\"path/1\",\"paths/0\",\"paths/1\",\"pick/1\",\"pow/2\",\"range/1\",\"range/2\",\"range/3\",\"recurse/0\",\"recurse/1\",\"recurse/2\",\"remainder/2\",\"repeat/1\",\"reverse/0\",\"rindex/1\",\"rint/0\",\"round/0\",\"rtrim/0\",\"rtrimstr/1\",\"scalars/0\",\"scalb/2\",\"scalbln/2\",\"scan/1\",\"scan/2\",\"select/1\",\"setpath/2\",\"significand/0\",\"sin/0\",\"sinh/0\",\"skip/2\",\"sort/0\",\"sort_by/1\",\"split/1\",\"split/2\",\"splits/1\",\"splits/2\",\"sqrt/0\",\"startswith/1\",\"stderr/0\",\"strflocaltime/1\",\"strftime/1\",\"strings/0\",\"strptime/1\",\"sub/2\",\"sub/3\",\"tan/0\",\"tanh/0\",\"test/1\",\"test/2\",\"tgamma/0\",\"to_entries/0\",\"toboolean/0\",\"todate/0\",\"todateiso8601/0\",\"tojson/0\",\"tonumber/0\",\"tostream/0\",\"tostring/0\",\"transpose/0\",\"trim/0\",\"trimstr/1\",\"trunc/0\",\"truncate_stream/1\",\"type/0\",\"unique/0\",\"unique_by/1\",\"until/2\",\"utf8bytelength/0\",\"values/0\",\"walk/1\",\"while/2\",\"with_entries/1\",\"y0/0\",\"y1/0\",\"yn/2\"]"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0202",
+  "program": "\"a%20b\" | @urid",
+  "input": "null",
+  "outputs": [
+   "\"a b\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0203",
+  "program": "\"%41%42\" | @urid",
+  "input": "null",
+  "outputs": [
+   "\"AB\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0204",
+  "program": "\"%\" | @urid",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): string (\"%\") is not a valid uri encoding\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0205",
+  "program": "\"%2\" | @urid",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): string (\"%2\") is not a valid uri encoding\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0206",
+  "program": "\"%zz\" | @urid",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): string (\"%zz\") is not a valid uri encoding\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0207",
+  "program": "\"%+1\" | @urid",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): string (\"%+1\") is not a valid uri encoding\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0208",
+  "program": "\"%C3%A9\" | @urid",
+  "input": "null",
+  "outputs": [
+   "\"é\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0209",
+  "program": "\"%FF\" | @urid",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): string (\"%FF\") is not a valid uri encoding\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0210",
+  "program": "\"%e2%82\" | @urid",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): string (\"%e2%82\") is not a valid uri encoding\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0211",
+  "program": "\"a+b\" | @urid",
+  "input": "null",
+  "outputs": [
+   "\"a+b\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0212",
+  "program": "\"%2B\" | @urid",
+  "input": "null",
+  "outputs": [
+   "\"+\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0213",
+  "program": "\"%f0%9f%98%80\" | @urid",
+  "input": "null",
+  "outputs": [
+   "\"😀\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0214",
+  "program": "1 | @urid",
+  "input": "null",
+  "outputs": [
+   "\"1\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0215",
+  "program": "[1] | @urid",
+  "input": "null",
+  "outputs": [
+   "\"[1]\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0216",
+  "program": "\"a%20b\" | format(\"urid\")",
+  "input": "null",
+  "outputs": [
+   "\"a b\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0217",
+  "program": "format(\"foo\")",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): foo is not a valid format\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0218",
+  "program": "@foo",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): foo is not a valid format\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0219",
+  "program": "@base32",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): base32 is not a valid format\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0220",
+  "program": "\"x\" | format(1)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): number (1) is not a valid format\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0221",
+  "program": "\"foo\" as $f | format($f)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): foo is not a valid format\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0222",
+  "program": "{f:\"text\"} | format(.f)",
+  "input": "null",
+  "outputs": [
+   "\"{\\\"f\\\":\\\"text\\\"}\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0223",
+  "program": "\"x\" | test(\"(\")",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): Regex failure: end pattern with unmatched parenthesis\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0224",
+  "program": "\"x\" | test(\"a\"; \"q\")",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): q is not a valid modifier string\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0225",
+  "program": "\"a+\" as $re | \"aa\" | test($re)",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0226",
+  "program": "{p:\"a+\"} | .p as $p | \"aa\" | test($p)",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0227",
+  "program": "{p:\"a+\"} | \"aa\" | test(.p)",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): Cannot index string with string (\"p\")\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0228",
+  "program": "\"aa\" | test([\"a+\", \"x\"])",
+  "input": "null",
+  "outputs": [
+   "true"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0229",
+  "program": "\"aa\" | test([\"a+\", \"gq\"])",
+  "input": "null",
+  "outputs": [],
+  "stderr": "jq: error (at <stdin>:0): gq is not a valid modifier string\n",
+  "exit": 5
+ },
+ {
+  "id": "probe_0230",
+  "program": "null | {\"\\(1,2)\"}",
+  "input": "null",
+  "outputs": [
+   "{\"1\":null}",
+   "{\"2\":null}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0231",
+  "program": "{\"a\":1,\"b\":2} | {\"\\(\"a\",\"b\")\"}",
+  "input": "null",
+  "outputs": [
+   "{\"a\":1}",
+   "{\"b\":2}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0232",
+  "program": "{a:1} | {a, \"b\", \"\\(\"c\")\": 3}",
+  "input": "null",
+  "outputs": [
+   "{\"a\":1,\"b\":null,\"c\":3}"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0233",
+  "program": "def format(f): 1; @base64",
+  "input": "null",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "probe_0234",
+  "program": "def recurse: 1; ..",
+  "input": "null",
+  "outputs": [
+   "1"
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "format_nul_dispatch",
+  "program": "[[\"uri\\u0000tail\",\"a b\"],[\"urid\\u0000tail\",\"a%20b\"],[\"html\\u0000\",\"<&\"],[\"text\\u0000tail\",\"a b\"],[\"json\\u0000tail\",{\"a\":1}],[\"base64\\u0000tail\",\"a b\"],[\"base64d\\u0000tail\",\"YSBi\"],[\"csv\\u0000tail\",[\"a b\",null]],[\"tsv\\u0000tail\",[\"a\\tb\",null]],[\"sh\\u0000tail\",[\"a b\",null]]][] as [$f,$v] | $v | format($f)",
+  "input": "null",
+  "outputs": [
+   "\"a%20b\"",
+   "\"a b\"",
+   "\"&lt;&amp;\"",
+   "\"a b\"",
+   "\"{\\\"a\\\":1}\"",
+   "\"YSBi\"",
+   "\"a b\"",
+   "\"\\\"a b\\\",\"",
+   "\"a\\\\tb\\t\"",
+   "\"'a b' null\""
+  ],
+  "stderr": "",
+  "exit": 0
+ },
+ {
+  "id": "format_nul_error_values",
+  "program": "[\"unknown\\u0000tail\",\"uriX\\u0000uri\",\"\\u0000uri\",\"u\\u0000ri\",\"unknown\\u0000\",\"unknown\",\"\"][] as $f | \"a b\" | try format($f) catch .",
+  "input": "null",
+  "outputs": [
+   "\"unknown\\u0000tail is not a valid format\"",
+   "\"uriX\\u0000uri is not a valid format\"",
+   "\"\\u0000uri is not a valid format\"",
+   "\"u\\u0000ri is not a valid format\"",
+   "\"unknown\\u0000 is not a valid format\"",
+   "\"unknown is not a valid format\"",
+   "\" is not a valid format\""
+  ],
+  "stderr": "",
+  "exit": 0
  }
 ]

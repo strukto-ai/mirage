@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use super::compile::{Refusal, compile};
 use super::eval::{DEBUG, ERROR, HALT, OUTPUT, STDERR};
+use super::meter::{self, Meter};
 use super::value::{Value, parse_json};
 use super::vm::{Limits, Next, Vm};
 use crate::Stream;
@@ -11,6 +12,7 @@ const LIMITS: Limits = Limits {
     blocks: 1 << 20,
     items: 1 << 24,
     bytes: 1 << 28,
+    memory: 1 << 30,
 };
 
 #[derive(Debug, PartialEq)]
@@ -202,6 +204,45 @@ const CASES: &[(&str, &str, &[&str])] = &[
         "tojson, (tojson | fromjson)",
         r#"{"a":[1,2]}"#,
         &[r#""{\"a\":[1,2]}""#, r#"{"a":[1,2]}"#],
+    ),
+    (
+        "[range(300) | 300 - .] | sort | [.[0], .[-1], length]",
+        "null",
+        &["[1,300,300]"],
+    ),
+    (
+        "[range(300) | 300 - .] | group_by(. % 7) | map(length)",
+        "null",
+        &["[42,43,43,43,43,43,43]"],
+    ),
+    (
+        "[range(300) | 300 - .] | unique_by(. % 5)",
+        "null",
+        &["[300,296,297,298,299]"],
+    ),
+    (
+        "[range(300) | 300 - .] | [min, max, min_by(-.), max_by(-.)]",
+        "null",
+        &["[1,300,300,1]"],
+    ),
+    (
+        r#"sort_by(.k) | map(.v) | join("")"#,
+        r#"[{"k":1,"v":"a"},{"k":0,"v":"b"},{"k":1,"v":"c"},{"k":0,"v":"d"}]"#,
+        &[r#""bdac""#],
+    ),
+    ("[range(500)] | tojson | length", "null", &["1891"]),
+    ("[range(50)] | tostring | length", "null", &["141"]),
+    ("[range(50)] | @json | length", "null", &["141"]),
+    (r#""a\"b" | @text"#, "null", &[r#""a\"b""#]),
+    (
+        r#""[" + ([range(500)] | map(tostring) | join(",")) + "]" | fromjson | length"#,
+        "null",
+        &["500"],
+    ),
+    (
+        r#""{\"a\":{\"b\":[1,{\"c\":null}]},\"d\":\"e\"}" | fromjson"#,
+        "null",
+        &[r#"{"a":{"b":[1,{"c":null}]},"d":"e"}"#],
     ),
     (
         "walk(if type == \"number\" then . + 1 else . end)",
@@ -513,9 +554,22 @@ fn programs_match_jq() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+const SLICED: &[&str] = &[
+    "[range(300) | 300 - .] | sort",
+    "[range(300) | 300 - .] | group_by(. % 7)",
+    "[range(500)] | tojson",
+    "[range(50)] | tostring",
+    "[range(50)] | @json",
+    "[range(2000)]",
+];
+
 #[test]
 fn every_budget_gives_the_same_frames() {
-    for (program, input, _) in CASES {
+    let cases = CASES
+        .iter()
+        .map(|(program, input, _)| (*program, *input))
+        .chain(SLICED.iter().map(|program| (*program, "null")));
+    for (program, input) in cases {
         let whole = run(program, input, 1 << 16);
         for steps in [1, 7, 128] {
             assert_eq!(
@@ -525,6 +579,39 @@ fn every_budget_gives_the_same_frames() {
             );
         }
     }
+}
+
+fn drains(program: &str, input: &str, steps: u64) -> (usize, Vec<Frame>) {
+    let mut stream = open(program, steps);
+    let mut wire = Vec::new();
+    stream.feed(input.as_bytes(), &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    let mut drains = 0;
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+        drains += 1;
+    }
+    (drains, frames(&wire))
+}
+
+#[test]
+fn large_sorts_dumps_parses_and_outputs_pause_every_drain() {
+    let descending: Vec<String> = (0..200000).rev().map(|n| n.to_string()).collect();
+    let descending = format!("[{}]", descending.join(","));
+    let (count, got) = drains("sort | length", &descending, 1000);
+    assert!(count > 10, "{count} drains");
+    assert_eq!(got, vec![Frame::Out("200000".into())]);
+    let ascending: Vec<String> = (0..100000).map(|n| n.to_string()).collect();
+    let ascending = format!("[{}]", ascending.join(","));
+    let (count, got) = drains("tojson | length", &ascending, 1000);
+    assert!(count > 10, "{count} drains");
+    assert_eq!(got, vec![Frame::Out("588891".into())]);
+    let (count, got) = drains("tojson | fromjson | length", &ascending, 1000);
+    assert!(count > 10, "{count} drains");
+    assert_eq!(got, vec![Frame::Out("100000".into())]);
+    let (count, got) = drains(".", &ascending, 1000);
+    assert!(count > 10, "{count} drains");
+    assert_eq!(got, vec![Frame::Out(ascending)]);
 }
 
 /// Exponential backtracking stops at Oniguruma's retry limit, as jq's
@@ -620,7 +707,12 @@ fn runaway_programs_pause_every_drain_and_hold_little_stack() {
         "last(range(1e18))",
     ] {
         let program = Arc::new(compile(program, &HashMap::new()).unwrap());
-        let mut vm = Vm::start(Arc::clone(&program), parse_json("0").unwrap(), LIMITS);
+        let mut vm = Vm::start(
+            Arc::clone(&program),
+            parse_json("0").unwrap(),
+            LIMITS,
+            Arc::new(Meter::default()),
+        );
         for round in 1..=100u64 {
             let mut budget = 1000;
             assert!(matches!(vm.next(&mut budget), Next::Paused));
@@ -713,6 +805,101 @@ fn an_array_cap_ends_unbounded_collection() {
     );
 }
 
+fn limited(config: serde_json::Value) -> Vec<Frame> {
+    let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+    let mut wire = Vec::new();
+    stream.feed(b"null", &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+    }
+    frames(&wire)
+}
+
+#[test]
+fn a_memory_cap_ends_a_run_holding_too_many_values() {
+    let program = r#"[range(100000) | "x" * 100]"#;
+    assert_eq!(
+        limited(serde_json::json!({ "program": program, "memory": 1_000_000 })),
+        vec![Frame::Err(
+            "jq memory limit of 1000000 bytes exceeded".into()
+        )]
+    );
+    assert_eq!(
+        limited(serde_json::json!({ "program": format!("{program} | length") })),
+        vec![Frame::Out("100000".into())]
+    );
+}
+
+#[test]
+fn the_memory_cap_counts_live_values_not_cumulative_ones() {
+    let program = r#"reduce range(2000) as $i (0; ("x" * 100000 | length) + .)"#;
+    assert_eq!(
+        limited(serde_json::json!({ "program": program, "memory": 1_000_000 })),
+        vec![Frame::Out("200000000".into())]
+    );
+}
+
+#[test]
+fn the_memory_cap_charges_a_shared_value_once() {
+    let program = "[range(1000)] as $a | [range(1000) | $a] | length";
+    assert_eq!(
+        limited(serde_json::json!({ "program": program, "memory": 100_000 })),
+        vec![Frame::Out("1000".into())]
+    );
+}
+
+#[test]
+fn the_memory_cap_charges_shared_object_keys_once() {
+    for item in ["$a + {}", "$a * {}", "{($k): .}"] {
+        let program =
+            format!(r#"("x" * 90000) as $k | {{($k): 0}} as $a | [range(10) | {item}] | length"#);
+        assert_eq!(
+            limited(serde_json::json!({"program":program,"memory":300000,"steps":7})),
+            vec![Frame::Out("10".into())],
+            "{item}"
+        );
+    }
+}
+
+#[test]
+fn numeric_conversion_buffers_cannot_bypass_the_memory_cap() {
+    let config = serde_json::json!({"program":"tonumber | empty","memory":140000,"steps":7});
+    let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+    let mut wire = Vec::new();
+    stream
+        .feed(format!("\"{}\"", "1".repeat(60000)).as_bytes(), &mut wire)
+        .unwrap();
+    stream.finish(&mut wire).unwrap();
+    settle(&mut *stream, &mut wire);
+    assert_eq!(
+        frames(&wire),
+        vec![Frame::Err(
+            "jq memory limit of 140000 bytes exceeded".into()
+        )]
+    );
+}
+
+#[test]
+fn the_meter_returns_to_zero_once_every_value_drops() {
+    let meter = Arc::new(Meter::default());
+    let installed = meter::install(&meter);
+    let array = Value::array((0..10).map(|i| Value::string(i.to_string())).collect());
+    let charged = meter.live();
+    assert!(charged > 0, "{charged} bytes");
+    let mut copy = array.clone();
+    assert_eq!(meter.live(), charged, "an Arc clone shares the value");
+    if let Value::Array(items) = &mut copy {
+        Arc::make_mut(items).push(Value::string("pushed"));
+    }
+    assert!(meter.live() > charged, "{} bytes", meter.live());
+    drop(copy);
+    assert_eq!(meter.live(), charged);
+    drop(array);
+    assert_eq!(meter.live(), 0);
+    drop(installed);
+}
+
 #[test]
 fn deep_values_drop_and_print_without_recursion() {
     let got = run(
@@ -727,10 +914,91 @@ fn deep_values_drop_and_print_without_recursion() {
     );
 }
 
+const BUILTINS_SORTED: &str = r#"["IN/1","IN/2","INDEX/1","INDEX/2","JOIN/2","JOIN/3","JOIN/4","abs/0","acos/0","acosh/0","add/0","add/1","all/0","all/1","all/2","any/0","any/1","any/2","arrays/0","ascii_downcase/0","ascii_upcase/0","asin/0","asinh/0","atan/0","atan2/2","atanh/0","booleans/0","bsearch/1","builtins/0","capture/1","capture/2","cbrt/0","ceil/0","combinations/0","combinations/1","contains/1","copysign/2","cos/0","cosh/0","debug/0","debug/1","del/1","delpaths/1","drem/2","empty/0","endswith/1","env/0","erf/0","erfc/0","error/0","error/1","exp/0","exp10/0","exp2/0","explode/0","expm1/0","fabs/0","fdim/2","finites/0","first/0","first/1","flatten/0","flatten/1","floor/0","fma/3","fmax/2","fmin/2","fmod/2","format/1","frexp/0","from_entries/0","fromdate/0","fromdateiso8601/0","fromjson/0","fromstream/1","gamma/0","get_jq_origin/0","get_prog_origin/0","get_search_list/0","getpath/1","gmtime/0","group_by/1","gsub/2","gsub/3","halt/0","halt_error/0","halt_error/1","has/1","have_decnum/0","have_literal_numbers/0","hypot/2","implode/0","in/1","index/1","indices/1","infinite/0","input/0","input_filename/0","input_line_number/0","inputs/0","inside/1","isempty/1","isfinite/0","isinfinite/0","isnan/0","isnormal/0","iterables/0","j0/0","j1/0","jn/2","join/1","keys/0","keys_unsorted/0","last/0","last/1","ldexp/2","length/0","lgamma/0","lgamma_r/0","limit/2","localtime/0","log/0","log10/0","log1p/0","log2/0","logb/0","ltrim/0","ltrimstr/1","map/1","map_values/1","match/1","match/2","max/0","max_by/1","min/0","min_by/1","mktime/0","modf/0","modulemeta/0","nan/0","nearbyint/0","nextafter/2","nexttoward/2","normals/0","not/0","now/0","nth/1","nth/2","nulls/0","numbers/0","objects/0","path/1","paths/0","paths/1","pick/1","pow/2","range/1","range/2","range/3","recurse/0","recurse/1","recurse/2","remainder/2","repeat/1","reverse/0","rindex/1","rint/0","round/0","rtrim/0","rtrimstr/1","scalars/0","scalb/2","scalbln/2","scan/1","scan/2","select/1","setpath/2","significand/0","sin/0","sinh/0","skip/2","sort/0","sort_by/1","split/1","split/2","splits/1","splits/2","sqrt/0","startswith/1","stderr/0","strflocaltime/1","strftime/1","strings/0","strptime/1","sub/2","sub/3","tan/0","tanh/0","test/1","test/2","tgamma/0","to_entries/0","toboolean/0","todate/0","todateiso8601/0","tojson/0","tonumber/0","tostream/0","tostring/0","transpose/0","trim/0","trimstr/1","trunc/0","truncate_stream/1","type/0","unique/0","unique_by/1","until/2","utf8bytelength/0","values/0","walk/1","while/2","with_entries/1","y0/0","y1/0","yn/2"]"#;
+
 #[test]
-fn unsupported_builtins_refuse_to_compile() {
-    for program in ["builtins", "modulemeta", "@base32", "@urid"] {
-        assert!(compile(program, &HashMap::new()).is_err(), "{program}");
+fn builtins_lists_jqs_names_in_jqs_order() {
+    assert_eq!(outputs("builtins | length", "null"), vec!["226"]);
+    assert_eq!(
+        outputs("[builtins | .[0:12], .[-6:]]", "null"),
+        vec![
+            r#"[["have_literal_numbers/0","have_decnum/0","input_line_number/0","input_filename/0","now/0","localtime/0","gmtime/0","mktime/0","strflocaltime/1","strftime/1","strptime/1","stderr/0"],["JOIN/2","JOIN/3","JOIN/4","IN/1","IN/2","builtins/0"]]"#
+        ]
+    );
+    assert_eq!(outputs("builtins | sort", "null"), vec![BUILTINS_SORTED]);
+    for name in [
+        "builtins/0",
+        "modulemeta/0",
+        "get_search_list/0",
+        "gamma/0",
+        "jn/2",
+    ] {
+        let (name, arity) = name.split_once('/').unwrap();
+        let args = (0..arity.parse::<usize>().unwrap())
+            .map(|_| "1")
+            .collect::<Vec<_>>()
+            .join(";");
+        let call = if args.is_empty() {
+            name.to_string()
+        } else {
+            format!("{name}({args})")
+        };
+        let compiled = compile(&call, &HashMap::new());
+        if matches!(name, "gamma" | "jn") {
+            assert!(matches!(compiled, Err(Refusal::Unsupported(_))), "{call}");
+        } else {
+            assert!(compiled.is_ok(), "{call}");
+        }
+    }
+}
+
+#[test]
+fn module_builtins_answer_without_a_module_path() {
+    assert_eq!(
+        outputs("\"x\" | modulemeta", "null"),
+        vec!["error: module not found: x"]
+    );
+    assert_eq!(
+        outputs("1 | modulemeta", "null"),
+        vec!["error: modulemeta input module name must be a string"]
+    );
+    assert_eq!(
+        outputs("get_search_list", "null"),
+        vec![r#"["~/.jq","$ORIGIN/../lib/jq","$ORIGIN/../lib"]"#]
+    );
+}
+
+#[test]
+fn modulemeta_and_imports_validate_paths_with_the_same_diagnostics() {
+    for (path, message) in [
+        (
+            "../x",
+            "Relative paths to modules may not traverse to parent directories (../x)",
+        ),
+        (
+            "x/x",
+            "module names must not have equal consecutive components: x/x",
+        ),
+        (
+            "x\\x",
+            "Modules must be named by relative paths using '/', not '\\' (x\\x)",
+        ),
+        ("x\0y", "Module path contains a NUL byte"),
+        ("x", "module not found: x"),
+        ("a//b", "module not found: a//b"),
+        ("/x", "module not found: /x"),
+    ] {
+        let input = serde_json::to_string(path).unwrap();
+        assert_eq!(
+            run("try modulemeta catch .", &input, 1),
+            vec![Frame::Out(serde_json::to_string(message).unwrap())],
+            "{path}"
+        );
+        assert_eq!(
+            invalid_report(&format!("import {input} as x; missing")),
+            format!("jq: error: {message}\n\njq: 1 compile error"),
+            "{path}"
+        );
     }
 }
 
@@ -749,22 +1017,48 @@ fn refusal(program: &str) -> Refusal {
     }
 }
 
+fn invalid_report(program: &str) -> String {
+    match refusal(program) {
+        Refusal::Invalid(report) => report,
+        Refusal::Unsupported(why) => panic!("unexpected fallback: {why}"),
+    }
+}
+
 #[test]
-fn a_program_jq_refuses_is_told_from_one_left_to_libjq() {
-    assert!(matches!(refusal("if"), Refusal::Invalid(_)));
-    assert!(matches!(refusal("$x"), Refusal::Invalid(_)));
+fn programs_compile_or_get_jqs_report() {
+    assert!(invalid_report("if").ends_with("jq: 1 compile error"));
+    assert!(invalid_report("$x").ends_with("jq: 1 compile error"));
+    assert_eq!(
+        invalid_report("import \"a\" as a; ."),
+        "jq: error: module not found: a\n\njq: 1 compile error"
+    );
+    assert_eq!(
+        invalid_report("include \"a\"; $x"),
+        "jq: error: module not found: a\n\njq: 1 compile error"
+    );
+    assert_eq!(
+        invalid_report("import \"a\" as a; import \"../b\" as b; ."),
+        "jq: error: Relative paths to modules may not traverse to parent directories (../b)\n\njq: 1 compile error"
+    );
+    assert_eq!(
+        invalid_report("$$$$x + $$$$y"),
+        "jq: error: x/-1 is not defined at <top-level>, line 1, column 1:\n    $$$$x + $$$$y\n    ^^^^^\njq: error: y/-1 is not defined at <top-level>, line 1, column 9:\n    $$$$x + $$$$y\n            ^^^^^\njq: 2 compile errors"
+    );
+    assert_eq!(
+        invalid_report("\"\\\u{e9}\""),
+        "jq: error: Invalid escape at line 1, column 6 (while parsing '\"\\\u{fffd}\"') at <top-level>, line 1, column 2:\n    \"\\\u{e9}\"\n     ^^\njq: 1 compile error"
+    );
+    assert_eq!(
+        invalid_report("\"\\\u{20ac}x\""),
+        "jq: error: Unfinished string at EOF at line 1, column 5 (while parsing '\"\\\u{fffd}') at <top-level>, line 1, column 2:\n    \"\\\u{20ac}x\"\n     ^^\njq: 1 compile error"
+    );
     for program in [
-        "import \"a\" as a; .",
-        "include \"a\"; $x",
-        "$$$$x",
-        "\"\\\u{e9}\"",
+        "import \"a\" as a {optional: true}; .",
+        "1 as $x | $$$$x",
         &format!("{}.{}", "[".repeat(600), "]".repeat(600)),
         &".a".repeat(600),
     ] {
-        assert!(
-            matches!(refusal(program), Refusal::Unsupported(_)),
-            "{program:.40}"
-        );
+        assert!(compile(program, &HashMap::new()).is_ok(), "{program:.40}");
     }
 }
 
@@ -1025,10 +1319,35 @@ fn growing_arrays_respect_the_element_cap() {
 }
 
 #[test]
-fn a_format_named_at_run_time_falls_back() {
-    let globals = HashMap::from([("f".to_string(), parse_json("\"urid\"").unwrap())]);
-    assert!(compile("format($f)", &globals).is_err());
-    assert!(compile("@text, @base64d", &HashMap::new()).is_ok());
+fn formats_named_at_run_time_run() {
+    for (program, input, expected) in [
+        (
+            r#""foo" as $f | format($f)"#,
+            "null",
+            "error: foo is not a valid format",
+        ),
+        (
+            "format(\"foo\")",
+            "null",
+            "error: foo is not a valid format",
+        ),
+        ("@foo", "null", "error: foo is not a valid format"),
+        ("@base32", r#""abc""#, "error: base32 is not a valid format"),
+        ("format(.f)", r#"{"f":"text"}"#, r#""{\"f\":\"text\"}""#),
+        (r#""a%20b" | @urid"#, "null", r#""a b""#),
+        (
+            r#""%zz" | @urid"#,
+            "null",
+            r#"error: string ("%zz") is not a valid uri encoding"#,
+        ),
+        (r#""a%20b" | format("urid")"#, "null", r#""a b""#),
+    ] {
+        assert_eq!(
+            outputs(program, input),
+            vec![expected.to_string()],
+            "{program}"
+        );
+    }
 }
 
 #[test]
@@ -1787,26 +2106,6 @@ fn date_builtins_print_what_jq_prints() {
 }
 
 #[test]
-fn local_time_needs_a_zone_the_engine_reads() {
-    for program in ["localtime", "strflocaltime(\"%Y\")", "strptime(\"%s\")"] {
-        let config = serde_json::json!({ "program": program });
-        assert!(
-            super::eval::open(config.to_string().as_bytes()).is_err(),
-            "{program}"
-        );
-    }
-    for zone in ["America/New_York", "EST", "EST5EDT,M3.2.0", "x"] {
-        let config = serde_json::json!({ "program": "localtime", "zone": zone });
-        assert!(
-            super::eval::open(config.to_string().as_bytes()).is_err(),
-            "{zone}"
-        );
-    }
-    let config = serde_json::json!({ "program": "now, mktime, gmtime, todate" });
-    assert!(super::eval::open(config.to_string().as_bytes()).is_ok());
-}
-
-#[test]
 fn now_asks_the_hosts_clock_at_each_call() {
     let mut stream = open("[now, now]", 1 << 16);
     let mut wire = Vec::new();
@@ -2089,5 +2388,612 @@ fn sorting_mixed_literal_and_computed_numbers_never_panics() {
 fn input_reads_every_number_spelling_the_reader_accepts() {
     for text in ["nan00", "nan", "-nan", "NaN"] {
         assert!(parse_json(text).is_ok(), "{text}");
+    }
+}
+
+#[test]
+fn memory_errors_cover_sort_dump_parse_and_program_constants() {
+    for program in [
+        "[range(2000)] | sort | length",
+        "[range(2000)] | tojson | length",
+        "[range(2000)]",
+        r#"("[" + ("0," * 2000) + "0]") | fromjson | length"#,
+        r#""xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx""#,
+    ] {
+        let memory = if program.starts_with('"') { 16 } else { 60_000 };
+        let got = limited(serde_json::json!({"program":program,"memory":memory,"steps":7}));
+        assert!(
+            matches!(&got[..], [Frame::Err(error)] if error==&format!("jq memory limit of {memory} bytes exceeded")),
+            "{program}: {got:?}"
+        );
+    }
+}
+
+#[test]
+fn retirement_releases_cancelled_and_completed_pending_tasks() {
+    for (program, input, drains) in [
+        (
+            "sort | length",
+            Value::array(
+                (0..20000)
+                    .rev()
+                    .map(|i| Value::number(f64::from(i)))
+                    .collect(),
+            ),
+            100,
+        ),
+        (
+            "tojson | length",
+            Value::array(vec![Value::Null; 20000]),
+            100,
+        ),
+        (
+            "fromjson | length",
+            Value::string(format!("[{}]", vec!["null"; 20000].join(","))),
+            100,
+        ),
+        (
+            r#"match(".";"g") | length"#,
+            Value::string("x".repeat(20000)),
+            100,
+        ),
+    ] {
+        let program = Arc::new(compile(program, &HashMap::new()).unwrap());
+        let meter = Arc::new(Meter::default());
+        let _installed = meter::install(&meter);
+        let mut vm = Vm::start(program, input, LIMITS, Arc::clone(&meter));
+        for _ in 0..drains {
+            assert!(matches!(vm.next(&mut 7), Next::Paused));
+        }
+        let mut steps = 0;
+        while !vm.retire(1) {
+            steps += 1;
+            assert!(steps < 1_000_000);
+        }
+        assert!(steps > 1, "{steps} retirement steps");
+        drop(vm);
+        assert_eq!(meter.live(), 0);
+    }
+    let program = Arc::new(
+        compile(
+            "[range(2000)] | sort | tojson | fromjson | length",
+            &HashMap::new(),
+        )
+        .unwrap(),
+    );
+    let meter = Arc::new(Meter::default());
+    let _installed = meter::install(&meter);
+    let mut vm = Vm::start(program, Value::Null, LIMITS, Arc::clone(&meter));
+    loop {
+        match vm.next(&mut 7) {
+            Next::Paused => {}
+            Next::Output(value) => assert_eq!(value.as_f64(), Some(2000.0)),
+            Next::Done => break,
+            _ => panic!("unexpected result"),
+        }
+    }
+    while !vm.retire(1) {}
+    drop(vm);
+    assert_eq!(meter.live(), 0);
+}
+
+#[test]
+fn subtraction_keeps_nan_equality_and_shared_container_behavior() {
+    for (program, expected) in [
+        ("[nan,nan,1]-[nan]", "[null,null,1]"),
+        ("[[nan],[nan],[1]]-[[nan]]", "[[null],[null],[1]]"),
+        ("[{a:nan},{a:1}]-[{a:nan}]", r#"[{"a":null},{"a":1}]"#),
+        ("[1,nan,nan]|group_by(.)|map(length)", "[1,1,1]"),
+        ("[nan] as $a | [$a]-[$a]", "[]"),
+        ("[nan] == [nan]", "false"),
+        ("[nan] as $a | $a == $a", "true"),
+        ("[[nan],[nan]] | unique", "[[null],[null]]"),
+        ("[nan] as $a | [$a,$a] | unique", "[[null]]"),
+    ] {
+        assert_eq!(run(program, "null", 1), vec![Frame::Out(expected.into())]);
+    }
+}
+
+#[test]
+fn deep_programs_compile_and_run_on_a_small_stack() {
+    type Shape = (
+        fn(usize) -> String,
+        usize,
+        usize,
+        usize,
+        usize,
+        &'static str,
+    );
+    let shapes: &[Shape] = &[
+        (|n| ".a".repeat(n), 20000, 0, 0, 0, "null"),
+        (
+            |n| format!("1{}", " | .".repeat(n)),
+            4997,
+            4998,
+            19993,
+            1,
+            "1",
+        ),
+        (
+            |n| format!("{}0{}", "reduce 1 as $x (".repeat(n), "; .)".repeat(n)),
+            1998,
+            1999,
+            31986,
+            1,
+            "0",
+        ),
+        (
+            |n| format!("{}0{}", "if true then ".repeat(n), " else 0 end".repeat(n)),
+            3330,
+            3331,
+            43313,
+            3,
+            "0",
+        ),
+        (
+            |n| format!("{}1", "try ".repeat(n)),
+            9995,
+            9996,
+            39985,
+            1,
+            "1",
+        ),
+        (
+            |n| format!("{}1{}", "[".repeat(n), "]".repeat(n)),
+            9994,
+            9995,
+            9997,
+            1,
+            "",
+        ),
+        (
+            |n| format!("{}1{}", "(".repeat(n), ")".repeat(n)),
+            9994,
+            9995,
+            9997,
+            1,
+            "1",
+        ),
+        (
+            |n| format!("{}1{}", "(-".repeat(n), ")".repeat(n)),
+            4997,
+            4998,
+            9997,
+            1,
+            "-1",
+        ),
+        (
+            |n| format!("{}1", "1 as $x | ".repeat(n)),
+            2498,
+            2499,
+            24991,
+            1,
+            "1",
+        ),
+    ];
+    let worker = std::thread::Builder::new().stack_size(1 << 20);
+    let handle = worker
+        .spawn(move || {
+            for (make, deepest, refused, column, carets, want) in shapes {
+                let program = make(*deepest);
+                let got = outputs(&program, "{}");
+                if want.is_empty() {
+                    assert_eq!(got.len(), 1, "{deepest} brackets");
+                    assert_eq!(got[0].len(), 2 * deepest + 1, "{deepest} brackets");
+                } else {
+                    assert_eq!(got, vec![want.to_string()], "{program:.40}");
+                }
+                if *refused == 0 {
+                    continue;
+                }
+                let program = make(*refused);
+                let report = format!(
+                    "jq: error: memory exhausted at <top-level>, line 1, column {column}:\n    {program}\n    {}{}\njq: 1 compile error",
+                    " ".repeat(column - 1),
+                    "^".repeat(*carets)
+                );
+                assert_eq!(invalid_report(&program), report, "{program:.40}");
+            }
+        })
+        .unwrap();
+    handle.join().unwrap();
+}
+
+#[test]
+fn loadvn_and_interpolated_keys_run_as_jq_runs_them() {
+    let cases: &[(&str, &str, &[&str])] = &[
+        ("1 as $x | [$$$$x, $x]", "null", &["[1,null]"]),
+        ("def f($x): $$$$x; f(1)", "null", &["1"]),
+        (
+            "1 as $x | def g($y): $$$$y + $$$$x; [g(2), $x]",
+            "null",
+            &["[3,null]"],
+        ),
+        ("reduce (1,2) as $x (0; . + $$$$x)", "null", &["3"]),
+        (r#"{"\(1,2)"}"#, "null", &[r#"{"1":null}"#, r#"{"2":null}"#]),
+        (
+            r#"{"\("a","b")"}"#,
+            r#"{"a":1,"b":2}"#,
+            &[r#"{"a":1}"#, r#"{"b":2}"#],
+        ),
+        (
+            r#"{a, "b", "\("c")": 3}"#,
+            r#"{"a":1}"#,
+            &[r#"{"a":1,"b":null,"c":3}"#],
+        ),
+    ];
+    for (program, input, want) in cases {
+        assert_eq!(outputs(program, input), *want, "{program}");
+    }
+}
+
+#[test]
+fn platform_paths_and_build_configuration_keep_the_pre_execution_fallback() {
+    for program in [
+        "get_jq_origin",
+        "get_prog_origin",
+        "$JQ_BUILD_CONFIGURATION",
+    ] {
+        assert!(
+            matches!(refusal(program), Refusal::Unsupported(_)),
+            "{program}"
+        );
+    }
+    let globals = HashMap::from([("JQ_BUILD_CONFIGURATION".into(), Value::string("provided"))]);
+    assert!(compile("$JQ_BUILD_CONFIGURATION", &globals).is_ok());
+}
+
+#[test]
+fn unsupported_local_zones_refuse_before_effects_or_dynamic_arguments() {
+    for zone in [
+        None,
+        Some("Europe/Paris"),
+        Some("America/New_York"),
+        Some("GB-Eire"),
+        Some("Unknown/1868"),
+        Some("/usr/share/zoneinfo/Europe/Paris"),
+        Some(":/usr/share/zoneinfo/Europe/Paris"),
+        Some("posix/Europe/Paris"),
+        Some("right/Europe/Paris"),
+    ] {
+        for program in [
+            "localtime",
+            "strflocaltime(\"%Z %z\")",
+            "strptime(\"%s\")",
+            "debug | localtime",
+            "input | localtime",
+            "def alias: localtime; alias",
+            "debug | strflocaltime(\"%Z\")",
+            "input | strptime(.)",
+            "def alias: strflocaltime(.); alias",
+            "\"%Z\" as $format | strflocaltime($format)",
+            "def invoke(f): f; invoke(strptime(.))",
+        ] {
+            let config = serde_json::json!({"program": program, "zone": zone});
+            let error = super::eval::open(config.to_string().as_bytes())
+                .err()
+                .unwrap();
+            assert_eq!(
+                error.message, "jq_eval: no time zone for local time",
+                "{program}"
+            );
+        }
+        for program in [
+            ".",
+            "gmtime",
+            "mktime",
+            "strftime(\"%Z\")",
+            "def localtime: 42; localtime",
+            "def strptime($format): 42; strptime(\"%s\")",
+            "def strflocaltime($format): 42; strflocaltime(\"%Z\")",
+            "def unused: localtime; .",
+        ] {
+            let config = serde_json::json!({"program": program, "zone": zone});
+            assert!(
+                super::eval::open(config.to_string().as_bytes()).is_ok(),
+                "{program}"
+            );
+        }
+    }
+    for zone in ["UTC", "UTC0", "EST5EDT,M3.2.0,M11.1.0", "<+07>-7"] {
+        for program in ["localtime", "strflocaltime(\"%Z %z\")", "strptime(\"%s\")"] {
+            let config = serde_json::json!({"program": program, "zone": zone});
+            assert!(
+                super::eval::open(config.to_string().as_bytes()).is_ok(),
+                "{zone} {program}"
+            );
+        }
+    }
+}
+
+#[test]
+fn nonexact_libm_builtins_keep_the_pre_execution_fallback() {
+    for (name, arity) in [
+        ("erf", 0),
+        ("erfc", 0),
+        ("gamma", 0),
+        ("lgamma", 0),
+        ("lgamma_r", 0),
+        ("tgamma", 0),
+        ("j0", 0),
+        ("j1", 0),
+        ("jn", 2),
+        ("y0", 0),
+        ("y1", 0),
+        ("yn", 2),
+        ("remainder", 2),
+        ("drem", 2),
+    ] {
+        let program = if arity == 0 {
+            name.to_string()
+        } else {
+            format!("{name}(1;2)")
+        };
+        assert!(
+            matches!(refusal(&program), Refusal::Unsupported(_)),
+            "{program}"
+        );
+    }
+    assert_eq!(
+        run("def erf: 42; erf", "null", 1),
+        vec![Frame::Out("42".into())]
+    );
+}
+
+#[test]
+fn remainder_aliases_keep_the_pre_execution_fallback_at_extremes() {
+    for name in ["remainder", "drem"] {
+        for args in ["1.7976931348623157e308;1e308", "5e-324;5e-324", "5;2"] {
+            let call = format!("{name}({args})");
+            for program in [
+                call.clone(),
+                format!("def alias: {call}; alias"),
+                format!("debug | {call}"),
+                format!("input | {call}"),
+                format!("try {call} catch ."),
+            ] {
+                assert!(
+                    matches!(refusal(&program), Refusal::Unsupported(_)),
+                    "{program}"
+                );
+            }
+        }
+        assert_eq!(
+            run(
+                &format!("def {name}($a; $b): $a + $b; {name}(2;3)"),
+                "null",
+                1
+            ),
+            vec![Frame::Out("5".into())],
+            "{name}"
+        );
+    }
+    assert_eq!(
+        outputs("[fmod(5;2), fmod(-5;2), 5 % 2, -5 % 2]", "null"),
+        vec!["[1,-1,1,-1]"]
+    );
+}
+
+#[test]
+fn rendered_diagnostics_cannot_bypass_the_memory_cap() {
+    for program in [
+        r#""\u0001" * 50000 | debug | empty"#,
+        r#"["\u0001" * 50000] | stderr | empty"#,
+        r#"["\u0001" * 50000] | error"#,
+        r#""\u0001" * 20000 | halt_error(9)"#,
+        r#"["\u0001" * 20000] | halt_error(9)"#,
+        r#""\u0001" * 20000 | tojson | length"#,
+    ] {
+        let got = limited(serde_json::json!({"program":program,"memory":100000,"steps":7}));
+        assert_eq!(
+            got,
+            vec![Frame::Err(
+                "jq memory limit of 100000 bytes exceeded".into()
+            )],
+            "{program}"
+        );
+    }
+}
+
+#[test]
+fn diagnostics_keep_their_frames_at_every_budget() {
+    for program in [
+        r#"["é\u007f\u0001"] | debug | stderr | error"#,
+        r#"["é\u007f\u0001"] | halt_error(9)"#,
+        r#""é\u007f\u0001" | halt_error(9)"#,
+        "halt",
+        "null | halt_error(3)",
+    ] {
+        let expected = run(program, "null", 65536);
+        for budget in [1, 7, 128] {
+            assert_eq!(run(program, "null", budget), expected, "{program}");
+        }
+    }
+}
+
+#[test]
+fn initial_document_refusals_are_deferred_before_vm_execution() {
+    for (data, expected) in [
+        (&b"["[..], "Unfinished JSON term"),
+        (&b"\"\xff\""[..], "jq_eval: document is not UTF-8"),
+    ] {
+        let mut stream = open(".", 1);
+        let mut wire = Vec::new();
+        stream.feed(data, &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        assert!(stream.busy());
+        let error = loop {
+            match stream.drain(&mut wire) {
+                Ok(()) => {}
+                Err(error) => break error,
+            }
+        };
+        assert_eq!(error.message, expected);
+        assert!(wire.is_empty());
+        assert!(stream.request(&mut Vec::new()).is_none());
+        assert!(stream.cancel());
+        while stream.busy() {
+            stream.drain(&mut wire).unwrap();
+        }
+        stream.begin(b"{}").unwrap();
+        stream.feed(b"1", &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        settle(&mut *stream, &mut wire);
+        assert_eq!(frames(&wire), vec![Frame::Out("1".into())]);
+    }
+}
+
+#[test]
+fn input_reply_json_errors_remain_catchable_and_utf8_remains_a_refusal() {
+    let mut stream = open("try input catch .", 7);
+    let mut wire = Vec::new();
+    stream.feed(b"null", &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+    }
+    assert_eq!(
+        stream.request(&mut Vec::new()).unwrap(),
+        br#"{"op":"input"}"#
+    );
+    stream
+        .respond(br#"{"kind":"value"}"#, b"[", &mut wire)
+        .unwrap();
+    settle(&mut *stream, &mut wire);
+    assert_eq!(
+        frames(&wire),
+        vec![Frame::Out("\"Unfinished JSON term\"".into())]
+    );
+    wire.clear();
+    stream.begin(b"{}").unwrap();
+    stream.feed(b"null", &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+    }
+    assert!(stream.request(&mut Vec::new()).is_some());
+    stream
+        .respond(br#"{"kind":"value"}"#, b"\"\xff\"", &mut wire)
+        .unwrap();
+    let error = loop {
+        match stream.drain(&mut wire) {
+            Ok(()) => {}
+            Err(error) => break error,
+        }
+    };
+    assert_eq!(error.message, "jq_eval: document is not UTF-8");
+    assert!(wire.is_empty());
+    assert!(stream.cancel());
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+    }
+}
+
+#[test]
+fn rejected_timezone_format_buffers_still_latch_the_memory_limit() {
+    let config = serde_json::json!({
+        "program": "try strflocaltime(\"%Z\") catch \"caught\"",
+        "memory": 100000,
+        "steps": 7,
+        "zone": format!("<{}>0", "x".repeat(90000)),
+    });
+    let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+    let mut wire = Vec::new();
+    stream.feed(b"0", &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+    }
+    assert_eq!(
+        frames(&wire),
+        vec![Frame::Err(
+            "jq memory limit of 100000 bytes exceeded".into()
+        )]
+    );
+}
+
+#[test]
+fn over_limit_documents_retire_with_an_unlimited_step_budget() {
+    let data = format!("[{}null]", "null,".repeat(40000));
+    let memory = data.len() + 30000 * std::mem::size_of::<Value>();
+    for program in [".", "input"] {
+        let config = serde_json::json!({"program":program,"memory":memory,"steps":u64::MAX});
+        let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+        let mut wire = Vec::new();
+        if program == "input" {
+            stream.feed(b"null", &mut wire).unwrap();
+            stream.finish(&mut wire).unwrap();
+            while stream.busy() {
+                stream.drain(&mut wire).unwrap();
+            }
+            assert!(stream.request(&mut Vec::new()).is_some());
+            stream
+                .respond(br#"{"kind":"value"}"#, data.as_bytes(), &mut wire)
+                .unwrap();
+        } else {
+            stream.feed(data.as_bytes(), &mut wire).unwrap();
+            stream.finish(&mut wire).unwrap();
+        }
+        stream.drain(&mut wire).unwrap();
+        assert_eq!(
+            frames(&wire),
+            vec![Frame::Err(format!(
+                "jq memory limit of {memory} bytes exceeded"
+            ))],
+            "{program}"
+        );
+        let mut retired = 0;
+        while stream.busy() {
+            stream.drain(&mut wire).unwrap();
+            retired += 1;
+        }
+        assert!(retired > 1, "{program}: {retired} retirement drains");
+    }
+}
+
+#[test]
+fn low_caps_during_compilation_become_terminal_frames_without_panicking() {
+    for steps in [1000, u64::MAX] {
+        for program in [r#""\n" * 2000"#, r#""\n" * 2000 | tojson"#] {
+            let config = serde_json::json!({"program":program,"memory":6000,"steps":steps});
+            let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+            for begin in [false, true] {
+                let mut wire = Vec::new();
+                if begin {
+                    stream.begin(b"{}").unwrap();
+                }
+                stream.feed(b"null", &mut wire).unwrap();
+                stream.finish(&mut wire).unwrap();
+                settle(&mut *stream, &mut wire);
+                assert_eq!(
+                    frames(&wire),
+                    vec![Frame::Err("jq memory limit of 6000 bytes exceeded".into())],
+                    "{program} steps={steps} begin={begin}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn compilation_limits_cannot_become_availability_refusals() {
+    for (program, zone, memory) in [
+        ("remainder(1;2)", "UTC", 0),
+        (r#""\n" | strflocaltime("%Z")"#, "Europe/Paris", 6000),
+        ("localtime", "/usr/share/zoneinfo/Europe/Paris", 0),
+    ] {
+        let config = serde_json::json!({"program":program,"zone":zone,"memory":memory});
+        let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+        let mut wire = Vec::new();
+        stream.begin(b"{}").unwrap();
+        stream.feed(b"0", &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        settle(&mut *stream, &mut wire);
+        assert_eq!(
+            frames(&wire),
+            vec![Frame::Err(format!(
+                "jq memory limit of {memory} bytes exceeded"
+            ))]
+        );
     }
 }

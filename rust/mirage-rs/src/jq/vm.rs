@@ -2,11 +2,13 @@
 
 use std::sync::Arc;
 
-use super::builtin::{self, Cfunc, Fault, Subtracting};
-use super::host::{self, Answer, Host};
+use super::builtin::{self, Cfunc, Fault, Sorting, Subtracting};
+use super::host::{self, Answer, Host, Messaging, Reply};
+use super::meter::{Charge, Meter};
+use super::parse::Decoding;
 use super::regex::Matching;
 use super::time::{self, Clock};
-use super::value::{Object, Value, shed};
+use super::value::{Dumping, Object, Parsing, Retirement, Value};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Target {
@@ -35,6 +37,7 @@ pub(crate) enum Op {
     PushKUnder(Value),
     ErrorK(Value),
     Dup,
+    Dup2,
     DupN,
     Pop,
     SubexpBegin,
@@ -102,6 +105,7 @@ struct Frame {
     retaddr: Option<usize>,
     closures: Vec<Closure>,
     locals: Vec<Value>,
+    _charge: Charge,
 }
 
 struct Fork {
@@ -131,6 +135,7 @@ struct Entry {
 #[derive(Default)]
 struct Arena {
     entries: Vec<Entry>,
+    charge: Charge,
 }
 
 impl Arena {
@@ -140,6 +145,8 @@ impl Arena {
 
     fn push(&mut self, next: Ptr, block: Block) -> Ptr {
         self.entries.push(Entry { next, block });
+        self.charge
+            .set(self.entries.capacity() * std::mem::size_of::<Entry>());
         self.entries.len()
     }
 
@@ -205,6 +212,90 @@ enum Flow {
     Pause,
 }
 
+pub(crate) enum Pending {
+    Match(Box<Matching>),
+    Sort(Box<Sorting>),
+    Dump(Box<Dumping>),
+    Parse(Box<Decoding>),
+    Read(Box<Parsing>),
+    Message(Box<Messaging>),
+    Subtract(Box<Subtracting>),
+}
+
+impl Pending {
+    fn retire(&mut self) -> Option<Value> {
+        match self {
+            Self::Match(task) => task.retire(),
+            Self::Sort(task) => task.retire(),
+            Self::Dump(task) => task.retire(),
+            Self::Parse(task) => task.retire(),
+            Self::Read(task) => task.retire(),
+            Self::Message(task) => task.retire(),
+            Self::Subtract(task) => task.retire(),
+        }
+    }
+
+    fn begin(f: Cfunc, args: &[Value]) -> Option<Result<Pending, Fault>> {
+        let input = &args[0];
+        let dump = || Ok(Pending::Dump(Box::new(Dumping::begin(input.clone()))));
+        let format = match args.get(1) {
+            Some(Value::String(name)) if f == Cfunc::Format => Some(name.as_str()),
+            _ => None,
+        };
+        Some(match f {
+            Cfunc::Debug | Cfunc::Stderr => Ok(Pending::Message(Box::new(Messaging::begin(
+                f,
+                input.clone(),
+            )))),
+            Cfunc::MatchImpl => Matching::begin(args).map(|m| Pending::Match(Box::new(m))),
+            Cfunc::Sort
+            | Cfunc::SortByImpl
+            | Cfunc::GroupByImpl
+            | Cfunc::Unique
+            | Cfunc::UniqueByImpl
+            | Cfunc::Min
+            | Cfunc::Max
+            | Cfunc::MinByImpl
+            | Cfunc::MaxByImpl => builtin::sorting(f, args).map(|s| Pending::Sort(Box::new(s))),
+            Cfunc::ToJson => dump(),
+            Cfunc::ToString if !matches!(input, Value::String(_)) => dump(),
+            Cfunc::Format if format == Some("json") => dump(),
+            Cfunc::Format if format == Some("text") && !matches!(input, Value::String(_)) => dump(),
+            Cfunc::FromJson => match input {
+                Value::String(text) => Ok(Pending::Parse(Box::new(Decoding::from_text(
+                    Arc::clone(text),
+                )))),
+                _ => return None,
+            },
+            Cfunc::Minus => Ok(Pending::Subtract(Box::new(Subtracting::begin(args)?))),
+            _ => return None,
+        })
+    }
+
+    fn run(&mut self, budget: &mut u64, limits: Limits) -> Option<Result<Value, Fault>> {
+        if *budget == 0 {
+            *budget = 1;
+        }
+        match self {
+            Pending::Match(matching) => matching.run(budget, limits),
+            Pending::Sort(sorting) => sorting.run(budget),
+            Pending::Dump(dumping) => match dumping.run(budget) {
+                Some(text) => Some(builtin::string_limit(text, limits)),
+                None if dumping.written() > limits.bytes => {
+                    Some(Err(builtin::string_too_long(limits)))
+                }
+                None => None,
+            },
+            Pending::Parse(decoding) => decoding
+                .run(budget)
+                .map(|result| result.map_err(builtin::fail)),
+            Pending::Subtract(subtracting) => subtracting.run(budget),
+            Pending::Message(messaging) => messaging.run(budget, limits),
+            Pending::Read(_) => unreachable!("a document reader is retired outside the VM"),
+        }
+    }
+}
+
 /// Limits one run is held to.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Limits {
@@ -214,6 +305,8 @@ pub(crate) struct Limits {
     pub(crate) items: usize,
     /// Bytes one string may hold.
     pub(crate) bytes: usize,
+    /// Bytes of values the run may hold alive at once.
+    pub(crate) memory: usize,
 }
 
 /// One run of a program over one input. Every piece of state jq keeps in
@@ -236,21 +329,44 @@ pub(crate) struct Vm {
     restore: bool,
     initial: bool,
     limits: Limits,
-    teardown: Vec<Vec<Value>>,
+    meter: Arc<Meter>,
+    teardown: Vec<Retirement>,
     clock: Clock,
     pub(crate) steps: u64,
     pub(crate) host: Host,
-    /// A regex search that ran out of steps, resumed when its call runs
-    /// again.
-    matching: Option<Box<Matching>>,
-    /// An array subtraction that ran out of steps, resumed the same way.
-    subtracting: Option<Box<Subtracting>>,
+    pending: Option<Pending>,
+    retired: Vec<Pending>,
+    retiring_roots: bool,
 }
 
 impl Vm {
-    pub(crate) fn start(program: Arc<Program>, input: Value, limits: Limits) -> Self {
+    pub(crate) fn start(
+        program: Arc<Program>,
+        input: Value,
+        limits: Limits,
+        meter: Arc<Meter>,
+    ) -> Self {
         let nlocals = program.bytecodes[0].nlocals;
-        let mut vm = Self {
+        let mut vm = Self::retiring(program, limits, meter);
+        vm.curr_frame = vm.arena.push(
+            0,
+            Block::Frame(Frame {
+                bc: 0,
+                env: 0,
+                retdata: 0,
+                retaddr: None,
+                closures: Vec::new(),
+                locals: vec![Value::Null; nlocals],
+                _charge: Charge::open(nlocals * std::mem::size_of::<Value>()),
+            }),
+        );
+        vm.push(input);
+        vm.save(0, (vm.stk_top, vm.curr_frame));
+        vm
+    }
+
+    pub(crate) fn retiring(program: Arc<Program>, limits: Limits, meter: Arc<Meter>) -> Self {
+        Self {
             program,
             arena: Arena::default(),
             stk_top: 0,
@@ -267,27 +383,15 @@ impl Vm {
             restore: true,
             initial: true,
             limits,
+            meter,
             teardown: Vec::new(),
             clock: Clock::default(),
             steps: 0,
             host: Host::default(),
-            matching: None,
-            subtracting: None,
-        };
-        vm.curr_frame = vm.arena.push(
-            0,
-            Block::Frame(Frame {
-                bc: 0,
-                env: 0,
-                retdata: 0,
-                retaddr: None,
-                closures: Vec::new(),
-                locals: vec![Value::Null; nlocals],
-            }),
-        );
-        vm.push(input);
-        vm.save(0, (vm.stk_top, vm.curr_frame));
-        vm
+            pending: None,
+            retired: Vec::new(),
+            retiring_roots: false,
+        }
     }
 
     /// Hand the run the host's clock and time zone.
@@ -305,21 +409,14 @@ impl Vm {
     /// value is freed across calls too. True once nothing is left.
     /// Cancellation retires a run this way, a bounded slice at a time.
     pub(crate) fn retire(&mut self, count: usize) -> bool {
-        if let Some(subtracting) = self.subtracting.take() {
-            self.teardown.push(subtracting.into_values());
-        }
         for _ in 0..count {
-            if let Some(chunk) = self.teardown.last_mut() {
-                match chunk.pop() {
-                    Some(value) => {
-                        let children = shed(value);
-                        if !children.is_empty() {
-                            self.teardown.push(children);
-                        }
-                    }
-                    None => {
-                        self.teardown.pop();
-                    }
+            if self.retire_dead() {
+                continue;
+            }
+            if let Some(task) = &mut self.pending {
+                match task.retire() {
+                    Some(value) => self.teardown.push(Retirement::values(vec![value])),
+                    None => self.pending = None,
                 }
                 continue;
             }
@@ -329,17 +426,92 @@ impl Vm {
                     Block::Frame(frame) => frame.locals,
                     Block::Fork(fork) => vec![fork.value_at_path],
                 },
-                None => vec![
-                    std::mem::replace(&mut self.path, Value::Null),
-                    std::mem::replace(&mut self.value_at_path, Value::Null),
-                ],
+                None if !self.retiring_roots => {
+                    self.retiring_roots = true;
+                    vec![
+                        std::mem::replace(&mut self.path, Value::Null),
+                        std::mem::replace(&mut self.value_at_path, Value::Null),
+                        std::mem::replace(&mut self.host.env, Value::Null),
+                        std::mem::replace(&mut self.host.filename, Value::Null),
+                    ]
+                }
+                None => {
+                    if let Some(raise) = self.error.take() {
+                        match raise {
+                            Raise::Error(value) => {
+                                self.teardown.push(Retirement::values(vec![value]))
+                            }
+                            Raise::Wrapped(inner) => self.error = Some(*inner),
+                        }
+                        continue;
+                    }
+                    if let Some(halt) = self.halted.take() {
+                        if let Some(value) = halt.message {
+                            self.teardown.push(Retirement::values(vec![value]));
+                        }
+                        continue;
+                    }
+                    if let Some(reply) = self.host.reply.take() {
+                        if let Reply::Value(value) = reply {
+                            self.teardown.push(Retirement::values(vec![value]));
+                        }
+                        continue;
+                    }
+                    if self.host.messages.pop().is_some() {
+                        continue;
+                    }
+                    break;
+                }
             };
-            if values.iter().all(|v| matches!(v, Value::Null)) && self.arena.entries.is_empty() {
-                break;
-            }
-            self.teardown.push(values);
+            self.teardown.push(Retirement::values(values));
         }
-        self.arena.entries.is_empty() && self.teardown.is_empty()
+        self.arena.entries.is_empty()
+            && self.teardown.is_empty()
+            && self.pending.is_none()
+            && self.retired.is_empty()
+            && self.retiring_roots
+            && self.error.is_none()
+            && self.halted.is_none()
+            && self.host.reply.is_none()
+            && self.host.messages.is_empty()
+    }
+
+    fn retire_dead(&mut self) -> bool {
+        if let Some(chunk) = self.teardown.last_mut() {
+            match chunk.next() {
+                Some(value) => {
+                    if let Some(children) = Retirement::split(value) {
+                        self.teardown.push(children);
+                    }
+                }
+                None => {
+                    self.teardown.pop();
+                }
+            }
+            return true;
+        }
+        if let Some(task) = self.retired.last_mut() {
+            match task.retire() {
+                Some(value) => self.teardown.push(Retirement::values(vec![value])),
+                None => {
+                    self.retired.pop();
+                }
+            }
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn retire_value(&mut self, value: Value) {
+        self.teardown.push(Retirement::values(vec![value]));
+    }
+
+    pub(crate) fn retire_reading(&mut self, parsing: Box<Parsing>) {
+        self.retired.push(Pending::Read(parsing));
+    }
+
+    pub(crate) fn retire_output(&mut self, dumping: Dumping) {
+        self.retired.push(Pending::Dump(Box::new(dumping)));
     }
 
     fn push(&mut self, value: Value) {
@@ -503,6 +675,17 @@ impl Vm {
                     self.limits.blocks
                 ))));
             }
+            if self.meter.exceeded() {
+                self.restore = true;
+                self.error = None;
+                return Next::Error(Raise::Error(Value::string(format!(
+                    "jq memory limit of {} bytes exceeded",
+                    self.limits.memory
+                ))));
+            }
+            if self.retire_dead() {
+                continue;
+            }
             let bc = self.arena.frame(self.curr_frame).bc;
             let pc = self.pc;
             let op = &program.bytecodes[bc].ops[pc];
@@ -577,6 +760,13 @@ impl Vm {
                 self.push(value.clone());
                 self.push(value);
             }
+            Op::Dup2 => {
+                let keep = self.pop();
+                let value = self.pop();
+                self.push(value.clone());
+                self.push(keep);
+                self.push(value);
+            }
             Op::DupN => {
                 let value = self.popn();
                 self.push(value.clone());
@@ -644,7 +834,7 @@ impl Vm {
                         k.dump_trunc()
                     ))));
                 };
-                Arc::make_mut(&mut fields).insert(Arc::clone(key), v);
+                Arc::make_mut(&mut fields).insert(key.clone().into(), v);
                 self.push(Value::Object(fields));
                 self.push(top);
             }
@@ -740,7 +930,9 @@ impl Vm {
                 self.next_label += 1;
                 self.push(Value::object(label));
             }
-            Op::CallBuiltin(f, _) if host::is_host(*f) => {
+            Op::CallBuiltin(f, _)
+                if host::is_host(*f) && !matches!(f, Cfunc::Debug | Cfunc::Stderr) =>
+            {
                 let input = self.pop();
                 *budget = budget.saturating_sub(builtin::cost(std::slice::from_ref(&input)));
                 match self.host.call(*f, input) {
@@ -763,39 +955,34 @@ impl Vm {
                 for _ in 0..*nargs {
                     args.push(self.pop());
                 }
-                if self.matching.is_none() && self.subtracting.is_none() {
-                    *budget = budget.saturating_sub(builtin::cost(&args));
-                }
-                let result = match f {
-                    Cfunc::GetPath => self.getpath(args),
-                    Cfunc::Mktime
-                    | Cfunc::Gmtime
-                    | Cfunc::Localtime
-                    | Cfunc::Strftime
-                    | Cfunc::StrfLocaltime
-                    | Cfunc::Strptime => time::call(*f, &args, &self.clock),
-                    Cfunc::MatchImpl => match self.matching(&args, budget) {
-                        Some(result) => result,
-                        None => {
-                            for arg in args.into_iter().rev() {
-                                self.push(arg);
-                            }
-                            self.pc = pc;
-                            return Flow::Pause;
+                let result = match self.pending.take() {
+                    Some(task) => self.resume(task, budget),
+                    None => {
+                        *budget = budget.saturating_sub(builtin::cost(&args));
+                        match Pending::begin(*f, &args) {
+                            Some(Ok(task)) => self.resume(task, budget),
+                            Some(Err(fault)) => Some(Err(fault)),
+                            None => Some(match f {
+                                Cfunc::GetPath => self.getpath(&args),
+                                Cfunc::Mktime
+                                | Cfunc::Gmtime
+                                | Cfunc::Localtime
+                                | Cfunc::Strftime
+                                | Cfunc::StrfLocaltime
+                                | Cfunc::Strptime => time::call(*f, &args, &self.clock),
+                                _ => builtin::call(*f, &args, self.limits),
+                            }),
                         }
-                    },
-                    Cfunc::Minus => match self.subtracting(&args, budget) {
-                        Some(result) => result,
-                        None => {
-                            for arg in args.into_iter().rev() {
-                                self.push(arg);
-                            }
-                            self.pc = pc;
-                            return Flow::Pause;
-                        }
-                    },
-                    _ => builtin::call(*f, args, self.limits),
+                    }
                 };
+                let Some(result) = result else {
+                    for arg in args.into_iter().rev() {
+                        self.push(arg);
+                    }
+                    self.pc = pc;
+                    return Flow::Pause;
+                };
+                self.teardown.push(Retirement::values(args));
                 match result {
                     Ok(value) => self.push(value),
                     Err(Fault::Error(message)) => return Flow::Raise(Raise::Error(message)),
@@ -902,7 +1089,7 @@ impl Vm {
                 items.get(at).cloned(),
             ),
             Value::Object(fields) => match fields.entry(at) {
-                Some((k, v)) => (fields.len(), Value::String(Arc::clone(k)), Some(v.clone())),
+                Some((k, v)) => (fields.len(), Value::string(&**k), Some(v.clone())),
                 None => (fields.len(), Value::Null, None),
             },
             _ => unreachable!("EACH over a scalar"),
@@ -940,50 +1127,35 @@ impl Vm {
         Flow::Go
     }
 
-    /// `_match_impl`: starts the search, or resumes the one that paused;
-    /// None when it paused again.
-    fn matching(&mut self, args: &[Value], budget: &mut u64) -> Option<Result<Value, Fault>> {
-        let mut matching = match self.matching.take() {
-            Some(matching) => matching,
-            None => match Matching::begin(args) {
-                Ok(matching) => Box::new(matching),
-                Err(fault) => return Some(Err(fault)),
-            },
-        };
-        let result = matching.run(budget, self.limits);
+    fn resume(&mut self, mut task: Pending, budget: &mut u64) -> Option<Result<Value, Fault>> {
+        let result = task.run(budget, self.limits);
         if result.is_none() {
-            self.matching = Some(matching);
+            self.pending = Some(task);
+        } else {
+            if result.as_ref().is_some_and(Result::is_ok) {
+                if let Pending::Message(messaging) = &mut task {
+                    if let Some(message) = messaging.message() {
+                        self.host.queue(message);
+                    }
+                    if self.host.queued >= crate::PIECE {
+                        *budget = 0;
+                    }
+                }
+            }
+            self.retired.push(task);
         }
         result
     }
 
-    /// `_minus`: an array subtraction starts its scan, or resumes the one
-    /// that paused; None when it paused again. Other operands subtract at
-    /// once.
-    fn subtracting(&mut self, args: &[Value], budget: &mut u64) -> Option<Result<Value, Fault>> {
-        let mut subtracting = match self.subtracting.take() {
-            Some(subtracting) => subtracting,
-            None => match Subtracting::begin(args) {
-                Some(subtracting) => Box::new(subtracting),
-                None => return Some(builtin::call(Cfunc::Minus, args.to_vec(), self.limits)),
-            },
-        };
-        let result = subtracting.run(budget);
-        if result.is_none() {
-            self.subtracting = Some(subtracting);
-        }
-        result
-    }
-
-    fn getpath(&mut self, mut args: Vec<Value>) -> Result<Value, Fault> {
-        let path = args.pop().unwrap_or(Value::Null);
-        let input = args.pop().unwrap_or(Value::Null);
-        let found = builtin::getpath(&input, &path)?;
+    fn getpath(&mut self, args: &[Value]) -> Result<Value, Fault> {
+        let path = args.get(1).unwrap_or(&Value::Null);
+        let input = &args[0];
+        let found = builtin::getpath(input, path)?;
         if !self.tracking() || !input.identical(&self.value_at_path) {
             return Ok(found);
         }
         if let Value::Array(items) = &mut self.path {
-            match &path {
+            match path {
                 Value::Array(more) => Arc::make_mut(items).extend(more.iter().cloned()),
                 other => Arc::make_mut(items).push(other.clone()),
             }
@@ -1010,6 +1182,10 @@ impl Vm {
                 env: callee.env,
                 retdata,
                 retaddr,
+                _charge: Charge::open(
+                    nlocals * std::mem::size_of::<Value>()
+                        + closures.capacity() * std::mem::size_of::<Closure>(),
+                ),
                 closures,
                 locals: vec![Value::Null; nlocals],
             }),

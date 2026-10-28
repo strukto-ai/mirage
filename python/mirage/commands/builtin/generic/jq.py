@@ -690,30 +690,45 @@ class Engine:
         stream.begin(reader_position(reader))
         outputs: list[str] = []
         messages: list[tuple[int, str]] = []
+        safe = True
         try:
             stop = read_frames(stream.feed(doc.encode()), outputs, messages)
             stop = read_frames(stream.finish(), outputs, messages) or stop
-        except StreamRefusal as exc:
-            logger.debug("jq_eval leaves the document to libjq: %s", exc)
-            return None
-        while True:
-            if stream.busy():
-                await self._budget.run()
-                wire = stream.drain()
-            elif (asked := stream.request()) is not None:
-                # `now` asks the clock at each call; `input` the reader.
-                reply: dict[str, JsonValue]
-                if asked[0].get("op") == "now":
-                    reply, data = {"kind": "now", "now": time.time()}, b""
+            safe = not outputs and not messages and stop is None
+            while True:
+                if stream.busy():
+                    await self._budget.run()
+                    wire = stream.drain()
+                elif (asked := stream.request()) is not None:
+                    safe = False
+                    reply: dict[str, JsonValue]
+                    op = asked[0].get("op")
+                    if op == "now":
+                        reply, data = {"kind": "now", "now": time.time()}, b""
+                    elif op == "input":
+                        reply, data = await input_reply(reader)
+                    else:
+                        raise ValueError(
+                            f"jq_eval: unknown host request {asked[0]}"
+                        )
+                    wire = stream.respond(reply, data)
                 else:
-                    reply, data = await input_reply(reader)
-                wire = stream.respond(reply, data)
-            else:
-                break
-            stop = read_frames(wire, outputs, messages) or stop
-            for tag, text in messages:
-                report(await self._message(tag, text))
-            messages.clear()
+                    break
+                if wire:
+                    safe = False
+                stop = read_frames(wire, outputs, messages) or stop
+                for tag, text in messages:
+                    report(await self._message(tag, text))
+                messages.clear()
+        except StreamRefusal as exc:
+            if not safe or exc.output:
+                raise
+            logger.debug("jq_eval leaves the document to libjq: %s", exc)
+            if stream.cancel():
+                while stream.busy():
+                    await self._budget.run()
+                    stream.drain()
+            return None
         return JqRun(outputs, stop)
 
     async def _message(self, tag: int, text: str) -> str:

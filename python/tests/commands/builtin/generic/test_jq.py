@@ -775,9 +775,8 @@ async def test_a_program_that_never_ends_is_cancelled_on_this_thread(
 
 @pytest.mark.asyncio
 async def test_a_program_jq_eval_refuses_runs_in_libjqs_worker(monkeypatch):
-    monkeypatch.setenv("TZ", "America/New_York")
-    out, io = await _run([], "0 | localtime | .[3]", null_input=True)
-    assert (out, io.exit_code) == (b"19\n", 0)
+    out, io = await _run([], r'"a" | test("\\X")', null_input=True)
+    assert (out, io.exit_code) == (b"true\n", 0)
 
 
 @pytest.mark.asyncio
@@ -800,6 +799,37 @@ def test_local_zone_is_the_process_tz_or_a_zone_that_is_utc(monkeypatch):
     assert jq_module.local_zone() == "EST5EDT"
     monkeypatch.delenv("TZ")
     assert jq_module.local_zone() in (None, "UTC", "GMT")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "zone",
+    [
+        "/usr/share/zoneinfo/Europe/Paris",
+        ":/usr/share/zoneinfo/Europe/Paris",
+        "posix/Europe/Paris",
+        ":posix/Europe/Paris",
+        "right/Europe/Paris",
+        ":right/Europe/Paris",
+    ],
+)
+async def test_timezone_files_fall_back_before_debug_and_leave_utc_native(
+    monkeypatch, zone
+):
+    monkeypatch.setenv("TZ", zone)
+    assert Engine.open("localtime", JqOptions(), None, "{}") is None
+    out, io = await _run(
+        [], "1 | debug | (0 | localtime) | 42", null_input=True
+    )
+    assert (out, io.exit_code) == (b"42\n", 0)
+    assert await materialize(io.stderr) == b""
+    monkeypatch.setattr(jq_module, "Worker", _NoWorker)
+    for program, expected in [
+        ("0 | gmtime | .[3]", b"0\n"),
+        ("41+1", b"42\n"),
+    ]:
+        out, io = await _run([], program, null_input=True)
+        assert (out, io.exit_code) == (expected, 0)
 
 
 @pytest.mark.asyncio
@@ -951,7 +981,13 @@ async def test_jq_eval_reports_a_refused_program_as_jq_does(monkeypatch):
 def test_engine_tells_a_refused_program_from_one_it_leaves_to_libjq():
     with pytest.raises(JqCompileError, match=r"\njq: 1 compile error\Z"):
         Engine.open("if", JqOptions(), None, "{}")
-    assert Engine.open('import "a" as a; .', JqOptions(), None, "{}") is None
+    with pytest.raises(JqCompileError) as error:
+        Engine.open('import "a" as a; .', JqOptions(), None, "{}")
+    assert (
+        str(error.value)
+        == "jq: error: module not found: a\n\njq: 1 compile error"
+    )
+    assert Engine.open("get_jq_origin", JqOptions(), None, "{}") is None
 
 
 @pytest.mark.asyncio
@@ -960,3 +996,108 @@ async def test_now_reads_the_clock_at_each_call():
         [], 'now as $s | until(now > $s; .) | "done"', null_input=True
     )
     assert (out, io.exit_code) == (b'"done"\n', 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("zone", ["Europe/Paris", "America/New_York"])
+async def test_host_zone_time_calls_fall_back_before_debug(monkeypatch, zone):
+    monkeypatch.setenv("TZ", zone)
+    for program in [
+        "1 | debug | (0 | localtime) | 42",
+        '1 | debug | (try (0 | strflocaltime("%Z")) catch .) | 42',
+        '1 | debug | (try ("0" | strptime("%s")) catch .) | 42',
+        '"%Z" as $format | 1 | debug | (try (0 | strflocaltime($format)) catch .) | 42',
+    ]:
+        assert Engine.open(program, JqOptions(), None, "{}") is None
+        out, io = await _run([], program, null_input=True)
+        assert (out, io.exit_code) == (b"42\n", 0)
+        assert await materialize(io.stderr) == b""
+    monkeypatch.setattr(jq_module, "Worker", _NoWorker)
+    out, io = await _run([], '0 | strftime("%Z")', null_input=True)
+    assert (out, io.exit_code) == (b'"UTC"\n', 0)
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_after_input_is_not_replayed(monkeypatch):
+    engine = Engine.open("input", JqOptions(), None, "{}")
+    assert engine is not None
+    reader = InputReader([], JqOptions())
+    reads = 0
+
+    async def next_input():
+        nonlocal reads
+        reads += 1
+        return "1"
+
+    message = "reply fixture"
+
+    def respond(stream, reply, data):
+        raise jq_module.StreamRefusal(message, b"")
+
+    monkeypatch.setattr(reader, "next_input", next_input)
+    monkeypatch.setattr(jq_module.OpenStream, "respond", respond)
+    try:
+        with pytest.raises(jq_module.StreamRefusal, match="reply fixture"):
+            await engine.run("null", reader, print)
+        assert reads == 1
+    finally:
+        await engine.close()
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_after_debug_is_not_replayed(monkeypatch):
+    engine = Engine.open(
+        "1 | debug | until(false; .)", JqOptions(), None, "{}"
+    )
+    assert engine is not None
+    reader = InputReader([], JqOptions())
+    original = jq_module.OpenStream.drain
+    seen = False
+    rejected = False
+    reports = []
+
+    def drain(stream):
+        nonlocal seen, rejected
+        if stream is not engine._stream:
+            return original(stream)
+        if seen and not rejected:
+            rejected = True
+            raise jq_module.StreamRefusal("drain fixture", b"")
+        wire = original(stream)
+        seen |= bool(wire)
+        return wire
+
+    monkeypatch.setattr(jq_module.OpenStream, "drain", drain)
+    try:
+        with pytest.raises(jq_module.StreamRefusal, match="drain fixture"):
+            await engine.run("null", reader, reports.append)
+        assert reports == ['["DEBUG:",1]\n']
+    finally:
+        await engine.close()
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_request_does_not_consume_input(monkeypatch):
+    engine = Engine.open("input", JqOptions(), None, "{}")
+    assert engine is not None
+    reader = InputReader([], JqOptions())
+    reads = 0
+
+    async def next_input():
+        nonlocal reads
+        reads += 1
+        return "1"
+
+    request = ({"op": "unknown-fixture"}, b"")
+
+    def unknown(stream):
+        return request
+
+    monkeypatch.setattr(reader, "next_input", next_input)
+    monkeypatch.setattr(jq_module.OpenStream, "request", unknown)
+    try:
+        with pytest.raises(ValueError, match="unknown host request"):
+            await engine.run("null", reader, print)
+        assert reads == 0
+    finally:
+        await engine.close()

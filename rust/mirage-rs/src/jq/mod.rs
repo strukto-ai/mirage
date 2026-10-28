@@ -5,6 +5,7 @@ mod eval;
 mod format;
 mod host;
 mod lalr;
+mod meter;
 mod onig;
 mod parse;
 mod regex;
