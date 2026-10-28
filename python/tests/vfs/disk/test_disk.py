@@ -17,7 +17,10 @@ import asyncio
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.errors.types import QuotaExceededError
+from mirage.types import PathSpec
 from mirage.vfs.disk import DiskVFS
+from mirage.vfs.disk import disk as disk_module
 from mirage.vfs.errors import VFSConfigError
 
 
@@ -90,3 +93,21 @@ def test_get_state_saves_the_capacity_only_when_capped(tmp_path):
     assert "capacity" not in DiskVFS(str(tmp_path)).get_state()["config"]
     state = DiskVFS(str(tmp_path), capacity=10).get_state()
     assert state["config"]["capacity"] == 10
+
+
+@pytest.mark.asyncio
+async def test_a_copy_past_what_it_reserved_is_cut_back(tmp_path, monkeypatch):
+    (tmp_path / "src").write_bytes(b"x")
+    data = DiskVFS(str(tmp_path), capacity=10)
+    copy = disk_module._copy
+
+    async def grown(accessor, src, dst):
+        (tmp_path / "src").write_bytes(b"y" * 6)
+        await copy(accessor, src, dst)
+
+    monkeypatch.setattr(disk_module, "_copy", grown)
+    with pytest.raises(QuotaExceededError):
+        await data.copy(
+            PathSpec.from_str_path("/src"), PathSpec.from_str_path("/dst")
+        )
+    assert (tmp_path / "dst").read_bytes() == b"y"

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { edquot } from '@struktoai/mirage-core/errors/fs'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -234,8 +235,13 @@ export class OPFSVFS extends BaseVFS {
 
   override copy(src: PathSpec, dst: PathSpec): Promise<void> {
     return this.charge(dst, async (held) => {
-      if (this.usage !== null) held.growTo(await opfsSizeOf(this.accessor, src))
+      if (this.usage === null) return opfsCopy(this.accessor, src, dst)
+      held.growTo(await opfsSizeOf(this.accessor, src))
       await opfsCopy(this.accessor, src, dst)
+      if ((await opfsSizeOf(this.accessor, dst)) > held.reserved) {
+        await opfsTruncate(this.accessor, dst, held.reserved, true)
+        throw edquot(dst)
+      }
     })
   }
 

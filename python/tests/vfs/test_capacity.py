@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+import threading
 
 import pytest
 
@@ -272,3 +273,57 @@ async def test_a_replacement_loses_its_credit_once_a_folder_move_overlaps_it():
                 sizes["/data/saved/f"] = sizes.pop("/data/d/f")
             assert held.contended
             held.stream(b"x" * 10)
+
+
+@pytest.mark.asyncio
+async def test_a_write_cancelled_while_it_measures_releases_its_hold():
+    measured = asyncio.Event()
+
+    async def size_of(path: PathSpec) -> int:
+        if usage.pending:
+            measured.set()
+            await asyncio.Event().wait()
+        return 0
+
+    async def count() -> int:
+        return 0
+
+    usage = StorageUsage(10)
+
+    async def write() -> None:
+        async with charge(usage, _F, size_of, count) as held:
+            held.hold(4)
+
+    task = asyncio.ensure_future(write())
+    await measured.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (usage.pending, usage.dirty, usage.active) == (0, True, [])
+
+
+def test_a_store_serves_one_running_loop_at_a_time():
+    usage = StorageUsage(10, used=0)
+    ready = threading.Event()
+    done = threading.Event()
+
+    async def hold_loop() -> None:
+        usage.admit(_F, 1)
+        ready.set()
+        while not done.is_set():
+            await asyncio.sleep(0.01)
+
+    thread = threading.Thread(target=asyncio.run, args=(hold_loop(),))
+    thread.start()
+    ready.wait()
+
+    async def second() -> None:
+        usage.admit(_F, 1)
+
+    try:
+        with pytest.raises(RuntimeError, match="one event loop at a time"):
+            asyncio.run(second())
+    finally:
+        done.set()
+        thread.join()
+    asyncio.run(second())
