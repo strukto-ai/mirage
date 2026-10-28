@@ -33,6 +33,23 @@ import { ABSENT_WRITE } from '../../cache/types.ts'
 const accessor = new FakeAccessor()
 const ENC = new TextEncoder()
 
+it('preserves a competing creation after an unversioned missing truncate read', async () => {
+  const store = new FakeStore()
+  const driver = {
+    ...makeDriver(store),
+    get: (conn: Store, key: string) => {
+      conn.objects.set(key, ENC.encode('completed-writer'))
+      return Promise.resolve(null)
+    },
+  }
+  const failure = await makeTruncate(driver)(accessor, spec('/f.bin'), 2).then(
+    () => null,
+    (error: unknown) => error,
+  )
+  expect(store.contents()).toEqual({ 'f.bin': 'completed-writer' })
+  expect(failure).toMatchObject({ code: 'ENOTSUP' })
+})
+
 it.each(['bytes', 'stream'] as const)(
   'refuses an unsupported protected %s replacement before mutation',
   async (kind) => {

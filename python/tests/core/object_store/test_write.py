@@ -26,6 +26,7 @@ from mirage.core.object_store.write import (
     make_write,
 )
 from mirage.errors.fs import enoent
+from mirage.errors.types import OperationNotSupportedError
 from mirage.io.cooperative import chunks
 from mirage.observe.context import RecordingScope
 from mirage.types import FileStat, FileType
@@ -42,6 +43,24 @@ async def _stream(data):
 
 async def _reject_lookup(conn, key):
     raise AssertionError("write metadata must not issue a lookup")
+
+
+async def _missing_after_competing_creation(conn, key):
+    conn.objects[key] = b"completed-writer"
+    return None
+
+
+@pytest.mark.asyncio
+async def test_unversioned_missing_truncate_preserves_competing_creation(accessor):
+    store = FakeStore()
+    driver = replace(make_driver(store), get=_missing_after_competing_creation)
+    refused = None
+    try:
+        await make_truncate(driver)(accessor, spec("/f.bin"), 2)
+    except OperationNotSupportedError as exc:
+        refused = exc
+    assert store.objects["f.bin"] == b"completed-writer"
+    assert refused is not None
 
 
 def test_write_puts_the_object(accessor):

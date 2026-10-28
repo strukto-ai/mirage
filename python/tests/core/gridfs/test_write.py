@@ -31,6 +31,29 @@ A_TXT = PathSpec(vfs_path="a.txt", virtual="/mnt/a.txt", directory="/mnt")
 
 
 @pytest.mark.asyncio
+async def test_direct_protected_stream_refuses_before_upload_and_closes_source(store):
+    closed = []
+
+    async def source():
+        try:
+            yield b"first"
+            yield b"last"
+        finally:
+            closed.append(True)
+
+    body = source()
+    await anext(body)
+    refused = None
+    try:
+        await gridfs_driver.DRIVER.put_stream(make_accessor(), "a.txt", body, ABSENT_WRITE)
+    except OperationNotSupportedError as exc:
+        refused = exc
+    assert store.ids("a.txt") == []
+    assert refused is not None
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("streamed", [False, True])
 async def test_protected_replacement_refuses_before_upload_and_closes_source(
     store, streamed
