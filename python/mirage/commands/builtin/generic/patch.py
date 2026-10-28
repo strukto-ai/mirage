@@ -330,7 +330,8 @@ async def _directory(
     """The directory ``-d`` moves to from ``cwd``, or GNU patch's fatal
     line when it cannot move there. It is walked a name at a time, as
     chdir walks it: each entry a ``.`` or ``..`` steps out of must be a
-    directory too, checked once and in order, so the first that is not
+    directory too, and so must the last, the one it starts from among
+    them. Each is checked once and in order, so the first that is not
     stops the walk.
 
     Args:
@@ -341,7 +342,7 @@ async def _directory(
     """
     why = "" if typed else "No such file or directory"
     names = [] if typed.startswith("/") else [p for p in cwd.split("/") if p]
-    checked = len(names)
+    checked = 0
     for name in [*typed.split("/"), "."] if typed else []:
         if name in (".", "..") and len(names) > checked:
             target = "/" + "/".join(names)

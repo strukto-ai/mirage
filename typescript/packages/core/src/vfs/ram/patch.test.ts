@@ -100,13 +100,13 @@ it('walks a long -d a name at a time', async () => {
     return Promise.resolve()
   }
   const unexpected = (): Promise<void> => Promise.reject(new Error('unexpected change'))
-  const run = (directory: string) =>
+  const run = (directory: string, cwd = '/') =>
     runWithMountGate('/', MountMode.WRITE, () =>
       patchGeneric(
         [],
         {
           vfs: new Files(() => Promise.reject(new Error('no dispatch'))),
-          cwd: PathSpec.fromStrPath('/'),
+          cwd: PathSpec.fromStrPath(cwd),
           flags: { directory: [directory], i: 'p.diff' },
           stdin: null,
         },
@@ -127,4 +127,10 @@ it('walks a long -d a name at a time', async () => {
   const done = await run(dots)
   expect(done?.[1].exitCode).toBe(0)
   expect(DEC.decode(files.get('a'))).toBe('b\n')
+  // The directory it starts from is checked too, a stale one refused.
+  const stale = await run('.', '/f')
+  expect(stale?.[1].exitCode).toBe(2)
+  expect(await stale?.[1].stderrStr()).toBe(
+    "patch: **** Can't change to directory . : Not a directory\n",
+  )
 })
