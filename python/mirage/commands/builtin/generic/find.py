@@ -27,9 +27,8 @@ from mirage.commands.spec.types import FlagValue
 from mirage.core.generic import find_eval
 from mirage.core.generic.find import modified_ts, walk_find
 from mirage.core.generic.find_eval import printf_kind
-from mirage.errors.classify import failure_text
 from mirage.errors.constants import MISS_ERRORS
-from mirage.errors.fs import fs_strerror, walk_refusal
+from mirage.errors.fs import fs_strerror, strerror_of, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult, PathRecord
@@ -561,7 +560,7 @@ async def find_walk_generic(
                 )
                 for path, exc in unstatted.items():
                     shown = respell_one(path, search.virtual, search.raw_path)
-                    missing.append(f"find: '{shown}': {failure_text(exc)}")
+                    missing.append(f"find: '{shown}': {strerror_of(exc)}")
                 for path, above in loops:
                     missing.append(
                         "find: File system loop detected; "

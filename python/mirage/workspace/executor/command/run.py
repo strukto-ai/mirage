@@ -35,6 +35,7 @@ from mirage.runtime.types import (
 )
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.types import PathSpec
 from mirage.view.types import FollowOperands
 from mirage.workspace.evaluation import EvaluationContext
@@ -101,7 +102,7 @@ def admission_denial(cmd_name: str) -> IOResult:
         cmd_name (str): the refused command.
     """
     msg = f"{cmd_name}: no runtime accepted this line\n"
-    return IOResult(exit_code=126, stderr=encode_text(msg))
+    return IOResult(exit_code=CANNOT_EXECUTE_STATUS, stderr=encode_text(msg))
 
 
 def line_runtime_for(
@@ -245,7 +246,7 @@ async def run_on_mount(
             return None, IOResult(exit_code=1, stderr=encode_text(f"{exc}\n"))
         if mount is None:
             return None, IOResult(
-                exit_code=127,
+                exit_code=NOT_FOUND_STATUS,
                 stderr=encode_text(f"{cmd_name}: command not found"),
             )
     if cmd_name == "find":

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar
 
 from mirage.context import strongest_under_session
+from mirage.errors.types import StaleWriteError
 from mirage.io.types import IOResult
 from mirage.policy.decisions import Decisions
 from mirage.policy.match import head_allowed
@@ -32,10 +33,7 @@ from mirage.utils.path import gnu_dirname
 from mirage.workspace.files import Files
 from mirage.workspace.mount.registry import DEV_PREFIX, MountEntry
 from mirage.workspace.session.session import SessionState
-from mirage.workspace.tools.file_version import (
-    FileVersionTracker,
-    StaleMirageFileError,
-)
+from mirage.workspace.tools.file_version import FileVersionTracker
 from mirage.workspace.tools.io_text import (
     decode,
     error_text,
@@ -397,7 +395,7 @@ class MirageToolOperations:
         try:
             await ensure_parents(versions.vfs, path)
             await versions.write(path, content)
-        except (StaleMirageFileError, OSError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             return ToolResult(error_text(exc), True)
         return ToolResult(f"Written: {path}")
 
@@ -426,7 +424,7 @@ class MirageToolOperations:
             path = self._session.state.cwd.rstrip("/") + "/" + path
         try:
             content = decode(await versions.read_for_edit(path))
-        except StaleMirageFileError as exc:
+        except StaleWriteError as exc:
             return ToolResult(error_text(exc), True)
         except (OSError, ValueError) as exc:
             if await missing(versions.vfs, path):
@@ -446,7 +444,7 @@ class MirageToolOperations:
             )
         try:
             await versions.write_edit(path, new_content)
-        except (StaleMirageFileError, OSError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             return ToolResult(error_text(exc), True)
         occurrences = count if replace_all else 1
         return ToolResult(f"Edited: {path} ({occurrences} occurrence(s))")

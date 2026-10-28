@@ -32,8 +32,8 @@ from mirage.context import (
     reset_program_invocation,
     set_program_invocation,
 )
-from mirage.errors.classify import failure_text, is_entry_error
-from mirage.errors.fs import enoent
+from mirage.errors.classify import is_entry_error
+from mirage.errors.fs import enoent, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.stream import SharedStdin, materialize
@@ -243,7 +243,7 @@ async def _delete(
         await dispatch(op, ps)
         return True
     except (OSError, ValueError) as exc:
-        why = failure_text(exc)
+        why = strerror_of(exc)
         errors.append(encode_text(f"find: cannot delete '{path}': {why}\n"))
         return False
 
@@ -288,7 +288,7 @@ async def _row_stat(
         # reason there.
         why = (
             exc.strerror if isinstance(exc, OSError) else None
-        ) or failure_text(exc)
+        ) or strerror_of(exc)
         errors.append(encode_text(f"find: '{path}': {why}\n"))
         return None
     if st is None:

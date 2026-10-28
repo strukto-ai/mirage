@@ -43,7 +43,7 @@ import {
 import { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
 import { carried, ended, isUnwinding } from './control.ts'
-import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
+import { FORK_FAILED, FORK_FAILED_STATUS, SIGPIPE_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import { simpleCommand } from '../../shell/node_kind.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
@@ -163,7 +163,7 @@ export async function handlePipe(
         await waits?.join(rest)
       } catch (error) {
         if (error instanceof PipeClosed) {
-          io.exitCode = 141
+          io.exitCode = SIGPIPE_STATUS
         } else if (isUnwinding(error)) {
           // A stage is a subshell: whatever unwinds ends it there, a simple
           // command the top shell forked as that shell would.
@@ -527,7 +527,7 @@ export async function handleSubshell(
           !(await answerClosed(io, (channel, data) => sink.emit(channel, data)))
         ) {
           if (!writerForks(child, session, io)) throw err
-          io.exitCode = 141
+          io.exitCode = SIGPIPE_STATUS
         }
         recordStatus(session, io.exitCode)
       }
@@ -541,7 +541,7 @@ export async function handleSubshell(
       mergedIo = await landLate(recorder, leave, session.terminal, sink, allStdout, mergedIo)
     } catch (err) {
       // The subshell's own write met a closed pipe: SIGPIPE ends it.
-      const sig = err instanceof PipeClosed ? new ExitSignal(141) : err
+      const sig = err instanceof PipeClosed ? new ExitSignal(SIGPIPE_STATUS) : err
       if (!(sig instanceof ExitSignal || sig instanceof ReturnSignal)) {
         await recorder.close()
         throw err

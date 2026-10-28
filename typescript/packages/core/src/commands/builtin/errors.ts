@@ -46,7 +46,3 @@ export class HttpTimeoutError extends HttpConnectError {
     this.elapsedMs = elapsedMs
   }
 }
-
-// An invalid -k field specification or ordering letter (GNU sort).
-// Mirrors Python's mirage.commands.builtin.errors.SortKeyError.
-export class SortKeyError extends Error {}

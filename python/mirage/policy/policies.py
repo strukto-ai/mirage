@@ -38,7 +38,6 @@ from mirage.observe.context import command_records
 from mirage.policy.base import Policy
 from mirage.policy.builtin.mount_mode import MountModePolicy
 from mirage.policy.builtin.permissions import PermissionsPolicy
-from mirage.policy.constants import POLICY_DENIED_EXIT
 from mirage.policy.decisions import Decisions, ask_rule, op_question
 from mirage.policy.errors import Explained, PolicyDenied, PolicyError
 from mirage.policy.match.decide import source_of
@@ -66,6 +65,7 @@ from mirage.policy.types import (
     VfsResultContext,
     policy_caller,
 )
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.types import FileType, Limit, MountMode, PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.types import VfsCall
@@ -111,7 +111,7 @@ def render_deny(subject: str, deny: Deny | Pending) -> tuple[bytes, int]:
     if isinstance(deny, Deny) and deny.error is not None:
         line = f"{subject}: {deny.reason}\n"
         return line.encode(), operand_exit_code(subject)
-    return f"{subject}: Permission denied\n".encode(), POLICY_DENIED_EXIT
+    return f"{subject}: Permission denied\n".encode(), CANNOT_EXECUTE_STATUS
 
 
 async def render_command_deny(

@@ -14,13 +14,16 @@
 
 
 class StreamRefusal(Exception):
-    """A mirage-rs stream refused its input after writing ``output``.
+    """A failure after the command had already written ``output``: a
+    mirage-rs stream that refused its input, or a CLI leaf that prints as
+    it goes (``gh --jq``), whose output stays on stdout ahead of the
+    diagnostic.
 
     Args:
         message (str): The refusal, without a newline: the command's
             stderr wording, or what the caller reports it as (``sort -c``
             gets the disordered record's number).
-        output (bytes): What the stream wrote before it refused.
+        output (bytes): What the command wrote before it failed.
     """
 
     def __init__(self, message: str, output: bytes) -> None:

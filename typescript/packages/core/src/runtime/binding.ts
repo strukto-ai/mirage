@@ -21,7 +21,6 @@ import {
   noteRefusal,
   type Caller,
 } from '../context/session_context.ts'
-import { POLICY_DENIED_EXIT } from '../policy/constants.ts'
 import type { OpKwargs } from '../view/types.ts'
 import { isGlob, showHead } from '../utils/hidden.ts'
 import { PathSpec } from '../types.ts'
@@ -29,6 +28,7 @@ import type { MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn, DispatchFn, RunResult } from './types.ts'
 import { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
+import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 
 /** Local workspace entry points captured for one execution, never guest
  * globals. They run as `caller`, the caller the execution was captured
@@ -100,7 +100,7 @@ export function refusedRun(name: string, reason: string): RunResult {
   return {
     stdout: new Uint8Array(),
     stderr: new TextEncoder().encode(`${name}: Permission denied\n`),
-    exitCode: POLICY_DENIED_EXIT,
+    exitCode: CANNOT_EXECUTE_STATUS,
   }
 }
 

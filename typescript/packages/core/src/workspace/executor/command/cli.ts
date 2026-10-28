@@ -57,6 +57,7 @@ import { optionError, parseFlags } from './flags.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import type { IdSource } from '../../../utils/ids.ts'
+import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
 
 // A textual rest operand is a CLI node's pass-through form: parsed under
 // unknownIsOperand, it takes the undeclared dashed tokens the node does not
@@ -162,7 +163,7 @@ function selectRuntime(
 
 /** The 127 a script CLI answers when no entry can run its program. */
 function missing(message: string): IOResult {
-  return new IOResult({ exitCode: 127, stderr: encodeText(`${message}\n`) })
+  return new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: encodeText(`${message}\n`) })
 }
 
 /**
@@ -222,7 +223,7 @@ function scriptOutput(
       return {
         stdout: new Uint8Array(),
         stderr: encodeText(`${prog}: ${err.message}\n`),
-        exitCode: 127,
+        exitCode: NOT_FOUND_STATUS,
       }
     } finally {
       await settle?.(runtime)

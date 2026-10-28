@@ -42,6 +42,7 @@ import type { Flags } from './types.ts'
 import { parseFlags } from './flags.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../../../shell/constants.ts'
 
 export interface RunOnMountCtx {
   admission: EntryGate | null
@@ -144,7 +145,7 @@ function settled(node: ExecutionNode, io: IOResult): void {
 /** The 126 result for a command no runtime accepted. */
 export function admissionDenial(cmdName: string): IOResult {
   const msg = `${cmdName}: no runtime accepted this line\n`
-  return new IOResult({ exitCode: 126, stderr: encodeText(msg) })
+  return new IOResult({ exitCode: CANNOT_EXECUTE_STATUS, stderr: encodeText(msg) })
 }
 
 /**
@@ -222,7 +223,7 @@ export async function runOnMount(
     }
     if (mount === null) {
       const errBytes = encodeText(`${cmdName}: command not found`)
-      return [null, new IOResult({ exitCode: 127, stderr: errBytes })]
+      return [null, new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: errBytes })]
     }
   }
 

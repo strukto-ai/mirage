@@ -49,6 +49,7 @@ from mirage.shell.constants import (
     FD_STDIN,
     FD_STDOUT,
     OUTPUT_ONLY_BUILTINS,
+    SIGPIPE_STATUS,
 )
 from mirage.shell.descriptors import (
     Descriptor,
@@ -986,8 +987,8 @@ async def _handle_redirect(
                 # SIGPIPE ends a forked writer alone; a builtin's write,
                 # in a function or a group too, is the shell's, which dies.
                 if not forked:
-                    raise ExitSignal(141) from None
-                io = IOResult(exit_code=141)
+                    raise ExitSignal(SIGPIPE_STATUS) from None
+                io = IOResult(exit_code=SIGPIPE_STATUS)
     except UNWINDING as sig:
         unwound, io = sig, IOResult()
         output = await take_stdout(sig)
@@ -1089,9 +1090,9 @@ async def _handle_redirect(
                 if file is not deferred:
                     raise
                 if forked:
-                    io.exit_code = 141
+                    io.exit_code = SIGPIPE_STATUS
                 elif unwound is None:
-                    unwound = ExitSignal(141)
+                    unwound = ExitSignal(SIGPIPE_STATUS)
                 return False
             except Exception as exc:
                 if is_aborting(exc):

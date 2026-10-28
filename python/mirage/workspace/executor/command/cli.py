@@ -56,6 +56,7 @@ from mirage.runtime.types import (
 )
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
+from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
 from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.view.types import FollowOperands, SessionView
@@ -190,7 +191,9 @@ def _missing(message: str) -> IOResult:
     Args:
         message (str): the refusal, naming the world.
     """
-    return IOResult(exit_code=127, stderr=encode_text(f"{message}\n"))
+    return IOResult(
+        exit_code=NOT_FOUND_STATUS, stderr=encode_text(f"{message}\n")
+    )
 
 
 async def _script_output(

@@ -28,7 +28,6 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { workspaceBridge } from './binding.ts'
 import { LISTING_ENTRY_CONCURRENCY } from './constants.ts'
-import { CrossMountError } from './errors.ts'
 import { parseMode } from './handles/index.ts'
 import type { BridgeDispatchFn } from './types.ts'
 import { RuntimeFiles } from './files.ts'
@@ -417,7 +416,7 @@ describe('RuntimeFiles routing', () => {
   it('refuses a rename whose ends are on different mounts', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
     const vfs = new RuntimeFiles(dispatch, new PrefixResolver(() => ['/a', '/b']))
-    await expect(vfs.rename('/a/x', '/b/x')).rejects.toThrow(CrossMountError)
+    await expect(vfs.rename('/a/x', '/b/x')).rejects.toMatchObject({ code: 'EXDEV' })
     expect(dispatch).not.toHaveBeenCalled()
   })
 

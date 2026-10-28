@@ -23,7 +23,6 @@ if TYPE_CHECKING:
         reset_current_session,
         set_current_session,
     )
-    from mirage.workspace.session.errors import ReadonlyVariableError
     from mirage.workspace.session.manager import SessionManager
     from mirage.workspace.session.session import SessionState
     from mirage.workspace.session.state import (
@@ -41,7 +40,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "reset_current_session",
         "set_current_session",
     ),
-    "mirage.workspace.session.errors": ("ReadonlyVariableError",),
     "mirage.workspace.session.manager": ("SessionManager",),
     "mirage.workspace.session.session": ("SessionState",),
     "mirage.workspace.session.state": (
@@ -54,7 +52,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
 }
 
 __all__ = [
-    "ReadonlyVariableError",
     "SessionManager",
     "SessionState",
     "ensure_var_visible",

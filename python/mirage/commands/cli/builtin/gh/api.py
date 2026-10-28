@@ -26,13 +26,13 @@ from mirage.commands.cli.builtin.gh.accessor import (
 )
 from mirage.commands.cli.builtin.gh.constants import HTTP_REASONS
 from mirage.commands.config import Context
-from mirage.commands.errors import PartialOutputError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.client import GitHubApiError, github_request_response
 from mirage.core.github.constants import GRAPHQL_PATH
 from mirage.core.github.placeholder import expand
 from mirage.core.render.json import compact_json_text
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.errors import StreamRefusal
 from mirage.types import JsonValue, PathSpec
 
 INT_RE = re.compile(r"^-?\d+$")
@@ -531,9 +531,9 @@ def _render_pages(
         for page in pages:
             try:
                 parts.append([page.head, jq_lines([page.data], program)])
-            except PartialOutputError as exc:
+            except StreamRefusal as exc:
                 done = _bytes_of(_joined(parts + [[page.head]], between))
-                raise PartialOutputError(str(exc), done + exc.stdout) from exc
+                raise StreamRefusal(str(exc), done + exc.output) from exc
         return _bytes_of(_joined(parts + failed, between))
     if slurp:
         return _bytes_of(["[", *_joined(printed, between + ","), "]"])

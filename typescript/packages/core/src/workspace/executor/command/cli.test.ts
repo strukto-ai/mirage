@@ -19,7 +19,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { CLI, type CLIVerbFn } from '../../../commands/cli/types.ts'
 import { command, type Context } from '../../../commands/config.ts'
-import { PartialOutputError } from '../../../commands/errors.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
 import { Argument, UsageStyle } from '../../../commands/spec/types.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
@@ -824,7 +824,7 @@ describe('a leaf that fails after printing', () => {
       handlers: {
         go: new CLIHandler({
           fn: () => {
-            throw new PartialOutputError('late boom', new TextEncoder().encode('first\n'))
+            throw new StreamRefusal('late boom', new TextEncoder().encode('first\n'))
           },
         }),
       },

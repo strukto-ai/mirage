@@ -16,12 +16,13 @@ from dataclasses import dataclass
 
 import pytest
 
-from mirage.commands.errors import PartialOutputError, UsageError
+from mirage.commands.errors import UsageError
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors.fs import enoent
 from mirage.io import IOResult
 from mirage.io.errors import PipeClosed
 from mirage.io.types import Rows, materialize
+from mirage.rs.errors import StreamRefusal
 from mirage.types import HiddenPaths, PathSpec, Producer, Visibility
 from mirage.workspace.executor.command.handler import (
     cli_voice,
@@ -124,7 +125,7 @@ async def test_a_write_drops_once_answered_and_again_once_its_stream_ends(
     "voice,error,stdout,stderr",
     [
         (MOUNT, RuntimeError("lost"), b"a\n", b"cat: lost\n"),
-        (LEAF, PartialOutputError("cut", b"b\n"), b"a\nb\n", b"gh: cut\n"),
+        (LEAF, StreamRefusal("cut", b"b\n"), b"a\nb\n", b"gh: cut\n"),
     ],
 )
 async def test_an_answer_carries_the_producer_and_words_a_deferred_failure(

@@ -317,9 +317,9 @@ export function requireVfs(ctx: Context): Files {
 export function fatal(exc: GitError): CommandFnResult {
   const body = exc.prefix === null ? `${exc.message}\n` : `${exc.prefix}: ${exc.message}\n`
   const data = ENC.encode(body)
-  if (exc.stream === 'stdout') return [data, new IOResult({ exitCode: exc.code })]
+  if (exc.stream === 'stdout') return [data, new IOResult({ exitCode: exc.exitCode })]
   const told = exc.report === '' ? null : ENC.encode(exc.report)
-  return [told, new IOResult({ exitCode: exc.code, stderr: data })]
+  return [told, new IOResult({ exitCode: exc.exitCode, stderr: data })]
 }
 
 /**

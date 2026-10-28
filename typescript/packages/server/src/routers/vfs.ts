@@ -57,7 +57,7 @@ const STATUS: Partial<Record<FsCondition, number>> = {
 }
 
 /** Thrown for a request the route answers with a fixed status and detail. */
-export class RouteError extends Error {
+export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
@@ -72,7 +72,7 @@ export function requireEntry(
   wsId: string,
   account: string | null,
 ): WorkspaceEntry {
-  if (registry.visible(wsId, account) === null) throw new RouteError(404, 'workspace not found')
+  if (registry.visible(wsId, account) === null) throw new HttpError(404, 'workspace not found')
   return registry.get(wsId)
 }
 
@@ -84,7 +84,7 @@ export async function sessionOf(ws: Workspace, sessionId: string | undefined): P
     sessionId !== '' &&
     !ws.listSessions().some((s) => s.sessionId === sessionId)
   ) {
-    throw new RouteError(404, 'session not found')
+    throw new HttpError(404, 'session not found')
   }
   return new Session(ws, sessionId === undefined || sessionId === '' ? null : sessionId)
 }
@@ -93,7 +93,7 @@ export async function sessionOf(ws: Workspace, sessionId: string | undefined): P
 export function queryFlag(value: string | undefined, name: string): boolean {
   if (value === undefined || value === 'false') return false
   if (value === 'true') return true
-  throw new RouteError(400, `${name} must be true or false`)
+  throw new HttpError(400, `${name} must be true or false`)
 }
 
 /**
@@ -102,7 +102,7 @@ export function queryFlag(value: string | undefined, name: string): boolean {
  * refusal, its record. Mirrors Python's `failure`.
  */
 export function failure(reply: FastifyReply, err: unknown): FastifyReply {
-  if (err instanceof RouteError) return reply.status(err.status).send({ detail: err.message })
+  if (err instanceof HttpError) return reply.status(err.status).send({ detail: err.message })
   if (err instanceof CallArgsError) return reply.status(400).send({ detail: err.message })
   // A glob past its mount's walk_limit says so in words that carry
   // nothing private, so the caller learns why.
@@ -133,7 +133,7 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
           const params = (req.body ?? {}) as Record<string, unknown>
           const asked = call.name === 'read' && params.stream !== undefined
           const stream = asked ? params.stream : false
-          if (typeof stream !== 'boolean') throw new RouteError(400, 'stream must be a boolean')
+          if (typeof stream !== 'boolean') throw new HttpError(400, 'stream must be a boolean')
           const args = await checked(
             call,
             asked
@@ -190,7 +190,7 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
       try {
         const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
         const pattern = req.body?.pattern
-        if (typeof pattern !== 'string') throw new RouteError(400, 'pattern must be a string')
+        if (typeof pattern !== 'string') throw new HttpError(400, 'pattern must be a string')
         const session = await sessionOf(ws, req.query.session_id)
         paths = await session.glob(pattern)
       } catch (err) {

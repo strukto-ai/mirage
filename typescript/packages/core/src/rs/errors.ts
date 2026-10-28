@@ -13,10 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
- * A mirage-rs stream refused its input after writing `output`. `message` is
- * the refusal, without a newline: the command's stderr wording, or what the
- * caller reports it as (`sort -c` gets the disordered record's number).
- * Mirrors Python's StreamRefusal.
+ * A failure after the command had already written `output`: a mirage-rs
+ * stream that refused its input, or a CLI leaf that prints as it goes
+ * (`gh --jq`), whose output stays on stdout ahead of the diagnostic.
+ * `message` is the refusal, without a newline: the command's stderr wording,
+ * or what the caller reports it as (`sort -c` gets the disordered record's
+ * number). Mirrors Python's StreamRefusal.
  */
 export class StreamRefusal extends Error {
   readonly output: Uint8Array

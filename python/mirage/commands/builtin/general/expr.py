@@ -16,6 +16,7 @@ import re
 
 from mirage.accessor.base import Accessor
 from mirage.commands.config import Context, command
+from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_word
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
@@ -60,10 +61,6 @@ MISSING_OPERAND = (
 # and is far past any expression written by hand.
 MAX_NESTING = 64
 NESTING_TOO_DEEP = f"expr: expression nesting too deep (limit {MAX_NESTING})"
-
-
-class ExprError(Exception):
-    """An operand or operation GNU expr refuses, worded as GNU words it."""
 
 
 # How many decimal digits to convert in one go. CPython caps a base-10
@@ -223,10 +220,10 @@ def parse_int_operand(text: str) -> int:
             base-10 conversion cap does not bound it either.
 
     Raises:
-        ExprError: the operand is not an integer in GNU's grammar.
+        UsageError: the operand is not an integer in GNU's grammar.
     """
     if INT_OPERAND_RE.fullmatch(text) is None:
-        raise ExprError(NON_INTEGER)
+        raise UsageError(NON_INTEGER)
     return int_of_digits(text)
 
 
@@ -283,10 +280,10 @@ def trunc_div(a: int, b: int) -> int:
         int: the quotient, rounded toward zero.
 
     Raises:
-        ExprError: the divisor is zero.
+        UsageError: the divisor is zero.
     """
     if b == 0:
-        raise ExprError(DIVISION_BY_ZERO)
+        raise UsageError(DIVISION_BY_ZERO)
     quotient = abs(a) // abs(b)
     return -quotient if (a < 0) != (b < 0) else quotient
 
@@ -306,10 +303,10 @@ def trunc_mod(a: int, b: int) -> int:
         int: the remainder, signed like `a`.
 
     Raises:
-        ExprError: the divisor is zero.
+        UsageError: the divisor is zero.
     """
     if b == 0:
-        raise ExprError(DIVISION_BY_ZERO)
+        raise UsageError(DIVISION_BY_ZERO)
     remainder = abs(a) % abs(b)
     return -remainder if a < 0 else remainder
 
@@ -388,13 +385,13 @@ async def colon_match(subject: str, pattern: str, utf8: bool = False) -> str:
         str: group 1's text, or the match length.
 
     Raises:
-        ExprError: glibc's wording for a pattern it refuses, under
+        UsageError: glibc's wording for a pattern it refuses, under
             expr's own prefix.
     """
     try:
         regex = posix_regex(pattern, utf8=utf8)
     except RegexError as exc:
-        raise ExprError(f"expr: {exc.message}") from exc
+        raise UsageError(f"expr: {exc.message}") from exc
     found = await regex.search(subject)
     # The leftmost match is the one at the start, when there is one.
     if found is not None and found[0] is not None and found[0][0] != 0:
@@ -507,10 +504,10 @@ class ExprReader:
         """The next word, which has to be there.
 
         Raises:
-            ExprError: the line ran out; GNU names the word before.
+            UsageError: the line ran out; GNU names the word before.
         """
         if self.done():
-            raise ExprError(
+            raise UsageError(
                 missing_argument_after(self.last_read(), self.utf8)
             )
         self.next += 1
@@ -625,16 +622,16 @@ class ExprReader:
         if word == "+":
             return self.read_word()
         if word == ")":
-            raise ExprError(UNEXPECTED_CLOSE)
+            raise UsageError(UNEXPECTED_CLOSE)
         if word != "(":
             return word
         if self.depth >= MAX_NESTING:
-            raise ExprError(NESTING_TOO_DEEP)
+            raise UsageError(NESTING_TOO_DEEP)
         self.depth += 1
         value = await self.either(live)
         self.depth -= 1
         if self.take_if((")",)) is None:
-            raise ExprError(
+            raise UsageError(
                 expecting_close(self.ahead(), self.last_read(), self.utf8)
             )
         return value
@@ -655,12 +652,12 @@ async def _expr_eval(args: list[str], utf8: bool = False) -> tuple[str, int]:
             exit 2 is the only error status.
 
     Raises:
-        ExprError: anything GNU refuses.
+        UsageError: anything GNU refuses.
     """
     reader = ExprReader(args, utf8)
     value = await reader.either(True)
     if not reader.done():
-        raise ExprError(unexpected_argument(reader.words[reader.next], utf8))
+        raise UsageError(unexpected_argument(reader.words[reader.next], utf8))
     return value, 1 if is_null(value) else 0
 
 
@@ -680,7 +677,7 @@ async def expr(
         result, exit_code = await _expr_eval(
             [byte_view(t, utf8) for t in texts], utf8
         )
-    except ExprError as exc:
+    except UsageError as exc:
         # GNU writes the refusal to stderr, nothing to stdout, and exits
         # 2; exit 1 is reserved for a zero-valued success. The
         # diagnostic quotes a byte view of the offending word, so it

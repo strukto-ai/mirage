@@ -37,6 +37,7 @@ from mirage.runtime.sandbox.program import (
 )
 from mirage.runtime.types import OutputFn, Program, RunResult, RuntimeReach
 from mirage.shell.bytes import encode_text
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.types import PathSpec
 
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
@@ -51,11 +52,13 @@ def _unrunnable(name: str, path: str) -> RunResult | None:
         path (str): that path joined to the cwd.
     """
     if not os.path.exists(path):
-        return _not_run(f"{name}: No such file or directory\n", 127)
+        return _not_run(
+            f"{name}: No such file or directory\n", NOT_FOUND_STATUS
+        )
     if os.path.isdir(path):
-        return _not_run(f"{name}: Is a directory\n", 126)
+        return _not_run(f"{name}: Is a directory\n", CANNOT_EXECUTE_STATUS)
     if not os.access(path, os.X_OK):
-        return _not_run(f"{name}: Permission denied\n", 126)
+        return _not_run(f"{name}: Permission denied\n", CANNOT_EXECUTE_STATUS)
     return None
 
 
@@ -179,7 +182,9 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             # serves needs.
             found = await asyncio.to_thread(shutil.which, name)
             if found is None:
-                return _not_run(f"{name}: command not found\n", 127)
+                return _not_run(
+                    f"{name}: command not found\n", NOT_FOUND_STATUS
+                )
             # Absolute: a relative PATH entry names a file here, and the
             # program starts in the session's cwd.
             program = (
@@ -203,7 +208,9 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             reason = fs_strerror(exc) or errno.errorcode.get(
                 exc.errno or 0, str(exc)
             )
-            return _not_run(f"{name}: cannot execute: {reason}\n", 126)
+            return _not_run(
+                f"{name}: cannot execute: {reason}\n", CANNOT_EXECUTE_STATUS
+            )
 
     async def _spawn(
         self,

@@ -269,5 +269,3 @@ export function mirageTools(
 export function miragePlugin(ws: WsLike, options: MirageOpenCodeOptions = {}): Plugin {
   return () => Promise.resolve({ tool: mirageTools(ws, options) })
 }
-
-export { StaleMirageFileError } from '@struktoai/mirage-core/workspace/tools/file_version'

@@ -22,7 +22,7 @@ import {
   ARITH_PRECEDENCE,
   ARITH_UNARY_OPS,
 } from './constants.ts'
-import { ArithError, ReadonlyError, UnboundVariable } from './errors.ts'
+import { ArithError, ReadonlyVariableError, UnboundVariable } from './errors.ts'
 import type { ArithResult, ArithTokenKind, ArithWrite, ElementOps } from './types.ts'
 
 /**
@@ -483,7 +483,7 @@ function splitTarget(target: string): [string, string | null] {
  * made them. A variable's value and an indexed subscript are expressions
  * of their own, read in this same record (`x='y=5'; $((x))` leaves y at 5)
  * one level deeper. A write to a name `frozen` holds stops the evaluation
- * there (`ReadonlyError`). Mirrors Python's _Record.
+ * there (`ReadonlyVariableError`). Mirrors Python's _Record.
  */
 class ArithRecord {
   readonly updates = new Map<string, string>()
@@ -576,7 +576,7 @@ class ArithRecord {
   writeTarget(target: string, key: string | null, value: bigint, subscript: boolean): void {
     const [name] = splitTarget(target)
     const refused = this.frozen?.(name) ?? null
-    if (refused !== null) throw new ReadonlyError(refused, subscript)
+    if (refused !== null) throw new ReadonlyVariableError(refused, subscript)
     const text = value.toString()
     this.writes.push({ name, key, value: text })
     if (key !== null) {
@@ -605,8 +605,8 @@ class ArithRecord {
  * `nounset` is `set -u` for the names the expression reads: one that no
  * variable holds throws UnboundVariable instead of reading 0. `frozen`
  * names the readonly variable a write to a name reaches, through a
- * reference, or null: the evaluation stops there with ReadonlyError. An
- * ArithError or ReadonlyError carries the writes made before it. `added`
+ * reference, or null: the evaluation stops there with ReadonlyVariableError. An
+ * ArithError or ReadonlyVariableError carries the writes made before it. `added`
  * is a second expression read after `expr` in the same record and added to
  * it: an integer `+=`, whose held value and added text bash evaluates in
  * turn, the second seeing what the first assigned (`n='x=5'; n+=x` stores
@@ -628,7 +628,8 @@ export function evaluateArith(
     value = record.evaluate(expr, 0, false)
     if (added !== null) value = wrapInt64(value + record.evaluate(added, 0, false))
   } catch (err) {
-    if (err instanceof ArithError || err instanceof ReadonlyError) err.writes = [...record.writes]
+    if (err instanceof ArithError || err instanceof ReadonlyVariableError)
+      err.writes = [...record.writes]
     throw err
   }
   return { value, writes: record.writes }

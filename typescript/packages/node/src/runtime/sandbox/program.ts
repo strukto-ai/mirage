@@ -38,6 +38,7 @@ import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import { shellJoin } from '@struktoai/mirage-core/shell/join'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
 
 /**
  * Where the host's own PATH finds a program, as Python's `shutil.which`
@@ -479,7 +480,7 @@ export async function cwdRefusal(name: string, cwd: string): Promise<RunResult |
   return {
     stdout: new Uint8Array(),
     stderr: new TextEncoder().encode(`${name}: the working directory ${cwd} is not on this host\n`),
-    exitCode: 126,
+    exitCode: CANNOT_EXECUTE_STATUS,
   }
 }
 

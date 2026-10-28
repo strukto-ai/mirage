@@ -8,7 +8,7 @@ from mirage.commands.builtin.generic.find import (
 )
 from mirage.commands.builtin.generic.find import parse_find_args
 from mirage.commands.config import Context
-from mirage.commands.errors import FindParseError
+from mirage.commands.errors import UsageError
 from mirage.context.session_context import (
     bind_caller,
     current_caller,
@@ -81,9 +81,7 @@ def test_parse_find_args_reads_each_flag(kwargs, expected, filled):
 
 
 def test_parse_find_args_unknown_predicate_raises():
-    with pytest.raises(
-        FindParseError, match="find: unknown predicate '-bogus'"
-    ):
+    with pytest.raises(UsageError, match="find: unknown predicate '-bogus'"):
         parse_find_args(("-bogus",))
 
 
@@ -367,7 +365,7 @@ async def test_walk_find_time_test_before_prune_gates_it():
 def test_parse_find_args_invalid_numeric_raises_find_parse_error(
     kwargs, message
 ):
-    with pytest.raises(FindParseError) as exc:
+    with pytest.raises(UsageError) as exc:
         parse_find_args((), **kwargs)
     assert str(exc.value) == message
 

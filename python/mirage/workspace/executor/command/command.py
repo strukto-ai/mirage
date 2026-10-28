@@ -38,7 +38,7 @@ from mirage.commands.builtin.generic.program import (
 from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.cli.types import CLI
 from mirage.commands.cli.walk import invoked_env_names, supplied_env_names
-from mirage.commands.errors import FindParseError
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.builtins import is_builtin_grammar, registered_spec
 from mirage.commands.spec.constants import STANDARD_AFTER_SCAN
@@ -54,6 +54,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
+from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
 from mirage.view.types import StatPath
@@ -459,8 +460,10 @@ async def handle_command(
         err = encode_text(f"{typed}: command not found\n")
         return (
             None,
-            IOResult(exit_code=127, stderr=err),
-            ExecutionNode(command=cmd_str, exit_code=127, stderr=err),
+            IOResult(exit_code=NOT_FOUND_STATUS, stderr=err),
+            ExecutionNode(
+                command=cmd_str, exit_code=NOT_FOUND_STATUS, stderr=err
+            ),
         )
 
     async def run_tree(
@@ -696,13 +699,15 @@ async def handle_command(
         find_expr_tokens = find_expr_tail(raw_argv)
         try:
             find_expr = parse_find_expression(find_expr_tokens)
-        except FindParseError as exc:
+        except UsageError as exc:
             msg = f"{exc}\n"
             return (
                 None,
-                IOResult(exit_code=1, stderr=encode_text(msg)),
+                IOResult(exit_code=exc.exit_code, stderr=encode_text(msg)),
                 ExecutionNode(
-                    command=cmd_str, exit_code=1, stderr=encode_text(msg)
+                    command=cmd_str,
+                    exit_code=exc.exit_code,
+                    stderr=encode_text(msg),
                 ),
             )
         if find_expr.newer and dispatch is not None:
@@ -948,10 +953,10 @@ async def handle_command(
         return (
             None,
             IOResult(
-                exit_code=127,
+                exit_code=NOT_FOUND_STATUS,
                 stderr=encode_text(f"{cmd_name}: command not found"),
             ),
-            ExecutionNode(command=cmd_str, exit_code=127),
+            ExecutionNode(command=cmd_str, exit_code=NOT_FOUND_STATUS),
         )
 
     selected_tree = mount.cli_for(cmd_name)

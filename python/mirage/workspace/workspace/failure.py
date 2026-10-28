@@ -14,7 +14,7 @@
 
 import logging
 
-from mirage.commands.errors import FindParseError, UsageError
+from mirage.commands.errors import UsageError
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
@@ -25,6 +25,7 @@ from mirage.policy import (
     render_deny,
 )
 from mirage.shell.bytes import encode_text
+from mirage.shell.constants import TIMEOUT_STATUS
 from mirage.workspace.workspace.utils import command_name
 
 logger = logging.getLogger(__name__)
@@ -63,9 +64,9 @@ def failure_result(exc: BaseException, command: str) -> IOResult:
         command (str): the raw command line, for the diagnostic name.
     """
     if isinstance(exc, CommandTimeoutError):
-        return IOResult(exit_code=124, stderr=encode_text(str(exc) + "\n"))
-    if isinstance(exc, FindParseError):
-        return IOResult(exit_code=1, stderr=encode_text(f"{exc}\n"))
+        return IOResult(
+            exit_code=TIMEOUT_STATUS, stderr=encode_text(str(exc) + "\n")
+        )
     if isinstance(exc, UsageError):
         return IOResult(
             exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")

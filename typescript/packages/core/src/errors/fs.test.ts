@@ -41,6 +41,7 @@ import {
   noMount,
   readdirError,
   staleWrite,
+  strerrorOf,
   walkRefusal,
 } from './fs.ts'
 import { posixPhrase } from './posix.ts'
@@ -258,5 +259,20 @@ describe('isAborting', () => {
     expect(isAborting(makeAbortError())).toBe(true)
     expect(isAborting(new Error('upload refused: 503'))).toBe(false)
     expect(isAborting(enoent('/f'))).toBe(false)
+  })
+})
+
+describe('strerrorOf', () => {
+  it.each<[string, unknown, string]>([
+    [
+      'a named condition',
+      Object.assign(new Error('socket hang up'), { code: 'EIO' }),
+      'Input/output error',
+    ],
+    ['a path no mount owns', noMount('/nowhere/x'), 'No such file or directory'],
+    ['an unnamed error', new Error('upload refused: 503'), 'upload refused: 503'],
+    ['an error with no words', new RangeError(''), 'RangeError'],
+  ])('words %s', (_name, err, said) => {
+    expect(strerrorOf(err)).toBe(said)
   })
 })

@@ -24,7 +24,6 @@ from mirage.errors.types import (
     QuotaExceededError,
     ReadOnlyError,
 )
-from mirage.runtime.errors import CrossMountError
 from mirage.utils.path import CycleError
 
 
@@ -32,7 +31,6 @@ from mirage.utils.path import CycleError
     "exc,expected",
     [
         (CycleError("/a"), FsCondition.ELOOP),
-        (CrossMountError("/a/x", "/b/x"), FsCondition.EXDEV),
         (FileNotFoundError("/x"), FsCondition.ENOENT),
         (NotADirectoryError("/x"), FsCondition.ENOTDIR),
         (IsADirectoryError("/x"), FsCondition.EISDIR),

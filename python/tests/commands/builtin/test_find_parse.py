@@ -5,7 +5,7 @@ import pytest
 
 from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.builtin.types import ExecAction, PrintfAction, RowAction
-from mirage.commands.errors import FindParseError
+from mirage.commands.errors import UsageError
 from mirage.core.generic.find_eval import (
     Action,
     And,
@@ -197,7 +197,7 @@ def test_size_takes_uintmax_in_any_unit(unit, factor):
     ],
 )
 def test_size_refusals_use_gnu_wording(spec, message):
-    with pytest.raises(FindParseError) as exc:
+    with pytest.raises(UsageError) as exc:
         parse_find_expression(["-size", spec])
     assert str(exc.value) == message
 
@@ -207,14 +207,14 @@ def test_empty_expression_is_true():
 
 
 def test_unknown_predicate_raises():
-    with pytest.raises(FindParseError):
+    with pytest.raises(UsageError):
         parse_find_expression(["-bogus"])
-    with pytest.raises(FindParseError):
+    with pytest.raises(UsageError):
         parse_find_expression(["-regex", ".*"])
 
 
 def test_unbalanced_paren_raises():
-    with pytest.raises(FindParseError):
+    with pytest.raises(UsageError):
         parse_find_expression(["(", "-name", "a"])
 
 
@@ -233,7 +233,7 @@ def test_unbalanced_paren_raises():
     ],
 )
 def test_invalid_numeric_arg_raises_find_parse_error(tokens):
-    with pytest.raises(FindParseError):
+    with pytest.raises(UsageError):
         parse_find_expression(tokens)
 
 
@@ -251,7 +251,7 @@ def _ent(name="a", kind="f"):
     ],
 )
 def test_unsupported_predicate_raises(tokens):
-    with pytest.raises(FindParseError, match="unknown predicate"):
+    with pytest.raises(UsageError, match="unknown predicate"):
         parse_find_expression(tokens)
 
 
@@ -301,7 +301,7 @@ def test_prune_with_delete_is_gnus_refusal():
         "-prune does nothing when -depth is in effect.  If you want "
         "to carry on anyway, just explicitly use the -depth option."
     )
-    with pytest.raises(FindParseError) as exc:
+    with pytest.raises(UsageError) as exc:
         parse_find_expression(
             ["-path", "./skip", "-prune", "-o", "-name", "*.tmp", "-delete"]
         )
@@ -328,19 +328,19 @@ def test_valid_type_letters_accepted(ftype):
 
 @pytest.mark.parametrize("ftype", ["x", "z", "dir"])
 def test_invalid_type_letter_raises(ftype):
-    with pytest.raises(FindParseError):
+    with pytest.raises(UsageError):
         parse_find_expression(["-type", ftype])
 
 
 def test_deeply_nested_expression_raises_not_recursion_error():
     tokens = ["("] * 500 + ["-name", "x"] + [")"] * 500
-    with pytest.raises(FindParseError):
+    with pytest.raises(UsageError):
         parse_find_expression(tokens)
 
 
 def test_deeply_nested_not_raises_not_recursion_error():
     tokens = ["-not"] * 500 + ["-name", "x"]
-    with pytest.raises(FindParseError):
+    with pytest.raises(UsageError):
         parse_find_expression(tokens)
 
 
@@ -364,7 +364,7 @@ def test_operator_with_nothing_after_it_names_the_operator(tokens, op):
     # start point, so find printed the whole tree and blamed a missing
     # path instead.
     with pytest.raises(
-        FindParseError, match=f"^find: expected an expression after '{op}'$"
+        UsageError, match=f"^find: expected an expression after '{op}'$"
     ):
         parse_find_expression(tokens)
 
@@ -382,7 +382,7 @@ def test_operator_with_nothing_after_it_names_the_operator(tokens, op):
 )
 def test_operator_closed_by_paren_names_both(tokens, op):
     with pytest.raises(
-        FindParseError,
+        UsageError,
         match=f"^find: expected an expression between '{op}' and '\\)'$",
     ):
         parse_find_expression(tokens)
@@ -394,7 +394,7 @@ def test_printf_stores_format_on_its_action():
 
 
 def test_printf_missing_argument():
-    with pytest.raises(FindParseError, match="missing argument to '-printf'"):
+    with pytest.raises(UsageError, match="missing argument to '-printf'"):
         parse_find_expression(["-printf"])
 
 
@@ -439,7 +439,7 @@ def test_printf_runs_beside_other_actions_in_order(tokens, actions):
 
 
 def test_printf_formats_under_or_must_agree():
-    with pytest.raises(FindParseError) as exc:
+    with pytest.raises(UsageError) as exc:
         parse_find_expression(
             ["-name", "a", "-printf", "A", "-o", "-name", "b", "-printf", "B"]
         )
@@ -531,7 +531,7 @@ def test_exec_per_match_and_batched():
     ],
 )
 def test_exec_and_newer_refusals(tokens, message):
-    with pytest.raises(FindParseError, match=re.escape(message)):
+    with pytest.raises(UsageError, match=re.escape(message)):
         parse_find_expression(tokens)
 
 
@@ -627,7 +627,7 @@ def test_one_action_may_end_any_arm():
 def test_positional_actions_that_could_fire_twice_or_differ_are_refused(
     tokens, message
 ):
-    with pytest.raises(FindParseError) as exc:
+    with pytest.raises(UsageError) as exc:
         parse_find_expression(tokens)
     assert str(exc.value) == message
 
@@ -733,7 +733,7 @@ def test_newermt_accepts_an_epoch_timestamp():
 )
 def test_predicate_after_action_is_refused(action, test):
     with pytest.raises(
-        FindParseError, match="tests after actions are not supported"
+        UsageError, match="tests after actions are not supported"
     ):
         parse_find_expression(action + test)
 
@@ -784,7 +784,7 @@ def test_row_actions_may_end_an_arm(action, position):
     ],
 )
 def test_newermt_rejects_invalid_calendar_fields(value):
-    with pytest.raises(FindParseError, match="I cannot figure out"):
+    with pytest.raises(UsageError, match="I cannot figure out"):
         parse_find_expression(["-newermt", value])
 
 
@@ -834,7 +834,7 @@ def test_newermt_rejects_invalid_calendar_fields(value):
     ],
 )
 def test_newer_placement_refusals(tokens, message):
-    with pytest.raises(FindParseError) as exc:
+    with pytest.raises(UsageError) as exc:
         parse_find_expression(tokens)
     assert str(exc.value) == message
 

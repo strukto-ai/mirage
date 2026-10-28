@@ -24,6 +24,7 @@ import { resolvePathStat } from '../../../../commands/builtin/utils/paths.ts'
 import { toScope } from '../scope.ts'
 import type { Result } from '../types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
+import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../../../../shell/constants.ts'
 
 /**
  * A diagnostic from a shell that never got as far as running.
@@ -119,7 +120,10 @@ export async function readScriptFile(
   try {
     const data = await readScriptBytes(dispatch, path, session.cwd)
     if (isBinary(data)) {
-      return [null, scriptError(path, `${path}: cannot execute binary file`, 126, name)]
+      return [
+        null,
+        scriptError(path, `${path}: cannot execute binary file`, CANNOT_EXECUTE_STATUS, name),
+      ]
     }
     return [decodeText(data), null]
   } catch (exc) {
@@ -129,8 +133,15 @@ export async function readScriptFile(
     if (strerror === null) throw exc
     const code = (exc as { code?: string }).code
     if (code === 'EISDIR') {
-      return [null, scriptError(path, `${path}: ${strerror}`, 126, name)]
+      return [null, scriptError(path, `${path}: ${strerror}`, CANNOT_EXECUTE_STATUS, name)]
     }
-    return [null, scriptError(name, `${path}: ${strerror}`, code === 'ENOENT' ? 127 : 126)]
+    return [
+      null,
+      scriptError(
+        name,
+        `${path}: ${strerror}`,
+        code === 'ENOENT' ? NOT_FOUND_STATUS : CANNOT_EXECUTE_STATUS,
+      ),
+    ]
   }
 }

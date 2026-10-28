@@ -21,7 +21,6 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.constants import LISTING_ENTRY_CONCURRENCY
-from mirage.runtime.errors import CrossMountError
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import parse_mode
 from mirage.runtime.resolver import PrefixResolver
@@ -153,10 +152,10 @@ def test_a_longer_mount_still_wins_over_the_root_one():
 
 def test_rename_across_mounts_is_refused_before_any_dispatch():
     vfs = RecordingVFS(prefixes=["/data/", "/other/"])
-    with pytest.raises(CrossMountError) as exc:
+    with pytest.raises(OSError) as exc:
         vfs.rename("/data/a.txt", "/other/a.txt")
-    assert exc.value.src == "/data/a.txt"
-    assert exc.value.dst == "/other/a.txt"
+    assert exc.value.errno == errno.EXDEV
+    assert exc.value.filename == "/data/a.txt"
     assert vfs.calls == []
 
 

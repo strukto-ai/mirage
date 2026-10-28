@@ -153,6 +153,18 @@ export const IFS_DEFAULT = ' \t\n'
 export const FORK_FAILED = 'bash: fork: Resource temporarily unavailable\n'
 export const FORK_FAILED_STATUS = 254
 
+// The statuses a command ends with when it did not run its course, as bash
+// and coreutils report them: GNU timeout's 124 (also a line past its timeout
+// budget), 126 for a command found but refused (not executable, a policy
+// deny, a runtime that would not take it, an argument list too long), 127 for
+// one not found, and 128 + the signal for an interrupt (SIGINT) or a write to
+// a closed pipe (SIGPIPE).
+export const TIMEOUT_STATUS = 124
+export const CANNOT_EXECUTE_STATUS = 126
+export const NOT_FOUND_STATUS = 127
+export const INTERRUPTED_STATUS = 130
+export const SIGPIPE_STATUS = 141
+
 // Node types whose failure never triggers `set -e` by shape alone.
 // Lists are NOT exempt: bash exits when the command after the final
 // `&&`/`||` fails; short-circuit failures set SessionState.errexitImmune

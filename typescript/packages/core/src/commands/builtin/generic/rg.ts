@@ -20,7 +20,8 @@ import type { MountView } from '../../../view/types.ts'
 import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { enoent, isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { UsageError, WalkLimitError } from '../../errors.ts'
+import { UsageError } from '../../errors.ts'
+import { WalkLimitError } from '../../../errors/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import type { FlagValue, ParsedFlagValue } from '../../spec/types.ts'
@@ -56,6 +57,7 @@ import { type LinkResolver, linkResolver, mountsOf, dispatchOf, mountRoot } from
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
 
 const ENC = new TextEncoder()
 // ripgrep's own words for a line with no pattern, exit 2 (14.1.1).
@@ -64,9 +66,6 @@ export const RG_NO_PATTERN = 'rg: ripgrep requires at least one pattern to execu
 // refusal in (14.1.1).
 const GZIP_NAMES = ['.gz', '.tgz']
 const GZIP_RULE = '-'.repeat(79)
-// The status a line answers for a command it cannot find, which ripgrep
-// reports as a --pre command that could not start.
-const COMMAND_NOT_FOUND = 127
 // What ripgrep says when a line that named no path searched nothing, exit 2
 // (14.1.1).
 export const NOTHING_SEARCHED =
@@ -1170,7 +1169,7 @@ async function preprocessed(
   const shown = [command, path].map((word) => `"${word}"`).join(' ')
   const head = `rg: ${name}: preprocessor command`
   const io = shell === undefined ? null : await shell(shellJoin([command, path]), data)
-  if (io === null || io.exitCode === COMMAND_NOT_FOUND)
+  if (io === null || io.exitCode === NOT_FOUND_STATUS)
     return [
       new Uint8Array(),
       `${head} could not start: '${shown}': No such file or directory (os error 2)`,

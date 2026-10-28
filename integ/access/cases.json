@@ -143,7 +143,7 @@
     {"id": "edit_replaces_every_occurrence", "input": {"tool": "edit", "arguments": {"path": "/src/a.py", "old_string": "e", "new_string": "E", "replace_all": true}}, "expect": {"text": "Edited: /src/a.py (3 occurrence(s))", "is_error": false}},
     {"id": "shell_sees_the_edit", "input": {"tool": "shell", "arguments": {"command": "cat /src/a.py /src/b.txt"}}, "expect": {"text": "NEEdlE\nhay\npin\n", "is_error": false}},
     {"id": "shell_moves_a_file_underneath", "input": {"tool": "shell", "arguments": {"command": "echo moved > /src/b.txt"}}, "expect": {"text": "", "is_error": false}},
-    {"id": "edit_refuses_a_stale_file", "input": {"tool": "edit", "arguments": {"path": "/src/b.txt", "old_string": "moved", "new_string": "x"}}, "expect": {"text": "Error: File changed since it was last read: /src/b.txt. Read the file again before modifying it.", "is_error": true}},
+    {"id": "edit_refuses_a_stale_file", "input": {"tool": "edit", "arguments": {"path": "/src/b.txt", "old_string": "moved", "new_string": "x"}}, "expect": {"text": "Error: /src/b.txt: changed since it was read; read it again before writing", "is_error": true}},
     {"id": "shell_links_a_file", "input": {"tool": "shell", "arguments": {"command": "ln -s /src/a.py /src/link.py"}}, "expect": {"text": "", "is_error": false}},
     {"id": "glob_follows_a_link_to_a_file", "input": {"tool": "glob", "arguments": {"pattern": "*.py", "path": "/src"}}, "expect": {"text": "/src/a.py\n/src/link.py\n", "is_error": false}},
     {"id": "shell_moves_into_a_directory", "input": {"tool": "shell", "arguments": {"command": "cd /src/deep"}}, "expect": {"text": "", "is_error": false}},

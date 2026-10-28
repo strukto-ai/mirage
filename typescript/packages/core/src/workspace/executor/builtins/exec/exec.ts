@@ -19,7 +19,15 @@ import { PipeClosed } from '../../../../io/errors.ts'
 import { IOResult, materialize, PipeStream } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../../../shell/constants.ts'
+import {
+  FD_BOTH,
+  FD_CLOSE,
+  FD_STDERR,
+  FD_STDIN,
+  FD_STDOUT,
+  NOT_FOUND_STATUS,
+  SIGPIPE_STATUS,
+} from '../../../../shell/constants.ts'
 import {
   FileDescription,
   FileInput,
@@ -99,7 +107,7 @@ export async function handleExecCommand(
   if (head === undefined || executeFn === null || registry === null)
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
   const [missing, shadowed] = await programHead(head, session, registry, session.cwd, null)
-  if (missing) throw new ExitSignal(127, builtinError('exec', `${head}: not found`))
+  if (missing) throw new ExitSignal(NOT_FOUND_STATUS, builtinError('exec', `${head}: not found`))
   const line =
     (scan.letters.includes('c') ? 'env -i ' : '') + (shadowed ? 'command ' : '') + shellJoin(words)
   clearTraps(session)
@@ -495,8 +503,8 @@ export async function divertStatement(
         (await answerClosed(io, (said, more) => routed(dispatch, session, said, more, rest)))
       )
         break
-      if (!writerForks(statement, session, io)) throw new ExitSignal(141)
-      io.exitCode = 141
+      if (!writerForks(statement, session, io)) throw new ExitSignal(SIGPIPE_STATUS)
+      io.exitCode = SIGPIPE_STATUS
       break
     }
     if (refused) {

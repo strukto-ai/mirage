@@ -53,6 +53,7 @@ import {
 } from './constants.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { NOT_FOUND_STATUS, TIMEOUT_STATUS } from '../../../../shell/constants.ts'
 
 const SYNOPSIS = 'timeout [OPTION] DURATION COMMAND [ARG]...'
 
@@ -321,7 +322,7 @@ export async function handleTimeout(
   if (seconds === null) return usageError(`invalid time interval '${quoteText(raw)}'`)
   const name = command[0] ?? ''
   if (registry !== null && !execs(name, session, registry)) {
-    return refuse(encodeText(timeoutMissing(name)), 127)
+    return refuse(encodeText(timeoutMissing(name)), NOT_FOUND_STATUS)
   }
 
   const sink = new JobConsole()
@@ -440,12 +441,12 @@ async function supervise(
         say(SIGKILL)
         return await stop(said, 137)
       }
-      return await ended(sink, held, said, how.preserve ? late.exitCode : 124, true)
+      return await ended(sink, held, said, how.preserve ? late.exitCode : TIMEOUT_STATUS, true)
     }
     if (SELF_KILLING_SIGNALS.has(signal) && (!foreground || signal === SIGKILL)) {
       return await stop(said, 128 + signal)
     }
-    return await stop(said, how.preserve ? 128 + signal : 124)
+    return await stop(said, how.preserve ? 128 + signal : TIMEOUT_STATUS)
   } finally {
     kill.cancel()
   }

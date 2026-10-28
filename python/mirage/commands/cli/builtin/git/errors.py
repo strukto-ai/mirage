@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.constants import HELP_EXIT
+from mirage.commands.cli.constants import HELP_EXIT, USAGE_EXIT
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 
@@ -21,10 +21,6 @@ from mirage.errors.types import FsCondition
 # applies to a thrown handler error. Leaves therefore return this
 # code themselves rather than raising into the dispatcher's catch-all.
 FATAL_EXIT = 128
-# git's parse-options refuses a bad option with 129, not the 128 it uses
-# for a fatal. Both appear below, which is git's own split rather than
-# ours: `git log --zzz` is 128 and `git diff --zzz` is 129.
-OPTION_EXIT = 129
 # git closes each of these with a line naming the config knob that
 # turns it off. Kept verbatim so the advice reads the same whether an
 # agent hit real git or this one.
@@ -45,7 +41,7 @@ ADVICE_REF_SYNTAX = (
 class GitError(Exception):
     """Base for a git fatal: rendered as ``fatal: <message>``, exit 128.
 
-    Subclasses override ``prefix``, ``code`` and ``stream`` when git
+    Subclasses override ``prefix``, ``exit_code`` and ``stream`` when git
     words their case differently, so every verb can keep one
     ``except GitError`` arm and the rendering stays in one place. A None
     prefix prints the message alone, which is what git does when the
@@ -60,7 +56,7 @@ class GitError(Exception):
     """
 
     prefix: str | None = "fatal"
-    code = FATAL_EXIT
+    exit_code = FATAL_EXIT
     stream = "stderr"
     report = ""
 
@@ -503,7 +499,7 @@ class IgnoredPathsError(GitError):
     """
 
     prefix = None
-    code = 1
+    exit_code = 1
 
     def __init__(self, paths: list[str]) -> None:
         listed = "\n".join(sorted(paths))
@@ -564,7 +560,7 @@ class NothingSpecifiedError(GitError):
     """
 
     prefix = None
-    code = 0
+    exit_code = 0
 
     def __init__(self) -> None:
         super().__init__(
@@ -654,7 +650,7 @@ class CheckedOutBranchError(GitError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
     def __init__(self, name: str, worktree: str) -> None:
         super().__init__(
@@ -680,7 +676,7 @@ class UnmergedBranchError(GitError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
     def __init__(self, name: str) -> None:
         super().__init__(
@@ -698,7 +694,7 @@ class NoBranchError(GitError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
     def __init__(self, name: str) -> None:
         super().__init__(f"branch '{name}' not found")
@@ -720,7 +716,7 @@ class UnknownPathspecError(GitError):
     prefix = "error"
 
     def __init__(self, target: str, fatal: bool = False) -> None:
-        self.code = FATAL_EXIT if fatal else 1
+        self.exit_code = FATAL_EXIT if fatal else 1
         super().__init__(
             f"pathspec '{target}' did not match any file(s) known to git"
         )
@@ -766,7 +762,7 @@ class CheckoutConflictError(GitError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
     def __init__(
         self,
@@ -827,7 +823,7 @@ class ResolveIndexError(GitError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
     def __init__(self, paths: list[str]) -> None:
         self.report = "".join(
@@ -853,7 +849,7 @@ class UnmergedPathError(GitError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
     def __init__(self, paths: list[str]) -> None:
         # git emits each path as its own error, so every line after the
@@ -881,13 +877,13 @@ class UsageError(GitError):
     """
 
     prefix = None
-    code = OPTION_EXIT
+    exit_code = USAGE_EXIT
 
     def __init__(self, shown: str, refused: str) -> None:
         super().__init__((refused or shown).removesuffix("\n"))
         self.stream = "stderr" if refused else "stdout"
         if not refused:
-            self.code = HELP_EXIT
+            self.exit_code = HELP_EXIT
 
 
 class UnknownSubcommandError(UsageError):
@@ -1014,7 +1010,7 @@ class RemovalRefusedError(GitError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
     def __init__(
         self, both: list[str], staged: list[str], local: list[str]
@@ -1286,7 +1282,7 @@ class TagNotFoundError(GitError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
     def __init__(self, name: str) -> None:
         super().__init__(f"tag '{name}' not found.")
@@ -1331,7 +1327,7 @@ class RefUpdateConflictError(GitError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
     def __init__(self, ref: str) -> None:
         super().__init__(
@@ -1389,7 +1385,7 @@ class SymbolicRefLockError(RefLockError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
 
 class NotASymbolicRefError(GitError):
@@ -1472,7 +1468,7 @@ class BadRefNameUpdateError(GitError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
     def __init__(self, name: str) -> None:
         super().__init__(f"refusing to update ref with bad name '{name}'")
@@ -1537,7 +1533,7 @@ class IncompatibleOptionsError(GitError):
     """
 
     prefix = "error"
-    code = OPTION_EXIT
+    exit_code = USAGE_EXIT
 
     def __init__(self, first: str, second: str) -> None:
         super().__init__(
@@ -1773,7 +1769,7 @@ class SymbolicRefReadOnlyError(RefReadOnlyError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
 
 class RefDeleteReadOnlyError(GitError):
@@ -1786,7 +1782,7 @@ class RefDeleteReadOnlyError(GitError):
     """
 
     prefix = "error"
-    code = 1
+    exit_code = 1
 
     def __init__(self, ref: str, path: str) -> None:
         super().__init__(
@@ -1849,7 +1845,7 @@ class FetchHeadReadOnlyError(GitError):
     """
 
     prefix = "error"
-    code = 255
+    exit_code = 255
 
     def __init__(self, path: str) -> None:
         super().__init__(f"cannot open '{path}': Read-only file system")
@@ -1865,7 +1861,7 @@ class InitReadOnlyError(GitError):
     """
 
     prefix = None
-    code = 1
+    exit_code = 1
 
     def __init__(self, path: str) -> None:
         super().__init__(f"{path}: Read-only file system")
@@ -1952,7 +1948,7 @@ class MalformedObjectError(GitError):
     """
 
     prefix = "error"
-    code = OPTION_EXIT
+    exit_code = USAGE_EXIT
 
     def __init__(self, name: str, quoted: bool = False) -> None:
         shown = f"'{name}'" if quoted else name
@@ -1989,7 +1985,7 @@ class NotACommitError(GitError):
     """
 
     prefix = "error"
-    code = OPTION_EXIT
+    exit_code = USAGE_EXIT
 
     def __init__(self, sha: str, kind: str, reason: str) -> None:
         super().__init__(
@@ -2062,7 +2058,7 @@ class FormatUsageError(GitError):
     """
 
     prefix = "error"
-    code = OPTION_EXIT
+    exit_code = USAGE_EXIT
 
 
 class UnparsableFormatError(GitError):

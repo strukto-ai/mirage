@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { HELP_EXIT } from '../../constants.ts'
+import { HELP_EXIT, USAGE_EXIT } from '../../constants.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import type { FsCondition } from '../../../../errors/types.ts'
 
@@ -22,10 +22,6 @@ import type { FsCondition } from '../../../../errors/types.ts'
 // handler error. Leaves therefore return this code themselves rather than
 // throwing into the dispatcher's catch-all.
 export const FATAL_EXIT = 128
-// git's parse-options refuses a bad option with 129, not the 128 it uses for a
-// fatal. Both appear below, which is git's own split rather than ours:
-// `git log --zzz` is 128 and `git diff --zzz` is 129.
-const OPTION_EXIT = 129
 // git closes each of these with a line naming the config knob that turns it
 // off. Kept verbatim so the advice reads the same whether an agent hit real git
 // or this one.
@@ -39,7 +35,7 @@ const ADVICE_REF_SYNTAX = 'hint: Disable this message with "git config set advic
 /**
  * Base for a git fatal: rendered as `fatal: <message>`, exit 128.
  *
- * Subclasses override `prefix`, `code` and `stream` when git words their case
+ * Subclasses override `prefix`, `exitCode` and `stream` when git words their case
  * differently, so every verb can keep one `instanceof GitError` arm and the
  * rendering stays in one place. A null prefix prints the message alone, which is
  * what git does when the refusal is a report rather than an error ("nothing to
@@ -53,7 +49,7 @@ const ADVICE_REF_SYNTAX = 'hint: Disable this message with "git config set advic
  */
 export class GitError extends Error {
   readonly prefix: string | null = 'fatal'
-  readonly code: number = FATAL_EXIT
+  readonly exitCode: number = FATAL_EXIT
   readonly stream: 'stdout' | 'stderr' = 'stderr'
   readonly report: string = ''
 }
@@ -216,13 +212,13 @@ export class RefReadOnlyError extends GitError {
 /** `symbolic-ref`'s ref transaction refused by a read-only mount, an `error` exiting 1. */
 export class SymbolicRefReadOnlyError extends RefReadOnlyError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 }
 
 /** A ref a read-only mount will not let `branch -d` or `tag -d` delete. */
 export class RefDeleteReadOnlyError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(ref: string, path: string) {
     super(
@@ -270,7 +266,7 @@ export class CloneReadOnlyError extends GitError {
 /** `fetch` refused by a read-only mount, at FETCH_HEAD; git exits 255. */
 export class FetchHeadReadOnlyError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 255
+  override readonly exitCode = 255
 
   constructor(path: string) {
     super(`cannot open '${path}': Read-only file system`)
@@ -283,7 +279,7 @@ export class FetchHeadReadOnlyError extends GitError {
  */
 export class InitReadOnlyError extends GitError {
   override readonly prefix = null
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(path: string) {
     super(`${path}: Read-only file system`)
@@ -630,7 +626,7 @@ export class UnsupportedPathspecError extends GitError {
  */
 export class IgnoredPathsError extends GitError {
   override readonly prefix = null
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(paths: readonly string[]) {
     const listed = [...paths].sort(compareCodePoints).join('\n')
@@ -677,7 +673,7 @@ export class UnhashableFileError extends GitError {
  */
 export class NothingSpecifiedError extends GitError {
   override readonly prefix = null
-  override readonly code = 0
+  override readonly exitCode = 0
 
   constructor() {
     super(
@@ -739,7 +735,7 @@ export class BranchNameRequiredError extends GitError {
 /** `branch -d` naming the branch HEAD is on. */
 export class CheckedOutBranchError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(name: string, worktree: string) {
     super(`cannot delete branch '${name}' used by worktree at '${worktree}'`)
@@ -760,7 +756,7 @@ export class CheckedOutBranchError extends GitError {
  */
 export class UnmergedBranchError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(name: string) {
     super(
@@ -773,7 +769,7 @@ export class UnmergedBranchError extends GitError {
 /** A branch name that resolves to nothing. */
 export class NoBranchError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(name: string) {
     super(`branch '${name}' not found`)
@@ -789,11 +785,11 @@ export class NoBranchError extends GitError {
  */
 export class UnknownPathspecError extends GitError {
   override readonly prefix = 'error'
-  override readonly code: number
+  override readonly exitCode: number
 
   constructor(target: string, fatal = false) {
     super(`pathspec '${target}' did not match any file(s) known to git`)
-    this.code = fatal ? FATAL_EXIT : 1
+    this.exitCode = fatal ? FATAL_EXIT : 1
   }
 }
 
@@ -828,7 +824,7 @@ function conflictBlock(header: string, paths: readonly string[], advice = ''): s
  */
 export class CheckoutConflictError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(
     local: readonly string[],
@@ -884,7 +880,7 @@ export class CheckoutConflictError extends GitError {
  */
 export class ResolveIndexError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
   override readonly report: string
 
   constructor(paths: readonly string[]) {
@@ -910,7 +906,7 @@ export class ResolveIndexError extends GitError {
  */
 export class UnmergedPathError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(paths: readonly string[]) {
     // git emits each path as its own error, so every line after the first
@@ -935,7 +931,7 @@ export class UnmergedPathError extends GitError {
  */
 export class UsageError extends GitError {
   override readonly prefix = null
-  override readonly code: number
+  override readonly exitCode: number
   override readonly stream: 'stdout' | 'stderr'
 
   /**
@@ -945,7 +941,7 @@ export class UsageError extends GitError {
   constructor(shown: string, refused: string) {
     super((refused !== '' ? refused : shown).replace(/\n$/, ''))
     this.stream = refused !== '' ? 'stderr' : 'stdout'
-    this.code = refused !== '' ? OPTION_EXIT : HELP_EXIT
+    this.exitCode = refused !== '' ? USAGE_EXIT : HELP_EXIT
   }
 }
 
@@ -1042,7 +1038,7 @@ function removalBlock(wording: [string, string, string], paths: readonly string[
  */
 export class RemovalRefusedError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(both: readonly string[], staged: readonly string[], local: readonly string[]) {
     const blocks: string[] = []
@@ -1236,7 +1232,7 @@ export class TagExistsError extends GitError {
  */
 export class TagNotFoundError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(name: string) {
     super(`tag '${name}' not found.`)
@@ -1276,7 +1272,7 @@ export class ListModeOnlyError extends GitError {
  */
 export class RefUpdateConflictError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(ref: string) {
     super(`could not delete references: multiple updates for ref '${ref}' not allowed`)
@@ -1314,7 +1310,7 @@ export class BrokenHeadError extends GitError {
  */
 export class SymbolicRefLockError extends RefLockError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 }
 
 /** `symbolic-ref` naming a ref that holds an object id, or nothing at all. */
@@ -1375,7 +1371,7 @@ export class EmptyUpdateMessageError extends GitError {
  */
 export class BadRefNameUpdateError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly exitCode = 1
 
   constructor(name: string) {
     super(`refusing to update ref with bad name '${name}'`)
@@ -1419,7 +1415,7 @@ export class MissingTagMessageError extends GitError {
 /** Two options git refuses to take together. */
 export class IncompatibleOptionsError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = OPTION_EXIT
+  override readonly exitCode = USAGE_EXIT
 
   constructor(first: string, second: string) {
     super(`options '${first}' and '${second}' cannot be used together`)
@@ -1458,7 +1454,7 @@ export class InvalidDecorateError extends GitError {
  */
 export class MalformedObjectError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = OPTION_EXIT
+  override readonly exitCode = USAGE_EXIT
 
   constructor(name: string, quoted = false) {
     super(`malformed object name ${quoted ? `'${name}'` : name}`)
@@ -1486,7 +1482,7 @@ export class MalformedMergeFilterError extends GitError {
  */
 export class NotACommitError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = OPTION_EXIT
+  override readonly exitCode = USAGE_EXIT
 
   constructor(oid: string, type: string, reason: string) {
     super(`object ${oid} is a ${type}, not a commit\nerror: ${reason}`)
@@ -1540,7 +1536,7 @@ export class UnsupportedFieldError extends GitError {
  */
 export class FormatUsageError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = OPTION_EXIT
+  override readonly exitCode = USAGE_EXIT
 }
 
 /**

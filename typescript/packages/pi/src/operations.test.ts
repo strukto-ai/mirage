@@ -94,9 +94,10 @@ describe('mirageOperations.edit', () => {
     await ops.read.readFile('/f.txt')
     await ws.vfs.write('/f.txt', 'changed elsewhere')
 
-    await expect(ops.edit.readFile('/f.txt')).rejects.toThrow(
-      'File changed since it was last read: /f.txt',
-    )
+    await expect(ops.edit.readFile('/f.txt')).rejects.toMatchObject({
+      code: 'STALE_WRITE',
+      virtualPath: '/f.txt',
+    })
 
     await ops.read.readFile('/f.txt')
     expect((await ops.edit.readFile('/f.txt')).toString()).toBe('changed elsewhere')
@@ -110,7 +111,7 @@ describe('mirageOperations.edit', () => {
     await ws.vfs.write('/f.txt', 'changed elsewhere')
 
     await expect(ops.edit.writeFile('/f.txt', 'replacement')).rejects.toThrow(
-      'Read the file again before modifying it',
+      'changed since it was read; read it again before writing',
     )
     expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('changed elsewhere')
   })
@@ -125,7 +126,7 @@ describe('mirageOperations stale write protection', () => {
     await ws.vfs.write('/f.txt', 'changed elsewhere')
 
     await expect(ops.write.writeFile('/f.txt', 'replacement')).rejects.toThrow(
-      'Read the file again before modifying it',
+      'changed since it was read; read it again before writing',
     )
     expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('changed elsewhere')
   })

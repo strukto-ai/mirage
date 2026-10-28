@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { openStream } from '../../rs/stream.ts'
-import { SortKeyError } from './errors.ts'
+import { UsageError } from '../errors.ts'
 import { SORT_RUN_BYTES, streamConfig } from './generic/sort.ts'
 import { buildConfig, type KeyMods, parseKeydef, type SortConfig } from './sort_keys.ts'
 
@@ -151,11 +151,11 @@ describe('parseKeydef', () => {
   })
 
   it('zero field throws', () => {
-    expect(() => parseKeydef('0', G, false)).toThrow(SortKeyError)
+    expect(() => parseKeydef('0', G, false)).toThrow(UsageError)
   })
 
   it('unknown ordering letter throws', () => {
-    expect(() => parseKeydef('2x', G, false)).toThrow(SortKeyError)
+    expect(() => parseKeydef('2x', G, false)).toThrow(UsageError)
   })
 
   it('h is an ordering letter', () => {
@@ -209,7 +209,7 @@ describe('a refused keydef in GNU words', () => {
     ['1\nx', "stray character in field spec: invalid field specification '1\\nx'"],
     ['1é', "stray character in field spec: invalid field specification '1\\303\\251'"],
   ])('%j', (spec, message) => {
-    expect(() => parseKeydef(spec, G, false)).toThrow(new SortKeyError(message))
+    expect(() => parseKeydef(spec, G, false)).toThrow(new UsageError(`sort: ${message}`))
   })
 })
 
@@ -230,7 +230,7 @@ describe('ordering compatibility', () => {
     [{ d: true, M: true }, 'dM'],
   ])('the global options %j are the one key', (flags, letters) => {
     expect(() => configOf(flags)).toThrow(
-      new SortKeyError(`options '-${letters}' are incompatible`),
+      new UsageError(`sort: options '-${letters}' are incompatible`),
     )
   })
 
@@ -247,16 +247,16 @@ describe('ordering compatibility', () => {
     [['1n', '2gh'], 'gh'],
   ])('each key is checked in the order typed: %j', (k, letters) => {
     expect(() => configOf({ k })).toThrow(
-      new SortKeyError(`options '-${letters}' are incompatible`),
+      new UsageError(`sort: options '-${letters}' are incompatible`),
     )
   })
 
   it('a key without letters inherits the conflict', () => {
     expect(() => configOf({ k: ['1,1'], n: true, g: true })).toThrow(
-      new SortKeyError("options '-gn' are incompatible"),
+      new UsageError("sort: options '-gn' are incompatible"),
     )
     expect(() => configOf({ k: ['1'], n: true, d: true })).toThrow(
-      new SortKeyError("options '-dn' are incompatible"),
+      new UsageError("sort: options '-dn' are incompatible"),
     )
   })
 

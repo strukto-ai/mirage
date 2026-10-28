@@ -40,6 +40,7 @@ import {
 import { EBADF, EINVAL, ELOOP, ENOENT, ENOTDIR, EPIPE, ESPIPE, LINK_REFUSAL, OK } from './errors.ts'
 import { packDirent } from './list.ts'
 import { filetypeOf, packFdstat, packFilestat, packPrestat } from './stat.ts'
+import { INTERRUPTED_STATUS } from '../../shell/constants.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -396,8 +397,8 @@ export class WasiFs {
     const soonest = events.reduce((least, [at]) => (at < least ? at : least), events[0]?.[0] ?? now)
     const delay = soonest - clockNs(1)
     if (this.wait(delay > 0n ? Number(delay / 1_000_000n) : 0)) {
-      this.exitCode = 130
-      throw new GuestExit(130)
+      this.exitCode = INTERRUPTED_STATUS
+      throw new GuestExit(INTERRUPTED_STATUS)
     }
     const after = clockNs(1)
     const ready = events.filter(([at]) => at <= after).map(([, event]) => event)

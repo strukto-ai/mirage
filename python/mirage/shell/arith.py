@@ -26,7 +26,11 @@ from mirage.shell.constants import (
     ARITH_UNARY_OPS,
     ARITH_WRAP,
 )
-from mirage.shell.errors import ArithError, ReadonlyError, UnboundVariable
+from mirage.shell.errors import (
+    ArithError,
+    ReadonlyVariableError,
+    UnboundVariable,
+)
 from mirage.shell.types import (
     ArithResult,
     ArithTokenKind,
@@ -562,7 +566,7 @@ class _ArithRecord:
     and an indexed subscript are expressions of their own, read in this
     same record (``x='y=5'; $((x))`` leaves y at 5) one level deeper. A
     write to a name ``frozen`` holds stops the evaluation there
-    (``ReadonlyError``).
+    (``ReadonlyVariableError``).
 
     Args:
         env (Mapping[str, str]): variable environment for reads.
@@ -723,7 +727,7 @@ class _ArithRecord:
         name = _split_target(target)[0]
         refused = self.frozen(name) if self.frozen is not None else None
         if refused is not None:
-            raise ReadonlyError(refused, subscript)
+            raise ReadonlyVariableError(refused, subscript)
         text = str(value)
         self.writes.append(ArithWrite(name, key, text))
         if key is not None:
@@ -792,7 +796,7 @@ def evaluate_arith(
     Raises:
         ArithError: bash's arithmetic error line; its ``writes`` are the
             assignments made before it.
-        ReadonlyError: an assignment named a ``frozen`` name; the
+        ReadonlyVariableError: an assignment named a ``frozen`` name; the
             evaluation stopped there.
     """
     record = _ArithRecord(env, elements, read_var, wrote_var, nounset, frozen)
@@ -800,7 +804,7 @@ def evaluate_arith(
         value = record.evaluate(expr, 0, False)
         if added is not None:
             value = wrap_int64(value + record.evaluate(added, 0, False))
-    except (ArithError, ReadonlyError) as exc:
+    except (ArithError, ReadonlyVariableError) as exc:
         exc.writes = tuple(record.writes)
         raise
     return ArithResult(value, tuple(record.writes))

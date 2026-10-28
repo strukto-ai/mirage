@@ -54,8 +54,9 @@ from mirage.shell.console import JobConsole
 from mirage.shell.constants import (
     FORK_FAILED,
     FORK_FAILED_STATUS,
+    SIGPIPE_STATUS,
 )
-from mirage.shell.errors import ArithError, ExitSignal, ReadonlyError
+from mirage.shell.errors import ArithError, ExitSignal, ReadonlyVariableError
 from mirage.shell.helpers import (
     command_redirects,
     get_case_items,
@@ -177,7 +178,7 @@ async def _eval_cfor_expr(
     Raises:
         ArithError: the slot did not evaluate; the loop prints it as
             bash's ``((: expr: reason`` diagnostic.
-        ReadonlyError: the expression assigns to a readonly variable,
+        ReadonlyVariableError: the expression assigns to a readonly variable,
             which aborts the loop the same way an invalid expression
             does; the writes before it have landed.
         ExitSignal: that assignment was inside a subscript.
@@ -188,7 +189,7 @@ async def _eval_cfor_expr(
     text = await _slot_text(exprs, context, execute_fn, call_stack, view)
     try:
         return await landed_arith(context.session, view, text)
-    except ReadonlyError as exc:
+    except ReadonlyVariableError as exc:
         if exc.in_subscript:
             raise exc.signal() from exc
         raise
@@ -1328,8 +1329,10 @@ async def _execute_node(
                 raise
             return (
                 None,
-                IOResult(exit_code=141),
-                ExecutionNode(command=get_text(node), exit_code=141),
+                IOResult(exit_code=SIGPIPE_STATUS),
+                ExecutionNode(
+                    command=get_text(node), exit_code=SIGPIPE_STATUS
+                ),
             )
 
     if kind == NodeKind.PIPELINE:
@@ -1449,7 +1452,7 @@ async def _execute_node(
             value = await landed_arith(session, view, expr)
         except PolicyDenied as exc:
             return fail(text, f"bash: {exc.strerror}\n")
-        except (ArithError, ReadonlyError) as exc:
+        except (ArithError, ReadonlyVariableError) as exc:
             if exc.in_subscript:
                 raise exc.signal() from exc
             voice = "((: " if isinstance(exc, ArithError) else ""

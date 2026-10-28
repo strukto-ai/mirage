@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { evaluate, treeHasAction } from '../../core/generic/find_eval.ts'
-import { FindParseError } from '../errors.ts'
+import { UsageError } from '../errors.ts'
 import { parseFindExpression } from './find_parse.ts'
 
 describe('parseFindExpression', () => {
@@ -210,7 +210,7 @@ describe('parseFindExpression', () => {
     ['+18446744073709551616', "find: Invalid argument `+18446744073709551616' to -size"],
     [' 18446744073709551616', "find: Invalid argument ` 18446744073709551616' to -size"],
   ])('refuses -size %j in GNU wording', (spec, message) => {
-    expect(() => parseFindExpression(['-size', spec])).toThrow(new FindParseError(message))
+    expect(() => parseFindExpression(['-size', spec])).toThrow(new UsageError(message, 1))
   })
 
   it('empty expression is true', () => {
@@ -218,8 +218,8 @@ describe('parseFindExpression', () => {
   })
 
   it('throws on unknown / unbalanced', () => {
-    expect(() => parseFindExpression(['-bogus'])).toThrow(FindParseError)
-    expect(() => parseFindExpression(['(', '-name', 'a'])).toThrow(FindParseError)
+    expect(() => parseFindExpression(['-bogus'])).toThrow(UsageError)
+    expect(() => parseFindExpression(['(', '-name', 'a'])).toThrow(UsageError)
   })
 
   it('lets one -exec end any arm and refuses what could run twice or differ', () => {
@@ -294,19 +294,19 @@ describe('parseFindExpression', () => {
     })
   })
 
-  it('throws FindParseError on invalid numeric / size args', () => {
-    expect(() => parseFindExpression(['-maxdepth', 'abc'])).toThrow(FindParseError)
-    expect(() => parseFindExpression(['-mindepth', 'x'])).toThrow(FindParseError)
-    expect(() => parseFindExpression(['-size', ''])).toThrow(FindParseError)
-    expect(() => parseFindExpression(['-size', 'abc'])).toThrow(FindParseError)
-    expect(() => parseFindExpression(['-mtime', ''])).toThrow(FindParseError)
+  it('throws UsageError on invalid numeric / size args', () => {
+    expect(() => parseFindExpression(['-maxdepth', 'abc'])).toThrow(UsageError)
+    expect(() => parseFindExpression(['-mindepth', 'x'])).toThrow(UsageError)
+    expect(() => parseFindExpression(['-size', ''])).toThrow(UsageError)
+    expect(() => parseFindExpression(['-size', 'abc'])).toThrow(UsageError)
+    expect(() => parseFindExpression(['-mtime', ''])).toThrow(UsageError)
   })
 
   it('refuses trailing garbage after the digits', () => {
-    expect(() => parseFindExpression(['-maxdepth', '12abc'])).toThrow(FindParseError)
-    expect(() => parseFindExpression(['-mindepth', '2x'])).toThrow(FindParseError)
-    expect(() => parseFindExpression(['-size', '12ab'])).toThrow(FindParseError)
-    expect(() => parseFindExpression(['-mtime', '3x'])).toThrow(FindParseError)
+    expect(() => parseFindExpression(['-maxdepth', '12abc'])).toThrow(UsageError)
+    expect(() => parseFindExpression(['-mindepth', '2x'])).toThrow(UsageError)
+    expect(() => parseFindExpression(['-size', '12ab'])).toThrow(UsageError)
+    expect(() => parseFindExpression(['-mtime', '3x'])).toThrow(UsageError)
   })
 
   it('throws on unsupported predicates', () => {
@@ -324,16 +324,16 @@ describe('parseFindExpression', () => {
       expect(parseFindExpression(['-type', t]).tree).toEqual({ op: 'type', kind: t })
     }
     for (const bad of ['x', 'z', 'dir']) {
-      expect(() => parseFindExpression(['-type', bad])).toThrow(FindParseError)
+      expect(() => parseFindExpression(['-type', bad])).toThrow(UsageError)
     }
   })
 
   it('throws (not stack-overflow) on deeply nested expressions', () => {
     const open: string[] = Array.from({ length: 500 }, () => '(')
     const close: string[] = Array.from({ length: 500 }, () => ')')
-    expect(() => parseFindExpression([...open, '-name', 'x', ...close])).toThrow(FindParseError)
+    expect(() => parseFindExpression([...open, '-name', 'x', ...close])).toThrow(UsageError)
     const nots: string[] = Array.from({ length: 500 }, () => '-not')
-    expect(() => parseFindExpression([...nots, '-name', 'x'])).toThrow(FindParseError)
+    expect(() => parseFindExpression([...nots, '-name', 'x'])).toThrow(UsageError)
   })
 
   // GNU findutils 4.10.0, pinned on debian:stable-slim. Reachable only

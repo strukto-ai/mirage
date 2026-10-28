@@ -12,23 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fsError } from '../../errors/fs.ts'
+import { posixPhrase } from '../../errors/posix.ts'
 import { type Files, readerOf } from '../files.ts'
 import { posixNormpath, resolvePath } from '../../utils/path.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
-
-/**
- * Thrown when a write or edit targets a file that changed after the agent
- * last read it; `path` names the file.
- */
-export class StaleMirageFileError extends Error {
-  readonly path: string
-
-  constructor(path: string) {
-    super(`File changed since it was last read: ${path}. Read the file again before modifying it.`)
-    this.name = 'StaleMirageFileError'
-    this.path = path
-  }
-}
 
 /**
  * Version stamp for one file's stored bytes.
@@ -95,7 +83,8 @@ export class FileVersionTracker {
 
   private async assertVersion(path: string, expected: string): Promise<void> {
     if ((await this.currentVersion(path)) !== expected) {
-      throw new StaleMirageFileError(path)
+      // The tool adapters pass the message on whole, so it says what happened.
+      throw fsError(path, 'STALE_WRITE', `${path}: ${posixPhrase('STALE_WRITE')}`)
     }
   }
 
@@ -153,7 +142,7 @@ export class FileVersionTracker {
     const version = await fingerprint(content)
     const readVersion = this.readVersions.get(key)
     if (readVersion !== undefined && readVersion !== version) {
-      throw new StaleMirageFileError(path)
+      throw fsError(path, 'STALE_WRITE', `${path}: ${posixPhrase('STALE_WRITE')}`)
     }
     this.editVersions.set(key, version)
     return content

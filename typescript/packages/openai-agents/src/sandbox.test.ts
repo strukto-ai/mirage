@@ -24,8 +24,9 @@ import { ScriptedModel, assistantMessage, functionCall } from '@openai/agents/te
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
-import { INTERRUPT, INTERRUPTED_EXIT_CODE, NO_STDIN } from './constants.ts'
+import { INTERRUPT, NO_STDIN } from './constants.ts'
 import { MirageSandboxClient, combinedOutput } from './sandbox.ts'
+import { INTERRUPTED_STATUS } from '@struktoai/mirage-core/shell/constants'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -255,7 +256,7 @@ describe('MirageSandboxClient', () => {
       sessionId: started.sessionId ?? -1,
       chars: INTERRUPT,
     })
-    expect(stopped).toContain(`Process exited with code ${String(INTERRUPTED_EXIT_CODE)}`)
+    expect(stopped).toContain(`Process exited with code ${String(INTERRUPTED_STATUS)}`)
   })
 
   it('refuses stdin for a background command', async () => {

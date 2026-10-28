@@ -45,7 +45,7 @@ import {
   requireVfs,
 } from './util.ts'
 import { gitOptionRefusal, gitUsage, leafRefusal } from '../../refusal.ts'
-import { GIT_LONG_OPTIONS } from '../../constants.ts'
+import { GIT_LONG_OPTIONS, USAGE_EXIT } from '../../constants.ts'
 import { isBare } from './discover.ts'
 import type { RepoLocation } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
@@ -295,7 +295,10 @@ export async function config(
   if (!listing && !texts.length)
     return [
       null,
-      new IOResult({ exitCode: 129, stderr: ENC.encode('error: wrong number of arguments\n') }),
+      new IOResult({
+        exitCode: USAGE_EXIT,
+        stderr: ENC.encode('error: wrong number of arguments\n'),
+      }),
     ]
   const key = texts[0] ?? ''
   // git matches keys by the locale: bytes in C, characters in UTF-8.

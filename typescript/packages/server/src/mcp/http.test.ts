@@ -121,7 +121,7 @@ describe('the MCP endpoint over HTTP', () => {
       old_string: 'external',
       new_string: 'x',
     })
-    expect(stale).toContain('changed since it was last read')
+    expect(stale).toContain('changed since it was read')
   })
 
   it('answers an unknown workspace or session with 404', async () => {

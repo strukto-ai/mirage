@@ -96,6 +96,7 @@
                   "home/access/rpc",
                   "home/access/ssh",
                   "home/access/cli",
+                  "home/access/errors",
                   {
                     "group": "FUSE",
                     "icon": "folder-open",

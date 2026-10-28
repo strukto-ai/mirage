@@ -29,13 +29,12 @@ from mirage.context.session_context import (
     calls_as,
     current_caller,
 )
-from mirage.errors.fs import ebadf, einval, eloop, numbered
+from mirage.errors.fs import ebadf, einval, eloop, exdev, numbered
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io import IOResult, OpReport
 from mirage.mount.core import MountCore
 from mirage.runtime.binding import CallerResolver, WorkspaceBinding
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
-from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.resolver import MountResolver
@@ -910,10 +909,10 @@ class RuntimeFiles:
             dst (str): guest-absolute destination path.
 
         Raises:
-            CrossMountError: the two ends resolve to different mounts.
+            OSError: EXDEV, the two ends resolve to different mounts.
         """
         if self.mount_of(src) != self.mount_of(dst):
-            raise CrossMountError(src, dst)
+            raise exdev(src)
         if self._core is None:
             self.call("rename", src, dst=PathSpec.from_str_path(dst, cwd="/"))
             return

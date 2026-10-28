@@ -116,7 +116,7 @@ async def test_a_read_guards_the_next_requests_edit(tmp_path):
             {"path": "/a.txt", "old_string": "external", "new_string": "x"},
         )
     assert stale.is_error is True
-    assert "changed since it was last read" in stale.content[0].text
+    assert "changed since it was read" in stale.content[0].text
 
 
 @pytest.mark.asyncio

@@ -16,7 +16,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { GitHubAccount } from '../../../../accessor/github.ts'
 import { GitHubApiError, type GitHubTransport } from '../../../../core/github/client.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
-import { PartialOutputError, UsageError } from '../../../errors.ts'
+import { UsageError } from '../../../errors.ts'
+import { StreamRefusal } from '../../../../rs/errors.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { crc32 } from '../../../../utils/compress.ts'
 import { runViewCmd, workflowViewCmd } from './actions.ts'
@@ -231,10 +232,10 @@ describe('gh run view --log', () => {
     ROUTES.set(`GET ${RUN}/logs`, storedZip([]))
     ROUTES.set('GET /repos/o/r/actions/jobs/1/logs', 'from the api\n')
     const failure = runViewCmd(...args(['7'], { log: true }))
-    await expect(failure).rejects.toThrow(PartialOutputError)
+    await expect(failure).rejects.toThrow(StreamRefusal)
     await expect(failure).rejects.toMatchObject({
       message: 'log not found: 2',
-      stdout: ENC.encode('a\tUNKNOWN STEP\tfrom the api\n'),
+      output: ENC.encode('a\tUNKNOWN STEP\tfrom the api\n'),
     })
   })
 

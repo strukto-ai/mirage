@@ -106,6 +106,7 @@ import { ExecutionNode } from '../types.ts'
 import { concat } from '../../utils/bytes.ts'
 import type { ExpandedWords } from './types.ts'
 import { WORD_BREAKS } from '../../shell/parse/constants.ts'
+import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -439,8 +440,8 @@ export async function executeCommand(
     const stderr = argumentListTooLong(name, err.reason)
     return [
       null,
-      new IOResult({ exitCode: 126, stderr }),
-      new ExecutionNode({ command: name, exitCode: 126, stderr }),
+      new IOResult({ exitCode: CANNOT_EXECUTE_STATUS, stderr }),
+      new ExecutionNode({ command: name, exitCode: CANNOT_EXECUTE_STATUS, stderr }),
     ]
   } finally {
     const frames = session.localFrames

@@ -191,8 +191,5 @@ OPERAND_CONCURRENCY = 4
 # Where mktemp creates a name when neither -p nor TMPDIR says.
 FALLBACK_TMPDIR = "/tmp"
 
-# The status of a command SIGPIPE ended, as a shell reports it (128 + 13).
-SIGPIPE_EXIT = 141
-
 # The one name every host answers with; hostname and uname -n print it.
 HOSTNAME = "mirage"

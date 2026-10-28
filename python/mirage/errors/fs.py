@@ -432,19 +432,20 @@ def fs_strerror(exc: BaseException) -> str | None:
 
 
 def strerror_of(exc: BaseException) -> str:
-    """The reason a failed write's line ends with, whatever raised it.
+    """What a diagnostic says about a failure, whatever raised it.
 
-    The shared phrase for a filesystem condition, the kernel's words for
-    any other ``OSError``, and a store's own error (an SDK's, an HTTP
-    status on upload) by its message, the only cause it carries. Mirrors
-    TS ``strerrorOf``.
+    The strerror text for a condition the vocabulary names (EIO reads
+    ``Input/output error``, a path no mount owns ``No such file or
+    directory``), the kernel's words for any other ``OSError``, and a
+    store's own error (an SDK's, an HTTP status on upload) by its
+    message, the only cause it carries. Mirrors TS ``strerrorOf``.
 
     Args:
         exc (BaseException): the failure.
     """
-    phrase = fs_strerror(exc)
-    if phrase is not None:
-        return phrase
+    condition = classify(exc)
+    if condition is not None:
+        return posix_phrase(condition)
     if isinstance(exc, OSError) and exc.strerror:
         return exc.strerror
     return str(exc) or type(exc).__name__

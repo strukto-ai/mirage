@@ -15,12 +15,12 @@
 import { classify } from '../../../errors/classify.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { isEnotdir, isFsError } from '../../../errors/fs.ts'
-import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
+import { type FsCondition, type WalkDeclinedError, WalkLimitError } from '../../../errors/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import type { MountView } from '../../../view/types.ts'
-import { WalkLimitError, UsageError } from '../../errors.ts'
+import { UsageError } from '../../errors.ts'
 
 // The conditions under which a guard's path reaches no directory to walk.
 const NO_DIRECTORY: ReadonlySet<FsCondition> = new Set(['ENOENT', 'ENOTDIR', 'ELOOP'])

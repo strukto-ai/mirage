@@ -62,16 +62,18 @@ from mirage.commands.builtin.utils.wrap import (
     to_pathspec,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError, WalkLimitError
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import walk_refusal
+from mirage.errors.types import WalkLimitError
 from mirage.io.stream import close_quietly, yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.shell.join import shell_join
 from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
 from mirage.utils.compress import GzipDataError, gunzip_stream
@@ -84,9 +86,6 @@ logger = logging.getLogger(__name__)
 # refusal in (14.1.1).
 GZIP_NAMES = (".gz", ".tgz")
 GZIP_RULE = "-" * 79
-# The status a line answers for a command it cannot find, which ripgrep
-# reports as a --pre command that could not start.
-COMMAND_NOT_FOUND = 127
 # ripgrep's own words for a line with no pattern, exit 2 (14.1.1).
 RG_NO_PATTERN = "rg: ripgrep requires at least one pattern to execute a search"
 # What ripgrep says when a line that named no path searched nothing,
@@ -1510,7 +1509,7 @@ async def preprocessed(
     shown = " ".join(f'"{word}"' for word in (command, path))
     head = f"rg: {name}: preprocessor command"
     io = await shell(shell_join([command, path]), data) if shell else None
-    if io is None or io.exit_code == COMMAND_NOT_FOUND:
+    if io is None or io.exit_code == NOT_FOUND_STATUS:
         return b"", (
             f"{head} could not start: '{shown}': No such file or directory "
             "(os error 2)"

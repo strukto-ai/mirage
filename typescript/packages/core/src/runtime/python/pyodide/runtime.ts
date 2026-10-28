@@ -49,6 +49,7 @@ import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import { KEYS, type PyodideConfig } from './config.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
 import type { HostStdio } from './worker/types.ts'
+import { CANNOT_EXECUTE_STATUS } from '../../../shell/constants.ts'
 
 /**
  * The run's streams on the main thread: its input taken as the guest
@@ -841,7 +842,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
           `mirage: the ${this.name} runtime cannot run with a mount at '${hiding}', ` +
             `which hides the interpreter's standard library at /lib\n`,
         ),
-        exitCode: 126,
+        exitCode: CANNOT_EXECUTE_STATUS,
       }
     }
     const worker = await this.ensureWorker(files)

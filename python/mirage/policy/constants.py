@@ -16,10 +16,6 @@ from typing import get_args
 
 from mirage.policy.types import ScriptMethod
 
-# A whole-command refusal exits as bash does for a command it found but
-# may not run.
-POLICY_DENIED_EXIT = 126
-
 # The reason a bare command pattern under ``commands.deny`` carries, and
 # the one a bare pattern under ``commands.ask`` carries.
 DEFAULT_DENY_REASON = "denied by policy"

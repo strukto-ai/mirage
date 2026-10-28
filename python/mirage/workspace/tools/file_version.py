@@ -16,17 +16,9 @@ import base64
 import hashlib
 import posixpath
 
+from mirage.errors.fs import stale_write
 from mirage.utils.path import resolve_path
 from mirage.workspace.files import Files, reader_of
-
-
-class StaleMirageFileError(Exception):
-    def __init__(self, path: str) -> None:
-        super().__init__(
-            f"File changed since it was last read: {path}. "
-            f"Read the file again before modifying it."
-        )
-        self.path = path
 
 
 def fingerprint(content: bytes) -> str:
@@ -100,7 +92,7 @@ class FileVersionTracker:
 
     async def _assert_version(self, path: str, expected: str) -> None:
         if await self._current_version(path) != expected:
-            raise StaleMirageFileError(path)
+            raise stale_write(path)
 
     async def _record_write(self, path: str, key: str) -> None:
         # Stamp what a later read will return, not the bytes handed in.
@@ -172,7 +164,7 @@ class FileVersionTracker:
             bytes: The stored bytes.
 
         Raises:
-            StaleMirageFileError: The file moved since it was last read.
+            StaleWriteError: The file moved since it was last read.
         """
         content = await self.vfs.read(path)
         if not self._enabled:
@@ -181,7 +173,7 @@ class FileVersionTracker:
         version = fingerprint(content)
         read_version = self._read_versions.get(key)
         if read_version is not None and read_version != version:
-            raise StaleMirageFileError(path)
+            raise stale_write(path)
         self._edit_versions[key] = version
         return content
 
@@ -193,7 +185,7 @@ class FileVersionTracker:
             content (str): Text to write.
 
         Raises:
-            StaleMirageFileError: The file moved since it was last read.
+            StaleWriteError: The file moved since it was last read.
         """
         key = self._key(path)
         if self._enabled:
@@ -213,7 +205,7 @@ class FileVersionTracker:
             content (str): Text to write.
 
         Raises:
-            StaleMirageFileError: The file moved since it was read for edit.
+            StaleWriteError: The file moved since it was read for edit.
         """
         key = self._key(path)
         if self._enabled:
