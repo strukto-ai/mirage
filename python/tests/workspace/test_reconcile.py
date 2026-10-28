@@ -539,22 +539,17 @@ async def test_fresh_s3_relist_keeps_deletion_baseline_after_stat():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("shared", [False, True])
 @pytest.mark.parametrize("redis", [False, True])
 @pytest.mark.parametrize("replacement", [False, True])
-async def test_relist_preserves_nested_mount_subtree(
-    shared, redis, replacement
-):
+async def test_relist_preserves_nested_mount_subtree(redis, replacement):
     config = IndexConfig(ttl=600)
     if redis:
         url = os.environ.get("REDIS_URL")
         if not url:
             pytest.skip("REDIS_URL not set")
         config = RedisIndexConfig(url=url, key_prefix=f"nested:{uuid4()}:")
-    parent = RAMVFS()
     ws = Workspace(
-        {"/data": parent, "/data/sub/nested": parent if shared else RAMVFS()},
-        index=config,
+        {"/data": RAMVFS(), "/data/sub/nested": RAMVFS()}, index=config
     )
     try:
         await ws.namespace.ensure_loaded()

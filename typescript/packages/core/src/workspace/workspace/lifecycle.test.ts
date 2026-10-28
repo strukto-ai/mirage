@@ -348,16 +348,14 @@ it.each([
 )
 
 it.each(
-  [null, 'initial', 'dynamic'].flatMap((alias) =>
-    ['op', 'command', 'df'].flatMap((surface) =>
-      (surface === 'df' ? [false] : [false, true]).flatMap((streaming) =>
-        [false, true].map((borrowed) => ({ alias, streaming, surface, borrowed })),
-      ),
+  ['op', 'command', 'df'].flatMap((surface) =>
+    (surface === 'df' ? [false] : [false, true]).flatMap((streaming) =>
+      [false, true].map((borrowed) => ({ streaming, surface, borrowed })),
     ),
   ),
 )(
-  'unmount waits for admitted VFS use ($surface, streaming=$streaming, alias=$alias, borrowed=$borrowed)',
-  async ({ surface, streaming, alias, borrowed }) => {
+  'unmount waits for admitted VFS use ($surface, streaming=$streaming, borrowed=$borrowed)',
+  async ({ surface, streaming, borrowed }) => {
     const vfs = new RAMVFS()
     let entered = (): void => undefined
     let resume = (): void => undefined
@@ -385,10 +383,8 @@ it.each(
       return new TextEncoder().encode('value')
     }
     const mounts: Record<string, RAMVFS> = { '/data': vfs }
-    if (alias === 'initial') mounts['/alias'] = vfs
     const owner = new Workspace(mounts)
     const ws = borrowed ? await Workspace.fromState(await toStateDict(owner), {}, mounts) : owner
-    if (alias === 'dynamic') ws.addMount('/alias', vfs)
     vi.spyOn(vfs, 'capacity').mockImplementation(async () => {
       entered()
       await release
@@ -437,18 +433,12 @@ it.each(
     let removing: Promise<void> | undefined
     try {
       await started
-      if (alias) {
-        await ws.unmount('/data')
-        expect(closed).toBe(false)
-        expect(indexClosed).toBe(false)
-      }
       let removed = false
-      const prefix = alias ? '/alias' : '/data'
-      removing = ws.unmount(prefix).then(() => {
+      removing = ws.unmount('/data').then(() => {
         removed = true
       })
       await vi.waitFor(() => {
-        expect(ws.registry.tryMountForPrefix(prefix)).toBeNull()
+        expect(ws.registry.tryMountForPrefix('/data')).toBeNull()
       })
       expect(removed).toBe(false)
       expect(closed).toBe(false)

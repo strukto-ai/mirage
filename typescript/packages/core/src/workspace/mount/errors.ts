@@ -20,14 +20,6 @@ export class WritePolicyError extends Error {
   }
 }
 
-/** Overrides hand one saved VFS different VFSs, leaving a prefix without one. Mirrors Python's `MountOverrideError`. */
-export class MountOverrideError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'MountOverrideError'
-  }
-}
-
 /** A mount would expose storage another mount of the workspace already does. Mirrors Python's `SharedStorageError`. */
 export class SharedStorageError extends Error {
   constructor(prefix: string, existing: string, location: string | null) {

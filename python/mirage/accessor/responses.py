@@ -47,7 +47,8 @@ class ResponseCache(Generic[K, V]):
 
     def govern(self, read: ReadSpec) -> None:
         """Keep answers no longer than a mount's read policy allows. A
-        client mounted at several prefixes keeps the strictest.
+        client governed by several mounts (other workspaces, CLI
+        installs) keeps the strictest.
 
         Args:
             read (ReadSpec): the mount's read policy.

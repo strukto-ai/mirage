@@ -320,48 +320,6 @@ async def test_a_clone_runs_on_the_source_clock():
         await src.close()
 
 
-@pytest.mark.asyncio
-async def test_an_override_for_one_prefix_moves_its_whole_store():
-    shared = SlackVFS(SlackConfig(token="xoxb-secret"))
-    src = Workspace(
-        {
-            "/a": Mount(vfs=shared, vfs_ref="slack"),
-            "/b": Mount(vfs=shared, vfs_ref="slack"),
-        }
-    )
-    try:
-        cloned = await clone_workspace_with_override(
-            src, {"mounts": {"/b": {"vfs": "ram"}}}
-        )
-        try:
-            assert cloned.mount("/a").vfs is cloned.mount("/b").vfs
-            assert isinstance(cloned.mount("/a").vfs, RAMVFS)
-            assert cloned.mount("/a").vfs_ref == "ram"
-            again = await cloned.copy()
-            await again.close()
-        finally:
-            await cloned.close()
-    finally:
-        await src.close()
-
-
-@pytest.mark.asyncio
-async def test_an_override_for_a_prefix_the_source_lacks_moves_nothing():
-    shared = SlackVFS(SlackConfig(token="xoxb-secret"))
-    src = Workspace({"/a": shared, "/b": shared})
-    try:
-        cloned = await clone_workspace_with_override(
-            src, {"mounts": {"/new": {"vfs": "ram"}}}
-        )
-        try:
-            assert cloned.mount("/a").vfs is shared
-            assert cloned.mount("/b").vfs is shared
-        finally:
-            await cloned.close()
-    finally:
-        await src.close()
-
-
 class LiveRAM(RAMVFS):
     """A RAM VFS that asks to be handed back live."""
 
@@ -372,25 +330,10 @@ class LiveRAM(RAMVFS):
 async def _root_on_live(live: type[RAMVFS] = LiveRAM) -> Workspace:
     ws = Workspace({"/a": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        ws.add_mount("/x", ws.mount("/").vfs, mode=MountMode.WRITE)
         state = await to_state_dict(ws)
     finally:
         await ws.close()
-    return await Workspace.from_state(state, mounts={"/x": live()})
-
-
-@pytest.mark.asyncio
-async def test_a_clone_keeps_a_shared_scratch_root_the_scratch_root():
-    src = await _root_on_live()
-    try:
-        cloned = await clone_workspace_with_override(src, None)
-        try:
-            assert cloned.mount("/").vfs is src.mount("/x").vfs
-            assert not cloned.vfs.is_mounted("/tmp/x")
-        finally:
-            await cloned.close()
-    finally:
-        await src.close()
+    return await Workspace.from_state(state, mounts={"/": live()})
 
 
 class ConfigOnlyRAM(RAMVFS):
@@ -405,33 +348,15 @@ class ConfigOnlyRAM(RAMVFS):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("live", [LiveRAM, ConfigOnlyRAM])
-async def test_a_clone_shares_a_scratch_root_left_alone_on_a_live_vfs(live):
+async def test_a_clone_shares_a_scratch_root_on_a_live_vfs(live):
     src = await _root_on_live(live)
     try:
-        assert (await src.shell("echo hi > /x/f")).exit_code == 0
-        await src.unmount("/x")
+        assert (await src.shell("echo hi > /f")).exit_code == 0
         cloned = await clone_workspace_with_override(src, None)
         try:
             assert cloned.mount("/").vfs is src.mount("/").vfs
             assert await (await cloned.shell("cat /f")).stdout_str() == "hi\n"
             assert not cloned.vfs.is_mounted("/tmp/x")
-        finally:
-            await cloned.close()
-    finally:
-        await src.close()
-
-
-@pytest.mark.asyncio
-async def test_a_clone_rebuilds_a_vfs_whose_later_label_is_unresolvable():
-    shared = RAMVFS()
-    src = Workspace(
-        {"/a": shared, "/b": Mount(vfs=shared, vfs_ref="nosuch:Thing")}
-    )
-    try:
-        cloned = await clone_workspace_with_override(src, None)
-        try:
-            assert cloned.mount("/a").vfs is cloned.mount("/b").vfs
-            assert cloned.mount("/a").vfs is not shared
         finally:
             await cloned.close()
     finally:

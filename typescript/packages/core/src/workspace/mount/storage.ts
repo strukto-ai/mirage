@@ -23,8 +23,7 @@ import { writeConditions } from './write_policy.ts'
 
 // A driver that knows where its bytes live (a disk root, a bucket and key
 // prefix) says so through `storageLocation`; one that does not is its own
-// location, keyed by identity, so one object mounted at two prefixes keys
-// as one store rather than two. Mirrors Python's `vfs_storage_location`.
+// location, keyed by identity. Mirrors Python's `vfs_storage_location`.
 const OWN_LOCATION = new WeakMap<BaseVFS, string>()
 let ownLocations = 0
 

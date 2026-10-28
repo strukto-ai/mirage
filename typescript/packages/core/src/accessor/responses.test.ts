@@ -57,7 +57,7 @@ describe('ResponseCache', () => {
 
   it('keeps the strictest bound', async () => {
     // The client's own bound when it is shorter, and the shorter of two
-    // mounts' bounds for a client mounted twice.
+    // mounts' bounds for a client several mounts govern.
     vi.useFakeTimers({ now: 0 })
     const answer = service()
     const cache = new ResponseCache<string, number>(5)

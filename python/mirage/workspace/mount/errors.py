@@ -17,10 +17,6 @@ class WritePolicyError(ValueError):
     """A write policy a mount or snapshot cannot take, refused at load."""
 
 
-class MountOverrideError(ValueError):
-    """Overrides hand one saved VFS different VFSs, leaving a prefix without one."""
-
-
 class SharedStorageError(ValueError):
     """A mount would expose storage another mount of the workspace already does."""
 

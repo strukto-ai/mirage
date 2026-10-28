@@ -25,9 +25,7 @@ import type { IdSource } from '../../utils/ids.ts'
  *
  * A mount builds one when it is placed, from the workspace or mount
  * `index` config when there is one and from the driver's own `indexTtl`
- * otherwise. Two mounts of one driver instance share the store the first
- * one built; that sharing is the registry's. Mirrors Python
- * `cache/index/factory.py`.
+ * otherwise. Mirrors Python `cache/index/factory.py`.
  *
  * @param config the configured store, or undefined for a RAM store at the driver's TTL
  * @param ttl the driver's `indexTtl`, read when `config` is undefined

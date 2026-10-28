@@ -823,19 +823,17 @@ async def test_copy_preserves_live_box_mount_policy_and_provenance():
                 read=ReadSpec(policy=ReadPolicy.FRESH, ttl=45),
                 vfs_ref="box",
             ),
-            "/alias": Mount(vfs=vfs, read=ReadSpec(ttl=75), vfs_ref="box"),
         }
     )
     clone = await ws.copy()
     try:
-        for prefix in ("/box", "/alias"):
-            original, copied = ws.mount(prefix), clone.mount(prefix)
-            assert copied.read == original.read
-            assert copied.mode == original.mode
-            assert copied.vfs_ref == original.vfs_ref == "box"
-            assert copied.vfs is original.vfs
-            assert copied.index_store is not original.index_store
-            assert copied.cache_manager is not original.cache_manager
+        original, copied = ws.mount("/box"), clone.mount("/box")
+        assert copied.read == original.read
+        assert copied.mode == original.mode
+        assert copied.vfs_ref == original.vfs_ref == "box"
+        assert copied.vfs is original.vfs
+        assert copied.index_store is not original.index_store
+        assert copied.cache_manager is not original.cache_manager
     finally:
         await clone.close()
         await ws.close()

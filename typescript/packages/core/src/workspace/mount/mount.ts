@@ -324,8 +324,7 @@ export interface MountInit {
   /** Whether this mount's writes carry the version they were based on. */
   write?: WritePolicy
   // The store this mount runs its driver under; the registry builds
-  // one, shared with any alias of the same instance. A bare entry gets
-  // a RAM store at the driver's TTL.
+  // one. A bare entry gets a RAM store at the driver's TTL.
   index?: IndexCacheStore
   indexConfig?: IndexConfig | undefined
   // Whether indexConfig is the workspace's, not one given to this mount.

@@ -96,9 +96,9 @@ export class Reconciler {
   }
 
   // Drop what the backend no longer vouches for at `path` as a remove drops
-  // it (CacheManager.invalidate), under this mount's name only: its body, its
-  // own listing, its row in its parent's and what is cached below a folder,
-  // not every listing the mount holds. `keep`: the probe's backend answer
+  // it (CacheManager.invalidate): its body, its own listing, its row in its
+  // parent's and what is cached below a folder, not every listing the mount
+  // holds. `keep`: the probe's backend answer
   // still stands, so the command's own stat of `path` reuses it past the
   // drop.
   private async drop(mount: MountEntry, path: string, keep = false): Promise<void> {
@@ -110,7 +110,6 @@ export class Reconciler {
     const scope = scopeOf(mount, path)
     await manager.invalidate(scope, FileChangeKind.DELETE, null, {
       probed: keep ? manager.probedStat(scope) : null,
-      own: true,
     })
   }
 

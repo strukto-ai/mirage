@@ -292,20 +292,6 @@ describe('object-store write fingerprint (mocked S3)', () => {
     }
   })
 
-  it('a write drops what another mount of the store holds', async () => {
-    // One store mounted at two prefixes holds one file under two names, so
-    // the second write leaves no copy of the first under either.
-    const vfs = new S3VFS(makeConfig())
-    const ws = new Workspace({ '/a': vfs, '/b': vfs }, { mode: MountMode.WRITE, read: BOUNDED })
-    try {
-      await ws.vfs.write('/a/f', ENC.encode('one'))
-      await ws.vfs.write('/b/f', ENC.encode('two'))
-      expect(DEC.decode(await ws.vfs.read('/a/f'))).toBe('two')
-    } finally {
-      await ws.close()
-    }
-  })
-
   it('a write keeps nothing for a name a new mount took', async () => {
     // A mount added and readied (its cache cleared) while the write runs
     // owns the name by the time the bytes would be kept, so the next read
@@ -323,25 +309,6 @@ describe('object-store write fingerprint (mocked S3)', () => {
       })
       await ws.vfs.write('/s3/c/f', ENC.encode('parent'))
       expect(DEC.decode(await ws.vfs.read('/s3/c/f'))).toBe('child')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('a write leaves a name another mount holds', async () => {
-    // /b/c is its own mount, so a write to /a/c/f through the store at /a
-    // and /b is not the file at /b/c/f and leaves its saved time alone.
-    mock.store.set('child-bucket', 'f', ENC.encode('x'))
-    const vfs = new S3VFS(makeConfig())
-    const ws = new Workspace(
-      { '/a': vfs, '/b': vfs, '/b/c': new S3VFS({ ...makeConfig(), bucket: 'child-bucket' }) },
-      { mode: MountMode.WRITE, read: BOUNDED },
-    )
-    try {
-      await ws.shell("touch -d '2001-02-03 04:05:06' /b/c/f")
-      await ws.vfs.write('/a/c/f', ENC.encode('y'))
-      const io = await ws.shell('stat -c %y /b/c/f')
-      expect(DEC.decode(io.stdout)).toMatch(/^2001-02-03 04:05:06/)
     } finally {
       await ws.close()
     }

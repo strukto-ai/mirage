@@ -29,8 +29,7 @@ def vfs_storage_location(vfs: BaseVFS) -> str:
 
     A driver that knows (a disk root, a bucket and key prefix) says so
     through ``storage_location``; one that does not is its own location,
-    keyed by identity, so one object mounted at two prefixes keys as one
-    store rather than two.
+    keyed by identity.
 
     Args:
         vfs (BaseVFS): The mounted VFS.

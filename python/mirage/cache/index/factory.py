@@ -41,8 +41,7 @@ def build_index(
 
     A mount builds one when it is placed, from the workspace or mount
     ``index`` config when there is one and from the driver's own
-    ``index_ttl`` otherwise. Two mounts of one driver instance share
-    the store the first one built; that sharing is the registry's.
+    ``index_ttl`` otherwise.
 
     Args:
         config (IndexConfig | None): the configured store, or None for

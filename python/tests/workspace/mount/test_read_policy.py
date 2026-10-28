@@ -495,24 +495,6 @@ async def test_a_mount_index_is_what_fresh_is_judged_on(tmp_path):
         )
 
 
-@pytest.mark.asyncio
-async def test_an_alias_is_judged_on_the_index_it_shares(tmp_path):
-    # A second mount of one driver shares the first mount's store, so the
-    # workspace index it would otherwise be given is not the one it runs.
-    disk = DiskVFS(root=str(tmp_path))
-    ws = Workspace(
-        {"/a": Mount(disk, index=IndexConfig(ttl=600))},
-        index=IndexConfig(ttl=0),
-    )
-    try:
-        ws.add_mount("/b", disk, read=FRESH)
-        assert ws._registry.mount_for_prefix("/b/").read.policy is (
-            ReadPolicy.FRESH
-        )
-    finally:
-        await ws.close()
-
-
 def test_fresh_is_refused_on_dev_which_keeps_no_listing():
     with pytest.raises(ValueError, match="caches reads or listings"):
         check_read_capability("/dev/", DevVFS(), FRESH)
@@ -549,30 +531,3 @@ def test_lancedb_decides_per_config_not_per_class():
     assert remote.caches_reads is True
     with pytest.raises(ValueError, match="comparable content token"):
         check_read_capability("/l/", remote, FRESH)
-
-
-@pytest.mark.asyncio
-async def test_constructor_alias_uses_first_mount_index():
-    vfs = RAMVFS()
-    ws = Workspace(
-        {
-            "/first": Mount(vfs, index=IndexConfig(ttl=600)),
-            "/alias": Mount(vfs, index=IndexConfig(ttl=0), read=FRESH),
-        }
-    )
-    try:
-        assert ws.mount("/alias").index_store is ws.mount("/first").index_store
-        assert ws.mount("/alias").index_store.ttl == 600
-    finally:
-        await ws.close()
-
-
-def test_constructor_alias_cannot_enable_a_disabled_shared_index():
-    vfs = RAMVFS()
-    with pytest.raises(ValueError, match="caches reads or listings"):
-        Workspace(
-            {
-                "/first": Mount(vfs, index=IndexConfig(ttl=0)),
-                "/alias": Mount(vfs, index=IndexConfig(ttl=600), read=FRESH),
-            }
-        )

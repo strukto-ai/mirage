@@ -64,7 +64,7 @@ async def test_a_bounded_mount_keeps_an_answer_within_its_bound(monkeypatch):
 @pytest.mark.asyncio
 async def test_the_strictest_bound_wins(monkeypatch):
     # The client's own bound when it is shorter, and the shorter of two
-    # mounts' bounds for a client mounted twice.
+    # mounts' bounds for a client two mounts govern.
     now = [0.0]
     monkeypatch.setattr(
         "mirage.accessor.responses.time.monotonic", lambda: now[0]

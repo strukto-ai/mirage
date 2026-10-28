@@ -1005,9 +1005,7 @@ class Workspace:
             vfs_ref (str | None): the ``vfs:`` value the driver was built
                 from, recorded for snapshots; None for one built in code.
             index (IndexConfig | None): the mount's own index; None takes
-                the workspace's. A VFS already mounted elsewhere keeps
-                the index of that mount, as in the constructor, and this
-                one goes unused.
+                the workspace's.
             write (WritePolicy | str | None): the mount's write policy;
                 None takes the workspace default. It is judged like the
                 constructor's.
@@ -1016,23 +1014,16 @@ class Workspace:
             MountEntry: the installed mount, with its normalized prefix.
 
         Raises:
+            SharedStorageError: the VFS is already mounted, or it is a
+                disk on a folder a mounted disk already has.
             ValueError: the backend cannot honour the declared policy.
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         check_vfs(prefix, vfs)
         resolved_read = read if read is not None else self._read_default
-        # An alias keeps the index of the VFS's other mount.
-        alias = next(
-            (m for m in self._registry.mounts() if m.vfs is vfs), None
-        )
         own = index if index is not None else self._index_config
-        check_read_capability(
-            prefix,
-            vfs,
-            resolved_read,
-            alias.index_config if alias is not None else own,
-        )
+        check_read_capability(prefix, vfs, resolved_read, own)
         resolved_write = (
             coerce_write_policy(write)
             if write is not None
@@ -1838,8 +1829,7 @@ class Workspace:
             source (str | Path | BinaryIO): filesystem path OR a readable
                 file-like object; with ``s3``, the object key.
             mounts: {prefix: VFS} overrides for mounts saved
-                with redacted creds; one for a prefix of a VFS saved at
-                several prefixes also serves those with none of their own.
+                with redacted creds.
             clis: {name: config} overrides for CLIs saved with
                 redacted config secrets; a (spec, config) tuple also
                 carries a live spec (how copy() shares directly
@@ -1933,8 +1923,7 @@ class Workspace:
         Args:
             state: a state dict from ``to_state_dict`` or a version.
             mounts: {prefix: VFS} overrides for mounts saved
-                with redacted creds; one for a prefix of a VFS saved at
-                several prefixes also serves those with none of their own.
+                with redacted creds.
             clis: {name: config} overrides for CLIs saved with
                 redacted config secrets; a (spec, config) tuple also
                 carries a live spec (how copy() shares directly

@@ -346,14 +346,13 @@ describe('github listings respect the mount ttl', () => {
     }
   })
 
-  it('bounds each prefix of one VFS by its own mount ttl', async () => {
-    const vfs = await vfsOf()
+  it('bounds each mount of one repo by its own mount ttl', async () => {
     const w = new Workspace({
-      '/a': new Mount(vfs, {
+      '/a': new Mount(await vfsOf(), {
         mode: MountMode.READ,
         read: { policy: ReadPolicy.BOUNDED, ttl: 1 },
       }),
-      '/b': new Mount(vfs, {
+      '/b': new Mount(await vfsOf(), {
         mode: MountMode.READ,
         read: { policy: ReadPolicy.BOUNDED, ttl: 600 },
       }),
@@ -682,22 +681,4 @@ describe('a truncated tree is walked folder by folder', () => {
       await w.close()
     }
   })
-})
-
-it('fresh tree refill preserves a nested shared index', async () => {
-  const vfs = await vfsOf()
-  const opts = { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 } }
-  const ws = new Workspace({ '/gh': new Mount(vfs, opts), '/gh/sub/nested': new Mount(vfs, opts) })
-  try {
-    await out(ws, 'ls /gh')
-    await out(ws, 'ls /gh/sub/nested')
-    const index = ws.registry.mountFor('/gh').indexStore
-    const before = (await index.listDir('/gh/sub/nested')).entries
-    expect(before?.length).toBeGreaterThan(0)
-    await out(ws, 'ls /gh')
-    expect((await index.listDir('/gh/sub/nested')).entries).toEqual(before)
-    expect((await index.get('/gh/sub/nested/docs')).entry).not.toBeNull()
-  } finally {
-    await ws.close()
-  }
 })

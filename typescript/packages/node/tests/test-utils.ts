@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MountMode, PathSpec, WritePolicy } from '@struktoai/mirage-core/types'
@@ -25,7 +25,7 @@ export function tmpRoot(label = 'mirage-disk-test-'): {
   accessor: DiskAccessor
   cleanup: () => void
 } {
-  const root = mkdtempSync(join(tmpdir(), label))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), label)))
   return {
     root,
     accessor: new DiskAccessor(root),

@@ -3153,23 +3153,19 @@ class Dispatcher:
         if isinstance(dst, PathSpec):
             names.append(dst)
         names.extend(other for _, other in _operands(name, kwargs))
+        manager = mount.cache_manager
         for target in names:
             try:
-                kept = [
-                    (owner.cache_manager, alias)
-                    for owner, alias in self._aliases(mount, target)
-                    if owner.cache_manager is not None
-                ]
-                versions = [
-                    await manager.read_version(alias)
-                    for manager, alias in kept
-                ]
+                version = (
+                    await manager.read_version(target)
+                    if manager is not None
+                    else None
+                )
                 await self._changed(
                     mount, target, FileChangeKind.UNKNOWN, times=False
                 )
-                for (manager, alias), version in zip(kept, versions):
-                    if version:
-                        await manager.keep_version(alias, version)
+                if manager is not None and version:
+                    await manager.keep_version(target, version)
             except Exception as exc:
                 logger.debug("evicting after a failed %s: %s", name, exc)
         lost = active_lost()
@@ -3177,15 +3173,16 @@ class Dispatcher:
             return
         for key in list(lost.marks):
             version = lost.version(key)
-            if not version or not any(
-                under_path(key, target.virtual) for target in names
+            if (
+                manager is None
+                or not version
+                or not any(under_path(key, target.virtual) for target in names)
             ):
                 continue
             try:
-                spec = PathSpec.from_str_path(key)
-                for owner, alias in self._aliases(mount, spec):
-                    if owner.cache_manager is not None:
-                        await owner.cache_manager.keep_version(alias, version)
+                await manager.keep_version(
+                    PathSpec.from_str_path(key), version
+                )
             except Exception as exc:
                 logger.debug("keeping %s after a refusal: %s", key, exc)
 
@@ -4097,10 +4094,10 @@ class Dispatcher:
     ) -> None:
         """Drop what a change to ``path`` made stale above the store.
 
-        The mount's caches take it under every mount of its store
-        (``CacheManager.invalidate``); a removal through the dispatcher
-        knows nothing was below the name, so its index is not asked. The
-        overlay times a content write moves go too, under each name.
+        The mount's caches take it (``CacheManager.invalidate``); a
+        removal through the dispatcher knows nothing was below the name,
+        so its index is not asked. The overlay times a content write
+        moves go too.
 
         Args:
             mount (MountEntry): the mount the change ran on.
@@ -4114,37 +4111,8 @@ class Dispatcher:
                 False for a change that moved no times.
         """
         if times:
-            for _, name in self._aliases(mount, path):
-                await self._namespace.clear_times(
-                    name.virtual, observed=observed
-                )
+            await self._namespace.clear_times(path.virtual, observed=observed)
         if mount.cache_manager is not None:
             await mount.cache_manager.invalidate(
                 path, kind, row, leaf=kind is FileChangeKind.DELETE
             )
-
-    def _aliases(
-        self, mount: MountEntry, path: PathSpec
-    ) -> list[tuple[MountEntry, PathSpec]]:
-        """``path`` under each mount of its store, its own mount first.
-
-        One store mounted at two prefixes holds one file under two names,
-        so what a write makes stale under one name is stale under each. A
-        name another mount holds is that mount's file and is left out.
-
-        Args:
-            mount (MountEntry): the mount the path was reached through.
-            path (PathSpec): the path written.
-        """
-        key = mount_key(path.virtual, mount.prefix.rstrip("/"))
-        found = [(mount, path)]
-        for other in self._namespace.registry.visible_mounts():
-            if other is mount or other.vfs is not mount.vfs:
-                continue
-            base = other.prefix.rstrip("/")
-            name = PathSpec.from_str_path(
-                f"{base}/{key}" if key else base or "/"
-            )
-            if self._namespace.try_mount_for(name.virtual) is other:
-                found.append((other, name))
-        return found

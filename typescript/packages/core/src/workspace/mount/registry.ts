@@ -309,10 +309,6 @@ export class MountRegistry {
       },
       (folder, version) => this.mayServeListing(m, folder, version),
       () => this.descendantMounts(m.prefix).map((entry) => entry.prefix.replace(/\/$/, '')),
-      () =>
-        this.allMounts()
-          .filter((entry) => entry !== m && entry.vfs === m.vfs)
-          .flatMap((entry) => (entry.cacheManager === null ? [] : [entry.cacheManager])),
     )
   }
 
@@ -346,18 +342,15 @@ export class MountRegistry {
     // its policy can only ever be bounded, and it keeps no index, since a
     // path-only index would publish one session's descriptors to another.
     list.push(
-      MountRegistry.place(
-        {
-          prefix: DEV_PREFIX,
-          vfs: new DevVFS(),
-          mode: MountMode.WRITE,
-          read: DEFAULT_READ_SPEC,
-          write: WritePolicy.UNCONDITIONAL,
-          index: new DevIndex(),
-          ids: this.ids,
-        },
-        list,
-      ),
+      MountRegistry.place({
+        prefix: DEV_PREFIX,
+        vfs: new DevVFS(),
+        mode: MountMode.WRITE,
+        read: DEFAULT_READ_SPEC,
+        write: WritePolicy.UNCONDITIONAL,
+        index: new DevIndex(),
+        ids: this.ids,
+      }),
     )
     seen.add(DEV_PREFIX)
     for (const [rawPrefix, vfs] of Object.entries(mounts)) {
@@ -370,24 +363,21 @@ export class MountRegistry {
       seen.add(prefix)
       const mode = overrides[prefix] ?? defaultMode
       const read = readByPrefix[prefix] ?? defaultRead
-      const index = this.indexFor(vfs, placements.indexes?.[rawPrefix], list)
+      const index = this.indexFor(vfs, placements.indexes?.[rawPrefix])
       const vfsRef = placements.refs?.[rawPrefix] ?? null
       list.push(
-        MountRegistry.place(
-          {
-            prefix,
-            vfs,
-            mode,
-            read,
-            write: placements.writes?.[rawPrefix] ?? this.defaultWrite,
-            index,
-            vfsRef,
-            indexConfig: placements.indexes?.[rawPrefix] ?? this.indexConfig,
-            inheritsIndex: placements.indexes?.[rawPrefix] === undefined,
-            ids: this.ids,
-          },
-          list,
-        ),
+        MountRegistry.place({
+          prefix,
+          vfs,
+          mode,
+          read,
+          write: placements.writes?.[rawPrefix] ?? this.defaultWrite,
+          index,
+          vfsRef,
+          indexConfig: placements.indexes?.[rawPrefix] ?? this.indexConfig,
+          inheritsIndex: placements.indexes?.[rawPrefix] === undefined,
+          ids: this.ids,
+        }),
       )
     }
     list.sort((a, b) => b.prefix.length - a.prefix.length)
@@ -398,23 +388,13 @@ export class MountRegistry {
   /**
    * Build one mount with everything the tree needs to run its driver:
    * the driver's command and op tables registered on the entry, the
-   * general commands beside them, and the activity gate shared with any
-   * earlier mount of the same instance. The constructor and `mount()`
+   * general commands beside them. The constructor and `mount()`
    * both place through here, so a mount is the same whichever entry point
    * built it. Mirrors the Python registry, whose constructor mounts
    * through `mount()` as well.
    */
-  private static place(init: MountInit, siblings: readonly MountEntry[]): MountEntry {
-    const alias = siblings.find((existing) => existing.vfs === init.vfs)
-    const m = new MountEntry(
-      alias === undefined
-        ? init
-        : { ...init, indexConfig: alias.indexConfig, inheritsIndex: alias.inheritsIndex },
-    )
-    if (alias !== undefined) {
-      m.activity = alias.activity
-      m.backendWalkLimit = alias.backendWalkLimit
-    }
+  private static place(init: MountInit): MountEntry {
+    const m = new MountEntry(init)
     for (const cmd of [...GENERIC_COMMANDS, ...GENERAL_COMMANDS]) {
       m.registerGeneral(cmd)
     }
@@ -430,17 +410,10 @@ export class MountRegistry {
   }
 
   /**
-   * The store a driver runs under: the one its earlier mount already
-   * has, else a new one from the mount's or the workspace's index
-   * config, else a RAM store at the driver's own TTL.
+   * The store a driver runs under: a new one from the mount's or the
+   * workspace's index config, else a RAM store at the driver's own TTL.
    */
-  private indexFor(
-    vfs: BaseVFS,
-    config: IndexConfig | undefined,
-    siblings: readonly MountEntry[],
-  ): IndexCacheStore {
-    const alias = siblings.find((existing) => existing.vfs === vfs)
-    if (alias !== undefined) return alias.indexStore
+  private indexFor(vfs: BaseVFS, config: IndexConfig | undefined): IndexCacheStore {
     // A view renders on every read, and bin lists each session's own
     // programs, so none of them keeps a listing.
     if (
@@ -513,26 +486,22 @@ export class MountRegistry {
       }
     }
     this.checkStorageUnshared(norm, vfs, this.mountList)
-    const alias = this.mountList.some((existing) => existing.vfs === vfs)
     if (this.clocksBound) vfs.accessor.bindClock?.(this.clock, this)
     try {
-      const index = this.indexFor(vfs, placement.index, this.mountList)
+      const index = this.indexFor(vfs, placement.index)
       const vfsRef = placement.vfsRef ?? null
-      const m = MountRegistry.place(
-        {
-          prefix: norm,
-          vfs,
-          mode,
-          read: read ?? this.defaultRead,
-          write: placement.write ?? this.defaultWrite,
-          index,
-          vfsRef,
-          indexConfig: placement.index ?? this.indexConfig,
-          inheritsIndex: placement.index === undefined,
-          ids: this.ids,
-        },
-        this.mountList,
-      )
+      const m = MountRegistry.place({
+        prefix: norm,
+        vfs,
+        mode,
+        read: read ?? this.defaultRead,
+        write: placement.write ?? this.defaultWrite,
+        index,
+        vfsRef,
+        indexConfig: placement.index ?? this.indexConfig,
+        inheritsIndex: placement.index === undefined,
+        ids: this.ids,
+      })
       this.settleWalkLimit(m)
       this.attachManager(m)
       this.mountList.push(m)
@@ -540,7 +509,7 @@ export class MountRegistry {
       if (norm === '/') this.rootRef = m
       return m
     } catch (err) {
-      if (this.clocksBound && !alias) vfs.accessor.releaseClock?.(this)
+      if (this.clocksBound) vfs.accessor.releaseClock?.(this)
       throw err
     }
   }
@@ -565,12 +534,11 @@ export class MountRegistry {
   }
 
   /**
-   * Let go of the workspace clock on `vfs` once no mount of it remains, as an
-   * unmounted mount finishes its last call. Mirrors Python's
-   * `MountRegistry.release_clock`.
+   * Let go of the workspace clock on `vfs`, as an unmounted mount finishes its
+   * last call. Mirrors Python's `MountRegistry.release_clock`.
    */
   releaseClock(vfs: BaseVFS): void {
-    if (!this.mountList.some((m) => m.vfs === vfs)) vfs.accessor.releaseClock?.(this)
+    vfs.accessor.releaseClock?.(this)
   }
 
   /**
@@ -636,22 +604,10 @@ export class MountRegistry {
    * own search API under a cap, every file without): the mount's `@all` entry,
    * else the workspace's, else the backend's default, a null one lifting the
    * cap. A command's own `walkLimit` changes only how far that command walks.
-   * The mounts of one VFS share its search, so they settle on one limit; one
-   * that would settle on another is refused. Mirrors Python's
-   * `settle_walk_limit`.
+   * Mirrors Python's `settle_walk_limit`.
    */
   settleWalkLimit(entry: MountEntry): void {
-    const settled = this.settledWalkLimit(entry)
-    for (const other of this.mountList) {
-      if (other === entry || other.vfs !== entry.vfs) continue
-      const theirs = this.settledWalkLimit(other)
-      if (theirs !== settled) {
-        throw new Error(
-          `mount ${entry.prefix}: walk_limit ${String(settled)} differs from ${other.prefix}'s ${String(theirs)} on the same VFS`,
-        )
-      }
-    }
-    entry.vfs.walkLimit = settled
+    entry.vfs.walkLimit = this.settledWalkLimit(entry)
     entry.calls = entry.answeredCalls()
     this.rowCache = null
   }

@@ -108,7 +108,6 @@ class Reconciler:
             spec,
             FileChangeKind.DELETE,
             probed=manager.probed_stat(spec) if keep else None,
-            own=True,
         )
 
     async def _probe(self, mount: MountEntry, path: str) -> Verdict:

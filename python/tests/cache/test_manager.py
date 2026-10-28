@@ -239,34 +239,25 @@ def test_null_index_is_tolerated():
     assert _run(_no_index_case()) is False
 
 
-async def _drop_case() -> tuple[bool, bool, bool, LookupStatus]:
+async def _drop_case() -> tuple[bool, bool, LookupStatus]:
     cache, index = _stores()
     await _seed(cache, index)
-    await cache.set("/mirror/arch/h.txt", b"same\n")
     await cache.set("/other/keep.txt", b"safe\n")
-    manager = CacheManager(
-        cache,
-        index,
-        "/data/",
-        True,
-        aliases=lambda: (CacheManager(cache, index, "/mirror/", True),),
-    )
+    manager = CacheManager(cache, index, "/data/", True)
     await manager.drop()
     return (
         await cache.exists("/data/arch/h.txt"),
-        await cache.exists("/mirror/arch/h.txt"),
         await cache.exists("/other/keep.txt"),
         (await index.list_dir("/data/arch")).status,
     )
 
 
-def test_drop_evicts_this_mount_and_its_aliases_only():
-    """A path-unknown mutation drops the bodies under the mount and
-    every other mount of its VFS without reaching into a neighbouring
-    mount's keyspace, and expires the listings rather than clearing
-    them, so a backend whose index is its listing can tell the drop
-    from an empty folder."""
-    assert _run(_drop_case()) == (False, False, True, LookupStatus.EXPIRED)
+def test_drop_evicts_this_mount_only():
+    """A path-unknown mutation drops the bodies under the mount without
+    reaching into a neighbouring mount's keyspace, and expires the
+    listings rather than clearing them, so a backend whose index is its
+    listing can tell the drop from an empty folder."""
+    assert _run(_drop_case()) == (False, True, LookupStatus.EXPIRED)
 
 
 async def _drop_local_case() -> bool:

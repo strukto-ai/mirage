@@ -62,16 +62,15 @@ class ConfigOnlyRAM extends RAMVFS {
   }
 }
 
-async function rootOnLive(live: RAMVFS = new LiveRAM()): Promise<Workspace> {
+async function rootOnLive(live: RAMVFS): Promise<Workspace> {
   const ws = new Workspace({ '/a': new RAMVFS() }, { mode: MountMode.WRITE })
   let state: WorkspaceStateDict
   try {
-    ws.addMount('/x', ws.mount('/').vfs, MountMode.WRITE)
     state = await toStateDict(ws)
   } finally {
     await ws.close()
   }
-  return Workspace.fromState(state, {}, { '/x': live })
+  return Workspace.fromState(state, {}, { '/': live })
 }
 
 function capped(): Mount {
@@ -244,66 +243,13 @@ describe('cloneWorkspaceWithOverride', () => {
     await src.close()
   })
 
-  it('moves every prefix of the store an override replaces', async () => {
-    const shared = (await buildVfs('slack', { token: 'xoxb-secret' })) as SlackVFS
-    const src = new Workspace({
-      '/a': new Mount(shared, { vfsRef: 'slack' }),
-      '/b': new Mount(shared, { vfsRef: 'slack' }),
-    })
-    try {
-      const cloned = await cloneWorkspaceWithOverride(src, { mounts: { '/b': { vfs: 'ram' } } })
-      try {
-        expect(cloned.mount('/a/').vfs).toBe(cloned.mount('/b/').vfs)
-        expect(cloned.mount('/a/').vfs).toBeInstanceOf(RAMVFS)
-        expect(cloned.mount('/a/').vfsRef).toBe('ram')
-        await (await cloned.copy()).close()
-      } finally {
-        await cloned.close()
-      }
-    } finally {
-      await src.close()
-    }
-  })
-
-  it('moves nothing for an override of a prefix the source lacks', async () => {
-    const shared = (await buildVfs('slack', { token: 'xoxb-secret' })) as SlackVFS
-    const src = new Workspace({ '/a': shared, '/b': shared })
-    try {
-      const cloned = await cloneWorkspaceWithOverride(src, { mounts: { '/new': { vfs: 'ram' } } })
-      try {
-        expect(cloned.mount('/a/').vfs).toBe(shared)
-        expect(cloned.mount('/b/').vfs).toBe(shared)
-      } finally {
-        await cloned.close()
-      }
-    } finally {
-      await src.close()
-    }
-  })
-
-  it('keeps a shared scratch root the scratch root through a clone', async () => {
-    const src = await rootOnLive()
-    try {
-      const cloned = await cloneWorkspaceWithOverride(src, null)
-      try {
-        expect(cloned.mount('/').vfs).toBe(src.mount('/x/').vfs)
-        expect(cloned.syntheticRoot).toBe(true)
-      } finally {
-        await cloned.close()
-      }
-    } finally {
-      await src.close()
-    }
-  })
-
   it.each([
     ['LiveRAM', () => new LiveRAM()],
     ['ConfigOnlyRAM', () => new ConfigOnlyRAM()],
   ])('shares a scratch root left alone on a live VFS through a clone (%s)', async (_n, live) => {
     const src = await rootOnLive(live())
     try {
-      expect((await src.shell('echo hi > /x/f')).exitCode).toBe(0)
-      await src.unmount('/x')
+      expect((await src.shell('echo hi > /f')).exitCode).toBe(0)
       const cloned = await cloneWorkspaceWithOverride(src, null)
       try {
         expect(cloned.mount('/').vfs).toBe(src.mount('/').vfs)

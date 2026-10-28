@@ -71,7 +71,6 @@ class CacheManager:
         may_serve_listing: Callable[[str, str | None], Awaitable[bool]]
         | None = None,
         excluded_prefixes: Callable[[], tuple[str, ...]] = tuple,
-        aliases: Callable[[], tuple["CacheManager", ...]] = tuple,
     ) -> None:
         """Args:
         file_cache (FileCacheMixin | None): Workspace file cache
@@ -96,9 +95,6 @@ class CacheManager:
             cached listing; None serves them all.
         excluded_prefixes (Callable[[], tuple[str, ...]]): live nested
             mount roots protected from recursive deletion.
-        aliases (Callable[[], tuple[CacheManager, ...]]): the managers
-            of the other live mounts of this mount's VFS, whose caches
-            hold the same files under other names.
         """
         self._file_cache = file_cache
         self._index = index
@@ -109,7 +105,6 @@ class CacheManager:
         self._read_ttl = read_ttl
         self._on_gone = on_gone
         self._excluded_prefixes = excluded_prefixes
-        self._aliases = aliases
         self._may_serve_listing = may_serve_listing
         self._written: dict[str, tuple[int, float, int | None]] = {}
         self._checked: dict[str, tuple[str, int, float]] = {}
@@ -148,11 +143,9 @@ class CacheManager:
         owns it: a cleared index reads exactly like one that was never
         filled, so a backend whose index *is* its listing (github seeds
         the whole tree once) could not tell the drop from an empty
-        repository. A VFS mounted at several prefixes holds each file
-        under each of them, so the bodies under every alias go too. Over-
-        evicts when this mount is the root and another mount sits beneath
-        it, since keys are compared by prefix; a refetch is the safe
-        direction to be wrong in.
+        repository. Over-evicts when this mount is the root and another
+        mount sits beneath it, since keys are compared by prefix; a
+        refetch is the safe direction to be wrong in.
 
         Args:
             bodies (bool): drop the bodies too; False when the caller
@@ -163,10 +156,9 @@ class CacheManager:
             if self._owns_path(self._prefix or "/"):
                 await self._index.invalidate()
             if bodies and self._caches_reads and self._file_cache is not None:
-                for manager in (self, *self._aliases()):
-                    await self._file_cache.remove(
-                        manager._prefix or "/", subtree=True
-                    )
+                await self._file_cache.remove(
+                    self._prefix or "/", subtree=True
+                )
 
     def scope_index(self) -> IndexCacheStore:
         """This mount's index, its backend metadata writes bound to the
@@ -826,14 +818,10 @@ class CacheManager:
         *,
         leaf: bool = False,
         probed: FileStat | None = None,
-        own: bool = False,
     ) -> None:
-        """Drop what a change at ``path`` made stale, under every name its
-        store has here.
+        """Drop what a change at ``path`` made stale.
 
-        One store mounted at several prefixes holds one file under each,
-        so the change lands under every name a live mount of it owns. The
-        kind decides how far down it reaches:
+        The kind decides how far down it reaches:
 
         - CREATE, UPDATE, and MOVE at its landing: the body, and the
           path's entry in its parent's listing. A CREATE that answered
@@ -874,17 +862,8 @@ class CacheManager:
             probed (FileStat | None): the backend's answer the change was
                 found by, which this command's probe keeps serving for
                 ``path`` (``probed_stat``) past the retire.
-            own (bool): only this mount's name, as a freshness probe drops
-                what it found: the store's other names answer to their own
-                mount's read policy.
         """
-        key = mount_key(path.virtual, self._prefix)
-        for manager in (self,) if own else (self, *self._aliases()):
-            name = manager._name(key)
-            if manager is self or manager._owns_path(name):
-                await manager._invalidate(
-                    name, kind, row, leaf, probed if manager is self else None
-                )
+        await self._invalidate(self._cache_key(path), kind, row, leaf, probed)
 
     async def _invalidate(
         self,

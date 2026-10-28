@@ -109,18 +109,13 @@ async def test_added_mount_inherits_index_ttl():
 
 
 @pytest.mark.asyncio
-async def test_added_mount_keeps_index_coherent_across_aliases_and_duplicates():
+async def test_added_mount_keeps_index_coherent_across_duplicates():
     ws = Workspace({}, index=IndexConfig(ttl=3600))
-    vfs = RAMVFS()
-    entry = ws.add_mount("/late", vfs, MountMode.WRITE)
+    entry = ws.add_mount("/late", RAMVFS(), MountMode.WRITE)
     index = entry.index_store
     rejected = RAMVFS()
     try:
         await index.set_dir("/late", [])
-        alias = ws.add_mount("/alias", vfs)
-        # An alias runs under the store its instance already has.
-        assert alias.index_store is index
-        assert (await index.list_dir("/late")).entries == []
         with pytest.raises(ValueError, match="duplicate mount prefix"):
             ws.add_mount("late/", rejected)
         # The manager must invalidate the configured index, not a store
@@ -149,23 +144,5 @@ async def test_added_mount_runs_and_is_judged_on_the_index_it_names(tmp_path):
                 read=FRESH,
                 index=IndexConfig(ttl=0),
             )
-    finally:
-        await ws.close()
-
-
-# Two mounts of one instance run one store, the first one's, as in the
-# constructor: an alias's own index goes unused and fresh is judged on
-# the shared 37 (RAM keeps no listings of its own).
-@pytest.mark.asyncio
-async def test_added_alias_shares_the_first_mount_index():
-    ram = RAMVFS()
-    ws = Workspace({"/a": Mount(ram, index=IndexConfig(ttl=37))})
-    try:
-        alias = ws.add_mount("/b", ram, read=FRESH, index=IndexConfig(ttl=0))
-        assert alias.index_store is ws.mount("/a/").index_store
-        assert alias.read.policy is ReadPolicy.FRESH
-        assert ws.mount("/a/").cache_manager._aliases() == (
-            alias.cache_manager,
-        )
     finally:
         await ws.close()

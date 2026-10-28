@@ -376,13 +376,6 @@ class MountRegistry:
             excluded_prefixes=lambda: tuple(
                 e.prefix.rstrip("/") for e in self.descendant_mounts(m.prefix)
             ),
-            aliases=lambda: tuple(
-                e.cache_manager
-                for e in self._mounts
-                if e is not m
-                and e.vfs is m.vfs
-                and e.cache_manager is not None
-            ),
         )
 
     def check_vfs_available(self, vfs: BaseVFS) -> None:
@@ -438,9 +431,8 @@ class MountRegistry:
         """Place a VFS and return its mount.
 
         The mount is built with everything the tree needs to run the
-        driver: its index store (shared with any earlier mount of the
-        same instance, else ``store``, else built from ``index`` or the
-        driver's ``index_ttl``), the driver's op and command tables, and
+        driver: its index store (``store``, else built from ``index`` or
+        the driver's ``index_ttl``), the driver's op and command tables, and
         the reference it was built from. Once the workspace is built, the
         VFS takes the workspace clock before anything is placed.
 
@@ -460,6 +452,8 @@ class MountRegistry:
                 supplies itself, as the reserved /dev mount does.
 
         Raises:
+            SharedStorageError: the VFS is already mounted, or it is a
+                disk on a folder a mounted disk already has.
             ValueError: the prefix is taken, or another workspace holds
                 the VFS on another clock.
         """
@@ -469,7 +463,6 @@ class MountRegistry:
             if existing.prefix == norm_prefix:
                 raise ValueError(f"duplicate mount prefix: {norm_prefix!r}")
         self.check_storage_unshared(norm_prefix, vfs, self._mounts)
-        alias = next((e for e in self._mounts if e.vfs is vfs), None)
         if self._clocks_bound:
             vfs.accessor.bind_clock(self.clock, self)
         try:
@@ -482,10 +475,9 @@ class MountRegistry:
                 index,
                 vfs_ref,
                 store,
-                alias,
             )
         except BaseException:
-            if self._clocks_bound and alias is None:
+            if self._clocks_bound:
                 vfs.accessor.release_clock(self)
             raise
 
@@ -499,7 +491,6 @@ class MountRegistry:
         index: IndexConfig | None,
         vfs_ref: str | None,
         store: IndexCacheStore | None,
-        alias: MountEntry | None,
     ) -> MountEntry:
         """Build and register one mount, its clock already taken.
 
@@ -513,12 +504,8 @@ class MountRegistry:
             index (IndexConfig | None): the index store to build.
             vfs_ref (str | None): the ``vfs:`` value it was built from.
             store (IndexCacheStore | None): a store the placement supplies.
-            alias (MountEntry | None): an earlier mount of the same VFS.
         """
-        if alias is not None:
-            store = alias.index_store
-            index = alias.index_config
-        elif isinstance(vfs, DevVFS):
+        if isinstance(vfs, DevVFS):
             store = NULL_INDEX
         elif store is None:
             store = build_index(
@@ -535,9 +522,6 @@ class MountRegistry:
             write if write is not None else self._default_write,
             self.ids,
         )
-        if alias is not None:
-            m.activity = alias.activity
-            m.backend_walk_limit = alias.backend_walk_limit
         # The shared set first, so a command the VFS replaces keeps its own
         # spec, not the generic one of that name.
         for cmd in (*GENERIC_COMMANDS, *GENERAL_COMMANDS):
@@ -573,14 +557,13 @@ class MountRegistry:
         self._clocks_bound = True
 
     def release_clock(self, vfs: BaseVFS) -> None:
-        """Let go of the workspace clock on ``vfs`` once no mount of it
-        remains, as an unmounted mount finishes its last call.
+        """Let go of the workspace clock on ``vfs``, as an unmounted
+        mount finishes its last call.
 
         Args:
             vfs (BaseVFS): the driver an unmount removed.
         """
-        if not any(m.vfs is vfs for m in self._mounts):
-            vfs.accessor.release_clock(self)
+        vfs.accessor.release_clock(self)
 
     def release_clocks(self) -> None:
         """Let go of the workspace clock on every mount and CLI install,
@@ -660,26 +643,12 @@ class MountRegistry:
         searches (its own search API under a cap, every file without):
         the mount's ``"@all"`` entry, else the workspace's, else the
         backend's default, a None one lifting the cap. A command's own
-        ``walk_limit`` changes only how far that command walks. The
-        mounts of one VFS share its search, so they settle on one limit.
+        ``walk_limit`` changes only how far that command walks.
 
         Args:
             entry (MountEntry): the mount, its own limits applied.
-
-        Raises:
-            ValueError: another mount of the VFS settles on another limit.
         """
-        settled = self._settled_walk_limit(entry)
-        for other in self._mounts:
-            if other is entry or other.vfs is not entry.vfs:
-                continue
-            theirs = self._settled_walk_limit(other)
-            if theirs != settled:
-                raise ValueError(
-                    f"mount {entry.prefix}: walk_limit {settled} differs "
-                    f"from {other.prefix}'s {theirs} on the same VFS"
-                )
-        entry.vfs.walk_limit = settled
+        entry.vfs.walk_limit = self._settled_walk_limit(entry)
         entry.calls = entry.answered_calls()
         self._rows = None
 

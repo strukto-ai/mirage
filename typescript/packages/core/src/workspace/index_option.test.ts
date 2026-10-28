@@ -103,21 +103,4 @@ describe('Workspace index option', () => {
       await ws.close()
     }
   })
-
-  // Two mounts of one instance run one store, the first one's, as in the
-  // constructor: an alias's own index goes unused and fresh is judged on the
-  // shared 37 (RAM keeps no listings of its own).
-  it('shares the first mount index with an added alias', async () => {
-    const ram = new RAMVFS()
-    const ws = new Workspace({ '/a': new Mount(ram, { index: { ttl: 37 } }) })
-    try {
-      const alias = ws.addMount('/b', ram, MountMode.READ, FRESH, null, { ttl: 0 })
-      expect(alias.indexStore).toBe(ws.mount('/a').indexStore)
-      expect(alias.read.policy).toBe(ReadPolicy.FRESH)
-      const manager = ws.mount('/a').cacheManager as unknown as { aliases: () => unknown[] }
-      expect(manager.aliases()).toEqual([alias.cacheManager])
-    } finally {
-      await ws.close()
-    }
-  })
 })
