@@ -32,6 +32,7 @@ import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { checkMountpoint, FSKIT_MOUNT_ROOT, prepareBackend } from './backend.ts'
 import { UNMOUNT_POLL_MS, UNMOUNT_TIMEOUT_MS } from './constants.ts'
 import { MirageFS } from './fs.ts'
+import { SERVED, serve } from '../runtime/sandbox/program.ts'
 
 export interface FuseHandle {
   mountpoint: string
@@ -340,11 +341,8 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
   // fuse-native hands this path to unmountWithFusermount, which looks it up
   // in the mount table, so Linux mounts at the path resolved now, while
   // every parent still exists.
-  const fuse = new Fuse(
-    process.platform === 'linux' ? canonicalMountpoint(mountpoint) : mountpoint,
-    mfs.ops(),
-    fuseOpts,
-  )
+  const kernel = process.platform === 'linux' ? canonicalMountpoint(mountpoint) : mountpoint
+  const fuse = new Fuse(kernel, mfs.ops(), fuseOpts)
   if (isFskit) {
     // Issue #82's verified recipe: backend=fskit + volname, direct_io
     // omitted (FSKit has no direct_io; reads are driven by reported size,
@@ -359,14 +357,17 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
       else reject(err)
     })
   })
+  const served = [...serve(mountpoint), ...serve(kernel)]
   return {
     mountpoint,
     ownsMountpoint,
     unmount: () =>
       new Promise<void>((resolve, reject) => {
         fuse.unmount((err) => {
-          if (err === null) resolve()
-          else reject(err)
+          if (err === null) {
+            for (const name of served) SERVED.delete(name)
+            resolve()
+          } else reject(err)
         })
       }),
   }

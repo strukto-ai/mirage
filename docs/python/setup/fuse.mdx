@@ -53,9 +53,11 @@ The folder is served on the workspace's event loop, the one its calls run
 on. In async code, never block that loop on the folder: a synchronous
 `open()` there, or `subprocess.run` or `asyncio.create_subprocess_exec` with
 `cwd` inside it, waits on a call only that loop can answer. Use
-`asyncio.to_thread`, or pass the folder's paths as arguments. Inside a `with`
-block, a [`WorkspaceRunner`](/python/access/server#beside-your-own-event-loop)
-or the server, the workspace has a loop of its own, so your code may block.
+`asyncio.to_thread`, or pass the folder's paths as arguments. A workspace
+that a `with` block uses first, or that a
+[`WorkspaceRunner`](/python/access/server#beside-your-own-event-loop) or the
+server runs, has a loop of its own, so your code may block there. A `with`
+block entered after async calls keeps their loop.
 
 ## Per-mount backends
 

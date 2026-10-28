@@ -473,6 +473,26 @@ async def _spawn(
     return asyncio.subprocess.Process(transport, protocol, loop), transport
 
 
+def serve(folder: str) -> set[str]:
+    """Record ``folder`` in ``SERVED`` under each name a child's path may
+    give it: as given, made absolute, and with its parent's links
+    resolved. Only the parent is read, never the mount, so recording it
+    waits on no loop.
+
+    Args:
+        folder (str): a host folder a kernel mount here serves.
+
+    Returns:
+        set[str]: the names added, for the caller to take out of
+        ``SERVED`` once the mount is gone.
+    """
+    given = os.path.abspath(folder)
+    parent, name = os.path.split(given)
+    names = {given, os.path.join(os.path.realpath(parent), name)}
+    SERVED.update(names)
+    return names
+
+
 def _served(path: str) -> bool:
     """Whether ``path`` lies in a folder a kernel mount here serves.
 
@@ -481,7 +501,7 @@ def _served(path: str) -> bool:
     """
     return any(
         path == folder or path.startswith(folder.rstrip("/") + "/")
-        for folder in SERVED
+        for folder in tuple(SERVED)
     )
 
 

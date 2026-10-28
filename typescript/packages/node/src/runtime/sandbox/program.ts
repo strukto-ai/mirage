@@ -15,9 +15,9 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process'
 import { constants, hostname } from 'node:os'
 import { once } from 'node:events'
-import { constants as fsConstants } from 'node:fs'
+import { constants as fsConstants, realpathSync } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
-import { delimiter, resolve } from 'node:path'
+import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
@@ -48,6 +48,25 @@ import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
  * `SERVED`.
  */
 export const SERVED = new Set<string>()
+
+/**
+ * Record `folder` in `SERVED` under each name a child's path may give it: as
+ * given, made absolute, and with its parent's links resolved. Only the parent
+ * is read, never the mount, so recording it waits on no loop. Returns the
+ * names added, for the caller to take out of `SERVED` once the mount is gone.
+ * Mirrors Python's `serve`.
+ */
+export function serve(folder: string): string[] {
+  const given = resolve(folder)
+  const names = [given]
+  try {
+    names.push(join(realpathSync(dirname(given)), basename(given)))
+  } catch (err) {
+    debuglog('mirage')('cannot resolve the parent of %s: %s', given, err)
+  }
+  for (const name of names) SERVED.add(name)
+  return names
+}
 
 /** Whether `path` lies in a folder a kernel mount here serves. */
 function served(path: string): boolean {

@@ -648,12 +648,24 @@ def test_ops_run_on_the_mounts_own_loop_until_an_owner_runs():
     seen = _loops_of(fs)
     fs.readdir("/", 0)
     assert seen == [fs._loop]
-    assert not fs._loop.is_running()
+
+
+def test_a_mount_coming_up_runs_on_its_own_loop():
+    # The thread mounting it, perhaps the owner's, waits on its first ops.
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    with _owner_loop() as owner:
+        fs = MirageFS(ws.vfs, owner=lambda: owner)
+        seen = _loops_of(fs)
+        fs.starting = True
+        fs.readdir("/", 0)
+        fs.starting = False
+        fs.readdir("/", 0)
+    assert seen == [fs._loop, owner]
 
 
 def test_ops_run_on_the_mounts_own_loop_while_the_owner_is_blocked():
-    # A mount coming up on the owner's own thread blocks the owner until
-    # the kernel's first ops are answered, so they must not wait for it.
+    # A mount going down on the owner's own thread blocks the owner until
+    # the kernel's last ops are answered, so they must not wait for it.
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     entered, release = threading.Event(), threading.Event()
 

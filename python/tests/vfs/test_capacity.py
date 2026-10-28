@@ -304,18 +304,21 @@ async def test_a_write_cancelled_while_it_measures_releases_its_hold():
 
 def test_a_store_serves_one_running_loop_at_a_time():
     usage = StorageUsage(10, used=0)
-    ready = threading.Event()
-    done = threading.Event()
+    held, release, landed, done = (threading.Event() for _ in range(4))
 
     async def hold_loop() -> None:
-        usage.admit(_F, 1)
-        ready.set()
+        usage.hold(_F, 1)
+        held.set()
+        while not release.is_set():
+            await asyncio.sleep(0.01)
+        usage.land(1, 1)
+        landed.set()
         while not done.is_set():
             await asyncio.sleep(0.01)
 
     thread = threading.Thread(target=asyncio.run, args=(hold_loop(),))
     thread.start()
-    ready.wait()
+    held.wait()
 
     async def second() -> None:
         usage.admit(_F, 1)
@@ -323,7 +326,10 @@ def test_a_store_serves_one_running_loop_at_a_time():
     try:
         with pytest.raises(RuntimeError, match="one event loop at a time"):
             asyncio.run(second())
+        release.set()
+        landed.wait()
+        asyncio.run(second())
     finally:
+        release.set()
         done.set()
         thread.join()
-    asyncio.run(second())

@@ -42,8 +42,9 @@ class StorageUsage:
     (a file and its folder) can both measure the same bytes, so they lose
     the credit for the bytes they replace and mark the count for a
     recount, which waits until no write is in flight. It serves one
-    running event loop at a time: a store whose loop still runs refuses
-    another, whose check could race it from a second thread. The
+    event loop at a time: while work admitted on one is in flight,
+    another loop's check, which could race it from a second thread, is
+    refused; once that work lands, the next loop takes over. The
     count lives in this object: another process, or another VFS on the
     same disk folder or Redis prefix, counts on its own, so together they
     can pass the limit. Mirrors the TS ``StorageUsage``.
@@ -89,7 +90,11 @@ class StorageUsage:
         loop = asyncio._get_running_loop()
         if loop is None or loop is self._loop:
             return
-        if self._loop is not None and self._loop.is_running():
+        if (
+            self._loop is not None
+            and self._loop.is_running()
+            and (self.active or self.pending or self._counting is not None)
+        ):
             raise RuntimeError(
                 "a store with a capacity serves one event loop at a time"
             )

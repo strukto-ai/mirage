@@ -36,8 +36,8 @@ def blocking() -> Iterator[None]:
     """Mark the running loop as blocked by the synchronous call inside.
 
     A kernel mount answers on its workspace's loop. While that loop waits
-    on a mount itself (one coming up or going down), the mount's callbacks
-    run on a loop of their own rather than wait for it.
+    on a mount going down, the mount's callbacks run on a loop of their
+    own rather than wait for it.
     """
     loop = asyncio._get_running_loop()
     if loop is None or loop in BLOCKED:

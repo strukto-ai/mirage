@@ -14,12 +14,21 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
   SERVED,
+  serve,
   closeChildren,
   hostRun,
   openProgramPipe,
@@ -108,6 +117,19 @@ describe('runProgram', () => {
   // A folder a kernel mount here serves answers on the loop spawning the
   // child, which waits inside the spawn until the child runs, so the child
   // starts outside and the prelude takes it in: its `cd` sets PWD.
+  it('knows a served folder by its absolute and resolved names', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-serve-'))
+    mkdirSync(join(dir, 'real'))
+    symlinkSync(join(dir, 'real'), join(dir, 'link'))
+    const names = serve(join(dir, 'link', 'mp'))
+    try {
+      expect(names).toEqual([join(dir, 'link', 'mp'), join(realpathSync(join(dir, 'real')), 'mp')])
+      expect(names.every((name) => SERVED.has(name))).toBe(true)
+    } finally {
+      for (const name of names) SERVED.delete(name)
+    }
+  })
+
   it('starts a child in a served folder outside it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-served-'))
     const pwd = async (): Promise<string> =>

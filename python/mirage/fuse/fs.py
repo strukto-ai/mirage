@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import threading
 import time
 from collections.abc import Awaitable, Callable
 from functools import partial
@@ -61,11 +62,11 @@ class MirageFS:
     translation of mirage-native exceptions into ``OSError``. Every core
     op runs on the workspace's owner loop, the one its foreground calls
     run on, so a store's checks and the writes they guard never race a
-    second loop. Until an owner runs, or while it is blocked on a mount
-    itself, an op runs on the mount's own loop, driven by the calling
-    FUSE thread, so it never runs beside the owner. All filesystem
-    semantics live in MountCore, so an FSKit or File Provider adapter can
-    reuse them unchanged.
+    second loop. While the mount comes up (``starting``), while the owner
+    is blocked on a mount going down, or while no owner runs, an op runs
+    on a loop thread of the mount's own instead; a capped store lets the
+    two take turns. All filesystem semantics live in MountCore, so an
+    FSKit or File Provider adapter can reuse them unchanged.
 
     Args:
         files (Files): the workspace's ``ws.vfs`` every callback routes to.
@@ -88,12 +89,19 @@ class MirageFS:
     ) -> None:
         self.core = MountCore(files, root_prefix=root_prefix, session=session)
         self._owner = owner
+        self.starting = False
         self._loop = asyncio.new_event_loop()
+        threading.Thread(target=self._loop.run_forever, daemon=True).start()
 
     def _serving(self) -> asyncio.AbstractEventLoop:
         """The loop the next op runs on: the owner when it can answer."""
         owner = self._owner()
-        if owner is not None and owner.is_running() and owner not in BLOCKED:
+        if (
+            not self.starting
+            and owner is not None
+            and owner.is_running()
+            and owner not in BLOCKED
+        ):
             return owner
         return self._loop
 

@@ -34,6 +34,7 @@ from mirage.runtime.sandbox.program import (
     open_program_pipe,
     reap_host_run,
     run_program,
+    serve,
 )
 from mirage.types import PathSpec
 
@@ -162,6 +163,20 @@ async def test_an_exited_command_does_not_wait_on_a_pending_input_pull():
 async def test_a_missing_cli_raises_its_hint():
     with pytest.raises(RuntimeError, match="install it"):
         await run_program("mirage-no-such-program", "install it", [], None)
+
+
+def test_a_served_folder_is_known_by_its_absolute_and_resolved_names(
+    tmp_path, monkeypatch
+):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "link").symlink_to(real)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mirage.runtime.sandbox.program.SERVED", set())
+    assert serve("link/mp") == {
+        str(tmp_path / "link" / "mp"),
+        os.path.join(os.path.realpath(real), "mp"),
+    }
 
 
 @pytest.mark.asyncio

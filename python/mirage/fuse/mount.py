@@ -23,10 +23,10 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from mirage.bridge.sync import blocking
 from mirage.fuse.backend import MountBackend, prepare_backend
 from mirage.fuse.darwin import install_macfuse_extensions, timespec_ns
 from mirage.fuse.fs import MirageFS
+from mirage.runtime.sandbox.program import SERVED, serve
 from mirage.types import JsonValue
 from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.session.session import SessionState
@@ -196,14 +196,18 @@ def _run_fuse(
         opts["volname"] = os.path.basename(mountpoint.rstrip("/"))
     else:
         opts["direct_io"] = True
-    fuse.FUSE(
-        fs,
-        mountpoint,
-        nothreads=True,
-        foreground=True,
-        **opts,
-        **win_opts,
-    )
+    served = serve(mountpoint)
+    try:
+        fuse.FUSE(
+            fs,
+            mountpoint,
+            nothreads=True,
+            foreground=True,
+            **opts,
+            **win_opts,
+        )
+    finally:
+        SERVED.difference_update(served)
 
 
 def _await_ready(
@@ -263,6 +267,7 @@ def mount_background(
     )
     fuse = load_fuse()
     fs = MirageFS(files, root_prefix=root_prefix, session=session, owner=owner)
+    fs.starting = True
     _prepare_mountpoint(mountpoint)
     t = threading.Thread(
         target=_run_fuse,
@@ -270,6 +275,6 @@ def mount_background(
         daemon=True,
     )
     t.start()
-    with blocking():
-        _await_ready(t, mountpoint)
+    _await_ready(t, mountpoint)
+    fs.starting = False
     return t
