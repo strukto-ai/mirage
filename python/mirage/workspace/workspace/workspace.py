@@ -68,7 +68,7 @@ from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_MEMORY, MemoryBudget
-from mirage.io.network import NetworkSetting, network_rule
+from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
@@ -505,7 +505,7 @@ class Workspace:
             return (
                 session_view(session, self.policies),
                 self.vfs._for_session(session.session_id),
-                policy_caller(session),
+                policy_caller(session, self.policies.account),
             )
 
         self._registry.policies.views = views
@@ -1907,14 +1907,20 @@ class Workspace:
             await run_blocking(tempfile.mkdtemp, prefix="mirage-restore-")
         )
         try:
-            return await cls.from_state(
-                await read_snapshot(
+            # The store is the loader's to reach, not the workspace's: a
+            # rule bound to the restore leaves the read of its tar alone.
+            state = await run_with_network(
+                None,
+                read_snapshot(
                     source,
                     s3=s3,
                     staging=staging,
                     max_bytes=max_snapshot_bytes,
                     max_encoded_bytes=max_snapshot_encoded_bytes,
                 ),
+            )
+            return await cls.from_state(
+                state,
                 mounts=mounts,
                 clis=clis,
                 secrets=secrets,

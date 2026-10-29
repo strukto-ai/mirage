@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -20,13 +22,12 @@ import { Workspace } from '@struktoai/mirage-node'
 import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/workspace/snapshot/tar_io'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { buildApp } from '../app.ts'
+import { buildApp, type MirageApp } from '../app.ts'
 import type * as multipart from '../multipart.ts'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
-import { limitNetwork } from '@struktoai/mirage-core/io/network'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import type { CommandContext, Deny, WorkspaceContext } from '@struktoai/mirage-core/policy/types'
 
@@ -268,8 +269,12 @@ describe('workspaces router', () => {
   })
 
   it('holds every workspace to the server network', async () => {
-    const app = buildApp({ network: false })
-    try {
+    const server = createServer((_req, res) => res.end('ok\n'))
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
+    const port = (server.address() as AddressInfo).port
+    const held = buildApp({ network: false })
+    const free = buildApp()
+    const curl = async (app: MirageApp): Promise<number> => {
       const made = await app.inject({
         method: 'POST',
         url: '/v1/workspaces',
@@ -279,12 +284,17 @@ describe('workspaces router', () => {
       const ran = await app.inject({
         method: 'POST',
         url: `/v1/workspaces/${id}/shell`,
-        payload: { command: 'curl -sS http://127.0.0.1:9/' },
+        payload: { command: `curl -sS http://127.0.0.1:${String(port)}/` },
       })
-      expect(ran.json<{ exit_code: number }>().exit_code).toBe(7)
+      return ran.json<{ exit_code: number }>().exit_code
+    }
+    try {
+      expect(await curl(free)).toBe(0)
+      expect(await curl(held)).toBe(7)
     } finally {
-      await app.close()
-      limitNetwork(true)
+      await held.close()
+      await free.close()
+      server.close()
     }
   })
 

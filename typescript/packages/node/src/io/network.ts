@@ -97,9 +97,28 @@ function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
   return Reflect.apply(connect, this, args)
 }
 
-// One pool per rule, so a socket a workspace opened is never reused for a
-// request another workspace's rule never let through.
-const pools = new WeakMap<NetworkRule, Agent>()
+// The pools fetch keeps for each rule, verified and unverified (curl's -k),
+// so a socket a workspace opened is never reused for a request another
+// workspace's rule never let through.
+const pools = new WeakMap<NetworkRule, { verified?: Agent; unverified?: Agent }>()
+
+/** The pool a fetch under `rule` takes, built on first use; `unverified` for curl's -k. */
+export function rulePool(rule: NetworkRule, unverified = false): Agent {
+  let held = pools.get(rule)
+  if (held === undefined) {
+    held = {}
+    pools.set(rule, held)
+  }
+  if (unverified) return (held.unverified ??= new Agent({ connect: { rejectUnauthorized: false } }))
+  return (held.verified ??= new Agent())
+}
+
+/** Close the pools a rule holds, as the workspace it judges closes. */
+export async function releaseNetwork(rule: NetworkRule): Promise<void> {
+  const held = pools.get(rule)
+  pools.delete(rule)
+  await Promise.all([held?.verified?.close(), held?.unverified?.close()])
+}
 
 /**
  * Start judging every connection the process opens, once: each socket's
@@ -116,12 +135,7 @@ export function watchNetwork(): void {
     getGlobalDispatcher().compose((dispatch) => (options, handler) => {
       const rule = networkBound()
       if (rule === null) return dispatch(options, handler)
-      let pool = pools.get(rule)
-      if (pool === undefined) {
-        pool = new Agent()
-        pools.set(rule, pool)
-      }
-      return pool.dispatch(options, handler)
+      return rulePool(rule).dispatch(options, handler)
     }),
   )
 }

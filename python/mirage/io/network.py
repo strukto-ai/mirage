@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 import json
 import os
@@ -35,7 +36,7 @@ NetworkSetting: TypeAlias = bool | Mapping[str, Sequence[str]]
 # The audit events a connection raises, its address their second argument.
 _CONNECTING = frozenset({"socket.connect", "socket.sendto"})
 
-# How many addresses the names they were resolved for are kept for.
+# How many addresses a rule's lookups let are kept for its connects.
 _RESOLVED_SIZE = 4096
 
 
@@ -69,6 +70,9 @@ class NetworkRule:
         # The audit hook asks from any thread, and a test runs with the
         # GIL released: one test goes through the stream at a time.
         self._lock = threading.Lock()
+        # The addresses a lookup this rule let answered, which a connect,
+        # naming only its address, may open to.
+        self._resolved: OrderedDict[str, None] = OrderedDict()
 
     def lets(self, host: str, address: str) -> bool:
         """Whether a connection to ``address``, resolved for ``host``, opens.
@@ -79,6 +83,35 @@ class NetworkRule:
         """
         with self._lock:
             return self._stream.test(f"{host}\0{address}".encode())
+
+    def resolved(self, host: str, address: str) -> bool:
+        """Whether a lookup of ``host`` may answer ``address``; one that
+        may lets this rule's connects open to it.
+
+        Args:
+            host (str): the name looked up.
+            address (str): one address it resolved to.
+        """
+        if not self.lets(host, address):
+            return False
+        with self._lock:
+            self._resolved.pop(address, None)
+            self._resolved[address] = None
+            while len(self._resolved) > _RESOLVED_SIZE:
+                self._resolved.popitem(last=False)
+        return True
+
+    def connects(self, address: str) -> bool:
+        """Whether a connection to ``address`` opens: one a lookup this
+        rule let answered, or one the rule lets by its address alone.
+
+        Args:
+            address (str): the address it connects to.
+        """
+        with self._lock:
+            if address in self._resolved:
+                return True
+        return self.lets("", address)
 
 
 def network_layer(setting: NetworkSetting) -> dict[str, JsonValue] | None:
@@ -110,49 +143,34 @@ def network_layer(setting: NetworkSetting) -> dict[str, JsonValue] | None:
     )
 
 
-# What every workspace in this process is held to besides its own
-# setting: a server's operator ceiling, and the metadata block.
-_ceiling: list[dict[str, JsonValue]] = []
-_metadata = False
-
-
-def limit_network(setting: NetworkSetting, metadata: bool = False) -> None:
-    """Hold every workspace built in this process from now on to
-    ``setting`` as well as its own, and refuse the cloud metadata
-    addresses for them when ``metadata`` is set: what a server sets once
-    as it starts. Mirrors TS's ``limitNetwork``.
-
-    Args:
-        setting (NetworkSetting): the operator's ceiling.
-        metadata (bool): refuse the metadata addresses.
-
-    Raises:
-        ValueError: the setting or one of its entries is not valid.
-    """
-    global _metadata
-    layer = network_layer(setting)
-    NetworkRule([layer] if layer is not None else [], metadata)
-    _ceiling[:] = [layer] if layer is not None else []
-    _metadata = metadata
-
-
-def network_rule(setting: NetworkSetting = True) -> NetworkRule | None:
+def network_rule(
+    setting: NetworkSetting = True,
+    ceiling: NetworkSetting = True,
+    metadata: bool = False,
+) -> NetworkRule | None:
     """The rule a workspace's connections are judged by: its own setting
-    over the process's ceiling, None when nothing limits it. The first
-    rule built starts watching the process's connections. Mirrors TS's
-    ``networkRule``.
+    and the ceiling of the server that built it, each a layer, with the
+    cloud metadata addresses refused when ``metadata`` is set; None when
+    nothing limits it. The first rule built starts watching the process's
+    connections. Mirrors TS's ``networkRule``.
 
     Args:
         setting (NetworkSetting): the workspace's ``network``.
+        ceiling (NetworkSetting): what its server holds every workspace to.
+        metadata (bool): refuse the addresses clouds serve a machine its
+            credentials at.
 
     Raises:
-        ValueError: the setting or one of its entries is not valid.
+        ValueError: a setting or one of its entries is not valid.
     """
-    own = network_layer(setting)
-    layers = [*_ceiling, *([own] if own is not None else [])]
-    if not layers and not _metadata:
+    layers = [
+        layer
+        for layer in (network_layer(ceiling), network_layer(setting))
+        if layer is not None
+    ]
+    if not layers and not metadata:
         return None
-    rule = NetworkRule(layers, _metadata)
+    rule = NetworkRule(layers, metadata)
     watch_network()
     return rule
 
@@ -196,13 +214,33 @@ def network_bound() -> NetworkRule | None:
     return _rule.get()
 
 
-# The names each recent address was resolved for, so a connection, which
-# names only its address, is judged by the host it was asked for too.
-_resolved: OrderedDict[str, tuple[str, ...]] = OrderedDict()
-_resolved_lock = threading.Lock()
 _resolve = socket.getaddrinfo
+_loop_resolve = asyncio.base_events.BaseEventLoop.getaddrinfo
 _watching = False
 _watch_lock = threading.Lock()
+
+
+def _judged(
+    rule: NetworkRule, host: bytes | str | None, found: list[Any]
+) -> list[Any]:
+    """The answers of a lookup a rule lets, each judged by the name it
+    was asked for; refused when it lets none.
+
+    Args:
+        rule (NetworkRule): the rule bound to the lookup.
+        host (bytes | str | None): the name looked up.
+        found (list[Any]): what ``getaddrinfo`` answered.
+
+    Raises:
+        PermissionError: EACCES, the rule lets none of them.
+    """
+    if not host:
+        return found
+    name = host.decode() if isinstance(host, bytes) else host
+    let = [info for info in found if rule.resolved(name, str(info[4][0]))]
+    if found and not let:
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES))
+    return let
 
 
 def _getaddrinfo(
@@ -212,38 +250,41 @@ def _getaddrinfo(
     **kwargs: Any,
 ) -> list[Any]:
     found = _resolve(host, port, *args, **kwargs)
-    if host:
-        name = host.decode() if isinstance(host, bytes) else host
-        with _resolved_lock:
-            for info in found:
-                address = str(info[4][0])
-                names = _resolved.pop(address, ())
-                _resolved[address] = (
-                    names if name in names else (*names[-3:], name)
-                )
-            while len(_resolved) > _RESOLVED_SIZE:
-                _resolved.popitem(last=False)
-    return found
+    rule = _rule.get()
+    return found if rule is None else _judged(rule, host, found)
+
+
+async def _loop_getaddrinfo(
+    loop: asyncio.BaseEventLoop,
+    host: bytes | str | None,
+    port: bytes | str | int | None,
+    *args: Any,
+    **kwargs: Any,
+) -> list[Any]:
+    found = await _loop_resolve(loop, host, port, *args, **kwargs)
+    rule = _rule.get()
+    return found if rule is None else _judged(rule, host, found)
 
 
 def _connecting(event: str, args: tuple[Any, ...]) -> None:
-    if event not in _CONNECTING or network_bound() is None:
+    if event not in _CONNECTING:
+        return
+    rule = _rule.get()
+    if rule is None:
         return
     target = args[1]
     if not isinstance(target, tuple) or not isinstance(target[0], str):
         return
-    address = target[0]
-    with _resolved_lock:
-        names = _resolved.get(address, ())
-    if not any(network_lets(name, address) for name in names or ("",)):
+    if not rule.connects(target[0]):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES))
 
 
 def watch_network() -> None:
-    """Start judging every connection the process opens, once: an audit
-    hook on each connect, and a record of what each name resolved to.
-    A hook cannot be removed, and one with no rule bound returns at once.
-    Mirrors TS's ``watchNetwork``.
+    """Start judging every connection the process opens, once: each
+    lookup by the name it was asked for, on a thread or on an event
+    loop, and each connect by its address. A hook cannot be removed, and
+    one with no rule bound returns at once. Mirrors TS's
+    ``watchNetwork``.
     """
     global _watching
     with _watch_lock:
@@ -251,4 +292,7 @@ def watch_network() -> None:
             return
         _watching = True
         socket.getaddrinfo = _getaddrinfo
+        setattr(
+            asyncio.base_events.BaseEventLoop, "getaddrinfo", _loop_getaddrinfo
+        )
         sys.addaudithook(_connecting)

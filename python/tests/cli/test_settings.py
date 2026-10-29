@@ -232,6 +232,19 @@ def test_resolved_config_defaults_when_nothing_set(monkeypatch, tmp_path):
     resolved = resolved_config()
     assert resolved["url"] == (DEFAULT_DAEMON_URL, "default")
     assert resolved["idle_grace_seconds"] == ("30", "default")
+    assert resolved["network"] == ("true", "default")
+    assert resolved["policy_file"] == ("", "default")
+
+
+def test_resolved_config_reads_network_and_policy_file(monkeypatch, tmp_path):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.setenv("MIRAGE_POLICY_FILE", "/p.yaml")
+    (tmp_path / "config.toml").write_text(
+        '[daemon]\nnetwork = { allow = ["a.com"] }\n'
+    )
+    resolved = resolved_config()
+    assert resolved["network"] == ('{ allow = ["a.com"] }', "file")
+    assert resolved["policy_file"] == ("/p.yaml", "env MIRAGE_POLICY_FILE")
 
 
 def test_resolved_config_includes_port(monkeypatch, tmp_path):

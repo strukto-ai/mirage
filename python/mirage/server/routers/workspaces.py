@@ -32,6 +32,7 @@ from mirage.config import (
     _load_profile_policy,
     resolve_secrets,
 )
+from mirage.io.network import run_with_network
 from mirage.policy.errors import PolicyError
 from mirage.policy.profile import SessionProfile
 from mirage.secrets.errors import SecretsError
@@ -306,9 +307,14 @@ async def create_workspace(
             try:
                 # Map runtime entries construct their instances here, so a bad
                 # entry (a wasi build dir that does not exist, an unknown
-                # option) fails the create like any other config mistake.
+                # option) fails the create like any other config mistake. A
+                # secret the config names is read under the network the
+                # workspace will be held to.
                 kwargs = (
-                    await resolve_secrets(req.config)
+                    await run_with_network(
+                        registry.rule_for(req.config.network),
+                        resolve_secrets(req.config),
+                    )
                 ).to_workspace_kwargs()
             except (
                 FileNotFoundError,
@@ -479,8 +485,11 @@ async def clone_workspace(
         try:
             new_ws = await run_capture(
                 src_entry,
-                clone_workspace_with_override(
-                    src_entry.runner.ws, req.override
+                run_with_network(
+                    registry.rule_for(src_entry.runner.ws.network),
+                    clone_workspace_with_override(
+                        src_entry.runner.ws, req.override
+                    ),
                 ),
             )
         except (SecretsError, ValueError) as e:
@@ -546,13 +555,18 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
         store = _snapshot_store(request)
         source = store_key(request, req.key)
     wid = req.id or new_workspace_id()
+    # What the snapshot holds is built under the server's network; its own
+    # setting is not known until it is read.
+    rule = registry.rule_for()
     async with _building(request, wid):
         secrets = _build_load_secrets(req.override)
         try:
             # An override mount's credential may be a pointer at one of
             # these declarations; a container the constructor will reject
             # is left for it to reject.
-            mounts = await build_override_mounts(req.override, secrets)
+            mounts = await run_with_network(
+                rule, build_override_mounts(req.override, secrets)
+            )
         except (KeyError, TypeError, ValueError, SecretsError) as e:
             # An override naming a VFS the daemon cannot build (an
             # unknown name, an unloadable ref, a ref that is not a VFS,
@@ -563,13 +577,16 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
                 status_code=400, detail=f"override build failed: {e}"
             )
         try:
-            ws = await Workspace.load(
-                source,
-                mounts=mounts,
-                secrets=secrets,
-                s3=store,
-                max_snapshot_bytes=MAX_SNAPSHOT_BYTES,
-                max_snapshot_encoded_bytes=MAX_SNAPSHOT_PART,
+            ws = await run_with_network(
+                rule,
+                Workspace.load(
+                    source,
+                    mounts=mounts,
+                    secrets=secrets,
+                    s3=store,
+                    max_snapshot_bytes=MAX_SNAPSHOT_BYTES,
+                    max_snapshot_encoded_bytes=MAX_SNAPSHOT_PART,
+                ),
             )
         except FileNotFoundError:
             raise HTTPException(

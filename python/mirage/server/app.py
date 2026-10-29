@@ -25,7 +25,7 @@ from typing import cast
 from fastapi import FastAPI
 
 from mirage.concurrency.limiter import run_blocking
-from mirage.io.network import NetworkSetting, limit_network
+from mirage.io.network import NetworkSetting
 from mirage.policy.base import Policy
 from mirage.server.auth import (
     AuthConfig,
@@ -275,8 +275,8 @@ def build_app(
         max_workspaces=resolve_max_workspaces(max_workspaces),
         policies=policies,
         programs=resolve_policy_file(policy_file),
+        network=resolve_network(network),
     )
-    limit_network(resolve_network(network), metadata=auth.mode == AuthMode.JWT)
     app.state.jobs = app.state.registry.jobs
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None

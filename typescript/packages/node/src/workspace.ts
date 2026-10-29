@@ -27,7 +27,7 @@ import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 import { reapHostRun } from './runtime/sandbox/program.ts'
-import { watchNetwork } from './io/network.ts'
+import { releaseNetwork, watchNetwork } from './io/network.ts'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import './commands/builtin/utils/http.ts'
@@ -154,6 +154,7 @@ export class Workspace extends CoreWorkspace {
     await this.fuseReady()
     await this.kernelMounts.close()
     await super.close()
+    if (this.registry.network !== null) await releaseNetwork(this.registry.network)
   }
 
   // The kernel mounts come down first here too: the core teardown never
@@ -162,5 +163,6 @@ export class Workspace extends CoreWorkspace {
     await this.fuseReady()
     await this.kernelMounts.close()
     await super.delete()
+    if (this.registry.network !== null) await releaseNetwork(this.registry.network)
   }
 }

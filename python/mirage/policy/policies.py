@@ -427,7 +427,7 @@ async def pre_vfs_gate(
         prefix=prefix,
         session_id=session_id,
         mode=mode,
-        caller=policy_caller(caller.session),
+        caller=policy_caller(caller.session, policies.account),
     )
     trace = caller.explaining
     line = caller.refusals is not None
@@ -573,7 +573,7 @@ async def post_vfs_gate(
         prefix=prefix,
         session_id=session_id,
         mode=mode,
-        caller=policy_caller(caller.session),
+        caller=policy_caller(caller.session, policies.account),
         result=result,
     )
     await _refuse_op(
@@ -777,8 +777,10 @@ class Policies:
     fail-closed arm and every command read ``policy X failed``.
 
     The chain holds the decision ledger an Ask is put to
-    (``decisions``), and ``views``, which the workspace sets to fill a
-    method's read-only ``session`` and ``vfs``.
+    (``decisions``), ``views``, which the workspace sets to fill a
+    method's read-only ``session`` and ``vfs``, and ``account``, which a
+    server sets to the account it holds the workspace for, for every
+    method's ``caller``.
 
     Args:
         policies (list[Policy] | None): initial policies, consulted in
@@ -799,6 +801,7 @@ class Policies:
             ]
             | None
         ) = None
+        self.account: str | None = None
 
     def place(self, placement: Policy | None) -> None:
         """Install the built-in placement, the workspace's ``route_policy``

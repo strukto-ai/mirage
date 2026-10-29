@@ -19,6 +19,7 @@ import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/works
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { runWithNetwork } from '@struktoai/mirage-core/io/network'
 import { DiskWorkspaceStateStore, DOT_IDS, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
@@ -338,7 +339,12 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         return claimed(deps, req, reply, wid, async () => {
           let args: WorkspaceArgs
           try {
-            args = await configToWorkspaceArgs(cfg)
+            // Mounts that answer as they are built, and the secrets the
+            // config names, go out under the network the workspace will be
+            // held to.
+            args = await runWithNetwork(deps.registry.ruleFor(cfg.network), () =>
+              configToWorkspaceArgs(cfg),
+            )
           } catch (e) {
             if (
               e instanceof SecretsError ||
@@ -435,27 +441,34 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     const store = typeof source === 'string' ? deps.snapshotStore : undefined
     if (typeof source === 'string' && store === undefined) return noStore(reply)
     const wid = workspaceId ?? newWorkspaceId()
+    // What the snapshot holds is built under the server's network; its own
+    // setting is not known until it is read.
+    const rule = deps.registry.ruleFor()
     return building(deps, req, reply, wid, async () => {
       let overrides: Record<string, BaseVFS | Mount>
       try {
         // An override mount's credential may be a pointer at one of
         // these declarations; a container the constructor will reject
         // is left for it to reject. Mirrors the python load route.
-        overrides = await buildOverrideMounts(override ?? null, override?.secrets)
+        overrides = await runWithNetwork(rule, () =>
+          buildOverrideMounts(override ?? null, override?.secrets),
+        )
       } catch (e) {
         return answer(reply, 400, { detail: `override build failed: ${(e as Error).message}` })
       }
       let ws: Workspace
       try {
-        ws = await Workspace.load(
-          source,
-          {
-            maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
-            maxSnapshotEncodedBytes: MAX_SNAPSHOT_PART,
-            ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
-            ...(store !== undefined ? { s3: store } : {}),
-          },
-          overrides,
+        ws = await runWithNetwork(rule, () =>
+          Workspace.load(
+            source,
+            {
+              maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
+              maxSnapshotEncodedBytes: MAX_SNAPSHOT_PART,
+              ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
+              ...(store !== undefined ? { s3: store } : {}),
+            },
+            overrides,
+          ),
         )
       } catch (e) {
         if ((e as { code?: unknown }).code === 'ENOENT') {
@@ -570,7 +583,9 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         const src = source.runner.ws
         let newWs
         try {
-          newWs = await cloneWorkspaceWithOverride(src, body.override ?? null)
+          newWs = await runWithNetwork(deps.registry.ruleFor(src.network), () =>
+            cloneWorkspaceWithOverride(src, body.override ?? null),
+          )
         } catch (e) {
           if (
             e instanceof SecretsError ||

@@ -682,6 +682,8 @@ A server can hold every workspace it builds to its own rules. Its
 policies answer [`pre_workspace`](/home/policy/policies#pre_workspace)
 before a create, clone or load builds anything, and are registered on
 every workspace it builds, so a workspace's own config cannot lift them.
+In `jwt` mode every method's `caller.account` is the account that owns the
+workspace, so a rule can single one out.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">

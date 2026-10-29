@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { registerInsecureFetch } from '@struktoai/mirage-core/commands/builtin/utils/http'
-import { networkBound, type NetworkRule } from '@struktoai/mirage-core/io/network'
+import { networkBound } from '@struktoai/mirage-core/io/network'
 import { Agent, fetch as undiciFetch } from 'undici'
+import { rulePool } from '../../../io/network.ts'
 
 // curl's -k. Node's fetch takes an undici dispatcher, and an agent built with
 // `rejectUnauthorized: false` connects without verifying the server's
@@ -24,17 +25,10 @@ import { Agent, fetch as undiciFetch } from 'undici'
 // pooled socket never carries a request past the rule it was opened under.
 const INSECURE: Agent.Options = { connect: { rejectUnauthorized: false } }
 let agent: Agent | null = null
-const ruled = new WeakMap<NetworkRule, Agent>()
 
 function insecureAgent(): Agent {
   const rule = networkBound()
-  if (rule === null) return (agent ??= new Agent(INSECURE))
-  let own = ruled.get(rule)
-  if (own === undefined) {
-    own = new Agent(INSECURE)
-    ruled.set(rule, own)
-  }
-  return own
+  return rule === null ? (agent ??= new Agent(INSECURE)) : rulePool(rule, true)
 }
 
 registerInsecureFetch(((input: Parameters<typeof undiciFetch>[0], init?: RequestInit) =>

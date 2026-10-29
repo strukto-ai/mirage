@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 import os
 import tomllib
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ from mirage.server.env import (
     ENV_DAEMON_PORT,
     ENV_IDLE_GRACE_SECONDS,
     ENV_MAX_WORKSPACES,
+    ENV_POLICY_FILE,
 )
 from mirage.server.host_validation_constants import DEFAULT_ALLOWED_HOSTS
 from mirage.server.paths import mirage_home
@@ -55,6 +57,7 @@ _ENV_FOR_KEY = {
     "auth_token": ENV_TOKEN,
     "idle_grace_seconds": ENV_IDLE_GRACE_SECONDS,
     "max_workspaces": ENV_MAX_WORKSPACES,
+    "policy_file": ENV_POLICY_FILE,
     "port": ENV_DAEMON_PORT,
     **SSH_ENV_KEYS,
 }
@@ -160,6 +163,8 @@ def _default_for_key(key: str) -> str:
         "auth_token": "",
         "idle_grace_seconds": "30",
         "max_workspaces": "",
+        "network": "true",
+        "policy_file": "",
         "port": "8765",
         "ssh_port": "",
         "ssh_host": DEFAULT_SSH_HOST,
@@ -167,6 +172,12 @@ def _default_for_key(key: str) -> str:
         "ssh_authorized_keys": str(default_ssh_dir() / AUTHORIZED_KEYS_NAME),
     }
     return defaults[key]
+
+
+def _network_text(value: bool | dict[str, list[str]]) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return f"{{ allow = {json.dumps(value['allow'])} }}"
 
 
 def resolved_config() -> dict[str, tuple[str, str]]:
@@ -187,6 +198,8 @@ def resolved_config() -> dict[str, tuple[str, str]]:
         env_value = os.environ.get(env_name) if env_name else None
         if env_value:
             out[key] = (env_value, f"env {env_name}")
+        elif key == "network" and key in table:
+            out[key] = (_network_text(table[key]), "file")
         elif str(table.get(key, "")):
             out[key] = (str(table[key]), "file")
         else:

@@ -367,6 +367,17 @@ describe('scriptContext', () => {
     expect(scriptContext(ctx('cat'))).not.toHaveProperty('caller')
   })
 
+  it('reads a workspace config with its keys as written', () => {
+    const config = {
+      mounts: { '/host': { vfs: 'disk', config: { root: '/' } } },
+      env: { HOME_DIR: '/h', camelCase: 'x' },
+    }
+    expect(scriptContext({ config, caller: { session: null, account: 'acme' } })).toEqual({
+      config,
+      caller: { session: null, account: 'acme' },
+    })
+  })
+
   it('lists each command of a line as preCommand reads it', () => {
     const line: RouteContext = {
       line: 'cat /repo/sealed/k',

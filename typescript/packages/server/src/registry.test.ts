@@ -23,6 +23,8 @@ import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { DaemonConfigError } from './daemon_config.ts'
 import { ENV_HOME, ENV_MAX_WORKSPACES } from './env.ts'
 import { Claim, resolveMaxWorkspaces, WorkspaceRegistry } from './registry.ts'
+import type { Policy } from '@struktoai/mirage-core/policy/base'
+import type { CommandContext, VfsContext } from '@struktoai/mirage-core/policy/types'
 
 describe('newWorkspaceId', () => {
   it('mints canonical UUIDv7 ids', () => {
@@ -53,6 +55,32 @@ describe('WorkspaceRegistry', () => {
     expect(second).toBe(entry)
     expect(stop).toHaveBeenCalledTimes(1)
     expect(r.has('w')).toBe(false)
+  })
+
+  it("hands a server policy the owner's account", async () => {
+    const accounts = new Set<string | null>()
+    const seen: Policy = {
+      preCommand(ctx: CommandContext) {
+        accounts.add(ctx.caller?.account ?? '')
+        return null
+      },
+      preVfs(ctx: VfsContext) {
+        accounts.add(ctx.caller?.account ?? '')
+        return null
+      },
+    }
+    const r = new WorkspaceRegistry({ policies: [seen] })
+    const entry = r.add(
+      new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }),
+      'mine',
+      'alice',
+    )
+    try {
+      expect((await entry.runner.ws.shell('echo hi > /a')).exitCode).toBe(0)
+      expect(accounts).toEqual(new Set(['alice']))
+    } finally {
+      await r.closeAll()
+    }
   })
 
   it('rejects duplicate ids', () => {

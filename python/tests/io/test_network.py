@@ -18,6 +18,7 @@ import pytest
 import pytest_asyncio
 
 from mirage import Workspace
+from mirage.io import network
 from mirage.io.network import (
     NetworkRule,
     network_bound,
@@ -113,3 +114,29 @@ async def test_curl_clears_the_workspace_rule(port, network, exit_code):
 async def test_a_name_is_judged_by_the_host_it_was_asked_for(port):
     assert await _curl(port, {"allow": ["localhost"]}, "localhost") == 0
     assert await _curl(port, {"allow": ["example.com"]}, "localhost") == 7
+
+
+@pytest.mark.asyncio
+async def test_a_name_lends_its_address_to_no_other_name(port, monkeypatch):
+    resolve = network._resolve
+
+    def local(host, *args, **kwargs):
+        name = host.decode() if isinstance(host, bytes) else host
+        named = name in ("allowed.test", "other.test")
+        return resolve("127.0.0.1" if named else host, *args, **kwargs)
+
+    monkeypatch.setattr(network, "_resolve", local)
+    held = Workspace({"/data": RAMVFS()}, network={"allow": ["allowed.test"]})
+    other = Workspace({"/data": RAMVFS()}, network={"allow": ["other.test"]})
+    try:
+        for ws, host, exit_code in [
+            (held, "allowed.test", 0),
+            (held, "other.test", 7),
+            (other, "127.0.0.1", 7),
+            (other, "other.test", 0),
+        ]:
+            line = f"curl -sS http://{host}:{port}/"
+            assert (await ws.shell(line)).exit_code == exit_code, host
+    finally:
+        await held.close()
+        await other.close()

@@ -15,7 +15,7 @@
 import Fastify from 'fastify'
 import rateLimit from '@fastify/rate-limit'
 import { DiskRecordClient } from '@struktoai/mirage-node'
-import { limitNetwork, type NetworkSetting } from '@struktoai/mirage-core/io/network'
+import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import {
   OWNERS_PREFIX,
@@ -114,8 +114,8 @@ export function buildApp(options: BuildAppOptions = {}) {
     maxWorkspaces: resolveMaxWorkspaces(options.maxWorkspaces),
     policies: options.policies ?? [],
     programs: resolvePolicyFile(options.policyFile),
+    network: resolveNetwork(options.network),
   })
-  limitNetwork(resolveNetwork(options.network), authConfig.mode === AuthMode.Jwt)
   const jobs = registry.jobs
   const pidFile = pidFilePath(options.pidFile)
   const app = Fastify({ logger: false })

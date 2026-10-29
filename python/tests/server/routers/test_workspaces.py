@@ -22,17 +22,18 @@ import os
 import tarfile
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import boto3
 import jwt as pyjwt
 import pytest
+import pytest_asyncio
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient, Response
 from moto.server import ThreadedMotoServer
 from pydantic import BaseModel
 
 from mirage import MountMode, Workspace
-from mirage.io.network import limit_network
 from mirage.policy.base import Policy
 from mirage.policy.types import CommandContext, Deny, WorkspaceContext
 from mirage.secrets.errors import SecretsError
@@ -426,15 +427,26 @@ def test_a_policy_file_names_only_methods(tmp_path):
         build_app(idle_grace_seconds=10.0, policy_file=policy_file)
 
 
-@pytest.fixture()
-def unlimited() -> Iterator[None]:
-    yield
-    limit_network(True)
+@pytest_asyncio.fixture
+async def listening() -> AsyncIterator[int]:
+    async def answer(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        await reader.read(1024)
+        writer.write(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n"
+            b"Connection: close\r\n\r\nok\n"
+        )
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(answer, "127.0.0.1", 0)
+    yield server.sockets[0].getsockname()[1]
+    server.close()
+    await server.wait_closed()
 
 
-@pytest.mark.asyncio
-async def test_the_server_network_holds_every_workspace(unlimited):
-    app = build_app(idle_grace_seconds=10.0, network=False)
+async def _curl_from(app: FastAPI, port: int) -> int:
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport, base_url="http://test"
@@ -445,9 +457,18 @@ async def test_the_server_network_holds_every_workspace(unlimited):
         wid = r.json()["id"]
         r = await client.post(
             f"/v1/workspaces/{wid}/shell",
-            json={"command": "curl -sS http://127.0.0.1:9/"},
+            json={"command": f"curl -sS http://127.0.0.1:{port}/"},
         )
-        assert r.json()["exit_code"] == 7
+        await client.delete(f"/v1/workspaces/{wid}")
+        return int(r.json()["exit_code"])
+
+
+@pytest.mark.asyncio
+async def test_the_server_network_holds_every_workspace(listening):
+    held = build_app(idle_grace_seconds=10.0, network=False)
+    free = build_app(idle_grace_seconds=10.0)
+    assert await _curl_from(free, listening) == 0
+    assert await _curl_from(held, listening) == 7
 
 
 @pytest.mark.asyncio

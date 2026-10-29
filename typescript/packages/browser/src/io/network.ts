@@ -28,18 +28,23 @@ function lets(url: string | URL): boolean {
  * Start judging every request the page makes, once: fetch and WebSocket ask
  * every live workspace's rule by host name, since a page resolves no
  * address and cannot tell one task's binding from another's, so the
- * strictest rule wins. Called as the first workspace with a rule is built.
- * Mirrors Python's `watch_network`.
+ * strictest rule wins. A page cannot see where a redirect goes before it
+ * follows one, so under a rule fetch follows none: a request that asked to
+ * follow fails as fetch does. Called as the first workspace with a rule is
+ * built. Mirrors Python's `watch_network`.
  */
 export function watchNetwork(): void {
   if (watching) return
   watching = true
   const send = globalThis.fetch.bind(globalThis)
-  globalThis.fetch = (input, init) => {
-    if (networkBound() !== null && !lets(input instanceof Request ? input.url : input)) {
-      return Promise.reject(new TypeError('Failed to fetch'))
-    }
-    return send(input, init)
+  globalThis.fetch = async (input, init) => {
+    if (networkBound() === null) return send(input, init)
+    if (!lets(input instanceof Request ? input.url : input)) throw new TypeError('Failed to fetch')
+    const redirect = init?.redirect ?? (input instanceof Request ? input.redirect : 'follow')
+    if (redirect !== 'follow') return send(input, init)
+    const response = await send(input, { ...init, redirect: 'manual' })
+    if (response.type === 'opaqueredirect') throw new TypeError('Failed to fetch')
+    return response
   }
   const Socket = globalThis.WebSocket
   globalThis.WebSocket = class extends Socket {

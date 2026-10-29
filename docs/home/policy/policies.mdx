@@ -146,7 +146,7 @@ Every `ctx` also carries:
 | `session_id` | the session the action runs as |
 | `session` | the session, read only: `get(name)`, `snapshot()`, `cwd()`, `is_readonly(name)`, `profile()` |
 | `vfs` | the session's files, read only: `read`, `stat`, `readdir`, `exists`, and where the mounts are (`mount_of`, `is_mount`, `submounts`), hides applied |
-| `caller` | who makes the call (a `PolicyCaller`), a frozen copy: `caller.session` is the session above, with its `session_id` and `cwd` when the method was asked, and `caller.account` the account a server's request signed in as |
+| `caller` | who makes the call (a `PolicyCaller`), a frozen copy: `caller.session` is the session above, with its `session_id` and `cwd` when the method was asked, and `caller.account` the account a server holds the workspace for (the one its requests sign in as), null outside a server or without accounts |
 
 `words` is the command line word by word, after expansion. Each word has
 a `text`, a `kind` (`name`, `subcommand`, `option`, `value`, `operand` or

@@ -150,6 +150,13 @@ describe('Workspace.snapshot', () => {
     },
   )
 
+  it('narrows network on a copy that asks it', async () => {
+    const src = new Workspace({ '/m': new RAMVFS() })
+    const copy = await src.copy({ network: false })
+    expect(copy.network).toBe(false)
+    expect(copy.registry.network?.lets('', '127.0.0.1')).toBe(false)
+  })
+
   it('copies a read-only scratch root read-only', async () => {
     const src = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.READ })
     const copy = await src.copy()

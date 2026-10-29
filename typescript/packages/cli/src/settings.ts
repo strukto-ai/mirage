@@ -23,6 +23,7 @@ import {
   ENV_DAEMON_PORT,
   ENV_IDLE_GRACE_SECONDS,
   ENV_MAX_WORKSPACES,
+  ENV_POLICY_FILE,
 } from '@struktoai/mirage-server/env'
 import {
   ALLOWED_KEYS,
@@ -127,6 +128,7 @@ const ENV_FOR_KEY: Record<string, string> = {
   auth_token: ENV_TOKEN,
   idle_grace_seconds: ENV_IDLE_GRACE_SECONDS,
   max_workspaces: ENV_MAX_WORKSPACES,
+  policy_file: ENV_POLICY_FILE,
   port: ENV_DAEMON_PORT,
   ...SSH_ENV_KEYS,
 }
@@ -148,6 +150,8 @@ function defaultForKey(key: string, home: string): string {
     auth_token: '',
     idle_grace_seconds: '30',
     max_workspaces: '',
+    network: 'true',
+    policy_file: '',
     port: '8765',
     ssh_port: '',
     ssh_host: DEFAULT_SSH_HOST,

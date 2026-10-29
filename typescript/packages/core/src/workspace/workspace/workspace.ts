@@ -15,7 +15,7 @@ import { DiffPool } from '../../rs/diff_pool.ts'
 
 import { IOConfig } from '../../io/config.ts'
 import { MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
-import { networkRule, type NetworkSetting } from '../../io/network.ts'
+import { networkRule, runWithNetwork, type NetworkSetting } from '../../io/network.ts'
 import { parseLimit } from '../../utils/size.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { ShellExecution } from '../shell_execution.ts'
@@ -457,7 +457,7 @@ export class Workspace {
       const vfs = withCaller(this.vfs.forSession(session.sessionId), {
         explaining: DryRun.DECIDING,
       })
-      const called = policyCaller(session)
+      const called = policyCaller(session, this.policies.account)
       if (asyncContextIsolatesTasks) return { session: view, vfs, caller: called }
       // Without task isolation the mark cannot reach a session write through
       // the async context, so there its session refuses every write.
@@ -2157,14 +2157,18 @@ export class Workspace {
     // memory, until the restored mounts have copied them in.
     const staging = typeof source === 'string' && s3 === undefined ? await makeStagingDir() : null
     try {
-      const state = (await readSnapshot(source, {
-        ...(maxSnapshotBytes !== undefined ? { maxBytes: maxSnapshotBytes } : {}),
-        ...(maxSnapshotEncodedBytes !== undefined
-          ? { maxEncodedBytes: maxSnapshotEncodedBytes }
-          : {}),
-        ...(s3 !== undefined ? { s3 } : {}),
-        ...(staging !== null ? { staging } : {}),
-      })) as WorkspaceStateDict
+      // The store is the loader's to reach, not the workspace's: a rule
+      // bound to the restore leaves the read of its tar alone.
+      const state = (await runWithNetwork(null, () =>
+        readSnapshot(source, {
+          ...(maxSnapshotBytes !== undefined ? { maxBytes: maxSnapshotBytes } : {}),
+          ...(maxSnapshotEncodedBytes !== undefined
+            ? { maxEncodedBytes: maxSnapshotEncodedBytes }
+            : {}),
+          ...(s3 !== undefined ? { s3 } : {}),
+          ...(staging !== null ? { staging } : {}),
+        }),
+      )) as WorkspaceStateDict
       return await this.fromState(state, rest, overrides, cliOverrides)
     } finally {
       if (staging !== null) await removeDir(staging)
@@ -2300,6 +2304,7 @@ export class Workspace {
       clock: options.clock ?? this.clock,
       ids: options.ids ?? this.ids,
       ...(options.commandLimits !== undefined ? { commandLimits: options.commandLimits } : {}),
+      ...(options.network !== undefined ? { network: options.network } : {}),
       ...(options.profiles != null ? { profiles: options.profiles, profile: null } : {}),
       ...(options.profile != null ? { profile: options.profile } : {}),
     }

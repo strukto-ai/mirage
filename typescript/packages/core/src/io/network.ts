@@ -73,34 +73,22 @@ export function networkLayer(setting: unknown): Record<string, JsonValue> | null
   )
 }
 
-// What every workspace in this process is held to besides its own setting:
-// a server's operator ceiling, and the metadata block.
-let ceiling: Record<string, JsonValue>[] = []
-let metadataBlocked = false
-
 /**
- * Hold every workspace built in this process from now on to `setting` as
- * well as its own, and refuse the cloud metadata addresses for them when
- * `metadata` is set: what a server sets once as it starts. Mirrors Python's
- * `limit_network`.
+ * The rule a workspace's connections are judged by: its own setting and the
+ * ceiling of the server that built it, each a layer, with the cloud metadata
+ * addresses refused when `metadata` is set; null when nothing limits it.
+ * Mirrors Python's `network_rule`.
  */
-export function limitNetwork(setting: NetworkSetting, metadata = false): void {
-  const layer = networkLayer(setting)
-  new NetworkRule(layer === null ? [] : [layer], metadata)
-  ceiling = layer === null ? [] : [layer]
-  metadataBlocked = metadata
-}
-
-/**
- * The rule a workspace's connections are judged by: its own setting over the
- * process's ceiling, null when nothing limits it. Mirrors Python's
- * `network_rule`.
- */
-export function networkRule(setting: NetworkSetting = true): NetworkRule | null {
-  const own = networkLayer(setting)
-  const layers = [...ceiling, ...(own === null ? [] : [own])]
-  if (layers.length === 0 && !metadataBlocked) return null
-  return new NetworkRule(layers, metadataBlocked)
+export function networkRule(
+  setting: NetworkSetting = true,
+  ceiling: NetworkSetting = true,
+  metadata = false,
+): NetworkRule | null {
+  const layers = [networkLayer(ceiling), networkLayer(setting)].filter(
+    (layer): layer is Record<string, JsonValue> => layer !== null,
+  )
+  if (layers.length === 0 && !metadata) return null
+  return new NetworkRule(layers, metadata)
 }
 
 // The rule of the workspace a line or an op runs for, null for no limit.

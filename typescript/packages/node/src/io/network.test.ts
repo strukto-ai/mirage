@@ -18,6 +18,7 @@ import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
+import { rulePool } from './network.ts'
 
 describe('a workspace network rule', () => {
   let server: Server
@@ -73,5 +74,18 @@ describe('a workspace network rule', () => {
       await open.close()
       await shut.close()
     }
+  })
+
+  it('closes the pools a workspace opened as it closes', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { network: { allow: ['127.0.0.1'] } })
+    const rule = ws.registry.network
+    expect(rule).not.toBeNull()
+    if (rule === null) return
+    const url = `http://127.0.0.1:${String(port)}/`
+    expect((await ws.shell(`curl -sS ${url}`)).exitCode).toBe(0)
+    const pool = rulePool(rule)
+    await ws.close()
+    expect(pool.closed).toBe(true)
+    expect(rulePool(rule)).not.toBe(pool)
   })
 })

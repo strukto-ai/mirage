@@ -13,7 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { join } from 'node:path'
-import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
+import {
+  networkRule,
+  type NetworkRule,
+  type NetworkSetting,
+} from '@struktoai/mirage-core/io/network'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { Policies } from '@struktoai/mirage-core/policy/policies'
 import { ScriptPolicy } from '@struktoai/mirage-core/policy/script'
@@ -28,6 +32,7 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import { loadPolicyFile, type DiskRecordClient, type Workspace } from '@struktoai/mirage-node'
+import { watchNetwork } from '@struktoai/mirage-node/io/network'
 import { DaemonConfigError, parseNetwork, readDaemonTable } from './daemon_config.ts'
 import { ENV_MAX_WORKSPACES, ENV_POLICY_FILE } from './env.ts'
 import { ExecutionTable } from './jobs.ts'
@@ -93,6 +98,12 @@ export interface WorkspaceRegistryOptions {
   policies?: readonly Policy[]
   /** The server's policy programs, by method, which answer the same way. */
   programs?: ProfileScripts
+  /**
+   * What every workspace it builds is held to besides its own `network`; in
+   * jwt mode (`accountsRequired`) the cloud metadata addresses are refused
+   * too.
+   */
+  network?: NetworkSetting
 }
 
 /**
@@ -177,7 +188,9 @@ export class WorkspaceRegistry {
   private readonly owners: DiskRecordClient | null
   readonly maxWorkspaces: number | null
   readonly policies: readonly Policy[]
+  readonly network: NetworkSetting
   private readonly programs: ProfileScripts
+  private readonly admissionPrograms: ScriptPolicy
   private readonly admission: Policies
 
   constructor(options: WorkspaceRegistryOptions = {}) {
@@ -186,14 +199,26 @@ export class WorkspaceRegistry {
     this.programs = Object.fromEntries(
       Object.entries(options.programs ?? {}).filter(([method]) => method !== 'preWorkspace'),
     )
-    this.admission = new Policies([
-      ...this.policies,
-      new ScriptPolicy(new Programs(options.programs ?? {})),
-    ])
+    this.admissionPrograms = new ScriptPolicy(new Programs(options.programs ?? {}))
+    this.admission = new Policies([...this.policies, this.admissionPrograms])
+    this.network = options.network ?? true
+    // A bad ceiling fails the server as it starts, not its first create.
+    networkRule(true, this.network)
     this.idleGraceSeconds = options.idleGraceSeconds ?? 30
     this.onIdleExit = options.onIdleExit ?? null
     this.accountsRequired = options.accountsRequired ?? false
     this.owners = options.owners ?? null
+  }
+
+  /**
+   * The rule a workspace with this `network` is held to here: its own
+   * setting under the server's, null when nothing limits it. Throws when the
+   * setting or one of its entries is not valid.
+   */
+  ruleFor(setting: NetworkSetting = true): NetworkRule | null {
+    const rule = networkRule(setting, this.network, this.accountsRequired)
+    if (rule !== null) watchNetwork()
+    return rule
   }
 
   /**
@@ -356,6 +381,10 @@ export class WorkspaceRegistry {
     if (this.entries.has(wid) || this.removals.has(wid))
       throw new Error(`workspace id already exists: ${wid}`)
     for (const policy of this.policies) ws.policies.add(policy)
+    ws.registry.network = this.ruleFor(ws.network)
+    // An account reaches only the workspaces it owns, so every method's
+    // caller is the owner's account.
+    ws.policies.account = owner
     const entry = new WorkspaceEntry(wid, new WorkspaceRunner(ws), owner)
     if (Object.keys(this.programs).length > 0) {
       entry.programs = new ScriptPolicy(new Programs(this.programs))
@@ -447,6 +476,7 @@ export class WorkspaceRegistry {
         await stop(entry)
       }
     }
+    await this.admissionPrograms.close()
   }
 
   private startIdleTimer(): void {

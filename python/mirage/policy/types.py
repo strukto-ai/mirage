@@ -728,15 +728,21 @@ class CallerSessionQuery(Protocol):
     def cwd(self) -> str: ...
 
 
-def policy_caller(session: CallerSessionQuery | None) -> PolicyCaller:
+def policy_caller(
+    session: CallerSessionQuery | None, account: str | None = None
+) -> PolicyCaller:
     """``session`` as a method's ``ctx.caller`` reads it.
 
     Args:
         session (CallerSessionQuery | None): the session the call is made as.
+        account (str | None): the account the workspace's server holds it
+            for, None outside a server or where it keeps no accounts.
     """
     if session is None:
-        return PolicyCaller()
-    return PolicyCaller(CallerSession(session.session_id, session.cwd))
+        return PolicyCaller(account=account)
+    return PolicyCaller(
+        CallerSession(session.session_id, session.cwd), account
+    )
 
 
 @dataclass(frozen=True, slots=True)

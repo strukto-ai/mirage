@@ -553,14 +553,18 @@ export interface CallerSessionQuery {
 }
 
 /**
- * `session` as a method's `ctx.caller` reads it. Mirrors Python's
- * `policy_caller`.
+ * `session` as a method's `ctx.caller` reads it; `account` is the account
+ * the workspace's server holds it for, null outside a server or where it
+ * keeps no accounts. Mirrors Python's `policy_caller`.
  */
-export function policyCaller(session: CallerSessionQuery | null): PolicyCaller {
+export function policyCaller(
+  session: CallerSessionQuery | null,
+  account: string | null = null,
+): PolicyCaller {
   return Object.freeze({
     session:
       session === null ? null : Object.freeze({ sessionId: session.sessionId, cwd: session.cwd }),
-    account: null,
+    account,
   })
 }
 

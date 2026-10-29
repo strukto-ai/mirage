@@ -418,7 +418,7 @@ export async function preVfsGate(
     sessionId,
     ...(issuer !== undefined ? { issuer } : {}),
     ...context,
-    caller: policyCaller((caller ?? currentCaller()).session),
+    caller: policyCaller((caller ?? currentCaller()).session, policies.account),
   }
   const trace = caller === undefined ? explaining() : caller.explaining
   const line = caller === undefined ? lineRunning() : caller.refusals !== null
@@ -499,7 +499,7 @@ export async function postVfsGate(
     sessionId,
     ...(issuer !== undefined ? { issuer } : {}),
     ...context,
-    caller: policyCaller((caller ?? currentCaller()).session),
+    caller: policyCaller((caller ?? currentCaller()).session, policies.account),
     result,
   }
   await refuseOp(ctx, await apart(() => policies.postVfs(ctx)), line ? null : decisions, caller)
@@ -610,9 +610,10 @@ export async function preSessionGate(
  * not return (VALIDITY) throws PolicyError: that is a programming
  * error, not a refusal.
  *
- * The chain holds the decision ledger an Ask is put to (`decisions`), and
+ * The chain holds the decision ledger an Ask is put to (`decisions`),
  * `views`, which the workspace sets to fill a method's read-only `session`
- * and `vfs`.
+ * and `vfs`, and `account`, which a server sets to the account it holds the
+ * workspace for, for every method's `caller`.
  */
 export class Policies {
   private readonly policies: Policy[]
@@ -626,6 +627,7 @@ export class Policies {
         session?: SessionState,
       ) => (Required<Pick<RouteContext, 'session' | 'caller'>> & Pick<RouteContext, 'vfs'>) | null)
     | null = null
+  account: string | null = null
 
   constructor(policies?: readonly Policy[]) {
     this.policies = [...(policies ?? [])]

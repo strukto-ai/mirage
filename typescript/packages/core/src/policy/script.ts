@@ -142,8 +142,10 @@ function plain(value: unknown, data = false): JsonValue {
 export function scriptContext(
   ctx: CommandContext | RouteContext | VfsContext | SessionContext | WorkspaceContext,
 ): Record<string, JsonValue> {
+  // A config is data as its writer spelled it: no field it holds is a
+  // live handle or a camelCase name.
+  if ('config' in ctx) return { config: plain(ctx.config, true), caller: callerData(ctx.caller) }
   const data = plain(ctx) as Record<string, JsonValue>
-  if ('config' in ctx) return data
   if ('commands' in ctx) {
     const commands = data.commands as Record<string, JsonValue>[]
     data.commands = ctx.commands.map((command, at) => ({
