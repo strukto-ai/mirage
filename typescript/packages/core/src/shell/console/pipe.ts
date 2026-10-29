@@ -34,6 +34,7 @@ export class PipeConsole extends JobConsole {
     else if (!this.muted) {
       await this.pipe.write(data).catch((error: unknown) => {
         if (!this.muted) throw error
+        console.debug(`console pipe: a muted write is dropped: ${String(error)}`)
       })
     }
   }
