@@ -77,7 +77,7 @@ on both hosts. The existing whole-host core and TypeScript filters cover
 them, including the Node Redis store. Live session version history lives in
 `cache/versions` on both hosts, covered by those same filters. The optional
 `session` on a scenario command selects a session in the reader workspace;
-`unix/write/conditional.json` uses it to test peers sharing one byte cache. The shared `fixtures/write/move_recovery.json` corpus also drives both S3 driver tests and mirrored workspace-shell cases for successful compensation, refused cleanup, and an external destination replacement. Deterministic SDK hooks place the competing write between copy and source deletion; these cases do not depend on moto enforcing copy/delete conditions.
+`unix/write/conditional.json` uses it to test peers sharing one byte cache. The shared `fixtures/write/move_recovery.json` also checks S3 rollback on both hosts through deterministic driver and workspace hooks.
 
 The streamed read probes in `vfs/ranges/stream.json` accept
 `max_chunk_size` to bound every returned chunk and `take_bytes` to close
