@@ -72,8 +72,8 @@ describe('uploadFile', () => {
       { endpoint: 'files.getUploadURLExternal', params: { filename: 'reply.wav', length: '4' } },
       {
         endpoint: 'files.completeUploadExternal',
-        params: {
-          files: '[{"id":"F1","title":"reply.wav"}]',
+        body: {
+          files: [{ id: 'F1', title: 'reply.wav' }],
           channel_id: 'C1',
           initial_comment: 'here',
           thread_ts: '9.9',

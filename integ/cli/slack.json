@@ -331,6 +331,17 @@
         "stdout": "same\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sl_upload_file_long_comment",
+      "seq": 564027,
+      "targets": ["cli-slack"],
+      "command": "slack upload-file --channel C1 --file /scratch/reply.txt --initial-comment \"$(printf '%20000s' '' | tr ' ' x)\" >/dev/null && slack read-messages --channel C1 --limit 1 | jq '.[0].text | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "20000\n",
+        "stderr": ""
+      }
     }
   ]
 }

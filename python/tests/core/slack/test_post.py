@@ -25,26 +25,28 @@ ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
 
 @pytest.mark.asyncio
 async def test_upload_file_asks_sends_then_completes():
-    answers = [
-        {
-            "ok": True,
-            "upload_url": "https://files.example/u/1",
-            "file_id": "F1",
-        },
-        {"ok": True, "files": [{"id": "F1", "title": "reply.wav"}]},
-    ]
+    ticket = {
+        "ok": True,
+        "upload_url": "https://files.example/u/1",
+        "file_id": "F1",
+    }
+    shared = {"ok": True, "files": [{"id": "F1", "title": "reply.wav"}]}
     with (
         patch(
             "mirage.core.slack.post.slack_get",
-            new=AsyncMock(side_effect=answers),
+            new=AsyncMock(return_value=ticket),
         ) as get,
         patch("mirage.core.slack.post.upload_bytes", new=AsyncMock()) as send,
+        patch(
+            "mirage.core.slack.post.slack_post",
+            new=AsyncMock(return_value=shared),
+        ) as complete,
     ):
         result = await upload_file(
             ACCESSOR, "C1", "reply.wav", b"RIFF", "here", "9.9"
         )
-    assert result == answers[1]
-    assert get.await_args_list[0].args == (
+    assert result == shared
+    get.assert_awaited_once_with(
         ACCESSOR,
         "files.getUploadURLExternal",
         {"filename": "reply.wav", "length": 4},
@@ -52,11 +54,11 @@ async def test_upload_file_asks_sends_then_completes():
     send.assert_awaited_once_with(
         ACCESSOR, "https://files.example/u/1", b"RIFF"
     )
-    assert get.await_args_list[1].args == (
+    complete.assert_awaited_once_with(
         ACCESSOR,
         "files.completeUploadExternal",
         {
-            "files": '[{"id":"F1","title":"reply.wav"}]',
+            "files": [{"id": "F1", "title": "reply.wav"}],
             "channel_id": "C1",
             "initial_comment": "here",
             "thread_ts": "9.9",

@@ -177,18 +177,31 @@ export async function receiveUpload(ctx: Ctx<C>): Promise<Reply> {
   return { status: 200, body: Buffer.from(`OK - ${String(ctx.body.length)}`) }
 }
 
+// Slack reads files.completeUploadExternal's arguments from the query
+// string, form fields or a JSON body; `files` is a JSON string in the first
+// two and an array in the last. null when that string does not parse.
+function completeArgs(ctx: Ctx<C>): Record<string, JsonValue> | null {
+  const args: Record<string, JsonValue> = Object.fromEntries(argsOf(ctx))
+  const raw = ctx.headers['content-type']
+  const type = Array.isArray(raw) ? raw[0] : raw
+  if (type?.startsWith('application/json') === true) Object.assign(args, obj(ctx.json()))
+  if (typeof args.files !== 'string') return args
+  try {
+    args.files = JSON.parse(args.files) as JsonValue
+  } catch {
+    return null
+  }
+  return args
+}
+
 // files.completeUploadExternal: share the uploaded files in `channel_id`, as
 // one bot message carrying `initial_comment`, in `thread_ts` when given.
 // Without a channel the files complete unshared, so nothing lists them.
 export async function completeUpload(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return fail('not_authed')
-  const args = argsOf(ctx)
-  let asked: JsonValue
-  try {
-    asked = JSON.parse(args.get('files') ?? '') as JsonValue
-  } catch {
-    return fail('invalid_arguments')
-  }
+  const args = completeArgs(ctx)
+  if (args === null) return fail('invalid_arguments')
+  const asked = args.files
   if (!Array.isArray(asked) || asked.length === 0) return fail('invalid_arguments')
   const entries = asked.map(obj)
   const uploads = []
@@ -199,19 +212,14 @@ export async function completeUpload(ctx: Ctx<C>): Promise<Reply> {
     if (row === null || row.body === null) return fail('file_not_found')
     uploads.push({ row, title: str(entry.title) === '' ? row.name : str(entry.title) })
   }
-  const channel = args.get('channel_id') ?? ''
+  const channel = str(args.channel_id)
   let ts: string | null = null
   if (channel !== '') {
     const target = await channelById(ctx.db, ctx.tenant, channel)
     if (target === null) return fail('channel_not_found')
     if (!target.isMember) return fail('not_in_channel')
-    const threadTs = args.get('thread_ts') ?? ''
-    ts = await post(
-      ctx,
-      channel,
-      args.get('initial_comment') ?? '',
-      threadTs === '' ? null : threadTs,
-    )
+    const threadTs = str(args.thread_ts)
+    ts = await post(ctx, channel, str(args.initial_comment), threadTs === '' ? null : threadTs)
   }
   for (const { row, title } of uploads) {
     await ctx.db.upload.delete({ where: { tenant_id: { tenant: ctx.tenant, id: row.id } } })

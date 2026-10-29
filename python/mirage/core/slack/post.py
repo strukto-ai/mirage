@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
@@ -68,8 +67,8 @@ async def upload_file(
 ) -> dict[str, Any]:
     """Share a file in a channel or thread, the way Slack's own SDKs do:
     ask for an upload URL, send the bytes there, then complete the
-    upload into the conversation. Both API calls carry their arguments
-    in the query string, which every Slack method accepts.
+    upload into the conversation. The completion is a JSON body, so a
+    long ``initial_comment`` never outgrows a request line.
 
     Args:
         accessor (SlackAccessor): Slack accessor.
@@ -88,15 +87,12 @@ async def upload_file(
         {"filename": filename, "length": len(data)},
     )
     await upload_bytes(accessor, str(ticket["upload_url"]), data)
-    params: dict[str, Any] = {
-        "files": json.dumps(
-            [{"id": ticket["file_id"], "title": filename}],
-            separators=(",", ":"),
-        ),
+    body: dict[str, Any] = {
+        "files": [{"id": ticket["file_id"], "title": filename}],
         "channel_id": channel_id,
     }
     if initial_comment:
-        params["initial_comment"] = initial_comment
+        body["initial_comment"] = initial_comment
     if thread_ts:
-        params["thread_ts"] = thread_ts
-    return await slack_get(accessor, "files.completeUploadExternal", params)
+        body["thread_ts"] = thread_ts
+    return await slack_post(accessor, "files.completeUploadExternal", body)

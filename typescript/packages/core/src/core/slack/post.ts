@@ -42,8 +42,8 @@ export async function replyToThread(
 /**
  * Share a file in a channel or thread, the way Slack's own SDKs do: ask for
  * an upload URL, send the bytes there, then complete the upload into the
- * conversation. Both API calls carry their arguments in the query string,
- * which every Slack method accepts.
+ * conversation. The completion is a JSON body, so a long `initial_comment`
+ * never outgrows a request line.
  */
 export async function uploadFile(
   accessor: SlackAccessor,
@@ -62,13 +62,11 @@ export async function uploadFile(
     length: String(data.byteLength),
   })
   await transport.uploadBytes(String(ticket.upload_url), data)
-  const params: Record<string, string> = {
-    files: JSON.stringify([{ id: ticket.file_id, title: filename }]),
+  const body: Record<string, unknown> = {
+    files: [{ id: ticket.file_id, title: filename }],
     channel_id: channelId,
   }
-  if (initialComment !== undefined && initialComment !== '') {
-    params.initial_comment = initialComment
-  }
-  if (threadTs !== undefined && threadTs !== '') params.thread_ts = threadTs
-  return transport.call('files.completeUploadExternal', params)
+  if (initialComment !== undefined && initialComment !== '') body.initial_comment = initialComment
+  if (threadTs !== undefined && threadTs !== '') body.thread_ts = threadTs
+  return transport.call('files.completeUploadExternal', undefined, body)
 }
