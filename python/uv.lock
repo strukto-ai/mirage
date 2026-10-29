@@ -2905,7 +2905,7 @@ requires-dist = [
     { name = "lancedb", marker = "extra == 'lancedb'", specifier = ">=0.33.0" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=5.0.4" },
     { name = "mcp", specifier = ">=2.3.0,<3" },
-    { name = "mem0ai", marker = "extra == 'mem0'", specifier = ">=2.0.6" },
+    { name = "mem0ai", marker = "extra == 'mem0'", specifier = ">=2.0.18" },
     { name = "mfusepy", marker = "extra == 'fuse'", specifier = ">=1.0.0" },
     { name = "mirage-ai", extras = ["1password"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["agno"], marker = "extra == 'all'" },
