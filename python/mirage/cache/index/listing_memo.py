@@ -28,7 +28,8 @@ _WRITES_BY_PREFIX: Counter[str] = Counter()
 _ROW_WRITES_BY_PREFIX: Counter[str] = Counter()
 # Each row written within the last window, with its write count and time.
 _ROWS_WRITTEN_BY_PREFIX: dict[str, OrderedDict[str, tuple[int, float]]] = {}
-_HOLDERS_BY_PREFIX: Counter[str] = Counter()
+# The open memos on each prefix, which share its write count.
+_HOLDERS_BY_PREFIX: dict[str, set["ListingMemo"]] = {}
 _PREFIX_LOCK = threading.Lock()
 
 
@@ -111,7 +112,7 @@ class ListingMemo:
         self._reads: OrderedDict[tuple[int, str], _Read] = OrderedDict()
         self._closed = False
         with _PREFIX_LOCK:
-            _HOLDERS_BY_PREFIX[key_prefix] += 1
+            _HOLDERS_BY_PREFIX.setdefault(key_prefix, set()).add(self)
 
     def _live(self, kept: _Read) -> bool:
         return (
@@ -139,7 +140,8 @@ class ListingMemo:
         return True
 
     def contradicts(self, paths: Sequence[str]) -> bool:
-        """Whether a live kept listing leaves out one of the paths.
+        """Whether a live listing any open memo on this prefix keeps
+        leaves out one of the paths.
 
         Args:
             paths (Sequence[str]): observed immediate child keys.
@@ -147,10 +149,13 @@ class ListingMemo:
         observed: dict[str, list[str]] = {}
         for path in paths:
             observed.setdefault(path.rsplit("/", 1)[0] or "/", []).append(path)
+        with _PREFIX_LOCK:
+            memos = list(_HOLDERS_BY_PREFIX.get(self._key_prefix, ()))
         return any(
-            self._live(kept)
+            memo._live(kept)
             and any(path not in _positions(kept) for path in observed[folder])
-            for (_, folder), kept in self._reads.items()
+            for memo in memos
+            for (_, folder), kept in list(memo._reads.items())
             if folder in observed
         )
 
@@ -274,9 +279,10 @@ class ListingMemo:
             return
         self._closed = True
         with _PREFIX_LOCK:
-            _HOLDERS_BY_PREFIX[self._key_prefix] -= 1
-            if _HOLDERS_BY_PREFIX[self._key_prefix] <= 0:
-                del _HOLDERS_BY_PREFIX[self._key_prefix]
+            holders = _HOLDERS_BY_PREFIX.get(self._key_prefix, set())
+            holders.discard(self)
+            if not holders:
+                _HOLDERS_BY_PREFIX.pop(self._key_prefix, None)
                 _WRITES_BY_PREFIX.pop(self._key_prefix, None)
                 _ROW_WRITES_BY_PREFIX.pop(self._key_prefix, None)
                 _ROWS_WRITTEN_BY_PREFIX.pop(self._key_prefix, None)

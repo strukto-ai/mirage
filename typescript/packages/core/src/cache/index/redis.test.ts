@@ -1596,18 +1596,22 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
     expect(sent.mock.calls).toHaveLength(1)
   })
 
-  it('an observation a kept listing leaves out drops the memo', async () => {
-    await store.setDir('/d', LISTED)
-    await runInCommandScope(async () => {
-      expect((await store.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
-      const childrenKey = (
-        store as unknown as { childrenKey: (path: string) => string }
-      ).childrenKey('/d')
-      await (await redis()).del(childrenKey)
-      expect(await store.invalidateMissing(['/d/new'])).toBe(false)
-      expect((await store.listDir('/d')).entries ?? null).toBe(null)
-    })
-  })
+  it.each(['self', 'peer'])(
+    'an observation a kept listing leaves out drops the memo (%s)',
+    async (observer) => {
+      await store.setDir('/d', LISTED)
+      const writer = observer === 'self' ? store : peer
+      await runInCommandScope(async () => {
+        expect((await store.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
+        const childrenKey = (
+          store as unknown as { childrenKey: (path: string) => string }
+        ).childrenKey('/d')
+        await (await redis()).del(childrenKey)
+        expect(await writer.invalidateMissing(['/d/new'])).toBe(false)
+        expect((await store.listDir('/d')).entries ?? null).toBe(null)
+      })
+    },
+  )
 
   it('keeps the siblings of a written row batched', async () => {
     await store.setDir('/d', LISTED)
