@@ -15,13 +15,13 @@
 from tests.core.discord.conftest import FakeDiscordApi
 from tests.core.slack.conftest import FakeSlack
 from tests.e2e.gdrive_mock import FakeGDrive
-from tests.fixtures.github_mock import MOCK_BLOBS, MOCK_TREE
 from tests.sim.seam import Exponential, Match
 from tests.sim.world import Sim, simulate
 
 
 def test_sim_gdrive():
-    """Verify Google Drive operates in virtual time with deterministic latency and trace."""
+    """Verify Google Drive operates in virtual time with deterministic
+    latency and trace."""
     fake_gd = FakeGDrive()
     fake_gd.add_file("notes.txt", b"meeting notes in google drive\n")
 
@@ -43,7 +43,11 @@ def test_sim_gdrive():
 
     ops = [e.op for e in trace.served()]
     assert "list_files" in ops or "list_children" in ops
-    assert "capture_file_metadata" in ops or "get_file" in ops or "download_file" in ops
+    assert (
+        "capture_file_metadata" in ops
+        or "get_file" in ops
+        or "download_file" in ops
+    )
 
 
 def test_sim_slack():
@@ -78,7 +82,8 @@ def test_sim_slack():
 
 
 def test_sim_multi_backend_cross_mount():
-    """Verify S3, Google Drive, and Slack coexisting in a single workspace under virtual time."""
+    """Verify S3, Google Drive, and Slack coexisting in a single workspace
+    under virtual time."""
     fake_gd = FakeGDrive()
     fake_gd.add_file("report.txt", b"quarterly report\n")
     fake_slack = FakeSlack()
@@ -121,6 +126,7 @@ def test_sim_multi_backend_cross_mount():
 
 def test_sim_github():
     """Verify GitHub tree exploration and blob reads under virtual time."""
+
     async def scenario(sim: Sim):
         actor = await sim.workspace().actor("a")
         res_ls = await actor.sh("ls /github")
@@ -198,17 +204,14 @@ def test_sim_discord():
         assert b"My Server__G001" in res_ls.stdout
 
         # Read chat history
-        res_cat = await actor.sh(
-            "cat /discord/My\\ Server__G001/channels/general__C001/2024-01-15/chat.jsonl"
-        )
+        dpath = "/discord/My\\ Server__G001/channels/general__C001/2024-01-15"
+        res_cat = await actor.sh(f"cat {dpath}/chat.jsonl")
         assert res_cat.exit_code == 0
         assert b"hello" in res_cat.stdout
         assert b"alice" in res_cat.stdout
 
         # Read attachment stream
-        res_att = await actor.sh(
-            "cat /discord/My\\ Server__G001/channels/general__C001/2024-01-15/files/kept__A1.txt"
-        )
+        res_att = await actor.sh(f"cat {dpath}/files/kept__A1.txt")
         assert res_att.exit_code == 0
         assert res_att.stdout == b"0123456789"
 
@@ -295,5 +298,3 @@ def test_sim_hold_non_s3_backend():
         scenario,
         discord=fake_discord,
     )
-
-

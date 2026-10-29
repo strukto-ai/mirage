@@ -46,56 +46,66 @@ S3_OPS = frozenset(
     if inspect.iscoroutinefunction(member) and not name.startswith("_")
 )
 
-GDRIVE_OPS = frozenset({
-    "list_files",
-    "list_children",
-    "list_shared_drives",
-    "list_all_files",
-    "get_file",
-    "download_file",
-    "download_file_stream",
-    "capture_file_metadata",
-    "upload_file",
-    "update_file_content",
-    "create_folder",
-})
+GDRIVE_OPS = frozenset(
+    {
+        "list_files",
+        "list_children",
+        "list_shared_drives",
+        "list_all_files",
+        "get_file",
+        "download_file",
+        "download_file_stream",
+        "capture_file_metadata",
+        "upload_file",
+        "update_file_content",
+        "create_folder",
+    }
+)
 
-SLACK_OPS = frozenset({
-    "conversations.list",
-    "conversations.history",
-    "users.list",
-    "users.info",
-    "auth.test",
-    "download_file",
-    "download_file_stream",
-})
+SLACK_OPS = frozenset(
+    {
+        "conversations.list",
+        "conversations.history",
+        "users.list",
+        "users.info",
+        "auth.test",
+        "download_file",
+        "download_file_stream",
+    }
+)
 
-GITHUB_OPS = frozenset({
-    "fetch_default_branch",
-    "fetch_tree",
-    "read_bytes",
-    "search_code",
-    "graphql_data",
-})
+GITHUB_OPS = frozenset(
+    {
+        "fetch_default_branch",
+        "fetch_tree",
+        "read_bytes",
+        "search_code",
+        "graphql_data",
+    }
+)
 
-DROPBOX_OPS = frozenset({
-    "dropbox:/files/list_folder",
-    "dropbox:/files/get_metadata",
-    "dropbox:download",
-    "dropbox:upload",
-    "dropbox:/files/delete_v2",
-    "dropbox:/files/move_v2",
-    "dropbox:/files/copy_v2",
-})
+DROPBOX_OPS = frozenset(
+    {
+        "dropbox:/files/list_folder",
+        "dropbox:/files/get_metadata",
+        "dropbox:download",
+        "dropbox:upload",
+        "dropbox:/files/delete_v2",
+        "dropbox:/files/move_v2",
+        "dropbox:/files/copy_v2",
+    }
+)
 
-DISCORD_OPS = frozenset({
-    "list_guilds",
-    "list_channels",
-    "list_members",
-    "list_messages_for_day",
-    "download_file",
-    "download_file_stream",
-})
+DISCORD_OPS = frozenset(
+    {
+        "list_guilds",
+        "list_channels",
+        "list_members",
+        "list_messages_for_day",
+        "download_file",
+        "download_file_stream",
+    }
+)
 
 KNOWN_OPS = (
     S3_OPS | GDRIVE_OPS | SLACK_OPS | GITHUB_OPS | DROPBOX_OPS | DISCORD_OPS
@@ -447,7 +457,11 @@ class Network:
             if hold.takes(step, op, key):
                 await hold.wait(f"{step} {op} {key}")
         before = self._snapshot()
-        commits = dict(self._store.commits) if hasattr(self._store, "commits") else {}
+        commits = (
+            dict(self._store.commits)
+            if hasattr(self._store, "commits")
+            else {}
+        )
         try:
             answer = _at_once(perform())
         except Exception as exc:
@@ -492,9 +506,7 @@ class Connection:
         endpoint (str): the endpoint the client reports.
     """
 
-    def __init__(
-        self, network: Network, fake: Any, endpoint: str
-    ) -> None:
+    def __init__(self, network: Network, fake: Any, endpoint: str) -> None:
         self._network = network
         self._fake = fake
         self.meta = SimpleNamespace(endpoint_url=endpoint)
@@ -504,7 +516,10 @@ class Connection:
         if name == "get_paginator":
             return lambda op: _Paginator(self._network, attr(op))
         if inspect.isasyncgenfunction(attr):
-            async def gen_call(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
+
+            async def gen_call(
+                *args: Any, **kwargs: Any
+            ) -> AsyncIterator[Any]:
                 async def perform() -> Any:
                     return attr(*args, **kwargs)
 
@@ -565,9 +580,7 @@ class _SlackConnection:
         self._network = network
         self._fake = fake
 
-    async def get(
-        self, accessor: Any, method: str, params: Any = None
-    ) -> Any:
+    async def get(self, accessor: Any, method: str, params: Any = None) -> Any:
         async def perform() -> Any:
             with patch("asyncio.sleep", return_value=_NoYield()):
                 if method == "users.info":
@@ -612,10 +625,10 @@ def route_gdrive(network: Network, fake: Any) -> Iterator[None]:
     """
     from mirage.accessor.google_api import GoogleApiAccessor
     from tests.e2e.gdrive_mock import (
-        FakeDriveApi,
-        FakeRenderApi,
         _FAKE_EXPIRES_IN,
         _FAKE_TOKEN,
+        FakeDriveApi,
+        FakeRenderApi,
     )
 
     registry = [(None, fake)]
@@ -796,7 +809,9 @@ class _GitHubConnection:
         async def perform() -> tuple[list[Any], bool]:
             results = MOCK_SEARCH_RESULTS.get(query, [])
             if path_filter:
-                results = [r for r in results if r.path.startswith(path_filter)]
+                results = [
+                    r for r in results if r.path.startswith(path_filter)
+                ]
             return list(results), False
 
         return await self._network.request(
@@ -834,7 +849,9 @@ def route_github(
 
     mock_tree = MOCK_TREE if tree is None else tree
     mock_blobs = MOCK_BLOBS if blobs is None else blobs
-    mock_branch = MOCK_DEFAULT_BRANCH if default_branch is None else default_branch
+    mock_branch = (
+        MOCK_DEFAULT_BRANCH if default_branch is None else default_branch
+    )
 
     conn = _GitHubConnection(network, mock_tree, mock_blobs, mock_branch)
     with ExitStack() as stack:
@@ -927,25 +944,29 @@ class _DropboxConnection:
                             dname = rel.split("/")[0]
                             if dname not in dirs_seen:
                                 dirs_seen.add(dname)
-                                entries.append({
-                                    ".tag": "folder",
-                                    "name": dname,
-                                    "path_lower": f"{p_pfx}{dname}".lower(),
-                                    "path_display": f"{p_pfx}{dname}",
-                                })
+                                entries.append(
+                                    {
+                                        ".tag": "folder",
+                                        "name": dname,
+                                        "path_lower": f"{p_pfx}{dname}".lower(),
+                                        "path_display": f"{p_pfx}{dname}",
+                                    }
+                                )
                         else:
                             rev = str(self._revs.get(fpath, 1))
                             chash = hashlib.sha256(data).hexdigest()
-                            entries.append({
-                                ".tag": "file",
-                                "name": rel,
-                                "path_lower": fpath.lower(),
-                                "path_display": fpath,
-                                "id": f"id:{rel}",
-                                "size": len(data),
-                                "rev": rev,
-                                "content_hash": chash,
-                            })
+                            entries.append(
+                                {
+                                    ".tag": "file",
+                                    "name": rel,
+                                    "path_lower": fpath.lower(),
+                                    "path_display": fpath,
+                                    "id": f"id:{rel}",
+                                    "size": len(data),
+                                    "rev": rev,
+                                    "content_hash": chash,
+                                }
+                            )
                 return {"entries": entries, "has_more": False}
             if endpoint == "/files/get_metadata":
                 p = "/" + body.get("path", "").strip("/")
@@ -1013,7 +1034,6 @@ class _DropboxConnection:
     async def download(
         self, tm: Any, path: str, window: Any = None
     ) -> tuple[bytes, str | None]:
-        import json
 
         p = "/" + path.strip("/")
 
@@ -1045,10 +1065,12 @@ class _DropboxConnection:
     ) -> AsyncIterator[bytes]:
         data, res_hdr = await self.download(tm, path)
         if on_response is not None and res_hdr is not None:
-            on_response({
-                "Dropbox-API-Result": res_hdr,
-                "dropbox-api-result": res_hdr,
-            })
+            on_response(
+                {
+                    "Dropbox-API-Result": res_hdr,
+                    "dropbox-api-result": res_hdr,
+                }
+            )
         yield data
 
     async def upload(
@@ -1118,7 +1140,8 @@ def route_dropbox(
         for mod in ("client", "write"):
             stack.enter_context(
                 patch(
-                    f"mirage.core.dropbox.{mod}.dropbox_upload", new=conn.upload
+                    f"mirage.core.dropbox.{mod}.dropbox_upload",
+                    new=conn.upload,
                 )
             )
         stack.enter_context(
