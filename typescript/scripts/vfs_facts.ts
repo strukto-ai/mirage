@@ -650,6 +650,7 @@ export interface ConfigShape {
 }
 
 const CONFIG_PARSER = 'parseConfigWithSchema'
+const FIELD_REGISTRY = 'FIELD_NORMALIZERS'
 const CONFIG_RE = /^normalize\w*Config$|ConfigSchema$/
 
 export interface Bound {
@@ -1119,8 +1120,9 @@ function configCall(body: ts.Node): ts.CallExpression | undefined {
 }
 
 // The normalizer a schema registers through `.register(FIELD_NORMALIZERS,
-// normalizer)`. A `.extend()` builds a new schema that does not inherit the
-// registration, as in zod, so the walk stops there.
+// normalizer)`, past any registration in another registry. A `.extend()`
+// builds a new schema that does not inherit the registration, as in zod,
+// so the walk stops there.
 function registeredNormalizer(
   expr: ts.Expression,
   source: ts.SourceFile,
@@ -1139,8 +1141,15 @@ function registeredNormalizer(
   const callee = expr.expression
   if (ts.isPropertyAccessExpression(callee)) {
     const method = callee.name.text
-    const normalizer = expr.arguments[1]
-    if (method === 'register' && normalizer !== undefined) return { expr: normalizer, source, env }
+    const [registry, normalizer] = expr.arguments
+    if (
+      method === 'register' &&
+      registry !== undefined &&
+      ts.isIdentifier(registry) &&
+      registry.text === FIELD_REGISTRY &&
+      normalizer !== undefined
+    )
+      return { expr: normalizer, source, env }
     if (method === 'extend' || method === 'safeExtend' || method === 'object') return undefined
     return registeredNormalizer(callee.expression, source, env, packagesRoot, label)
   }
@@ -1160,7 +1169,7 @@ function registeredNormalizer(
   return undefined
 }
 
-function factsOfSchema(
+export function factsOfSchema(
   schema: ts.Expression,
   source: ts.SourceFile,
   env: Env,
