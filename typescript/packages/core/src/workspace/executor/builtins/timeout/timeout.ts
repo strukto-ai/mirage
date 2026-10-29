@@ -429,13 +429,14 @@ async function supervise(
   // What the stopped run printed up to the stop has gone out. What it
   // still does as it ends (a guest landing what it wrote) is done before
   // timeout answers, as Python joins the cancelled run, but what it prints
-  // on stdout then is lost, so the pipe ends at the stop: a JS run goes on
-  // past its abort, where a cancelled Python task stops at its next await.
+  // on stdout then is lost, so the pipe ends at the stop and drops it: a JS
+  // run goes on past its abort, where a cancelled Python task stops at its
+  // next await.
   // Its stderr is read after the join, since a runtime hands over what its
   // guest wrote there as the run ends. One that will not end is let go
   // after a stop's grace.
   const stop = async (said: readonly string[], exitCode: number): Promise<Result> => {
-    sink.end()
+    sink.mute()
     try {
       await joinOrAbort(run, abort.signal, STOP_WAIT_SECONDS * 1000)
     } catch (err) {

@@ -19,6 +19,7 @@ import { Channel } from './types.ts'
 /** Route a shell's piped channels through the shared bounded byte pipe. */
 export class PipeConsole extends JobConsole {
   private readonly pipe: BytePipe
+  private muted = false
 
   constructor(
     private readonly pipeStderr = false,
@@ -30,7 +31,11 @@ export class PipeConsole extends JobConsole {
 
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
     if (channel !== Channel.STDOUT && !this.pipeStderr) await super.emit(channel, data)
-    else await this.pipe.write(data)
+    else if (!this.muted) {
+      await this.pipe.write(data).catch((error: unknown) => {
+        if (!this.muted) throw error
+      })
+    }
   }
 
   async drain(): Promise<void> {
@@ -43,6 +48,16 @@ export class PipeConsole extends JobConsole {
 
   end(error?: unknown): void {
     this.pipe.end(error)
+  }
+
+  /**
+   * End the reader's stream here and drop what is piped after, unrefused: a
+   * stopped JS run goes on past its abort, where a stopped process writes
+   * nothing more, and a refused write would end it as a broken pipe instead.
+   */
+  mute(): void {
+    this.muted = true
+    this.pipe.end()
   }
 
   closeReader(): void {
