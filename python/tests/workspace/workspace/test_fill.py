@@ -33,6 +33,7 @@ from mirage import (
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec, FlagValue
 from mirage.io import IOResult
+from mirage.io.network import NetworkRule, network_bound
 from mirage.policy.match import Outcome
 from mirage.policy.types import Decision, RouteContext, Scope
 from mirage.runtime.base import Runtime
@@ -101,6 +102,25 @@ async def test_lazy_fetches_only_when_referenced_and_only_once():
         io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_managed_value_is_fetched_under_the_workspace_network():
+    bound: list[NetworkRule | None] = []
+
+    async def fetch(config: FakeConfig, ref: str) -> ResolvedSecret:
+        bound.append(network_bound())
+        return ResolvedSecret(fields={"TOKEN": "t0"})
+
+    register_secrets("fake", FakeConfig, fetch)
+    ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}}, network=False)
+    try:
+        io = await ws.shell("echo $TOKEN")
+        assert (await io.stdout_str()) == "t0\n"
+        assert bound == [ws.registry.network]
+        assert bound[0] is not None
     finally:
         await ws.close()
 

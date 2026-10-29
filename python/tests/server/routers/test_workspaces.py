@@ -35,7 +35,12 @@ from pydantic import BaseModel
 
 from mirage import MountMode, Workspace
 from mirage.policy.base import Policy
-from mirage.policy.types import CommandContext, Deny, WorkspaceContext
+from mirage.policy.types import (
+    CommandContext,
+    Deny,
+    SessionContext,
+    WorkspaceContext,
+)
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
@@ -469,6 +474,33 @@ async def test_the_server_network_holds_every_workspace(listening):
     free = build_app(idle_grace_seconds=10.0)
     assert await _curl_from(free, listening) == 0
     assert await _curl_from(held, listening) == 7
+
+
+class NoSecretVar(Policy):
+    async def pre_session(self, ctx: SessionContext) -> Deny | None:
+        return Deny("SECRET is the server's") if ctx.key == "SECRET" else None
+
+
+@pytest.mark.asyncio
+async def test_a_load_meets_the_server_policies_with_its_saved_values():
+    free = build_app(idle_grace_seconds=10.0)
+    held = build_app(idle_grace_seconds=10.0, policies=[NoSecretVar()])
+    async with AsyncClient(
+        transport=ASGITransport(app=free), base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+        wid = r.json()["id"]
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell", json={"command": "export SECRET=1"}
+        )
+        assert r.json()["exit_code"] == 0
+        tar = await _download(client, wid)
+        assert (await _upload(client, tar)).status_code == 201
+    async with AsyncClient(
+        transport=ASGITransport(app=held), base_url="http://test"
+    ) as client:
+        r = await _upload(client, tar)
+        assert r.status_code == 403, r.text
 
 
 @pytest.mark.asyncio

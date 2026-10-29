@@ -212,6 +212,23 @@ describe('config writer', () => {
     }
   })
 
+  it.each(['false', 'true', '{ allow = ["a.com", "10.0.0.0/8"] }'])(
+    'prints network %s so it sets again',
+    (value) => {
+      const { dir, path } = tmpConfigPath()
+      try {
+        setConfig('network', value, path)
+        const printed = getConfig('network', path)
+        expect(printed).toBe(value)
+        expect(listConfig(path)).toEqual({ network: value })
+        setConfig('network', printed ?? '', path)
+        expect(getConfig('network', path)).toBe(value)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
   it('setConfig updates an existing key in place without duplicating', () => {
     const { dir, path } = tmpConfigPath()
     try {

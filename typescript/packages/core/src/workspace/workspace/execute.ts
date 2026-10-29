@@ -1049,8 +1049,11 @@ async function runParsedLine(
       }
       if (env.sessions.hasManagedEnv) {
         // A whole-line program may read any name, so the walk is not
-        // consulted, and admitLine above already ran the real gate.
-        const filled = await fillManaged([rootNode], true, new Set(), false)
+        // consulted, and admitLine above already ran the real gate. A
+        // store answers under the workspace's network, as the line does.
+        const filled = await runWithNetwork(env.registry.network, () =>
+          fillManaged([rootNode], true, new Set(), false),
+        )
         if (filled !== null) return filled
       }
       const route = (await env.registry.policies.wantsFor(
@@ -1177,11 +1180,13 @@ async function runParsedLine(
       // expansions too, so a body invoked by bare name still fills what
       // it reads.
       const nodes = lineNodes(rootNode, effectiveSession)
-      const filled = await fillManaged(
-        nodes,
-        guestBound(nodes, decision),
-        cliEnvNames(nodes, effectiveSession, env.registry),
-        true,
+      const filled = await runWithNetwork(env.registry.network, () =>
+        fillManaged(
+          nodes,
+          guestBound(nodes, decision),
+          cliEnvNames(nodes, effectiveSession, env.registry),
+          true,
+        ),
       )
       if (filled !== null) return filled
     }

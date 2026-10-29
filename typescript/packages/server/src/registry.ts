@@ -376,10 +376,37 @@ export class WorkspaceRegistry {
     if (this.owners !== null) await this.owners.delete([id])
   }
 
-  add(ws: Workspace, id?: string, owner: string | null = null): WorkspaceEntry {
+  /**
+   * `fn` handed the server's policies, for a snapshot restore to meet as it
+   * reads the snapshot's saved values, as a live write meets them. The
+   * programs' runner is the restore's own, closed as it ends; `add` takes
+   * the list back as `restoredWith`. Mirrors Python's `restoring`.
+   */
+  async restoring<T>(fn: (policies: readonly Policy[]) => Promise<T>): Promise<T> {
+    const programs =
+      Object.keys(this.programs).length > 0 ? new ScriptPolicy(new Programs(this.programs)) : null
+    try {
+      return await fn([...this.policies, ...(programs === null ? [] : [programs])])
+    } finally {
+      await programs?.close()
+    }
+  }
+
+  /**
+   * Wrap `ws` in a runner and register it. `restoredWith` is the list
+   * `restoring` gave the restore that built it, taken off before the
+   * server's own policies are attached.
+   */
+  add(
+    ws: Workspace,
+    id?: string,
+    owner: string | null = null,
+    restoredWith: readonly Policy[] = [],
+  ): WorkspaceEntry {
     const wid = id ?? newWorkspaceId()
     if (this.entries.has(wid) || this.removals.has(wid))
       throw new Error(`workspace id already exists: ${wid}`)
+    for (const policy of restoredWith) ws.policies.remove(policy)
     for (const policy of this.policies) ws.policies.add(policy)
     ws.registry.network = this.ruleFor(ws.network)
     // An account reaches only the workspaces it owns, so every method's

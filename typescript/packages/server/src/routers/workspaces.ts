@@ -20,6 +20,8 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { runWithNetwork } from '@struktoai/mirage-core/io/network'
+import type { Policy } from '@struktoai/mirage-core/policy/base'
+import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { DiskWorkspaceStateStore, DOT_IDS, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
@@ -457,20 +459,28 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         return answer(reply, 400, { detail: `override build failed: ${(e as Error).message}` })
       }
       let ws: Workspace
+      let restoredWith: readonly Policy[] = []
       try {
-        ws = await runWithNetwork(rule, () =>
-          Workspace.load(
-            source,
-            {
-              maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
-              maxSnapshotEncodedBytes: MAX_SNAPSHOT_PART,
-              ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
-              ...(store !== undefined ? { s3: store } : {}),
-            },
-            overrides,
-          ),
-        )
+        // The snapshot's saved values meet the server's policies as a live
+        // write does, before any of them lands.
+        ws = await deps.registry.restoring((policies) => {
+          restoredWith = policies
+          return runWithNetwork(rule, () =>
+            Workspace.load(
+              source,
+              {
+                maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
+                maxSnapshotEncodedBytes: MAX_SNAPSHOT_PART,
+                ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
+                ...(store !== undefined ? { s3: store } : {}),
+                policies,
+              },
+              overrides,
+            ),
+          )
+        })
       } catch (e) {
+        if (e instanceof PolicyDenied) return answer(reply, 403, { detail: e.message })
         if ((e as { code?: unknown }).code === 'ENOENT') {
           return answer(reply, 400, { detail: `snapshot not found: ${String(key)}` })
         }
@@ -478,7 +488,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       }
       let entry
       try {
-        entry = deps.registry.add(ws, wid, req.account)
+        entry = deps.registry.add(ws, wid, req.account, restoredWith)
       } catch (e) {
         await ws.close()
         return answer(reply, 409, { detail: (e as Error).message })

@@ -458,11 +458,29 @@ class WorkspaceRegistry:
         if self._owners is not None:
             await self._owners.delete([workspace_id])
 
+    @asynccontextmanager
+    async def restoring(self) -> AsyncIterator[Sequence[Policy]]:
+        """The server's policies, for a snapshot restore to meet as it
+        reads the snapshot's saved values, as a live write meets them.
+        The programs' runner is the restore's own, closed as it ends,
+        since its runtimes start on the request's loop; ``add`` takes
+        the list back as ``restored_with``.
+        """
+        programs = (
+            ScriptPolicy(_Programs(self._programs)) if self._programs else None
+        )
+        try:
+            yield [*self.policies, *([programs] if programs else [])]
+        finally:
+            if programs is not None:
+                await programs.close()
+
     def add(
         self,
         workspace: Workspace,
         workspace_id: str | None = None,
         owner: str | None = None,
+        restored_with: Sequence[Policy] = (),
     ) -> WorkspaceEntry:
         """Wrap ``workspace`` in a runner and register it.
 
@@ -470,6 +488,9 @@ class WorkspaceRegistry:
             workspace (Workspace): freshly-constructed workspace.
             workspace_id (str | None): explicit id, or None to auto-mint.
             owner (str | None): the creating caller's account.
+            restored_with (Sequence[Policy]): the policies ``restoring``
+                gave the restore that built it, taken off before the
+                server's own are attached.
 
         Returns:
             WorkspaceEntry: the registered entry.
@@ -481,6 +502,8 @@ class WorkspaceRegistry:
         wid = workspace_id or new_workspace_id()
         if wid in self._entries or wid in self._removals:
             raise ValueError(f"workspace id already exists: {wid!r}")
+        for policy in restored_with:
+            workspace.policies.remove(policy)
         for policy in self.policies:
             workspace.policies.add(policy)
         workspace.registry.network = self.rule_for(workspace.network)

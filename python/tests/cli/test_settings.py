@@ -166,6 +166,19 @@ def test_list_config_returns_written_keys(tmp_path):
     }
 
 
+@pytest.mark.parametrize(
+    "value", ["false", "true", '{ allow = ["a.com", "10.0.0.0/8"] }']
+)
+def test_a_printed_network_sets_again(tmp_path, value):
+    p = tmp_path / "config.toml"
+    set_config("network", value, path=p)
+    printed = get_config("network", path=p)
+    assert printed == value
+    assert list_config(path=p) == {"network": value}
+    set_config("network", printed, path=p)
+    assert get_config("network", path=p) == value
+
+
 def test_set_config_rejects_unknown_key(tmp_path):
     with pytest.raises(DaemonConfigError, match="unknown config key"):
         set_config("MIRAGE_HOME", "/x", path=tmp_path / "config.toml")

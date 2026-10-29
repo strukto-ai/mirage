@@ -248,7 +248,10 @@ def list_config(path: Path | None = None) -> dict[str, Any]:
             table = tomllib.load(f).get("daemon", {})
     except tomllib.TOMLDecodeError as e:
         raise DaemonConfigError(f"malformed {use_path}: {e}") from e
-    return {k: str(v) for k, v in table.items()}
+    return {
+        k: _network_text(v) if k == "network" else str(v)
+        for k, v in table.items()
+    }
 
 
 def get_config(key: str, path: Path | None = None) -> str | None:

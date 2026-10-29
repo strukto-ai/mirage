@@ -33,7 +33,7 @@ from mirage.config import (
     resolve_secrets,
 )
 from mirage.io.network import run_with_network
-from mirage.policy.errors import PolicyError
+from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.profile import SessionProfile
 from mirage.secrets.errors import SecretsError
 from mirage.server.clone import (
@@ -577,17 +577,23 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
                 status_code=400, detail=f"override build failed: {e}"
             )
         try:
-            ws = await run_with_network(
-                rule,
-                Workspace.load(
-                    source,
-                    mounts=mounts,
-                    secrets=secrets,
-                    s3=store,
-                    max_snapshot_bytes=MAX_SNAPSHOT_BYTES,
-                    max_snapshot_encoded_bytes=MAX_SNAPSHOT_PART,
-                ),
-            )
+            # The snapshot's saved values meet the server's policies as a
+            # live write does, before any of them lands.
+            async with registry.restoring() as policies:
+                ws = await run_with_network(
+                    rule,
+                    Workspace.load(
+                        source,
+                        mounts=mounts,
+                        secrets=secrets,
+                        s3=store,
+                        max_snapshot_bytes=MAX_SNAPSHOT_BYTES,
+                        max_snapshot_encoded_bytes=MAX_SNAPSHOT_PART,
+                        policies=policies,
+                    ),
+                )
+        except PolicyDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
         except FileNotFoundError:
             raise HTTPException(
                 status_code=400, detail=f"snapshot not found: {req.key}"
@@ -600,7 +606,10 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
             raise HTTPException(status_code=400, detail=f"load failed: {e}")
         try:
             entry = registry.add(
-                ws, workspace_id=wid, owner=request.state.account
+                ws,
+                workspace_id=wid,
+                owner=request.state.account,
+                restored_with=policies,
             )
         except ValueError as e:
             await ws.close()

@@ -921,11 +921,16 @@ async def run_prepared_line(
                     # every managed name) still read a bootstrap source.
                     # The TypeScript twin shares one helper with the
                     # per-command path and skipped this by construction.
+                    # A store answers under the workspace's network, as
+                    # the line does.
                     if whole_names:
-                        await fill_env(
-                            effective_session,
-                            whole_names,
-                            await ws.secret_sources(),
+                        await run_with_network(
+                            ws.registry.network,
+                            fill_env(
+                                effective_session,
+                                whole_names,
+                                await ws.secret_sources(),
+                            ),
                         )
                 io = await run_with_network(
                     ws.registry.network,
@@ -1054,7 +1059,10 @@ async def run_prepared_line(
                         # unreachable store gets. Memoized, so the loop's
                         # later passes cost one await.
                         sources = await ws.secret_sources()
-                        await fill_env(effective_session, names, sources)
+                        await run_with_network(
+                            ws.registry.network,
+                            fill_env(effective_session, names, sources),
+                        )
                         names = plan_names(nodes)
             # No seam of its own: the whole line is one task under
             # ``Workspace.shell``, and a cancel lands on whichever await
