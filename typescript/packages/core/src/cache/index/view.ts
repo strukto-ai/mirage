@@ -50,6 +50,7 @@ interface IndexViewOptions {
 
 /** A mount-owned index view; delayed backend writes retain their original owner. */
 export class IndexView extends IndexCacheStore {
+  private unverified = false
   private readonly locked: boolean
   private readonly readTtl: number | undefined
   private readonly onGone: ((gone: readonly Evicted[]) => Promise<void>) | undefined
@@ -186,6 +187,7 @@ export class IndexView extends IndexCacheStore {
   private fencedListDir(path: string, child: string | undefined): Promise<ListResult> {
     return this.fence(async () => {
       if (!this.owns(path)) return { status: LookupStatus.NOT_FOUND }
+      if (this.unverified) return { status: LookupStatus.EXPIRED }
       const result = await this.inner.listDir(path, child)
       if (!this.owns(path)) return { status: LookupStatus.NOT_FOUND }
       // A child of a folder this mount owns is its own too, unless a nested
@@ -294,6 +296,49 @@ export class IndexView extends IndexCacheStore {
     if (this.onGone === undefined) return
     const owned = gone.filter((child) => this.owns(child.path))
     if (owned.length > 0) await this.onGone(owned)
+  }
+
+  override refillToken(): Promise<string> {
+    return this.fence(() => this.inner.refillToken())
+  }
+
+  override invalidateMissing(paths: readonly string[]): Promise<boolean> {
+    return this.fence(async () => {
+      const owned = paths.filter((path) => this.owns(path))
+      if (owned.length === 0) return false
+      try {
+        if (this.unverified) await this.inner.invalidatePrefix(this.prefix, this.excludedPrefixes())
+        const result = await this.inner.invalidateMissing(owned)
+        this.unverified = false
+        return result
+      } catch (err) {
+        this.unverified = true
+        throw err
+      }
+    })
+  }
+
+  override async refillDir(
+    path: string,
+    entries: readonly [string, FileStat][],
+    token: string,
+    expiredAt?: Date | null,
+    options: SetDirOptions & { partial?: boolean } = {},
+  ): Promise<Evicted[] | null> {
+    const gone = await this.fence(async () => {
+      if (!this.owns(path)) return null
+      const prefix = rstripSlash(path) + '/'
+      const owned = entries.filter(([name]) => this.owns(prefix + name))
+      const result = await this.inner.refillDir(path, owned, token, this.deadline(expiredAt), {
+        ...options,
+        excluded: [...(options.excluded ?? []), ...this.excludedPrefixes()],
+      })
+      if (result === null) return null
+      this.noted(path)
+      return result.filter((child) => this.owns(child.path))
+    })
+    if (gone !== null) await this.reportGone(gone)
+    return gone
   }
 
   invalidateEntry(vfsPath: string): Promise<void> {

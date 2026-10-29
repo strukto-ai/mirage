@@ -1542,9 +1542,12 @@ async def test_generation_tokens_are_drawn_from_the_id_source():
     )
     try:
         await store.invalidate()
-        assert await client.get(f"ids:{GENERATION_KEY}") == (
-            SeededIdSource(5).uuid7()
+        expected = SeededIdSource(5)
+        assert (
+            await client.get(f"ids:{GENERATION_KEY}-observation")
+            == expected.uuid7()
         )
+        assert await client.get(f"ids:{GENERATION_KEY}") == expected.uuid7()
     finally:
         await client.aclose()
 

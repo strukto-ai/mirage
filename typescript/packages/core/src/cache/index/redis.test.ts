@@ -61,6 +61,25 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
     return (store as unknown as { client: () => Promise<RedisClientLike> }).client()
   }
 
+  it.each([false, true])(
+    'eviction cannot revive an observation token (repeat=%s)',
+    async (repeat) => {
+      const client = await redis()
+      const key = `${prefix}${GENERATION_KEY}-observation`
+      await client.del(key)
+      await store.setDir('/dir', [])
+      if (repeat) await store.invalidateMissing(['/dir/first'])
+      const ticket = await store.refillToken()
+      await store.invalidateMissing(['/dir/new'])
+      await client.del(key)
+      if (repeat) await store.invalidateMissing(['/dir/another'])
+      expect(await store.refillDir('/dir', [], ticket)).toBe(null)
+      const fresh = await store.refillToken()
+      expect(fresh).not.toBe(ticket)
+      expect(await store.refillDir('/dir', [], fresh)).toEqual([])
+    },
+  )
+
   it.each(['none', 'replace', 'delete'])('conditional replacement is atomic: %s', async (peer) => {
     await store.setDir('/dir', [['a', entry('old', 'a')]], undefined, { version: 'v1' })
     const old = (await store.get('/dir/a')).entry
@@ -1263,7 +1282,9 @@ describe('Redis client protocol', () => {
       ids: new SeededIdSource(5),
     })
     await store.invalidate()
-    expect(value.set).toHaveBeenCalledWith(`ids:${GENERATION_KEY}`, new SeededIdSource(5).uuid7())
+    const expected = new SeededIdSource(5)
+    expect(value.set).toHaveBeenCalledWith(`ids:${GENERATION_KEY}-observation`, expected.uuid7())
+    expect(value.set).toHaveBeenCalledWith(`ids:${GENERATION_KEY}`, expected.uuid7())
   })
 
   it.each([0, 1])('conditional replacement passes exact wire bytes to CAS: %s', async (result) => {
@@ -1436,6 +1457,8 @@ const LISTED: [string, FileStat][] = [
 type StoreWrite = (store: RedisIndexCacheStore) => Promise<unknown>
 
 const COUNTING = {
+  refillDir: async (store) => store.refillDir('/d', [['a', row('a')]], await store.refillToken()),
+  invalidateMissing: (store) => store.invalidateMissing(['/d/new']),
   seed: (store) => {
     store.seed(
       new Map([['/d/c', row('c')]]),
@@ -1465,6 +1488,7 @@ const NOT_COUNTING = {
 
 type StoreRead =
   | 'ttl'
+  | 'refillToken'
   | 'clock'
   | 'scopeSnapshot'
   | 'get'
@@ -1518,6 +1542,21 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
         expect(sent.mock.calls).toHaveLength(3)
         vi.restoreAllMocks()
       }
+    },
+  )
+
+  it.each(['complete', 'partial', 'window'])(
+    'a known %s observation keeps the listing memo',
+    async (kind) => {
+      if (kind === 'partial') await store.setPartialDir('/d', LISTED)
+      else await store.setDir('/d', LISTED, null, { window: kind === 'window' })
+      const sent = await mGets()
+      await runInCommandScope(async () => {
+        const before = await store.listDir('/d')
+        expect(await store.invalidateMissing(['/d/a'])).toBe(false)
+        expect(await store.listDir('/d')).toEqual(before)
+      })
+      expect(sent.mock.calls).toHaveLength(1)
     },
   )
 

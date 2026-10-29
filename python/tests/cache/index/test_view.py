@@ -68,13 +68,13 @@ async def test_late_index_write_cannot_cross_mount_ownership(
         await release.wait()
 
     if phase == "store":
-        original = getattr(index, method)
+        original = index.refill_dir
 
         async def delayed_store(*args, **kwargs):
             await pause()
             return await original(*args, **kwargs)
 
-        monkeypatch.setattr(index, method, delayed_store)
+        monkeypatch.setattr(index, "refill_dir", delayed_store)
 
     async def delayed_readdir(_accessor, _path):
         if phase == "backend":
@@ -883,3 +883,56 @@ async def test_conditional_replacement_keeps_ownership(owned):
     assert (await store.get("/data/a")).entry.fingerprint == (
         "new" if owned else "a"
     )
+
+
+@pytest.mark.asyncio
+async def test_failed_point_observation_does_not_serve_the_known_stale_listing(
+    monkeypatch,
+):
+    index = RAMIndexCacheStore()
+    view = IndexView(index, RAMFileCacheStore(), "/data", lambda _: True)
+    await index.set_dir(
+        "/other", [("keep", FileStat(name="keep", type=FileType.FILE))]
+    )
+    await index.set_dir(
+        "/data", [("old", FileStat(name="old", type=FileType.FILE))]
+    )
+
+    async def unavailable(paths):
+        raise RuntimeError("unavailable")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(index, "invalidate_missing", unavailable)
+        with pytest.raises(RuntimeError, match="unavailable"):
+            await view.invalidate_missing(["/data/new"])
+    assert (await view.list_dir("/data")).status == LookupStatus.EXPIRED
+    await view.invalidate_missing(["/data/new"])
+    assert (await index.list_dir("/other")).entries == ["/other/keep"]
+    await view.set_dir(
+        "/data", [("new", FileStat(name="new", type=FileType.FILE))]
+    )
+    assert (await view.list_dir("/data")).entries == ["/data/new"]
+
+
+@pytest.mark.asyncio
+async def test_failed_observation_recovery_cannot_touch_a_replacement_mount(
+    monkeypatch,
+):
+    index = RAMIndexCacheStore()
+    owned = [True]
+    view = IndexView(index, RAMFileCacheStore(), "/data", lambda _: owned[0])
+
+    async def unavailable(paths):
+        raise RuntimeError("unavailable")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(index, "invalidate_missing", unavailable)
+        with pytest.raises(RuntimeError):
+            await view.invalidate_missing(["/data/new"])
+    owned[0] = False
+    await index.set_dir(
+        "/data",
+        [("replacement", FileStat(name="replacement", type=FileType.FILE))],
+    )
+    assert await view.invalidate_missing(["/data/new"]) is False
+    assert (await index.list_dir("/data")).entries == ["/data/replacement"]

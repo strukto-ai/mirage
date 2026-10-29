@@ -110,6 +110,19 @@ export class ListingMemo {
    *   expiry, or with null when there is no live listing to keep.
    * @param child the one key a lookup asks about, to narrow the entries to.
    */
+  /** Whether this command's live listings already name every observed child key. */
+  allows(paths: readonly string[]): boolean {
+    const stamp = soleCommandStarted()
+    if (stamp === null) return false
+    for (const path of paths) {
+      const folder = path.slice(0, path.lastIndexOf('/')) || '/'
+      const kept = this.reads.get(`${String(stamp)}:${folder}`)
+      if (kept === undefined || !this.live(kept)) return false
+      if (!positions(kept).has(path)) return false
+    }
+    return true
+  }
+
   async read(
     folder: string,
     fetch: () => Promise<[ListResult, number | null]>,

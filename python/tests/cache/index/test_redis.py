@@ -145,8 +145,16 @@ async def _replace(store: RedisIndexCacheStore) -> None:
     )
 
 
+async def _refill(store: RedisIndexCacheStore) -> None:
+    await store.refill_dir(
+        "/d", [("a", _row("a"))], await store.refill_token()
+    )
+
+
 COUNTING = {
     "seed": _seed,
+    "refill_dir": _refill,
+    "invalidate_missing": lambda s: s.invalidate_missing(["/d/new"]),
     "add_entry": lambda s: s.add_entry("/d/c", _row("c")),
     "set_dir": lambda s: s.set_dir("/d", [("a", _row("a"))]),
     "set_partial_dir": lambda s: s.set_partial_dir("/d", [("c", _row("c"))]),
@@ -165,6 +173,7 @@ NOT_COUNTING = {
 }
 
 READS = {
+    "refill_token",
     "ttl",
     "clock",
     "scope_snapshot",
@@ -369,3 +378,41 @@ async def test_a_new_command_reads_rows_changed_outside_the_process(
     async with command_scope():
         await store.list_dir("/d")
         assert (await store.get("/d/a")).entry.fingerprint == "external"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["complete", "partial", "window"])
+async def test_a_known_point_observation_keeps_the_listing_memo(
+    store, mgets, kind
+):
+    if kind == "partial":
+        await store.set_partial_dir("/d", LISTED)
+    else:
+        await store.set_dir("/d", LISTED, window=kind == "window")
+    mgets.clear()
+    async with command_scope():
+        before = await store.list_dir("/d")
+        assert await store.invalidate_missing(["/d/a"]) is False
+        assert await store.list_dir("/d") == before
+    assert len(mgets) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repeat", [False, True])
+async def test_observation_token_eviction_cannot_revive_an_old_refill(
+    store, repeat
+):
+    key = store._generation_key + "-observation"
+    await store._client.delete(key)
+    await store.set_dir("/dir", [])
+    if repeat:
+        await store.invalidate_missing(["/dir/first"])
+    ticket = await store.refill_token()
+    await store.invalidate_missing(["/dir/new"])
+    await store._client.delete(key)
+    if repeat:
+        await store.invalidate_missing(["/dir/another"])
+    assert await store.refill_dir("/dir", [], ticket) is None
+    fresh = await store.refill_token()
+    assert fresh != ticket
+    assert await store.refill_dir("/dir", [], fresh) == []

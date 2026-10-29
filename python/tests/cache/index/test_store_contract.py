@@ -9,6 +9,7 @@ from fakeredis.aioredis import FakeRedis
 
 from mirage.cache.index import Evicted, LookupStatus, RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
+from mirage.cache.index.scope import command_scope
 from mirage.cache.index.store import IndexCacheStore
 from mirage.types import FileStat, FileType
 
@@ -1150,3 +1151,80 @@ async def test_row_replacement_retains_only_its_required_history(
     assert (await store.get("/dir/kept/stray")).status == (
         LookupStatus.NOT_FOUND if len(expected) == 2 else None
     )
+
+
+@pytest.mark.asyncio
+async def test_point_observation_retains_rows_and_only_expires_missing_membership(
+    store,
+):
+    await store.set_dir("/dir", [("a", entry())], version="before")
+    await store.set_dir("/other", [("a", entry())])
+    assert await store.invalidate_missing(["/dir/new"]) is True
+    assert (await store.list_dir("/dir")).status == LookupStatus.EXPIRED
+    assert (await store.get("/dir/a")).entry == entry()
+    assert (await store.list_dir("/other")).entries == ["/other/a"]
+    assert await store.invalidate_missing(["/other/a"]) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["window", "partial", "expired", "absent"])
+async def test_point_observation_does_not_reinterpret_incomplete_listings(
+    store, kind
+):
+    if kind == "window":
+        await store.set_dir("/dir", [("a", entry())], window=True)
+    elif kind == "partial":
+        await store.set_partial_dir("/dir", [("a", entry())])
+    elif kind == "expired":
+        await store.set_dir(
+            "/dir",
+            [("a", entry())],
+            datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+    before = await store.list_dir("/dir")
+    assert await store.invalidate_missing(["/dir/new"]) is False
+    assert await store.list_dir("/dir") == before
+
+
+@pytest.mark.asyncio
+async def test_point_observation_fences_an_older_refill_even_without_a_cached_listing(
+    store_factory,
+):
+    store = store_factory()
+    peer = store_factory()
+    ticket = await store.refill_token()
+    await peer.invalidate_missing(["/dir/new"])
+    assert (
+        await store.refill_dir("/dir", [("old", entry("old"))], ticket) is None
+    )
+    assert (await store.list_dir("/dir")).entries is None
+    fresh = await store.refill_token()
+    assert await store.refill_dir("/dir", [("new", entry("new"))], fresh) == []
+    assert (await store.list_dir("/dir")).entries == ["/dir/new"]
+
+
+@pytest.mark.asyncio
+async def test_point_observation_refill_ticket_does_not_survive_clear(store):
+    token = await store.refill_token()
+    await store.clear()
+    assert await store.refill_dir("/dir", [("old", entry())], token) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["partial", "window"])
+async def test_point_observation_fences_refills_from_incomplete_listings(
+    store, kind
+):
+    if kind == "partial":
+        await store.set_partial_dir("/dir", [("a", entry())])
+    else:
+        await store.set_dir("/dir", [("a", entry())], window=True)
+    ticket = await store.refill_token()
+    async with command_scope():
+        before = await store.list_dir("/dir")
+        assert await store.invalidate_missing(["/dir/new"]) is False
+        assert await store.list_dir("/dir") == before
+    assert (
+        await store.refill_dir("/dir", [("old", entry("old"))], ticket) is None
+    )
+    assert await store.list_dir("/dir") == before

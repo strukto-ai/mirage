@@ -37,6 +37,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   private readonly windowed = new Set<string>()
   private readonly tombstones = new Map<string, Evicted[]>()
   private readonly versions = new Map<string, string>()
+  private observation = 0
   private readonly lock = new KeyLock()
 
   constructor(options: { ttl?: number; clock?: Clock } = {}) {
@@ -184,7 +185,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       options.window !== true,
       options.excluded ?? [],
       options.version ?? null,
-    )
+    ).then((result) => result ?? [])
   }
 
   override setPartialDir(
@@ -203,8 +204,10 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     evict: boolean,
     excluded: readonly string[] = [],
     version: string | null = null,
-  ): Promise<Evicted[]> {
-    return this.lock.withLock(vfsPath, () => {
+    refill: string | null = null,
+  ): Promise<Evicted[] | null> {
+    return this.lock.withLock(vfsPath, async () => {
+      if (refill !== null && refill !== String(this.observation)) return null
       const now = this.clock.now() * 1000
       const exp = expiredAt ? expiredAt.getTime() : now + this.ttl * 1000
       const prefix = vfsPath === '/' ? '/' : `${vfsPath}/`
@@ -309,6 +312,55 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     this.tombstones.set(parent, remembered)
   }
 
+  override refillToken(): Promise<string> {
+    return Promise.resolve(String(this.observation))
+  }
+
+  override async invalidateMissing(paths: readonly string[]): Promise<boolean> {
+    let changed = false
+    const now = this.clock.now() * 1000
+    for (const path of paths) {
+      const folder = path.slice(0, path.lastIndexOf('/')) || '/'
+      await this.lock.withLock(folder, () => {
+        const expiry = this.expiry.get(folder)
+        if (this.partial.has(folder) || this.windowed.has(folder)) {
+          if (this.folderFlags.get(folder)?.has(path) !== true) this.observation += 1
+          return Promise.resolve()
+        }
+        if (expiry === undefined || now >= expiry) {
+          this.observation += 1
+          return Promise.resolve()
+        }
+        if (this.folderFlags.get(folder)?.has(path) === true) return Promise.resolve()
+        this.expiry.set(folder, 0)
+        this.versions.delete(folder)
+        changed = true
+        this.observation += 1
+        return Promise.resolve()
+      })
+    }
+    return changed
+  }
+
+  override refillDir(
+    path: string,
+    entries: readonly [string, FileStat][],
+    token: string,
+    expiredAt?: Date | null,
+    options: SetDirOptions & { partial?: boolean } = {},
+  ): Promise<Evicted[] | null> {
+    return this.storeDir(
+      path,
+      entries,
+      expiredAt,
+      options.partial === true,
+      options.partial !== true && options.window !== true,
+      options.excluded ?? [],
+      options.version ?? null,
+      token,
+    )
+  }
+
   invalidateEntry(vfsPath: string): Promise<void> {
     const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
     return this.lock.withLock(folder, () => {
@@ -394,12 +446,14 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   }
 
   invalidate(): Promise<void> {
+    this.observation += 1
     const past = this.clock.now() * 1000 - 1000
     for (const key of this.expiry.keys()) this.expiry.set(key, past)
     return Promise.resolve()
   }
 
   clear(): Promise<void> {
+    this.observation += 1
     this.entryMap.clear()
     this.children.clear()
     this.folderFlags.clear()

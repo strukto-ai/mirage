@@ -170,19 +170,11 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
           await release
         }
         if (phase === 'store') {
-          if (method === 'setPartialDir') {
-            const original = index.setPartialDir.bind(index)
-            vi.spyOn(index, 'setPartialDir').mockImplementation(async (...args) => {
-              await pause()
-              await original(...args)
-            })
-          } else {
-            const original = index.setDir.bind(index)
-            vi.spyOn(index, 'setDir').mockImplementation(async (...args) => {
-              await pause()
-              return original(...args)
-            })
-          }
+          const original = index.refillDir.bind(index)
+          vi.spyOn(index, 'refillDir').mockImplementation(async (...args) => {
+            await pause()
+            return original(...args)
+          })
         }
         backend.readdir = async () => {
           if (phase === 'backend') await pause()
@@ -1014,4 +1006,39 @@ it.each([false, true])('conditional replacement keeps ownership: %s', async (own
     await view.replaceIfUnchanged('/data/a', JSON.stringify(old), old.with({ fingerprint: 'new' })),
   ).toBe(owned)
   expect((await store.get('/data/a')).entry?.fingerprint).toBe(owned ? 'new' : old.fingerprint)
+})
+
+it('a failed point observation does not serve a known stale listing', async () => {
+  const index = new RAMIndexCacheStore()
+  const view = new IndexView(index, new RAMFileCacheStore(), '/data', () => true)
+  const row = new FileStat({ name: 'old', type: FileType.FILE })
+  await index.setDir('/other', [['keep', row]])
+  await index.setDir('/data', [['old', row]])
+  const failure = vi
+    .spyOn(index, 'invalidateMissing')
+    .mockRejectedValueOnce(new Error('unavailable'))
+  await expect(view.invalidateMissing(['/data/new'])).rejects.toThrow('unavailable')
+  expect((await view.listDir('/data')).status).toBe(LookupStatus.EXPIRED)
+  failure.mockRestore()
+  await view.invalidateMissing(['/data/new'])
+  expect((await index.listDir('/other')).entries).toEqual(['/other/keep'])
+  await view.setDir('/data', [['new', new FileStat({ name: 'new', type: FileType.FILE })]])
+  expect((await view.listDir('/data')).entries).toEqual(['/data/new'])
+})
+
+it('failed observation recovery cannot touch a replacement mount', async () => {
+  const index = new RAMIndexCacheStore()
+  let owned = true
+  const view = new IndexView(index, new RAMFileCacheStore(), '/data', () => owned)
+  const failure = vi
+    .spyOn(index, 'invalidateMissing')
+    .mockRejectedValueOnce(new Error('unavailable'))
+  await expect(view.invalidateMissing(['/data/new'])).rejects.toThrow('unavailable')
+  failure.mockRestore()
+  owned = false
+  await index.setDir('/data', [
+    ['replacement', new FileStat({ name: 'replacement', type: FileType.FILE })],
+  ])
+  expect(await view.invalidateMissing(['/data/new'])).toBe(false)
+  expect((await index.listDir('/data')).entries).toEqual(['/data/replacement'])
 })

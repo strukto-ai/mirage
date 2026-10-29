@@ -41,6 +41,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
 
     def __init__(self, ttl: float = 600, clock: Clock | None = None) -> None:
         super().__init__(clock)
+        self._observation = 0
         self._ttl = ttl
         self._entries: dict[str, FileStat] = {}
         self._children: dict[str, list[str]] = {}
@@ -190,7 +191,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         excluded: tuple[str, ...] = (),
         version: str | None = None,
     ) -> list[Evicted]:
-        return await self._set_dir(
+        result = await self._set_dir(
             vfs_path,
             entries,
             expired_at,
@@ -199,6 +200,8 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             excluded=excluded,
             version=version,
         )
+        assert result is not None
+        return result
 
     async def set_partial_dir(
         self,
@@ -220,8 +223,11 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         evict: bool,
         excluded: tuple[str, ...] = (),
         version: str | None = None,
-    ) -> list[Evicted]:
+        refill: str | None = None,
+    ) -> list[Evicted] | None:
         async with self._lock_for(vfs_path):
+            if refill is not None and refill != str(self._observation):
+                return None
             now = datetime.fromtimestamp(self.clock.now(), timezone.utc)
             exp = expired_at or (now + timedelta(seconds=self._ttl))
             prefix = "/" if vfs_path == "/" else vfs_path + "/"
@@ -359,6 +365,54 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         ]
         self._tombstones[parent] = remembered
 
+    async def refill_token(self) -> str:
+        return str(self._observation)
+
+    async def invalidate_missing(self, paths: Sequence[str]) -> bool:
+        changed = False
+        now = datetime.fromtimestamp(self.clock.now(), timezone.utc)
+        for path in paths:
+            folder = path.rsplit("/", 1)[0] or "/"
+            async with self._lock_for(folder):
+                expiry = self._expiry.get(folder)
+                if folder in self._partial or folder in self._windows:
+                    if path not in self._folder_flags.get(folder, {}):
+                        self._observation += 1
+                    continue
+                if expiry is None or now >= expiry:
+                    self._observation += 1
+                    continue
+                if path in self._folder_flags.get(folder, {}):
+                    continue
+                self._expiry[folder] = datetime.fromtimestamp(0, timezone.utc)
+                self._versions.pop(folder, None)
+                changed = True
+                self._observation += 1
+        return changed
+
+    async def refill_dir(
+        self,
+        vfs_path: str,
+        entries: Sequence[tuple[str, FileStat]],
+        token: str,
+        expired_at: datetime | None = None,
+        *,
+        partial: bool = False,
+        window: bool = False,
+        excluded: tuple[str, ...] = (),
+        version: str | None = None,
+    ) -> list[Evicted] | None:
+        return await self._set_dir(
+            vfs_path,
+            entries,
+            expired_at,
+            partial=partial,
+            evict=not partial and not window,
+            excluded=excluded,
+            version=version,
+            refill=token,
+        )
+
     async def invalidate_entry(self, vfs_path: str) -> None:
         folder = vfs_path.rsplit("/", 1)[0] or "/"
         async with self._lock_for(folder):
@@ -453,6 +507,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._versions.pop(exp_key, None)
 
     async def invalidate(self) -> None:
+        self._observation += 1
         past = datetime.fromtimestamp(
             self.clock.now(), timezone.utc
         ) - timedelta(seconds=1)
@@ -460,6 +515,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._expiry[key] = past
 
     async def clear(self) -> None:
+        self._observation += 1
         self._entries.clear()
         self._children.clear()
         self._folder_flags.clear()

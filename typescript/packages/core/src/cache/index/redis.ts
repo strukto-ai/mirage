@@ -41,6 +41,35 @@ import {
 } from './constants.ts'
 import { globEscape } from '../file/utils.ts'
 
+const INVALIDATE_MISSING = `
+local changed, unknown = false, false
+for i = 3, #ARGV do
+  local path = ARGV[i]
+  local folder = string.match(path, '^(.*)/[^/]+$')
+  if folder == '' then folder = '/' end
+  local key = KEYS[1] .. folder
+  local raw = redis.call('GET', key)
+  if raw then
+    local listing = cjson.decode(raw)
+    local found = false
+    for _, child in ipairs(listing.entries) do
+      if child == path then found = true; break end
+    end
+    if listing.partial or listing.window then
+      if not found then unknown = true end
+    elseif listing.expires_at <= tonumber(ARGV[1]) then unknown = true
+    elseif not found then
+      listing.expires_at = 0
+      listing.version = cjson.null
+      redis.call('SET', key, cjson.encode(listing))
+      changed = true
+    end
+  else unknown = true end
+end
+if changed or unknown then redis.call('SET', KEYS[2], ARGV[2]) end
+return changed and 1 or 0
+`
+
 const REPLACE_ENTRY = `
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 redis.call('SET', KEYS[1], ARGV[2])
@@ -743,7 +772,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       if (current !== null) return current
       // A new token after eviction must never revive an old listing.
       const generation = this.ids.uuid7()
-      if (key === this.generationKey) {
+      if (!key.startsWith(`${this.generationKey}:`)) {
         await c.set(key, generation, { NX: true })
       } else {
         const pipe = c.multi()
@@ -1012,7 +1041,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       options.window !== true,
       options.excluded ?? [],
       options.version ?? null,
-    )
+    ).then((result) => result ?? [])
   }
 
   override async setPartialDir(
@@ -1031,10 +1060,15 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     evict: boolean,
     excluded: readonly string[] = [],
     version: string | null = null,
-  ): Promise<Evicted[]> {
+    refill: string | null = null,
+  ): Promise<Evicted[] | null> {
     return this.listings.writing(async () => {
       await this.flushSeed()
       const c = await this.client()
+      const guard =
+        refill === null
+          ? ''
+          : `if redis.call('GET', KEYS[4] .. '-observation') ~= ${JSON.stringify(refill)} then return nil end\n`
       const now = new Date(this.clock.now() * 1000)
       const prefix = vfsPath === '/' ? '/' : `${vfsPath}/`
       const generation = await this.generation(c, this.generationKey)
@@ -1053,7 +1087,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
         window: !partial && !evict,
       }
       if (!evict) {
-        await c.eval(WRITE_LISTING, {
+        const accepted = await c.eval(guard + WRITE_LISTING, {
           keys: [
             this.childrenKey(vfsPath),
             this.tombstonePrefix + vfsPath,
@@ -1072,11 +1106,11 @@ export class RedisIndexCacheStore extends IndexCacheStore {
             ...rows.flat(),
           ],
         })
-        return []
+        return accepted === null ? null : []
       }
       // One script, so no other writer lands between reading the previous
       // listing and replacing it; the diff is against the true predecessor.
-      const [gone, folders] = (await this.evalComplete(c, SWAP_LISTING, {
+      const result = (await this.evalComplete(c, guard + SWAP_LISTING, {
         keys: [
           this.childrenKey(vfsPath),
           this.tombstonePrefix + vfsPath,
@@ -1094,13 +1128,55 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           this.ids.uuid7(),
           ...rows.flat(),
         ],
-      })) as [string[], number[]]
+      })) as [string[], number[]] | null
+      if (result === null) return null
+      const [gone, folders] = result
       const dropped: Evicted[] = []
       for (const [i, path] of gone.entries()) {
         dropped.push({ path, folder: folders[i] === 1 })
       }
       return dropped
     })
+  }
+
+  override async refillToken(): Promise<string> {
+    await this.flushSeed()
+    return this.generation(await this.client(), `${this.generationKey}-observation`)
+  }
+
+  override async invalidateMissing(paths: readonly string[]): Promise<boolean> {
+    await this.flushSeed()
+    if (paths.length === 0 || this.listings.allows(paths)) return false
+    try {
+      const result = await (
+        await this.client()
+      ).eval(INVALIDATE_MISSING, {
+        keys: [this.childrenPrefix, `${this.generationKey}-observation`],
+        arguments: [String(this.clock.now()), this.ids.uuid7(), ...paths],
+      })
+      return result === 1
+    } finally {
+      this.listings.wrote()
+    }
+  }
+
+  override refillDir(
+    path: string,
+    entries: readonly [string, FileStat][],
+    token: string,
+    expiredAt?: Date | null,
+    options: SetDirOptions & { partial?: boolean } = {},
+  ): Promise<Evicted[] | null> {
+    return this.storeDir(
+      path,
+      entries,
+      expiredAt,
+      options.partial === true,
+      options.partial !== true && options.window !== true,
+      options.excluded ?? [],
+      options.version ?? null,
+      token,
+    )
   }
 
   invalidateEntry(vfsPath: string): Promise<void> {
@@ -1205,6 +1281,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     return this.listings.writing(async () => {
       await this.flushSeed()
       const c = await this.client()
+      await c.set(`${this.generationKey}-observation`, this.ids.uuid7())
       // Atomically expire listings without overwriting concurrent refills/deletions.
       await c.set(this.generationKey, this.ids.uuid7())
     })
@@ -1213,6 +1290,8 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   clear(): Promise<void> {
     return this.listings.writing(() =>
       this.seedLock.withLock('seed', async () => {
+        const client = await this.client()
+        await client.set(`${this.generationKey}-observation`, this.ids.uuid7())
         this.pendingSeeds.length = 0
         await this.deletePaths([this.entryPrefix], '/')
         await this.deletePaths(

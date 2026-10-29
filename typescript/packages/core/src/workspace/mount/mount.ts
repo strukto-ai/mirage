@@ -898,8 +898,8 @@ export class MountEntry {
       if (vfs.supports('read')) {
         const read: ReadFn = (path, given, offset, size) =>
           vfs.read(path, given, offset, size, callerSignal())
-        levels.push((scope, _args, kw) =>
-          readWindow(
+        levels.push(async (scope, _args, kw) => {
+          const data = await readWindow(
             read,
             vfs.readsRanges,
             vfs instanceof RAMVFS,
@@ -907,8 +907,10 @@ export class MountEntry {
             kw,
             handedOf(kw),
             this.indexStore.clock,
-          ),
-        )
+          )
+          if (kw.size !== 0) await this.observe(kw.index ?? this.index, [scope])
+          return data
+        })
       }
       return levels
     }
@@ -1347,13 +1349,58 @@ export class MountEntry {
    * stat of it, handed what is at its parent; null when nothing is. Mirrors
    * Python's `_beyond`.
    */
+  /** Invalidate cached absences disproved by current backend answers. Mirrors Python's _observe. */
+  private async observe(index: IndexCacheStore, scopes: readonly PathSpec[]): Promise<void> {
+    if (!this.lists || index instanceof ListingCheckStore) return
+    const paths = new Set<string>()
+    for (const scope of scopes) {
+      if (this.revisions.has(scope.virtual) || this.livePipe(scope.virtual) !== null) continue
+      let key = indexKey(this.prefix, scope)
+      while (key !== this.rootKey && key !== '/') {
+        paths.add(key)
+        key = folderOf(key)
+      }
+    }
+    if (paths.size > 0) {
+      try {
+        await index.invalidateMissing([...paths].sort(compareCodePoints))
+      } catch (err) {
+        console.warn(`listing observation not kept for ${this.prefix}`, err)
+      }
+    }
+  }
+
+  /** Observe existence once without pulling beyond the consumer's demand. */
+  private async *observeStream(
+    scope: PathSpec,
+    index: IndexCacheStore,
+    source: AsyncIterable<Uint8Array>,
+  ): AsyncIterable<Uint8Array> {
+    let observed = false
+    try {
+      for await (const chunk of source) {
+        if (chunk.byteLength > 0 && !observed) {
+          await this.observe(index, [scope])
+          observed = true
+        }
+        yield chunk
+      }
+      if (!observed) await this.observe(index, [scope])
+    } finally {
+      await closeQuietly(source)
+    }
+  }
+
   private async beyond(scope: PathSpec, index: IndexCacheStore): Promise<FileStat | null> {
     const handed: { -readonly [K in keyof Handed]: Handed[K] } = {}
     if (this.wants('stat').includes('parent')) {
       handed.parent = await this.entry(this.folder(scope), index)
     }
     try {
-      return await this.vfs.stat(scope, handed)
+      const row = await this.vfs.stat(scope, handed)
+      await this.observe(index, [scope])
+      this.cacheManager?.noteProbed(scope, row)
+      return row
     } catch (err) {
       if (!isEnoent(err)) throw err
       console.debug(`nothing unlisted at ${scope.virtual}: ${String(err)}`)
@@ -1375,8 +1422,9 @@ export class MountEntry {
     const handed = await this.handedFor('readdir', path, null, index)
     const seeded = await storedListing(index, key, glob)
     if (seeded !== null) return seeded
+    const refill = await index.refillToken()
     const listed = await this.vfs.readdir(path, handed)
-    return keepListing(index, key, listed)
+    return keepListing(index, key, listed, refill)
   }
 
   /**
@@ -1613,11 +1661,21 @@ export class MountEntry {
         if (stored !== null) return stored
       }
       for (const call of levels) {
+        const refill =
+          this.lists && (name === 'readdir' || name === 'read_tree')
+            ? await index.refillToken()
+            : null
         const result = await this.run(name, call, scope, args, kwargs, index, found)
         found = null
         if (result === null || result === undefined) continue
-        const kept = this.lists ? await this.kept(name, scope, index, result) : result
-        if (name === 'stat') this.noteLive(scope, index, kept)
+        const kept = this.lists ? await this.kept(name, scope, index, result, refill) : result
+        if (name === 'stat') {
+          if (kept instanceof FileStat && this.wants('stat').length === 0) {
+            await this.observe(index, [scope])
+            this.cacheManager?.noteProbed(scope, kept)
+          }
+          this.noteLive(scope, index, kept)
+        }
         return kept
       }
       return null
@@ -1661,14 +1719,15 @@ export class MountEntry {
     scope: PathSpec,
     index: IndexCacheStore,
     result: unknown,
+    refill: string | null = null,
   ): Promise<unknown> {
     const key = indexKey(this.prefix, scope)
     if (name === 'readdir') {
-      return keepListing(index, key, result as readonly FileStat[] | DirListing)
+      return keepListing(index, key, result as readonly FileStat[] | DirListing, refill)
     }
     if (name === 'read_tree' && result instanceof Map) {
       const tree = result as Map<string, FileStat>
-      await keepTree(index, key, tree)
+      await keepTree(index, key, tree, refill)
       return new Map([...tree].filter(([path]) => path !== ''))
     }
     return result
@@ -1701,7 +1760,9 @@ export class MountEntry {
       this.wants('read').length > 0 || vfs.read.constructor.name === 'AsyncFunction'
         ? this.streamed(vfs, scope, this.index, signal)
         : asStream(runWithCaller(caller, async () => vfs.read(scope, {}, 0, null, signal)))
-    return this.activity.hold(withCaller(stream, caller)) as AsyncIterable<Uint8Array>
+    return this.activity.hold(
+      withCaller(this.observeStream(scope, this.index, stream), caller),
+    ) as AsyncIterable<Uint8Array>
   }
 
   private resolveCascade<T>(
@@ -2306,7 +2367,12 @@ export class MountEntry {
       if (wants.includes('parent')) one.parent = await this.entry(this.folder(scope), index)
       handed.push(one)
     }
-    return this.vfs.readMany(scopes, limit, handed)
+    const result = await this.vfs.readMany(scopes, limit, handed)
+    await this.observe(
+      index,
+      scopes.filter((scope) => result.has(scope.virtual)),
+    )
+    return result
   }
 
   /**

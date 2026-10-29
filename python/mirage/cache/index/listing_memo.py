@@ -120,6 +120,24 @@ class ListingMemo:
             and self._clock.now() < kept.expires_at
         )
 
+    def allows(self, paths: Sequence[str]) -> bool:
+        """Whether this command's live listings already name every path.
+
+        Args:
+            paths (Sequence[str]): observed immediate child keys.
+        """
+        stamp = sole_command_started()
+        if stamp is None:
+            return False
+        for path in paths:
+            folder = path.rsplit("/", 1)[0] or "/"
+            kept = self._reads.get((stamp, folder))
+            if kept is None or not self._live(kept):
+                return False
+            if path not in _positions(kept):
+                return False
+        return True
+
     async def read(
         self,
         folder: str,

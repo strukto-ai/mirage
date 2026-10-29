@@ -84,6 +84,46 @@ class NullIndexCacheStore(IndexCacheStore):
     async def entries(self) -> dict[str, FileStat]:
         return {}
 
+    async def refill_token(self) -> str:
+        """Token captured before fetching listings, including descendant seeds."""
+        return ""
+
+    async def invalidate_missing(self, paths: Sequence[str]) -> bool:
+        """Expire complete parent listings contradicted by observed paths.
+
+        Args:
+            paths (Sequence[str]): immediate child keys, scoped by the mount.
+        """
+        return False
+
+    async def refill_dir(
+        self,
+        vfs_path: str,
+        entries: Sequence[tuple[str, FileStat]],
+        token: str,
+        expired_at: datetime | None = None,
+        *,
+        partial: bool = False,
+        window: bool = False,
+        excluded: tuple[str, ...] = (),
+        version: str | None = None,
+    ) -> list[Evicted] | None:
+        """Commit a fetched listing unless a point observation retired it.
+
+        None means rejected; rejected listings report no deletions.
+
+        Args:
+            vfs_path (str): directory key.
+            entries (Sequence[tuple[str, FileStat]]): fetched children.
+            token (str): token captured before the backend fetch.
+            expired_at (datetime | None): optional deadline.
+            partial (bool): incomplete page.
+            window (bool): capped view which proves nothing absent.
+            excluded (tuple[str, ...]): nested mounts to preserve.
+            version (str | None): backend listing version.
+        """
+        return []
+
     async def invalidate_entry(self, vfs_path: str) -> None:
         pass
 

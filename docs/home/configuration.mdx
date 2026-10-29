@@ -110,6 +110,13 @@ workspace's `max_memory`, which refuses a write the same way.
 | `bounded` | Serve cached content without checking the backend, for up to `ttl` seconds. The default. |
 | `fresh` | Check the backend's content token before serving a cached copy. |
 
+A successful current-path backend read or stat expires complete cached
+listings that incorrectly omit that path, including affected ancestors.
+The next listing refreshes through the backend without evicting cached file
+content. Partial pages, capped listing windows and historical revision reads
+do not establish that a name is absent from the current directory. Provider
+listing permissions and consistency still apply.
+
 `write` decides whether a write carries the version it was based on:
 
 | Value | Behavior |

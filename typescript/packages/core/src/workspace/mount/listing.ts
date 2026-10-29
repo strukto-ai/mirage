@@ -75,18 +75,29 @@ export async function keepListing(
   index: IndexCacheStore,
   key: string,
   listed: readonly FileStat[] | DirListing,
+  refill: string | null = null,
 ): Promise<string[]> {
   const listing = listed instanceof DirListing ? listed : new DirListing({ entries: listed })
   const rows: [string, FileStat][] = listing.entries.map((row) => [row.name, row])
-  if (listing.partial) await index.setPartialDir(key, rows)
+  if (refill !== null) {
+    const accepted = await index.refillDir(key, rows, refill, null, {
+      partial: listing.partial,
+      window: listing.window,
+      version: listing.version,
+    })
+    if (accepted === null) {
+      const stem = key === '/' ? '' : key
+      return listing.entries.map((row) => `${stem}/${row.name}`)
+    }
+  } else if (listing.partial) await index.setPartialDir(key, rows)
   else await index.setDir(key, rows, null, { window: listing.window, version: listing.version })
   const stem = key === '/' ? '' : key
   for (const [relative, children] of listing.seeds) {
     const seeded: [string, FileStat][] = children.map((row) => [row.name, row])
-    await index.setDir(`${stem}/${stripSlash(relative)}`, seeded, null, {
-      window: listing.window,
-      version: listing.version,
-    })
+    const folder = `${stem}/${stripSlash(relative)}`
+    const options = { window: listing.window, version: listing.version }
+    if (refill === null) await index.setDir(folder, seeded, null, options)
+    else await index.refillDir(folder, seeded, refill, null, options)
   }
   return listing.entries.map((row) => `${stem}/${row.name}`)
 }
@@ -192,6 +203,7 @@ export async function keepTree(
   index: IndexCacheStore,
   key: string,
   tree: ReadonlyMap<string, FileStat>,
+  refill: string | null = null,
 ): Promise<void> {
   const base = key === '/' ? '' : key
   const listings = new Map<string, [string, FileStat][]>([[key, []]])
@@ -212,6 +224,9 @@ export async function keepTree(
     }
   }
   for (const [folder, rows] of listings) {
-    if ((await index.listDir(folder)).entries == null) await index.setDir(folder, rows)
+    if ((await index.listDir(folder)).entries == null) {
+      if (refill === null) await index.setDir(folder, rows)
+      else await index.refillDir(folder, rows, refill)
+    }
   }
 }

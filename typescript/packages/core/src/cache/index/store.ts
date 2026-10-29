@@ -104,6 +104,25 @@ export abstract class IndexCacheStore {
    * parent's version and window without recording a new observation.
    * Missing or stale membership must never become fresh.
    */
+  /** Token captured before fetching listings, including descendant seeds. */
+  refillToken(): Promise<string> {
+    throw new Error('refillToken is not implemented')
+  }
+  /** Expire complete parent listings contradicted by the observed immediate child keys. */
+  invalidateMissing(_paths: readonly string[]): Promise<boolean> {
+    throw new Error('invalidateMissing is not implemented')
+  }
+  /** null rejects an older refill without reporting any deletions. */
+  refillDir(
+    _path: string,
+    _entries: readonly [string, FileStat][],
+    _token: string,
+    _expiredAt?: Date | null,
+    _options: SetDirOptions & { partial?: boolean } = {},
+  ): Promise<Evicted[] | null> {
+    throw new Error('refillDir is not implemented')
+  }
+
   abstract invalidateEntry(vfsPath: string): Promise<void>
   abstract invalidateDir(vfsPath: string): Promise<void>
   /**

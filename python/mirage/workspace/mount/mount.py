@@ -22,6 +22,7 @@ from collections.abc import (
     Awaitable,
     Iterable,
     Iterator,
+    Sequence,
 )
 from contextlib import (
     AbstractAsyncContextManager,
@@ -2087,6 +2088,63 @@ class MountEntry:
         await index.invalidate_dir(folder_of(key))
         return await entry_at(index, key, warm)
 
+    async def _observe(
+        self, index: IndexCacheStore, scopes: Sequence[PathSpec]
+    ) -> None:
+        """Invalidate cached absences disproved by current backend answers.
+
+        Args:
+            index (IndexCacheStore): lifetime-fenced metadata view.
+            scopes (Sequence[PathSpec]): resolved paths actually observed.
+        """
+        if not self._lists or isinstance(index, ListingCheckStore):
+            return
+        paths: set[str] = set()
+        for scope in scopes:
+            if (
+                scope.virtual in self.revisions
+                or self.live_pipe(scope.virtual) is not None
+            ):
+                continue
+            key = index_key(self.prefix, scope)
+            while key != self._root_key and key != "/":
+                paths.add(key)
+                key = folder_of(key)
+        if paths:
+            try:
+                await index.invalidate_missing(sorted(paths))
+            except Exception:
+                logger.warning(
+                    "listing observation not kept for %s",
+                    self.prefix,
+                    exc_info=True,
+                )
+
+    async def _observe_stream(
+        self,
+        scope: PathSpec,
+        index: IndexCacheStore,
+        source: AsyncIterator[bytes],
+    ) -> AsyncIterator[bytes]:
+        """Observe existence without pulling beyond the consumer's demand.
+
+        Args:
+            scope (PathSpec): current backing file.
+            index (IndexCacheStore): lifetime-fenced metadata view.
+            source (AsyncIterator[bytes]): backend stream.
+        """
+        observed = False
+        try:
+            async for chunk in source:
+                if chunk and not observed:
+                    await self._observe(index, [scope])
+                    observed = True
+                yield chunk
+            if not observed:
+                await self._observe(index, [scope])
+        finally:
+            await close_quietly(source)
+
     async def _beyond(
         self, scope: PathSpec, index: IndexCacheStore
     ) -> FileStat | None:
@@ -2104,7 +2162,11 @@ class MountEntry:
         if "parent" in _wants(stat):
             handed["parent"] = await self._entry(self._folder(scope), index)
         try:
-            return await stat(scope, **_handed_on(stat, index, **handed))
+            row = await stat(scope, **_handed_on(stat, index, **handed))
+            await self._observe(index, [scope])
+            if self.cache_manager is not None:
+                self.cache_manager.note_probed(scope, row)
+            return row
         except FileNotFoundError as exc:
             logger.debug("nothing unlisted at %s: %s", scope, exc)
             return None
@@ -2131,8 +2193,9 @@ class MountEntry:
         stored = await stored_listing(index, key, glob=glob)
         if stored is not None:
             return stored
+        refill = await index.refill_token()
         listed = await readdir(path, **_handed_on(readdir, index, **handed))
-        return await keep_listing(index, key, listed)
+        return await keep_listing(index, key, listed, refill)
 
     async def _level(
         self, virtual: str, limit: int | None
@@ -2353,7 +2416,12 @@ class MountEntry:
         return index_lock(index, index_key(self.prefix, scope))
 
     async def _kept(
-        self, name: str, scope: PathSpec, index: IndexCacheStore, result: Any
+        self,
+        name: str,
+        scope: PathSpec,
+        index: IndexCacheStore,
+        result: Any,
+        refill: str | None = None,
     ) -> Any:
         """What a listing or a subtree read answered, kept as listings.
 
@@ -2367,9 +2435,9 @@ class MountEntry:
         """
         key = index_key(self.prefix, scope)
         if name == "readdir":
-            return await keep_listing(index, key, result)
+            return await keep_listing(index, key, result, refill)
         if name == "read_tree" and isinstance(result, dict):
-            await keep_tree(index, key, result)
+            await keep_tree(index, key, result, refill)
             return {path: row for path, row in result.items() if path}
         return result
 
@@ -2582,6 +2650,12 @@ class MountEntry:
                             if stored is not None:
                                 return stored
                         for fn in levels:
+                            refill = (
+                                await index.refill_token()
+                                if name in {"readdir", "read_tree"}
+                                and self._lists
+                                else None
+                            )
                             result = await self._run(
                                 name,
                                 fn,
@@ -2595,10 +2669,24 @@ class MountEntry:
                                 continue
                             if self._lists:
                                 result = await self._kept(
-                                    name, scope, index, result
+                                    name, scope, index, result, refill
                                 )
                             if name == "stat":
+                                if isinstance(result, FileStat) and not _wants(
+                                    self._backend_fn(fn)
+                                ):
+                                    await self._observe(index, [scope])
+                                    if self.cache_manager is not None:
+                                        self.cache_manager.note_probed(
+                                            scope, result
+                                        )
                                 self._note_live(scope, index, fn, result)
+                            elif (
+                                name == "read"
+                                and self._backend_fn(fn) == self.vfs.read
+                                and kwargs.get("size") != 0
+                            ):
+                                await self._observe(index, [scope])
                             return _wrap_stream(
                                 result, self.mount_id, self.activity
                             )
@@ -2781,7 +2869,11 @@ class MountEntry:
             kwargs["parents"] = [
                 await self._entry(self._folder(s), self.index) for s in scopes
             ]
-        return await fn(scopes, limit, **kwargs)
+        result = await fn(scopes, limit, **kwargs)
+        await self._observe(
+            self.index, [s for s in scopes if s.virtual in result]
+        )
+        return result
 
     def live_pipe(self, path: str) -> DevicePipe | None:
         """The live pipe a read of ``path`` takes bytes from, which another
@@ -2855,5 +2947,12 @@ class MountEntry:
         caller = self._on_mount(current_caller())
         return cast(
             AsyncIterator[bytes],
-            self.activity.hold(with_caller(with_host_io(source), caller)),
+            self.activity.hold(
+                with_caller(
+                    with_host_io(
+                        self._observe_stream(scope, self.index, source)
+                    ),
+                    caller,
+                )
+            ),
         )
