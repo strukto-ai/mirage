@@ -657,30 +657,31 @@ class ConditionalReadRAM extends RAMVFS {
   }
 }
 
-async function conditionalReads(cached = true): Promise<{
+async function conditionalReads(
+  cached = true,
+  write: WritePolicy = WritePolicy.CONDITIONAL,
+): Promise<{
   ws: Workspace
-  mount: MountEntry
+  manager: CacheManager
   dispatcher: Dispatcher
 }> {
-  const ws = new Workspace(
-    { '/data': new ConditionalReadRAM() },
-    { mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL },
-  )
+  const ws = new Workspace({ '/data': new ConditionalReadRAM() }, { mode: MountMode.WRITE, write })
   await ws.namespace.ensureLoaded()
   const mount = ws.namespace.mountFor('/data/f')
   await mount.ensureReady()
+  const manager = mount.cacheManager
+  if (manager === null) throw new Error('expected a cache manager')
   if (cached) {
     await ws.cache.set('/data/f', new Uint8Array([1]), { fingerprint: 'v1', ttl: 600 })
     await ws.cache.set('/data/g', new Uint8Array([2]), { fingerprint: 'v2', ttl: 600 })
   }
-  return { ws, mount, dispatcher: new Dispatcher(ws.namespace, ws.cache) }
+  return { ws, manager, dispatcher: new Dispatcher(ws.namespace, ws.cache) }
 }
 
 it.each([false, true])(
   'overlapping warm dispatcher reads keep their owners, reverse=%s',
   async (reverse) => {
-    const { ws, mount, dispatcher } = await conditionalReads()
-    const manager = mount.cacheManager!
+    const { ws, manager, dispatcher } = await conditionalReads()
     const a = new SessionState({ sessionId: 'a' })
     const b = new SessionState({ sessionId: 'b' })
     const caller = currentCaller()
@@ -727,7 +728,7 @@ it.each([false, true])(
 )
 
 it('an explicit dispatcher owner wins over an already live browser peer', async () => {
-  const { ws, mount, dispatcher } = await conditionalReads()
+  const { ws, manager, dispatcher } = await conditionalReads()
   const a = new SessionState({ sessionId: 'a' })
   const b = new SessionState({ sessionId: 'b' })
   const caller = currentCaller()
@@ -739,46 +740,50 @@ it('an explicit dispatcher owner wins over an already live browser peer', async 
       }),
     )
     expect(result).toEqual(new Uint8Array([1]))
-    expect(a.versions.read(mount.cacheManager!.versionScope, '/f')).toBe('v1')
-    expect(b.versions.read(mount.cacheManager!.versionScope, '/f')).toBeNull()
+    expect(a.versions.read(manager.versionScope, '/f')).toBe('v1')
+    expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
   } finally {
     await ws.close()
   }
 })
 
-it('an ambiguous unbound browser read cannot bless the newest session', async () => {
-  const { ws, mount, dispatcher } = await conditionalReads()
-  const a = new SessionState({ sessionId: 'a' })
-  const b = new SessionState({ sessionId: 'b' })
-  const caller = currentCaller()
-  try {
-    await expect(
-      runWithCaller({ ...caller, session: a }, () =>
+it.each([WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL])(
+  'an ambiguous unbound browser read respects the mount write policy (%s)',
+  async (write) => {
+    const { ws, manager, dispatcher } = await conditionalReads(true, write)
+    const a = new SessionState({ sessionId: 'a' })
+    const b = new SessionState({ sessionId: 'b' })
+    const caller = currentCaller()
+    try {
+      const read = runWithCaller({ ...caller, session: a }, () =>
         runWithCaller({ ...caller, session: b }, () =>
           dispatcher.dispatch('read', PathSpec.fromStrPath('/data/f')),
         ),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOTSUP' })
-    expect(a.versions.read(mount.cacheManager!.versionScope, '/f')).toBeNull()
-    expect(b.versions.read(mount.cacheManager!.versionScope, '/f')).toBeNull()
-  } finally {
-    await ws.close()
-  }
-})
+      )
+      if (write === WritePolicy.CONDITIONAL)
+        await expect(read).rejects.toMatchObject({ code: 'ENOTSUP' })
+      else expect((await read)[0]).toEqual(new Uint8Array([1]))
+      expect(a.versions.read(manager.versionScope, '/f')).toBeNull()
+      expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
+    } finally {
+      await ws.close()
+    }
+  },
+)
 
 it.each([
   [false, '/data/f'],
   [false, '/data/./f'],
   [true, '/data/./f'],
 ] as const)('a known browser read keeps its owner, cached=%s path=%s', async (cached, path) => {
-  const { ws, mount, dispatcher } = await conditionalReads(cached)
+  const { ws, manager, dispatcher } = await conditionalReads(cached)
   const a = new SessionState({ sessionId: 'a' })
   try {
     const [result] = await runWithCaller({ ...currentCaller(), session: a }, () =>
       dispatcher.dispatch('read', PathSpec.fromStrPath(path, undefined, '/')),
     )
     expect(result).toEqual(new Uint8Array([1]))
-    expect(a.versions.read(mount.cacheManager!.versionScope, '/f')).toBe('v1')
+    expect(a.versions.read(manager.versionScope, '/f')).toBe('v1')
   } finally {
     await ws.close()
   }
