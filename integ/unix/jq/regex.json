@@ -399,6 +399,22 @@
         "stdout": "[[0,3,\"aaa\",[\"a\",\"a\",\"a\"]]]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "jq_regex_shared_recursive_call_graph",
+      "seq": 18610026,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc 'def pattern: reduce range(1;13) as $n (\"(?<g0>a\\\\g<r>?){0}\"; . + \"(?<g\\($n)>\\\\g<g\\($n-1)>\\\\g<g\\($n-1)>){0}\") + \"(?<r>\\\\g<g12>?)\"; \"\" | test(pattern)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
     }
   ]
 }
