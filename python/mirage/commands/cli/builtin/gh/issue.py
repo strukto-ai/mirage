@@ -210,6 +210,7 @@ async def list_cmd(
             fl,
             "",
             ISSUE_FIELDS,
+            ctx,
         )
     params = {"state": state}
     assignee = fl.as_nonempty("assignee")
@@ -225,7 +226,7 @@ async def list_cmd(
         accessor, repo_for(accessor, fl), params, list_limit(fl, 30)
     )
     rows = [_issue(value) for value in values]
-    return await typed_out(rows, fl, _list_text(rows), ISSUE_FIELDS)
+    return await typed_out(rows, fl, _list_text(rows), ISSUE_FIELDS, ctx)
 
 
 async def view_cmd(
@@ -254,6 +255,7 @@ async def view_cmd(
             fl,
             "",
             ISSUE_FIELDS,
+            ctx,
         )
     row = _issue(await get_issue(accessor, ref, number))
     comments = await comments_for(accessor, fl, ref, number)
@@ -264,6 +266,7 @@ async def view_cmd(
         if gh_bool(fl, "comments")
         else _view_text(row),
         ISSUE_FIELDS,
+        ctx,
     )
 
 

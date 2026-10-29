@@ -29,7 +29,7 @@ class CacheConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: CacheType = CacheType.RAM
-    limit: str | int = "512MB"
+    limit: str | int = "32MB"
     max_drain_bytes: int | None = None
 
     @field_validator("limit", mode="before")
@@ -41,6 +41,7 @@ class CacheConfig(BaseModel):
 
 class RedisCacheConfig(CacheConfig):
     type: CacheType = CacheType.REDIS
+    limit: str | int = "512MB"
     url: str = "redis://localhost:6379/0"
     # None scopes the keys to the workspace; a prefix shares them with
     # every workspace that names it.

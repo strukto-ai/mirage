@@ -9,8 +9,8 @@ without asking the backend again.
 
 | `type` | Keeps it | Keys |
 | --- | --- | --- |
-| `ram` | In the process's memory, up to `limit` | `limit`, default `512MB`; `max_drain_bytes` |
-| `redis` | On Redis, under the workspace's own keys | `url`, `key_prefix`, `limit`, `max_drain_bytes` |
+| `ram` | In the process's memory, up to `limit` | `limit`, default `32MB`; `max_drain_bytes` |
+| `redis` | On Redis, under the workspace's own keys | `url`, `key_prefix`, `limit`, default `512MB`; `max_drain_bytes` |
 
 `limit` is in bytes or a size string. `max_drain_bytes` is the largest file a
 streamed read copies into the cache: 8 MiB or `limit`, whichever is smaller,

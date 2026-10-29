@@ -18,6 +18,7 @@ import pydantic_monty
 import pytest
 
 from mirage.commands.config import Context
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.runtime.python import MontyRuntime
 from mirage.runtime.types import Program, RunResult
 from mirage.types import MountMode, PathSpec
@@ -289,6 +290,24 @@ async def test_max_memory_caps_a_run_and_leaves_a_small_one_alone():
         assert big.stderr is not None and b"MemoryError" in big.stderr
         small = await _run(runtime, Program(code="print(sum(range(10)))"))
         assert (small.exit_code, small.stdout) == (0, b"45\n")
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_a_run_holds_no_more_than_its_workspace_has_left():
+    runtime = MontyRuntime(config={"max_memory": "1G"})
+    try:
+        big = await run_with_memory(
+            MemoryBudget(1 << 20, lambda: 0),
+            _run(runtime, Program(code="x = [0] * 10_000_000")),
+        )
+        assert big.exit_code == 1
+        assert big.stderr is not None and b"MemoryError" in big.stderr
+        free = await _run(
+            runtime, Program(code="print(len([0] * 10_000_000))")
+        )
+        assert (free.exit_code, free.stdout) == (0, b"10000000\n")
     finally:
         await runtime.close()
 

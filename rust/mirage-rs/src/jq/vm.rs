@@ -38,6 +38,10 @@ pub(crate) enum Op {
     LoadK(Value),
     PushKUnder(Value),
     ErrorK(Value),
+    /// Raise the input as the program's own `error`.
+    Raise,
+    /// Raise again the error the last `try` caught, as whose it was.
+    Reraise,
     Dup,
     Dup2,
     DupN,
@@ -85,10 +89,12 @@ pub(crate) struct Program {
 }
 
 /// An error in flight: jq's invalid-with-message, which `try` wraps when
-/// the error came from past its body.
+/// the error came from past its body. `Own` is one the program raised
+/// with `error` itself, which jq never tells apart but gojq does.
 #[derive(Clone, Debug)]
 pub(crate) enum Raise {
     Error(Value),
+    Own(Value),
     Wrapped(Box<Raise>),
 }
 
@@ -348,6 +354,8 @@ pub(crate) struct Vm {
     path: Value,
     value_at_path: Value,
     error: Option<Raise>,
+    /// Whether the error the last `try` caught was the program's own.
+    caught_own: bool,
     halted: Option<Halt>,
     next_label: u64,
     pc: usize,
@@ -402,6 +410,7 @@ impl Vm {
             path: Value::Null,
             value_at_path: Value::Null,
             error: None,
+            caught_own: false,
             halted: None,
             next_label: 0,
             pc: 0,
@@ -464,7 +473,7 @@ impl Vm {
                 None => {
                     if let Some(raise) = self.error.take() {
                         match raise {
-                            Raise::Error(value) => {
+                            Raise::Error(value) | Raise::Own(value) => {
                                 self.teardown.push(Retirement::values(vec![value]))
                             }
                             Raise::Wrapped(inner) => self.error = Some(*inner),
@@ -791,6 +800,15 @@ impl Vm {
                 self.push(top);
             }
             Op::ErrorK(value) => return Flow::Raise(Raise::Error(value.clone())),
+            Op::Raise => return Flow::Raise(Raise::Own(self.pop())),
+            Op::Reraise => {
+                let value = self.pop();
+                return Flow::Raise(if self.caught_own {
+                    Raise::Own(value)
+                } else {
+                    Raise::Error(value)
+                });
+            }
             Op::Dup => {
                 let value = self.pop();
                 self.push(value.clone());
@@ -1106,12 +1124,8 @@ impl Vm {
                         self.error = Some(*inner);
                         Flow::Backtrack
                     }
-                    Some(Raise::Error(message)) => {
-                        self.pop();
-                        self.push(message);
-                        self.pc = *handler;
-                        Flow::Go
-                    }
+                    Some(Raise::Error(message)) => self.catch(message, false, *handler),
+                    Some(Raise::Own(message)) => self.catch(message, true, *handler),
                     None => Flow::Backtrack,
                 }
             }
@@ -1129,6 +1143,15 @@ impl Vm {
             Op::Ret => Flow::Backtrack,
             _ => unreachable!("no backtrack handler for {op:?}"),
         }
+    }
+
+    /// Hand a caught error's message to the `try`'s handler.
+    fn catch(&mut self, message: Value, own: bool, handler: usize) -> Flow {
+        self.caught_own = own;
+        self.pop();
+        self.push(message);
+        self.pc = handler;
+        Flow::Go
     }
 
     fn each(&mut self, container: Value, at: usize, pc: usize) -> Flow {

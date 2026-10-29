@@ -130,6 +130,14 @@ describe('Workspace.snapshot', () => {
     }
   })
 
+  it.each([1024 * 1024, null])('keeps max_memory %s across a round trip', async (maxMemory) => {
+    const src = new Workspace({ '/m': new RAMVFS() }, { maxMemory })
+    const tar = await src.snapshot()
+    for (const dst of [await src.copy(), await Workspace.load(tar)]) {
+      expect(dst.registry.memory?.limit ?? null).toBe(maxMemory)
+    }
+  })
+
   it('copies a read-only scratch root read-only', async () => {
     const src = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.READ })
     const copy = await src.copy()

@@ -14,6 +14,8 @@ import { DiffPool } from '../../rs/diff_pool.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOConfig } from '../../io/config.ts'
+import { MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
+import { parseLimit } from '../../utils/size.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { ShellExecution } from '../shell_execution.ts'
 import { ExecutionScope } from '../execution.ts'
@@ -534,6 +536,13 @@ export class Workspace {
       defaultBase === null ? null : compileProfile(defaultBase, this.profileName(null))
     checkCommandLimits(options.commandLimits ?? {}, 'workspace', true)
     this.registry.commandLimits = { ...options.commandLimits }
+    // What the RAM mounts store and what a command builds share the
+    // workspace's max_memory; null runs uncapped.
+    const maxMemory = options.maxMemory === undefined ? MAX_MEMORY : options.maxMemory
+    this.registry.memory =
+      maxMemory === null
+        ? null
+        : new MemoryBudget(parseLimit(maxMemory, 'max_memory'), () => this.registry.heldInMemory())
     for (const [prefix, limits] of Object.entries(normalized.commandLimits)) {
       const mount = this.registry.mountForPrefix(prefix)
       for (const [name, limit] of Object.entries(limits)) mount.commandLimits.set(name, limit)
@@ -2035,7 +2044,9 @@ export class Workspace {
     session.tty = new Terminal()
     if (!this.lineLock.held(source.sessionId)) {
       session.tty.chunks = source.tty.chunks
+      session.tty.held = source.tty.held
       source.tty.chunks = []
+      source.tty.held = 0
     }
     let result: ExecuteResult
     try {
@@ -2214,6 +2225,7 @@ export class Workspace {
     }
     const mergedOptions: WorkspaceOptions = {
       io: args.io,
+      maxMemory: args.maxMemory,
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
       commandLimits: args.commandLimits,

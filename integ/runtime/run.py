@@ -948,6 +948,8 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
         kwargs["profiles"] = world["profiles"]
     if "profile" in world:
         kwargs["profile"] = world["profile"]
+    if "max_memory" in world:
+        kwargs["max_memory"] = world["max_memory"]
     ws = Workspace(mounts, mode=MountMode.EXEC, **kwargs)
     if "read_control" in world:
         ws.policies.add(ReadControl(ws, world["read_control"]))

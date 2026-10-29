@@ -62,6 +62,8 @@ from mirage.core.jq.types import (
     StreamReads,
 )
 from mirage.errors.constants import FS_ERRORS
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import memory_room
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
@@ -113,6 +115,9 @@ ERROR_SYSTEM = 2
 # refusal to compile such a program ends in; any other refusal names what
 # jq_eval cannot run yet.
 COMPILE_REPORT = re.compile(r"(?:\A|\n)jq: [0-9]+ compile errors?\Z")
+
+# The error jq_eval ends a run with once it holds more than its memory.
+MEMORY_REPORT = "jq memory limit of {} bytes exceeded"
 
 USAGE_HINT = (
     "Use jq --help for help with command-line options,\n"
@@ -551,7 +556,9 @@ def read_frames(
     """Fold one drain of mirage-rs's jq_eval into a run: each output frame
     is a compact dump and a debug or stderr frame a message for stderr,
     both kept in the order the run wrote them, and an error or a halt
-    frame is what stopped the run.
+    frame is what stopped the run. An error's flag byte says whether it
+    is a string (bit 0) and whether the program raised it with `error`
+    itself (bit 1).
 
     Args:
         wire (bytes): the frames, a tag byte and a little-endian u32
@@ -569,7 +576,10 @@ def read_frames(
         if tag in (FRAME_OUTPUT, FRAME_DEBUG, FRAME_STDERR):
             frames.append((tag, payload.decode()))
         elif tag == FRAME_ERROR:
-            stop = JqError(payload[1:].decode(), payload[0] == 1)
+            flags = payload[0]
+            stop = JqError(
+                payload[1:].decode(), bool(flags & 1), bool(flags & 2)
+            )
         elif tag == FRAME_HALT:
             halt = json.loads(payload)
             stop = JqHalt(halt["message"], halt["string"], halt["code"])
@@ -626,10 +636,15 @@ class Engine:
     Args:
         stream (OpenStream): the compiled program.
         opts (JqOptions): resolved options, which `debug` prints by.
+        memory (int | None): the bytes the run may hold, what the
+            workspace's ``max_memory`` had left; None for jq_eval's own.
     """
 
-    def __init__(self, stream: OpenStream, opts: JqOptions) -> None:
+    def __init__(
+        self, stream: OpenStream, opts: JqOptions, memory: int | None = None
+    ) -> None:
         self._stream = stream
+        self._memory = memory
         self._budget = YieldBudget()
         # jq's debug callback prints compactly, with -S and -a but none of
         # the layout or raw options (main.c's dumpopts less pretty).
@@ -658,6 +673,7 @@ class Engine:
         Raises:
             JqCompileError: a program jq itself refuses, with jq's report.
         """
+        limit = memory_room()
         try:
             stream = open_stream(
                 "jq_eval",
@@ -667,6 +683,7 @@ class Engine:
                     "args": args,
                     "env": env,
                     "zone": local_zone(),
+                    **({} if limit is None else {"memory": limit}),
                 },
             )
         except StreamRefusal as exc:
@@ -674,7 +691,7 @@ class Engine:
                 raise JqCompileError(exc.message) from exc
             logger.debug("jq_eval leaves the program to libjq: %s", exc)
             return None
-        return cls(stream, opts)
+        return cls(stream, opts, limit)
 
     async def run(
         self,
@@ -746,6 +763,12 @@ class Engine:
         except GeneratorExit:
             await self._cancel()
             raise
+        if (
+            self._memory is not None
+            and isinstance(stop, JqError)
+            and stop.text == MEMORY_REPORT.format(self._memory)
+        ):
+            raise MemoryExhausted()
         ending.stop = stop
 
     async def _cancel(self) -> None:

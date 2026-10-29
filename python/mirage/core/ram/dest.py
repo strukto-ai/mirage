@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.errors.fs import (
+    edquot,
     eexist,
     einval,
     eisdir,
@@ -20,6 +21,7 @@ from mirage.errors.fs import (
     enotdir,
     enotempty,
 )
+from mirage.io.memory import memory_room
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import ancestors
@@ -210,7 +212,8 @@ def check_capacity(
     store: RAMStore, spec: PathSpec, key: str, size: int
 ) -> None:
     """Refuse with EDQUOT a key growing to ``size`` bytes past its store's
-    capacity; an uncapped store takes any size.
+    capacity, or past what its workspace's ``max_memory`` has left; an
+    uncapped store in an uncapped workspace takes any size.
 
     Called under ``store.lock`` just before the change, with no await
     between, so the check and the change run as one step, on the store's
@@ -222,5 +225,20 @@ def check_capacity(
         key (str): its normalized key.
         size (int): the key's length after the change.
     """
+    growth = size - len(store.files.get(key, b""))
+    check_room(spec, growth)
     if store.usage is not None:
-        store.usage.admit(spec, size - len(store.files.get(key, b"")))
+        store.usage.admit(spec, growth)
+
+
+def check_room(spec: PathSpec, growth: int) -> None:
+    """Refuse with EDQUOT ``growth`` more bytes past what the running
+    workspace's ``max_memory`` has left.
+
+    Args:
+        spec (PathSpec): the operand a refusal names.
+        growth (int): bytes the change adds; zero or less always passes.
+    """
+    room = memory_room()
+    if growth > 0 and room is not None and growth > room:
+        raise edquot(spec)

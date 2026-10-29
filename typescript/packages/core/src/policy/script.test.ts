@@ -1041,6 +1041,12 @@ describe('ScriptPolicy env and external functions', () => {
     ])
   }, 60_000)
 
+  it('keeps a pool of its own for a monty runtime', () => {
+    const policy = track(new ScriptPolicy(scripts({ preCommand: [entry()] })))
+    const engine = (policy as unknown as { engine: (e: ProfileScript) => unknown }).engine(entry())
+    expect(engine instanceof MontyRuntime && !engine.shared).toBe(true)
+  })
+
   it('hands the functions to a monty runtime only', async () => {
     const engine = new FakeProgram()
     built.factory = () => engine

@@ -16,6 +16,7 @@ from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.errors.types import BadDescriptorError
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import AsyncLineIterator, line_buffer
+from mirage.io.memory import check_memory
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import decode_text, encode_text
@@ -234,17 +235,23 @@ async def _read_raw(
         return decode_text(data), complete
     if nchars is not None:
         data, complete = await buffer.read_chars(nchars, delim)
+        held = len(data)
         text = decode_text(data)
         while (
             not raw and complete and ends_escaped(text) and len(text) < nchars
         ):
             more, complete = await buffer.read_chars(nchars - len(text), delim)
+            held += len(more)
+            check_memory(held)
             text += decode_text(more)
         return text, complete
     data, complete = await buffer.read_until(delim)
+    held = len(data)
     text = decode_text(data)
     while not raw and complete and delim == b"\n" and ends_escaped(text):
         more, complete = await buffer.read_until(delim)
+        held += len(more) + 1
+        check_memory(held)
         text += "\n" + decode_text(more)
     return text, complete
 

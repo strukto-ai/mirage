@@ -49,6 +49,8 @@ import {
 } from '../../../core/jq/index.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { closeStream, openStream, type OpenStream } from '../../../rs/stream.ts'
+import { MemoryExhausted } from '../../../io/errors.ts'
+import { memoryRoom } from '../../../io/memory.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec, type JsonValue } from '../../../types.ts'
@@ -109,6 +111,11 @@ const ERROR_SYSTEM = 2
 // refusal to compile such a program ends in; any other refusal names what
 // jq_eval cannot run yet.
 const COMPILE_REPORT = /(?:^|\n)jq: [0-9]+ compile errors?$/
+
+// The error jq_eval ends a run with once it holds more than its memory, `{}`
+// the bytes. Mirrors Python's MEMORY_REPORT.
+const MEMORY_REPORT = 'jq memory limit of {} bytes exceeded'
+
 const USAGE_HINT =
   'Use jq --help for help with command-line options,\n' +
   'or see the jq manpage, or online docs at https://jqlang.org'
@@ -424,8 +431,9 @@ export function runStatus(run: JqRun<string>): number {
  * order the run wrote them, and the stop an error or halt frame names, or
  * null. A frame is a
  * tag, a little-endian u32 length and its payload: an output's dump, an
- * error's string flag byte then its text, a halt's JSON, a `debug` line's
- * dump, or the text `stderr` writes.
+ * error's flag byte (bit 0 for a string, bit 1 when the program raised it
+ * with `error` itself) then its text, a halt's JSON, a `debug` line's dump,
+ * or the text `stderr` writes.
  */
 export function readFrames(bytes: Uint8Array, frames: [number, string][]): JqError | JqHalt | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
@@ -441,7 +449,13 @@ export function readFrames(bytes: Uint8Array, frames: [number, string][]): JqErr
     if (tag === FRAME_OUTPUT || tag === FRAME_DEBUG || tag === FRAME_STDERR) {
       frames.push([tag, DEC.decode(payload)])
     } else if (tag === FRAME_ERROR) {
-      stop = { kind: 'error', text: DEC.decode(payload.subarray(1)), string: payload[0] === 1 }
+      const flags = payload[0] ?? 0
+      stop = {
+        kind: 'error',
+        text: DEC.decode(payload.subarray(1)),
+        string: (flags & 1) === 1,
+        own: (flags & 2) === 2,
+      }
     } else if (tag === FRAME_HALT) {
       const halt = JSON.parse(DEC.decode(payload)) as Omit<JqHalt, 'kind'>
       stop = { kind: 'halt', message: halt.message, string: halt.string, code: halt.code }
@@ -498,9 +512,12 @@ export class Engine {
   // layout or raw options (main.c's dumpopts less pretty).
   private readonly debugOpts: JqOptions
 
+  // What the workspace's max_memory had left when the program compiled, the
+  // bytes the run may hold; null for jq_eval's own.
   private constructor(
     private readonly stream: OpenStream,
     opts: JqOptions,
+    private readonly memory: number | null,
     private readonly signal?: AbortSignal,
   ) {
     this.budget = new YieldBudget(signal)
@@ -529,6 +546,7 @@ export class Engine {
     signal?: AbortSignal,
   ): Promise<Engine | null> {
     let stream: OpenStream
+    const limit = memoryRoom()
     try {
       stream = await openStream('jq_eval', {
         program: expr,
@@ -536,6 +554,7 @@ export class Engine {
         args,
         env,
         zone: localZone() ?? null,
+        ...(limit === null ? {} : { memory: limit }),
       })
     } catch (error) {
       if (!(error instanceof StreamRefusal)) throw error
@@ -543,7 +562,7 @@ export class Engine {
       console.debug(`jq: jq_eval leaves the program to jq-wasm: ${error.message}`)
       return null
     }
-    return new Engine(stream, opts, signal)
+    return new Engine(stream, opts, limit, signal)
   }
 
   /**
@@ -613,6 +632,13 @@ export class Engine {
       return
     } finally {
       if (abandoned) await this.cancel()
+    }
+    if (
+      this.memory !== null &&
+      stop?.kind === 'error' &&
+      stop.text === MEMORY_REPORT.replace('{}', String(this.memory))
+    ) {
+      throw new MemoryExhausted()
     }
     ending.stop = stop
   }

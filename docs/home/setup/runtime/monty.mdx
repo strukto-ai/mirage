@@ -70,7 +70,9 @@ runtimes:
       max_memory: 64M
 ```
 
-A run that needs more raises `MemoryError`. There is no cap by default.
+A run that needs more raises `MemoryError`. A run also holds no more than its
+workspace's [`max_memory`](/home/core/output-limits#limit-a-workspaces-memory)
+has left, 32 MB by default.
 
 ## Python compatibility
 

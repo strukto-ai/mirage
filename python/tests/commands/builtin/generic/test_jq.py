@@ -747,6 +747,7 @@ def test_frames_fold_in_order_with_the_stop_that_ended_the_run():
         + _frame(2, b"\x00{}")
     )
     assert read_frames(wire, frames) == JqError("{}", False)
+    assert read_frames(_frame(2, b"\x03x"), []) == JqError("x", True, True)
     assert frames == [(1, "1"), (4, '["DEBUG:",1]'), (1, "[2]"), (5, "x")]
     halt = b'{"message":"bye","string":true,"code":3.0}'
     assert read_frames(_frame(3, halt), []) == JqHalt("bye", True, 3.0)

@@ -24,6 +24,7 @@ import { PrefixResolver } from '../../resolver.ts'
 import { context } from '../../../../tests/workspace/fixtures/context.ts'
 import { materialize } from '../../../io/types.ts'
 import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
+import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
 
 function makeBridge(
   seed: Record<string, Uint8Array>,
@@ -380,6 +381,18 @@ describe('MontyRuntime', () => {
     expect(text(big.stderr)).toContain('MemoryError')
     const small = await run(rt, 'print(sum(range(10)))')
     expect([small.exitCode, text(small.stdout)]).toEqual([0, '45\n'])
+  }, 30_000)
+
+  it('holds no more than its workspace has left', async () => {
+    const rt = new MontyRuntime({ config: { maxMemory: '1G' } })
+    runtimes.push(rt)
+    const big = await runWithMemory(new MemoryBudget(1024 * 1024, () => 0), () =>
+      run(rt, 'x = [0] * 10_000_000'),
+    )
+    expect(big.exitCode).toBe(1)
+    expect(text(big.stderr)).toContain('MemoryError')
+    const free = await run(rt, 'print(len([0] * 10_000_000))')
+    expect([free.exitCode, text(free.stdout)]).toEqual([0, '10000000\n'])
   }, 30_000)
 
   it('max_memory must be a size', () => {

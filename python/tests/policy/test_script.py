@@ -1069,6 +1069,16 @@ async def test_monty_runs_handed_the_functions_go_at_once():
 
 
 @pytest.mark.asyncio
+async def test_a_monty_runtime_keeps_a_pool_of_its_own():
+    policy = ScriptPolicy(Programs({"pre_command": (_entry(),)}))
+    try:
+        engine, _ = policy._engine(_entry())
+    finally:
+        await policy.close()
+    assert isinstance(engine, MontyRuntime) and engine.shared is False
+
+
+@pytest.mark.asyncio
 async def test_only_a_monty_runtime_is_handed_the_functions(monkeypatch):
     engine = FakeProgram()
     monkeypatch.setattr(

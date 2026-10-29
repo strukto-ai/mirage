@@ -18,12 +18,19 @@ import concurrent.futures
 import logging
 import os
 import signal
+import threading
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from mirage.concurrency.limiter import owned_task
+from mirage.io.memory import memory_room
 from mirage.io.types import materialize
 from mirage.runtime.python.execution import main_filename
-from mirage.runtime.python.monty.constants import DEFAULT_PROG, LIMITS
+from mirage.runtime.python.monty.constants import (
+    DEFAULT_PROG,
+    LIMITS,
+    POOL_WORKERS,
+)
 from mirage.runtime.python.monty.fs import MontyFs
 from mirage.runtime.python.monty.loader import pydantic_monty
 from mirage.runtime.types import OutputFn, Program, RunResult
@@ -32,33 +39,104 @@ from mirage.types import PathSpec
 logger = logging.getLogger(__name__)
 
 
+class _SharedPool:
+    """The one pool of monty workers every workspace in the process runs
+    on, so an idle workspace holds no worker of its own.
+
+    The first runtime that needs it opens it and the last to let go
+    closes it. Its workers serve any event loop, so workspaces running on
+    loops of their own share them; ``POOL_WORKERS`` run at once and a run
+    past them waits. Each run still checks out with its own limits.
+    Mirrors the TypeScript ``SharedPool``.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._users = 0
+        self._opened: concurrent.futures.Future[Any] | None = None
+        self._opener: asyncio.Task[None] | None = None
+
+    async def acquire(self) -> Any:
+        """The pool, opened by the first caller; every acquire is
+        released once."""
+        with self._lock:
+            self._users += 1
+            opened = self._opened
+            opener = opened is None
+            if opened is None:
+                opened = self._opened = concurrent.futures.Future()
+        if opener:
+            self._opener = owned_task(self._open(opened))
+        try:
+            return await asyncio.shield(asyncio.wrap_future(opened))
+        except BaseException:
+            await self.release()
+            raise
+
+    async def _open(self, opened: concurrent.futures.Future[Any]) -> None:
+        try:
+            pool = pydantic_monty.AsyncMonty(max_processes=POOL_WORKERS)
+            await pool.__aenter__()
+        except BaseException as exc:
+            with self._lock:
+                if self._opened is opened:
+                    self._opened = None
+            opened.set_exception(exc)
+            if not isinstance(exc, Exception):
+                raise
+            return
+        opened.set_result(pool)
+
+    async def release(self) -> None:
+        """Let go of the pool, closing it once no runtime holds it."""
+        with self._lock:
+            self._users -= 1
+            opened = self._opened
+            if self._users > 0 or opened is None:
+                return
+            self._opened = None
+        try:
+            pool = await asyncio.wrap_future(opened)
+        except Exception as exc:
+            logger.debug("monty pool being opened at close failed: %s", exc)
+            return
+        await pool.__aexit__(None, None, None)
+
+
+_shared_pool = _SharedPool()
+
+
 class MontyExecution:
-    """Runs on one runtime's pooled monty workers.
+    """Runs on pooled monty workers: the process's shared pool, or one of
+    its own for a run nested in another, which must not queue behind its
+    parent's worker.
 
     Args:
         max_memory (int | None): the heap one run may use, in bytes;
             None for no cap.
+        shared (bool): run on the process's shared pool.
     """
 
     name = "monty"
 
-    def __init__(self, max_memory: int | None = None) -> None:
+    def __init__(
+        self, max_memory: int | None = None, shared: bool = False
+    ) -> None:
         self._limits: dict[str, int] = (
             LIMITS
             if max_memory is None
             else {**LIMITS, "max_memory": max_memory}
         )
+        self._shared = shared
         self._pool: Any = None
         self._pool_task: asyncio.Task[Any] | None = None
 
     async def _ensure_pool(self) -> Any:
-        """The runtime's worker pool, spawned on first use.
+        """The execution's worker pool, taken on first use.
 
-        One pool per runtime instance, which is one per workspace world:
-        it keeps `request_timeout` and the process cap per workspace
-        rather than global. The pool spawns `min_processes` workers
-        eagerly and reuses one across sequential checkouts, so an idle
-        workspace costs a single worker.
+        A pool of its own spawns `min_processes` workers eagerly and
+        reuses one across sequential checkouts; the shared pool is
+        opened once for the whole process.
 
         Creation is cached as a task, not guarded by an `is None`
         check: two commands reaching a cold runtime together would both
@@ -81,6 +159,8 @@ class MontyExecution:
         return self._pool
 
     async def _open_pool(self) -> Any:
+        if self._shared:
+            return await _shared_pool.acquire()
         pool = pydantic_monty.AsyncMonty()
         await pool.__aenter__()
         return pool
@@ -156,8 +236,17 @@ class MontyExecution:
         start = cwd.virtual if cwd is not None else None
         # A script is Monty's own script_name, which it keeps the last
         # part of for `__file__`, under the directory a feed starts in.
+        room = memory_room()
+        own = self._limits.get("max_memory")
         checkout = pool.checkout(
-            limits=self._limits,
+            limits=(
+                self._limits
+                if room is None
+                else {
+                    **self._limits,
+                    "max_memory": room if own is None else min(own, room),
+                }
+            ),
             assert_message_annotations=False,
             os_policy={"sleep_system_max": float("inf")},
             **(
@@ -220,8 +309,11 @@ class MontyExecution:
                 )
         self._pool_task = None
         if self._pool is not None:
-            await self._pool.__aexit__(None, None, None)
-            self._pool = None
+            pool, self._pool = self._pool, None
+            if self._shared:
+                await _shared_pool.release()
+            else:
+                await pool.__aexit__(None, None, None)
 
 
 def _kill_worker(pid: int | None) -> None:

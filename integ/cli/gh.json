@@ -1821,6 +1821,45 @@
       }
     },
     {
+      "id": "gh_jq_that_never_ends_stops_at_timeout",
+      "seq": 569336,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "timeout 1 gh api user --jq 'until(false; .)'; echo \"exit=$?\"; timeout 1 gh issue view 4 --json number --jq 'until(false; .)'; echo \"exit=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=124\nexit=124\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_jq_env_is_the_command_environment",
+      "seq": 569337,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "export TOKEN=t; gh api user --jq '[$ENV.TOKEN, env.TOKEN]'; TOKEN=u gh issue view 4 --json number --jq '$ENV.TOKEN'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"t\",\"t\"]\nu\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_jq_tells_the_program_s_own_errors_apart",
+      "seq": 569338,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api user --jq 'first(error(\"in\"))'; echo \"exit=$?\"; gh api user --jq 'label $f | .login | .x'; echo \"exit=$?\"; gh api user --jq '[1 | lgamma], error(.login)'; echo \"exit=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\nexit=1\n[0]\nexit=1\n",
+        "stderr": "gh api: error: in\ngh api: Cannot index string with string (\"x\")\ngh api: error: integ-user\n"
+      }
+    },
+    {
       "id": "gh_run_view_log_prints_each_line_behind_its_job_and_step",
       "seq": 569024,
       "targets": [

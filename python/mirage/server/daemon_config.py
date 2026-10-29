@@ -32,6 +32,7 @@ ALLOWED_KEYS = frozenset(
         "jwt_authorized_parties",
         "login_client_id",
         "idle_grace_seconds",
+        "max_workspaces",
         "port",
         "ssh_port",
         "ssh_host",
@@ -40,7 +41,13 @@ ALLOWED_KEYS = frozenset(
     }
 )
 NUMERIC_KEYS = frozenset(
-    {"idle_grace_seconds", "jwt_clock_skew", "port", "ssh_port"}
+    {
+        "idle_grace_seconds",
+        "jwt_clock_skew",
+        "max_workspaces",
+        "port",
+        "ssh_port",
+    }
 )
 
 

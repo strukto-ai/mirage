@@ -30,6 +30,7 @@ from mirage.config import (
     _build_runtime_entries,
     load_config,
 )
+from mirage.io.memory import MAX_MEMORY
 from mirage.policy import DEFAULT_DENY_REASON, CommandRule
 from mirage.policy.profile import (
     CommandsBlock,
@@ -133,6 +134,30 @@ async def test_to_workspace_kwargs_yields_constructible_workspace():
     assert mount.mode == MountMode.WRITE
     ws = Workspace(**kwargs)
     assert ws is not None
+
+
+@pytest.mark.parametrize(
+    ("block", "expected"),
+    [
+        ({}, MAX_MEMORY),
+        ({"max_memory": "8MB"}, 8 << 20),
+        ({"max_memory": None}, None),
+    ],
+)
+def test_max_memory_reaches_the_workspace(block, expected):
+    cfg = WorkspaceConfig.model_validate(
+        {"mounts": {"/": {"vfs": "ram"}}, **block}
+    )
+    ws = Workspace(**cfg.to_workspace_kwargs())
+    memory = ws.registry.memory
+    assert (None if memory is None else memory.limit) == expected
+
+
+def test_max_memory_must_be_a_size():
+    with pytest.raises(ValueError, match="max_memory must be a size"):
+        WorkspaceConfig.model_validate(
+            {"mounts": {"/": {"vfs": "ram"}}, "max_memory": "lots"}
+        )
 
 
 @pytest.mark.asyncio

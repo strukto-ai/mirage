@@ -14,6 +14,7 @@
 
 import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
 import { type AsyncLineIterator, lineBuffer } from '../../../../io/async_line_iterator.ts'
+import { checkMemory } from '../../../../io/memory.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { isFsError } from '../../../../errors/fs.ts'
@@ -155,17 +156,23 @@ async function readRaw(
   }
   if (nchars !== null) {
     let [data, complete] = await buffer.readChars(nchars, delim, signal)
+    let held = data.byteLength
     let text = decodeText(data)
     while (!raw && complete && endsEscaped(text) && text.length < nchars) {
       ;[data, complete] = await buffer.readChars(nchars - text.length, delim, signal)
+      held += data.byteLength
+      checkMemory(held)
       text += decodeText(data)
     }
     return [text, complete]
   }
   let [data, complete] = await buffer.readUntil(delim, signal)
+  let held = data.byteLength
   let text = decodeText(data)
   while (!raw && complete && delim === 10 && endsEscaped(text)) {
     ;[data, complete] = await buffer.readUntil(delim, signal)
+    held += data.byteLength + 1
+    checkMemory(held)
     text += '\n' + decodeText(data)
   }
   return [text, complete]

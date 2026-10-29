@@ -289,6 +289,32 @@ describe('streamed write', () => {
     expect(accessor.store.files.get('/new')?.byteLength).toBe(0)
   })
 
+  // A publish copies only what arrived into a buffer the write grows, and a
+  // view a reader took earlier stays as it was; the file lands at its size.
+  it('grows in place and leaves a reader its view', async () => {
+    const accessor = mkAccessor()
+    const gates: (() => void)[] = []
+    const opened = [0, 1, 2].map(() => new Promise<void>((resolve) => gates.push(resolve)))
+    async function* source(): AsyncIterable<Uint8Array> {
+      for (const [at, chunk] of ['a\n', 'b\n', 'c\n', 'd\n'].entries()) {
+        if (at > 0) await opened[at - 1]
+        yield ENC.encode(chunk)
+      }
+    }
+    const writing = write(accessor, mkPath('/f'), source())
+    const seen: (Uint8Array | undefined)[] = []
+    for (const gate of gates) {
+      await settle()
+      seen.push(accessor.store.files.get('/f'))
+      gate()
+    }
+    await writing
+    expect(seen.map((view) => DEC.decode(view))).toEqual(['a\n', 'a\nb\n', 'a\nb\nc\n'])
+    const stored = accessor.store.files.get('/f')
+    expect(DEC.decode(stored)).toBe('a\nb\nc\nd\n')
+    expect(stored?.buffer.byteLength).toBe(stored?.byteLength)
+  })
+
   // A stream that fails keeps what it had delivered, as a disk file does.
   it('keeps what arrived before the stream failed', async () => {
     const accessor = mkAccessor()

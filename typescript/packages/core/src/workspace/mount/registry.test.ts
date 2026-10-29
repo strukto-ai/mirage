@@ -815,3 +815,14 @@ it('a read in flight keeps nothing after every mount drops', async () => {
   expect(new TextDecoder().decode(await read)).toBe('old')
   expect(await cache.exists('/b/x.txt')).toBe(false)
 })
+
+describe('MountRegistry.heldInMemory', () => {
+  it('sums the RAM mounts', () => {
+    const one = new RAMVFS()
+    const two = new RAMVFS()
+    one.store.files.set('/a', new Uint8Array(4))
+    two.store.files.set('/b', new Uint8Array(2))
+    const reg = new MountRegistry({ '/one': one, '/two': two }, MountMode.WRITE)
+    expect(reg.heldInMemory()).toBe(6)
+  })
+})

@@ -734,6 +734,13 @@ describe('jq_eval', () => {
       kind: 'error',
       text: '{}',
       string: false,
+      own: false,
+    })
+    expect(readFrames(frame(2, joined(Uint8Array.of(3), ENC.encode('x'))), [])).toEqual({
+      kind: 'error',
+      text: 'x',
+      string: true,
+      own: true,
     })
     expect(frames).toEqual([
       [1, '1'],

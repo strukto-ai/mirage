@@ -82,6 +82,12 @@ export interface WorkspaceOptions {
   sessionId?: string
   cacheLimit?: string | number
   /**
+   * What the RAM mounts store and what a command builds may hold together, a
+   * size like `32MB` or a count of bytes; null runs uncapped. Defaults to
+   * `MAX_MEMORY`.
+   */
+  maxMemory?: string | number | null
+  /**
    * The workspace's byte cache, described the way `index` is: the
    * config to build one from. A store core cannot build reaches
    * `buildFileCache` by registering a factory for its `type`

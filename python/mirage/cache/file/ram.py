@@ -43,7 +43,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
 
     def __init__(
         self,
-        cache_limit: str | int = "512MB",
+        cache_limit: str | int = "32MB",
         max_drain_bytes: int | None = None,
         clock: Clock | None = None,
     ) -> None:

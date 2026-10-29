@@ -21,6 +21,8 @@ import {
   SharedInput,
 } from './async_line_iterator.ts'
 import { chunks } from './cooperative.ts'
+import { MemoryExhausted } from './errors.ts'
+import { MemoryBudget, runWithMemory } from './memory.ts'
 import { DeviceInput, materialize } from './types.ts'
 
 async function* fromChunks(chunks: Uint8Array[]): AsyncIterable<Uint8Array> {
@@ -113,6 +115,28 @@ describe('AsyncLineIterator', () => {
     expect(decode(await input.read1(4))).toBe('gh')
     expect(decode(await input.read1(0))).toBe('')
     expect((await input.read1(4)).byteLength).toBe(0)
+  })
+})
+
+describe('the memory budget', () => {
+  const first = (parts: string[]) => () =>
+    new AsyncLineIterator(fromChunks(parts.map(encode))).readline()
+  const load = (parts: string[]) => () =>
+    new AsyncLineIterator(fromChunks(parts.map(encode))).loadRest()
+
+  it('refuses a line past it', async () => {
+    const line = await runWithMemory(new MemoryBudget(8, () => 0), first(['abcd', 'ef\n']))
+    expect(line === null ? null : decode(line)).toBe('abcdef')
+    await expect(
+      runWithMemory(new MemoryBudget(8, () => 0), first(['abcd', 'efgh', 'ij\n'])),
+    ).rejects.toThrow(MemoryExhausted)
+  })
+
+  it('counts what a reader loads', async () => {
+    await runWithMemory(new MemoryBudget(8, () => 0), load(['abcd', 'efgh']))
+    await expect(
+      runWithMemory(new MemoryBudget(8, () => 0), load(['abcd', 'efgh', 'i'])),
+    ).rejects.toThrow(MemoryExhausted)
   })
 })
 

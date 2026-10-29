@@ -1313,6 +1313,29 @@ async def test_a_rebuilt_local_mount_keeps_its_walk_limit(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["copy", "load"])
+@pytest.mark.parametrize("max_memory", [1 << 20, None])
+async def test_a_rebuilt_workspace_keeps_its_max_memory(
+    tmp_path, route, max_memory
+):
+    ws = Workspace({"/d": RAMVFS()}, max_memory=max_memory)
+    try:
+        if route == "copy":
+            rebuilt = await ws.copy()
+        else:
+            snap = tmp_path / "ws.tar"
+            await ws.snapshot(snap)
+            rebuilt = await Workspace.load(snap)
+        try:
+            memory = rebuilt.registry.memory
+            assert (None if memory is None else memory.limit) == max_memory
+        finally:
+            await rebuilt.close()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("named", [None, {}])
 async def test_an_override_naming_no_limits_keeps_the_saved_ones(named):
     saved = {"cat": Limit(max_bytes=2)}

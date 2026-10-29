@@ -656,6 +656,68 @@ fn a_runaway_regex_pauses_every_drain_until_the_retry_limit() {
     );
 }
 
+/// The flag byte of the error frame `program` ends with on `input`.
+fn error_flags(program: &str, input: &str) -> u8 {
+    let mut stream = open(program, 7);
+    let mut wire = Vec::new();
+    stream.feed(input.as_bytes(), &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    settle(&mut *stream, &mut wire);
+    let mut flags = None;
+    let mut at = &wire[..];
+    while !at.is_empty() {
+        let len = u32::from_le_bytes(at[1..5].try_into().unwrap()) as usize;
+        if at[0] == ERROR {
+            flags = Some(at[5]);
+        }
+        at = &at[5 + len..];
+    }
+    flags.unwrap_or_else(|| panic!("{program} ends without an error"))
+}
+
+#[test]
+fn errors_say_whether_the_program_raised_them_itself() {
+    let own = [
+        r#"error("boom")"#,
+        r#""x" | error"#,
+        "error(null)",
+        "error(error)",
+        r#"[error("in")]"#,
+        r#"first(error("in"))"#,
+        r#"label $f | error("in")"#,
+        r#"[limit(1; error("in"))]"#,
+        "try (.a | .b) catch error",
+        r#"(try error(.a) catch .), error("y")"#,
+        "def f: error; f",
+        "def error(m): m | error; error(1)",
+        ".a |= error",
+        "map_values(error)",
+        ". as [$a] ?// $a | error",
+    ];
+    for program in own {
+        assert_eq!(error_flags(program, r#"{"a":"x"}"#) & 2, 2, "{program}");
+    }
+    let builtin = [
+        ".a | .b",
+        "label $f | .a | .b",
+        "first(.a | .b)",
+        "def error: 7; error | .b",
+        "limit(-1; .a)",
+        "skip(-1; .a)",
+        "nth(-1; .a)",
+        r#"try error("x") catch .a"#,
+        "[.[] | ltrimstr(1) | .b]",
+        "input",
+        "1 - \"a\"",
+    ];
+    for program in builtin {
+        assert_eq!(error_flags(program, r#"{"a":"x"}"#) & 2, 0, "{program}");
+    }
+    assert_eq!(error_flags(r#"error("s")"#, "null"), 3);
+    assert_eq!(error_flags("error({})", "null"), 2);
+    assert_eq!(error_flags(".a.b", r#"{"a":"x"}"#), 1);
+}
+
 #[test]
 fn errors_end_the_run_with_jq_wording() {
     let cases: &[(&str, &str, &str)] = &[

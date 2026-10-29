@@ -34,6 +34,8 @@ import { Workspace } from '../workspace/workspace.ts'
 import { MountEntry } from './mount.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { Files } from '../files.ts'
+import { MemoryExhausted } from '../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../io/memory.ts'
 
 class StubVFS extends BaseVFS {
   override readonly name = 'ram'
@@ -432,6 +434,24 @@ describe('Mount.call', () => {
     const m = makeMount(MountMode.WRITE, new Reading())
     const result = await m.call('read', '/x.txt')
     expect(result).toBeInstanceOf(Uint8Array)
+  })
+
+  it('refuses a whole read built fresh past what is left, not a RAM file', async () => {
+    class Built extends StubVFS {
+      override read(): Promise<Uint8Array> {
+        return Promise.resolve(new Uint8Array(16))
+      }
+    }
+    const ram = new RAMVFS()
+    ram.store.files.set('/f', new Uint8Array(16))
+    const budget = new MemoryBudget(8, () => 0)
+    await expect(
+      runWithMemory(budget, () => makeMount(MountMode.WRITE, new Built()).call('read', '/ram/f')),
+    ).rejects.toThrow(MemoryExhausted)
+    const read = await runWithMemory(budget, () =>
+      makeMount(MountMode.WRITE, ram).call('read', '/ram/f'),
+    )
+    expect((read as Uint8Array).byteLength).toBe(16)
   })
 
   it('throws on unknown op', async () => {

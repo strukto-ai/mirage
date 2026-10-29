@@ -32,6 +32,7 @@ from mirage.core.jq.types import (
 )
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import fs_strerror
+from mirage.io.memory import check_memory
 
 # The most bytes one read of jq's input reader takes (jq 1.8.2's util.c):
 # fgets into a 4096-byte buffer, less the four bytes it keeps for UTF-8
@@ -85,9 +86,9 @@ class InputReader:
             else JqParser(seq=opts.seq, streaming=opts.stream)
         )
         self._json_eof = False
-        self._slurped: "list[str] | str | NoValue" = NO_VALUE
-        if opts.slurp:
-            self._slurped = "" if opts.raw_input else []
+        self._slurped: "list[str] | NoValue" = [] if opts.slurp else NO_VALUE
+        self._held = 0
+        self._kept = 0
         self._name: str | None = None
         self._line = 0
         self._chunks: AsyncIterator[bytes] | None = None
@@ -146,44 +147,71 @@ class InputReader:
         while True:
             value = await parser.next()
             if isinstance(value, JqParseError):
+                # The scanner drops the value it failed on.
+                self._held = 0
                 return value
             if value is not NO_VALUE:
+                self._held = 0
                 if not isinstance(self._slurped, list):
                     return value
+                # The value and the comma or bracket after it in the list.
+                self._kept += len(value.encode()) + 1
+                check_memory(self._kept)
                 self._slurped.append(value)
                 continue
             if self._json_eof:
                 break
             piece, self._json_eof = await self._read_more()
+            self._count(
+                len(piece) if self._held else len(piece.lstrip(WHITESPACE))
+            )
             parser.feed(piece, not self._json_eof)
         return self._take_slurped()
 
     async def _next_line(self) -> "str | NoValue":
-        line: str | NoValue = NO_VALUE
+        parts: list[str] | None = None
         while True:
             piece, is_last = await self._read_more()
             if piece:
-                if isinstance(self._slurped, str):
-                    self._slurped += await decode_utf8(piece)
+                self._count(len(piece))
+                if isinstance(self._slurped, list):
+                    self._slurped.append(await decode_utf8(piece))
                 elif piece.endswith(b"\n"):
-                    head = "" if line is NO_VALUE else line
-                    return string_text(head + (await decode_utf8(piece[:-1])))
+                    self._held = 0
+                    tail = await decode_utf8(piece[:-1])
+                    return string_text("".join(parts or ()) + tail)
                 else:
-                    line = (
-                        "" if line is NO_VALUE else line
-                    ) + await decode_utf8(piece)
+                    parts = parts if parts is not None else []
+                    parts.append(await decode_utf8(piece))
             if is_last:
                 break
-        if isinstance(self._slurped, str):
+        if isinstance(self._slurped, list):
             return self._take_slurped()
-        return line if line is NO_VALUE else string_text(line)
+        return NO_VALUE if parts is None else string_text("".join(parts))
+
+    def _count(self, size: int) -> None:
+        """Count bytes read into memory, which must fit in what the
+        workspace's ``max_memory`` has left with the values a slurp keeps,
+        each counted by its own bytes: a raw line holds the pieces read
+        of it, a raw slurp the whole input, and a JSON value what was
+        read of it from its first byte, whitespace before it left out, as
+        the scanner discards it.
+
+        Args:
+            size (int): the bytes jq's reader read that are kept.
+        """
+        self._held += size
+        check_memory(self._kept + self._held)
 
     def _take_slurped(self) -> "str | NoValue":
         slurped = self._slurped
         self._slurped = NO_VALUE
-        if isinstance(slurped, list):
-            return f"[{','.join(slurped)}]"
-        return slurped if slurped is NO_VALUE else string_text(slurped)
+        if slurped is NO_VALUE:
+            return slurped
+        if self._parser is None:
+            return string_text("".join(slurped))
+        check_memory(self._kept + 1)
+        return f"[{','.join(slurped)}]"
 
     async def _open_next(self) -> None:
         """Move on to the next input once the current one is read to its

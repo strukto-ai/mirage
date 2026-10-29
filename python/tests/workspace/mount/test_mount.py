@@ -33,6 +33,8 @@ from mirage.commands.config import Context, command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Argument
 from mirage.errors.types import OperationNotSupportedError
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
     RecordingScope,
@@ -40,6 +42,7 @@ from mirage.observe.context import (
     record_stream,
 )
 from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.files import Files
@@ -796,3 +799,28 @@ async def test_native_replacement_preserves_the_settled_condition(
     assert native.await_args.args[0] is request
     ordinary.assert_not_awaited()
     assert closed == [True]
+
+
+class _Built(BaseVFS):
+    """Answers a whole read with bytes built for it, as a renderer does."""
+
+    name = "built"
+
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> ByteSource:
+        return b"x" * 16
+
+
+@pytest.mark.asyncio
+async def test_a_whole_read_built_fresh_must_fit_in_what_is_left():
+    built = MountEntry("/b/", _Built())
+    ram = RAMVFS()
+    ram._store.files["/f"] = b"x" * 16
+    stored = MountEntry("/r/", ram)
+    budget = MemoryBudget(8, lambda: 0)
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(budget, built.call("read", "/b/f"))
+    assert await run_with_memory(budget, stored.call("read", "/r/f")) == (
+        b"x" * 16
+    )

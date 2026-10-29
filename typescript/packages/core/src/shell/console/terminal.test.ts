@@ -14,6 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { CHUNK_SIZE } from '../../io/cooperative.ts'
+import { MemoryExhausted } from '../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../io/memory.ts'
 import { concat } from '../../utils/bytes.ts'
 import { Recorder } from '../descriptors.ts'
 import { Channel, JobConsole, Tee, Terminal } from './index.ts'
@@ -210,6 +212,28 @@ describe('Terminal', () => {
     await tty.jobs.emit(Channel.STDOUT, enc('later\n'))
     tty.putBack(out.subarray(0, 4), err)
     expect(dec(tty.take())).toEqual(['longlater\n', ''])
+  })
+
+  it('keeps only what fits in the memory budget', async () => {
+    const tty = new Terminal()
+    const write = (data: string) => () => tty.emit(Channel.STDOUT, enc(data))
+    await runWithMemory(new MemoryBudget(8, () => 0), write('abcd'))
+    await runWithMemory(new MemoryBudget(8, () => 0), write('efgh'))
+    await expect(runWithMemory(new MemoryBudget(8, () => 0), write('i'))).rejects.toThrow(
+      MemoryExhausted,
+    )
+    expect(dec(tty.take())).toEqual(['abcdefgh', ''])
+    await runWithMemory(new MemoryBudget(8, () => 0), write('12345678'))
+    expect(tty.held).toBe(8)
+  })
+
+  it('counts nothing it hands to its reader', async () => {
+    const tty = new Terminal()
+    await tty.attach(new JobConsole())
+    await runWithMemory(new MemoryBudget(8, () => 0), () =>
+      tty.emit(Channel.STDOUT, enc('x'.repeat(16))),
+    )
+    expect(tty.held).toBe(0)
   })
 })
 

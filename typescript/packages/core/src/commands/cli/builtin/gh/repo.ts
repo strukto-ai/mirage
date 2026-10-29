@@ -377,10 +377,10 @@ export async function view(
   const fields = jsonFields(fl, REPO_FIELDS)
   if (fields !== null) {
     const node = await repositoryFields(transport, ref, repoSelection(fields))
-    return typedOut(exportedRepo(node, fields), fl, '', REPO_FIELDS)
+    return typedOut(exportedRepo(node, fields), fl, '', REPO_FIELDS, ctx)
   }
   const value = await viewRepo(transport, ref)
-  return typedOut(value, fl, summary(value, await readReadme(transport, ref)), REPO_FIELDS)
+  return typedOut(value, fl, summary(value, await readReadme(transport, ref)), REPO_FIELDS, ctx)
 }
 
 /** `gh repo list`, over GraphQL for `--json` as `view` is. */
@@ -401,6 +401,7 @@ export async function listCmd(
       fl,
       '',
       REPO_FIELDS,
+      ctx,
     )
   }
   const rows = (await listRepos(transport, texts[0], limit)).map(repo)
@@ -410,7 +411,7 @@ export async function listCmd(
         `${textValue(row.nameWithOwner)}\t${textValue(row.description)}\t${textValue(row.visibility)}\t${textValue(row.updatedAt)}\n`,
     )
     .join('')
-  return typedOut(rows, fl, human, REPO_FIELDS)
+  return typedOut(rows, fl, human, REPO_FIELDS, ctx)
 }
 
 export async function createCmd(

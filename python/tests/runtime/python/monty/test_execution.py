@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import threading
 
 import pytest
 
+from mirage.runtime.python.monty import execution as monty_execution
 from mirage.runtime.python.monty.execution import MontyExecution
 from mirage.runtime.python.monty.fs import MontyFs
 from mirage.runtime.types import Program
@@ -31,6 +33,70 @@ async def test_concurrent_first_use_shares_one_pool():
         assert len({id(pool) for pool in pools}) == 1
     finally:
         await execution.close()
+
+
+class _Pool:
+    def __init__(self, opened: list["_Pool"]) -> None:
+        self.closed = False
+        opened.append(self)
+
+    async def __aenter__(self) -> "_Pool":
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_runtimes_share_one_pool_the_last_one_closes(monkeypatch):
+    opened: list[_Pool] = []
+    monkeypatch.setattr(
+        monty_execution.pydantic_monty,
+        "AsyncMonty",
+        lambda **_: _Pool(opened),
+    )
+    monkeypatch.setattr(
+        monty_execution, "_shared_pool", monty_execution._SharedPool()
+    )
+    first = MontyExecution(shared=True)
+    second = MontyExecution(shared=True)
+    assert await first._ensure_pool() is await second._ensure_pool()
+    assert len(opened) == 1
+    await first.close()
+    assert not opened[0].closed
+    await second.close()
+    assert opened[0].closed
+    third = MontyExecution(shared=True)
+    assert await third._ensure_pool() is not opened[0]
+    await third.close()
+
+
+def test_a_workspace_on_its_own_loop_takes_the_same_pool(monkeypatch):
+    opened: list[_Pool] = []
+    monkeypatch.setattr(
+        monty_execution.pydantic_monty,
+        "AsyncMonty",
+        lambda **_: _Pool(opened),
+    )
+    monkeypatch.setattr(
+        monty_execution, "_shared_pool", monty_execution._SharedPool()
+    )
+    pools: list[_Pool] = []
+
+    def workspace() -> None:
+        async def run() -> None:
+            execution = MontyExecution(shared=True)
+            pools.append(await execution._ensure_pool())
+
+        asyncio.run(run())
+
+    threads = [threading.Thread(target=workspace) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+    assert len(opened) == 1
+    assert pools == [opened[0]] * 3
 
 
 @pytest.mark.asyncio

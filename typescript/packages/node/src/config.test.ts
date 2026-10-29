@@ -373,6 +373,22 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/max_memory must be a size/)
   })
 
+  it.each([
+    [{}, undefined],
+    [{ max_memory: '8MB' }, '8MB'],
+    [{ max_memory: null }, null],
+  ])('passes the workspace max_memory %o on', async (block, expected) => {
+    const cfg = loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, ...block })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.maxMemory).toBe(expected)
+  })
+
+  it('refuses a workspace max_memory that is not a size', () => {
+    expect(() =>
+      loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, max_memory: 'lots' }),
+    ).toThrow(/max_memory must be a size/)
+  })
+
   it('refuses a runtime entry script', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },

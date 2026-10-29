@@ -72,6 +72,7 @@ from mirage.errors.fs import (
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
+from mirage.io.memory import run_with_memory
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, PipeStream
 from mirage.io.yield_budget import task_turn
@@ -981,7 +982,9 @@ class Dispatcher:
         report: OpReport | None = None,
         **kwargs: Any,
     ) -> tuple[Any, IOResult]:
-        """Run one op as ``caller`` on the mount that serves its path.
+        """Run one op as ``caller`` on the mount that serves its path,
+        under the workspace's ``max_memory``, which FUSE and ``ws.vfs``
+        writes reach only here.
 
         Args:
             name (str): the op.
@@ -992,13 +995,18 @@ class Dispatcher:
             **kwargs (Any): the op's own arguments.
         """
         await task_turn()
+        memory = self._namespace.registry.memory
         try:
             if caller is None:
                 caller = current_caller()
             if self._admit_write is None or name not in POLICY_WRITE_OPS:
-                return await self._bound(name, path, caller, report, kwargs)
+                return await run_with_memory(
+                    memory, self._bound(name, path, caller, report, kwargs)
+                )
             async with self._admit_write(caller) as held:
-                return await self._bound(name, path, held, report, kwargs)
+                return await run_with_memory(
+                    memory, self._bound(name, path, held, report, kwargs)
+                )
         finally:
             if name in ("write", "append", "pwrite"):
                 await close_quietly(kwargs.get("data"))

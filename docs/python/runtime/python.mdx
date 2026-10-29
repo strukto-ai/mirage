@@ -14,8 +14,9 @@ specific to the Python SDK.
 - **Monty:** `os.chdir()` works and lasts for the run, and `os.stat()`
   returns a real named tuple, so `st[6]` and `len(st)` work. Runs execute on
   Monty's worker pool, so the event loop stays free and cancelling a run halts
-  the interpreter. A run waiting on workspace I/O holds a worker; the pool
-  defaults to the core count, and `TOKIO_WORKER_THREADS` raises it.
+  the interpreter. Every workspace in the process shares one pool of four
+  workers; a run waiting on workspace I/O holds one, and a run past the four
+  waits for one to free up.
 - **QuickJS:** the real quickjs-ng `std` and `os`. The first run compiles
   `qjs-wasi.wasm` and caches `qjs-wasi.cwasm` beside it. A write shows to
   other commands once the file is closed or the run ends, and a timeout

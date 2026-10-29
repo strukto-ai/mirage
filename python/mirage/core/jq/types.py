@@ -74,10 +74,13 @@ class JqError:
             anything else in jq's own compact dump.
         string (bool): whether the message was a string, which jq's
             report says when it was not.
+        own (bool): whether the program raised it with `error` itself,
+            which jq never tells apart but gojq does.
     """
 
     text: str
     string: bool
+    own: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -691,6 +691,7 @@ def _value_bound(
     inputs: Sequence[JsonValue] | None,
     args_value: Mapping[str, JsonValue] | None,
     inputs_error: str | None = None,
+    env: str | None = None,
 ) -> _Bound:
     """The bindings of a run on values, each carried as its JSON text.
 
@@ -701,6 +702,8 @@ def _value_bound(
         inputs (Sequence[JsonValue] | None): the unread documents.
         args_value (Mapping[str, JsonValue] | None): the value of `$ARGS`.
         inputs_error (str | None): the parse error the stream ends in.
+        env (str | None): the environment `$ENV` and `env` read, an
+            object as text.
     """
     named = (
         {name: _value_text(value) for name, value in named_args.items()}
@@ -709,7 +712,7 @@ def _value_bound(
     )
     docs = None if inputs is None else [_value_text(doc) for doc in inputs]
     args = None if args_value is None else _value_text(dict(args_value))
-    return _bound(_value_text(obj), expr, named, docs, args, inputs_error)
+    return _bound(_value_text(obj), expr, named, docs, args, inputs_error, env)
 
 
 def _run(expr: str, bound: _Bound, dump: bool) -> JqRun[JsonValue]:
@@ -842,6 +845,7 @@ def jq_raised(
     named_args: Mapping[str, JsonValue] | None = None,
     inputs: Sequence[JsonValue] | None = None,
     args_value: Mapping[str, JsonValue] | None = None,
+    env: str | None = None,
 ) -> bool:
     """Whether the program's own `error` raised the error a run stopped at,
     rather than a builtin, which jq itself never tells apart but gojq does.
@@ -859,6 +863,7 @@ def jq_raised(
         named_args (Mapping[str, JsonValue] | None): $name bindings.
         inputs (Sequence[JsonValue] | None): the unread documents.
         args_value (Mapping[str, JsonValue] | None): the value of `$ARGS`.
+        env (str | None): the environment the run read, an object as text.
     """
     if not isinstance(run.stop, JqError):
         return False
@@ -867,7 +872,7 @@ def jq_raised(
     renamed = _renamed(expr)
     if renamed == expr:
         return False
-    bound = _value_bound(obj, expr, named_args, inputs, args_value)
+    bound = _value_bound(obj, expr, named_args, inputs, args_value, None, env)
     compiled = _wrapped(renamed, bound, _WRAP, f"{_UNWRAP}){_DONE}")
     if compiled is not None:
         verdict = _wrapped_verdict(compiled.input_text(bound.stdin), run)
@@ -877,6 +882,30 @@ def jq_raised(
     if compiled is None:
         return False
     return _marked_verdict(compiled.input_text(bound.stdin), run) is True
+
+
+def jq_run_raised(obj: JsonValue, expr: str, env: str) -> JqRun[JsonValue]:
+    """Run a jq program on one value the way jq_run does, with `env` as
+    the environment `$ENV` and `env` read, and its error marked `own` when
+    the program raised it with `error` itself (see jq_raised): a whole
+    run, for a worker to make away from the event loop.
+
+    Args:
+        obj (JsonValue): the value the program runs on.
+        expr (str): jq program text.
+        env (str): the environment, an object as text.
+
+    Raises:
+        JqCompileError: libjq's refusal of the program.
+    """
+    run = _run(
+        expr, _value_bound(obj, expr, None, None, None, None, env), False
+    )
+    if isinstance(run.stop, JqError) and jq_raised(obj, expr, run, env=env):
+        return JqRun(
+            run.outputs, JqError(run.stop.text, run.stop.string, True)
+        )
+    return run
 
 
 def jq_check(

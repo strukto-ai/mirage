@@ -17,6 +17,8 @@ import { jqRunTexts } from './eval.ts'
 import { InputReader, readTexts, valueText } from './stream.ts'
 import { JqParseError, NO_VALUE, jqOptions, type InputSource, type JqOptions } from './types.ts'
 import { eacces, eisdir, enoent } from '../../errors/fs.ts'
+import { MemoryExhausted } from '../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../io/memory.ts'
 
 const ENC = new TextEncoder()
 
@@ -518,5 +520,41 @@ describe('valueText', () => {
     expect(await valueText(bytes(''))).toBe(NO_VALUE)
     expect(await valueText(bytes('nope'))).toBe(NO_VALUE)
     expect(await valueText(bytes('[1,'))).toBe(NO_VALUE)
+  })
+})
+
+describe('the memory budget', () => {
+  it('counts the commas a slurp joins with', async () => {
+    const reader = new InputReader(sources([bytes('1\n'.repeat(3000))]), jqOptions({ slurp: true }))
+    const drain = async (): Promise<void> => {
+      for (;;) if ((await reader.nextInput()) === NO_VALUE) return
+    }
+    try {
+      await expect(runWithMemory(new MemoryBudget(4096, () => 0), drain)).rejects.toThrow(
+        MemoryExhausted,
+      )
+    } finally {
+      await reader.close()
+    }
+  })
+
+  it('counts each value a slurp keeps', async () => {
+    // A failed record before each value clears what was read of it, so
+    // only the values' own bytes show the list growing.
+    const record = '\x1e]\x1e"' + 'a'.repeat(20) + '"'
+    const reader = new InputReader(
+      sources([bytes(record.repeat(400) + '\n')]),
+      jqOptions({ slurp: true, seq: true }),
+    )
+    const drain = async (): Promise<void> => {
+      for (;;) if ((await reader.nextInput()) === NO_VALUE) return
+    }
+    try {
+      await expect(runWithMemory(new MemoryBudget(4096, () => 0), drain)).rejects.toThrow(
+        MemoryExhausted,
+      )
+    } finally {
+      await reader.close()
+    }
   })
 })

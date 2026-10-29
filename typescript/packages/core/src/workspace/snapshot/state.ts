@@ -29,6 +29,7 @@ import { z } from 'zod'
 import { narrow, narrowingOf, stricterModes } from '../session/resolve.ts'
 import { profileFromDict, profileToDict, type SessionProfile } from '../../policy/profile.ts'
 import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
+import { MAX_MEMORY } from '../../io/memory.ts'
 import { IOConfig } from '../../io/config.ts'
 import { setCwd } from '../session/shell_dirs.ts'
 import { gateRestoredVars } from '../session/state.ts'
@@ -261,6 +262,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
     ),
     profile: ws.defaultProfileName,
     command_limits: commandLimitsToJSON(ws.registry.commandLimits),
+    max_memory: ws.registry.memory?.limit ?? null,
   }
 }
 
@@ -504,6 +506,7 @@ export function buildMountArgs(
       Object.entries(state.profiles ?? {}).map(([name, doc]) => [name, profileFromDict(doc)]),
     ),
     profile: state.profile ?? null,
+    maxMemory: state.max_memory === undefined ? MAX_MEMORY : state.max_memory,
   }
 }
 

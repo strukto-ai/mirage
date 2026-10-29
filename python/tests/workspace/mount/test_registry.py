@@ -909,3 +909,14 @@ async def test_a_read_in_flight_keeps_nothing_after_every_mount_drops(
     await dropping
     assert await reading == b"old"
     assert not await cache.exists("/b/x.txt")
+
+
+def test_held_in_memory_sums_the_ram_mounts():
+    reg = MountRegistry()
+    one, two = RAMVFS(), RAMVFS()
+    one._store.files["/a"] = b"1234"
+    two._store.files["/b"] = b"12"
+    reg.mount("/one/", one, MountMode.WRITE)
+    reg.mount("/two/", two, MountMode.WRITE)
+    reg.mount("/disk/", DiskVFS(root="/tmp"), MountMode.READ)
+    assert reg.held_in_memory() == 6
