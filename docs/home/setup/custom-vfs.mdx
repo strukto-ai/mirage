@@ -7,7 +7,7 @@ description: Mount a service Mirage does not ship by writing your own VFS in Pyt
 A VFS is a class that extends `BaseVFS`. Override `readdir`, `stat` and
 `read`, and `ls`, `cat`, `grep`, `find` and the other read commands work on
 your service. Every other method is optional: override one, and the commands
-that need it start working, or answer with fewer requests.
+that need it start working, or complete with fewer requests.
 
 ## The base class
 
@@ -394,7 +394,7 @@ Override `line_count`:
   </Tab>
 </Tabs>
 
-`wc -l /notes/hello.txt` now answers without reading the page. For a database,
+`wc -l /notes/hello.txt` now returns without reading the page. For a database,
 this is where a `count(*)` query goes. Plain `wc` still reads the page, since it
 also counts words and bytes.
 

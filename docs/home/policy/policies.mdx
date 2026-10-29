@@ -76,7 +76,7 @@ flowchart LR
     end
     subgraph call["A VFS call"]
         direction LR
-        PV["pre_vfs"] --> Op["call runs or cache answers"] --> PoV["post_vfs"]
+        PV["pre_vfs"] --> Op["call runs or cache serves"] --> PoV["post_vfs"]
     end
     Run -. file operations .-> PV
     subgraph write["A variable write"]
@@ -85,7 +85,7 @@ flowchart LR
     end
 ```
 
-| Python | TypeScript | Runs | May answer |
+| Python | TypeScript | Runs | Can return |
 | --- | --- | --- | --- |
 | `pre_execute` | `preExecute` | once per line, before any of it runs | Deny, Ask, Route |
 | `pre_command` | `preCommand` | before each command or CLI, once the line is parsed and expanded | Deny, Ask |
@@ -410,7 +410,7 @@ An Ask records a question in the workspace's ledger:
 - With `on_ask` (`onAsk`), an inline allow answer continues the current request;
   a deny answer refuses it.
 - Without an inline answer, including when the callback returns no decision,
-  the request returns pending. The host answers the ledger, then the caller retries.
+  the request returns pending. The host records a decision in the ledger, allowing the caller to retry.
 
 Ledger answers apply as follows:
 

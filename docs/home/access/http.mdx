@@ -5,7 +5,7 @@ icon: globe
 ---
 
 The Mirage server holds workspaces and serves them over HTTP. The Python and
-TypeScript servers speak the same protocol. Routes are under `/v1` and answer
+TypeScript servers speak the same protocol. Routes are under `/v1` and return
 JSON.
 
 ## Launch a server
@@ -29,7 +29,7 @@ JSON.
   </Tab>
 </Tabs>
 
-The server answers only the host names in `MIRAGE_ALLOWED_HOSTS`: `127.0.0.1`,
+The server accepts only the host names in `MIRAGE_ALLOWED_HOSTS`: `127.0.0.1`,
 `localhost` and `::1` by default. Add the name your clients use. Other options
 are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server)
 server pages.
@@ -108,7 +108,7 @@ Create a workspace with an in-memory mount, then run a line in it:
   </Tab>
 </Tabs>
 
-The shell call answers:
+The shell call returns:
 
 ```json
 {"kind": "io", "exit_code": 0, "stdout": "hello\n", "stderr": "", "refusal": null}
@@ -117,7 +117,7 @@ The shell call answers:
 ## Errors
 
 A `200` means the server ran the line, not that the line succeeded: check
-`exit_code`. Most errors answer JSON with a `detail` message, but an auth or
+`exit_code`. Most errors return JSON with a `detail` message, but an auth or
 `Host` refusal can be plain text, so check `Content-Type` before parsing.
 
 | Status | Means |
@@ -140,19 +140,19 @@ A `200` means the server ran the line, not that the line succeeded: check
 
 <Badge color="blue">GET</Badge> `/v1/health`
 
-Answers `{"status": "ok", "workspaces": 2, "uptime_s": 12.5}`, without a token.
+Returns `{"status": "ok", "workspaces": 2, "uptime_s": 12.5}` without requiring a token.
 
 ### Shut down
 
 <Badge color="green">POST</Badge> `/v1/shutdown`
 
-Asks the server to stop, and answers `{"status": "shutting_down", "pid": 4242}`.
+Requests the server to shut down, returning `{"status": "shutting_down", "pid": 4242}`.
 A server you launch stops only if you gave it `on_idle_exit` (`onIdleExit` in
 TypeScript).
 
 ## Workspaces
 
-Routes that answer a workspace answer this object:
+Routes that return a workspace yield this object:
 
 <ResponseField name="id" type="string">The workspace id.</ResponseField>
 <ResponseField name="mode" type="string">The default mount mode: `read`, `write` or `exec`.</ResponseField>
@@ -176,14 +176,15 @@ Routes that answer a workspace answer this object:
 <ParamField body="config" type="object" required>The workspace YAML as JSON.</ParamField>
 <ParamField body="id" type="string">The workspace id. A fresh one when absent.</ParamField>
 
-Answers `201` and the workspace. The same id and config again answers `200` and
-that workspace; another config under a taken id answers `409`.
+Returns HTTP 201 Created with the workspace object. Re-submitting the same ID and
+config returns HTTP 200 OK with the existing workspace; submitting a different
+config under an already taken ID returns HTTP 409 Conflict.
 
 ### List workspaces
 
 <Badge color="blue">GET</Badge> `/v1/workspaces`
 
-Answers a summary of each workspace:
+Returns an array of workspace summaries:
 
 ```json
 [{"id": "demo", "mode": "write", "mount_count": 2, "session_count": 1, "created_at": 1792630121.06}]
@@ -195,19 +196,19 @@ Answers a summary of each workspace:
 
 <ParamField query="verbose" type="boolean" default="false">Add cache and job internals.</ParamField>
 
-Answers the workspace.
+Returns the workspace object.
 
 ### Delete a workspace
 
 <Badge color="red">DELETE</Badge> `/v1/workspaces/{id}`
 
-Closes the workspace, deletes its state, and answers `{"id": "demo", "closed_at": 1792630121.33}`.
+Closes the workspace, deletes its persistent state, and returns `{"id": "demo", "closed_at": 1792630121.33}`.
 
 ### Close a workspace
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/close`
 
-Stops the workspace, keeps its state, and answers `{"id": "demo", "closed_at": 1792630121.32}`.
+Stops the workspace, preserves its state on disk, and returns `{"id": "demo", "closed_at": 1792630121.32}`.
 Creating the same id again picks up its sessions, history and disk files. RAM
 mounts are lost unless you snapshot first.
 
@@ -215,13 +216,13 @@ mounts are lost unless you snapshot first.
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/cancel`
 
-Cancels the running and queued lines of every session, however they came in, and answers `{"canceled": 2}` once they have ended. The sessions stay open.
+Cancels all running and queued lines across every session, returning `{"canceled": 2}` once they have ended. The sessions stay open.
 
 ### Kill a workspace's jobs
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/kill`
 
-Kills every session's background jobs (`cmd &`) and the processes runtimes started, and answers `{"killed": 1}`.
+Kills every session's background jobs (`cmd &`) and the processes runtimes started, returning `{"killed": 1}`.
 
 ### Set a profile
 
@@ -229,9 +230,9 @@ Kills every session's background jobs (`cmd &`) and the processes runtimes start
 
 The body is the [profile](/home/policy/overview) as JSON, the same document as an entry under `profiles` in the workspace YAML.
 
-Adds the profile or replaces what the name means, and answers `{"name": "reader"}`.
-A document no session could run under answers `422` and changes nothing. A
-session on the name keeps its rules until you [change its
+Adds the profile or replaces what the name means, returning `{"name": "reader"}`.
+An invalid profile document returns HTTP 422 Unprocessable Entity and changes
+nothing. A session on the name keeps its rules until you [change its
 profile](#change-a-sessions-profile) to the name again. The workspace's config
 is not rewritten, so creating the workspace again after a restart brings back
 the profiles its YAML defines. Restored sessions keep the rules they last ran
@@ -249,19 +250,19 @@ curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/profiles/reader \
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/clone`
 
 <ParamField body="id" type="string">The new workspace's id.</ParamField>
-<ParamField body="override" type="object">A config whose mounts replace the source's. The scratch root stays the scratch root, an override for it included.</ParamField>
+<ParamField body="override" type="object">Configuration overrides for the clone. Mount definitions replace corresponding source mounts. Overriding `/` replaces its backing VFS, but it remains the scratch root.</ParamField>
 
-Answers `201` and the new workspace.
+Returns HTTP 201 Created with the cloned workspace.
 
 ### Snapshot a workspace
 
 <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/snapshot`
 
-Answers the tar (`application/x-tar`). Secrets are stored redacted. The server never writes a snapshot to its own disk. While it captures, new lines and file writes wait, and running ones get 30 seconds to end; if any are still running then, it answers `409`, so cancel them and retry. A clone waits the same way.
+Returns the tar archive (`application/x-tar`). Secrets are stored redacted. The server never writes a snapshot to its own disk. While it captures, new lines and file writes wait, and running ones get 30 seconds to end; if any are still running then, it returns HTTP 409 Conflict, so cancel them and retry. A clone waits the same way.
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/snapshot`
 
-<ParamField body="key" type="string" required>Puts the tar in the server's snapshot store under this key, and answers `{id, key, size}`. `400` when the server has none.</ParamField>
+<ParamField body="key" type="string" required>Stores the tar archive in the server's snapshot store under this key, returning `{id, key, size}`. Returns HTTP 400 Bad Request when the server has no snapshot store configured.</ParamField>
 
 ### Load a snapshot
 
@@ -271,14 +272,14 @@ Upload the tar as `multipart/form-data`: a `request` part holding the JSON field
 
 <ParamField body="key" type="string">The tar's key in the snapshot store; leave it out when uploading.</ParamField>
 <ParamField body="id" type="string">The new workspace's id.</ParamField>
-<ParamField body="override" type="object">A config that re-supplies the redacted credentials. The scratch root stays the scratch root, an override for it included.</ParamField>
+<ParamField body="override" type="object">Configuration overrides for the restored workspace, including credentials redacted from the snapshot. Overriding `/` replaces its backing VFS, but it remains the scratch root.</ParamField>
 
-Answers `201` and the new workspace.
+Returns HTTP 201 Created with the restored workspace.
 
 ## Sessions
 
 A session keeps its own working directory, environment, and history. Requests use the workspace's default session unless they specify `session_id`.
-Routes that answer a session answer `{"session_id": "agent", "cwd": "/"}`.
+Routes that return a session yield an object with session details: `{"session_id": "agent", "cwd": "/"}`.
 
 ### Create a session
 
@@ -288,31 +289,31 @@ Routes that answer a session answer `{"session_id": "agent", "cwd": "/"}`.
 <ParamField body="profile" type="string">A [profile](/home/policy/overview) from the workspace's `profiles`.</ParamField>
 <ParamField body="mounts" type="object">Prefix to mode (`read`, `write`, `exec`) to narrow those mounts, such as `{"/data": "read"}`.</ParamField>
 
-Answers `201` and the session.
+Returns HTTP 201 Created with the session object.
 
 ### List sessions
 
 <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/sessions`
 
-Answers a list of sessions.
+Returns an array of session objects.
 
 ### Delete a session
 
 <Badge color="red">DELETE</Badge> `/v1/workspaces/{id}/sessions/{session_id}`
 
-Cancels its lines, kills its jobs, closes it, and answers `{"session_id": "agent"}`.
+Cancels active lines, terminates jobs, closes the session, and returns `{"session_id": "agent"}`.
 
 ### Cancel a session's lines
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/sessions/{session_id}/cancel`
 
-Cancels the session's running and queued lines, from every way in, and answers `{"canceled": 1}` once they have ended. The session stays open.
+Cancels running and queued lines in the session, returning `{"canceled": 1}` once they have ended. The session stays open.
 
 ### Kill a session's jobs
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/sessions/{session_id}/kill`
 
-Kills the session's background jobs and the processes its runtimes started, and answers `{"killed": 1}`. The session stays open.
+Kills background jobs and processes associated with the session, returning `{"killed": 1}`. The session stays open.
 
 ### Change a session's profile
 
@@ -321,7 +322,7 @@ Kills the session's background jobs and the processes its runtimes started, and 
 <ParamField body="profile" type="string | object | null" required>A [profile](/home/policy/overview) from the workspace's `profiles`, `null` for the workspace default, or a profile document. A document runs without a name, so `whoami` and the profile's policy programs see none.</ParamField>
 
 Replaces the session's modes, hides and rules with the profile's current
-definition, and answers the session. Its cwd, env and history stay.
+definition, returning the updated session object. Its cwd, env and history stay.
 
 ### VFS.md and SKILL.md
 
@@ -332,11 +333,11 @@ definition, and answers the session. Its cwd, env and history stay.
 <ParamField query="profile" type="string">GET only, on the workspace route: preview this profile.</ParamField>
 <ParamField body="path" type="string" required>PUT only: expose the document as a live, read-only file at this path.</ParamField>
 
-Answers `text/markdown`. Use `skill-md` in place of `vfs-md` for SKILL.md; [VFS.md and SKILL.md](/home/setup/vfs-md) covers both. Errors: `404` for a missing session or parent folder, `409` for a path already taken, `422` for a bad path or profile.
+Returns raw Markdown (`text/markdown`). Use `skill-md` in place of `vfs-md` for SKILL.md; [VFS.md and SKILL.md](/home/setup/vfs-md) covers both. Errors: `404` for a missing session or parent folder, `409` for a path already taken, `422` for a bad path or profile.
 
 ## Shell, VFS calls and tools
 
-Each call acts as the session `?session_id=` names, the default one when absent. `?explain=true` on the shell or a VFS call answers what the call would do instead of doing it; see [Explain](/home/policy/explain).
+Each call acts as the session `?session_id=` names, the default one when absent. `?explain=true` on the shell or a VFS call returns what the call would do without executing it; see [Explain](/home/policy/explain).
 
 ### Run a shell line
 
@@ -347,11 +348,11 @@ Each call acts as the session `?session_id=` names, the default one when absent.
 <ParamField body="runtime" type="string">Run the line on this [runtime](/home/setup/runtime/overview), by name, instead of the one routing picks.</ParamField>
 <ParamField body="record" type="boolean" default="true">Add the line to the session's history. `false` leaves it out.</ParamField>
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
-<ParamField query="background" type="boolean" default="false">Answer `202` with `{job_id, workspace_id, submitted_at}` at once.</ParamField>
-<ParamField query="explain" type="boolean" default="false">Answer the line's explanation; run nothing.</ParamField>
+<ParamField query="background" type="boolean" default="false">Return HTTP 202 Accepted with `{job_id, workspace_id, submitted_at}` immediately.</ParamField>
+<ParamField query="explain" type="boolean" default="false">Return the line's explanation without executing it.</ParamField>
 <ParamField query="stream" type="boolean" default="false">Stream stdout, stderr and final status as NDJSON. Cannot be combined with background or explain.</ParamField>
 
-Answers `{kind, exit_code, stdout, stderr, refusal}` when the line ends, with
+Returns `{kind, exit_code, stdout, stderr, refusal}` when the line ends, with
 the job id in the `X-Mirage-Job-Id` header. Closing the request cancels the
 line. With `explain`, send only `command`.
 
@@ -400,7 +401,7 @@ a `stdin` part of up to 64 MiB. The line reads it as it arrives.
   </Tab>
 </Tabs>
 
-**Streaming.** With `?stream=true`, the answer is NDJSON: one record per output
+**Streaming.** With `?stream=true`, the response is streamed as NDJSON: one record per output
 chunk, with base64 `data`, then a final record whose `status` is `done`,
 `failed` or `canceled`. A stream without that record was cut off.
 
@@ -415,10 +416,10 @@ chunk, with base64 `data`, then a final record whose `status` is `done`,
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/vfs/{call}`
 
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
-<ParamField query="explain" type="boolean" default="false">Answer the call's explanation; run nothing.</ParamField>
+<ParamField query="explain" type="boolean" default="false">Return the call's explanation without executing it.</ParamField>
 
-The body is the call's arguments, up to 4 MiB. A call answers what
-[`session.vfs`](/python/access/in-app#session-vfs) returns, as JSON, and `null`
+The body is the call's arguments, up to 4 MiB. A call returns what
+[`session.vfs`](/python/access/in-app#session-vfs) produces, as JSON, and `null`
 when it returns nothing. Bytes are base64 strings, both ways.
 
 **Read**
@@ -434,11 +435,11 @@ when it returns nothing. Bytes are base64 strings, both ways.
 | `is_file` | `path` | `boolean` |
 
 `raw` reads the stored bytes where the mount renders the file through a
-`filetype` read, as a read-modify-write needs. `stream` answers the bytes
+`filetype` read, as a read-modify-write needs. `stream` returns the bytes
 themselves as `application/octet-stream`, read as the response is sent. The
 server reads the whole file first when the backend answers bytes, the file is
 rendered, `offset` or `size` asks for a window, or a `post_vfs` policy applies.
-A failure before the first byte answers like any failed call.
+A failure before the first byte returns an error response like any failed call.
 
 **Write**
 
@@ -475,7 +476,7 @@ A failure before the first byte answers like any failed call.
 
 **Errors**
 
-A failed call answers `{detail, errno}`, plus a `refusal` record when a policy
+A failed call returns `{detail, errno}`, plus a `refusal` record when a policy
 refused it. The errno picks the status, as [Errors](/home/access/errors#file-calls)
 lists.
 
@@ -489,7 +490,7 @@ lists.
 
 Calls a function a mount's VFS declares beyond the built-in calls, such as one
 added in a [custom VFS](/python/vfs/new). It goes through the same policy
-checks, and answers its result as JSON.
+checks and returns its result as JSON.
 
 ### Match paths
 
@@ -498,10 +499,9 @@ checks, and answers its result as JSON.
 <ParamField body="pattern" type="string" required>A pathname pattern, such as `/src/**/*.py`.</ParamField>
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 
-Answers a list of every path the session sees that matches. A pattern that
-matches more files than a mount's
-[`walk_limit`](/home/integration/search#walk_limit) answers `400`,
-and `detail` names the limit.
+Returns a list of every matching path visible to the session. A pattern matching
+more files than a mount's [`walk_limit`](/home/integration/search#walk_limit)
+returns HTTP 400 Bad Request, and `detail` names the limit.
 
 ### Call a tool
 
@@ -512,12 +512,12 @@ and `detail` names the limit.
 Runs one of the [agent tools](/home/access/mcp#tools); the body is the tool's
 input.
 
-Answers `{text, is_error}`. A tool that fails is still `200`, with `is_error` set.
+Returns `{text, is_error}`. Failed tool executions still return HTTP 200 with `is_error` set.
 
 ## Jobs
 
 Every shell line is a job: `pending`, `running`, then `done`, `failed` or `canceled`.
-Routes that answer a job answer this object:
+Routes that return a job yield this object:
 
 <ResponseField name="job_id" type="string">The job id.</ResponseField>
 <ResponseField name="workspace_id" type="string">Its workspace.</ResponseField>
@@ -535,32 +535,32 @@ Routes that answer a job answer this object:
 
 <ParamField query="workspace_id" type="string">Only this workspace's jobs.</ParamField>
 
-Answers a list of jobs, without `result` and `error`.
+Returns a list of jobs (omitting `result` and `error`).
 
 ### Get a job
 
 <Badge color="blue">GET</Badge> `/v1/jobs/{job_id}`
 
-Answers the job.
+Returns the job object.
 
 ### Wait for a job
 
 <Badge color="green">POST</Badge> `/v1/jobs/{job_id}/wait`
 
-<ParamField body="timeout_s" type="number">Seconds to wait. A timeout answers the job as it is, without canceling it.</ParamField>
+<ParamField body="timeout_s" type="number">Seconds to wait. On timeout, returns the job in its current state without canceling it.</ParamField>
 
-Answers the job.
+Returns the job object.
 
 ### Cancel a job
 
 <Badge color="red">DELETE</Badge> `/v1/jobs/{job_id}`
 
-Answers `{"job_id": "exec_01a1...", "canceled": true}`.
+Returns `{"job_id": "exec_01a1...", "canceled": true}`.
 
 ## Asks
 
-An ask refuses the current action and records a pending decision. List pending asks, allow or deny one, then retry the refused line or VFS call in the same session; answering alone does not resume the original request. See [Asks](/home/policy/policies#asks).
-Routes that answer an ask answer this object:
+An ask refuses the current action and records a pending decision. List pending asks, allow or deny one, then retry the refused line or VFS call in the same session; resolving alone does not resume the original request. See [Asks](/home/policy/policies#asks).
+Routes that return an ask yield this object:
 
 <ResponseField name="id" type="string">The ask id, also in the refused line's `refusal.ask_id`.</ResponseField>
 <ResponseField name="session_id" type="string">The session that asked.</ResponseField>
@@ -580,7 +580,7 @@ Routes that answer an ask answer this object:
 <ParamField query="session_id" type="string">Only this session's asks.</ParamField>
 <ParamField query="all" type="boolean" default="false">Include settled ones.</ParamField>
 
-Answers a list of asks.
+Returns a list of asks.
 
 ### Answer an ask
 
@@ -589,7 +589,7 @@ Answers a list of asks.
 <ParamField body="answer" type="string" required>`allow` or `deny`.</ParamField>
 <ParamField body="scope" type="string" default="once">`once`, or `session` to allow every matching line in the session.</ParamField>
 
-Answers the ask, with its `outcome` set.
+Returns the updated ask object with its `outcome` set.
 
 ## Configure authentication
 
@@ -651,8 +651,8 @@ Set one of the JWKS URL or a fixed key, not both.
 ### Accounts
 
 In `jwt` mode, a token's `sub` is its account, and an account reaches only the
-workspaces it created. Another account's workspace, session, job or ask answers
-`404`, like a missing one. An [SSH key](/home/access/ssh#auth-optional)
+workspaces it created. Another account's workspace, session, job or ask returns
+HTTP 404 Not Found, matching a missing resource. An [SSH key](/home/access/ssh#auth-optional)
 joins an account with its `mirage-account` option.
 
 <Accordion title="What else an account changes">
@@ -661,7 +661,7 @@ joins an account with its `mirage-account` option.
     before the server used `jwt` mode has no owner, and no account can create
     its id.
   - Snapshot keys live under `accounts/<account>/` in the snapshot store.
-  - `POST /v1/shutdown` answers `403`.
+  - `POST /v1/shutdown` returns HTTP 403 Forbidden.
 </Accordion>
 
 <Warning>

@@ -71,14 +71,14 @@ too, through MCP, HTTP, RPC or the CLI:
 | [RPC](/home/access/rpc) | `shell` with `explain: true` | `vfs/<call>` with `explain: true` |
 | [CLI](/home/access/cli#run-lines-vfs-calls-and-tools) | `mirage shell -w ID -s SESSION -c LINE --explain` | `mirage vfs CALL ARGS -w ID -s SESSION --explain` |
 
-Every entry point answers the same JSON. Explain reads the line only, so
+Every entry point returns the same JSON schema. Explain reads the line only, so
 stdin, `cwd`, `runtime` and a background job are refused with it.
 
-### What it asks
+### What it evaluates
 
-Explain stops before anything runs, so it asks only what answers first:
+Explain stops before anything runs, evaluating only pre-execution checks:
 
-| Explained | Asks | Never asks |
+| Explained | Evaluates | Never evaluates |
 | --- | --- | --- |
 | A line | the profile's rules, `pre_execute`, `pre_command` | `pre_session`, `pre_vfs`, every `post_` method |
 | A VFS call | the profile's rules, `pre_vfs` | every `post_` method |
@@ -87,7 +87,7 @@ The `post_` methods need a result, and `pre_session` fires only as a line
 runs. So `export AWS_SECRET=x` explains as `allow` even when a
 `pre_session` policy refuses it. A line's file calls reach `pre_vfs` only
 when the line runs; explain a specific VFS call to see its admission
-answer without executing the line.
+result without executing the line.
 
 ### What comes back
 

@@ -38,7 +38,7 @@ One virtual terminal over the backends mounted at each prefix.
   [Policies](/home/policy/overview) every line passes through.
 </ResponseField>
 <ResponseField name="on_ask" type="AskHandler">
-  Answers an ask while the line waits. Without one, asks wait in [`ws.decisions`](#ws-decisions).
+  Resolves an approval request (ask) while the line waits. Without a handler, asks are recorded in [`ws.decisions`](#ws-decisions).
 </ResponseField>
 <ResponseField name="workspace_id" type="str">
   The workspace's id, generated when unset.
@@ -195,7 +195,7 @@ await ws.decisions.answer(
 ) -> None
 ```
 
-The [asks](/home/policy/policies#asks) waiting for a host. Each one belongs to the session that ran the line: `pending()` lists every session's, `pending("agent")` one session's, and an answer never reaches another session. `outcome` is `Outcome.ALLOW` or `Outcome.DENY`. `Scope.ONCE` answers the one line, so its retry runs or is refused; `Scope.SESSION` allows every line the rule covers for the rest of that session.
+The [asks](/home/policy/policies#asks) waiting for a host. Each one belongs to the session that ran the line: `pending()` lists every session's, `pending("agent")` one session's, and an answer never reaches another session. `outcome` is `Outcome.ALLOW` or `Outcome.DENY`. `Scope.ONCE` resolves the pending ask for this line, allowing its retry to run or be refused; `Scope.SESSION` allows every line the rule covers for the rest of that session.
 
 <Expandable title="Decision">
   <ResponseField name="id" type="str">The id to answer it by.</ResponseField>
@@ -235,13 +235,13 @@ from mirage import Session
 class Session(workspace: Workspace, session_id: str)
 ```
 
-One session's handle, from [`ws.session`](#ws-session). Every call on it answers under the session's [profile](/home/policy/overview), working directory and environment. `ws.shell`, `ws.glob`, `ws.vfs` and `ws.tools` are the same calls as the workspace's default session.
+One session's handle, from [`ws.session`](#ws-session). Every call on it runs under the session's [profile](/home/policy/overview), working directory and environment. `ws.shell`, `ws.glob`, `ws.vfs` and `ws.tools` are the same calls as the workspace's default session.
 
 <ResponseField name="session_id" type="str" />
-<ResponseField name="state" type="SessionState">The session's record, as [`ws.list_sessions`](#ws-list_sessions-ws-close_session) answers it.</ResponseField>
+<ResponseField name="state" type="SessionState">The session's record, as returned by [`ws.list_sessions`](#ws-list_sessions-ws-close_session).</ResponseField>
 <ResponseField name="vfs" type="Files">The file API, below.</ResponseField>
 <ResponseField name="tools" type="MirageToolOperations">The agent tools, below.</ResponseField>
-<ResponseField name="decisions" type="Decisions">The workspace's [asks](/home/policy/policies#asks) ledger, which this session's questions land in.</ResponseField>
+<ResponseField name="decisions" type="Decisions">The workspace's [asks](/home/policy/policies#asks) ledger, which records pending approval requests for this session.</ResponseField>
 
 ### session.shell
 
@@ -275,8 +275,8 @@ Runs a shell line as the session. With `stream=False`, it collects the execution
 
 <Expandable title="IOResult">
   <ResponseField name="exit_code" type="int" />
-  <ResponseField name="stdout_str()" type="async -> str">The output as text. `materialize_stdout()` answers the bytes.</ResponseField>
-  <ResponseField name="stderr_str()" type="async -> str">The error output as text. `materialize_stderr()` answers the bytes.</ResponseField>
+  <ResponseField name="stdout_str()" type="async -> str">The output as text. `materialize_stdout()` returns the raw bytes.</ResponseField>
+  <ResponseField name="stderr_str()" type="async -> str">The error output as text. `materialize_stderr()` returns the raw bytes.</ResponseField>
   <ResponseField name="refusal" type="Refusal | None">
     Why the line did not run, or `None`.
     <Expandable title="Refusal">
