@@ -35,8 +35,13 @@ from mirage.commands.spec.usage import (
 )
 from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.io import IOResult
-from mirage.io.stream import ensure_stream, materialize, yield_bytes
-from mirage.io.types import ByteSource
+from mirage.io.stream import (
+    OutputStream,
+    ensure_stream,
+    materialize,
+    yield_bytes,
+)
+from mirage.io.types import ByteSource, OutputState
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.console.pipe import PipeConsole
@@ -390,8 +395,26 @@ async def _supervise(
 
     watching = asyncio.ensure_future(watch())
     io = IOResult()
+    io.output = state = OutputState()
     node = ExecutionNode(command="timeout")
-    return _streamed(console, watching, io, node), io, node
+
+    async def close() -> None:
+        # A reader that stops early, or never starts, closes the pipe, so
+        # the line's next write fails as a write to a closed pipe does and
+        # the run is let go. The line ran under the command's prefix
+        # assignments, which end as this settles.
+        console.close_reader()
+        if not watching.done():
+            await _cancel(watching)
+        elif not watching.cancelled() and watching.exception() is not None:
+            logger.debug("timeout: the run ended: %s", watching.exception())
+        state.finish()
+
+    return (
+        OutputStream(_streamed(console, watching, io, node), close),
+        io,
+        node,
+    )
 
 
 async def _streamed(
@@ -401,9 +424,7 @@ async def _streamed(
     node: ExecutionNode,
 ) -> AsyncIterator[bytes]:
     """The inner line's stdout as it writes it; once it ends, timeout's
-    status and stderr settle on `io` and `node`. A reader that stops early
-    closes the pipe, so the line's next write fails as a write to a closed
-    pipe does, and the run is let go.
+    status and stderr settle on `io` and `node`.
 
     Args:
         console (PipeConsole): where the line writes.
@@ -412,18 +433,11 @@ async def _streamed(
         io (IOResult): timeout's result, settled at the end.
         node (ExecutionNode): timeout's node, settled at the end.
     """
-    try:
-        async for chunk in console.stream():
-            yield chunk
-        _, result, _ = await watch
-        io.exit_code = node.exit_code = result.exit_code
-        io.stderr = result.stderr
-    finally:
-        console.close_reader()
-        if not watch.done():
-            await _cancel(watch)
-        elif not watch.cancelled() and watch.exception() is not None:
-            logger.debug("timeout: the run ended: %s", watch.exception())
+    async for chunk in console.stream():
+        yield chunk
+    _, result, _ = await watch
+    io.exit_code = node.exit_code = result.exit_code
+    io.stderr = result.stderr
 
 
 async def _deadline(

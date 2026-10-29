@@ -620,6 +620,41 @@
         "stdout": "y\nz\ny\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "timeout_keeps_the_prefix_for_its_command",
+      "seq": 1300102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "TOKEN=expected timeout 5 printenv TOKEN; TOKEN=x timeout 5 sh -c 'echo $TOKEN'; export TOKEN=old; TOKEN=y timeout 5 seq 1 1000000000 | head -1; echo $TOKEN; unset TOKEN; TOKEN=z timeout 5 seq 1 1000000000 | true; echo ${TOKEN-unset}",
+      "expect": {
+        "exit": 0,
+        "stdout": "expected\nx\n1\nold\nunset\n",
+        "stderr": ""
+      }
     }
   ]
 }

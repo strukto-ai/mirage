@@ -26,9 +26,9 @@ import {
   usageHint,
 } from '../../../../commands/spec/usage.ts'
 import { runAsProgram } from '../../../../context/session_context.ts'
-import { IOResult, materialize } from '../../../../io/types.ts'
+import { IOResult, OutputState, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
-import { ensureStream, yieldBytes } from '../../../../io/stream.ts'
+import { OutputStream, ensureStream, yieldBytes } from '../../../../io/stream.ts'
 import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
 import { shellJoin } from '../../../../shell/join.ts'
@@ -362,39 +362,39 @@ export async function handleTimeout(
     sink.end()
   })
   const io = new IOResult()
+  const state = new OutputState()
+  io.output = state
   const node = new ExecutionNode({ command: 'timeout', exitCode: 0 })
-  return [streamed(sink, watch, abort, io, node), io, node]
+  // A reader that stops early, or never starts, closes the pipe, so the
+  // line's next write fails as a write to a closed pipe does and the run is
+  // let go. The line ran under the command's prefix assignments, which end
+  // as this settles.
+  const close = (): Promise<void> => {
+    sink.closeReader()
+    abort.abort()
+    watch.catch((err: unknown) => {
+      console.debug(`timeout: the run ended: ${String(err)}`)
+    })
+    state.finish()
+    return Promise.resolve()
+  }
+  return [new OutputStream(streamed(sink, watch, io, node), close), io, node]
 }
 
 /**
  * The inner line's stdout as it writes it; once it ends, timeout's status
- * and stderr settle on `io` and `node`. A reader that stops early closes the
- * pipe, so the line's next write fails as a write to a closed pipe does, and
- * the run is let go.
+ * and stderr settle on `io` and `node`.
  */
 async function* streamed(
   sink: PipeConsole,
   watch: Promise<Result>,
-  abort: AbortController,
   io: IOResult,
   node: ExecutionNode,
 ): AsyncGenerator<Uint8Array, void, undefined> {
-  let settled = false
-  try {
-    yield* sink.stream()
-    const [, result] = await watch
-    io.exitCode = node.exitCode = result.exitCode
-    io.stderr = result.stderr
-    settled = true
-  } finally {
-    sink.closeReader()
-    if (!settled) {
-      abort.abort()
-      watch.catch((err: unknown) => {
-        console.debug(`timeout: the run ended: ${String(err)}`)
-      })
-    }
-  }
+  yield* sink.stream()
+  const [, result] = await watch
+  io.exitCode = node.exitCode = result.exitCode
+  io.stderr = result.stderr
 }
 
 /** Wait for the run, and at the deadline do what the signal does. */
