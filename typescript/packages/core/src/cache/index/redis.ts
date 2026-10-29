@@ -1162,10 +1162,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   override async invalidateMissing(paths: readonly string[]): Promise<boolean> {
     await this.flushSeed()
     if (paths.length === 0) return false
-    if (this.listings.allows(paths)) {
-      if (this.listings.contradicts(paths)) this.listings.wrote()
-      return false
-    }
+    if (this.listings.allows(paths) && !this.listings.contradicts(paths)) return false
     let changed: boolean
     try {
       const result = await (

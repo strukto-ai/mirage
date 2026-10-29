@@ -1300,9 +1300,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         await self._flush_seed()
         if not paths:
             return False
-        if self._listings.allows(paths):
-            if self._listings.contradicts(paths):
-                self._listings.wrote()
+        if self._listings.allows(paths) and not self._listings.contradicts(paths):
             return False
         try:
             changed = bool(
