@@ -171,6 +171,11 @@ export interface OpenOptions {
 
 type MountMap = ConstructorParameters<typeof Workspace>[0]
 
+// What a target's workspace opens with. The corpus pins what the real tools
+// print, and they run under no workspace cap, so max_memory is lifted; the
+// cap has its own cases in runtime/policy/limits.
+const WORKSPACE_OPTIONS = { mode: MountMode.WRITE, maxMemory: null }
+
 interface OpenedWorkspaces {
   ws: ExecWorkspace
   shadow: () => ExecWorkspace
@@ -230,7 +235,7 @@ function openWorkspaces(
   const make = (read?: ReadSpec, mountRead?: Record<string, ReadSpec>): ExecWorkspace => {
     const mounts = mountRead !== undefined ? applyMountRead(build(), mountRead) : build()
     const ws = new Workspace(mounts, {
-      mode: MountMode.WRITE,
+      ...WORKSPACE_OPTIONS,
       ...(read !== undefined ? { read } : {}),
       ...(write !== undefined ? { write } : {}),
       ...(manualClock ? { clock: new ManualClock() } : {}),
@@ -384,7 +389,7 @@ async function openRam(target: Target, options?: OpenOptions): Promise<Open> {
   const store = jobStoreFor(target)
   const cache = cacheFor(target)
   const ws = new Workspace(mounts, {
-    mode: MountMode.WRITE,
+    ...WORKSPACE_OPTIONS,
     ...(store !== undefined ? { store } : {}),
     ...(cache !== undefined ? { cache } : {}),
     ...(secretsEnv !== null ? { env: secretsEnv.env } : {}),
@@ -455,7 +460,7 @@ async function openDisk(target: Target, options?: OpenOptions): Promise<Open> {
     for (const root of roots) rmSync(root, { recursive: true, force: true })
   }
   if (options === undefined) {
-    const ws = new Workspace(build(), { mode: MountMode.WRITE, ...permissionOptions(target) })
+    const ws = new Workspace(build(), { ...WORKSPACE_OPTIONS, ...permissionOptions(target) })
     installLocalClis(ws, target)
     const cleanup = async (): Promise<void> => {
       await ws.close()
@@ -485,7 +490,7 @@ async function openRedis(target: Target): Promise<Open> {
     const url = m.keyspace_of === undefined || other === undefined ? REDIS_URL : alias.href
     mounts[m.path] = new RedisVFS({ url, keyPrefix: `mirage-integ-${id}-${safe}` })
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
@@ -497,7 +502,7 @@ async function openOpfs(target: Target): Promise<Open> {
     mounts[m.path] =
       m.mode === 'read' ? [vfs, MountMode.READ] : m.mode === 'exec' ? [vfs, MountMode.EXEC] : vfs
   })
-  const ws = new BrowserWorkspace(mounts, { mode: MountMode.WRITE })
+  const ws = new BrowserWorkspace(mounts, WORKSPACE_OPTIONS)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     restoreNav()
@@ -567,7 +572,7 @@ async function openDatabricksVolume(target: Target): Promise<Open> {
       timeout: 30,
     })
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     await server.close()
@@ -711,7 +716,7 @@ async function openNextcloud(target: Target): Promise<Open> {
       password: NEXTCLOUD_PASSWORD,
     })
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
@@ -785,7 +790,7 @@ async function openEmail(target: Target): Promise<Open> {
       maxMessages: 200,
     })
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE, ...permissionOptions(target) })
+  const ws = new Workspace(mounts, { ...WORKSPACE_OPTIONS, ...permissionOptions(target) })
   // Every registerCli in this file installs the same snake_case block
   // the Python runner does, so the cli facet proves one YAML config
   // serves both hosts rather than only that each host has some config
@@ -1230,7 +1235,7 @@ async function openAirtable(target: Target): Promise<Open> {
     })
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   // The same bounds as the mount, scoped to two of the fixture's three bases
   // so the battery can show a refused one (the Archive).
   if (target.clis?.includes('airtable') === true) {
@@ -1283,7 +1288,7 @@ async function openNotion(target: Target): Promise<Open> {
     })
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   if (target.clis?.includes('ntn') === true) {
     // The same run as the mounts above. The CLI and the mount are two views of
     // one workspace, so pointing them at different runs would give a case that
@@ -1349,7 +1354,7 @@ async function openLancedb(target: Target): Promise<Open> {
         })
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
@@ -1447,7 +1452,7 @@ async function openQdrant(target: Target): Promise<Open> {
         })
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
@@ -1511,7 +1516,7 @@ async function openChroma(target: Target): Promise<Open> {
     const vfs = new ChromaVFS({ host, port, collectionName })
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
@@ -1570,7 +1575,7 @@ async function openMongodb(target: Target): Promise<Open> {
     created.push(vfs)
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     for (const vfs of created) await vfs.close()
@@ -1702,7 +1707,7 @@ async function openPostgres(target: Target): Promise<Open> {
     created.push(vfs)
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     for (const vfs of created) await vfs.close()
@@ -1731,7 +1736,7 @@ async function openMem0(target: Target): Promise<Open> {
     })
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
@@ -1816,7 +1821,7 @@ async function openTiDBFilesystem(target: Target): Promise<Open> {
       normalizeTiDBFilesystemConfig({ host, token, root_path: `${base}/${String(m.root)}` }),
     )
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     await adminExec(admin, `rm -rf /admin${base}`)
@@ -2131,7 +2136,7 @@ async function openSlack(target: Target): Promise<Open> {
       }),
     )
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   if (target.clis?.includes('slack') === true) {
     ws.registerCli('slack', SLACK, {
       token: `xoxb-${workspace}`,
@@ -2197,7 +2202,7 @@ async function openGitHub(target: Target, options?: OpenOptions): Promise<Open> 
     })
   }
   if (options === undefined) {
-    const ws = new Workspace(await buildMounts(), { mode: MountMode.WRITE })
+    const ws = new Workspace(await buildMounts(), WORKSPACE_OPTIONS)
     register(ws as unknown as ExecWorkspace)
     return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
   }
@@ -2281,7 +2286,7 @@ async function openDify(target: Target): Promise<Open> {
       datasetId: target.dataset ?? 'kb-7f3a',
     })
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
@@ -2314,7 +2319,7 @@ async function openTrello(target: Target): Promise<Open> {
     )
     mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   // A target may scope the install to one mount's workspace and boards, so
   // the CLI and that mount cover the same boards.
   if (target.clis?.includes('trello') === true) {
@@ -2354,7 +2359,7 @@ async function openDiscord(target: Target): Promise<Open> {
       }),
     )
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   if (target.clis?.includes('discord') === true) {
     ws.registerCli('discord', DISCORD, {
       token: 'integ-bot-token',
@@ -2389,7 +2394,7 @@ async function openLinear(target: Target): Promise<Open> {
       baseUrl: graphql,
     })
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   if (target.clis?.includes('linear') === true) {
     ws.registerCli('linear', LINEAR, { api_key: 'integ-key', base_url: graphql })
   }
@@ -2409,7 +2414,7 @@ async function openJaeger(target: Target): Promise<Open> {
     }
     mounts[m.path] = new JaegerVFS({ host })
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
@@ -2431,7 +2436,7 @@ async function openLangfuse(target: Target): Promise<Open> {
       host,
     })
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
@@ -2489,7 +2494,7 @@ async function openHttp(target: Target): Promise<Open> {
     const vfs = new RAMVFS()
     mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     await server.close()
@@ -2504,7 +2509,7 @@ async function openArgError(target: Target): Promise<Open> {
     const vfs = await ARG_ERROR_VFS[m.backend]()
     mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 

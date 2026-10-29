@@ -3457,6 +3457,9 @@ async def open_target(
     profiles = scripted_profiles(target.get("profiles") or None)
     default_profile = target.get("profile")
     clock = ManualClock() if target.get("clock") == "manual" else None
+    # The corpus pins what the real tools print, and they run under no
+    # workspace cap, so max_memory is lifted; the cap has its own cases in
+    # runtime/policy/limits.
     if read is not None:
         ws = Workspace(
             mounts,
@@ -3468,6 +3471,7 @@ async def open_target(
             profile=default_profile,
             env=env_block,
             clock=clock,
+            max_memory=None,
         )
     else:
         ws = Workspace(
@@ -3479,6 +3483,7 @@ async def open_target(
             profile=default_profile,
             env=env_block,
             clock=clock,
+            max_memory=None,
         )
     if store is not None:
         cleanups.append(_drop_jobs(store, ws))
@@ -3627,11 +3632,14 @@ async def open_consistency(
             mode=MountMode.WRITE,
             read=read,
             write=write,
+            max_memory=None,
         )
     except Exception:
         await teardown_target([], [*read_cleanups, *shadow_cleanups], service)
         raise
-    shadow_ws = Workspace(shadow_mounts, mode=MountMode.WRITE, write=write)
+    shadow_ws = Workspace(
+        shadow_mounts, mode=MountMode.WRITE, write=write, max_memory=None
+    )
     # Same rule as open_target: a target's declared environment reaches
     # every workspace a case can run against, or a consistency scenario
     # would silently run under a different one.
