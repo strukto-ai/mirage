@@ -69,7 +69,7 @@ def jq_texts(text: str, expr: str) -> list[JsonValue]:
         raise ValueError(exc.message) from exc
     position: dict[str, JsonValue] = {"filename": None, "line": 0}
     stream.begin(position)
-    frames: list[tuple[int, str]] = []
+    frames: list[tuple[int, bytes]] = []
     stop = read_frames(stream.feed(text.encode()), frames)
     stop = read_frames(stream.finish(), frames) or stop
     while True:

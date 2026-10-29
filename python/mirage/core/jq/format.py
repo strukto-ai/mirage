@@ -36,6 +36,16 @@ def _config(
     }
 
 
+def print_config(opts: JqOptions) -> dict[str, JsonValue]:
+    """The options jq prints each output by, separator included, as
+    jq_format and jq_eval's `print` take them.
+
+    Args:
+        opts (JqOptions): resolved output options.
+    """
+    return _config(opts, separator=True, check_only=False)
+
+
 async def format_one(text: str, opts: JqOptions) -> bytes:
     """Render one evaluator dump with its separator in bounded Rust steps.
 
@@ -43,9 +53,13 @@ async def format_one(text: str, opts: JqOptions) -> bytes:
         text (str): compact evaluator output.
         opts (JqOptions): resolved output options.
     """
-    config = _config(opts, separator=True, check_only=False)
     return b"".join(
-        [part async for part in run_codec("jq_format", config, text.encode())]
+        [
+            part
+            async for part in run_codec(
+                "jq_format", print_config(opts), text.encode()
+            )
+        ]
     )
 
 

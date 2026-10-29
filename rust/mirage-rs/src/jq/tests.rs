@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::compile::compile;
-use super::eval::{DEBUG, ERROR, HALT, OUTPUT, STDERR};
+use super::eval::{DEBUG, ERROR, HALT, OUTPUT, PRINT, STDERR};
 use super::meter::{self, Meter};
 use super::value::{Value, parse_json};
 use super::vm::{Limits, Next, Vm};
@@ -20,6 +20,9 @@ enum Frame {
     Out(String),
     Err(String),
     Halt(String),
+    /// A printed output: its null-or-false byte, then the bytes, which a
+    /// frame may end inside a character.
+    Print(Vec<u8>),
 }
 
 fn frames(mut wire: &[u8]) -> Vec<Frame> {
@@ -27,7 +30,8 @@ fn frames(mut wire: &[u8]) -> Vec<Frame> {
     while !wire.is_empty() {
         let tag = wire[0];
         let len = u32::from_le_bytes(wire[1..5].try_into().unwrap()) as usize;
-        let payload = String::from_utf8_lossy(&wire[5..5 + len]).into_owned();
+        let bytes = &wire[5..5 + len];
+        let payload = String::from_utf8_lossy(bytes).into_owned();
         if matches!(tag, DEBUG | STDERR) {
             wire = &wire[5 + len..];
             continue;
@@ -36,6 +40,7 @@ fn frames(mut wire: &[u8]) -> Vec<Frame> {
             OUTPUT => Frame::Out(payload),
             ERROR => Frame::Err(payload[1..].to_string()),
             HALT => Frame::Halt(payload),
+            PRINT => Frame::Print(bytes.to_vec()),
             _ => panic!("unknown frame {tag}"),
         });
         wire = &wire[5 + len..];
@@ -89,8 +94,156 @@ fn outputs(program: &str, input: &str) -> Vec<String> {
             Frame::Out(text) => text,
             Frame::Err(text) => format!("error: {text}"),
             Frame::Halt(text) => format!("halt: {text}"),
+            Frame::Print(bytes) => format!("print: {}", String::from_utf8_lossy(&bytes)),
         })
         .collect()
+}
+
+/// Run `program` over `input`, printing its outputs by jq_format's
+/// `options`, with `steps` VM steps per drain; and how many drains it took.
+fn printed(
+    program: &str,
+    input: &str,
+    options: serde_json::Value,
+    steps: u64,
+) -> (usize, Vec<Frame>) {
+    let config = serde_json::json!({ "program": program, "steps": steps, "print": options });
+    let mut stream = super::eval::open(config.to_string().as_bytes()).expect("compiles");
+    let mut wire = Vec::new();
+    stream.feed(input.as_bytes(), &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    let mut drains = 0;
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+        drains += 1;
+    }
+    (drains, frames(&wire))
+}
+
+#[test]
+fn printed_outputs_are_formatted_and_flag_null_and_false() {
+    let input = r#"[1,"a",null,false,{"b":[1,2]}]"#;
+    let (_, got) = printed(".[]", input, serde_json::json!({}), 1 << 16);
+    let want = [
+        "\u{0}1\n",
+        "\u{0}\"a\"\n",
+        "\u{1}null\n",
+        "\u{1}false\n",
+        "\u{0}{\n  \"b\": [\n    1,\n    2\n  ]\n}\n",
+    ];
+    assert_eq!(got, want.map(|text| Frame::Print(text.into())));
+    let raw = serde_json::json!({ "raw_output": true, "compact": true, "seq": true });
+    let (_, got) = printed(".[]", input, raw, 1 << 16);
+    let want = [
+        "\u{0}\u{1e}1\n",
+        "\u{0}a\n",
+        "\u{1}\u{1e}null\n",
+        "\u{1}\u{1e}false\n",
+    ];
+    assert_eq!(got[..4], want.map(|text| Frame::Print(text.into())));
+}
+
+/// What a run printed, its print frames joined, and whether the last
+/// output was null or false.
+fn stdout(frames: &[Frame]) -> (String, bool) {
+    let mut bytes = Vec::new();
+    let mut falsy = false;
+    for frame in frames {
+        if let Frame::Print(payload) = frame {
+            falsy = payload[0] == 1;
+            bytes.extend_from_slice(&payload[1..]);
+        }
+    }
+    (String::from_utf8(bytes).expect("printed UTF-8"), falsy)
+}
+
+#[test]
+fn printing_prints_the_same_at_every_budget() {
+    let ascending: Vec<String> = (0..20000).map(|n| n.to_string()).collect();
+    let ascending = format!("[{}]", ascending.join(","));
+    let wide = serde_json::to_string(&vec!["é€😀".repeat(50); 400]).unwrap();
+    for (program, input, options) in [
+        (".", &ascending, serde_json::json!({})),
+        (".[]", &ascending, serde_json::json!({ "compact": true })),
+        (
+            "{a: .}",
+            &ascending,
+            serde_json::json!({ "sort_keys": true, "tab": true }),
+        ),
+        (".", &wide, serde_json::json!({})),
+        (".[]", &wide, serde_json::json!({ "raw_output": true })),
+    ] {
+        let (_, whole) = printed(program, input, options.clone(), 1 << 16);
+        for steps in [1, 7, 128, 1000] {
+            let (_, got) = printed(program, input, options.clone(), steps);
+            assert_eq!(stdout(&got), stdout(&whole), "{program} at {steps} steps");
+        }
+    }
+    let (count, got) = printed(".", &ascending, serde_json::json!({}), 1000);
+    assert!(count > 10, "{count} drains");
+    assert!(got.len() > 10, "{} frames", got.len());
+}
+
+/// Every output ends with a print frame, even one that prints nothing.
+#[test]
+fn an_output_that_prints_nothing_still_sends_a_frame() {
+    let options = serde_json::json!({ "join_output": true, "raw_output": true });
+    let (_, got) = printed(r#""", null"#, "null", options, 1);
+    assert_eq!(
+        got,
+        vec![
+            Frame::Print("\u{0}".into()),
+            Frame::Print("\u{1}null".into())
+        ]
+    );
+}
+
+/// An output `--raw-output0` cannot print ends the run with jq's error,
+/// after the outputs before it.
+#[test]
+fn a_nul_raw_output0_cannot_print_ends_the_run() {
+    let options = serde_json::json!({ "raw_output": true, "nul_output": true });
+    let (_, got) = printed(r#""a", "b\u0000c", "d""#, "null", options, 1 << 16);
+    assert_eq!(
+        got,
+        vec![
+            Frame::Print("\u{0}a\u{0}".into()),
+            Frame::Err("Cannot dump a string containing NUL with --raw-output0 option".into()),
+        ]
+    );
+}
+
+/// A run cancelled at any point of printing a large output, while it is
+/// dumped, fed to the printer or printed, gives the printer up on later
+/// drains, and the next run prints as before.
+#[test]
+fn a_cancelled_print_is_discarded_before_the_next_run() {
+    let big = serde_json::to_string(&"é".repeat(1 << 16)).unwrap();
+    let (whole, _) = printed(".", &big, serde_json::json!({}), 1000);
+    let config = serde_json::json!({ "program": ".", "steps": 1000, "print": {} });
+    for after in 0..whole {
+        let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+        let mut wire = Vec::new();
+        stream.feed(big.as_bytes(), &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        for _ in 0..after {
+            stream.drain(&mut wire).unwrap();
+        }
+        assert!(stream.cancel());
+        while stream.busy() {
+            stream.drain(&mut wire).unwrap();
+        }
+        let mut wire = Vec::new();
+        stream.begin(b"{}").unwrap();
+        stream.feed(b"[1]", &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        settle(&mut *stream, &mut wire);
+        assert_eq!(
+            frames(&wire),
+            vec![Frame::Print("\u{0}[\n  1\n]\n".into())],
+            "cancelled after {after} of {whole} drains"
+        );
+    }
 }
 
 /// Outputs jq 1.8.2 printed for each, `jq -c`.
@@ -1289,7 +1442,7 @@ fn run_corpus(corpus: &str) -> (usize, usize, usize, usize) {
             match f {
                 Frame::Out(text) => got.push(text),
                 Frame::Err(text) => error = Some(text),
-                Frame::Halt(_) => {}
+                Frame::Halt(_) | Frame::Print(_) => {}
             }
         }
         let want: Vec<String> = case["outputs"]
@@ -2710,7 +2863,7 @@ fn date_builtins_print_what_jq_prints() {
             match frame {
                 Frame::Out(text) => got.push(text),
                 Frame::Err(text) => got = vec![format!("!{text}")],
-                Frame::Halt(_) => {}
+                Frame::Halt(_) | Frame::Print(_) => {}
             }
         }
         if got.join("\n") != *want {
@@ -3427,7 +3580,7 @@ fn parameter_shadowing_preserves_value_evaluation_and_filter_lookup() {
 fn regex_array_limit_transfers_storage_without_a_false_memory_peak() {
     let long = serde_json::to_string(&"a".repeat(101)).unwrap();
     for steps in [7, u64::MAX] {
-        for memory in [40000, 55000, 100000] {
+        for memory in [25000, 33000, 100000] {
             let config = serde_json::json!({
                 "program":r#"try match(".";"g") catch ."#, "items":100,
                 "memory":memory, "steps":steps,
@@ -3454,8 +3607,8 @@ fn regex_array_limit_transfers_storage_without_a_false_memory_peak() {
                 settle(&mut *stream, &mut wire);
                 let expected = if cancel {
                     vec![]
-                } else if input == long && memory == 40000 {
-                    vec![Frame::Err("jq memory limit of 40000 bytes exceeded".into())]
+                } else if input == long && memory == 25000 {
+                    vec![Frame::Err("jq memory limit of 25000 bytes exceeded".into())]
                 } else if input == long {
                     vec![Frame::Out(
                         "\"jq array limit of 100 elements exceeded\"".into(),

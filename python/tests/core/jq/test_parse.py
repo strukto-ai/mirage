@@ -110,7 +110,7 @@ def test_utf8_missing(piece, missing):
 @pytest.mark.asyncio
 async def test_large_unfinished_input_can_be_cancelled_and_discarded():
     parser = JqParser()
-    parser.feed(b'"' + b"x" * (8 * 1024 * 1024), True)
+    parser.feed(b'"' + b"\\n" * (4 * 1024 * 1024), True)
     pending = asyncio.create_task(parser.next())
     try:
         await asyncio.sleep(0.02)

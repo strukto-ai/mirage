@@ -11,6 +11,8 @@ use crate::{Stream, StreamError};
 use std::sync::Arc;
 
 const DEPTH: usize = 10000;
+/// The work freeing one block of a discarded token costs.
+const FREE: usize = BLOCK / 64;
 const RS: u8 = 0x1e;
 const SEPARATOR: &str = "Expected separator between values";
 const CONTROL: &str =
@@ -353,9 +355,11 @@ impl Token {
             } => loop {
                 if *phase == StringPhase::Source {
                     while self.at < self.bytes.len() && *budget > 0 {
-                        document.push(self.bytes.get(self.at).unwrap());
-                        self.at += 1;
-                        *budget -= 1;
+                        let run = self.bytes.run_at(self.at);
+                        let run = &run[..run.len().min(*budget)];
+                        document.extend(run);
+                        self.at += run.len();
+                        *budget -= run.len();
                     }
                     if self.at < self.bytes.len() || *budget == 0 {
                         return None;
@@ -383,6 +387,29 @@ impl Token {
                     continue;
                 }
                 while self.at < self.bytes.len() && *budget > 0 {
+                    let run = self.bytes.run_at(self.at);
+                    let plain = run
+                        .iter()
+                        .take(*budget)
+                        .take_while(|b| **b >= 0x20 && **b != b'\\')
+                        .count();
+                    if plain > 0 {
+                        let run = &run[..plain];
+                        if !*streaming
+                            && *phase == StringPhase::Validate
+                            && !(utf8.remaining == 0 && run.is_ascii())
+                        {
+                            for byte in run {
+                                utf8.push(*byte);
+                            }
+                        }
+                        if *capture {
+                            decoded.extend(run);
+                        }
+                        self.at += plain;
+                        *budget -= plain;
+                        continue;
+                    }
                     let ch = self.bytes.get(self.at).unwrap();
                     if !*streaming && *phase == StringPhase::Validate {
                         utf8.push(ch);
@@ -632,6 +659,8 @@ struct Scanner {
     path: Paths,
     next: Option<Leaf>,
     token: Bytes,
+    /// A finished token's buffer, emptied for the next token to fill.
+    spare: Option<Bytes>,
     document: Bytes,
     task: Option<Token>,
     emission: Option<Emission>,
@@ -663,6 +692,7 @@ impl Scanner {
             path: Paths::default(),
             next: None,
             token: Bytes::default(),
+            spare: None,
             document: Bytes::default(),
             task: None,
             emission: None,
@@ -684,6 +714,11 @@ impl Scanner {
         if !bytes.is_empty() {
             self.trash.push_back(bytes);
         }
+    }
+
+    /// The token read so far, a spare buffer taking its place.
+    fn take_token(&mut self) -> Bytes {
+        std::mem::replace(&mut self.token, self.spare.take().unwrap_or_default())
     }
 
     fn discard_leaf(&mut self, leaf: Leaf) {
@@ -1113,10 +1148,7 @@ impl Scanner {
                     || self.next.as_ref().is_some_and(Leaf::is_number))
         };
         if !self.token.is_empty() {
-            self.task = Some(Token::literal(
-                std::mem::take(&mut self.token),
-                AfterToken::Rs(truncated),
-            ));
+            self.task = Some(Token::literal(self.take_token(), AfterToken::Rs(truncated)));
         } else {
             self.after_rs(truncated, None);
         }
@@ -1185,10 +1217,7 @@ impl Scanner {
             return;
         }
         if !self.token.is_empty() {
-            self.task = Some(Token::literal(
-                std::mem::take(&mut self.token),
-                AfterToken::Eof,
-            ));
+            self.task = Some(Token::literal(self.take_token(), AfterToken::Eof));
             return;
         }
         let nested = if self.config.streaming {
@@ -1263,20 +1292,14 @@ impl Scanner {
                     self.token.push(ch);
                     self.last_ws = false;
                 } else if !self.token.is_empty() {
-                    self.task = Some(Token::literal(
-                        std::mem::take(&mut self.token),
-                        AfterToken::Delimiter(ch),
-                    ));
+                    self.task = Some(Token::literal(self.take_token(), AfterToken::Delimiter(ch)));
                 } else {
                     self.delimiter(ch);
                 }
             }
             Lex::String if ch == b'"' => {
                 self.last_ws = false;
-                self.task = Some(Token::string(
-                    std::mem::take(&mut self.token),
-                    self.config.streaming,
-                ));
+                self.task = Some(Token::string(self.take_token(), self.config.streaming));
             }
             Lex::String | Lex::Escape => {
                 self.token.push(ch);
@@ -1336,14 +1359,20 @@ impl Scanner {
         true
     }
 
+    /// Free the trash a block at a time, keeping a buffer of one block as
+    /// the spare the next token fills.
     fn cleanup(&mut self, budget: &mut usize) {
         while *budget > 0 {
             if let Some(bytes) = self.trash.front_mut() {
-                let done = bytes.discard_block();
-                *budget = budget.saturating_sub(BLOCK);
-                if done {
+                if self.spare.is_none() && bytes.clear_one() {
+                    self.spare = self.trash.pop_front();
+                    *budget -= 1;
+                    continue;
+                }
+                if bytes.discard_block() {
                     self.trash.pop_front();
                 }
+                *budget = budget.saturating_sub(FREE);
             } else if let Some(path) = self.old_paths.front_mut() {
                 if let Some(Path::Key(Some(bytes))) = path.pop() {
                     self.trash.push_back(bytes);
@@ -1390,6 +1419,22 @@ impl Scanner {
             }
             if self.ended {
                 return;
+            }
+            if self.lex == Lex::String && self.bom >= 3 {
+                let plain = self.input[self.input_at..]
+                    .iter()
+                    .take(budget)
+                    .take_while(|b| **b >= 0x20 && **b != b'"' && **b != b'\\')
+                    .count();
+                if plain > 0 {
+                    self.token
+                        .extend(&self.input[self.input_at..self.input_at + plain]);
+                    self.input_at += plain;
+                    self.column = self.column.saturating_add(plain as u64);
+                    self.last_ws = false;
+                    budget -= plain;
+                    continue;
+                }
             }
             if self.input_at < self.input.len() {
                 let ch = self.input[self.input_at];
@@ -2030,7 +2075,7 @@ mod tests {
             scanner.drain(&mut out).unwrap();
             assert!(out.is_empty());
             let remaining = retained_blocks(scanner);
-            assert!(previous - remaining <= WORK / BLOCK);
+            assert!(previous - remaining <= WORK / FREE);
             previous = remaining;
         }
         assert_eq!(retained_blocks(scanner), 0);

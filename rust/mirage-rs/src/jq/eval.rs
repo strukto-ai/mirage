@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::{Stream, StreamError};
 
 use super::compile;
+use super::format::{self, Formatter};
 use super::host::{Host, Message, Reply, Request};
 use super::meter::{self, Charge, Meter};
 use super::time::{Clock, Zone};
@@ -22,6 +23,11 @@ pub(crate) const ERROR: u8 = 2;
 pub(crate) const HALT: u8 = 3;
 pub(crate) const DEBUG: u8 = 4;
 pub(crate) const STDERR: u8 = 5;
+pub(crate) const PRINT: u8 = 6;
+
+/// The steps one slice of the printer costs, at the rate a dump is
+/// charged: a step for every 64 bytes it handles.
+const PRINT_SLICE: u64 = (format::LIMIT / 64) as u64;
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,6 +55,10 @@ struct Config {
     /// which `get_prog_origin` answers.
     #[serde(default)]
     prog_origin: Option<String>,
+    /// The options jq prints its outputs by (jq_format's): each output
+    /// then goes out printed, in a print frame, instead of as its dump.
+    #[serde(default)]
+    print: Option<format::Config>,
 }
 
 fn steps() -> u64 {
@@ -178,6 +188,84 @@ impl Printing {
     }
 }
 
+/// One output going through jq's printer a bounded slice at a time: its
+/// compact dump fed to the formatter a piece a slice, and what it printed
+/// since it last went out, after a byte that says whether the output was
+/// null or false, which `-e` reads.
+struct Formatting {
+    formatter: Formatter,
+    text: String,
+    fed: usize,
+    printed: Vec<u8>,
+    finished: bool,
+    refused: Option<StreamError>,
+}
+
+impl Formatting {
+    fn begin(options: &format::Config, text: String) -> Self {
+        let printed = vec![u8::from(text == "null" || text == "false")];
+        Self {
+            formatter: Formatter::new(options.clone()),
+            text,
+            fed: 0,
+            printed,
+            finished: false,
+            refused: None,
+        }
+    }
+
+    /// Print on while the budget lasts: None until the output is printed,
+    /// then the formatter's refusal of it, if it refused it.
+    fn run(&mut self, budget: &mut u64) -> Option<Result<(), StreamError>> {
+        while self.refused.is_none() && (!self.finished || self.formatter.busy()) {
+            if *budget == 0 {
+                return None;
+            }
+            let printed = if self.fed < self.text.len() {
+                let end = (self.fed + format::LIMIT).min(self.text.len());
+                self.formatter
+                    .feed(&self.text.as_bytes()[self.fed..end], &mut self.printed)
+                    .expect("a formatter takes a value's pieces");
+                self.fed = end;
+                Ok(())
+            } else if self.finished {
+                self.formatter.drain(&mut self.printed)
+            } else {
+                self.finished = true;
+                self.text = String::new();
+                self.formatter.finish(&mut self.printed)
+            };
+            self.refused = printed.err();
+            *budget = budget.saturating_sub(PRINT_SLICE);
+        }
+        Some(self.refused.take().map_or(Ok(()), Err))
+    }
+
+    /// Send what it printed so far in a print frame.
+    fn flush(&mut self, out: &mut Vec<u8>) {
+        frame(PRINT, &self.printed, out);
+        self.printed.truncate(1);
+    }
+
+    /// Give it up: the formatter frees what it holds through its own
+    /// bounded discard, which `discard` runs.
+    fn cancel(&mut self) {
+        self.text = String::new();
+        self.formatter
+            .begin(br#"{"discard":true}"#)
+            .expect("a formatter discards at any point");
+    }
+
+    /// Free one slice of what a cancelled output holds; whether it is all
+    /// gone.
+    fn discard(&mut self) -> bool {
+        self.formatter
+            .drain(&mut Vec::new())
+            .expect("a discarded output prints nothing");
+        !self.formatter.busy()
+    }
+}
+
 /// One jq program run over documents one at a time, on the host's own
 /// thread: `open` compiles it, each document is fed, `finish` starts the
 /// run, and every `drain` executes a bounded number of VM steps, so a
@@ -189,7 +277,12 @@ impl Printing {
 /// prints (the compact dump of `["DEBUG:", value]`), and what `stderr`
 /// writes (the bytes). An output is dumped on the same step budget, so
 /// a large one takes several drains and its frame goes out whole once
-/// it is written. `begin` readies the stream for the next document,
+/// it is written. Given jq_format's options as `print`, the stream prints
+/// each output itself, on that budget too, and writes print frames
+/// instead: a byte set when the output was null or false, then the bytes
+/// printed since the last, at least one frame an output and its last
+/// when it is printed whole; an output `--raw-output0` cannot print ends
+/// the run with jq's error. `begin` readies the stream for the next document,
 /// with the reader's position; `cancel` retires the run's stack a bounded
 /// slice per `drain`.
 ///
@@ -213,6 +306,8 @@ struct Eval {
     compile_limited: bool,
     receiving: Option<Box<Parsing>>,
     printing: Option<Printing>,
+    print: Option<format::Config>,
+    formatting: Option<Box<Formatting>>,
     state: State,
 }
 
@@ -265,6 +360,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         compile_limited,
         receiving: None,
         printing: None,
+        print: config.print,
+        formatting: None,
         state: State::Feeding,
     }))
 }
@@ -440,6 +537,27 @@ impl Stream for Eval {
                     }
                 }
                 loop {
+                    if let Some(formatting) = &mut self.formatting {
+                        let Some(printed) = formatting.run(&mut budget) else {
+                            if formatting.printed.len() > 1 {
+                                formatting.flush(out);
+                            }
+                            return Ok(());
+                        };
+                        let mut formatting = self.formatting.take().expect("the printed output");
+                        if let Err(refusal) = printed {
+                            let text = refusal.message;
+                            out.push(ERROR);
+                            out.extend_from_slice(&((text.len() + 1) as u32).to_le_bytes());
+                            out.push(1);
+                            out.extend_from_slice(text.as_bytes());
+                            break;
+                        }
+                        formatting.flush(out);
+                        if budget == 0 || out.len() - start >= crate::PIECE {
+                            return Ok(());
+                        }
+                    }
                     if let Some(printing) = &mut self.printing {
                         let text = printing.dumping.run(&mut budget);
                         if self.meter.exceeded() {
@@ -450,7 +568,14 @@ impl Stream for Eval {
                         let printing = self.printing.take().expect("the completed output renderer");
                         vm.retire_output(printing.dumping);
                         match printing.kind {
-                            PrintKind::Output => frame(OUTPUT, text.as_bytes(), out),
+                            PrintKind::Output => match &self.print {
+                                None => frame(OUTPUT, text.as_bytes(), out),
+                                Some(options) => {
+                                    self.formatting =
+                                        Some(Box::new(Formatting::begin(options, text)));
+                                    continue;
+                                }
+                            },
                             PrintKind::Error(string, own) => {
                                 out.push(ERROR);
                                 out.extend_from_slice(&((text.len() + 1) as u32).to_le_bytes());
@@ -499,6 +624,7 @@ impl Stream for Eval {
                 if let Some(dumping) = self.printing.take() {
                     vm.retire_output(dumping.dumping);
                 }
+                self.formatting = None;
                 self.state = State::Retiring(vm);
                 self.retire();
             }
@@ -537,6 +663,9 @@ impl Stream for Eval {
         self.asking = Asking::No;
         self.pending = Vec::new();
         self.pending_charge.set(0);
+        if let Some(formatting) = &mut self.formatting {
+            formatting.cancel();
+        }
         if let Some(dumping) = self.printing.take() {
             if let State::Retiring(vm) = &mut self.state {
                 vm.retire_output(dumping.dumping);
@@ -667,6 +796,12 @@ impl Eval {
     }
 
     fn retire(&mut self) {
+        if let Some(formatting) = &mut self.formatting {
+            if formatting.discard() {
+                self.formatting = None;
+            }
+            return;
+        }
         if let State::Retiring(vm) = &mut self.state {
             if vm.retire(RETIRE) {
                 self.state = State::Ended;

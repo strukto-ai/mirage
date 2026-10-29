@@ -97,9 +97,7 @@ it('finishes a reader piece inside a UTF-8 character', () => {
 it('cancels and discards a large unfinished input', async () => {
   const controller = new AbortController()
   const parser = new JqParser(false, false, controller.signal)
-  const data = new Uint8Array(8 * 1024 * 1024).fill(0x78)
-  data[0] = 0x22
-  parser.feed(data, true)
+  parser.feed(new TextEncoder().encode('"' + '\\n'.repeat(4 * 1024 * 1024)), true)
   const timer = setTimeout(() => {
     controller.abort()
   }, 20)
