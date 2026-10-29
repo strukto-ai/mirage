@@ -82,7 +82,7 @@ export class RAMVFS extends BaseVFS {
    * as `/dev`'s devices and pipes. Mirrors Python's `held`.
    */
   get held(): number {
-    const files = this.store.files
+    const files = this.accessor.store.files
     return files instanceof RAMFiles ? files.held : 0
   }
 

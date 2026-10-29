@@ -72,7 +72,7 @@ class RAMVFS(BaseVFS):
         """The bytes the store's files hold, which count against the
         ``max_memory`` of each workspace the store is mounted in; 0 for a
         table that keeps none, as ``/dev``'s devices and pipes."""
-        files = self._store.files
+        files = self.accessor.store.files
         return files.held if isinstance(files, RAMFiles) else 0
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
