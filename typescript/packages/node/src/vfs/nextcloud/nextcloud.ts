@@ -3,7 +3,7 @@ import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import {
-  redactNextcloudConfig,
+  NextcloudConfigSchema,
   type NextcloudConfig,
   type NextcloudConfigRedacted,
 } from './config.ts'
@@ -32,6 +32,7 @@ import { capacity } from '../../core/nextcloud/capacity.ts'
 import { checksum } from '../../core/nextcloud/checksum.ts'
 import { setAttrs } from '../../core/nextcloud/set_attrs.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 export interface NextcloudVFSState {
   type: string
@@ -142,6 +143,9 @@ export class NextcloudVFS extends BaseVFS {
   }
 
   override getState(): Promise<NextcloudVFSState> {
-    return Promise.resolve({ type: this.name, config: redactNextcloudConfig(this.config) })
+    return Promise.resolve({
+      type: this.name,
+      config: redactConfigWithSchema(NextcloudConfigSchema, this.config) as NextcloudConfigRedacted,
+    })
   }
 }

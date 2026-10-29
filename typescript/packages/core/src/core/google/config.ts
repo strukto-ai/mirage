@@ -13,14 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  type ConfigOf,
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  type RedactedConfig,
-  secretSchema,
-  secretStr,
-} from '../../vfs/secrets.ts'
+import { type ConfigOf, type RedactedConfig, secretSchema, secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
 // A pre-minted token read on every request. This is how a caller that
@@ -115,19 +108,9 @@ export const GoogleConfigSchema = z
 // adds a shape that can drift from it.
 export type GoogleConfig = ConfigOf<typeof GoogleConfigSchema>
 
-const GoogleAppConfigSchema = GoogleConfigSchema
-
-export type GoogleAppConfig = ConfigOf<typeof GoogleAppConfigSchema>
+export type GoogleAppConfig = ConfigOf<typeof GoogleConfigSchema>
 
 export type GoogleAppConfigRedacted = RedactedConfig<
   GoogleAppConfig,
   'accessToken' | 'clientSecret' | 'refreshToken' | 'refreshFn'
 >
-
-export function redactGoogleAppConfig(config: GoogleAppConfig): GoogleAppConfigRedacted {
-  return redactConfigWithSchema(GoogleAppConfigSchema, config) as unknown as GoogleAppConfigRedacted
-}
-
-export function normalizeGoogleAppConfig(input: Record<string, unknown>): GoogleAppConfig {
-  return parseConfigWithSchema(GoogleAppConfigSchema, input)
-}

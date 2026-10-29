@@ -15,8 +15,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ops } from '../../test-utils.ts'
 import { PathSpec, VFSName } from '../../types.ts'
-import { redactTrelloConfig } from '../../core/trello/config.ts'
+import { TrelloConfigSchema } from '../../core/trello/config.ts'
 import { TrelloVFS, VFS_MD } from './trello.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -128,14 +129,14 @@ describe('TrelloVFS', () => {
   })
 })
 
-describe('redactTrelloConfig', () => {
+describe('TrelloConfigSchema redaction', () => {
   it('redacts apiKey/apiToken, keeps workspace metadata', () => {
-    expect(redactTrelloConfig({ apiKey: 'k', apiToken: 't' })).toEqual({
+    expect(redactConfigWithSchema(TrelloConfigSchema, { apiKey: 'k', apiToken: 't' })).toEqual({
       apiKey: '<REDACTED>',
       apiToken: '<REDACTED>',
     })
     expect(
-      redactTrelloConfig({
+      redactConfigWithSchema(TrelloConfigSchema, {
         apiKey: 'k',
         apiToken: 't',
         workspaceId: 'w1',

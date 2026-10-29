@@ -19,71 +19,68 @@ import { S3VFS } from './s3/s3.ts'
 import type { S3Config } from './s3/config.ts'
 import {
   aliyunToS3Config,
-  normalizeAliyunConfig,
+  AliyunConfigSchema,
   resolvedAliyunEndpoint,
   type AliyunConfig,
 } from './aliyun/config.ts'
 import { AliyunVFS } from './aliyun/aliyun.ts'
 import {
   backblazeToS3Config,
-  normalizeBackblazeConfig,
+  BackblazeConfigSchema,
   resolvedBackblazeEndpoint,
   type BackblazeConfig,
 } from './backblaze/config.ts'
 import { BackblazeVFS } from './backblaze/backblaze.ts'
-import { cephToS3Config, normalizeCephConfig, type CephConfig } from './ceph/config.ts'
+import { cephToS3Config, CephConfigSchema, type CephConfig } from './ceph/config.ts'
 import { CephVFS } from './ceph/ceph.ts'
 import {
   digitalOceanToS3Config,
-  normalizeDigitalOceanConfig,
+  DigitalOceanConfigSchema,
   resolvedDigitalOceanEndpoint,
   type DigitalOceanConfig,
 } from './digitalocean/config.ts'
 import { DigitalOceanVFS } from './digitalocean/digitalocean.ts'
 import { gcsToS3Config, type GCSConfig } from './gcs/config.ts'
-import { normalizeOciConfig, ociToS3Config, type OCIConfig } from './oci/config.ts'
+import { OCIConfigSchema, ociToS3Config, type OCIConfig } from './oci/config.ts'
 import { r2ToS3Config, type R2Config } from './r2/config.ts'
-import {
-  normalizeSupabaseConfig,
-  supabaseToS3Config,
-  type SupabaseConfig,
-} from './supabase/config.ts'
-import { minioToS3Config, normalizeMinIOConfig, type MinIOConfig } from './minio/config.ts'
+import { SupabaseConfigSchema, supabaseToS3Config, type SupabaseConfig } from './supabase/config.ts'
+import { minioToS3Config, MinIOConfigSchema, type MinIOConfig } from './minio/config.ts'
 import { MinIOVFS } from './minio/minio.ts'
 import {
-  normalizeSeaweedFSConfig,
+  SeaweedFSConfigSchema,
   seaweedfsToS3Config,
   type SeaweedFSConfig,
 } from './seaweedfs/config.ts'
 import { SeaweedFSVFS } from './seaweedfs/seaweedfs.ts'
 import {
-  normalizeQingStorConfig,
+  QingStorConfigSchema,
   qingStorToS3Config,
   resolvedQingStorEndpoint,
   type QingStorConfig,
 } from './qingstor/config.ts'
 import { QingStorVFS } from './qingstor/qingstor.ts'
 import {
-  normalizeScalewayConfig,
+  ScalewayConfigSchema,
   resolvedScalewayEndpoint,
   scalewayToS3Config,
   type ScalewayConfig,
 } from './scaleway/config.ts'
 import { ScalewayVFS } from './scaleway/scaleway.ts'
 import {
-  normalizeTencentConfig,
+  TencentConfigSchema,
   resolvedTencentEndpoint,
   tencentToS3Config,
   type TencentConfig,
 } from './tencent/config.ts'
 import { TencentVFS } from './tencent/tencent.ts'
 import {
-  normalizeWasabiConfig,
+  WasabiConfigSchema,
   resolvedWasabiEndpoint,
   wasabiToS3Config,
   type WasabiConfig,
 } from './wasabi/config.ts'
 import { WasabiVFS } from './wasabi/wasabi.ts'
+import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 const CREDS = { bucket: 'b', accessKeyId: 'AKIA-LEAK', secretAccessKey: 'SECRET-LEAK' }
 
@@ -96,7 +93,7 @@ const REGION_CASES = [
     make: (region: string): AliyunConfig => ({ ...CREDS, region }),
     resolved: resolvedAliyunEndpoint,
     toS3: aliyunToS3Config,
-    normalize: normalizeAliyunConfig,
+    schema: AliyunConfigSchema,
     build: (config: AliyunConfig) => new AliyunVFS(config),
   },
   {
@@ -107,7 +104,7 @@ const REGION_CASES = [
     make: (region: string): BackblazeConfig => ({ ...CREDS, region }),
     resolved: resolvedBackblazeEndpoint,
     toS3: backblazeToS3Config,
-    normalize: normalizeBackblazeConfig,
+    schema: BackblazeConfigSchema,
     build: (config: BackblazeConfig) => new BackblazeVFS(config),
   },
   {
@@ -118,7 +115,7 @@ const REGION_CASES = [
     make: (region: string): DigitalOceanConfig => ({ ...CREDS, region }),
     resolved: resolvedDigitalOceanEndpoint,
     toS3: digitalOceanToS3Config,
-    normalize: normalizeDigitalOceanConfig,
+    schema: DigitalOceanConfigSchema,
     build: (config: DigitalOceanConfig) => new DigitalOceanVFS(config),
   },
   {
@@ -129,7 +126,7 @@ const REGION_CASES = [
     make: (region: string): TencentConfig => ({ ...CREDS, region }),
     resolved: resolvedTencentEndpoint,
     toS3: tencentToS3Config,
-    normalize: normalizeTencentConfig,
+    schema: TencentConfigSchema,
     build: (config: TencentConfig) => new TencentVFS(config),
   },
   {
@@ -140,7 +137,7 @@ const REGION_CASES = [
     make: (region: string): ScalewayConfig => ({ ...CREDS, region }),
     resolved: resolvedScalewayEndpoint,
     toS3: scalewayToS3Config,
-    normalize: normalizeScalewayConfig,
+    schema: ScalewayConfigSchema,
     build: (config: ScalewayConfig) => new ScalewayVFS(config),
   },
   {
@@ -151,7 +148,7 @@ const REGION_CASES = [
     make: (region: string): QingStorConfig => ({ ...CREDS, region }),
     resolved: resolvedQingStorEndpoint,
     toS3: qingStorToS3Config,
-    normalize: normalizeQingStorConfig,
+    schema: QingStorConfigSchema,
     build: (config: QingStorConfig) => new QingStorVFS(config),
   },
 ] as const
@@ -183,8 +180,8 @@ describe('region-derived S3 aliases', () => {
       expect(s3.forcePathStyle).toBeUndefined()
     })
 
-    it(`${c.name}: normalize renames snake_case keys`, () => {
-      const norm = c.normalize({
+    it(`${c.name}: parse renames snake_case keys`, () => {
+      const norm = parseConfigWithSchema(c.schema, {
         bucket: 'b',
         region: c.region,
         access_key_id: 'k',
@@ -246,7 +243,7 @@ describe('wasabi endpoint defaults', () => {
   })
 
   it('normalize renames snake_case keys', () => {
-    const norm = normalizeWasabiConfig({
+    const norm = parseConfigWithSchema(WasabiConfigSchema, {
       bucket: 'b',
       access_key_id: 'k',
       secret_access_key: 's',
@@ -277,7 +274,7 @@ const ENDPOINT_CASES = [
     name: 'minio',
     kind: VFSName.MINIO,
     toS3: minioToS3Config as (config: never) => S3Config,
-    normalize: normalizeMinIOConfig as (input: Record<string, unknown>) => unknown,
+    schema: MinIOConfigSchema,
     make: (): MinIOConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new MinIOVFS(config),
   },
@@ -285,7 +282,7 @@ const ENDPOINT_CASES = [
     name: 'ceph',
     kind: VFSName.CEPH,
     toS3: cephToS3Config as (config: never) => S3Config,
-    normalize: normalizeCephConfig as (input: Record<string, unknown>) => unknown,
+    schema: CephConfigSchema,
     make: (): CephConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new CephVFS(config),
   },
@@ -293,7 +290,7 @@ const ENDPOINT_CASES = [
     name: 'seaweedfs',
     kind: VFSName.SEAWEEDFS,
     toS3: seaweedfsToS3Config as (config: never) => S3Config,
-    normalize: normalizeSeaweedFSConfig as (input: Record<string, unknown>) => unknown,
+    schema: SeaweedFSConfigSchema,
     make: (): SeaweedFSConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new SeaweedFSVFS(config),
   },
@@ -314,8 +311,8 @@ describe('endpoint-required S3 aliases (minio/ceph/seaweedfs)', () => {
       expect(s3.forcePathStyle).toBe(false)
     })
 
-    it(`${c.name}: normalize renames snake_case keys`, () => {
-      const norm = c.normalize({
+    it(`${c.name}: parse renames snake_case keys`, () => {
+      const norm = parseConfigWithSchema(c.schema, {
         bucket: 'b',
         endpoint_url: 'http://localhost:9000',
         access_key_id: 'k',
@@ -446,9 +443,13 @@ describe('S3 alias subfolder mounts', () => {
 // silently ignored here.
 describe('oci and supabase path style', () => {
   it('oci: defaults on, honors path_style: false', () => {
-    const on = normalizeOciConfig({ bucket: 'b', namespace: 'ns', region: 'us-ashburn-1' })
+    const on = parseConfigWithSchema(OCIConfigSchema, {
+      bucket: 'b',
+      namespace: 'ns',
+      region: 'us-ashburn-1',
+    })
     expect(ociToS3Config(on).forcePathStyle).toBe(true)
-    const off = normalizeOciConfig({
+    const off = parseConfigWithSchema(OCIConfigSchema, {
       bucket: 'b',
       namespace: 'ns',
       region: 'us-ashburn-1',
@@ -459,9 +460,13 @@ describe('oci and supabase path style', () => {
   })
 
   it('supabase: defaults on, honors path_style: false', () => {
-    const on = normalizeSupabaseConfig({ bucket: 'b', project_ref: 'p', region: 'us-east-1' })
+    const on = parseConfigWithSchema(SupabaseConfigSchema, {
+      bucket: 'b',
+      project_ref: 'p',
+      region: 'us-east-1',
+    })
     expect(supabaseToS3Config(on).forcePathStyle).toBe(true)
-    const off = normalizeSupabaseConfig({
+    const off = parseConfigWithSchema(SupabaseConfigSchema, {
       bucket: 'b',
       project_ref: 'p',
       region: 'us-east-1',
@@ -471,9 +476,15 @@ describe('oci and supabase path style', () => {
   })
 
   it('refuses a wrong-typed field for every alias', () => {
-    expect(() => normalizeOciConfig({ bucket: 'b', namespace: 'ns', region: 1 })).toThrow(/region/)
     expect(() =>
-      normalizeAliyunConfig({ bucket: 'b', region: 'cn-hangzhou', timeout: 'abc' }),
+      parseConfigWithSchema(OCIConfigSchema, { bucket: 'b', namespace: 'ns', region: 1 }),
+    ).toThrow(/region/)
+    expect(() =>
+      parseConfigWithSchema(AliyunConfigSchema, {
+        bucket: 'b',
+        region: 'cn-hangzhou',
+        timeout: 'abc',
+      }),
     ).toThrow(/timeout/)
   })
 })

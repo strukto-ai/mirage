@@ -14,7 +14,7 @@
 
 import { S3VFS } from './s3/s3.ts'
 import {
-  parseConfigWithSchema,
+  FIELD_NORMALIZERS,
   redactConfigWithSchema,
   secretSchema,
   z,
@@ -30,10 +30,9 @@ import type { S3BrowserPresignedUrlProvider, S3Config, S3ConfigRedacted } from '
  * so the fields, the zod schema that drives redaction, and the conversion
  * to S3Config live here once. A provider declares only its endpoint rule
  * and whatever it genuinely adds. The node twin is
- * `packages/node/src/vfs/s3_alias.ts`; it carries credentials and a
- * snake_case `normalize` where this one carries a
- * `presignedUrlProvider`, which is one field's difference and not a
- * reason to fork the family.
+ * `packages/node/src/vfs/s3_alias.ts`; it carries credentials where this
+ * one carries a `presignedUrlProvider`, which is one field's difference
+ * and not a reason to fork the family.
  *
  * Only `bucket` and the provider are required. `region` and `endpoint`
  * are optional here — unlike node, where a regional provider must have a
@@ -93,7 +92,9 @@ export const BROWSER_ALIAS_FIELDS = {
 export function browserAliasSchema<E extends z.ZodRawShape>(
   extra: E,
 ): z.ZodObject<typeof BROWSER_ALIAS_FIELDS & E> {
-  return z.object({ ...BROWSER_ALIAS_FIELDS, ...extra })
+  return z
+    .object({ ...BROWSER_ALIAS_FIELDS, ...extra })
+    .register(FIELD_NORMALIZERS, { rename: S3_BROWSER_RENAME })
 }
 
 /**
@@ -118,7 +119,6 @@ export interface BrowserAlias<C, R, E extends string | undefined> {
   resolvedEndpoint: (config: C) => string | E
   toS3Config: (config: C) => S3Config
   redact: (config: C) => R
-  normalize: (input: Record<string, unknown>) => C
 }
 
 /**
@@ -165,8 +165,6 @@ export function makeBrowserS3Alias<
       }
     },
     redact: (config) => redactConfigWithSchema(schema, config) as unknown as R,
-    normalize: (input) =>
-      parseConfigWithSchema(schema, input, { rename: S3_BROWSER_RENAME }) as unknown as C,
   }
 }
 
@@ -182,15 +180,10 @@ export interface S3AliasVFSState<TRedacted> {
 /**
  * The shared body of every S3-compatible provider VFS (MinIO, Ceph,
  * R2, Wasabi, ...). Each is an {@link S3VFS} reached through a
- * provider-shaped config, so all it owns is its `name` and that config;
- * the mount serves S3's commands under the name. A subclass supplies its
- * prompt as a plain field and hands the varying pieces to `super`.
- *
- * `toS3Config` and `redact` arrive as functions rather than as an
- * {@link Alias}: the four providers whose region or endpoint rule fits
- * neither {@link makeRegionAlias} nor {@link makeFixedAlias} write their
- * own pair, so the VFS layer takes the two functions every provider
- * has either way. Mirrors python `S3AliasVFS` in
+ * provider-shaped config, so all it owns is its `name`, that config and the
+ * {@link BrowserAlias} that converts and redacts it; the mount serves S3's
+ * commands under the name. A subclass supplies its prompt as a plain field
+ * and hands the varying pieces to `super`. Mirrors python `S3AliasVFS` in
  * `mirage/vfs/s3_alias.py`.
  */
 export abstract class S3AliasVFS<TConfig, TRedacted extends S3ConfigRedacted> extends S3VFS {
@@ -201,13 +194,12 @@ export abstract class S3AliasVFS<TConfig, TRedacted extends S3ConfigRedacted> ex
   protected constructor(
     name: string,
     config: TConfig,
-    s3Config: S3Config,
-    redact: (config: TConfig) => TRedacted,
+    alias: Pick<BrowserAlias<TConfig, TRedacted, string | undefined>, 'toS3Config' | 'redact'>,
   ) {
-    super(s3Config)
+    super(alias.toS3Config(config))
     this.name = name
     this.aliasConfig = config
-    this.redactAlias = redact
+    this.redactAlias = alias.redact
   }
 
   override getState(): Promise<S3AliasVFSState<TRedacted>> {

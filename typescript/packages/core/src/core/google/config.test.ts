@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { GOOGLE_CREDENTIAL_ERROR, GoogleConfigSchema } from './config.ts'
-import { GCalConfigSchema, normalizeGCalConfig } from '../../vfs/gcal/config.ts'
+import { GCalConfigSchema } from '../../vfs/gcal/config.ts'
 import { errorSummary } from '../../secrets/summary.ts'
 import {
   parseConfigWithSchema,
@@ -108,7 +108,7 @@ describe('GoogleConfig', () => {
       if (err instanceof z.ZodError) refusal = errorSummary(err)
     }
     expect(refusal).toBe('time_zone: unrecognized_keys')
-    const calendar = normalizeGCalConfig({
+    const calendar = parseConfigWithSchema(GCalConfigSchema, {
       access_token: 'tok',
       time_zone: 'UTC',
       min_access_role: 'writer',
@@ -120,6 +120,8 @@ describe('GoogleConfig', () => {
       today: '2026-01-01',
     })
     // `safeExtend` keeps the base's credential check.
-    expect(() => normalizeGCalConfig({ time_zone: 'UTC' })).toThrow(GOOGLE_CREDENTIAL_ERROR)
+    expect(() => parseConfigWithSchema(GCalConfigSchema, { time_zone: 'UTC' })).toThrow(
+      GOOGLE_CREDENTIAL_ERROR,
+    )
   })
 })

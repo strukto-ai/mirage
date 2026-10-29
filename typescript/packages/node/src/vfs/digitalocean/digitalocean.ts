@@ -14,17 +14,12 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import {
-  digitalOceanToS3Config,
-  redactDigitalOceanConfig,
-  type DigitalOceanConfig,
-  type DigitalOceanConfigRedacted,
-} from './config.ts'
+import { ALIAS, type DigitalOceanConfig, type DigitalOceanConfigRedacted } from './config.ts'
 
 export type DigitalOceanVFSState = S3AliasVFSState<DigitalOceanConfigRedacted>
 
 export class DigitalOceanVFS extends S3AliasVFS<DigitalOceanConfig, DigitalOceanConfigRedacted> {
   constructor(config: DigitalOceanConfig) {
-    super(VFSName.DIGITALOCEAN, config, digitalOceanToS3Config(config), redactDigitalOceanConfig)
+    super(VFSName.DIGITALOCEAN, config, ALIAS)
   }
 }

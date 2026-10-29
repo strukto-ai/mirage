@@ -14,18 +14,21 @@
 
 import { describe, expect, it } from 'vitest'
 import { AirtableAccessor } from '../../accessor/airtable.ts'
-import { normalizeAirtableConfig, redactAirtableConfig } from './config.ts'
+import { AirtableConfigSchema } from './config.ts'
+import { parseConfigWithSchema, redactConfigWithSchema } from '../../vfs/secrets.ts'
 
 describe('airtable config', () => {
   it('points at the public api by default', () => {
-    const accessor = new AirtableAccessor(normalizeAirtableConfig({ token: 't' }))
+    const accessor = new AirtableAccessor(
+      parseConfigWithSchema(AirtableConfigSchema, { token: 't' }),
+    )
     expect(accessor.baseUrl).toBe('https://api.airtable.com/v0')
     expect(accessor.maxReadRecords).toBe(10_000)
     expect(accessor.baseIds).toBeNull()
   })
 
   it('reads the snake_case yaml spelling', () => {
-    const config = normalizeAirtableConfig({
+    const config = parseConfigWithSchema(AirtableConfigSchema, {
       token: 't',
       base_ids: ['appA'],
       max_read_records: 3,
@@ -36,19 +39,23 @@ describe('airtable config', () => {
   })
 
   it('refuses a misspelled key', () => {
-    expect(() => normalizeAirtableConfig({ token: 't', base_idz: ['appX'] })).toThrow()
+    expect(() =>
+      parseConfigWithSchema(AirtableConfigSchema, { token: 't', base_idz: ['appX'] }),
+    ).toThrow()
   })
 
   it.each([
     ['max_read_records', 0],
     ['requests_per_second', 0],
   ])('refuses a non-positive %s', (key, value) => {
-    expect(() => normalizeAirtableConfig({ token: 't', [key]: value })).toThrow()
+    expect(() =>
+      parseConfigWithSchema(AirtableConfigSchema, { token: 't', [key]: value }),
+    ).toThrow()
   })
 
   it('redacts the token', () => {
-    expect(JSON.stringify(redactAirtableConfig({ token: 'pat.secret' }))).not.toContain(
-      'pat.secret',
-    )
+    expect(
+      JSON.stringify(redactConfigWithSchema(AirtableConfigSchema, { token: 'pat.secret' })),
+    ).not.toContain('pat.secret')
   })
 })

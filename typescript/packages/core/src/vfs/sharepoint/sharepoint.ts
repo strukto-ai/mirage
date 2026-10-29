@@ -1,6 +1,6 @@
 import { BaseVFS } from '../base.ts'
 import {
-  redactSharePointConfig,
+  SharePointConfigSchema,
   SharePointAccessor,
   type SharePointConfig,
   type SharePointConfigRedacted,
@@ -26,6 +26,7 @@ import { rename } from '../../core/sharepoint/rename.ts'
 import { copy } from '../../core/sharepoint/copy.ts'
 import { truncate } from '../../core/sharepoint/truncate.ts'
 import { filesContaining } from '../../core/sharepoint/search.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   SharePoint Enterprise document libraries. Multi-site, multi-drive discovery.
@@ -155,7 +156,10 @@ export class SharePointVFS extends BaseVFS {
   }
 
   override getState(): SharePointVFSState {
-    const config: SharePointConfigRedacted = redactSharePointConfig(this.config)
+    const config: SharePointConfigRedacted = redactConfigWithSchema(
+      SharePointConfigSchema,
+      this.config,
+    ) as SharePointConfigRedacted
     return { type: this.name, config }
   }
 }

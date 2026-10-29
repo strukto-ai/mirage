@@ -17,7 +17,7 @@ import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
-import { redactConfig, type GridFSConfig, type GridFSConfigRedacted } from './config.ts'
+import { GridFSConfigSchema, type GridFSConfig, type GridFSConfigRedacted } from './config.ts'
 import type { DirListing, PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { appendByStreamedRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
@@ -37,6 +37,7 @@ import { copy as gridfsCopy } from '../../core/gridfs/copy.ts'
 import { truncate as gridfsTruncate } from '../../core/gridfs/truncate.ts'
 import { tree as gridfsTree } from '../../core/gridfs/readdir.ts'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 export interface GridFSVFSState {
   type: string
@@ -163,7 +164,7 @@ export class GridFSVFS extends BaseVFS {
   override getState(): Promise<GridFSVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactConfig(this.config),
+      config: redactConfigWithSchema(GridFSConfigSchema, this.config) as GridFSConfigRedacted,
     })
   }
 }

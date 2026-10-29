@@ -16,12 +16,13 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import {
-  normalizeDatabricksVolumeConfig,
+  DatabricksVolumeConfigSchema,
   type DatabricksVolumeConfig,
 } from '../../vfs/databricks_volume/config.ts'
 import { backendPath, configuredRoot, normalizePosix, virtualPath, volumeRoot } from './path.ts'
+import { parseConfigWithSchema } from '../../vfs/secrets.ts'
 
-const CONFIG: DatabricksVolumeConfig = normalizeDatabricksVolumeConfig({
+const CONFIG: DatabricksVolumeConfig = parseConfigWithSchema(DatabricksVolumeConfigSchema, {
   catalog: 'main',
   schema: 'default',
   volume: 'agent_files',
@@ -48,7 +49,7 @@ describe('volumeRoot / configuredRoot', () => {
   })
 
   it('defaults to the volume root without root_path', () => {
-    const config = normalizeDatabricksVolumeConfig({
+    const config = parseConfigWithSchema(DatabricksVolumeConfigSchema, {
       catalog: 'main',
       schema: 'default',
       volume: 'agent_files',
@@ -100,7 +101,7 @@ describe('backendPath', () => {
 describe('config root_path validation', () => {
   it('rejects parent segments in root_path', () => {
     expect(() =>
-      normalizeDatabricksVolumeConfig({
+      parseConfigWithSchema(DatabricksVolumeConfigSchema, {
         catalog: 'main',
         schema: 'default',
         volume: 'agent_files',

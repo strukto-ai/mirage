@@ -14,28 +14,38 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { REDACTED_SECRET } from '../secrets.ts'
-import { normalizeQdrantConfig, redactQdrantConfig, resolveQdrantConfig } from './config.ts'
+import { REDACTED_SECRET, parseConfigWithSchema } from '../secrets.ts'
+import { QdrantConfigSchema, redactQdrantConfig, resolveQdrantConfig } from './config.ts'
 
 const embed = (text: string): Promise<number[]> => Promise.resolve([text.length])
 
 describe('qdrant config embed hook', () => {
   it('keeps a function through the config loader and resolves it', () => {
-    const config = resolveQdrantConfig(normalizeQdrantConfig({ collection: 'c', embed }))
+    const config = resolveQdrantConfig(
+      parseConfigWithSchema(QdrantConfigSchema, { collection: 'c', embed }),
+    )
     expect(config.embed).toBe(embed)
   })
 
   it('resolves to null when absent', () => {
-    expect(resolveQdrantConfig(normalizeQdrantConfig({ collection: 'c' })).embed).toBeNull()
+    expect(
+      resolveQdrantConfig(parseConfigWithSchema(QdrantConfigSchema, { collection: 'c' })).embed,
+    ).toBeNull()
   })
 
   it('refuses a non-function', () => {
-    expect(() => normalizeQdrantConfig({ collection: 'c', embed: 'model' })).toThrow(/embed/)
+    expect(() =>
+      parseConfigWithSchema(QdrantConfigSchema, { collection: 'c', embed: 'model' }),
+    ).toThrow(/embed/)
   })
 
   it('redacts the hook so no snapshot carries it', () => {
-    const withHook = redactQdrantConfig(resolveQdrantConfig(normalizeQdrantConfig({ embed })))
+    const withHook = redactQdrantConfig(
+      resolveQdrantConfig(parseConfigWithSchema(QdrantConfigSchema, { embed })),
+    )
     expect(withHook.embed).toBe(REDACTED_SECRET)
-    expect(redactQdrantConfig(resolveQdrantConfig(normalizeQdrantConfig({}))).embed).toBeNull()
+    expect(
+      redactQdrantConfig(resolveQdrantConfig(parseConfigWithSchema(QdrantConfigSchema, {}))).embed,
+    ).toBeNull()
   })
 })

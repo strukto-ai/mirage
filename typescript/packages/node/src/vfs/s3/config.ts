@@ -14,44 +14,13 @@
 
 import { S3ConfigSchema as S3CoreConfigSchema } from '@struktoai/mirage-core/vfs/s3/config'
 import type { S3Config as S3CoreConfig } from '@struktoai/mirage-core/vfs/s3/config'
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  secretStr,
-  z,
-} from '@struktoai/mirage-core/vfs/secrets'
+import { FIELD_NORMALIZERS, secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import type { FieldNormalizer } from '@struktoai/mirage-core/utils/normalize'
 
 export interface S3Config extends S3CoreConfig {
   profile?: string
   proxy?: string
-}
-
-const S3ConfigSchema = S3CoreConfigSchema.extend({
-  profile: z
-    .string()
-    .optional()
-    .describe(
-      'Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.',
-    ),
-  proxy: secretStr()
-    .optional()
-    .describe('Proxy URL for every HTTP and HTTPS request to the endpoint.'),
-})
-
-export type S3ConfigRedacted = RedactedConfig<
-  ConfigOf<typeof S3ConfigSchema>,
-  | 'accessKeyId'
-  | 'secretAccessKey'
-  | 'sessionToken'
-  | 'presignedUrlProvider'
-  | 'httpAgentProvider'
-  | 'proxy'
->
-
-export function redactConfig(config: S3Config): S3ConfigRedacted {
-  return redactConfigWithSchema(S3ConfigSchema, config) as unknown as S3ConfigRedacted
 }
 
 // Only the entries `snakeToCamel` would get wrong, shared by every
@@ -68,22 +37,33 @@ const S3_FAMILY_RENAME: Record<string, string> = {
 
 export const S3_FAMILY_NORMALIZER: FieldNormalizer = { rename: S3_FAMILY_RENAME }
 
-// S3 proper also takes the credentials under boto3's `aws_` spellings.
-const S3_NORMALIZER: FieldNormalizer = {
-  rename: {
-    aws_access_key_id: 'accessKeyId',
-    aws_secret_access_key: 'secretAccessKey',
-    aws_session_token: 'sessionToken',
-    ...S3_FAMILY_RENAME,
-  },
-}
+export const S3ConfigSchema = S3CoreConfigSchema.extend({
+  profile: z
+    .string()
+    .optional()
+    .describe(
+      'Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.',
+    ),
+  proxy: secretStr()
+    .optional()
+    .describe('Proxy URL for every HTTP and HTTPS request to the endpoint.'),
+})
+  // S3 proper also takes the credentials under boto3's `aws_` spellings.
+  .register(FIELD_NORMALIZERS, {
+    rename: {
+      aws_access_key_id: 'accessKeyId',
+      aws_secret_access_key: 'secretAccessKey',
+      aws_session_token: 'sessionToken',
+      ...S3_FAMILY_RENAME,
+    },
+  })
 
-/**
- * Translate Python-style snake_case keys (as used in YAML configs and the
- * Python `S3Config`) to the TS-idiomatic camelCase fields, then validate.
- * Already-camelCase keys pass through unchanged so user code that
- * constructs `S3Config` directly keeps working.
- */
-export function normalizeS3Config(input: Record<string, unknown>): S3Config {
-  return parseConfigWithSchema(S3ConfigSchema, input, S3_NORMALIZER)
-}
+export type S3ConfigRedacted = RedactedConfig<
+  ConfigOf<typeof S3ConfigSchema>,
+  | 'accessKeyId'
+  | 'secretAccessKey'
+  | 'sessionToken'
+  | 'presignedUrlProvider'
+  | 'httpAgentProvider'
+  | 'proxy'
+>

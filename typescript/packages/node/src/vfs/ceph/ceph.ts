@@ -14,17 +14,12 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import {
-  cephToS3Config,
-  redactCephConfig,
-  type CephConfig,
-  type CephConfigRedacted,
-} from './config.ts'
+import { ALIAS, type CephConfig, type CephConfigRedacted } from './config.ts'
 
 export type CephVFSState = S3AliasVFSState<CephConfigRedacted>
 
 export class CephVFS extends S3AliasVFS<CephConfig, CephConfigRedacted> {
   constructor(config: CephConfig) {
-    super(VFSName.CEPH, config, cephToS3Config(config), redactCephConfig)
+    super(VFSName.CEPH, config, ALIAS)
   }
 }

@@ -15,12 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import {
-  MountMode,
-  TiDBFilesystemVFS,
-  Workspace,
-  normalizeTiDBFilesystemConfig,
-} from '@struktoai/mirage-node'
+import { buildVfs, MountMode, Workspace } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
@@ -38,13 +33,11 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const vfs = await TiDBFilesystemVFS.create(
-    normalizeTiDBFilesystemConfig({
-      host: process.env.TIDB_FILESYSTEM_HOST,
-      token: process.env.TIDB_FILESYSTEM_TOKEN,
-      root_path: process.env.TIDB_FILESYSTEM_ROOT_PATH ?? '/',
-    }),
-  )
+  const vfs = await buildVfs('tidb_filesystem', {
+    host: process.env.TIDB_FILESYSTEM_HOST,
+    token: process.env.TIDB_FILESYSTEM_TOKEN,
+    root_path: process.env.TIDB_FILESYSTEM_ROOT_PATH ?? '/',
+  })
   const ws = new Workspace({ '/fs': vfs }, { mode: MountMode.WRITE })
   try {
     await run(ws, 'mkdir -p /fs/mirage-example/notes')

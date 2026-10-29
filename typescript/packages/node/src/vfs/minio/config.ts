@@ -12,7 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeFixedAlias, type S3AliasConfig, type S3AliasConfigRedacted } from '../s3_alias.ts'
+import {
+  makeS3Alias,
+  FIXED_ALIAS_SCHEMA,
+  type S3AliasConfig,
+  type S3AliasConfigRedacted,
+} from '../s3_alias.ts'
 
 export interface MinIOConfig extends S3AliasConfig {
   endpoint: string
@@ -20,8 +25,13 @@ export interface MinIOConfig extends S3AliasConfig {
 
 export type MinIOConfigRedacted = S3AliasConfigRedacted
 
-const alias = makeFixedAlias<MinIOConfig, MinIOConfigRedacted>()
+export const MinIOConfigSchema = FIXED_ALIAS_SCHEMA
 
-export const minioToS3Config = alias.toS3Config
-export const redactMinIOConfig = alias.redact
-export const normalizeMinIOConfig = alias.normalize
+export const ALIAS = makeS3Alias<MinIOConfig, MinIOConfigRedacted>({
+  schema: MinIOConfigSchema,
+  endpointFor: (config) => config.endpoint,
+  regionDefault: 'us-east-1',
+  forcePathStyle: true,
+})
+
+export const minioToS3Config = ALIAS.toS3Config

@@ -16,7 +16,7 @@ import { DiscordVFSBase } from '@struktoai/mirage-core/vfs/discord/discord'
 import { DiscordAccessor } from '@struktoai/mirage-core/accessor/discord'
 
 import { NodeDiscordTransport } from '@struktoai/mirage-core/core/discord/client'
-import { redactDiscordConfig } from '@struktoai/mirage-core/vfs/discord/config'
+import { DiscordConfigSchema } from '@struktoai/mirage-core/vfs/discord/config'
 import type {
   DiscordConfig,
   DiscordConfigRedacted,
@@ -24,6 +24,7 @@ import type {
 
 import { VFS_MD } from '@struktoai/mirage-core/vfs/discord/discord'
 import { VFSName } from '@struktoai/mirage-core/types'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 export interface DiscordVFSState {
   type: string
@@ -54,7 +55,7 @@ export class DiscordVFS extends DiscordVFSBase {
   override getState(): Promise<DiscordVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactDiscordConfig(this.config),
+      config: redactConfigWithSchema(DiscordConfigSchema, this.config) as DiscordConfigRedacted,
     })
   }
 }

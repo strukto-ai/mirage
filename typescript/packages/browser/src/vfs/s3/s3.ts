@@ -19,7 +19,8 @@ import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { s3StorageLocation } from '@struktoai/mirage-core/vfs/s3/storage_id'
 import { VFSName } from '@struktoai/mirage-core/types'
 
-import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
+import { S3ConfigSchema, type S3Config, type S3ConfigRedacted } from './config.ts'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 export interface S3VFSState {
   type: string
@@ -66,7 +67,7 @@ export class S3VFS extends S3VFSBase {
   override getState(): Promise<S3VFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactConfig(this.config),
+      config: redactConfigWithSchema(S3ConfigSchema, this.config) as S3ConfigRedacted,
     })
   }
 }

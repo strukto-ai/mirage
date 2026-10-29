@@ -19,13 +19,12 @@ import { rstripSlash } from '../../utils/slash.ts'
 import {
   type ConfigOf,
   normalizeNonEmpty,
-  parseConfigWithSchema,
   REDACTED_SECRET,
   type RedactedConfig,
   secretStr,
 } from '../secrets.ts'
 
-const DifyConfigSchema = z.object({
+export const DifyConfigSchema = z.object({
   apiKey: secretStr().describe('Dify Knowledge API key, sent as `Authorization: Bearer`.'),
   baseUrl: z.string().describe('Dify API root, such as `https://api.dify.ai/v1`.'),
   datasetId: z.string().describe('ID of the Knowledge dataset the mount shows.'),
@@ -51,10 +50,6 @@ const DifyConfigSchema = z.object({
 })
 
 export type DifyConfig = ConfigOf<typeof DifyConfigSchema>
-
-export function normalizeDifyConfig(input: Record<string, unknown>): DifyConfig {
-  return parseConfigWithSchema(DifyConfigSchema, input)
-}
 
 export interface DifyConfigResolved {
   apiKey: string

@@ -16,7 +16,7 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const OCIConfigSchema = browserAliasSchema({
+export const OCIConfigSchema = browserAliasSchema({
   namespace: z
     .string()
     .optional()
@@ -29,7 +29,7 @@ export type OCIConfig = ConfigOf<typeof OCIConfigSchema>
 
 export type OCIConfigRedacted = RedactedConfig<OCIConfig, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<OCIConfig, OCIConfigRedacted>({
+export const ALIAS = makeBrowserS3Alias<OCIConfig, OCIConfigRedacted>({
   schema: OCIConfigSchema,
   endpointFor: (config) =>
     config.namespace !== undefined &&
@@ -40,7 +40,5 @@ const alias = makeBrowserS3Alias<OCIConfig, OCIConfigRedacted>({
       : undefined,
 })
 
-export const resolvedOciEndpoint = alias.resolvedEndpoint
-export const ociToS3Config = alias.toS3Config
-export const redactOciConfig = alias.redact
-export const normalizeOCIConfig = alias.normalize
+export const resolvedOciEndpoint = ALIAS.resolvedEndpoint
+export const ociToS3Config = ALIAS.toS3Config

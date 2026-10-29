@@ -14,17 +14,12 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import {
-  aliyunToS3Config,
-  redactAliyunConfig,
-  type AliyunConfig,
-  type AliyunConfigRedacted,
-} from './config.ts'
+import { ALIAS, type AliyunConfig, type AliyunConfigRedacted } from './config.ts'
 
 export type AliyunVFSState = S3AliasVFSState<AliyunConfigRedacted>
 
 export class AliyunVFS extends S3AliasVFS<AliyunConfig, AliyunConfigRedacted> {
   constructor(config: AliyunConfig) {
-    super(VFSName.ALIYUN, config, aliyunToS3Config(config), redactAliyunConfig)
+    super(VFSName.ALIYUN, config, ALIAS)
   }
 }

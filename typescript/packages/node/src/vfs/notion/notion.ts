@@ -16,11 +16,12 @@ import { NotionVFSBase } from '@struktoai/mirage-core/vfs/notion/notion'
 import { NotionAccessor } from '@struktoai/mirage-core/accessor/notion'
 
 import { HttpNotionTransport } from '@struktoai/mirage-core/core/notion/client'
-import { redactNotionConfig } from '@struktoai/mirage-core/core/notion/config'
+import { NotionConfigSchema } from '@struktoai/mirage-core/core/notion/config'
 import type { NotionConfig, NotionConfigRedacted } from '@struktoai/mirage-core/core/notion/config'
 
 import { VFS_MD } from '@struktoai/mirage-core/vfs/notion/notion'
 import { VFSName } from '@struktoai/mirage-core/types'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 export interface NotionVFSState {
   type: string
@@ -54,7 +55,7 @@ export class NotionVFS extends NotionVFSBase {
   override getState(): Promise<NotionVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactNotionConfig(this.config),
+      config: redactConfigWithSchema(NotionConfigSchema, this.config) as NotionConfigRedacted,
     })
   }
 }

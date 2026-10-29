@@ -17,18 +17,13 @@ import {
   orderedTimes,
   timeRangeOrderError,
 } from '@struktoai/mirage-core/core/time_config'
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  secretSchema,
-  z,
-} from '@struktoai/mirage-core/vfs/secrets'
+import { secretSchema, z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 type HeaderProvider = () => Promise<Record<string, string>> | Record<string, string>
 
-const DiscordConfigSchema = z
+export const DiscordConfigSchema = z
   .object({
     ...timeoutShape,
     ...timeRangeShape,
@@ -48,18 +43,3 @@ const DiscordConfigSchema = z
 export type DiscordConfig = ConfigOf<typeof DiscordConfigSchema>
 
 export type DiscordConfigRedacted = RedactedConfig<DiscordConfig, 'getHeaders'>
-
-export function redactDiscordConfig(config: DiscordConfig): DiscordConfigRedacted {
-  return redactConfigWithSchema(DiscordConfigSchema, config) as unknown as DiscordConfigRedacted
-}
-
-/**
- * Translate a python-style config blob to this one's camelCase.
- *
- * No rename map: every field's camelCase spelling is what `snakeToCamel`
- * already produces, and restating those only creates a second place to be
- * wrong. Mirrors node's `normalizeDiscordConfig`.
- */
-export function normalizeDiscordConfig(input: Record<string, unknown>): DiscordConfig {
-  return parseConfigWithSchema(DiscordConfigSchema, input)
-}

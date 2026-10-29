@@ -14,17 +14,12 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import {
-  redactScalewayConfig,
-  scalewayToS3Config,
-  type ScalewayConfig,
-  type ScalewayConfigRedacted,
-} from './config.ts'
+import { ALIAS, type ScalewayConfig, type ScalewayConfigRedacted } from './config.ts'
 
 export type ScalewayVFSState = S3AliasVFSState<ScalewayConfigRedacted>
 
 export class ScalewayVFS extends S3AliasVFS<ScalewayConfig, ScalewayConfigRedacted> {
   constructor(config: ScalewayConfig) {
-    super(VFSName.SCALEWAY, config, scalewayToS3Config(config), redactScalewayConfig)
+    super(VFSName.SCALEWAY, config, ALIAS)
   }
 }

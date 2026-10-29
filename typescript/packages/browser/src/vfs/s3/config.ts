@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { S3ConfigSchema } from '@struktoai/mirage-core/vfs/s3/config'
-import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
-import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3ConfigSchema as S3CoreConfigSchema } from '@struktoai/mirage-core/vfs/s3/config'
+import { FIELD_NORMALIZERS } from '@struktoai/mirage-core/vfs/secrets'
 
 // The one field whose camelCase spelling is not what `snakeToCamel` would
 // produce, so it is the whole rename map for the browser's S3 family. Every
@@ -22,12 +21,12 @@ import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 // the default, and restating those only creates a second place to be wrong.
 export const S3_BROWSER_RENAME: Record<string, string> = { endpoint_url: 'endpoint' }
 
-/** Translate a python-style S3 config blob to the browser's camelCase one. */
-export function normalizeS3Config(input: Record<string, unknown>): S3Config {
-  return parseConfigWithSchema(S3ConfigSchema, input, { rename: S3_BROWSER_RENAME })
-}
+// The core shape under the browser's own renames, so the core schema
+// carries none of a host's spellings.
+export const S3ConfigSchema = S3CoreConfigSchema.clone().register(FIELD_NORMALIZERS, {
+  rename: S3_BROWSER_RENAME,
+})
 
-export { redactConfig } from '@struktoai/mirage-core/vfs/s3/config'
 export type {
   S3BrowserOperation,
   S3BrowserPresignedUrlProvider,

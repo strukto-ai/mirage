@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeSlackConfig, redactSlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
+import { SlackConfigSchema } from '@struktoai/mirage-core/vfs/slack/config'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { buildVfs } from '../registry.ts'
 import { SlackVFS } from './slack.ts'
+import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -109,33 +110,35 @@ describe('SlackVFS (node)', () => {
   })
 })
 
-describe('redactSlackConfig (node)', () => {
+describe('SlackConfigSchema redaction (node)', () => {
   it('redacts only declared fields, drops nothing else', () => {
-    expect(redactSlackConfig({ token: 'a' })).toEqual({ token: '<REDACTED>' })
-    expect(redactSlackConfig({ token: 'a', searchToken: 'b' })).toEqual({
+    expect(redactConfigWithSchema(SlackConfigSchema, { token: 'a' })).toEqual({
+      token: '<REDACTED>',
+    })
+    expect(redactConfigWithSchema(SlackConfigSchema, { token: 'a', searchToken: 'b' })).toEqual({
       token: '<REDACTED>',
       searchToken: '<REDACTED>',
     })
   })
 })
 
-describe('normalizeSlackConfig', () => {
+describe('SlackConfigSchema parsing', () => {
   it('renames search_token to searchToken', () => {
-    expect(normalizeSlackConfig({ token: 'a', search_token: 'b' })).toEqual({
+    expect(parseConfigWithSchema(SlackConfigSchema, { token: 'a', search_token: 'b' })).toEqual({
       token: 'a',
       searchToken: 'b',
     })
   })
 
   it('passes camelCase through unchanged', () => {
-    expect(normalizeSlackConfig({ token: 'a', searchToken: 'b' })).toEqual({
+    expect(parseConfigWithSchema(SlackConfigSchema, { token: 'a', searchToken: 'b' })).toEqual({
       token: 'a',
       searchToken: 'b',
     })
   })
 
   it('omits searchToken when not provided', () => {
-    expect(normalizeSlackConfig({ token: 'a' })).toEqual({ token: 'a' })
+    expect(parseConfigWithSchema(SlackConfigSchema, { token: 'a' })).toEqual({ token: 'a' })
   })
 })
 

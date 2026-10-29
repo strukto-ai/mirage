@@ -12,10 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  normalizeDiscordConfig,
-  redactDiscordConfig,
-} from '@struktoai/mirage-core/vfs/discord/config'
+import { DiscordConfigSchema } from '@struktoai/mirage-core/vfs/discord/config'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
@@ -23,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { buildVfs } from '../registry.ts'
 import { DiscordVFS } from './discord.ts'
+import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -120,22 +118,26 @@ describe('DiscordVFS (node)', () => {
   })
 })
 
-describe('redactDiscordConfig (node)', () => {
+describe('DiscordConfigSchema redaction (node)', () => {
   it('always redacts token', () => {
-    expect(redactDiscordConfig({ token: 'a' })).toEqual({ token: '<REDACTED>' })
+    expect(redactConfigWithSchema(DiscordConfigSchema, { token: 'a' })).toEqual({
+      token: '<REDACTED>',
+    })
   })
 })
 
-describe('normalizeDiscordConfig', () => {
+describe('DiscordConfigSchema parsing', () => {
   it('passes token through unchanged', () => {
-    expect(normalizeDiscordConfig({ token: 'a' })).toEqual({ token: 'a' })
+    expect(parseConfigWithSchema(DiscordConfigSchema, { token: 'a' })).toEqual({ token: 'a' })
   })
 
   it('maps the python-parity base_url key onto baseUrl', () => {
     // normalizeFields snake-to-camels every key by default, so no explicit
     // rename is needed. Pinned because a silent miss here would send YAML
     // and registry configs to the public API instead of the configured one.
-    expect(normalizeDiscordConfig({ token: 'a', base_url: 'http://127.0.0.1:5099' })).toEqual({
+    expect(
+      parseConfigWithSchema(DiscordConfigSchema, { token: 'a', base_url: 'http://127.0.0.1:5099' }),
+    ).toEqual({
       token: 'a',
       baseUrl: 'http://127.0.0.1:5099',
     })

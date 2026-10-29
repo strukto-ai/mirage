@@ -13,15 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OAuthClientProvider } from '@modelcontextprotocol/client'
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  secretSchema,
-  z,
-} from '@struktoai/mirage-core/vfs/secrets'
+import { secretSchema, z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 
-const NotionConfigSchema = z.object({
+export const NotionConfigSchema = z.object({
   authProvider: secretSchema(
     z.custom<OAuthClientProvider>((value) => value !== null && typeof value === 'object'),
   ).describe(
@@ -36,18 +31,3 @@ const NotionConfigSchema = z.object({
 export type NotionConfig = ConfigOf<typeof NotionConfigSchema>
 
 export type NotionConfigRedacted = RedactedConfig<NotionConfig, 'authProvider'>
-
-export function redactNotionConfig(config: NotionConfig): NotionConfigRedacted {
-  return redactConfigWithSchema(NotionConfigSchema, config) as unknown as NotionConfigRedacted
-}
-
-/**
- * Translate a python-style config blob to this one's camelCase.
- *
- * No rename map: every field's camelCase spelling is what `snakeToCamel`
- * already produces, and restating those only creates a second place to be
- * wrong. Mirrors node's `normalizeNotionConfig`.
- */
-export function normalizeNotionConfig(input: Record<string, unknown>): NotionConfig {
-  return parseConfigWithSchema(NotionConfigSchema, input)
-}

@@ -16,7 +16,7 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const SupabaseConfigSchema = browserAliasSchema({
+export const SupabaseConfigSchema = browserAliasSchema({
   projectRef: z
     .string()
     .optional()
@@ -29,7 +29,7 @@ export type SupabaseConfig = ConfigOf<typeof SupabaseConfigSchema>
 
 export type SupabaseConfigRedacted = RedactedConfig<SupabaseConfig, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<SupabaseConfig, SupabaseConfigRedacted>({
+export const ALIAS = makeBrowserS3Alias<SupabaseConfig, SupabaseConfigRedacted>({
   schema: SupabaseConfigSchema,
   endpointFor: derivedEndpoint(
     'projectRef',
@@ -38,7 +38,5 @@ const alias = makeBrowserS3Alias<SupabaseConfig, SupabaseConfigRedacted>({
   forcePathStyle: true,
 })
 
-export const resolvedSupabaseEndpoint = alias.resolvedEndpoint
-export const supabaseToS3Config = alias.toS3Config
-export const redactSupabaseConfig = alias.redact
-export const normalizeSupabaseConfig = alias.normalize
+export const resolvedSupabaseEndpoint = ALIAS.resolvedEndpoint
+export const supabaseToS3Config = ALIAS.toS3Config

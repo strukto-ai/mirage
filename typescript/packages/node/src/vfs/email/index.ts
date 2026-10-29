@@ -14,8 +14,6 @@
 
 export {
   buildEmailConfig,
-  normalizeEmailConfig,
-  redactEmailConfig,
   type EmailConfig,
   type EmailConfigInput,
   type EmailConfigRedacted,

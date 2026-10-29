@@ -13,19 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  type ConfigOf,
-  parseConfigWithSchema,
-  REDACTED_SECRET,
-  type RedactedConfig,
-  secretStr,
-} from '../secrets.ts'
+import { type ConfigOf, REDACTED_SECRET, type RedactedConfig, secretStr } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 
 // `uri` is the credential, so it carries the secret marker the redactor
 // reads; the rest are the knobs python's `MongoDBConfig` declares.
-const MongoDBConfigSchema = z.object({
+export const MongoDBConfigSchema = z.object({
   ...timeoutShape,
   uri: secretStr().describe(
     'MongoDB connection URI in Node; in the browser, the URL of a backend route that holds the connection URI.',
@@ -57,10 +51,6 @@ export interface MongoDBConfigResolved {
   databases: readonly string[] | null
   maxDocLimit: number
   elideFields: Record<string, readonly string[]>
-}
-
-export function normalizeMongoDBConfig(input: Record<string, unknown>): MongoDBConfig {
-  return parseConfigWithSchema(MongoDBConfigSchema, input)
 }
 
 export function resolveMongoDBConfig(config: MongoDBConfig): MongoDBConfigResolved {

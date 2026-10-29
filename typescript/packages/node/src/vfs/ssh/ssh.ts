@@ -16,7 +16,7 @@ import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { SSHAccessor } from '../../accessor/ssh.ts'
-import { type SSHConfig, type SSHConfigRedacted, redactSshConfig } from './config.ts'
+import { type SSHConfig, type SSHConfigRedacted, SSHConfigSchema } from './config.ts'
 import type {
   CapacityResult,
   PathSpec,
@@ -45,6 +45,7 @@ import { capacity as sshCapacity } from '../../core/ssh/capacity.ts'
 import { truncate as sshTruncate } from '../../core/ssh/truncate.ts'
 import { setAttrs as sshSetAttrs } from '../../core/ssh/set_attrs.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 const mkdirOp = (accessor: SSHAccessor, path: PathSpec, parents?: boolean): Promise<void> =>
   sshMkdir(accessor, path, parents === true)
@@ -211,7 +212,7 @@ export class SSHVFS extends BaseVFS {
   override async getState(): Promise<SSHVFSState> {
     return {
       type: this.name,
-      config: redactSshConfig(this.config),
+      config: redactConfigWithSchema(SSHConfigSchema, this.config) as SSHConfigRedacted,
     }
   }
 }

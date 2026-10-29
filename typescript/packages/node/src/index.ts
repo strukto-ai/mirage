@@ -79,26 +79,15 @@ export {
   type TiDBFilesystemVFSState,
 } from './vfs/tidb_filesystem/tidb_filesystem.ts'
 
-export {
-  normalizeS3Config,
-  redactConfig as redactS3Config,
-  type S3Config,
-  type S3ConfigRedacted,
-} from './vfs/s3/config.ts'
+export type { S3Config, S3ConfigRedacted } from './vfs/s3/config.ts'
 export { GCSVFS, type GCSVFSState } from './vfs/gcs/gcs.ts'
-export {
-  GCS_ENDPOINT,
-  redactGcsConfig,
-  type GCSConfig,
-  type GCSConfigRedacted,
-} from './vfs/gcs/config.ts'
+export { GCS_ENDPOINT, type GCSConfig, type GCSConfigRedacted } from './vfs/gcs/config.ts'
 export { OCIVFS, type OCIVFSState } from './vfs/oci/oci.ts'
-export { redactOciConfig, type OCIConfig, type OCIConfigRedacted } from './vfs/oci/config.ts'
+export type { OCIConfig, OCIConfigRedacted } from './vfs/oci/config.ts'
 export { R2VFS, type R2VFSState } from './vfs/r2/r2.ts'
-export { redactR2Config, type R2Config, type R2ConfigRedacted } from './vfs/r2/config.ts'
+export type { R2Config, R2ConfigRedacted } from './vfs/r2/config.ts'
 export { SupabaseVFS, type SupabaseVFSState } from './vfs/supabase/supabase.ts'
 export {
-  redactSupabaseConfig,
   resolvedSupabaseEndpoint,
   type SupabaseConfig,
   type SupabaseConfigRedacted,
@@ -118,85 +107,55 @@ export {
   type HfRepoConfigRedacted,
 } from './vfs/hf_buckets/config.ts'
 export { HfDatasetsVFS, type HfDatasetsVFSState } from './vfs/hf_datasets/hf_datasets.ts'
-export {
-  normalizeHfDatasetsConfig,
-  redactHfDatasetsConfig,
-  type HfDatasetsConfig,
-  type HfDatasetsConfigRedacted,
-} from './vfs/hf_datasets/config.ts'
+export type { HfDatasetsConfig, HfDatasetsConfigRedacted } from './vfs/hf_datasets/config.ts'
 export { HfModelsVFS, type HfModelsVFSState } from './vfs/hf_models/hf_models.ts'
-export {
-  normalizeHfModelsConfig,
-  redactHfModelsConfig,
-  type HfModelsConfig,
-  type HfModelsConfigRedacted,
-} from './vfs/hf_models/config.ts'
+export type { HfModelsConfig, HfModelsConfigRedacted } from './vfs/hf_models/config.ts'
 export { HfSpacesVFS, type HfSpacesVFSState } from './vfs/hf_spaces/hf_spaces.ts'
-export {
-  normalizeHfSpacesConfig,
-  redactHfSpacesConfig,
-  type HfSpacesConfig,
-  type HfSpacesConfigRedacted,
-} from './vfs/hf_spaces/config.ts'
+export type { HfSpacesConfig, HfSpacesConfigRedacted } from './vfs/hf_spaces/config.ts'
 export { MinIOVFS, type MinIOVFSState } from './vfs/minio/minio.ts'
-export {
-  redactMinIOConfig,
-  type MinIOConfig,
-  type MinIOConfigRedacted,
-} from './vfs/minio/config.ts'
+export type { MinIOConfig, MinIOConfigRedacted } from './vfs/minio/config.ts'
 export { SeaweedFSVFS, type SeaweedFSVFSState } from './vfs/seaweedfs/seaweedfs.ts'
-export {
-  redactSeaweedFSConfig,
-  type SeaweedFSConfig,
-  type SeaweedFSConfigRedacted,
-} from './vfs/seaweedfs/config.ts'
+export type { SeaweedFSConfig, SeaweedFSConfigRedacted } from './vfs/seaweedfs/config.ts'
 export { CephVFS, type CephVFSState } from './vfs/ceph/ceph.ts'
-export { redactCephConfig, type CephConfig, type CephConfigRedacted } from './vfs/ceph/config.ts'
+export type { CephConfig, CephConfigRedacted } from './vfs/ceph/config.ts'
 export { WasabiVFS, type WasabiVFSState } from './vfs/wasabi/wasabi.ts'
 export {
-  redactWasabiConfig,
   resolvedWasabiEndpoint,
   type WasabiConfig,
   type WasabiConfigRedacted,
 } from './vfs/wasabi/config.ts'
 export { BackblazeVFS, type BackblazeVFSState } from './vfs/backblaze/backblaze.ts'
 export {
-  redactBackblazeConfig,
   resolvedBackblazeEndpoint,
   type BackblazeConfig,
   type BackblazeConfigRedacted,
 } from './vfs/backblaze/config.ts'
 export { DigitalOceanVFS, type DigitalOceanVFSState } from './vfs/digitalocean/digitalocean.ts'
 export {
-  redactDigitalOceanConfig,
   resolvedDigitalOceanEndpoint,
   type DigitalOceanConfig,
   type DigitalOceanConfigRedacted,
 } from './vfs/digitalocean/config.ts'
 export { TencentVFS, type TencentVFSState } from './vfs/tencent/tencent.ts'
 export {
-  redactTencentConfig,
   resolvedTencentEndpoint,
   type TencentConfig,
   type TencentConfigRedacted,
 } from './vfs/tencent/config.ts'
 export { AliyunVFS, type AliyunVFSState } from './vfs/aliyun/aliyun.ts'
 export {
-  redactAliyunConfig,
   resolvedAliyunEndpoint,
   type AliyunConfig,
   type AliyunConfigRedacted,
 } from './vfs/aliyun/config.ts'
 export { ScalewayVFS, type ScalewayVFSState } from './vfs/scaleway/scaleway.ts'
 export {
-  redactScalewayConfig,
   resolvedScalewayEndpoint,
   type ScalewayConfig,
   type ScalewayConfigRedacted,
 } from './vfs/scaleway/config.ts'
 export { QingStorVFS, type QingStorVFSState } from './vfs/qingstor/qingstor.ts'
 export {
-  redactQingStorConfig,
   resolvedQingStorEndpoint,
   type QingStorConfig,
   type QingStorConfigRedacted,
@@ -208,60 +167,28 @@ export { MongoDBStore } from './vfs/mongodb/store.ts'
 export { LanceDBVFS, type LanceDBVFSOptions } from './vfs/lancedb/lancedb.ts'
 export { LanceDBStore } from './vfs/lancedb/store.ts'
 export { SlackVFS, type SlackVFSState } from './vfs/slack/slack.ts'
-export { normalizeSlackConfig, redactSlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
 export type { SlackConfig, SlackConfigRedacted } from '@struktoai/mirage-core/vfs/slack/config'
 export { SSHVFS, type SSHVFSState } from './vfs/ssh/ssh.ts'
-export {
-  normalizeSshConfig,
-  redactSshConfig,
-  type SSHConfig,
-  type SSHConfigRedacted,
-} from './vfs/ssh/config.ts'
+export type { SSHConfig, SSHConfigRedacted } from './vfs/ssh/config.ts'
 export { SSHAccessor } from './accessor/ssh.ts'
 export { NextcloudAccessor } from './accessor/nextcloud.ts'
 export { NextcloudVFS, type NextcloudVFSState } from './vfs/nextcloud/nextcloud.ts'
-export {
-  normalizeNextcloudConfig,
-  redactNextcloudConfig,
-  type NextcloudConfig,
-  type NextcloudConfigRedacted,
-} from './vfs/nextcloud/config.ts'
+export type { NextcloudConfig, NextcloudConfigRedacted } from './vfs/nextcloud/config.ts'
 export { NextcloudEventHook } from './core/nextcloud/events.ts'
 export { DiscordVFS, type DiscordVFSState } from './vfs/discord/discord.ts'
-export {
-  normalizeDiscordConfig,
-  redactDiscordConfig,
-} from '@struktoai/mirage-core/vfs/discord/config'
 export type {
   DiscordConfig,
   DiscordConfigRedacted,
 } from '@struktoai/mirage-core/vfs/discord/config'
 export { TrelloVFS, type TrelloVFSState } from '@struktoai/mirage-core/vfs/trello/trello'
-export {
-  normalizeTrelloConfig,
-  redactTrelloConfig,
-  type TrelloConfig,
-  type TrelloConfigRedacted,
-} from '@struktoai/mirage-core/core/trello/config'
+export type { TrelloConfig, TrelloConfigRedacted } from '@struktoai/mirage-core/core/trello/config'
 export { LinearVFS, type LinearVFSState } from '@struktoai/mirage-core/vfs/linear/linear'
-export {
-  normalizeLinearConfig,
-  redactLinearConfig,
-} from '@struktoai/mirage-core/core/linear/config'
 export type { LinearConfig, LinearConfigRedacted } from '@struktoai/mirage-core/core/linear/config'
 export { NotionVFS, type NotionVFSState } from './vfs/notion/notion.ts'
-export {
-  normalizeNotionConfig,
-  redactNotionConfig,
-} from '@struktoai/mirage-core/core/notion/config'
 export type { NotionConfig, NotionConfigRedacted } from '@struktoai/mirage-core/core/notion/config'
 // Named rather than left to the `export *` above: the three VFS classes come
 // through it, but core's entry point carries no config type of theirs, so
 // dropping these lines would take them out of this package's API too.
-export {
-  normalizeAirtableConfig,
-  redactAirtableConfig,
-} from '@struktoai/mirage-core/core/airtable/config'
 export type {
   AirtableConfig,
   AirtableConfigRedacted,
@@ -272,80 +199,40 @@ export type { OneDriveConfig } from '@struktoai/mirage-core/accessor/onedrive'
 export type { SharePointConfig } from '@struktoai/mirage-core/accessor/sharepoint'
 export { LangfuseVFS, type LangfuseVFSState } from '@struktoai/mirage-core/vfs/langfuse/langfuse'
 export { JaegerVFS, type JaegerVFSState } from './vfs/jaeger/jaeger.ts'
-export {
-  normalizeLangfuseConfig,
-  redactLangfuseConfig,
-  type LangfuseConfig,
-  type LangfuseConfigRedacted,
+export type {
+  LangfuseConfig,
+  LangfuseConfigRedacted,
 } from '@struktoai/mirage-core/vfs/langfuse/config'
 export { GitHubVFS, type GitHubVFSState } from '@struktoai/mirage-core/vfs/github/github'
-export {
-  normalizeGitHubConfig,
-  redactGitHubConfig,
-  type GitHubConfig,
-  type GitHubConfigRedacted,
-} from '@struktoai/mirage-core/core/github/config'
+export type { GitHubConfig, GitHubConfigRedacted } from '@struktoai/mirage-core/core/github/config'
 export { GDocsVFS, type GDocsVFSState } from '@struktoai/mirage-core/vfs/gdocs/gdocs'
-export {
-  normalizeGDocsConfig,
-  redactGDocsConfig,
-  type GDocsConfig,
-  type GDocsConfigRedacted,
-} from '@struktoai/mirage-core/vfs/gdocs/config'
+export type { GDocsConfig, GDocsConfigRedacted } from '@struktoai/mirage-core/vfs/gdocs/config'
 export { GSheetsVFS, type GSheetsVFSState } from '@struktoai/mirage-core/vfs/gsheets/gsheets'
-export {
-  normalizeGSheetsConfig,
-  redactGSheetsConfig,
-  type GSheetsConfig,
-  type GSheetsConfigRedacted,
+export type {
+  GSheetsConfig,
+  GSheetsConfigRedacted,
 } from '@struktoai/mirage-core/vfs/gsheets/config'
 export { GSlidesVFS, type GSlidesVFSState } from '@struktoai/mirage-core/vfs/gslides/gslides'
-export {
-  normalizeGSlidesConfig,
-  redactGSlidesConfig,
-  type GSlidesConfig,
-  type GSlidesConfigRedacted,
+export type {
+  GSlidesConfig,
+  GSlidesConfigRedacted,
 } from '@struktoai/mirage-core/vfs/gslides/config'
 export { GoogleDriveVFS, type GDriveVFSState } from '@struktoai/mirage-core/vfs/gdrive/gdrive'
-export {
-  normalizeGDriveConfig,
-  redactGDriveConfig,
-  type GDriveConfig,
-  type GDriveConfigRedacted,
+export type {
+  GoogleDriveConfig,
+  GoogleDriveConfigRedacted,
 } from '@struktoai/mirage-core/vfs/gdrive/config'
 export { DropboxVFS, type DropboxVFSState } from '@struktoai/mirage-core/vfs/dropbox/dropbox'
-export {
-  normalizeDropboxConfig,
-  redactDropboxConfig,
-  type DropboxConfig,
-  type DropboxConfigRedacted,
-} from './vfs/dropbox/config.ts'
+export type { DropboxConfig, DropboxConfigRedacted } from './vfs/dropbox/config.ts'
 export { BoxVFS, type BoxVFSState } from '@struktoai/mirage-core/vfs/box/box'
-export {
-  normalizeBoxConfig,
-  redactBoxConfig,
-  type BoxConfig,
-  type BoxConfigRedacted,
-} from '@struktoai/mirage-core/vfs/box/config'
+export type { BoxConfig, BoxConfigRedacted } from '@struktoai/mirage-core/vfs/box/config'
 export { GmailVFS, type GmailVFSState } from '@struktoai/mirage-core/vfs/gmail/gmail'
-export {
-  normalizeGmailConfig,
-  redactGmailConfig,
-  type GmailConfig,
-  type GmailConfigRedacted,
-} from '@struktoai/mirage-core/vfs/gmail/config'
+export type { GmailConfig, GmailConfigRedacted } from '@struktoai/mirage-core/vfs/gmail/config'
 export { GCalVFS, type GCalVFSState } from '@struktoai/mirage-core/vfs/gcal/gcal'
-export {
-  normalizeGCalConfig,
-  redactGCalConfig,
-  type GCalConfig,
-  type GCalConfigRedacted,
-} from '@struktoai/mirage-core/vfs/gcal/config'
+export type { GCalConfig, GCalConfigRedacted } from '@struktoai/mirage-core/vfs/gcal/config'
 export { EmailVFS, type EmailVFSState } from './vfs/email/email.ts'
 export {
   buildEmailConfig,
-  normalizeEmailConfig,
-  redactEmailConfig,
   type EmailConfig,
   type EmailConfigInput,
   type EmailConfigRedacted,
@@ -434,4 +321,4 @@ export { Files, WorkspaceFiles } from '@struktoai/mirage-core/workspace/files'
 export { Namespace } from '@struktoai/mirage-core/workspace/mount/namespace/namespace'
 
 export { WandbVFS } from '@struktoai/mirage-core/vfs/wandb/wandb'
-export { normalizeWandbConfig, type WandbConfig } from '@struktoai/mirage-core/core/wandb/config'
+export type { WandbConfig } from '@struktoai/mirage-core/core/wandb/config'

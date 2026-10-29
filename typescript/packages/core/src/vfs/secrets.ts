@@ -73,16 +73,25 @@ export function secretSchema<T extends z.ZodType>(schema: T): T {
 }
 
 /**
+ * The python spellings a config schema takes, registered beside the schema
+ * (`z.object({...}).register(FIELD_NORMALIZERS, { rename: {...} })`) the way
+ * a pydantic field carries its alias, so every caller of
+ * {@link parseConfigWithSchema} renames the same keys.
+ */
+export const FIELD_NORMALIZERS = z.registry<FieldNormalizer>()
+
+/**
  * The one loader a mount config comes through: rename the python-side
  * spellings, then validate.
  *
- * Every `normalize*Config` is this call with its schema, so a config that
- * reaches a VFS has been checked the way pydantic checks the python
+ * Every registry entry calls this with its backend's schema, so a config
+ * that reaches a VFS has been checked the way pydantic checks the python
  * twin on construction. It used to be `normalizeFields` alone in 56 of 60
  * normalizers, which let `bucket: 123`, `timeout: "abc"` and a Google
  * config naming no credential at all reach their clients unrefused, and
  * left every requiredness rule in these schemas unreachable from the mount
  * path -- `GitHubConfigSchema` required `owner` and nothing ever asked it.
+ * The renames come from the schema's {@link FIELD_NORMALIZERS} entry.
  *
  * Unknown keys are refused, as every python config refuses them with
  * `extra="forbid"`: they used to be stripped, so a typo'd `team_idz` built
@@ -97,8 +106,8 @@ export function secretSchema<T extends z.ZodType>(schema: T): T {
 export function parseConfigWithSchema<T extends ZodRawShape>(
   schema: ZodObject<T>,
   input: Record<string, unknown>,
-  normalizer: FieldNormalizer = {},
 ): ConfigOf<ZodObject<T>> {
+  const normalizer = FIELD_NORMALIZERS.get(schema) ?? {}
   if (refusesExtraKeys(schema)) refuseUnknownKeys(input, Object.keys(schema.shape), normalizer)
   return schema.parse(normalizeFields(input, normalizer)) as ConfigOf<ZodObject<T>>
 }

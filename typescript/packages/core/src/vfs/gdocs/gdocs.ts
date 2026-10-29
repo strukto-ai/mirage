@@ -19,7 +19,7 @@ import { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { TokenManager } from '../../core/google/client.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
-import { redactGDocsConfig, type GDocsConfig, type GDocsConfigRedacted } from './config.ts'
+import { GDocsConfigSchema, type GDocsConfig, type GDocsConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { DOCS_WORDS } from '../../utils/generated/google_vocabulary.ts'
@@ -33,6 +33,7 @@ import { makeFilename } from './doc_entry.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { unlink as gdocsUnlink } from '../../core/gdocs/unlink.ts'
 import { rename as gdocsRename } from '../../core/gdocs/rename.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   owned/
@@ -204,7 +205,7 @@ export class GDocsVFS extends BaseVFS {
   override getState(): Promise<GDocsVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactGDocsConfig(this.config),
+      config: redactConfigWithSchema(GDocsConfigSchema, this.config) as GDocsConfigRedacted,
     })
   }
 }

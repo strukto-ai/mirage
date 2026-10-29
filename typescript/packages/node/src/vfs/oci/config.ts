@@ -12,33 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  z,
-} from '@struktoai/mirage-core/vfs/secrets'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
-import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
-import { ALIAS_SHAPE } from '../s3_alias.ts'
-import type { S3Config } from '../s3/config.ts'
+import { aliasSchema, makeS3Alias, type S3AliasConfig } from '../s3_alias.ts'
 
-export interface OCIConfig {
-  bucket: string
+export interface OCIConfig extends S3AliasConfig {
   namespace: string
   region: string
-  accessKeyId?: string
-  secretAccessKey?: string
-  sessionToken?: string
-  profile?: string
-  endpoint?: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeout?: number
-  proxy?: string
 }
 
-const OCIConfigSchema = z.object({
-  ...ALIAS_SHAPE,
+export const OCIConfigSchema = aliasSchema({
   forcePathStyle: z.boolean().optional().meta({ default: true }),
   region: z
     .string()
@@ -63,35 +46,11 @@ export type OCIConfigRedacted = RedactedConfig<
   'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
 >
 
-function resolvedOciEndpoint(config: OCIConfig): string {
-  if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
-  return `https://${config.namespace}.compat.objectstorage.${config.region}.oci.customer-oci.com`
-}
+export const ALIAS = makeS3Alias<OCIConfig, OCIConfigRedacted>({
+  schema: OCIConfigSchema,
+  endpointFor: (config) =>
+    `https://${config.namespace}.compat.objectstorage.${config.region}.oci.customer-oci.com`,
+  forcePathStyle: true,
+})
 
-export function ociToS3Config(config: OCIConfig): S3Config {
-  return {
-    bucket: config.bucket,
-    region: config.region,
-    endpoint: resolvedOciEndpoint(config),
-    ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
-    ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
-    ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
-    ...(config.profile !== undefined ? { profile: config.profile } : {}),
-    forcePathStyle: config.forcePathStyle ?? true,
-    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
-    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-  }
-}
-
-export function redactOciConfig(config: OCIConfig): OCIConfigRedacted {
-  return redactConfigWithSchema(OCIConfigSchema, {
-    ...config,
-    endpoint: resolvedOciEndpoint(config),
-    forcePathStyle: config.forcePathStyle ?? true,
-  }) as unknown as OCIConfigRedacted
-}
-
-export function normalizeOciConfig(input: Record<string, unknown>): OCIConfig {
-  return parseConfigWithSchema(OCIConfigSchema, input, S3_FAMILY_NORMALIZER)
-}
+export const ociToS3Config = ALIAS.toS3Config

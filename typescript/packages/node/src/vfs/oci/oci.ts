@@ -14,12 +14,12 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ociToS3Config, redactOciConfig, type OCIConfig, type OCIConfigRedacted } from './config.ts'
+import { ALIAS, type OCIConfig, type OCIConfigRedacted } from './config.ts'
 
 export type OCIVFSState = S3AliasVFSState<OCIConfigRedacted>
 
 export class OCIVFS extends S3AliasVFS<OCIConfig, OCIConfigRedacted> {
   constructor(config: OCIConfig) {
-    super(VFSName.OCI, config, ociToS3Config(config), redactOciConfig)
+    super(VFSName.OCI, config, ALIAS)
   }
 }

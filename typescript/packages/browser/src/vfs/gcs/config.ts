@@ -16,7 +16,7 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const GCSConfigSchema = browserAliasSchema({
+export const GCSConfigSchema = browserAliasSchema({
   region: z.string().optional().meta({
     description: 'Region the presigned URLs are signed for; GCS accepts `auto`.',
     default: 'auto',
@@ -32,12 +32,10 @@ export type GCSConfig = ConfigOf<typeof GCSConfigSchema>
 
 export type GCSConfigRedacted = RedactedConfig<GCSConfig, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<GCSConfig, GCSConfigRedacted, string>({
+export const ALIAS = makeBrowserS3Alias<GCSConfig, GCSConfigRedacted, string>({
   schema: GCSConfigSchema,
   endpointFor: () => 'https://storage.googleapis.com',
   regionDefault: 'auto',
 })
 
-export const gcsToS3Config = alias.toS3Config
-export const redactGcsConfig = alias.redact
-export const normalizeGCSConfig = alias.normalize
+export const gcsToS3Config = ALIAS.toS3Config

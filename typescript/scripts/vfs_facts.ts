@@ -615,13 +615,13 @@ export function registryClasses(
 // Config field sets: what a mount can be told.
 //
 // Python dumps its pydantic wire names off the model. TypeScript's twin is
-// the zod schema behind each `normalize*Config` entry point, and it is read from
-// the source rather than observed, for the same reason capabilities are:
-// most schemas are module-private, and constructing a VFS to reach one
-// is not inert. The walk follows exactly the forms the config modules use --
-// a config call in the exported function, `alias.normalize` off one of the
-// S3 factories, a re-exported normalizer -- and throws on any other, so a
-// new form fails the dump rather than emitting a row that reads as "no
+// the zod schema each registry entry parses its config with, and it is read
+// from the source rather than observed, for the same reason capabilities
+// are: constructing a VFS to reach one is not inert. The walk follows
+// exactly the forms the config modules use -- the schema itself, a function
+// whose body parses with one, a re-export of either -- and the renames the
+// schema registers in `FIELD_NORMALIZERS`, and throws on any other form, so
+// a new one fails the dump rather than emitting a row that reads as "no
 // divergence here".
 // ---------------------------------------------------------------------------
 
@@ -650,7 +650,7 @@ export interface ConfigShape {
 }
 
 const CONFIG_PARSER = 'parseConfigWithSchema'
-const NORMALIZER_RE = /^normalize\w*Config$/
+const CONFIG_RE = /^normalize\w*Config$|ConfigSchema$/
 
 export interface Bound {
   expr: ts.Expression
@@ -673,8 +673,9 @@ export function moduleFile(
   return existsSync(file) ? file : undefined
 }
 
-// The normalizer a registry entry calls, and the module it imports it from.
-function registryNormalizers(
+// The schema (or schema-parsing function) a registry entry imports, and the
+// module it imports it from.
+function registryConfigs(
   registryFile: string,
   packagesRoot: string,
 ): Map<string, { file: string; name: string } | null> {
@@ -693,7 +694,7 @@ function registryNormalizers(
         const name = prop.name.getText(source).replace(/^['"]|['"]$/g, '')
         let found: { file: string; name: string } | null = null
         const scan = (child: ts.Node): void => {
-          // `const { normalizeX } = await import('...')`
+          // `const { XConfigSchema } = await import('...')`
           if (
             ts.isVariableDeclaration(child) &&
             ts.isObjectBindingPattern(child.name) &&
@@ -705,7 +706,7 @@ function registryNormalizers(
             const spec = child.initializer.expression.arguments[0]
             for (const el of child.name.elements) {
               const local = el.name.getText(source)
-              if (!NORMALIZER_RE.test(local) || spec === undefined || !ts.isStringLiteral(spec)) {
+              if (!CONFIG_RE.test(local) || spec === undefined || !ts.isStringLiteral(spec)) {
                 continue
               }
               const file = moduleFile(registryFile, spec.text, packagesRoot)
@@ -901,7 +902,12 @@ function shapeOfLiteral(
   const out: Record<string, FieldShape> = {}
   for (const prop of literal.properties) {
     if (ts.isSpreadAssignment(prop)) {
-      Object.assign(out, shapeOf(prop.expression, source, env, packagesRoot, label))
+      for (const [key, field] of Object.entries(
+        shapeOf(prop.expression, source, env, packagesRoot, label),
+      )) {
+        field.overrides ??= out[key]
+        out[key] = field
+      }
       continue
     }
     const key = propertyKey(prop, source)
@@ -1054,7 +1060,7 @@ function returnExpression(
   return found
 }
 
-// The `rename` map an entry point applies, resolved through any const or spread.
+// The `rename` map of a normalizer, resolved through any const or spread.
 function renameOf(
   expr: ts.Expression | undefined,
   source: ts.SourceFile,
@@ -1094,7 +1100,7 @@ function renameOf(
   return out
 }
 
-// The `parseConfigWithSchema(schema, input, normalizer?)` call inside a body.
+// The `parseConfigWithSchema(schema, input)` call inside a body.
 function configCall(body: ts.Node): ts.CallExpression | undefined {
   let found: ts.CallExpression | undefined
   const visit = (node: ts.Node): void => {
@@ -1112,104 +1118,101 @@ function configCall(body: ts.Node): ts.CallExpression | undefined {
   return found
 }
 
-function factsOfConfigCall(
-  call: ts.CallExpression,
+// The normalizer a schema registers through `.register(FIELD_NORMALIZERS,
+// normalizer)`. A `.extend()` builds a new schema that does not inherit the
+// registration, as in zod, so the walk stops there.
+function registeredNormalizer(
+  expr: ts.Expression,
+  source: ts.SourceFile,
+  env: Env,
+  packagesRoot: string,
+  label: string,
+): (Bound & { env: Env }) | undefined {
+  if (ts.isParenthesizedExpression(expr))
+    return registeredNormalizer(expr.expression, source, env, packagesRoot, label)
+  if (ts.isIdentifier(expr)) {
+    const bound = bindingOf(expr.text, source, env, packagesRoot)
+    if (bound === undefined) throw new Error(`${label}: cannot resolve schema ${expr.text}`)
+    return registeredNormalizer(bound.expr, bound.source, env, packagesRoot, label)
+  }
+  if (!ts.isCallExpression(expr)) return undefined
+  const callee = expr.expression
+  if (ts.isPropertyAccessExpression(callee)) {
+    const method = callee.name.text
+    const normalizer = expr.arguments[1]
+    if (method === 'register' && normalizer !== undefined) return { expr: normalizer, source, env }
+    if (method === 'extend' || method === 'safeExtend' || method === 'object') return undefined
+    return registeredNormalizer(callee.expression, source, env, packagesRoot, label)
+  }
+  if (ts.isIdentifier(callee)) {
+    const fn = resolveFunction(callee.text, source, packagesRoot)
+    const returned = fn === undefined ? undefined : returnExpression(fn.decl)
+    if (fn === undefined || returned === undefined) return undefined
+    const inner: Env = new Map(env)
+    fn.decl.parameters.forEach((param, i) => {
+      const arg = expr.arguments[i]
+      if (arg !== undefined && ts.isIdentifier(param.name)) {
+        inner.set(param.name.text, { expr: arg, source })
+      }
+    })
+    return registeredNormalizer(returned, fn.source, inner, packagesRoot, label)
+  }
+  return undefined
+}
+
+function factsOfSchema(
+  schema: ts.Expression,
   source: ts.SourceFile,
   env: Env,
   packagesRoot: string,
   label: string,
 ): ConfigShape {
-  const schema = call.arguments[0]
-  if (schema === undefined) throw new Error(`${label}: ${CONFIG_PARSER} without a schema`)
+  const normalizer = registeredNormalizer(schema, source, env, packagesRoot, label)
   return {
     fields: shapeOf(schema, source, env, packagesRoot, label),
-    rename: renameOf(call.arguments[2], source, env, packagesRoot, label),
+    rename:
+      normalizer === undefined
+        ? {}
+        : renameOf(normalizer.expr, normalizer.source, normalizer.env, packagesRoot, label),
     validates: true,
   }
 }
 
-// The facts behind one exported normalizer.
-function factsOfNormalizer(
+// The facts behind one registry import: a schema, or a function that parses
+// with one.
+function factsOfConfig(
   file: string,
   name: string,
   packagesRoot: string,
   label: string,
   depth = 0,
 ): ConfigShape {
-  if (depth > 6) throw new Error(`${label}: normalizer resolution did not converge at ${name}`)
+  if (depth > 6) throw new Error(`${label}: config resolution did not converge at ${name}`)
   const source = parse(file)
   const reExport = reExportOf(source, name, packagesRoot)
   if (reExport !== undefined)
-    return factsOfNormalizer(reExport.file, reExport.name, packagesRoot, label, depth + 1)
+    return factsOfConfig(reExport.file, reExport.name, packagesRoot, label, depth + 1)
   const fn = topLevelFunction(source, name)
   if (fn !== undefined) {
     const call = fn.body === undefined ? undefined : configCall(fn.body)
-    if (call === undefined) return { fields: {}, rename: {}, validates: false }
-    return factsOfConfigCall(call, source, new Map(), packagesRoot, label)
+    const schema = call?.arguments[0]
+    if (schema === undefined) return { fields: {}, rename: {}, validates: false }
+    return factsOfSchema(schema, source, new Map(), packagesRoot, label)
   }
-  const init = topLevelConst(source, name)
-  if (init === undefined) {
-    const origin = importOrigin(source, name, packagesRoot)
-    if (origin !== undefined)
-      return factsOfNormalizer(origin.file, origin.exported, packagesRoot, label, depth + 1)
-    throw new Error(`${label}: no declaration of ${name} in ${file}`)
-  }
-  // `export const normalizeX = normalizeY`
-  if (ts.isIdentifier(init)) {
-    const origin = importOrigin(source, init.text, packagesRoot)
-    if (origin !== undefined)
-      return factsOfNormalizer(origin.file, origin.exported, packagesRoot, label, depth + 1)
-    return factsOfNormalizer(file, init.text, packagesRoot, label, depth + 1)
-  }
-  // `export const normalizeX = alias.normalize`, `alias = makeSomething(...)`
-  if (ts.isPropertyAccessExpression(init) && ts.isIdentifier(init.expression)) {
-    const aliasInit = topLevelConst(source, init.expression.text)
-    if (
-      aliasInit === undefined ||
-      !ts.isCallExpression(aliasInit) ||
-      !ts.isIdentifier(aliasInit.expression)
-    ) {
-      throw new Error(`${label}: ${init.expression.text} is not a factory call`)
-    }
-    const factory = resolveFunction(aliasInit.expression.text, source, packagesRoot)
-    if (factory === undefined)
-      throw new Error(`${label}: cannot resolve factory ${aliasInit.expression.text}`)
-    // Bind the factory's parameters to the call site: a positional
-    // parameter by name, and every property of an options object.
-    const env: Env = new Map()
-    factory.decl.parameters.forEach((param, i) => {
-      const arg = aliasInit.arguments[i]
-      if (arg === undefined) return
-      if (ts.isIdentifier(param.name)) env.set(param.name.text, { expr: arg, source })
-      if (ts.isObjectLiteralExpression(arg)) {
-        for (const prop of arg.properties) {
-          const key = propertyKey(prop, source)
-          if (key !== undefined && ts.isPropertyAssignment(prop))
-            env.set(key, { expr: prop.initializer, source })
-          if (key !== undefined && ts.isShorthandPropertyAssignment(prop))
-            env.set(key, { expr: prop.name, source })
-        }
-      }
-    })
-    const body = factory.decl.body
-    const call = body === undefined ? undefined : configCall(body)
-    if (call === undefined) return { fields: {}, rename: {}, validates: false }
-    return factsOfConfigCall(call, factory.source, env, packagesRoot, label)
-  }
-  throw new Error(
-    `${label}: unsupported normalizer declaration ${init.getText(source).slice(0, 60)}`,
-  )
+  const bound = bindingOf(name, source, new Map(), packagesRoot)
+  if (bound === undefined) throw new Error(`${label}: no declaration of ${name} in ${file}`)
+  return factsOfSchema(bound.expr, bound.source, new Map(), packagesRoot, label)
 }
 
 /**
- * Per registry name, the config field set behind its normalizer.
+ * Per registry name, the config field set behind its schema.
  *
  * Args:
  *   registryFile: absolute path to the variant's `VFS/registry.ts`.
  *   packagesRoot: absolute path to `typescript/packages`.
  *
- * A name whose factory calls no `normalize*Config` (ram, disk, redis take
- * raw kwargs, as their python twins do) dumps null.
+ * A name whose factory imports no config schema (ram, disk, redis take raw
+ * kwargs, as their python twins do) dumps null.
  */
 // Codepoint compare, not `localeCompare` and not the default comparator:
 // python's `sorted` and `json.dumps(sort_keys=True)` order by code point,
@@ -1238,12 +1241,12 @@ export function configShapes(
   packagesRoot: string,
 ): Record<string, ConfigShape | null> {
   const out: Record<string, ConfigShape | null> = {}
-  const entries = registryNormalizers(registryFile, packagesRoot)
-  for (const [vfs, normalizer] of [...entries].sort(([a], [b]) => compareCodePoints(a, b))) {
+  const entries = registryConfigs(registryFile, packagesRoot)
+  for (const [vfs, config] of [...entries].sort(([a], [b]) => compareCodePoints(a, b))) {
     out[vfs] =
-      normalizer === null
+      config === null
         ? null
-        : factsOfNormalizer(normalizer.file, normalizer.name, packagesRoot, `configs[${vfs}]`)
+        : factsOfConfig(config.file, config.name, packagesRoot, `configs[${vfs}]`)
   }
   return out
 }

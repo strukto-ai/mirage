@@ -18,13 +18,14 @@ import { LinearAccessor } from '../../accessor/linear.ts'
 
 import { filesContaining as linearFilesContaining } from '../../core/linear/search.ts'
 import { HttpLinearTransport } from '../../core/linear/client.ts'
-import { redactLinearConfig } from '../../core/linear/config.ts'
+import { LinearConfigSchema } from '../../core/linear/config.ts'
 import type { LinearConfig, LinearConfigRedacted } from '../../core/linear/config.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import { readdir as linearReaddir } from '../../core/linear/readdir.ts'
 import { read as linearRead } from '../../core/linear/read.ts'
 import { stat as linearStat } from '../../core/linear/stat.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   teams/
@@ -207,7 +208,7 @@ export class LinearVFS extends BaseVFS {
   override getState(): Promise<LinearVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactLinearConfig(this.config),
+      config: redactConfigWithSchema(LinearConfigSchema, this.config) as LinearConfigRedacted,
     })
   }
 }

@@ -22,7 +22,8 @@ import { VFSName } from '@struktoai/mirage-core/types'
 
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
-import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
+import { S3ConfigSchema, type S3Config, type S3ConfigRedacted } from './config.ts'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 function createProxyAgents(proxy: string): S3HttpAgents {
   return { httpAgent: new HttpProxyAgent(proxy), httpsAgent: new HttpsProxyAgent(proxy) }
@@ -100,7 +101,7 @@ export class S3VFS extends S3VFSBase {
   override getState(): Promise<S3VFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactConfig(this.config),
+      config: redactConfigWithSchema(S3ConfigSchema, this.config) as S3ConfigRedacted,
     })
   }
 }

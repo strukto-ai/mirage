@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { errorSummary } from '../secrets/summary.ts'
 import {
+  FIELD_NORMALIZERS,
   normalizeNonEmpty,
   parseConfigWithSchema,
   refuseRepeatedFields,
@@ -49,9 +50,8 @@ describe('parseConfigWithSchema', () => {
 
   it('looks a key up under the name the normalizer writes it to', () => {
     const parsed = parseConfigWithSchema(
-      Schema,
+      Schema.clone().register(FIELD_NORMALIZERS, { rename: { developer_token: 'apiKey' } }),
       { developer_token: 'k', team_ids: ['t'] },
-      { rename: { developer_token: 'apiKey' } },
     )
     expect(parsed).toEqual({ apiKey: 'k', teamIds: ['t'] })
     expect(parseConfigWithSchema(Schema, { apiKey: 'k' })).toEqual({ apiKey: 'k' })
@@ -74,7 +74,10 @@ describe('parseConfigWithSchema', () => {
 
   it('treats a dropped key as known', () => {
     expect(
-      parseConfigWithSchema(Schema, { api_key: 'k', proxy: 'p' }, { drop: ['proxy'] }),
+      parseConfigWithSchema(Schema.clone().register(FIELD_NORMALIZERS, { drop: ['proxy'] }), {
+        api_key: 'k',
+        proxy: 'p',
+      }),
     ).toEqual({ apiKey: 'k' })
   })
 })

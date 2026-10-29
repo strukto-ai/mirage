@@ -13,17 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  type ConfigOf,
-  parseConfigWithSchema,
-  REDACTED_SECRET,
-  type RedactedConfig,
-  secretStr,
-} from '../secrets.ts'
+import { type ConfigOf, REDACTED_SECRET, type RedactedConfig, secretStr } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 
-const LanceDBConfigSchema = z.object({
+export const LanceDBConfigSchema = z.object({
   ...timeoutShape,
   uri: z
     .string()
@@ -89,10 +83,6 @@ const LanceDBConfigSchema = z.object({
 })
 
 export type LanceDBConfig = ConfigOf<typeof LanceDBConfigSchema>
-
-export function normalizeLanceDBConfig(input: Record<string, unknown>): LanceDBConfig {
-  return parseConfigWithSchema(LanceDBConfigSchema, input)
-}
 
 export interface LanceDBConfigResolved {
   timeout: number

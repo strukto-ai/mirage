@@ -18,7 +18,7 @@ import { BaseVFS } from '../base.ts'
 import { BoxAccessor } from '../../accessor/box.ts'
 import { BoxTokenManager } from '../../core/box/client.ts'
 import { VFSName } from '../../types.ts'
-import { redactBoxConfig, type BoxConfig, type BoxConfigRedacted } from './config.ts'
+import { BoxConfigSchema, type BoxConfig, type BoxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/box/events.ts'
 import { type DeltaHook } from '../../events/index.ts'
 import type { CapacityResult, DirListing, PathSpec, FileStat } from '../../types.ts'
@@ -39,6 +39,7 @@ import { rename as boxRename } from '../../core/box/rename.ts'
 import { copy as boxCopy } from '../../core/box/copy.ts'
 import { truncate as boxTruncate } from '../../core/box/truncate.ts'
 import { filesContaining as boxFilesContaining } from '../../core/box/search.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   Mirrors Box folder hierarchy. Every item is served as its raw bytes:
@@ -236,7 +237,7 @@ export class BoxVFS extends BaseVFS {
   override getState(): Promise<BoxVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactBoxConfig(this.config),
+      config: redactConfigWithSchema(BoxConfigSchema, this.config) as BoxConfigRedacted,
     })
   }
 }

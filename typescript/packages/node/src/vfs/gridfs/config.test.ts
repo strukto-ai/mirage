@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { normalizeGridFSConfig, redactConfig } from './config.ts'
+import { normalizeGridFSConfig, GridFSConfigSchema } from './config.ts'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 describe('normalizeGridFSConfig', () => {
   it('renames snake_case fields', () => {
@@ -59,9 +60,12 @@ describe('normalizeGridFSConfig', () => {
   })
 })
 
-describe('redactConfig', () => {
+describe('GridFSConfigSchema redaction', () => {
   it('redacts the uri', () => {
-    const redacted = redactConfig({ uri: 'mongodb://user:pass@h', database: 'db' })
+    const redacted = redactConfigWithSchema(GridFSConfigSchema, {
+      uri: 'mongodb://user:pass@h',
+      database: 'db',
+    })
     expect(redacted.uri).not.toContain('pass')
     expect(redacted.database).toBe('db')
   })

@@ -20,7 +20,7 @@ import { bucketName, bucketStart } from '../../core/gcal/day.ts'
 import { TokenManager } from '../../core/google/client.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
-import { redactGCalConfig, type GCalConfig, type GCalConfigRedacted } from './config.ts'
+import { GCalConfigSchema, type GCalConfig, type GCalConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import { readdir as gcalReaddir } from '../../core/gcal/readdir.ts'
 import { filesContaining as gcalFilesContaining } from '../../core/gcal/search.ts'
@@ -29,6 +29,7 @@ import { stat as gcalStat } from '../../core/gcal/stat.ts'
 import { unlink as gcalUnlink } from '../../core/gcal/unlink.ts'
 import { buildDeltaHook } from '../../core/gcal/events.ts'
 import type { DeltaHook } from '../../events/base.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `Google Calendar is mounted as one directory per calendar, one
 directory per date bucket, and one JSON file per event.
@@ -177,7 +178,7 @@ export class GCalVFS extends BaseVFS {
   override getState(): Promise<GCalVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactGCalConfig(this.config),
+      config: redactConfigWithSchema(GCalConfigSchema, this.config) as GCalConfigRedacted,
     })
   }
 }

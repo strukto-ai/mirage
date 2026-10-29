@@ -15,18 +15,16 @@
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const TencentConfigSchema = browserAliasSchema({})
+export const TencentConfigSchema = browserAliasSchema({})
 
 export type TencentConfig = ConfigOf<typeof TencentConfigSchema>
 
 export type TencentConfigRedacted = RedactedConfig<TencentConfig, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<TencentConfig, TencentConfigRedacted>({
+export const ALIAS = makeBrowserS3Alias<TencentConfig, TencentConfigRedacted>({
   schema: TencentConfigSchema,
   endpointFor: derivedEndpoint('region', (region) => `https://cos.${region}.myqcloud.com`),
 })
 
-export const resolvedTencentEndpoint = alias.resolvedEndpoint
-export const tencentToS3Config = alias.toS3Config
-export const redactTencentConfig = alias.redact
-export const normalizeTencentConfig = alias.normalize
+export const resolvedTencentEndpoint = ALIAS.resolvedEndpoint
+export const tencentToS3Config = ALIAS.toS3Config

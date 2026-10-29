@@ -14,7 +14,7 @@
 
 import { S3VFS } from './s3/s3.ts'
 import {
-  parseConfigWithSchema,
+  FIELD_NORMALIZERS,
   redactConfigWithSchema,
   secretStr,
   z,
@@ -90,12 +90,22 @@ export const ALIAS_SHAPE = {
     .describe('Proxy URL for every HTTP and HTTPS request to the endpoint.'),
 }
 
+/**
+ * The shared fields plus whatever one provider's endpoint rule needs, under
+ * the S3 family's python spellings. The node twin of the browser's
+ * `browserAliasSchema`.
+ */
+export function aliasSchema<E extends z.ZodRawShape>(
+  extra: E,
+): z.ZodObject<typeof ALIAS_SHAPE & E> {
+  return z.object({ ...ALIAS_SHAPE, ...extra }).register(FIELD_NORMALIZERS, S3_FAMILY_NORMALIZER)
+}
+
 // What a caller may write, split the way python splits
 // `RegionEndpointConfig` from `FixedEndpointConfig`: a regional provider
 // must name its region and may override the endpoint; a self-hosted
 // gateway must name its endpoint and may name a region.
-const REGION_ALIAS_SCHEMA = z.object({
-  ...ALIAS_SHAPE,
+export const REGION_ALIAS_SCHEMA = aliasSchema({
   region: z
     .string()
     .describe(
@@ -107,8 +117,7 @@ const REGION_ALIAS_SCHEMA = z.object({
     .describe('Endpoint URL that replaces the one the provider derives.'),
 })
 
-const FIXED_ALIAS_SCHEMA = z.object({
-  ...ALIAS_SHAPE,
+export const FIXED_ALIAS_SCHEMA = aliasSchema({
   forcePathStyle: z.boolean().optional().meta({ default: true }),
   region: z.string().optional().meta({
     description: "Region requests are signed for; the gateway's endpoint does not depend on it.",
@@ -121,23 +130,15 @@ const FIXED_ALIAS_SCHEMA = z.object({
 
 // The resolved shape, with the region and endpoint each provider's rule
 // fills in, is what redaction and snapshot state see.
-const ALIAS_SCHEMA = z.object({
-  ...ALIAS_SHAPE,
-  region: z.string(),
-  endpoint: z.string(),
-})
-
-// Only the redacted twin derives: the schema is the resolved shape, with
-// the region and endpoint each provider's rule fills in.
 export type S3AliasConfigRedacted = RedactedConfig<
-  ConfigOf<typeof ALIAS_SCHEMA>,
+  ConfigOf<typeof REGION_ALIAS_SCHEMA> & { endpoint: string },
   'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
 >
 
 export interface Alias<C extends S3AliasConfig, R> {
+  resolvedEndpoint: (config: C) => string
   toS3Config: (config: C) => S3Config
   redact: (config: C) => R
-  normalize: (input: Record<string, unknown>) => C
 }
 
 const optional = (config: S3AliasConfig): Partial<S3Config> => ({
@@ -149,65 +150,46 @@ const optional = (config: S3AliasConfig): Partial<S3Config> => ({
 })
 
 /**
- * A provider whose endpoint is derived from its (required) region.
+ * Build one provider's config helpers from its endpoint rule.
  *
- * `forcePathStyle` stays absent from the S3Config when the caller did not
- * ask for it, which is what the hand-written providers did and what the
- * S3 client treats as virtual-hosted style.
+ * `endpointFor` is consulted only when the caller gave no explicit
+ * endpoint. `regionDefault` materializes a region the provider always has
+ * (gcs and r2 report `auto`, wasabi and the self-hosted gateways
+ * `us-east-1`), and `forcePathStyle` the path style it defaults to (oci,
+ * supabase and the gateways). Without one, `forcePathStyle` stays absent
+ * from the S3Config unless the caller asked for it, which the S3 client
+ * treats as virtual-hosted style. The redacted config carries the same
+ * resolved values the S3Config does.
  */
-export function makeRegionAlias<C extends S3AliasConfig & { region: string }, R>(
-  endpointFor: (config: C) => string,
-): Alias<C, R> & { resolvedEndpoint: (config: C) => string } {
+export function makeS3Alias<C extends S3AliasConfig, R>(options: {
+  schema: z.ZodObject<z.ZodRawShape>
+  endpointFor: (config: C) => string
+  regionDefault?: string
+  forcePathStyle?: boolean
+}): Alias<C, R> {
+  const { schema, endpointFor, regionDefault, forcePathStyle } = options
   const resolvedEndpoint = (config: C): string =>
     config.endpoint !== undefined && config.endpoint !== '' ? config.endpoint : endpointFor(config)
+  const resolved = (config: C): Pick<S3Config, 'endpoint' | 'region' | 'forcePathStyle'> => {
+    const region = config.region ?? regionDefault
+    const pathStyle = config.forcePathStyle ?? forcePathStyle
+    return {
+      endpoint: resolvedEndpoint(config),
+      ...(region !== undefined ? { region } : {}),
+      ...(pathStyle !== undefined ? { forcePathStyle: pathStyle } : {}),
+    }
+  }
   return {
     resolvedEndpoint,
     toS3Config: (config) => ({
       bucket: config.bucket,
-      region: config.region,
-      endpoint: resolvedEndpoint(config),
+      ...resolved(config),
       ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
       ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
-      ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
       ...optional(config),
     }),
     redact: (config) =>
-      redactConfigWithSchema(ALIAS_SCHEMA, {
-        ...config,
-        endpoint: resolvedEndpoint(config),
-      }) as unknown as R,
-    normalize: (input) =>
-      parseConfigWithSchema(REGION_ALIAS_SCHEMA, input, S3_FAMILY_NORMALIZER) as unknown as C,
-  }
-}
-
-/**
- * A self-hosted gateway reachable only at a caller-supplied endpoint.
- *
- * ceph, minio and seaweedfs have no public region to derive from, so the
- * region and path-style defaults are materialized rather than omitted.
- */
-export function makeFixedAlias<C extends S3AliasConfig & { endpoint: string }, R>(): Alias<C, R> {
-  const region = (config: C): string => config.region ?? 'us-east-1'
-  const pathStyle = (config: C): boolean => config.forcePathStyle ?? true
-  return {
-    toS3Config: (config) => ({
-      bucket: config.bucket,
-      region: region(config),
-      endpoint: config.endpoint,
-      ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
-      ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
-      forcePathStyle: pathStyle(config),
-      ...optional(config),
-    }),
-    redact: (config) =>
-      redactConfigWithSchema(ALIAS_SCHEMA, {
-        ...config,
-        region: region(config),
-        forcePathStyle: pathStyle(config),
-      }) as unknown as R,
-    normalize: (input) =>
-      parseConfigWithSchema(FIXED_ALIAS_SCHEMA, input, S3_FAMILY_NORMALIZER) as unknown as C,
+      redactConfigWithSchema(schema, { ...config, ...resolved(config) }) as unknown as R,
   }
 }
 
@@ -223,38 +205,31 @@ export interface S3AliasVFSState<TRedacted> {
 /**
  * The shared body of every S3-compatible provider VFS (MinIO, Ceph,
  * R2, Wasabi, ...). Each is an {@link S3VFS} reached through a
- * provider-shaped config, so all it owns is its `name` and that config;
- * the mount serves S3's commands under the name. A subclass supplies its
- * prompt as a plain field and hands the varying pieces to `super`.
- *
- * `toS3Config` and `redact` arrive as functions rather than as an
- * {@link Alias}: the four providers whose region or endpoint rule fits
- * neither {@link makeRegionAlias} nor {@link makeFixedAlias} write their
- * own pair, so the VFS layer takes the two functions every provider
- * has either way. Mirrors python `S3AliasVFS` in
+ * provider-shaped config, so all it owns is its `name`, that config and the
+ * {@link Alias} that converts and redacts it; the mount serves S3's
+ * commands under the name. A subclass supplies its prompt as a plain field
+ * and hands the varying pieces to `super`. Mirrors python `S3AliasVFS` in
  * `mirage/vfs/s3_alias.py`.
  */
-export abstract class S3AliasVFS<TConfig, TRedacted extends S3ConfigRedacted> extends S3VFS {
+export abstract class S3AliasVFS<
+  TConfig extends S3AliasConfig,
+  TRedacted extends S3ConfigRedacted,
+> extends S3VFS {
   override readonly name: string
   readonly aliasConfig: TConfig
-  private readonly redactAlias: (config: TConfig) => TRedacted
+  private readonly alias: Alias<TConfig, TRedacted>
 
-  protected constructor(
-    name: string,
-    config: TConfig,
-    s3Config: S3Config,
-    redact: (config: TConfig) => TRedacted,
-  ) {
-    super(s3Config)
+  protected constructor(name: string, config: TConfig, alias: Alias<TConfig, TRedacted>) {
+    super(alias.toS3Config(config))
     this.name = name
     this.aliasConfig = config
-    this.redactAlias = redact
+    this.alias = alias
   }
 
   override getState(): Promise<S3AliasVFSState<TRedacted>> {
     return Promise.resolve({
       type: this.name,
-      config: this.redactAlias(this.aliasConfig),
+      config: this.alias.redact(this.aliasConfig),
     })
   }
 }

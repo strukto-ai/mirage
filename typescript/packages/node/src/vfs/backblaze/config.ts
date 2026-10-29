@@ -12,7 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeRegionAlias, type S3AliasConfig, type S3AliasConfigRedacted } from '../s3_alias.ts'
+import {
+  makeS3Alias,
+  REGION_ALIAS_SCHEMA,
+  type S3AliasConfig,
+  type S3AliasConfigRedacted,
+} from '../s3_alias.ts'
 
 export interface BackblazeConfig extends S3AliasConfig {
   region: string
@@ -20,11 +25,12 @@ export interface BackblazeConfig extends S3AliasConfig {
 
 export type BackblazeConfigRedacted = S3AliasConfigRedacted
 
-const alias = makeRegionAlias<BackblazeConfig, BackblazeConfigRedacted>(
-  (config) => `https://s3.${config.region}.backblazeb2.com`,
-)
+export const BackblazeConfigSchema = REGION_ALIAS_SCHEMA
 
-export const resolvedBackblazeEndpoint = alias.resolvedEndpoint
-export const backblazeToS3Config = alias.toS3Config
-export const redactBackblazeConfig = alias.redact
-export const normalizeBackblazeConfig = alias.normalize
+export const ALIAS = makeS3Alias<BackblazeConfig, BackblazeConfigRedacted>({
+  schema: BackblazeConfigSchema,
+  endpointFor: (config) => `https://s3.${config.region}.backblazeb2.com`,
+})
+
+export const resolvedBackblazeEndpoint = ALIAS.resolvedEndpoint
+export const backblazeToS3Config = ALIAS.toS3Config

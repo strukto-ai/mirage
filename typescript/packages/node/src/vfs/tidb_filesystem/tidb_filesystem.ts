@@ -18,10 +18,11 @@ import { TiDBFilesystemAccessor } from '@struktoai/mirage-core/accessor/tidb_fil
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import {
-  redactTiDBFilesystemConfig,
+  TiDBFilesystemConfigSchema,
   type TiDBFilesystemConfig,
   type TiDBFilesystemConfigRedacted,
 } from './config.ts'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 export interface TiDBFilesystemVFSState {
   type: string
@@ -51,7 +52,10 @@ export class TiDBFilesystemVFS extends TiDBFilesystemVFSBase {
   override getState(): Promise<TiDBFilesystemVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactTiDBFilesystemConfig(this.config),
+      config: redactConfigWithSchema(
+        TiDBFilesystemConfigSchema,
+        this.config,
+      ) as TiDBFilesystemConfigRedacted,
     })
   }
 }

@@ -16,8 +16,9 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { buildVfs } from '../registry.ts'
-import { redactDiscordConfig } from './config.ts'
+import { DiscordConfigSchema } from './config.ts'
 import { DiscordVFS } from './discord.ts'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -75,11 +76,15 @@ describe('DiscordVFS (browser)', () => {
   })
 })
 
-describe('redactDiscordConfig (browser)', () => {
+describe('DiscordConfigSchema redaction (browser)', () => {
   it('keeps proxyUrl in clear, redacts getHeaders only when present', () => {
-    expect(redactDiscordConfig({ proxyUrl: '/p' })).toEqual({ proxyUrl: '/p' })
+    expect(redactConfigWithSchema(DiscordConfigSchema, { proxyUrl: '/p' })).toEqual({
+      proxyUrl: '/p',
+    })
     const headers = (): Record<string, string> => ({})
-    expect(redactDiscordConfig({ proxyUrl: '/p', getHeaders: headers })).toEqual({
+    expect(
+      redactConfigWithSchema(DiscordConfigSchema, { proxyUrl: '/p', getHeaders: headers }),
+    ).toEqual({
       proxyUrl: '/p',
       getHeaders: '<REDACTED>',
     })

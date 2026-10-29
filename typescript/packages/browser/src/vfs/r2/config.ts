@@ -16,7 +16,7 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const R2ConfigSchema = browserAliasSchema({
+export const R2ConfigSchema = browserAliasSchema({
   region: z.string().optional().meta({
     description: 'Region of the bucket; R2 addresses a bucket by account, not by region.',
     default: 'auto',
@@ -33,7 +33,7 @@ export type R2Config = ConfigOf<typeof R2ConfigSchema>
 
 export type R2ConfigRedacted = RedactedConfig<R2Config, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<R2Config, R2ConfigRedacted>({
+export const ALIAS = makeBrowserS3Alias<R2Config, R2ConfigRedacted>({
   schema: R2ConfigSchema,
   endpointFor: derivedEndpoint(
     'accountId',
@@ -42,7 +42,5 @@ const alias = makeBrowserS3Alias<R2Config, R2ConfigRedacted>({
   regionDefault: 'auto',
 })
 
-export const resolvedR2Endpoint = alias.resolvedEndpoint
-export const r2ToS3Config = alias.toS3Config
-export const redactR2Config = alias.redact
-export const normalizeR2Config = alias.normalize
+export const resolvedR2Endpoint = ALIAS.resolvedEndpoint
+export const r2ToS3Config = ALIAS.toS3Config

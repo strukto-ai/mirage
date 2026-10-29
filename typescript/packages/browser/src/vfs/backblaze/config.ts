@@ -15,18 +15,16 @@
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const BackblazeConfigSchema = browserAliasSchema({})
+export const BackblazeConfigSchema = browserAliasSchema({})
 
 export type BackblazeConfig = ConfigOf<typeof BackblazeConfigSchema>
 
 export type BackblazeConfigRedacted = RedactedConfig<BackblazeConfig, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<BackblazeConfig, BackblazeConfigRedacted>({
+export const ALIAS = makeBrowserS3Alias<BackblazeConfig, BackblazeConfigRedacted>({
   schema: BackblazeConfigSchema,
   endpointFor: derivedEndpoint('region', (region) => `https://s3.${region}.backblazeb2.com`),
 })
 
-export const resolvedBackblazeEndpoint = alias.resolvedEndpoint
-export const backblazeToS3Config = alias.toS3Config
-export const redactBackblazeConfig = alias.redact
-export const normalizeBackblazeConfig = alias.normalize
+export const resolvedBackblazeEndpoint = ALIAS.resolvedEndpoint
+export const backblazeToS3Config = ALIAS.toS3Config

@@ -14,17 +14,12 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import {
-  redactTencentConfig,
-  tencentToS3Config,
-  type TencentConfig,
-  type TencentConfigRedacted,
-} from './config.ts'
+import { ALIAS, type TencentConfig, type TencentConfigRedacted } from './config.ts'
 
 export type TencentVFSState = S3AliasVFSState<TencentConfigRedacted>
 
 export class TencentVFS extends S3AliasVFS<TencentConfig, TencentConfigRedacted> {
   constructor(config: TencentConfig) {
-    super(VFSName.TENCENT, config, tencentToS3Config(config), redactTencentConfig)
+    super(VFSName.TENCENT, config, ALIAS)
   }
 }

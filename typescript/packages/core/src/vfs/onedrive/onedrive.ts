@@ -1,7 +1,7 @@
 import { BaseVFS } from '../base.ts'
 import {
   OneDriveAccessor,
-  redactOneDriveConfig,
+  OneDriveConfigSchema,
   type OneDriveConfig,
   type OneDriveConfigRedacted,
 } from '../../accessor/onedrive.ts'
@@ -28,6 +28,7 @@ import { copy } from '../../core/onedrive/copy.ts'
 import { truncate } from '../../core/onedrive/truncate.ts'
 import { filesContaining } from '../../core/msgraph/search.ts'
 import { driveLoc } from '../../core/onedrive/client.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export interface OneDriveVFSState {
   type: string
@@ -153,7 +154,10 @@ export class OneDriveVFS extends BaseVFS {
   }
 
   override getState(): OneDriveVFSState {
-    const config: OneDriveConfigRedacted = redactOneDriveConfig(this.config)
+    const config: OneDriveConfigRedacted = redactConfigWithSchema(
+      OneDriveConfigSchema,
+      this.config,
+    ) as OneDriveConfigRedacted
     return { type: this.name, config }
   }
 }

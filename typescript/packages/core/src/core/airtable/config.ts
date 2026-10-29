@@ -13,13 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  type ConfigOf,
-  type RedactedConfig,
-  secretStr,
-} from '../../vfs/secrets.ts'
+import { type ConfigOf, type RedactedConfig, secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
 /** Credentials and bounds for one Airtable account. */
@@ -56,11 +50,3 @@ export const AirtableConfigSchema = z
 export type AirtableConfig = ConfigOf<typeof AirtableConfigSchema>
 
 export type AirtableConfigRedacted = RedactedConfig<AirtableConfig, 'token'>
-
-export function redactAirtableConfig(config: AirtableConfig): AirtableConfigRedacted {
-  return redactConfigWithSchema(AirtableConfigSchema, config) as unknown as AirtableConfigRedacted
-}
-
-export function normalizeAirtableConfig(input: Record<string, unknown>): AirtableConfig {
-  return parseConfigWithSchema(AirtableConfigSchema, input)
-}

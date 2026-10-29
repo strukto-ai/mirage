@@ -20,7 +20,8 @@ import { HttpJaegerTransport } from '@struktoai/mirage-core/core/jaeger/client'
 import { VFS_MD } from '@struktoai/mirage-core/vfs/jaeger/jaeger'
 import { VFSName } from '@struktoai/mirage-core/types'
 
-import { redactJaegerConfig, type JaegerConfig, type JaegerConfigRedacted } from './config.ts'
+import { JaegerConfigSchema, type JaegerConfig, type JaegerConfigRedacted } from './config.ts'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 export interface JaegerVFSState {
   type: string
@@ -64,7 +65,7 @@ export class JaegerVFS extends JaegerVFSBase {
   override getState(): Promise<JaegerVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactJaegerConfig(this.config),
+      config: redactConfigWithSchema(JaegerConfigSchema, this.config) as JaegerConfigRedacted,
     })
   }
 }

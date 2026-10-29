@@ -14,17 +14,12 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import {
-  minioToS3Config,
-  redactMinIOConfig,
-  type MinIOConfig,
-  type MinIOConfigRedacted,
-} from './config.ts'
+import { ALIAS, type MinIOConfig, type MinIOConfigRedacted } from './config.ts'
 
 export type MinIOVFSState = S3AliasVFSState<MinIOConfigRedacted>
 
 export class MinIOVFS extends S3AliasVFS<MinIOConfig, MinIOConfigRedacted> {
   constructor(config: MinIOConfig) {
-    super(VFSName.MINIO, config, minioToS3Config(config), redactMinIOConfig)
+    super(VFSName.MINIO, config, ALIAS)
   }
 }

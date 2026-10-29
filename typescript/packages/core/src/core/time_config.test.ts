@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeSlackConfig } from '../vfs/slack/config.ts'
-import { normalizeDiscordConfig } from '../vfs/discord/config.ts'
-import { normalizeGCalConfig } from '../vfs/gcal/config.ts'
+import { SlackConfigSchema } from '../vfs/slack/config.ts'
+import { DiscordConfigSchema } from '../vfs/discord/config.ts'
+import { GCalConfigSchema } from '../vfs/gcal/config.ts'
+import { parseConfigWithSchema } from '../vfs/secrets.ts'
+
+type Input = Record<string, unknown>
 
 describe('mount time bounds', () => {
   for (const [name, normalize, credentials] of [
-    ['slack', normalizeSlackConfig, { token: 'test' }],
-    ['discord', normalizeDiscordConfig, { token: 'test' }],
-    ['gcal', normalizeGCalConfig, { access_token: 'test' }],
+    ['slack', (c: Input) => parseConfigWithSchema(SlackConfigSchema, c), { token: 'test' }],
+    ['discord', (c: Input) => parseConfigWithSchema(DiscordConfigSchema, c), { token: 'test' }],
+    ['gcal', (c: Input) => parseConfigWithSchema(GCalConfigSchema, c), { access_token: 'test' }],
   ] as const) {
     it(`${name} validates both bounds through snake_case config`, () => {
       expect(

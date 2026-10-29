@@ -23,16 +23,15 @@ pnpm add opendal
 ## Config
 
 ```typescript
-import { MountMode, NextcloudVFS, normalizeNextcloudConfig, Workspace } from '@struktoai/mirage-node'
+import { buildVfs, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const config = normalizeNextcloudConfig({
+const vfs = await buildVfs('nextcloud', {
   url: process.env.NEXTCLOUD_URL!,
   username: process.env.NEXTCLOUD_USERNAME,
   password: process.env.NEXTCLOUD_PASSWORD,
   // Optional:
   // timeout: 30,
 })
-const vfs = new NextcloudVFS(config)
 const ws = new Workspace({ '/nc/': vfs }, { mode: MountMode.WRITE })
 ```
 
@@ -133,14 +132,13 @@ times, but not ETags. Subsequent `stat` operations can reuse those entries.
 ## Example
 
 ```typescript
-import { MountMode, NextcloudVFS, normalizeNextcloudConfig, Workspace } from '@struktoai/mirage-node'
+import { buildVfs, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const config = normalizeNextcloudConfig({
+const vfs = await buildVfs('nextcloud', {
   url: process.env.NEXTCLOUD_URL!,
   username: process.env.NEXTCLOUD_USERNAME,
   password: process.env.NEXTCLOUD_PASSWORD,
 })
-const vfs = new NextcloudVFS(config)
 const ws = new Workspace({ '/nc/': vfs }, { mode: MountMode.WRITE })
 
 // List files

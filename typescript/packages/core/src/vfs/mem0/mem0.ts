@@ -2,7 +2,7 @@ import { BaseVFS } from '../base.ts'
 import { type ByteSource } from '../../io/types.ts'
 import type { Handed } from '../types.ts'
 import { Mem0Accessor } from '../../accessor/mem0.ts'
-import { redactMem0Config, type Mem0Config, type Mem0ConfigRedacted } from './config.ts'
+import { Mem0ConfigSchema, type Mem0Config, type Mem0ConfigRedacted } from './config.ts'
 
 import { type DirListing, VFSName } from '../../types.ts'
 import type { PathSpec, FileStat, SearchQuery } from '../../types.ts'
@@ -10,6 +10,7 @@ import { readdir } from '../../core/mem0/readdir.ts'
 import { readStream } from '../../core/mem0/read.ts'
 import { stat } from '../../core/mem0/stat.ts'
 import { searchMany } from '../../core/mem0/search.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   <memory-id>.json`
@@ -64,7 +65,10 @@ export class Mem0VFS extends BaseVFS {
   }
 
   override getState(): Mem0VFSState {
-    const config: Mem0ConfigRedacted = redactMem0Config(this.config)
+    const config: Mem0ConfigRedacted = redactConfigWithSchema(
+      Mem0ConfigSchema,
+      this.config,
+    ) as Mem0ConfigRedacted
     return { type: this.name, config }
   }
 }

@@ -14,14 +14,15 @@
 
 import { describe, expect, it } from 'vitest'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import { normalizeEmailConfig } from '../core/email/config.ts'
+import { EmailConfigSchema } from '../core/email/config.ts'
 import { DiskVFS } from './disk/disk.ts'
 import { EmailVFS } from './email/email.ts'
 import { GridFSVFS } from './gridfs/gridfs.ts'
 import { HfBucketsVFS } from './hf_buckets/hf_buckets.ts'
-import { normalizeNextcloudConfig } from './nextcloud/config.ts'
+import { NextcloudConfigSchema } from './nextcloud/config.ts'
 import { NextcloudVFS } from './nextcloud/nextcloud.ts'
 import { SSHVFS } from './ssh/ssh.ts'
+import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 // The node backends' half of core's vfs/rangeRoster.test.ts: who takes the
 // window itself, and who leaves it to the read-and-slice fallback.
@@ -33,7 +34,11 @@ const NATIVE: [string, () => BaseVFS][] = [
     'nextcloud',
     () =>
       new NextcloudVFS(
-        normalizeNextcloudConfig({ url: 'https://cloud.test/dav/', username: 'u', password: 'p' }),
+        parseConfigWithSchema(NextcloudConfigSchema, {
+          url: 'https://cloud.test/dav/',
+          username: 'u',
+          password: 'p',
+        }),
       ),
   ],
   ['ssh', () => new SSHVFS({ host: 'h', username: 'u' })],
@@ -46,7 +51,7 @@ const SLICED: [string, () => BaseVFS][] = [
     'email',
     () =>
       new EmailVFS(
-        normalizeEmailConfig({
+        parseConfigWithSchema(EmailConfigSchema, {
           imap_host: 'h',
           smtp_host: 'h',
           username: 'me@example.com',

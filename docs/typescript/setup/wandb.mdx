@@ -6,13 +6,13 @@ description: "Read experiment runs, configuration, summaries, history, and run f
 For API-key and entity discovery, see [Weights & Biases Setup](/home/setup/wandb).
 
 ```typescript
-import { Workspace, MountMode, WandbVFS, normalizeWandbConfig } from '@struktoai/mirage-node'
+import { Workspace, MountMode, buildVfs } from '@struktoai/mirage-node'
 
 const ws = new Workspace({
-  '/wandb': new WandbVFS(normalizeWandbConfig({
+  '/wandb': await buildVfs('wandb', {
     entities: ['my-team'],
     api_key: process.env.WANDB_API_KEY,
-  })),
+  }),
 }, { mode: MountMode.READ })
 ```
 

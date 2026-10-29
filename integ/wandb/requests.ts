@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs'
 import { Kind, parse, visit } from 'graphql'
 import { Workspace } from '../../typescript/packages/core/src/workspace/workspace/workspace.ts'
 import { WandbVFS } from '../../typescript/packages/core/src/vfs/wandb/wandb.ts'
-import { normalizeWandbConfig } from '../../typescript/packages/core/src/core/wandb/config.ts'
+import { WandbConfigSchema } from '../../typescript/packages/core/src/core/wandb/config.ts'
+import { parseConfigWithSchema } from '../../typescript/packages/core/src/vfs/secrets.ts'
 import { MountMode } from '../../typescript/packages/core/src/types.ts'
 import type { RequestRecord, startWandb } from '../server/wandb/fake.ts'
 
@@ -91,7 +92,7 @@ export async function requestChecks(server: Awaited<ReturnType<typeof startWandb
   const results: RequestResult[] = []
   for (const scenario of scenarios) {
     const vfs = new WandbVFS(
-      normalizeWandbConfig({
+      parseConfigWithSchema(WandbConfigSchema, {
         entities: ['lab'],
         api_key: API_KEY,
         base_url: server.base,
