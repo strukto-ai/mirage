@@ -1635,3 +1635,19 @@ async def test_refill_tokens_stay_out_of_the_listing_script(
     assert (
         redis_index._WRITE_LISTING if window else redis_index._SWAP_LISTING
     ) in scripts
+
+
+@pytest.mark.asyncio
+async def test_a_failed_seed_flush_still_releases_the_listing_memo(
+    rolling_client, monkeypatch
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+
+    async def unavailable():
+        raise RuntimeError("unavailable")
+
+    monkeypatch.setattr(store, "_flush_seed", unavailable)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        await store.close()
+    assert store._listings._closed
