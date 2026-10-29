@@ -444,6 +444,7 @@ export async function jqLines(
   } finally {
     await engine?.close()
     await worker?.close()
+    await reader.close()
   }
   return lines.join('')
 }

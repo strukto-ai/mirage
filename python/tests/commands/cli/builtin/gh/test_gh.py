@@ -1239,6 +1239,17 @@ async def test_api_jq_runs_a_program_jq_eval_refuses_in_a_worker():
         "error: boom",
         b"[0]\n",
     )
+    accessor, paths, texts, ctx = _args(
+        ["repos/o/r"], {"jq": "[1 | lgamma], error($ENV.TOKEN)"}
+    )
+    with pytest.raises(StreamRefusal) as caught:
+        await api(
+            accessor,
+            paths,
+            texts,
+            dataclasses.replace(ctx, env={"TOKEN": "t"}),
+        )
+    assert (str(caught.value), caught.value.output) == ("error: t", b"[0]\n")
 
 
 @pytest.mark.asyncio

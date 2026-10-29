@@ -967,6 +967,14 @@ describe('gh api --jq', () => {
       'error: boom',
       '[0]\n',
     ])
+    const withEnv = await api(
+      ...args(['repos/o/r'], { jq: '[1 | lgamma], error($ENV.TOKEN)' }, undefined, {
+        env: { TOKEN: 't' },
+      }),
+    ).catch((error: unknown) => error)
+    expect(withEnv).toBeInstanceOf(StreamRefusal)
+    const read = withEnv as StreamRefusal
+    expect([read.message, new TextDecoder().decode(read.output)]).toEqual(['error: t', '[0]\n'])
   })
 })
 

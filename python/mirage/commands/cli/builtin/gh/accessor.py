@@ -555,6 +555,7 @@ async def jq_lines(
             await engine.close()
         if worker is not None:
             await worker.close()
+        await reader.close()
     return "".join(lines)
 
 

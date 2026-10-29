@@ -426,6 +426,7 @@ function valueBound(
   inputs: readonly unknown[] | null,
   argsValue: Readonly<Record<string, unknown>> | null,
   inputsError: string | null,
+  env: string | null = null,
 ): Bound {
   const named = new Map(Object.entries(namedArgs).map(([name, value]) => [name, jqText(value)]))
   const docs = inputs === null ? null : inputs.map(jqText)
@@ -436,6 +437,7 @@ function valueBound(
     docs,
     argsValue === null ? null : jqText(argsValue),
     inputsError,
+    env,
   )
 }
 
@@ -806,6 +808,7 @@ async function run(bindings: Bound, expr: string, texts: boolean): Promise<JqRun
  * program's. A string is the program's only when it calls `error` at all, and
  * then only when a rerun that tells the program's own errors apart shows it
  * (see WRAP and MARK); a run neither rerun can speak for reads as a builtin's.
+ * `env` is the environment the run read, an object as text.
  */
 export async function jqRaised(
   obj: unknown,
@@ -814,12 +817,13 @@ export async function jqRaised(
   namedArgs: Readonly<Record<string, unknown>> = {},
   inputs: readonly unknown[] | null = null,
   argsValue: Readonly<Record<string, unknown>> | null = null,
+  env: string | null = null,
 ): Promise<boolean> {
   if (run.stop?.kind !== 'error') return false
   if (!run.stop.string) return true
   const program = renamed(expr)
   if (program === expr) return false
-  const bindings = valueBound(obj, expr, namedArgs, inputs, argsValue, null)
+  const bindings = valueBound(obj, expr, namedArgs, inputs, argsValue, null, env)
   const wrapping = wrapped(bindings, program, WRAP, `${UNWRAP})${DONE}`)
   if (wrapping !== null) {
     const values = rerunValues(await raw(bindings.stdin, wrapping))
@@ -839,8 +843,10 @@ export async function jqRaised(
  * for a worker to make away from the event loop.
  */
 export async function jqRunRaised(obj: unknown, expr: string, env: string): Promise<JqRun> {
-  const done = await run(bound(jqText(obj), expr, new Map(), null, null, null, env), expr, false)
-  if (done.stop?.kind !== 'error' || !(await jqRaised(obj, expr, done))) return done
+  const done = await run(valueBound(obj, expr, {}, null, null, null, env), expr, false)
+  if (done.stop?.kind !== 'error' || !(await jqRaised(obj, expr, done, {}, null, null, env))) {
+    return done
+  }
   return { outputs: done.outputs, stop: { ...done.stop, own: true } }
 }
 
