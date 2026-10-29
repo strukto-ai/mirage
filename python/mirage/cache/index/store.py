@@ -284,7 +284,11 @@ class IndexCacheStore:
         raise NotImplementedError
 
     async def invalidate_prefix(
-        self, vfs_path: str, *, excluded: tuple[str, ...] = ()
+        self,
+        vfs_path: str,
+        *,
+        excluded: tuple[str, ...] = (),
+        remember: bool = False,
     ) -> None:
         """Drop ``vfs_path`` and everything cached below it.
 
@@ -297,6 +301,8 @@ class IndexCacheStore:
         Args:
             vfs_path (str): Mount-absolute root of the subtree.
             excluded (tuple[str, ...]): nested mount roots to preserve.
+            remember (bool): retain current membership as deletion history
+                for the next complete listing; False forgets it.
         """
         raise NotImplementedError
 

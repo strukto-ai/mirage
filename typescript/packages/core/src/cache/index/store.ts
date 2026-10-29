@@ -150,9 +150,11 @@ export abstract class IndexCacheStore {
    * because the listings further down were cached independently and nothing
    * above them expires them.
    *
+   * `remember` retains current membership as deletion history for the next
+   * complete listing; the default forgets it.
    * Mirrors Python `IndexCacheStore.invalidate_prefix`.
    */
-  abstract invalidatePrefix(vfsPath: string, excluded?: readonly string[]): Promise<void>
+  abstract invalidatePrefix(vfsPath: string, excluded?: readonly string[], remember?: boolean): Promise<void>
   /**
    * Whether the running command fetched `folder`'s listing itself.
    *

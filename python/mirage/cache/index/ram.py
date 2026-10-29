@@ -452,9 +452,19 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._versions.pop(vfs_path, None)
 
     async def invalidate_prefix(
-        self, vfs_path: str, *, excluded: tuple[str, ...] = ()
+        self,
+        vfs_path: str,
+        *,
+        excluded: tuple[str, ...] = (),
+        remember: bool = False,
     ) -> None:
         self._observation += 1
+        if remember:
+            for folder, children in self._children.items():
+                if under_path(folder, vfs_path) and not any(
+                    under_path(folder, prefix) for prefix in excluded
+                ):
+                    self._bury(folder, tuple(children))
         # Forgetting what is cached is not evidence that anything went away,
         # so an existing tombstone survives for the next complete listing.
         self._drop_prefix(vfs_path, keep_tombstones=True, excluded=excluded)

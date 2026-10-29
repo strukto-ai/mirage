@@ -402,8 +402,15 @@ export class RAMIndexCacheStore extends IndexCacheStore {
 
   // Forgetting what is cached is not evidence that anything went away, so an
   // existing tombstone survives for the next complete listing.
-  invalidatePrefix(vfsPath: string, excluded: readonly string[] = []): Promise<void> {
+  invalidatePrefix(vfsPath: string, excluded: readonly string[] = [], remember = false): Promise<void> {
     this.observation += 1
+    if (remember) {
+      for (const [folder, children] of this.children) {
+        if (underPath(folder, vfsPath) && !excluded.some((prefix) => underPath(folder, prefix))) {
+          this.bury(folder, children)
+        }
+      }
+    }
     this.dropPrefix(vfsPath, true, excluded)
     return Promise.resolve()
   }

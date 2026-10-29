@@ -301,7 +301,7 @@ export class IndexView extends IndexCacheStore {
   override refillToken(): Promise<string> {
     return this.fence(async () => {
       if (this.unverified && this.owns(this.prefix)) {
-        await this.inner.invalidatePrefix(this.prefix, this.excludedPrefixes())
+        await this.inner.invalidatePrefix(this.prefix, this.excludedPrefixes(), true)
         this.unverified = false
       }
       return this.inner.refillToken()
@@ -313,7 +313,7 @@ export class IndexView extends IndexCacheStore {
       const owned = paths.filter((path) => this.owns(path))
       if (owned.length === 0) return false
       try {
-        if (this.unverified) await this.inner.invalidatePrefix(this.prefix, this.excludedPrefixes())
+        if (this.unverified) await this.inner.invalidatePrefix(this.prefix, this.excludedPrefixes(), true)
         const result = await this.inner.invalidateMissing(owned)
         this.unverified = false
         return result
@@ -359,10 +359,10 @@ export class IndexView extends IndexCacheStore {
     })
   }
 
-  invalidatePrefix(path: string, excluded: readonly string[] = []): Promise<void> {
+  invalidatePrefix(path: string, excluded: readonly string[] = [], remember = false): Promise<void> {
     return this.fence(async () => {
       if (this.owns(path))
-        await this.inner.invalidatePrefix(path, [...excluded, ...this.excludedPrefixes()])
+        await this.inner.invalidatePrefix(path, [...excluded, ...this.excludedPrefixes()], remember)
     })
   }
 

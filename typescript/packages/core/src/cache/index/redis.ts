@@ -319,7 +319,7 @@ return {0, ARGV[1]}
 `
 
 const DELETE_PATHS =
-  PATH_REGISTRY +
+  LISTING_HISTORY +
   `
 if not redis.call('ZSCORE', KEYS[1], '') then
   error('MIRAGE_INDEX_REGISTRY_MISSING')
@@ -344,6 +344,10 @@ for _, path in ipairs(paths) do
     end
   end
   if not protected then
+    if ARGV[10] == '1' then
+      local raw = redis.call('GET', ARGV[2] .. path)
+      if raw then bury(ARGV[3] .. path, cjson.decode(raw)) end
+    end
     for _, prefix in ipairs(removed) do redis.call('DEL', prefix .. path) end
     prune(KEYS[1], prefixes, path)
   end
@@ -1234,6 +1238,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     prefixes: readonly string[],
     vfsPath: string,
     excluded: readonly string[] = [],
+    remember = false,
   ): Promise<void> {
     const c = await this.client()
     let cursor = ''
@@ -1250,18 +1255,19 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           JSON.stringify(excluded.map(rstripSlash)),
           cursor,
           String(REGISTRY_PAGE),
+          remember ? '1' : '0',
         ],
       })) as string
     } while (cursor !== '')
   }
 
-  invalidatePrefix(vfsPath: string, excluded: readonly string[] = []): Promise<void> {
+  invalidatePrefix(vfsPath: string, excluded: readonly string[] = [], remember = false): Promise<void> {
     return this.listings.writing(async () => {
       await this.flushSeed()
       await (await this.client()).set(`${this.generationKey}-observation`, this.ids.uuid7())
       // Tombstones survive until the next complete listing proves removals.
       await this.deletePaths([this.entryPrefix], vfsPath, excluded)
-      await this.deletePaths([this.childrenPrefix, `${this.generationKey}:`], vfsPath, excluded)
+      await this.deletePaths([this.childrenPrefix, `${this.generationKey}:`], vfsPath, excluded, remember)
     })
   }
 

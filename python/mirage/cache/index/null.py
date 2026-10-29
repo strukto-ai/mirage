@@ -131,7 +131,11 @@ class NullIndexCacheStore(IndexCacheStore):
         return None
 
     async def invalidate_prefix(
-        self, vfs_path: str, *, excluded: tuple[str, ...] = ()
+        self,
+        vfs_path: str,
+        *,
+        excluded: tuple[str, ...] = (),
+        remember: bool = False,
     ) -> None:
         return None
 

@@ -344,7 +344,7 @@ return {0, ARGV[1]}
 """
 
 _DELETE_PATHS = (
-    _PATH_REGISTRY
+    _LISTING_HISTORY
     + """
 if not redis.call('ZSCORE', KEYS[1], '') then
   error('MIRAGE_INDEX_REGISTRY_MISSING')
@@ -369,6 +369,10 @@ for _, path in ipairs(paths) do
     end
   end
   if not protected then
+    if ARGV[10] == '1' then
+      local raw = redis.call('GET', ARGV[2] .. path)
+      if raw then bury(ARGV[3] .. path, cjson.decode(raw)) end
+    end
     for _, prefix in ipairs(removed) do redis.call('DEL', prefix .. path) end
     prune(KEYS[1], prefixes, path)
   end
@@ -1383,6 +1387,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         prefixes: list[str],
         vfs_path: str,
         excluded: tuple[str, ...] = (),
+        remember: bool = False,
     ) -> None:
         cursor = ""
         while True:
@@ -1399,6 +1404,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                     json.dumps([p.rstrip("/") for p in excluded]),
                     cursor,
                     str(REGISTRY_PAGE),
+                    "1" if remember else "0",
                 ],
             )
             cursor = _text(cast(str | bytes, raw))
@@ -1407,7 +1413,11 @@ class RedisIndexCacheStore(IndexCacheStore):
 
     @_counts_listing_write
     async def invalidate_prefix(
-        self, vfs_path: str, *, excluded: tuple[str, ...] = ()
+        self,
+        vfs_path: str,
+        *,
+        excluded: tuple[str, ...] = (),
+        remember: bool = False,
     ) -> None:
         await self._flush_seed()
         await self._client.set(
@@ -1419,6 +1429,7 @@ class RedisIndexCacheStore(IndexCacheStore):
             [self._children_prefix, self._directory_generation_prefix],
             vfs_path,
             excluded,
+            remember,
         )
 
     async def holds_subtree(self, vfs_path: str) -> bool:
