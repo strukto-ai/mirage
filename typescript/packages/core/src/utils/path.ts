@@ -81,7 +81,7 @@ const DOTS = new Set(['.', '..'])
  * `missing/` and `f/` are EISDIR).
  */
 export function endsAtDot(spelling: string): boolean {
-  const last = spelling.replace(/\/+$/, '').split('/').pop()
+  const last = rstripSlash(spelling).split('/').pop()
   return last === '.' || last === '..'
 }
 

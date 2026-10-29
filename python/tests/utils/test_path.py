@@ -17,6 +17,7 @@ import pytest
 from mirage.utils.path import (
     ancestors,
     drop_trailing_segments,
+    ends_at_dot,
     expand_tilde,
     glob_prefix_match,
     gnu_basename,
@@ -347,3 +348,23 @@ def test_link_targets_walk_dots_and_links_in_order(path, links, expected):
 def test_resolve_symlinks_preserves_directory_suffix(path, expected):
     links = {"/data/al": "/other/dir", "/data/root": "/"}
     assert resolve_symlinks(path, links) == expected
+
+
+@pytest.mark.parametrize(
+    "spelling,expected",
+    [
+        ("a/.", True),
+        ("a/..//", True),
+        ("..", True),
+        ("a/b/", False),
+        ("/", False),
+        ("", False),
+        (".a/", False),
+    ],
+)
+def test_ends_at_dot(spelling, expected):
+    assert ends_at_dot(spelling) is expected
+
+
+def test_ends_at_dot_reads_a_long_run_of_slashes():
+    assert ends_at_dot("/" * 200_000 + "x") is False

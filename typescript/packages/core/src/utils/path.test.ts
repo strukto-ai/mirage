@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ancestors,
   CycleError,
+  endsAtDot,
   expandTilde,
   globPrefixMatch,
   posixNormpath,
@@ -232,4 +233,22 @@ it.each([
     ['/data/root', '/'],
   ])
   expect(resolveSymlinks(path, links)).toBe(expected)
+})
+
+describe('endsAtDot', () => {
+  it.each([
+    ['a/.', true],
+    ['a/..//', true],
+    ['..', true],
+    ['a/b/', false],
+    ['/', false],
+    ['', false],
+    ['.a/', false],
+  ])('%s', (spelling, expected) => {
+    expect(endsAtDot(spelling)).toBe(expected)
+  })
+
+  it('reads a long run of slashes in linear time', () => {
+    expect(endsAtDot(`${'/'.repeat(200_000)}x`)).toBe(false)
+  })
 })

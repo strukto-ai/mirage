@@ -144,8 +144,9 @@ async function lowerExcludeFrom(
       return [bag, consumed, new IOResult({ exitCode: 2, stderr: new TextEncoder().encode(line) })]
     }
     for (const line of decodeText(data).split('\n')) {
-      const glob = line.replace(/[ \t\n\v\f\r]+$/, '')
-      if (glob) globs.push(glob)
+      let end = line.length
+      while (end > 0 && ' \t\n\v\f\r'.includes(line.charAt(end - 1))) end--
+      if (end > 0) globs.push(line.slice(0, end))
     }
   }
   const lowered: Record<string, FlagValue> = { ...bag, exclude_from: globs }

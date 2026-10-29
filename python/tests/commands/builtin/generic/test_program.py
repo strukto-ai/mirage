@@ -34,6 +34,31 @@ async def test_rg_pattern_file_from_stdin_lowers_to_regexp():
 
 
 @pytest.mark.asyncio
+async def test_grep_exclude_from_trims_trailing_ascii_whitespace():
+    _, flags, _, error = await prepare_program(
+        "grep",
+        ["/in"],
+        {"exclude_from": [_typed("-")]},
+        "*.log \t\v\f\r\n \t\n\tkeep\u00a0\n".encode(),
+        _no_dispatch,
+    )
+    assert error is None
+    assert flags["exclude_from"] == ["*.log", "\tkeep\u00a0"]
+
+
+@pytest.mark.asyncio
+async def test_grep_exclude_from_reads_a_long_run_of_tabs():
+    _, flags, _, _ = await prepare_program(
+        "grep",
+        ["/in"],
+        {"exclude_from": [_typed("-")]},
+        b"\t" * 200_000 + b"x",
+        _no_dispatch,
+    )
+    assert len(flags["exclude_from"][0]) == 200_001
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("name,data", [("sed", b""), ("grep", None)])
 async def test_a_directory_program_file_is_read_as_the_command_reads_it(
     name, data
