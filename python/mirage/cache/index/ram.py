@@ -375,12 +375,12 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             folder = path.rsplit("/", 1)[0] or "/"
             async with self._lock_for(folder):
                 expiry = self._expiry.get(folder)
+                if expiry is None or now >= expiry:
+                    self._observation += 1
+                    continue
                 if folder in self._partial or folder in self._windows:
                     if path not in self._folder_flags.get(folder, {}):
                         self._observation += 1
-                    continue
-                if expiry is None or now >= expiry:
-                    self._observation += 1
                     continue
                 if path in self._folder_flags.get(folder, {}):
                     continue

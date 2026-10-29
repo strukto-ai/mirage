@@ -1600,3 +1600,38 @@ async def test_directory_tokens_are_drawn_in_seed_order():
         assert tokens == sorted(tokens)
     finally:
         await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("window", [False, True])
+async def test_refill_tokens_stay_out_of_the_listing_script(
+    rolling_client, monkeypatch, window
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    scripts: set[str] = set()
+    tokens: list[str] = []
+    real = client.eval
+
+    async def recorded(script, *args):
+        scripts.add(script)
+        return await real(script, *args)
+
+    monkeypatch.setattr(client, "eval", recorded)
+    for name in ("a", "b"):
+        tokens.append(await store.refill_token())
+        assert (
+            await store.refill_dir(
+                "/dir",
+                [(name, FileStat(name=name, type=FileType.FILE))],
+                tokens[-1],
+                window=window,
+            )
+            is not None
+        )
+        await store.invalidate_missing([f"/dir/new-{name}"])
+    assert len(set(tokens)) == 2
+    assert not any(token in script for script in scripts for token in tokens)
+    assert (
+        redis_index._WRITE_LISTING if window else redis_index._SWAP_LISTING
+    ) in scripts

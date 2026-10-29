@@ -1237,6 +1237,25 @@ async def test_point_observation_fences_refills_from_incomplete_listings(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["invalidated", "expired-partial"])
+async def test_a_stale_listing_naming_the_path_still_fences_refills(
+    store, kind
+):
+    if kind == "invalidated":
+        await store.set_dir("/dir", [("a", entry())])
+        await store.invalidate()
+    else:
+        await store.set_partial_dir(
+            "/dir",
+            [("a", entry())],
+            datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+    ticket = await store.refill_token()
+    assert await store.invalidate_missing(["/dir/a"]) is False
+    assert await store.refill_dir("/dir", [], ticket) is None
+
+
+@pytest.mark.asyncio
 async def test_empty_listing_remains_readable_after_point_invalidation(store):
     await store.set_dir("/dir", [])
     assert await store.invalidate_missing(["/dir/first"]) is True

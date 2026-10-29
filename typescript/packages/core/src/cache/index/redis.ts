@@ -43,6 +43,7 @@ import { globEscape } from '../file/utils.ts'
 
 const INVALIDATE_MISSING = `
 local changed, unknown = false, false
+local current = redis.call('GET', KEYS[3])
 for i = 3, #ARGV do
   local path = ARGV[i]
   local folder = string.match(path, '^(.*)/[^/]+$')
@@ -51,13 +52,17 @@ for i = 3, #ARGV do
   local raw = redis.call('GET', key)
   if raw then
     local listing = cjson.decode(raw)
+    local directory = redis.call('GET', KEYS[4] .. folder)
     local found = false
     for _, child in ipairs(listing.entries) do
       if child == path then found = true; break end
     end
-    if listing.partial or listing.window then
+    if not current or not directory
+        or listing.generation ~= current .. ':' .. directory
+        or listing.expires_at <= tonumber(ARGV[1]) then
+      unknown = true
+    elseif listing.partial or listing.window then
       if not found then unknown = true end
-    elseif listing.expires_at <= tonumber(ARGV[1]) then unknown = true
     elseif not found then
       listing.expires_at = 0
       listing.version = cjson.null
@@ -414,6 +419,9 @@ prune(KEYS[1], prefixes, ARGV[5])
 const WRITE_LISTING =
   LISTING_HISTORY +
   `
+if ARGV[8] ~= '' and redis.call('GET', KEYS[4] .. '-observation') ~= ARGV[8] then
+  return nil
+end
 local next = cjson.decode(ARGV[1])
 local path = string.sub(KEYS[1], #ARGV[3] + 1)
 track(KEYS[3], {ARGV[2], ARGV[3], ARGV[4], ARGV[5]}, {path})
@@ -423,7 +431,7 @@ if next.partial then
 else
   redis.call('DEL', KEYS[2])
 end
-for i = 8, #ARGV, 2 do
+for i = 9, #ARGV, 2 do
   if next.partial then
     local old = redis.call('GET', ARGV[2] .. ARGV[i])
     if (old and is_dir(cjson.decode(old)))
@@ -442,6 +450,9 @@ return 1
 const SWAP_LISTING =
   LISTING_HISTORY +
   `
+if ARGV[8] ~= '' and redis.call('GET', KEYS[4] .. '-observation') ~= ARGV[8] then
+  return nil
+end
 if not redis.call('ZSCORE', KEYS[3], '') then
   error('MIRAGE_INDEX_REGISTRY_MISSING')
 end
@@ -460,7 +471,7 @@ local function protected(path)
   return false
 end
 local named = {}
-for i = 8, #ARGV, 2 do
+for i = 9, #ARGV, 2 do
   named[ARGV[i]] = is_dir(cjson.decode(ARGV[i + 1]))
 end
 local seen, gone, folders = {}, {}, {}
@@ -496,7 +507,7 @@ end
 if saved then
   for _, path in ipairs(saved.entries) do drop(path, buried[path]) end
 end
-for i = 8, #ARGV, 2 do drop(ARGV[i], false) end
+for i = 9, #ARGV, 2 do drop(ARGV[i], false) end
 local roots = {}
 for i, path in ipairs(gone) do
   if folders[i] == 1 then roots[#roots + 1] = path end
@@ -511,7 +522,7 @@ end
 for _, root in ipairs(roots) do
   for _, path in ipairs(subtree(KEYS[3], root)) do remove(path) end
 end
-for i = 8, #ARGV, 2 do
+for i = 9, #ARGV, 2 do
   redis.call('SET', ARGV[2] .. ARGV[i], ARGV[i + 1])
   redis.call('ZADD', KEYS[3], 0, ARGV[i])
 end
@@ -1071,10 +1082,6 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     return this.listings.writing(async () => {
       await this.flushSeed()
       const c = await this.client()
-      const guard =
-        refill === null
-          ? ''
-          : `if redis.call('GET', KEYS[4] .. '-observation') ~= ${JSON.stringify(refill)} then return nil end\n`
       const now = new Date(this.clock.now() * 1000)
       const prefix = vfsPath === '/' ? '/' : `${vfsPath}/`
       const generation = await this.generation(c, this.generationKey)
@@ -1093,7 +1100,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
         window: !partial && !evict,
       }
       if (!evict) {
-        const accepted = await c.eval(guard + WRITE_LISTING, {
+        const accepted = await c.eval(WRITE_LISTING, {
           keys: [
             this.childrenKey(vfsPath),
             this.tombstonePrefix + vfsPath,
@@ -1109,6 +1116,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
             `${this.generationKey}:`,
             '[]',
             this.ids.uuid7(),
+            refill ?? '',
             ...rows.flat(),
           ],
         })
@@ -1116,7 +1124,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       }
       // One script, so no other writer lands between reading the previous
       // listing and replacing it; the diff is against the true predecessor.
-      const result = (await this.evalComplete(c, guard + SWAP_LISTING, {
+      const result = (await this.evalComplete(c, SWAP_LISTING, {
         keys: [
           this.childrenKey(vfsPath),
           this.tombstonePrefix + vfsPath,
@@ -1132,6 +1140,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           `${this.generationKey}:`,
           JSON.stringify(excluded.map(rstripSlash)),
           this.ids.uuid7(),
+          refill ?? '',
           ...rows.flat(),
         ],
       })) as [string[], number[]] | null
@@ -1153,17 +1162,26 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   override async invalidateMissing(paths: readonly string[]): Promise<boolean> {
     await this.flushSeed()
     if (paths.length === 0 || this.listings.allows(paths)) return false
+    let changed: boolean
     try {
       const result = await (
         await this.client()
       ).eval(INVALIDATE_MISSING, {
-        keys: [this.childrenPrefix, `${this.generationKey}-observation`],
+        keys: [
+          this.childrenPrefix,
+          `${this.generationKey}-observation`,
+          this.generationKey,
+          `${this.generationKey}:`,
+        ],
         arguments: [String(this.clock.now()), this.ids.uuid7(), ...paths],
       })
-      return result === 1
-    } finally {
+      changed = result === 1
+    } catch (err) {
       this.listings.wrote()
+      throw err
     }
+    if (changed || this.listings.contradicts(paths)) this.listings.wrote()
+    return changed
   }
 
   override refillDir(

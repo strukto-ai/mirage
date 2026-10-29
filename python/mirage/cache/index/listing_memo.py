@@ -138,6 +138,22 @@ class ListingMemo:
                 return False
         return True
 
+    def contradicts(self, paths: Sequence[str]) -> bool:
+        """Whether a live kept listing leaves out one of the paths.
+
+        Args:
+            paths (Sequence[str]): observed immediate child keys.
+        """
+        observed: dict[str, list[str]] = {}
+        for path in paths:
+            observed.setdefault(path.rsplit("/", 1)[0] or "/", []).append(path)
+        return any(
+            self._live(kept)
+            and any(path not in _positions(kept) for path in observed[folder])
+            for (_, folder), kept in self._reads.items()
+            if folder in observed
+        )
+
     async def read(
         self,
         folder: str,

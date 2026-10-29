@@ -442,6 +442,9 @@ prune(KEYS[1], prefixes, ARGV[5])
 _WRITE_LISTING = (
     _LISTING_HISTORY
     + """
+if ARGV[8] ~= '' and redis.call('GET', KEYS[4] .. '-observation') ~= ARGV[8] then
+  return nil
+end
 local next = cjson.decode(ARGV[1])
 local path = string.sub(KEYS[1], #ARGV[3] + 1)
 track(KEYS[3], {ARGV[2], ARGV[3], ARGV[4], ARGV[5]}, {path})
@@ -451,7 +454,7 @@ if next.partial then
 else
   redis.call('DEL', KEYS[2])
 end
-for i = 8, #ARGV, 2 do
+for i = 9, #ARGV, 2 do
   if next.partial then
     local old = redis.call('GET', ARGV[2] .. ARGV[i])
     if (old and is_dir(cjson.decode(old)))
@@ -471,6 +474,9 @@ return 1
 _SWAP_LISTING = (
     _LISTING_HISTORY
     + """
+if ARGV[8] ~= '' and redis.call('GET', KEYS[4] .. '-observation') ~= ARGV[8] then
+  return nil
+end
 if not redis.call('ZSCORE', KEYS[3], '') then
   error('MIRAGE_INDEX_REGISTRY_MISSING')
 end
@@ -489,7 +495,7 @@ local function protected(path)
   return false
 end
 local named = {}
-for i = 8, #ARGV, 2 do
+for i = 9, #ARGV, 2 do
   named[ARGV[i]] = is_dir(cjson.decode(ARGV[i + 1]))
 end
 local seen, gone, folders = {}, {}, {}
@@ -525,7 +531,7 @@ end
 if saved then
   for _, path in ipairs(saved.entries) do drop(path, buried[path]) end
 end
-for i = 8, #ARGV, 2 do drop(ARGV[i], false) end
+for i = 9, #ARGV, 2 do drop(ARGV[i], false) end
 local roots = {}
 for i, path in ipairs(gone) do
   if folders[i] == 1 then roots[#roots + 1] = path end
@@ -540,7 +546,7 @@ end
 for _, root in ipairs(roots) do
   for _, path in ipairs(subtree(KEYS[3], root)) do remove(path) end
 end
-for i = 8, #ARGV, 2 do
+for i = 9, #ARGV, 2 do
   redis.call('SET', ARGV[2] .. ARGV[i], ARGV[i + 1])
   redis.call('ZADD', KEYS[3], 0, ARGV[i])
 end
@@ -596,6 +602,7 @@ prune(KEYS[4], {ARGV[1], ARGV[2], ARGV[3], ARGV[4]},
 
 _INVALIDATE_MISSING = """
 local changed, unknown = false, false
+local current = redis.call('GET', KEYS[3])
 for i = 3, #ARGV do
   local path = ARGV[i]
   local folder = string.match(path, '^(.*)/[^/]+$')
@@ -604,13 +611,17 @@ for i = 3, #ARGV do
   local raw = redis.call('GET', key)
   if raw then
     local listing = cjson.decode(raw)
+    local directory = redis.call('GET', KEYS[4] .. folder)
     local found = false
     for _, child in ipairs(listing.entries) do
       if child == path then found = true; break end
     end
-    if listing.partial or listing.window then
+    if not current or not directory
+        or listing.generation ~= current .. ':' .. directory
+        or listing.expires_at <= tonumber(ARGV[1]) then
+      unknown = true
+    elseif listing.partial or listing.window then
       if not found then unknown = true end
-    elseif listing.expires_at <= tonumber(ARGV[1]) then unknown = true
     elseif not found then
       listing.expires_at = 0
       listing.version = cjson.null
@@ -1179,15 +1190,6 @@ class RedisIndexCacheStore(IndexCacheStore):
         refill: str | None = None,
     ) -> list[Evicted] | None:
         await self._flush_seed()
-        guard = (
-            ""
-            if refill is None
-            else (
-                "if redis.call('GET', KEYS[4] .. '-observation') ~= "
-                + json.dumps(refill)
-                + " then return nil end\n"
-            )
-        )
         now = datetime.fromtimestamp(self.clock.now(), timezone.utc)
         prefix = "/" if vfs_path == "/" else vfs_path + "/"
 
@@ -1217,7 +1219,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         )
         if not evict:
             accepted = await self._eval_complete(
-                guard + _WRITE_LISTING,
+                _WRITE_LISTING,
                 [
                     self._children_key(vfs_path),
                     self._tombstone_prefix + vfs_path,
@@ -1233,6 +1235,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                     self._directory_generation_prefix,
                     "[]",
                     self._ids.uuid7(),
+                    refill or "",
                     *(value for row in rows for value in row),
                 ],
             )
@@ -1242,7 +1245,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         result = cast(
             tuple[list[str | bytes], list[int]] | None,
             await self._eval_complete(
-                guard + _SWAP_LISTING,
+                _SWAP_LISTING,
                 [
                     self._children_key(vfs_path),
                     self._tombstone_prefix + vfs_path,
@@ -1258,6 +1261,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                     self._directory_generation_prefix,
                     json.dumps([p.rstrip("/") for p in excluded]),
                     self._ids.uuid7(),
+                    refill or "",
                     *(value for row in rows for value in row),
                 ],
             ),
@@ -1297,22 +1301,28 @@ class RedisIndexCacheStore(IndexCacheStore):
         if not paths or self._listings.allows(paths):
             return False
         try:
-            return bool(
+            changed = bool(
                 await cast(
                     Awaitable[int],
                     self._client.eval(
                         _INVALIDATE_MISSING,
-                        2,
+                        4,
                         self._children_prefix,
                         self._generation_key + "-observation",
+                        self._generation_key,
+                        self._directory_generation_prefix,
                         self.clock.now(),
                         self._ids.uuid7(),
                         *paths,
                     ),
                 )
             )
-        finally:
+        except BaseException:
             self._listings.wrote()
+            raise
+        if changed or self._listings.contradicts(paths):
+            self._listings.wrote()
+        return changed
 
     async def refill_dir(
         self,

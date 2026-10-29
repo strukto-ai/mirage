@@ -323,12 +323,12 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       const folder = path.slice(0, path.lastIndexOf('/')) || '/'
       await this.lock.withLock(folder, () => {
         const expiry = this.expiry.get(folder)
-        if (this.partial.has(folder) || this.windowed.has(folder)) {
-          if (this.folderFlags.get(folder)?.has(path) !== true) this.observation += 1
-          return Promise.resolve()
-        }
         if (expiry === undefined || now >= expiry) {
           this.observation += 1
+          return Promise.resolve()
+        }
+        if (this.partial.has(folder) || this.windowed.has(folder)) {
+          if (this.folderFlags.get(folder)?.has(path) !== true) this.observation += 1
           return Promise.resolve()
         }
         if (this.folderFlags.get(folder)?.has(path) === true) return Promise.resolve()

@@ -967,3 +967,23 @@ async def test_listing_refill_recovers_a_failed_observation_scope(monkeypatch):
     assert (await index.list_dir("/data/nested")).entries == [
         "/data/nested/keep"
     ]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_point_observation_keeps_the_view_verified(
+    monkeypatch,
+):
+    index = RAMIndexCacheStore()
+    view = IndexView(index, RAMFileCacheStore(), "/data", lambda _: True)
+    await index.set_dir("/data", [("old", _row())])
+
+    async def cancelled(paths):
+        raise asyncio.CancelledError
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(index, "invalidate_missing", cancelled)
+        with pytest.raises(asyncio.CancelledError):
+            await view.invalidate_missing(["/data/old"])
+    assert (await view.list_dir("/data")).entries == ["/data/old"]
+    await view.refill_token()
+    assert (await index.list_dir("/data")).entries == ["/data/old"]

@@ -864,6 +864,25 @@ it('a rejected warm still resolves a backend id', async () => {
   }
 })
 
+it('a rejected complete listing answers a miss without listing again', async () => {
+  const folders = new Folders()
+  folders.add('found', 'root', ENC.encode('present'))
+  const ws = workspace(folders)
+  const index = ws.mount('/f').indexStore
+  const original = folders.readdir.bind(folders)
+  folders.readdir = async (path, handed) => {
+    const rows = await original(path, handed)
+    await index.invalidateMissing(['/unrelated/new'])
+    return rows
+  }
+  try {
+    await expect(ws.vfs.stat('/f/missing')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(folders.calls.filter(([op, id]) => op === 'list' && id === 'root')).toHaveLength(1)
+  } finally {
+    await ws.close()
+  }
+})
+
 it.each(['scratch', 'retired', 'live'])(
   'only a current direct stat notes a probe (%s)',
   async (kind) => {

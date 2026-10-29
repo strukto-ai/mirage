@@ -2069,17 +2069,20 @@ class MountEntry:
             listed.append(key)
             return names
 
-        row = await entry_at(index, key, warm) or fetched[key]
+        row = await entry_at(index, key, warm) or fetched.get(key)
         if (
             row is None
             and listed
+            and key in fetched
             and index is not NULL_INDEX
             and (await index.list_dir(folder_of(key), key)).status
             is LookupStatus.NOT_FOUND
         ):
-            row = await entry_at(index, key, warm) or fetched[key]
+            row = await entry_at(index, key, warm) or fetched.get(key)
         if row is not None:
             return row
+        if key not in fetched:
+            return None
         if await beyond_window(index, key):
             return await self._beyond(scope, index)
         if not await self._unproven(index, key):
@@ -2087,7 +2090,7 @@ class MountEntry:
         if self._asks_by_path:
             return await self._beyond(scope, index)
         await index.invalidate_dir(folder_of(key))
-        return await entry_at(index, key, warm) or fetched[key]
+        return await entry_at(index, key, warm) or fetched.get(key)
 
     async def _observe(
         self, index: IndexCacheStore, scopes: Sequence[PathSpec]
@@ -2169,7 +2172,8 @@ class MountEntry:
         )
         try:
             row = await stat(scope, **_handed_on(stat, index, **handed))
-            await self._observe(index, [scope])
+            if not _wants(stat):
+                await self._observe(index, [scope])
             self._note_live(scope, index, stat, row, generation)
             return row
         except FileNotFoundError as exc:
@@ -2191,7 +2195,9 @@ class MountEntry:
             path (PathSpec): the directory, keyed below the mount.
             index (IndexCacheStore): the mount's index.
             fetched (dict[str, FileStat | None] | None): requested rows
-                returned to the lookup even if cache publication is rejected.
+                returned to the lookup even if cache publication is
+                rejected; a rejected complete listing drops a key it
+                leaves out.
         """
         key = index_key(self.prefix, path)
         glob = path.pattern is not None

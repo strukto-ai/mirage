@@ -111,6 +111,21 @@ for (const backend of ['ram', 'redis']) {
         expect(await store.refillDir('/dir', [['old', entry()]], ticket)).toBe(null)
       })
 
+      it.each(['invalidated', 'expired-partial'])(
+        'a stale %s listing naming the path still fences refills',
+        async (kind) => {
+          if (kind === 'invalidated') {
+            await store.setDir('/dir', [['a', entry()]])
+            await store.invalidate()
+          } else {
+            await store.setPartialDir('/dir', [['a', entry()]], new Date(Date.now() - 1000))
+          }
+          const ticket = await store.refillToken()
+          expect(await store.invalidateMissing(['/dir/a'])).toBe(false)
+          expect(await store.refillDir('/dir', [], ticket)).toBe(null)
+        },
+      )
+
       it('an empty listing stays readable after point invalidation', async () => {
         await store.setDir('/dir', [])
         expect(await store.invalidateMissing(['/dir/first'])).toBe(true)

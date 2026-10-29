@@ -89,9 +89,12 @@ export async function keepListing(
     if (accepted === null) {
       const stem = key === '/' ? '' : key
       if (fetched !== undefined) {
-        for (const row of listing.entries) {
-          const child = `${stem}/${row.name}`
-          if (fetched.has(child)) fetched.set(child, row)
+        const named = new Map(listing.entries.map((row) => [`${stem}/${row.name}`, row]))
+        const complete = !listing.partial && !listing.window
+        for (const child of [...fetched.keys()]) {
+          const row = named.get(child)
+          if (row !== undefined) fetched.set(child, row)
+          else if (complete) fetched.delete(child)
         }
       }
       return listing.entries.map((row) => `${stem}/${row.name}`)

@@ -805,6 +805,28 @@ async def test_rejected_warm_still_resolves_a_backend_id():
 
 
 @pytest.mark.asyncio
+async def test_a_rejected_complete_listing_answers_a_miss_without_relisting():
+    folders = Folders()
+    folders.add("found", data=b"present")
+    ws = Workspace({"/f": folders})
+    index = ws.mount("/f").index_store
+    original = folders.readdir
+
+    async def retire_refill(path, entry=None):
+        rows = await original(path, entry)
+        await index.invalidate_missing(["/unrelated/new"])
+        return rows
+
+    folders.readdir = retire_refill
+    try:
+        with pytest.raises(FileNotFoundError):
+            await ws.vfs.stat("/f/missing")
+        assert folders.calls.count(("list", "root")) == 1
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["scratch", "retired", "live"])
 async def test_only_a_current_direct_stat_can_note_a_probe(kind):
     keys = Keys({"new": b"present"})

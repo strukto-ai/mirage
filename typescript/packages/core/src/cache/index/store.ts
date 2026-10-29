@@ -98,12 +98,6 @@ export abstract class IndexCacheStore {
   reportGone(_gone: readonly Evicted[]): Promise<void> {
     return Promise.resolve()
   }
-  /**
-   * Drop a changed row and demote its parent listing to partial.
-   * Retain siblings, the original deadline and deletion history. Clear the
-   * parent's version and window without recording a new observation.
-   * Missing or stale membership must never become fresh.
-   */
   /** Token captured before fetching listings, including descendant seeds. */
   refillToken(): Promise<string> {
     throw new Error('refillToken is not implemented')
@@ -122,7 +116,12 @@ export abstract class IndexCacheStore {
   ): Promise<Evicted[] | null> {
     throw new Error('refillDir is not implemented')
   }
-
+  /**
+   * Drop a changed row and demote its parent listing to partial.
+   * Retain siblings, the original deadline and deletion history. Clear the
+   * parent's version and window without recording a new observation.
+   * Missing or stale membership must never become fresh.
+   */
   abstract invalidateEntry(vfsPath: string): Promise<void>
   abstract invalidateDir(vfsPath: string): Promise<void>
   /**

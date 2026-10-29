@@ -102,14 +102,6 @@ export class ListingMemo {
     )
   }
 
-  /**
-   * A folder's listing, read from Redis at most once per command.
-   *
-   * @param folder the listed folder's key.
-   * @param fetch reads the listing from Redis and answers it with its
-   *   expiry, or with null when there is no live listing to keep.
-   * @param child the one key a lookup asks about, to narrow the entries to.
-   */
   /** Whether this command's live listings already name every observed child key. */
   allows(paths: readonly string[]): boolean {
     const stamp = soleCommandStarted()
@@ -123,6 +115,29 @@ export class ListingMemo {
     return true
   }
 
+  /** Whether a live kept listing leaves out one of the observed child keys. */
+  contradicts(paths: readonly string[]): boolean {
+    const observed = new Map<string, string[]>()
+    for (const path of paths) {
+      const folder = path.slice(0, path.lastIndexOf('/')) || '/'
+      observed.set(folder, [...(observed.get(folder) ?? []), path])
+    }
+    for (const [key, kept] of this.reads) {
+      const named = observed.get(key.slice(key.indexOf(':') + 1))
+      if (named === undefined || !this.live(kept)) continue
+      if (named.some((path) => !positions(kept).has(path))) return true
+    }
+    return false
+  }
+
+  /**
+   * A folder's listing, read from Redis at most once per command.
+   *
+   * @param folder the listed folder's key.
+   * @param fetch reads the listing from Redis and answers it with its
+   *   expiry, or with null when there is no live listing to keep.
+   * @param child the one key a lookup asks about, to narrow the entries to.
+   */
   async read(
     folder: string,
     fetch: () => Promise<[ListResult, number | null]>,

@@ -103,6 +103,11 @@ async def keep_listing(
         index (IndexCacheStore): the mount's index.
         key (str): the listed directory's key.
         listed (list[FileStat] | DirListing): the backend's answer.
+        refill (str | None): token taken before the fetch; None keeps
+            the listing unconditionally.
+        fetched (dict[str, FileStat | None] | None): keys a lookup asks
+            about; a rejected listing fills the rows it names and, when
+            complete, drops the keys it proves absent.
     """
     listing = listed if isinstance(listed, DirListing) else DirListing(listed)
     rows: list[tuple[str, FileStat]] = [
@@ -120,10 +125,13 @@ async def keep_listing(
         if accepted is None:
             stem = "" if key == "/" else key
             if fetched is not None:
-                for row in listing.entries:
-                    child = f"{stem}/{row.name}"
-                    if child in fetched:
-                        fetched[child] = row
+                named = {f"{stem}/{row.name}": row for row in listing.entries}
+                complete = not listing.partial and not listing.window
+                for child in list(fetched):
+                    if child in named:
+                        fetched[child] = named[child]
+                    elif complete:
+                        del fetched[child]
             return [f"{stem}/{row.name}" for row in listing.entries]
     elif listing.partial:
         await index.set_partial_dir(key, rows)

@@ -391,7 +391,7 @@ class IndexView(IndexCacheStore):
                 result = await self._store.invalidate_missing(owned)
                 self._unverified = False
                 return result
-            except BaseException:
+            except Exception:
                 self._unverified = True
                 raise
 

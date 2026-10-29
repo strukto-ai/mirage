@@ -1297,11 +1297,13 @@ export class MountEntry {
     if (
       row === null &&
       listed.length > 0 &&
+      fetched.has(key) &&
       (await index.listDir(folderOf(key), key)).status === LookupStatus.NOT_FOUND
     ) {
       row = (await entryAt(index, key, warm)) ?? fetched.get(key) ?? null
     }
     if (row !== null) return row
+    if (!fetched.has(key)) return null
     if (await beyondWindow(index, key)) return this.beyond(scope, index)
     if (!(await this.unproven(index, key))) return null
     if (this.asksByPath) return this.beyond(scope, index)
@@ -1344,12 +1346,6 @@ export class MountEntry {
     return (this.asksByPath || this.vfs.supports('write')) && unprovenMiss(index, key)
   }
 
-  /**
-   * What is at a path its folder's stored listing leaves out without proving
-   * it absent (a window, or a listing another command fetched): the backend's
-   * stat of it, handed what is at its parent; null when nothing is. Mirrors
-   * Python's `_beyond`.
-   */
   /** Invalidate cached absences disproved by current backend answers. Mirrors Python's _observe. */
   private async observe(index: IndexCacheStore, scopes: readonly PathSpec[]): Promise<void> {
     if (!this.lists || index instanceof ListingCheckStore) return
@@ -1392,6 +1388,12 @@ export class MountEntry {
     }
   }
 
+  /**
+   * What is at a path its folder's stored listing leaves out without proving
+   * it absent (a window, or a listing another command fetched): the backend's
+   * stat of it, handed what is at its parent; null when nothing is. Mirrors
+   * Python's `_beyond`.
+   */
   private async beyond(scope: PathSpec, index: IndexCacheStore): Promise<FileStat | null> {
     const handed: { -readonly [K in keyof Handed]: Handed[K] } = {}
     if (this.wants('stat').includes('parent')) {
@@ -1400,7 +1402,7 @@ export class MountEntry {
     const generation = this.cacheManager?.generation
     try {
       const row = await this.vfs.stat(scope, handed)
-      await this.observe(index, [scope])
+      if (this.wants('stat').length === 0) await this.observe(index, [scope])
       this.noteLive(scope, index, row, generation)
       return row
     } catch (err) {

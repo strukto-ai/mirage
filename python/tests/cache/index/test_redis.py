@@ -398,6 +398,31 @@ async def test_a_known_point_observation_keeps_the_listing_memo(
 
 
 @pytest.mark.asyncio
+async def test_an_unknown_point_observation_keeps_the_listing_memo(
+    store, mgets
+):
+    await store.set_dir("/d", LISTED)
+    mgets.clear()
+    async with command_scope():
+        before = await store.list_dir("/d")
+        assert await store.invalidate_missing(["/e/new"]) is False
+        assert await store.list_dir("/d") == before
+    assert len(mgets) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_observation_a_kept_listing_leaves_out_drops_the_memo(
+    store, mgets
+):
+    await store.set_dir("/d", LISTED)
+    async with command_scope():
+        assert (await store.list_dir("/d")).entries == ["/d/a", "/d/b"]
+        await store._client.delete(store._children_key("/d"))
+        assert await store.invalidate_missing(["/d/new"]) is False
+        assert (await store.list_dir("/d")).entries is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("repeat", [False, True])
 async def test_observation_token_eviction_cannot_revive_an_old_refill(
     store, repeat

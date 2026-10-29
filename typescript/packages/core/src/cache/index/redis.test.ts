@@ -80,6 +80,31 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
     },
   )
 
+  it.each([false, true])(
+    'refill tokens stay out of the listing script (window=%s)',
+    async (window) => {
+      const client = await redis()
+      const sent = vi.spyOn(client, 'eval')
+      const tokens: string[] = []
+      for (const name of ['a', 'b']) {
+        tokens.push(await store.refillToken())
+        expect(
+          await store.refillDir('/dir', [[name, entry(name, name)]], tokens.at(-1) ?? '', null, {
+            window,
+          }),
+        ).not.toBe(null)
+        await store.invalidateMissing([`/dir/new-${name}`])
+      }
+      const scripts = sent.mock.calls.map(([script]) => script)
+      expect(new Set(tokens).size).toBe(2)
+      expect(scripts.some((script) => tokens.some((token) => script.includes(token)))).toBe(false)
+      expect(
+        new Set(scripts.filter((script) => script.includes('publish_listing(KEYS[1]'))).size,
+      ).toBe(1)
+      sent.mockRestore()
+    },
+  )
+
   it.each(['none', 'replace', 'delete'])('conditional replacement is atomic: %s', async (peer) => {
     await store.setDir('/dir', [['a', entry('old', 'a')]], undefined, { version: 'v1' })
     const old = (await store.get('/dir/a')).entry
@@ -1559,6 +1584,30 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
       expect(sent.mock.calls).toHaveLength(1)
     },
   )
+
+  it('an unknown observation keeps the listing memo', async () => {
+    await store.setDir('/d', LISTED)
+    const sent = await mGets()
+    await runInCommandScope(async () => {
+      const before = await store.listDir('/d')
+      expect(await store.invalidateMissing(['/e/new'])).toBe(false)
+      expect(await store.listDir('/d')).toEqual(before)
+    })
+    expect(sent.mock.calls).toHaveLength(1)
+  })
+
+  it('an observation a kept listing leaves out drops the memo', async () => {
+    await store.setDir('/d', LISTED)
+    await runInCommandScope(async () => {
+      expect((await store.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
+      const childrenKey = (
+        store as unknown as { childrenKey: (path: string) => string }
+      ).childrenKey('/d')
+      await (await redis()).del(childrenKey)
+      expect(await store.invalidateMissing(['/d/new'])).toBe(false)
+      expect((await store.listDir('/d')).entries ?? null).toBe(null)
+    })
+  })
 
   it('keeps the siblings of a written row batched', async () => {
     await store.setDir('/d', LISTED)
