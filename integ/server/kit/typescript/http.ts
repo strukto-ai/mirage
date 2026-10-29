@@ -173,7 +173,7 @@ function faultsEndpoint<C extends MinimalClient>(
 }
 
 function send(res: ServerResponse, reply: Reply, head: boolean): void {
-  const headers: Record<string, string> = { ...(reply.headers ?? {}) }
+  const headers: Record<string, string | string[]> = { ...(reply.headers ?? {}) }
   let payload: Buffer
   if (reply.body === undefined) {
     payload = Buffer.alloc(0)

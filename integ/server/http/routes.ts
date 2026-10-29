@@ -25,7 +25,7 @@ interface ResponseRow {
   body: string
 }
 
-function text(status: number, body: string, extra: Record<string, string> = {}): Reply {
+function text(status: number, body: string, extra: Record<string, string | string[]> = {}): Reply {
   return { status, body: Buffer.from(body, 'utf8'), headers: { 'Content-Type': TEXT, ...extra } }
 }
 
@@ -105,6 +105,24 @@ function form(ctx: Ctx<C>): Reply {
   return text(200, `form ${pairs.join(' ')}\n`)
 }
 
+// One route for every cookie case: it sets each `c` value as a Set-Cookie
+// header, redirects to `to` when there is one, refuses a request whose
+// cookies lack `need` with a 401, and answers with the Cookie header it got
+// (node joins two of them with `; `).
+function jar(ctx: Ctx<C>): Reply {
+  const query = ctx.url.searchParams
+  const sent = headerOf(ctx, 'cookie')
+  const set = query.getAll('c')
+  const headers: Record<string, string | string[]> = set.length > 0 ? { 'Set-Cookie': set } : {}
+  const to = query.get('to')
+  if (to !== null) return text(302, `cookie=${sent}\n`, { ...headers, Location: to })
+  const need = query.get('need')
+  if (need !== null && !sent.split('; ').includes(need)) {
+    return text(401, 'unauthorized\n', headers)
+  }
+  return text(200, `cookie=${sent}\n`, headers)
+}
+
 export function httpRoutes(): KitRoute<C>[] {
   const paths = ['/hello', '/data.json', '/bytes.bin', '/missing', '/boom']
   return [
@@ -118,5 +136,7 @@ export function httpRoutes(): KitRoute<C>[] {
     route<C>('GET', '/request', request('GET')),
     route<C>('POST', '/request', request('POST')),
     route<C>('POST', '/form', form),
+    route<C>('GET', '/jar/*path', jar),
+    route<C>('POST', '/jar/*path', jar),
   ]
 }

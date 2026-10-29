@@ -53,7 +53,8 @@ export interface ResetResponse {
 export interface Reply {
   status: number
   body?: JsonValue | Buffer
-  headers?: Record<string, string>
+  // A list sends the header once per value, as Set-Cookie needs.
+  headers?: Record<string, string | string[]>
 }
 
 export interface RouteMatch {

@@ -20,6 +20,7 @@ import pytest
 from mirage import Workspace
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.utils import http as http_mod
+from mirage.commands.builtin.utils.cookie import CookieJar
 from mirage.commands.builtin.utils.http import (
     DEFAULT_USER_AGENT,
     HttpResponse,
@@ -294,3 +295,130 @@ async def test_response_headers_are_captured_in_order(monkeypatch):
         ("Set-Cookie", "a"),
         ("Set-Cookie", "b"),
     )
+
+
+def _cookies_sent(httpx_mock) -> list[str | None]:
+    return [r.headers.get("cookie") for r in httpx_mock.get_requests()]
+
+
+@pytest.mark.asyncio
+async def test_a_cookie_a_redirect_set_goes_on_the_next_hop_and_stays(
+    httpx_mock,
+):
+    httpx_mock.add_response(
+        url="http://x.test/hop",
+        status_code=302,
+        headers=[
+            ("Location", "/next"),
+            ("Set-Cookie", "h=1; Path=/"),
+            ("Set-Cookie", "k=2; Path=/"),
+        ],
+    )
+    httpx_mock.add_response(url="http://x.test/next", text="ok")
+    jar = CookieJar(True)
+    await http_request("http://x.test/hop", follow_redirects=True, cookies=jar)
+    assert _cookies_sent(httpx_mock) == [None, "k=2; h=1"]
+    assert jar.sent == [None, "k=2; h=1"]
+    assert [c.name for c in jar.cookies] == ["h", "k"]
+
+
+@pytest.mark.asyncio
+async def test_nothing_crosses_a_hop_with_the_engine_off(httpx_mock):
+    httpx_mock.add_response(
+        url="http://x.test/hop",
+        status_code=302,
+        headers=[("Location", "/next"), ("Set-Cookie", "h=1; Path=/")],
+    )
+    httpx_mock.add_response(url="http://x.test/next", text="ok")
+    await http_request(
+        "http://x.test/hop", follow_redirects=True, cookies=CookieJar(False)
+    )
+    assert _cookies_sent(httpx_mock) == [None, None]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "location,after",
+    [("/next", "y=2; x=1"), ("http://other.test/next", "y=2")],
+)
+async def test_a_typed_cookie_follows_the_jar_on_the_first_origin_only(
+    httpx_mock, location, after
+):
+    httpx_mock.add_response(
+        url="http://x.test/hop",
+        status_code=302,
+        headers=[("Location", location)],
+    )
+    httpx_mock.add_response(url=httpx.URL("http://x.test/hop").join(location))
+    await http_request(
+        "http://x.test/hop",
+        headers={"Cookie": "x=1"},
+        follow_redirects=True,
+        cookies=CookieJar(False, "y=2"),
+    )
+    assert _cookies_sent(httpx_mock) == ["y=2; x=1", after]
+
+
+class _StalledBody(httpx.AsyncByteStream):
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        raise httpx.ReadTimeout("body stalled")
+
+
+@pytest.mark.asyncio
+async def test_the_cookies_of_a_response_whose_body_fails_are_kept(httpx_mock):
+    httpx_mock.add_callback(
+        lambda request: httpx.Response(
+            200,
+            headers=[("Set-Cookie", "f=1; Path=/")],
+            stream=_StalledBody(),
+        ),
+        url="http://x.test/x",
+    )
+    jar = CookieJar(True)
+    with pytest.raises(HttpTimeoutError):
+        await http_request("http://x.test/x", cookies=jar)
+    assert [c.name for c in jar.cookies] == ["f"]
+
+
+@pytest.mark.asyncio
+async def test_a_typed_cookie_reaches_a_unicode_host_it_was_typed_for(
+    httpx_mock,
+):
+    httpx_mock.add_response(
+        url="http://xn--bcher-kva.test/hop",
+        status_code=302,
+        headers=[("Location", "/next")],
+    )
+    httpx_mock.add_response(url="http://xn--bcher-kva.test/next")
+    await http_request(
+        "http://bücher.test/hop",
+        headers={"Cookie": "x=1"},
+        follow_redirects=True,
+        cookies=CookieJar(False),
+    )
+    assert _cookies_sent(httpx_mock) == ["x=1", "x=1"]
+
+
+@pytest.mark.asyncio
+async def test_a_typed_cookie_comes_back_with_the_first_origin(httpx_mock):
+    httpx_mock.add_response(
+        url="http://x.test/hop",
+        status_code=302,
+        headers=[("Location", "http://other.test/back")],
+    )
+    httpx_mock.add_response(
+        url="http://other.test/back",
+        status_code=302,
+        headers=[("Location", "http://x.test/end")],
+    )
+    httpx_mock.add_response(url="http://x.test/end")
+    await http_request(
+        "http://x.test/hop",
+        headers={"Cookie": "x=1"},
+        follow_redirects=True,
+        cookies=CookieJar(False),
+    )
+    assert _cookies_sent(httpx_mock) == ["x=1", None, "x=1"]

@@ -709,7 +709,8 @@ async function* treePages(at: Dispatch, where: RepoAt, recursive: boolean): Asyn
   for (;;) {
     yield page
     if (!ok(page) || !Array.isArray(page.body)) return
-    const link = (page.headers ?? {}).Link
+    const raw = (page.headers ?? {}).Link
+    const link = Array.isArray(raw) ? raw[0] : raw
     if (link === undefined) return
     const cursor = /[?&]cursor=([^&>]+)/.exec(link)?.[1]
     if (cursor === undefined) return

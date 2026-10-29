@@ -72,6 +72,20 @@ SPECS: dict[str, CommandSpec] = {
                 help="Submit a multipart/form-data field.",
             ),
             Argument(
+                "-b",
+                "--cookie",
+                action="append",
+                help="Send cookies: NAME=VALUE data as given, else a cookie "
+                "file to read.",
+            ),
+            Argument(
+                "-c",
+                "--cookie-jar",
+                type="path",
+                help="Write every cookie to the given file after the "
+                "transfer, - for stdout.",
+            ),
+            Argument(
                 "-o",
                 "--output",
                 type="path",
