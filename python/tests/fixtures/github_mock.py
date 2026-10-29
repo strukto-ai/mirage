@@ -174,6 +174,15 @@ class FakeGitHubApi:
             ]
         self.search_results = new_search
 
+    def head(self) -> str:
+        """The repository's head: a digest of its tree, so any edit to
+        ``tree`` moves it."""
+        state = "".join(
+            f"{path}\0{entry.type}\0{entry.sha}\n"
+            for path, entry in sorted(self.tree.items())
+        )
+        return hashlib.sha1(state.encode()).hexdigest()
+
     async def fetch_default_branch(
         self, account: Any, owner: str, repo: str
     ) -> str:
@@ -182,12 +191,12 @@ class FakeGitHubApi:
     async def fetch_tree(
         self, account: Any, owner: str, repo: str, ref: str
     ) -> tuple[dict[str, Any], bool, Any]:
-        return dict(self.tree), False, "mock-head-sha"
+        return dict(self.tree), False, self.head()
 
     async def fetch_head(
         self, account: Any, owner: str, repo: str, ref: str
     ) -> str | None:
-        return "mock-head-sha"
+        return self.head()
 
     async def fetch_dir_page(
         self, account: Any, owner: str, repo: str, tree_sha: str
