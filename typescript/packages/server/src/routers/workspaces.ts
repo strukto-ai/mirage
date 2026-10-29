@@ -189,7 +189,8 @@ function answer<T>(reply: FastifyReply, status: number, body: T): T {
 
 /**
  * Run a create's `build` under the caller's claim on `id`, or answer 409
- * when the id is not theirs to create. A claim this create made is released
+ * when the id is not theirs to create, and 503 before anything is built
+ * when the server is at its `maxWorkspaces`. A claim this create made is released
  * when the build answers anything but success or throws, so a failed
  * create leaves the id free; one the account already held (its own closed
  * or stored workspace) stays.
@@ -201,6 +202,11 @@ async function claimed(
   id: string,
   build: () => Promise<unknown>,
 ): Promise<unknown> {
+  if (!deps.registry.hasRoom()) {
+    return answer(reply, 503, {
+      detail: `server is at max_workspaces (${String(deps.registry.maxWorkspaces)})`,
+    })
+  }
   const stored = req.account !== null && (await hasState(deps.stateRoot, id))
   const claim = await deps.registry.claim(id, req.account, stored)
   if (claim === Claim.Taken) {

@@ -18,7 +18,13 @@ import time
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.server.registry import Claim, WorkspaceRegistry
+from mirage.server.daemon_config import DaemonConfigError
+from mirage.server.env import ENV_MAX_WORKSPACES
+from mirage.server.registry import (
+    Claim,
+    WorkspaceRegistry,
+    resolve_max_workspaces,
+)
 from mirage.workspace.record.disk import DiskRecordClient
 
 
@@ -162,3 +168,33 @@ async def test_a_workspace_reaches_only_records_made_since_its_creation():
     assert not await registry.allows("w", "bob", entry.created_at - 1)
     assert await registry.allows("w", "bob", entry.created_at)
     await registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_builds_in_flight_count_against_max_workspaces():
+    registry = WorkspaceRegistry(max_workspaces=2)
+    registry.add(_ws(), "a")
+    async with registry.creating("b", "one"):
+        assert registry.has_room()
+        async with registry.creating("c", "two"):
+            assert not registry.has_room()
+    assert WorkspaceRegistry().has_room()
+    await registry.close_all()
+
+
+def test_max_workspaces_reads_the_env_then_config(monkeypatch, tmp_path):
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    monkeypatch.delenv(ENV_MAX_WORKSPACES, raising=False)
+    assert resolve_max_workspaces() is None
+    (tmp_path / "config.toml").write_text("[daemon]\nmax_workspaces = 8\n")
+    assert resolve_max_workspaces() == 8
+    monkeypatch.setenv(ENV_MAX_WORKSPACES, "32")
+    assert resolve_max_workspaces() == 32
+    assert resolve_max_workspaces(4) == 4
+
+
+@pytest.mark.parametrize("value", ["0", "lots", "1.5"])
+def test_max_workspaces_must_be_a_positive_whole_number(monkeypatch, value):
+    monkeypatch.setenv(ENV_MAX_WORKSPACES, value)
+    with pytest.raises(DaemonConfigError, match="max_workspaces"):
+        resolve_max_workspaces()

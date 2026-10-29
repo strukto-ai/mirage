@@ -127,6 +127,34 @@ describe('workspaces router', () => {
     await app.close()
   })
 
+  it('answers 503 past max_workspaces', async () => {
+    const app = buildApp({ maxWorkspaces: 2 })
+    const create = (id?: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { config: RAM, ...(id === undefined ? {} : { id }) },
+      })
+    try {
+      expect((await create('a')).statusCode).toBe(201)
+      expect((await create('b')).statusCode).toBe(201)
+      const full = await create()
+      expect(full.statusCode).toBe(503)
+      expect(full.json()).toEqual({ detail: 'server is at max_workspaces (2)' })
+      const clone = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/a/clone',
+        payload: {},
+      })
+      expect(clone.statusCode).toBe(503)
+      expect((await create('a')).statusCode).toBe(200)
+      expect((await app.inject({ method: 'DELETE', url: '/v1/workspaces/a' })).statusCode).toBe(200)
+      expect((await create()).statusCode).toBe(201)
+    } finally {
+      await app.close()
+    }
+  })
+
   it('POST /v1/workspaces answers a held config id without building', async () => {
     registerSecrets('held-src', LoadAccountConfig, (_config: LoadAccountConfig, ref: string) =>
       Promise.resolve({ fields: { credential: `xoxb-${ref}` } }),

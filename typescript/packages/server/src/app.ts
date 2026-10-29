@@ -15,7 +15,7 @@
 import Fastify from 'fastify'
 import rateLimit from '@fastify/rate-limit'
 import { DiskRecordClient } from '@struktoai/mirage-node'
-import { OWNERS_PREFIX, WorkspaceRegistry } from './registry.ts'
+import { OWNERS_PREFIX, resolveMaxWorkspaces, WorkspaceRegistry } from './registry.ts'
 import type { AuthConfig } from './auth/index.ts'
 import { AuthMode, registerAuth, resolveAuthConfig } from './auth/index.ts'
 import { isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
@@ -59,6 +59,12 @@ export interface BuildAppOptions {
    * TCP endpoint stays shut unless a port is set.
    */
   sshConfig?: SSHConfig
+  /**
+   * The most workspaces the app holds at once; past it a create, clone or
+   * load answers 503. Undefined reads `$MIRAGE_MAX_WORKSPACES` or the
+   * `max_workspaces` config key, else sets no cap.
+   */
+  maxWorkspaces?: number
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -80,6 +86,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     onIdleExit: exitFn,
     accountsRequired: authConfig.mode === AuthMode.Jwt,
     owners: new DiskRecordClient(stateRoot, OWNERS_PREFIX),
+    maxWorkspaces: resolveMaxWorkspaces(options.maxWorkspaces),
   })
   const jobs = registry.jobs
   const pidFile = pidFilePath(options.pidFile)

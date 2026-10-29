@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -20,7 +20,9 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { DiskRecordClient, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
-import { Claim, WorkspaceRegistry } from './registry.ts'
+import { DaemonConfigError } from './daemon_config.ts'
+import { ENV_HOME, ENV_MAX_WORKSPACES } from './env.ts'
+import { Claim, resolveMaxWorkspaces, WorkspaceRegistry } from './registry.ts'
 
 describe('newWorkspaceId', () => {
   it('mints canonical UUIDv7 ids', () => {
@@ -194,5 +196,41 @@ describe('WorkspaceRegistry accounts', () => {
     expect(await r.allows('w', 'bob', entry.createdAt - 1)).toBe(false)
     expect(await r.allows('w', 'bob', entry.createdAt)).toBe(true)
     await r.closeAll()
+  })
+})
+
+describe('max_workspaces', () => {
+  it('counts builds in flight against the cap', async () => {
+    const r = new WorkspaceRegistry({ maxWorkspaces: 2 })
+    r.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }), 'a')
+    await r.creating('b', 'one', async () => {
+      expect(r.hasRoom()).toBe(true)
+      await r.creating('c', 'two', () => {
+        expect(r.hasRoom()).toBe(false)
+        return Promise.resolve()
+      })
+    })
+    expect(new WorkspaceRegistry().hasRoom()).toBe(true)
+    await r.remove('a')
+  })
+
+  it('reads the env, then the config file', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'mirage-max-'))
+    try {
+      expect(resolveMaxWorkspaces(undefined, { [ENV_HOME]: home })).toBeNull()
+      await writeFile(join(home, 'config.toml'), '[daemon]\nmax_workspaces = 8\n')
+      expect(resolveMaxWorkspaces(undefined, { [ENV_HOME]: home })).toBe(8)
+      const env = { [ENV_HOME]: home, [ENV_MAX_WORKSPACES]: '32' }
+      expect(resolveMaxWorkspaces(undefined, env)).toBe(32)
+      expect(resolveMaxWorkspaces(4, env)).toBe(4)
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it.each(['0', 'lots', '1.5'])('refuses %s', (value) => {
+    expect(() => resolveMaxWorkspaces(undefined, { [ENV_MAX_WORKSPACES]: value })).toThrow(
+      DaemonConfigError,
+    )
   })
 })

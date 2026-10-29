@@ -33,6 +33,7 @@ from mirage.server.env import (
     ENV_ALLOWED_HOSTS,
     ENV_DAEMON_PORT,
     ENV_IDLE_GRACE_SECONDS,
+    ENV_MAX_WORKSPACES,
 )
 from mirage.server.host_validation_constants import DEFAULT_ALLOWED_HOSTS
 from mirage.server.paths import mirage_home
@@ -52,6 +53,7 @@ _ENV_FOR_KEY = {
     **CONFIG_ENV_KEYS,
     "auth_token": ENV_TOKEN,
     "idle_grace_seconds": ENV_IDLE_GRACE_SECONDS,
+    "max_workspaces": ENV_MAX_WORKSPACES,
     "port": ENV_DAEMON_PORT,
     **SSH_ENV_KEYS,
 }
@@ -156,6 +158,7 @@ def _default_for_key(key: str) -> str:
         "socket": "",
         "auth_token": "",
         "idle_grace_seconds": "30",
+        "max_workspaces": "",
         "port": "8765",
         "ssh_port": "",
         "ssh_host": DEFAULT_SSH_HOST,

@@ -92,8 +92,9 @@ async def _has_state(request: Request, workspace_id: str) -> bool:
 async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
     """Hold the caller's claim on ``workspace_id`` while it is built.
 
-    A claim this create made is released when the build fails, so a
-    failed create leaves the id free; one the account already held (its
+    A server at its ``max_workspaces`` answers 503 before anything is
+    built. A claim this create made is released when the build fails, so
+    a failed create leaves the id free; one the account already held (its
     own closed or stored workspace) stays.
 
     Args:
@@ -101,6 +102,11 @@ async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
         workspace_id (str): the id being created.
     """
     registry = request.app.state.registry
+    if not registry.has_room():
+        raise HTTPException(
+            status_code=503,
+            detail=f"server is at max_workspaces ({registry.max_workspaces})",
+        )
     account = request.state.account
     stored = account is not None and await _has_state(request, workspace_id)
     claim = await registry.claim(workspace_id, account, stored)
