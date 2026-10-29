@@ -40,6 +40,14 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--json', { action: 'append', help: 'Send the data as JSON.' }),
       new Argument(['-u', '--user'], { help: 'Send the user and password for basic auth.' }),
       new Argument(['-F', '--form'], { help: 'Submit a multipart/form-data field.' }),
+      new Argument(['-b', '--cookie'], {
+        action: 'append',
+        help: 'Send cookies: NAME=VALUE data as given, else a cookie file to read.',
+      }),
+      new Argument(['-c', '--cookie-jar'], {
+        type: 'path',
+        help: 'Write every cookie to the given file after the transfer, - for stdout.',
+      }),
       new Argument(['-o', '--output'], {
         type: 'path',
         help: 'Write response body to the given file.',

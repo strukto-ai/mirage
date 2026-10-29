@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.utils.constants import HTTP_TIMEOUT_SECONDS
+from mirage.commands.builtin.utils.cookie import CookieJar, cookie_value
 
 # httpx is the [http] extra, so it stays optional: top-level import guarded the
 # same way the databricks accessor guards its SDK.
@@ -110,6 +111,7 @@ async def http_request(
     verify: bool = True,
     *,
     form_data: dict[str, str] | None = None,
+    cookies: CookieJar | None = None,
 ) -> HttpResponse:
     # A None timeout is no deadline at all (curl's `--max-time 0`), which
     # is what httpx spells it as too. `verify=False` is curl's -k: the
@@ -117,8 +119,42 @@ async def http_request(
     if httpx is None:
         raise ImportError(MISSING_HTTPX)
     started = time.monotonic()
+    event_hooks: dict[str, list[Any]] = {}
+    if cookies is not None:
+        # The jar every hop sends from and keeps the Set-Cookie headers in.
+        # Each hop's Cookie header is set here, over the one httpx would
+        # build from its own cookies; httpx drops a Cookie header on every
+        # redirect, so the one among `headers` is put back after the jar's
+        # on the hops that stay on the first origin.
+        origin = httpx.URL(url)
+        first = (origin.scheme, origin.host, origin.port)
+        typed = next(
+            (v for k, v in (headers or {}).items() if k.lower() == "cookie"),
+            None,
+        )
+
+        async def send_cookies(request: Any) -> None:
+            hop = request.url
+            same = (hop.scheme, hop.host, hop.port) == first
+            value = cookie_value(
+                cookies.header(str(hop)), typed if same else None
+            )
+            request.headers.pop("Cookie", None)
+            if value is not None:
+                request.headers["Cookie"] = value
+
+        async def keep_cookies(response: Any) -> None:
+            cookies.store(
+                str(response.request.url),
+                response.headers.get_list("set-cookie"),
+            )
+
+        event_hooks = {"request": [send_cookies], "response": [keep_cookies]}
     async with httpx.AsyncClient(
-        timeout=timeout, follow_redirects=follow_redirects, verify=verify
+        timeout=timeout,
+        follow_redirects=follow_redirects,
+        verify=verify,
+        event_hooks=event_hooks,
     ) as client:
         try:
             resp = await client.request(
@@ -146,6 +182,7 @@ async def http_form_request(
     timeout: float | None = HTTP_TIMEOUT_SECONDS,
     follow_redirects: bool = False,
     verify: bool = True,
+    cookies: CookieJar | None = None,
 ) -> HttpResponse:
     return await http_request(
         url,
@@ -155,6 +192,7 @@ async def http_form_request(
         follow_redirects=follow_redirects,
         verify=verify,
         form_data=form_data or {},
+        cookies=cookies,
     )
 
 

@@ -83,6 +83,7 @@ def mock_http(monkeypatch):
         timeout=30,
         follow_redirects=False,
         verify=True,
+        cookies=None,
     ):
         return HttpResponse(status=200, reason="OK", body=payload, url=url)
 

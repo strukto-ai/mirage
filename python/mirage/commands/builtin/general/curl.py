@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
+import logging
 import time
 from collections.abc import Sequence
 from urllib.parse import quote, urlsplit
@@ -21,6 +22,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.general.curl_write_out import render_write_out
 from mirage.commands.builtin.utils.constants import HTTP_TIMEOUT_SECONDS
+from mirage.commands.builtin.utils.cookie import CookieJar
 from mirage.commands.builtin.utils.http import (
     DEFAULT_USER_AGENT,
     HttpResponse,
@@ -37,6 +39,8 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
+
+logger = logging.getLogger(__name__)
 
 # Exit codes real curl uses for the failures mirage can hit. An HTTP error
 # status is deliberately absent: curl treats 4xx/5xx as a successful transfer
@@ -201,6 +205,65 @@ async def _read_at(
             f"a file\n{HELP_HINT}",
             exit_code=EXIT_READ,
         ) from exc
+
+
+async def _read_cookies(name: str, ctx: Context) -> str:
+    """The text of the cookie file a -b value names.
+
+    ``-`` is stdin, and an empty name is no file. curl goes on without a
+    file it cannot read, saying nothing (curl 8.14.1).
+
+    Args:
+        name (str): the file as the line named it.
+        ctx (Context): the invocation, for stdin and the dispatcher.
+    """
+    if not name:
+        return ""
+    try:
+        if name == "-":
+            return (await materialize(ctx.stdin)).decode(errors="replace")
+        if ctx.vfs is None:
+            return ""
+        content, _ = await ctx.vfs.dispatch(
+            "read", resolve_target(name, ctx.cwd)
+        )
+        return (await materialize(content)).decode(errors="replace")
+    except WALK_ERRORS as exc:
+        logger.debug("curl: cookie file %s not read: %s", name, exc)
+        return ""
+
+
+async def _save_cookies(
+    ctx: Context, target: PathSpec | str, jar: CookieJar
+) -> bytes:
+    """Write the jar to the file -c names, once the transfer has run.
+
+    Whatever the transfer ended in. ``-`` is stdout, which gets it after
+    everything else. A file curl cannot write stays unwritten, without a
+    word (curl 8.14.1).
+
+    Args:
+        ctx (Context): the invocation, for the dispatcher.
+        target (PathSpec | str): the file as the line named it.
+        jar (CookieJar): the invocation's cookies.
+
+    Returns:
+        bytes: what stdout gets, empty unless the file is ``-``.
+    """
+    text = jar.render().encode()
+    if (target.raw_path if isinstance(target, PathSpec) else target) == "-":
+        return text
+    if ctx.vfs is None:
+        return b""
+    try:
+        await ctx.vfs.dispatch(
+            "write", resolve_target(target, ctx.cwd), data=text
+        )
+    except WALK_ERRORS as exc:
+        logger.debug(
+            "curl: cookie jar %s not written: %s", _path_str(target), exc
+        )
+    return b""
 
 
 async def _data_piece(
@@ -433,6 +496,22 @@ async def curl(
     head = fl.as_bool("head")
     max_time = fl.as_float("max_time")
     sent, named = header_lines(fl.as_list("header"))
+    # -b data with a `=` goes as given, after the jar's cookies; anything
+    # else names a cookie file, which, like -c, turns the jar on (curl
+    # 8.14.1). A Cookie header the line typed takes the data's place.
+    cookie_jar = fl.raw("cookie_jar")
+    cookie_target = (
+        cookie_jar if isinstance(cookie_jar, (PathSpec, str)) else None
+    )
+    cookie_args = fl.as_list("cookie")
+    literals = [value for value in cookie_args if "=" in value]
+    cookie_files = [value for value in cookie_args if "=" not in value]
+    jar = CookieJar(
+        bool(cookie_files) or cookie_target is not None,
+        None
+        if not literals or "cookie" in named
+        else ";".join(value.lstrip() for value in literals),
+    )
     # curl refuses these lines before any transfer (curl 8.7.1, exit 2).
     # A negative --max-time is not a number curl takes; curl names the
     # spelling typed, which the handler cannot see, so the long one.
@@ -492,7 +571,8 @@ async def curl(
         if json and name.lower() not in named
     ]
     headers = [*auth, *agent, *sent, *typed]
-    trace_headers = [
+    # The jar's Cookie line goes between the two, as each hop sent it.
+    trace_head = [
         *auth,
         *(
             []
@@ -500,9 +580,8 @@ async def curl(
             else [("User-Agent", user_agent or DEFAULT_USER_AGENT)]
         ),
         *([] if "accept" in named or json else [("Accept", "*/*")]),
-        *sent,
-        *typed,
     ]
+    trace_tail = [*sent, *typed]
     started = time.monotonic()
 
     async def finish(
@@ -540,10 +619,17 @@ async def curl(
         }
         out, err = render_write_out(template, values)
         io.stderr = prompt + (await materialize(io.stderr)) + err
-        return (await materialize(stdout)) + out, io
+        saved = (
+            b""
+            if cookie_target is None
+            else await _save_cookies(ctx, cookie_target, jar)
+        )
+        return (await materialize(stdout)) + out + saved, io
 
     body_len: int | None = None
     body_type: str | None = None
+    for name in cookie_files:
+        jar.load(await _read_cookies(name, ctx))
     try:
         if form:
             method = request or "POST"
@@ -556,6 +642,7 @@ async def curl(
                 timeout=timeout,
                 follow_redirects=location,
                 verify=verify,
+                cookies=jar,
             )
         else:
             method = request or (
@@ -577,6 +664,7 @@ async def curl(
                 timeout=timeout,
                 follow_redirects=location,
                 verify=verify,
+                cookies=jar,
             )
     except HttpTimeoutError as exc:
         # Nothing was received: the body is read whole, so a deadline
@@ -604,14 +692,19 @@ async def curl(
     trace = b""
     if verbose:
         dumped: list[str] = []
-        for (target, sent_as), hop in zip(requests, hops):
+        for index, ((target, sent_as), hop) in enumerate(zip(requests, hops)):
             carries = sent_as == method
+            cookie = jar.sent[index] if index < len(jar.sent) else None
             dumped.append(
                 _dump(
                     request_lines(
                         target,
                         sent_as,
-                        trace_headers,
+                        [
+                            *trace_head,
+                            *([("Cookie", cookie)] if cookie else []),
+                            *trace_tail,
+                        ],
                         body_len if carries else None,
                         body_type if carries else None,
                     ),

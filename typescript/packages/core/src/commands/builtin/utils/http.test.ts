@@ -15,6 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import { httpFormRequest, httpRequest, isHttpError, registerInsecureFetch } from './http.ts'
+import { CookieJar } from './cookie.ts'
 import { runWithEvaluation } from '../../../context/session_context.ts'
 import { EvaluationContext } from '../../../workspace/evaluation.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
@@ -312,5 +313,70 @@ describe("httpRequest and the call's signal", () => {
     await new Promise((resolve) => setTimeout(resolve, 10))
     stop.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})
+
+describe('cookies across hops', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function hopThen(location: string, setCookie: string[]): ReturnType<typeof vi.fn<typeof fetch>> {
+    return vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('', {
+          status: 302,
+          statusText: 'Found',
+          headers: [
+            ['Location', location],
+            ...setCookie.map((c): [string, string] => ['Set-Cookie', c]),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(new Response('ok', { status: 200, statusText: 'OK' }))
+  }
+
+  function cookieSent(
+    mock: ReturnType<typeof vi.fn<typeof fetch>>,
+    call: number,
+  ): string | undefined {
+    return (mock.mock.calls[call]?.[1]?.headers as Record<string, string>).Cookie
+  }
+
+  it('sends a cookie a redirect set on the next hop and keeps it', async () => {
+    const mock = hopThen('/next', ['h=1; Path=/', 'k=2; Path=/'])
+    vi.stubGlobal('fetch', mock)
+    const jar = new CookieJar(true)
+    await httpRequest('http://x.test/hop', { followRedirects: true, cookies: jar })
+    expect([cookieSent(mock, 0), cookieSent(mock, 1)]).toEqual([undefined, 'k=2; h=1'])
+    expect(jar.sent).toEqual([null, 'k=2; h=1'])
+    expect(jar.cookies.map((c) => c.name)).toEqual(['h', 'k'])
+  })
+
+  it('carries nothing across a hop with the engine off', async () => {
+    const mock = hopThen('/next', ['h=1; Path=/'])
+    vi.stubGlobal('fetch', mock)
+    await httpRequest('http://x.test/hop', { followRedirects: true, cookies: new CookieJar(false) })
+    expect(cookieSent(mock, 1)).toBeUndefined()
+  })
+
+  it('puts a typed Cookie after the jar on the first origin only', async () => {
+    const same = hopThen('/next', [])
+    vi.stubGlobal('fetch', same)
+    await httpRequest('http://x.test/hop', {
+      headers: { cookie: 'x=1' },
+      followRedirects: true,
+      cookies: new CookieJar(false, 'y=2'),
+    })
+    expect([cookieSent(same, 0), cookieSent(same, 1)]).toEqual(['y=2; x=1', 'y=2; x=1'])
+    const away = hopThen('http://other.test/next', [])
+    vi.stubGlobal('fetch', away)
+    await httpRequest('http://x.test/hop', {
+      headers: { Cookie: 'x=1' },
+      followRedirects: true,
+      cookies: new CookieJar(false, 'y=2'),
+    })
+    expect([cookieSent(away, 0), cookieSent(away, 1)]).toEqual(['y=2; x=1', 'y=2'])
   })
 })

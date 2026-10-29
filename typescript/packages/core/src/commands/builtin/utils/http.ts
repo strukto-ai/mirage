@@ -22,6 +22,7 @@ import { callerSignal } from '../../../context/session_context.ts'
 import { makeAbortError, mergeSignals } from '../../../utils/abort.ts'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import { HTTP_TIMEOUT_SECONDS } from './constants.ts'
+import { type CookieJar, cookieValue } from './cookie.ts'
 
 export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; mirage/1.0)'
 const DEFAULT_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443 }
@@ -117,6 +118,12 @@ export interface HttpRequestOptions {
   verify?: boolean
   // The invocation's cancellation, which aborts the request with it.
   signal?: AbortSignal
+  // The jar every hop sends from and keeps the Set-Cookie headers in. A
+  // Cookie header among `headers` rides after the jar's, on the hops that
+  // stay on the first origin. A deliberate divergence the browser forces:
+  // its fetch drops a Cookie header and hides Set-Cookie, so there the jar
+  // sends and keeps nothing.
+  cookies?: CookieJar
 }
 
 async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpResponse> {
@@ -153,9 +160,18 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
     let method = options.method ?? 'GET'
     let body = options.body
     for (;;) {
+      let sent = headers
+      if (options.cookies !== undefined) {
+        const typed = Object.entries(headers).find(([name]) => name.toLowerCase() === 'cookie')
+        const value = cookieValue(options.cookies.header(current), typed?.[1] ?? null)
+        sent = Object.fromEntries(
+          Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'cookie'),
+        )
+        if (value !== null) sent.Cookie = value
+      }
       const init: RequestInit = {
         method,
-        headers,
+        headers: sent,
         signal: mergeSignals(controller.signal, caller) ?? controller.signal,
         redirect: 'manual',
       }
@@ -190,6 +206,10 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
         throw new HttpConnectError(host, port)
       }
       const hop = hopOf(resp, current, method, buf)
+      options.cookies?.store(
+        current,
+        hop.headers.filter(([name]) => name === 'set-cookie').map(([, value]) => value),
+      )
       const location = resp.headers.get('location')
       const next =
         follow && REDIRECT_STATUSES.has(resp.status) && location !== null
@@ -203,9 +223,12 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
       history.push(hop)
       if (!next.sameOrigin) {
         // Credentials stay with the host they were typed for, as the native
-        // follow and curl (without --location-trusted) both keep them.
+        // follow and curl (without --location-trusted) both keep them: the
+        // Authorization and the Cookie header a line typed.
         headers = Object.fromEntries(
-          Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'authorization'),
+          Object.entries(headers).filter(
+            ([name]) => !['authorization', 'cookie'].includes(name.toLowerCase()),
+          ),
         )
       }
       const switched = redirectMethod(resp.status, method)
@@ -233,6 +256,7 @@ export function httpFormRequest(
     followRedirects?: boolean
     verify?: boolean
     signal?: AbortSignal
+    cookies?: CookieJar
   } = {},
 ): Promise<HttpResponse> {
   const method = opts.method ?? 'POST'
@@ -252,6 +276,7 @@ export function httpFormRequest(
     ...(opts.followRedirects !== undefined ? { followRedirects: opts.followRedirects } : {}),
     ...(opts.verify !== undefined ? { verify: opts.verify } : {}),
     ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+    ...(opts.cookies !== undefined ? { cookies: opts.cookies } : {}),
   })
 }
 

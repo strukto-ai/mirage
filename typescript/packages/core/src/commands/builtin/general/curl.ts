@@ -26,6 +26,7 @@ import {
   isHttpError,
 } from '../utils/http.ts'
 import { HTTP_TIMEOUT_SECONDS } from '../utils/constants.ts'
+import { CookieJar } from '../utils/cookie.ts'
 import { resolveTarget } from '../utils/paths.ts'
 import { UsageError } from '../../errors.ts'
 import { fsStrerror, isFsError, isWalkError, enotsup } from '../../../errors/fs.ts'
@@ -38,6 +39,13 @@ import { renderWriteOut } from './curl_write_out.ts'
 import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
+const DEC = new TextDecoder()
+
+/**
+ * Opt in by assigning a debug sink, as Python's module logger is off until
+ * configured: a cookie file curl cannot read or write is skipped silently.
+ */
+export const logger: { debug?: (message: string) => void } = {}
 
 // Exit codes real curl uses for the failures mirage can hit. An HTTP error
 // status is deliberately absent: curl treats 4xx/5xx as a successful transfer
@@ -189,6 +197,48 @@ async function readAt(
     failure.cause = err
     throw failure
   }
+}
+
+/**
+ * The text of the cookie file a -b value names, `-` being stdin, and none for
+ * an empty name. curl goes on without a file it cannot read, saying nothing
+ * (curl 8.14.1).
+ */
+async function readCookies(name: string, ctx: Context): Promise<string> {
+  if (name === '') return ''
+  try {
+    if (name === '-') return DEC.decode(await materialize(ctx.stdin))
+    if (ctx.vfs === undefined) return ''
+    const [content] = await ctx.vfs.dispatch('read', resolveTarget(name, ctx.cwd.virtual), [])
+    return DEC.decode(await materialize(content as ByteSource))
+  } catch (err) {
+    if (!isWalkError(err)) throw err
+    logger.debug?.(`curl: cookie file ${name} not read: ${String(err)}`)
+    return ''
+  }
+}
+
+/**
+ * Write the jar to the file -c names, once the transfer has run, whatever it
+ * ended in; what stdout gets for `-`, which comes after everything else. A
+ * file curl cannot write stays unwritten, without a word (curl 8.14.1).
+ */
+async function saveCookies(
+  ctx: Context,
+  target: PathSpec | string,
+  jar: CookieJar,
+): Promise<Uint8Array> {
+  const text = ENC.encode(jar.render())
+  if (target === '-' || (target instanceof PathSpec && target.rawPath === '-')) return text
+  if (ctx.vfs === undefined) return new Uint8Array()
+  try {
+    await ctx.vfs.dispatch('write', resolveTarget(target, ctx.cwd.virtual), [text])
+  } catch (err) {
+    if (!isWalkError(err)) throw err
+    const shown = target instanceof PathSpec ? target.virtual : target
+    logger.debug?.(`curl: cookie jar ${shown} not written: ${String(err)}`)
+  }
+  return new Uint8Array()
 }
 
 /** One data option's contribution to the body. */
@@ -366,6 +416,19 @@ async function curl(
   const quiet = fl.asBool('silent') && !fl.asBool('show_error')
 
   const [sent, named] = headerLines(fl.asList('header'))
+  // -b data with a `=` goes as given, after the jar's cookies; anything else
+  // names a cookie file, which, like -c, turns the jar on (curl 8.14.1). A
+  // Cookie header the line typed takes the data's place.
+  const cookieJar = fl.asPath('cookie_jar') ?? fl.asStr('cookie_jar') ?? null
+  const cookieArgs = fl.asList('cookie')
+  const literals = cookieArgs.filter((value) => value.includes('='))
+  const cookieFiles = cookieArgs.filter((value) => !value.includes('='))
+  const jar = new CookieJar(
+    cookieFiles.length > 0 || cookieJar !== null,
+    literals.length === 0 || named.has('cookie')
+      ? null
+      : literals.map((value) => value.trimStart()).join(';'),
+  )
   // curl refuses these lines before any transfer (curl 8.7.1, exit 2). A
   // negative --max-time is not a number curl takes; curl names the spelling
   // typed, which the handler cannot see, so the long one.
@@ -420,15 +483,15 @@ async function curl(
         .map((name): [string, string] => [name, JSON_TYPE])
     : []
   const headers: Record<string, string> = Object.fromEntries([...auth, ...agent, ...sent, ...typed])
-  const traceHeaders: [string, string][] = [
+  // The jar's Cookie line goes between the two, as each hop sent it.
+  const traceHead: [string, string][] = [
     ...auth,
     ...(named.has('user-agent')
       ? []
       : [['User-Agent', userAgent ?? DEFAULT_USER_AGENT] as [string, string]]),
     ...(named.has('accept') || json ? [] : [['Accept', '*/*'] as [string, string]]),
-    ...sent,
-    ...typed,
   ]
+  const traceTail: [string, string][] = [...sent, ...typed]
   const started = performance.now()
   const finish = async (
     stdout: ByteSource | null,
@@ -449,12 +512,14 @@ async function curl(
       time_total: ((performance.now() - started) / 1000).toFixed(6),
     })
     io.stderr = concat([prompt, await materialize(io.stderr), err])
-    return [concat([await materialize(stdout), out]), io]
+    const saved = cookieJar === null ? new Uint8Array() : await saveCookies(ctx, cookieJar, jar)
+    return [concat([await materialize(stdout), out, saved]), io]
   }
   let method: string
   let bodyLen: number | null = null
   let bodyType: string | null = null
   let resp: HttpResponse
+  for (const name of cookieFiles) jar.load(await readCookies(name, ctx))
   try {
     if (form !== null) {
       method = request ?? 'POST'
@@ -469,6 +534,7 @@ async function curl(
         ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
         followRedirects: location,
         verify,
+        cookies: jar,
       })
     } else {
       method = request ?? (head ? 'HEAD' : body !== null ? 'POST' : 'GET')
@@ -485,6 +551,7 @@ async function curl(
         ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
         followRedirects: location,
         verify,
+        cookies: jar,
       })
     }
   } catch (err) {
@@ -514,12 +581,17 @@ async function curl(
           .map((hop, index) => {
             const [target, sentAs] = requests[index] ?? [hop.url, hop.method]
             const carries = sentAs === method
+            const cookie = jar.sent[index] ?? null
             return (
               dump(
                 requestLines(
                   target,
                   sentAs,
-                  traceHeaders,
+                  [
+                    ...traceHead,
+                    ...(cookie === null ? [] : [['Cookie', cookie] as [string, string]]),
+                    ...traceTail,
+                  ],
                   carries ? bodyLen : null,
                   carries ? bodyType : null,
                 ),
