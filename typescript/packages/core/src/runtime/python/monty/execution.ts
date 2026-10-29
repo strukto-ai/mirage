@@ -156,48 +156,68 @@ export class MontyExecution {
     errors?: OutputFn,
     externalLookup: Readonly<Record<string, (...args: never[]) => unknown>> = {},
   ): Promise<RunResult> {
-    // A script is Monty's own script_name, which it keeps the last part of
-    // for `__file__`, under the directory a feed starts in.
-    const session = await this.checkout(
-      program.scriptPath === undefined ? undefined : mainFilename(program, ctx.cwd),
-    )
     // Monty executes on its own worker process, so the event loop stays
     // live to observe the limit deadline and the kill signal; a trip
     // SIGKILLs the worker (see killWorker). Deadline -> exit 124 via
-    // CommandTimeoutError, kill -> exit 1 like the local runtime.
-    const workerPid = session.workerPid
+    // CommandTimeoutError, kill -> exit 1 like the local runtime. Both count
+    // from before the checkout, which waits while every worker of the shared
+    // pool is busy.
     const interruption = this.installInterruption(ctx.signal, ctx.timeoutSeconds)
-    const prints = new Prints(output, errors)
     try {
-      // The prints are handed on inside the race, so a deadline or a kill
-      // still stops a run whose reader holds its last writes back.
-      const run = this.feedOne(session, program, ctx, files, prints, externalLookup).then(
-        async (outcome) => {
-          await prints.end()
-          return outcome
-        },
+      // A script is Monty's own script_name, which it keeps the last part of
+      // for `__file__`, under the directory a feed starts in.
+      const checkout = this.checkout(
+        program.scriptPath === undefined ? undefined : mainFilename(program, ctx.cwd),
       )
-      const winner = await Promise.race([run, interruption.promise])
-      if (winner !== INTERRUPTED) {
-        const [exitCode, note] = winner
-        const [stdout, stderr] = prints.streams()
-        return {
-          stdout,
-          stderr: note === '' ? stderr : concat([stderr ?? new Uint8Array(), ENC.encode(note)]),
-          exitCode,
+      const session = await Promise.race([checkout, interruption.promise])
+      if (session === INTERRUPTED) {
+        // A worker that arrives after the run was stopped goes straight back.
+        void checkout
+          .then((late) => late.close())
+          .catch((err: unknown) => {
+            console.debug('monty: a checkout that arrived after its run stopped failed', err)
+          })
+        return this.interrupted(interruption, ctx)
+      }
+      const workerPid = session.workerPid
+      const prints = new Prints(output, errors)
+      try {
+        // The prints are handed on inside the race, so a deadline or a kill
+        // still stops a run whose reader holds its last writes back.
+        const run = this.feedOne(session, program, ctx, files, prints, externalLookup).then(
+          async (outcome) => {
+            await prints.end()
+            return outcome
+          },
+        )
+        const winner = await Promise.race([run, interruption.promise])
+        if (winner !== INTERRUPTED) {
+          const [exitCode, note] = winner
+          const [stdout, stderr] = prints.streams()
+          return {
+            stdout,
+            stderr: note === '' ? stderr : concat([stderr ?? new Uint8Array(), ENC.encode(note)]),
+            exitCode,
+          }
         }
+        prints.stop()
+        run.catch(() => undefined)
+        killWorker(workerPid)
+        return this.interrupted(interruption, ctx)
+      } finally {
+        await session.close()
       }
-      prints.stop()
-      run.catch(() => undefined)
-      killWorker(workerPid)
-      if (interruption.timedOut.value && ctx.timeoutSeconds !== undefined) {
-        throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)
-      }
-      return { stdout: new Uint8Array(), stderr: null, exitCode: 1 }
     } finally {
       interruption.dispose()
-      await session.close()
     }
+  }
+
+  // How a stopped run ends: past its deadline it throws, killed it exits 1.
+  private interrupted(interruption: RunInterruption, ctx: Context): RunResult {
+    if (interruption.timedOut.value && ctx.timeoutSeconds !== undefined) {
+      throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)
+    }
+    return { stdout: new Uint8Array(), stderr: null, exitCode: 1 }
   }
 
   private installInterruption(

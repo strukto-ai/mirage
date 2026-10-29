@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { POOL_WORKERS } from './constants.ts'
 import { MontyExecution } from './execution.ts'
@@ -119,6 +120,55 @@ describe('the shared pool', () => {
 })
 
 describe('MontyExecution.run', () => {
+  it('stops at its deadline while it waits for a worker, and gives a late one back', async () => {
+    const execution = new MontyExecution()
+    const late = { workerPid: undefined, close: vi.fn(() => Promise.resolve()) }
+    let arrive: (session: typeof late) => void = () => undefined
+    vi.spyOn(execution as unknown as PoolHooks, 'loadPool').mockResolvedValue({
+      checkout: () =>
+        new Promise((resolve) => {
+          arrive = resolve
+        }),
+      close: () => Promise.resolve(),
+    })
+    try {
+      await expect(
+        execution.run(
+          { code: 'print(1)\n', args: [], stdin: null },
+          { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), timeoutSeconds: 0.05 },
+          null,
+        ),
+      ).rejects.toBeInstanceOf(CommandTimeoutError)
+      expect(late.close).not.toHaveBeenCalled()
+      arrive(late)
+      await vi.waitFor(() => {
+        expect(late.close).toHaveBeenCalledTimes(1)
+      })
+    } finally {
+      await execution.close()
+    }
+  })
+
+  it('stops at an abort while it waits for a worker', async () => {
+    const execution = new MontyExecution()
+    const stop = new AbortController()
+    vi.spyOn(execution as unknown as PoolHooks, 'loadPool').mockResolvedValue({
+      checkout: () => new Promise(() => undefined),
+      close: () => Promise.resolve(),
+    })
+    try {
+      const run = execution.run(
+        { code: 'print(1)\n', args: [], stdin: null },
+        { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), signal: stop.signal },
+        null,
+      )
+      stop.abort()
+      expect((await run).exitCode).toBe(1)
+    } finally {
+      await execution.close()
+    }
+  })
+
   it('stops at an abort while its reader holds the prints back', async () => {
     const execution = new MontyExecution()
     const stop = new AbortController()
