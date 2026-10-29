@@ -158,7 +158,7 @@ async def test_writes_in_flight_together_stay_within_the_workspace():
         yield data
         await release.wait()
 
-    async def writes() -> list[object]:
+    async def writes() -> list[None | BaseException]:
         both = [
             asyncio.ensure_future(
                 write(accessor, _spec(name), held_back(b"12345"))

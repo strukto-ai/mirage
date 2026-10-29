@@ -81,7 +81,7 @@ def test_a_workspace_on_its_own_loop_takes_the_same_pool(monkeypatch):
     monkeypatch.setattr(
         monty_execution, "_shared_pool", monty_execution._SharedPool()
     )
-    pools: list[object] = []
+    pools: list[_Pool] = []
 
     def workspace() -> None:
         async def run() -> None:
