@@ -162,6 +162,24 @@ describe('help', () => {
     ])
   })
 
+  it('names a raw-byte pattern as typed', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell("help $'\\xff'")
+      expect(io.exitCode).toBe(1)
+      const text =
+        "bash: help: no help topics match `\xff'.  Try `help help' or `man -k \xff' or `info \xff'.\n"
+      expect(io.stderr).toEqual(Uint8Array.from(text, (ch) => ch.charCodeAt(0)))
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("is the shell's own and no program", async () => {
+    expect(await run('which help; echo rc=$?')).toEqual(['rc=1\n', '', 0])
+    expect(await run('type -a help')).toEqual(['help is a shell builtin\n', '', 0])
+  })
+
   it('describes every topic with a spec', () => {
     expect(TOPICS).toEqual(Object.keys(SHELL_SYNOPSES).sort(compareCodePoints))
     for (const name of TOPICS) expect(SHELL_SPECS[name]?.description).toBeTruthy()

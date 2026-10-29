@@ -221,6 +221,7 @@ SHELL_ONLY_BUILTINS = frozenset(
         "export",
         "fg",
         "getopts",
+        "help",
         "history",
         "jobs",
         "kill",

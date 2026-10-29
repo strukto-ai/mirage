@@ -941,7 +941,7 @@ SHELL_SPECS: dict[str, CommandSpec] = {
             Argument(
                 "-b",
                 action="store_true",
-                help="report finished jobs at once",
+                help="accepted, with no effect",
             ),
             Argument(
                 "-e",
@@ -956,14 +956,16 @@ SHELL_SPECS: dict[str, CommandSpec] = {
             Argument(
                 "-h",
                 action="store_true",
-                help="remember where commands are found",
+                help="accepted, with no effect",
             ),
             Argument(
                 "-k",
                 action="store_true",
-                help="take assignments anywhere in a command's words",
+                help="accepted, with no effect",
             ),
-            Argument("-m", action="store_true", help="turn on job control"),
+            Argument(
+                "-m", action="store_true", help="accepted, with no effect"
+            ),
             Argument(
                 "-n",
                 action="store_true",
@@ -974,11 +976,13 @@ SHELL_SPECS: dict[str, CommandSpec] = {
                 metavar="name",
                 help="turn on the option called NAME",
             ),
-            Argument("-p", action="store_true", help="privileged mode"),
+            Argument(
+                "-p", action="store_true", help="accepted, with no effect"
+            ),
             Argument(
                 "-t",
                 action="store_true",
-                help="leave after one command",
+                help="accepted, with no effect",
             ),
             Argument(
                 "-u",
@@ -1013,7 +1017,7 @@ SHELL_SPECS: dict[str, CommandSpec] = {
             Argument(
                 "-H",
                 action="store_true",
-                help="turn on `!' history expansion",
+                help="accepted, with no effect",
             ),
             Argument(
                 "-P",
@@ -1023,7 +1027,7 @@ SHELL_SPECS: dict[str, CommandSpec] = {
             Argument(
                 "-T",
                 action="store_true",
-                help="pass the DEBUG and RETURN traps on to functions",
+                help="pass the RETURN trap on to functions",
             ),
         ),
     ),
@@ -1098,15 +1102,15 @@ SHELL_SPECS: dict[str, CommandSpec] = {
             "Run commands when the shell meets signals or events.\n\n"
             "Runs ARG when a SIGNAL_SPEC arrives. An empty ARG ignores the "
             "signals; `-' puts back what they did before. EXIT runs as the "
-            "shell leaves, ERR after a command fails, DEBUG before each "
-            "command and RETURN as a function or sourced file ends."
+            "shell leaves, ERR after a command fails and RETURN as a "
+            "function or sourced file ends. DEBUG is not supported."
         ),
         epilog="0 unless a SIGNAL_SPEC is invalid.",
         arguments=(
             Argument(
                 "-l",
                 action="store_true",
-                help="list the signal names and numbers",
+                help="not supported",
             ),
             Argument(
                 "-p",

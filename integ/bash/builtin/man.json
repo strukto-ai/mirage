@@ -209,6 +209,76 @@
         "stdout": "Usage: man [OPTION...] [SECTION] PAGE...\nman: Show the manual page of a command.\n\nUsage: man [OPTION...] [SECTION] PAGE...\nMAN(1)                      General Commands Manual                      MAN(1)\n\nNAME\n       man - Show the manual page of a command.\n\nSYNOPSIS\n       man [OPTION...] [SECTION] PAGE...\n\nDESCRIPTION\n       Shows the manual page of each PAGE: what the command does, how to call\n       it and its options. The pages are those of the shell's own commands, of\n       the commands each mount provides and of the installed CLIs, where a\n       subcommand has a page of its own, named after its path with hyphens.\n       Every page is in section 1.\n\nOPTIONS\n       -a, --all\n              show every page that matches PAGE\n\n       -f, --whatis\n              print the summary line of each PAGE\n\n       -k, --apropos\n              search the names and summaries of every page\n\n       -?, -h, --help\n              print this list\n\n       --usage\n              print the usage line\n\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "man_apropos_reads_an_extended_expression",
+      "seq": 18720027,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "man -k '^wa[[:alpha:]]t$|^f(g)$'; echo rc=$?; man -k wait '['; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "fg (1)               - Bring a job to the foreground.\nwait (1)             - Wait for jobs and return their status.\nrc=0\nrc=2\n",
+        "stderr": "apropos: fatal: regex `[': Invalid regular expression\n"
+      }
+    },
+    {
+      "id": "man_width_stops_at_the_widest_page",
+      "seq": 18720028,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "MANWIDTH=1000000000 man wait | head -1 | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "32769\n",
+        "stderr": ""
+      }
     }
   ]
 }

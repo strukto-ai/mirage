@@ -605,6 +605,7 @@ export const SHELL_ONLY_BUILTINS: ReadonlySet<string> = new Set([
   'export',
   'fg',
   'getopts',
+  'help',
   'history',
   'jobs',
   'kill',

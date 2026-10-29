@@ -12,10 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import Iterator, Sequence
 
-from mirage.commands.cli.walk import find_child, listed_node
+from mirage.commands.cli.walk import (
+    find_child,
+    listed_node,
+    subcommand_rows,
+)
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.help import (
     argparse_parts,
@@ -31,7 +34,9 @@ from mirage.commands.spec.shell import (
 )
 from mirage.commands.spec.synopsis import SHELL_SYNOPSES, SYNOPSES
 from mirage.commands.spec.types import CommandSpec, UsageStyle
-from mirage.shell.bytes import encode_text
+from mirage.rs.errors import RegexError
+from mirage.rs.regex import PosixRegex, posix_regex
+from mirage.shell.bytes import byte_view, encode_text, utf8_locale
 from mirage.shell.types import ShellBuiltin
 from mirage.version import __version__
 from mirage.workspace.executor.builtins.help import (
@@ -45,6 +50,7 @@ from mirage.workspace.executor.builtins.man.constants import (
     DEFAULT_WIDTH,
     HINT,
     MANUAL,
+    MAX_WIDTH,
     MIN_WIDTH,
     NO_PAGE,
     SECTION,
@@ -62,6 +68,7 @@ from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup.constants import BASH_BUILTINS, EXEC_WRAPPERS
 from mirage.workspace.mount.registry import DEV_PREFIX, MountRegistry
 from mirage.workspace.session.session import SessionState
+from mirage.workspace.session.state import env_snapshot
 
 _SHELL_WORDS = frozenset(str(b) for b in ShellBuiltin)
 
@@ -168,9 +175,7 @@ def cli_page(
         style (UsageStyle): the root's dialect.
     """
     words = " ".join((head, *path))
-    rows = [
-        (child.name, child.description or "") for child in node.subcommands
-    ]
+    rows = subcommand_rows(node)
     listed = listed_node(node, style)
     if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA):
         usage, operands, options = argparse_parts(words, listed, rows)
@@ -258,16 +263,19 @@ def _subpage(
 
 def _cli_lookup(name: str, registry: MountRegistry) -> ManPage | None:
     """The page an installed CLI has under a name: its head word, or a
-    subcommand spelled with hyphens (``git-commit``).
+    subcommand spelled with hyphens (``git-commit``). A head wins over
+    another install's subcommand spelled the same way.
 
     Args:
         name (str): the page name.
         registry (MountRegistry): registry holding the installs.
     """
-    for head, install in registry.clis.items().items():
+    installs = registry.clis.items()
+    if name in installs:
+        spec = installs[name].cli.spec
+        return cli_page(name, (), spec, spec.usage_style)
+    for head, install in installs.items():
         spec = install.cli.spec
-        if name == head:
-            return cli_page(head, (), spec, spec.usage_style)
         if name.startswith(head + "-"):
             found = _subpage(spec, name[len(head) + 1 :])
             if found is not None:
@@ -331,7 +339,10 @@ def _all_pages(registry: MountRegistry) -> list[ManPage]:
     for head, install in registry.clis.items().items():
         spec = install.cli.spec
         for page in _cli_pages(head, (), spec, spec.usage_style):
-            pages.setdefault(page.name, page)
+            if page.name == head:
+                pages[head] = page
+            else:
+                pages.setdefault(page.name, page)
     words = {
         *(name for name in SHELL_SYNOPSES if name in BASH_BUILTINS),
         *_SHELL_WORDS,
@@ -512,14 +523,16 @@ async def handle_man(
     if "f" in chosen and "k" in chosen:
         return _usage_error("-f -k : incompatible options")
     if "f" in chosen or "k" in chosen:
-        return _summaries(pages, registry, "f" in chosen)
+        utf8 = utf8_locale(env_snapshot(session))
+        return await _summaries(pages, registry, "f" in chosen, utf8)
     if not pages:
         return result("man", exit_code=1, stderr=NO_PAGE)
     section = ""
     if len(pages) > 1 and SECTION_RE.fullmatch(pages[0]):
         section = pages.pop(0)
-    width = env_width(
-        session, ("MANWIDTH", "COLUMNS"), MIN_WIDTH, DEFAULT_WIDTH
+    width = min(
+        env_width(session, ("MANWIDTH", "COLUMNS"), MIN_WIDTH, DEFAULT_WIDTH),
+        MAX_WIDTH,
     )
     out: list[str] = []
     errors: list[str] = []
@@ -538,37 +551,49 @@ async def handle_man(
     )
 
 
-def _summaries(
-    words: list[str], registry: MountRegistry, whatis: bool
+async def _summaries(
+    words: list[str], registry: MountRegistry, whatis: bool, utf8: bool
 ) -> Result:
     """``man -f`` (each page's summary line) or ``man -k`` (every page
-    whose name or summary the word matches, as a regular expression,
-    ignoring case).
+    whose name or summary the word matches, as an extended regular
+    expression, ignoring case). apropos compiles every keyword before it
+    searches, so one it refuses is fatal on its own.
 
     Args:
         words (list[str]): the page names or keywords.
         registry (MountRegistry): registry holding mounts and installs.
         whatis (bool): ``-f`` when True, ``-k`` when False.
+        utf8 (bool): the session runs under a UTF-8 locale.
     """
     if not words:
         verb = "whatis" if whatis else "apropos"
         return result("man", exit_code=1, stderr=f"{verb} what?\n")
+    patterns: list[PosixRegex] = []
+    for word in [] if whatis else words:
+        try:
+            patterns.append(
+                posix_regex(
+                    byte_view(word, utf8),
+                    extended=True,
+                    ignore_case=True,
+                    utf8=utf8,
+                )
+            )
+        except RegexError as exc:
+            message = f"apropos: fatal: regex `{word}': {exc.message}\n"
+            return result("man", exit_code=2, stderr=message)
     found: list[ManPage] = []
     errors: list[str] = []
     every = [] if whatis else _all_pages(registry)
-    for word in words:
+    for index, word in enumerate(words):
         if whatis:
             page = find_page(word, registry)
             hits = [page] if page is not None else []
         else:
-            try:
-                pattern = re.compile(word, re.IGNORECASE)
-            except re.error:
-                pattern = re.compile(re.escape(word), re.IGNORECASE)
             hits = [
                 page
                 for page in every
-                if pattern.search(page.name) or pattern.search(page.summary)
+                if await _matches(patterns[index], page, utf8)
             ]
         if not hits:
             errors.append(f"{word}: nothing appropriate.\n")
@@ -581,6 +606,20 @@ def _summaries(
         exit_code=0 if found else 16,
         stderr="".join(errors) or None,
     )
+
+
+async def _matches(pattern: PosixRegex, page: ManPage, utf8: bool) -> bool:
+    """Whether a keyword matches a page's name or its summary.
+
+    Args:
+        pattern (PosixRegex): the compiled keyword.
+        page (ManPage): the page.
+        utf8 (bool): the session runs under a UTF-8 locale.
+    """
+    for text in (page.name, page.summary):
+        if await pattern.search(byte_view(text, utf8)) is not None:
+            return True
+    return False
 
 
 async def man_builtin(call: BuiltinCall) -> Result:

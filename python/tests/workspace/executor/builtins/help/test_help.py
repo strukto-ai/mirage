@@ -173,6 +173,29 @@ def test_an_invalid_option_is_status_2_with_the_usage():
     )
 
 
+def test_a_raw_byte_pattern_is_named_as_typed():
+    async def go():
+        ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+        try:
+            return await ws.shell("help $'\\xff'")
+        finally:
+            await ws.close()
+
+    io = asyncio.run(go())
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"bash: help: no help topics match `\xff'.  Try `help help' or "
+        b"`man -k \xff' or `info \xff'.\n"
+    )
+
+
+def test_help_is_the_shells_own_and_no_program():
+    assert _run("which help; echo rc=$?", "type -a help") == [
+        ("rc=1\n", "", 0),
+        ("help is a shell builtin\n", "", 0),
+    ]
+
+
 BUILTIN_TOPICS = sorted(
     name
     for name in SHELL_SYNOPSES

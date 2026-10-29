@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { findChild, listedNode } from '../../../../commands/cli/walk.ts'
+import { findChild, listedNode, subcommandRows } from '../../../../commands/cli/walk.ts'
 import { BUILTIN_SPECS } from '../../../../commands/spec/builtins.ts'
 import {
   argparseParts,
@@ -23,13 +23,16 @@ import {
 import { SHELL_SPECS, type ShellParse, parseShellOptions } from '../../../../commands/spec/shell.ts'
 import { SHELL_SYNOPSES, SYNOPSES } from '../../../../commands/spec/synopsis.ts'
 import { type CommandSpec, UsageStyle } from '../../../../commands/spec/types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import { RegexError } from '../../../../rs/errors.ts'
+import { type PosixRegex, posixRegex } from '../../../../rs/regex.ts'
+import { byteView, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
 import { ShellBuiltin } from '../../../../shell/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { VERSION } from '../../../../version.ts'
 import { BASH_BUILTINS, EXEC_WRAPPERS } from '../../../lookup/constants.ts'
 import { DEV_PREFIX, type MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
+import { envSnapshot } from '../../../session/state.ts'
 import { envWidth, fill, optionRows, paragraphs, summary } from '../help/help.ts'
 import { result } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
@@ -37,6 +40,7 @@ import {
   DEFAULT_WIDTH,
   HINT,
   MANUAL,
+  MAX_WIDTH,
   MIN_WIDTH,
   NO_PAGE,
   SECTION,
@@ -125,10 +129,7 @@ export function cliPage(
   style: UsageStyle,
 ): ManPage {
   const words = [head, ...path].join(' ')
-  const rows: [string, string][] = node.subcommands.map((child) => [
-    child.name,
-    child.description ?? '',
-  ])
+  const rows = subcommandRows(node)
   const listed = listedNode(node, style)
   let synopsis: string
   let operands: [string, string][]
@@ -200,12 +201,15 @@ function subpage(node: CommandSpec, rest: string): [CommandSpec, string[]] | nul
 
 /**
  * The page an installed CLI has under a name: its head word, or a subcommand
- * spelled with hyphens (`git-commit`).
+ * spelled with hyphens (`git-commit`). A head wins over another install's
+ * subcommand spelled the same way.
  */
 function cliLookup(name: string, registry: MountRegistry): ManPage | null {
-  for (const [head, install] of registry.clis.items()) {
+  const installs = registry.clis.items()
+  const exact = installs.get(name)
+  if (exact !== undefined) return cliPage(name, [], exact.cli.spec, exact.cli.spec.usageStyle)
+  for (const [head, install] of installs) {
     const spec = install.cli.spec
-    if (name === head) return cliPage(head, [], spec, spec.usageStyle)
     if (name.startsWith(`${head}-`)) {
       const found = subpage(spec, name.slice(head.length + 1))
       if (found !== null) return cliPage(head, found[1], found[0], spec.usageStyle)
@@ -246,7 +250,7 @@ function allPages(registry: MountRegistry): ManPage[] {
   for (const [head, install] of registry.clis.items()) {
     const spec = install.cli.spec
     for (const page of cliPages(head, [], spec, spec.usageStyle)) {
-      if (!pages.has(page.name)) pages.set(page.name, page)
+      if (page.name === head || !pages.has(page.name)) pages.set(page.name, page)
     }
   }
   const words = new Set<string>([
@@ -379,11 +383,11 @@ function* lookup(
  * when a page is missing, as man-db answers, after the pages it did find; 1
  * for a command line it refuses. $MANWIDTH or $COLUMNS sets the width.
  */
-export function handleMan(
+export async function handleMan(
   args: readonly string[],
   registry: MountRegistry,
   session: SessionState,
-): Result {
+): Promise<Result> {
   const spec = SHELL_SPECS.man
   const parse = parseShellOptions(spec, [...args])
   const wrong = refusal(parse)
@@ -401,12 +405,15 @@ export function handleMan(
     return usageError('-f -k : incompatible options')
   }
   if (chosen.f !== undefined || chosen.k !== undefined) {
-    return summaries(pages, registry, chosen.f !== undefined)
+    return summaries(pages, registry, chosen.f !== undefined, utf8Locale(envSnapshot(session)))
   }
   if (pages.length === 0) return result('man', { exitCode: 1, stderr: NO_PAGE })
   let section = ''
   if (pages.length > 1 && SECTION_RE.test(pages[0] ?? '')) section = pages.shift() ?? ''
-  const width = envWidth(session, ['MANWIDTH', 'COLUMNS'], MIN_WIDTH, DEFAULT_WIDTH)
+  const width = Math.min(
+    envWidth(session, ['MANWIDTH', 'COLUMNS'], MIN_WIDTH, DEFAULT_WIDTH),
+    MAX_WIDTH,
+  )
   const out: string[] = []
   const errors: string[] = []
   for (const [name, found] of lookup(pages, registry)) {
@@ -429,26 +436,38 @@ export function handleMan(
  * `man -f` (each page's summary line) or `man -k` (every page whose name or
  * summary the word matches, as a regular expression, ignoring case).
  */
-function summaries(words: readonly string[], registry: MountRegistry, isWhatis: boolean): Result {
+async function summaries(
+  words: readonly string[],
+  registry: MountRegistry,
+  isWhatis: boolean,
+  utf8: boolean,
+): Promise<Result> {
   if (words.length === 0) {
     return result('man', { exitCode: 1, stderr: `${isWhatis ? 'whatis' : 'apropos'} what?\n` })
+  }
+  const patterns: PosixRegex[] = []
+  for (const word of isWhatis ? [] : words) {
+    try {
+      patterns.push(posixRegex(byteView(word, utf8), true, 'posix', true, utf8))
+    } catch (err) {
+      if (!(err instanceof RegexError)) throw err
+      const message = `apropos: fatal: regex \`${word}': ${err.message}\n`
+      return result('man', { exitCode: 2, stderr: message })
+    }
   }
   const found: ManPage[] = []
   const errors: string[] = []
   const every = isWhatis ? [] : allPages(registry)
-  for (const word of words) {
-    let hits: ManPage[]
+  for (const [index, word] of words.entries()) {
+    let hits: ManPage[] = []
     if (isWhatis) {
       const page = findPage(word, registry)
       hits = page !== null ? [page] : []
     } else {
-      let pattern: RegExp
-      try {
-        pattern = new RegExp(word, 'i')
-      } catch {
-        pattern = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+      const pattern = patterns[index]
+      if (pattern !== undefined) {
+        for (const page of every) if (await matches(pattern, page, utf8)) hits.push(page)
       }
-      hits = every.filter((page) => pattern.test(page.name) || pattern.test(page.summary))
     }
     if (hits.length === 0) errors.push(`${word}: nothing appropriate.\n`)
     for (const page of hits) if (!found.some((seen) => seen.name === page.name)) found.push(page)
@@ -461,7 +480,15 @@ function summaries(words: readonly string[], registry: MountRegistry, isWhatis: 
   })
 }
 
+/** Whether a keyword matches a page's name or its summary. */
+async function matches(pattern: PosixRegex, page: ManPage, utf8: boolean): Promise<boolean> {
+  for (const text of [page.name, page.summary]) {
+    if ((await pattern.search(byteView(text, utf8))) !== null) return true
+  }
+  return false
+}
+
 /** The `man` arm. */
 export function manBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleMan([...call.argv.args], call.registry, call.context.session))
+  return handleMan([...call.argv.args], call.registry, call.context.session)
 }

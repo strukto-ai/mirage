@@ -269,7 +269,7 @@
       "command": "man gh | sed -n '3,4p;/^SYNOPSIS/,/^$/p'; man gh | sed -n '/^COMMANDS/,$p' | head -6",
       "expect": {
         "exit": 0,
-        "stdout": "NAME\n       gh - GitHub CLI\nSYNOPSIS\n       gh [-h]\n       {auth,help,version,api,issue,pr,repo,release,run,workflow,search} ...\n\nCOMMANDS\n       auth   Manage authentication\n\n       help   Help about any command\n\n       version\n",
+        "stdout": "NAME\n       gh - GitHub CLI\nSYNOPSIS\n       gh [-h] {auth,help,version\n       (--version),api,issue,pr,repo,release,run,workflow,search} ...\n\nCOMMANDS\n       auth   Manage authentication\n\n       help   Help about any command\n\n       version (--version)\n",
         "stderr": ""
       }
     },
@@ -2675,6 +2675,19 @@
       "expect": {
         "exit": 0,
         "stdout": "✓ Created fork integ-user/repo-cli\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "man_gh_issue_lists_command_aliases",
+      "seq": 569059,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "man gh issue | sed -n '/^COMMANDS/,/^[A-Z]/p' | head -6",
+      "expect": {
+        "exit": 0,
+        "stdout": "COMMANDS\n       list (ls)\n              List issues\n\n       view   View an issue\n\n",
         "stderr": ""
       }
     }

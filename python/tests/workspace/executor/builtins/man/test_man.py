@@ -333,9 +333,9 @@ def test_an_installed_cli_has_a_page_with_its_commands():
     assert text.startswith(_header("LINEAR(1)"))
     assert "NAME\n       linear - Linear API client\n" in text
     assert (
-        "COMMANDS\n       issue  Manage issues\n\n       team   Manage one\n"
-        in text
-    )
+        "COMMANDS\n       issue (i)\n              Manage issues\n\n"
+        "       team   Manage one\n"
+    ) in text
 
 
 def test_a_subcommand_page_is_named_with_hyphens():
@@ -369,3 +369,39 @@ def test_a_cli_comes_before_a_colliding_command_and_all_shows_both():
 def test_apropos_lists_cli_subcommand_pages():
     out = _man(["-k", "create one"], _cli_registry())[0]
     assert out == b"linear-issue-create (1) - Create one\n"
+
+
+def test_apropos_reads_an_extended_expression_with_classes():
+    out, io, _node = _man(["-k", "^wa[[:alpha:]]t$|^f(g)$"], _mk_registry([]))
+    assert io.exit_code == 0
+    assert [line.split()[0] for line in out.decode().splitlines()] == [
+        "fg",
+        "wait",
+    ]
+
+
+def test_apropos_refuses_a_bad_expression_before_searching():
+    out, io, _node = _man(["-k", "wait", "["], _mk_registry([]))
+    assert (out, io.exit_code) == (None, 2)
+    assert (
+        io.stderr == b"apropos: fatal: regex `[': Invalid regular expression\n"
+    )
+
+
+def test_the_width_stops_at_the_widest_page():
+    text = _man(["wait"], _mk_registry([]), MANWIDTH="1000000000")[0]
+    assert len(text.decode().split("\n")[0]) == 32768
+
+
+def test_a_head_wins_over_another_clis_subcommand():
+    reg = _cli_registry()
+    reg.clis.install(
+        "linear-team",
+        CLI(
+            spec=CommandSpec(name="linear-team", description="Own head"),
+            handlers={"": CLIHandler(fn=lambda: None)},
+        ),
+    )
+    assert find_page("linear-team", reg).summary == "Own head"
+    out = _man(["-k", "^linear-team$"], reg)[0]
+    assert out == b"linear-team (1)      - Own head\n"

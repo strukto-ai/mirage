@@ -21,7 +21,7 @@ from mirage.commands.spec.standard import version_line
 from mirage.commands.spec.synopsis import SHELL_SYNOPSES
 from mirage.commands.spec.types import CommandSpec
 from mirage.policy.match import runs
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.help.constants import (
@@ -342,7 +342,7 @@ async def help_builtin(call: BuiltinCall) -> Result:
         return result(
             "help",
             exit_code=2,
-            stderr=message.decode() + builtin_usage("help"),
+            stderr=decode_text(message) + builtin_usage("help"),
         )
     if not scan.operands:
         return result("help", out=encode_text(_listing(session)))
@@ -378,5 +378,5 @@ async def help_builtin(call: BuiltinCall) -> Result:
         "help",
         out=encode_text("".join(out)) or None,
         exit_code=1,
-        stderr=message.decode(),
+        stderr=decode_text(message),
     )

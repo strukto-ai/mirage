@@ -224,27 +224,27 @@ SPECS: dict[str, CommandSpec] = {
             Argument(
                 "-a",
                 action="store_true",
-                help="append this session's new lines to the history file",
+                help="accepted, with no effect: the history file is the list",
             ),
             Argument(
                 "-n",
                 action="store_true",
-                help="read the history file's lines not read yet",
+                help="accepted, with no effect: the history file is the list",
             ),
             Argument(
                 "-r",
                 action="store_true",
-                help="read the history file and append it to the history",
+                help="accepted, with no effect: the history file is the list",
             ),
             Argument(
                 "-w",
                 action="store_true",
-                help="write the history to the history file",
+                help="accepted, with no effect: the history file is the list",
             ),
             Argument(
                 "-p",
                 action="store_true",
-                help="expand each ARG as a history reference and print it",
+                help="print each ARG, with no history expansion",
             ),
             Argument(
                 "-s",

@@ -19,9 +19,12 @@ export const SECTION = '1'
 export const MANUAL = 'General Commands Manual'
 
 // The width a page is laid out to when neither $MANWIDTH nor $COLUMNS
-// gives one, and the narrowest it takes.
+// gives one, the narrowest it takes, and the widest: past 32769 columns
+// groff discards characters or overflows (man-db 2.13.1 on
+// debian:stable-slim), so a wider ask gets the widest page there is.
 export const DEFAULT_WIDTH = 80
 export const MIN_WIDTH = 20
+export const MAX_WIDTH = 32769
 
 // Where text starts under a heading, and where a tagged paragraph's text
 // starts, both from the left margin.
