@@ -3,7 +3,7 @@
 use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
@@ -176,6 +176,11 @@ pub(crate) fn format_double(x: f64, out: &mut String) {
 }
 
 const BASE: usize = 16;
+/// Up to this many fields an object keeps no index: a lookup scans them,
+/// which costs about what hashing the key does and saves the table.
+const SCAN: usize = 8;
+/// The most distinct keys a parse shares between the objects it builds.
+const SHARED_KEYS: usize = 4096;
 const INDEX: usize = 32;
 
 fn list_bytes(len: usize) -> usize {
@@ -591,31 +596,55 @@ impl Object {
         self.entries.len()
     }
 
+    /// Where `key` is: found by a scan while the object has no index.
+    fn position(&self, key: &str) -> Option<usize> {
+        if self.index.is_empty() {
+            self.entries.iter().position(|(k, _)| &**k == key)
+        } else {
+            self.index.get(key).copied()
+        }
+    }
+
     pub(crate) fn get(&self, key: &str) -> Option<&Value> {
-        self.index.get(key).map(|at| &self.entries[*at].1)
+        self.position(key).map(|at| &self.entries[at].1)
     }
 
     pub(crate) fn insert(&mut self, key: Key, value: Value) {
-        match self.index.get(&*key) {
-            Some(at) => self.entries[*at].1 = value,
-            None => {
-                self.index.insert(key.clone(), self.entries.len());
-                self.entries.push((key, value));
-                self.recharge();
-            }
+        if let Some(at) = self.position(&key) {
+            self.entries[at].1 = value;
+            return;
         }
+        if self.entries.len() == SCAN {
+            self.index = self
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(at, (k, _))| (k.clone(), at))
+                .collect();
+        }
+        if !self.index.is_empty() {
+            self.index.insert(key.clone(), self.entries.len());
+        }
+        self.entries.push((key, value));
+        self.recharge();
     }
 
     /// Drop each of `keys`, in one pass over the fields however many go.
     pub(crate) fn remove_all<'a>(&mut self, keys: impl IntoIterator<Item = &'a str>) {
-        let mut gone: Vec<usize> = keys
-            .into_iter()
-            .filter_map(|key| self.index.remove(key))
-            .collect();
+        let mut gone: Vec<usize> = if self.index.is_empty() {
+            keys.into_iter()
+                .filter_map(|key| self.position(key))
+                .collect()
+        } else {
+            keys.into_iter()
+                .filter_map(|key| self.index.remove(key))
+                .collect()
+        };
         if gone.is_empty() {
             return;
         }
         gone.sort_unstable();
+        gone.dedup();
         let mut at = 0;
         let mut skip = gone.iter().peekable();
         self.entries.retain(|_| {
@@ -1756,6 +1785,8 @@ pub(crate) struct Parsing {
     number: Option<usize>,
     numeric: Option<NumberReading>,
     validation_at: usize,
+    /// The keys it made so far, which the next object to use one shares.
+    keys: HashSet<Key>,
     charge: Charge,
 }
 
@@ -1785,6 +1816,7 @@ impl Parsing {
             number: None,
             numeric: None,
             validation_at,
+            keys: HashSet::new(),
             charge,
         }
     }
@@ -1826,6 +1858,7 @@ impl Parsing {
         self.charge.set(
             self.text.capacity()
                 + self.stack.capacity() * std::mem::size_of::<Open>()
+                + self.keys.capacity() * INDEX
                 + self
                     .string
                     .as_ref()
@@ -1870,8 +1903,18 @@ impl Parsing {
             if self.string_step(&mut string)? {
                 if string.key {
                     self.recharge();
-                    if let Some(Open::Object(_, key)) = self.stack.last_mut() {
-                        *key = Some(string.out.into());
+                    let key = match self.keys.get(string.out.as_str()) {
+                        Some(key) => key.clone(),
+                        None => {
+                            let key = Key::from(string.out);
+                            if self.keys.len() < SHARED_KEYS {
+                                self.keys.insert(key.clone());
+                            }
+                            key
+                        }
+                    };
+                    if let Some(Open::Object(_, slot)) = self.stack.last_mut() {
+                        *slot = Some(key);
                     }
                     self.phase = ReadPhase::Colon;
                 } else {

@@ -3541,7 +3541,7 @@ fn parameter_shadowing_preserves_value_evaluation_and_filter_lookup() {
 fn regex_array_limit_transfers_storage_without_a_false_memory_peak() {
     let long = serde_json::to_string(&"a".repeat(101)).unwrap();
     for steps in [7, u64::MAX] {
-        for memory in [40000, 55000, 100000] {
+        for memory in [25000, 33000, 100000] {
             let config = serde_json::json!({
                 "program":r#"try match(".";"g") catch ."#, "items":100,
                 "memory":memory, "steps":steps,
@@ -3568,8 +3568,8 @@ fn regex_array_limit_transfers_storage_without_a_false_memory_peak() {
                 settle(&mut *stream, &mut wire);
                 let expected = if cancel {
                     vec![]
-                } else if input == long && memory == 40000 {
-                    vec![Frame::Err("jq memory limit of 40000 bytes exceeded".into())]
+                } else if input == long && memory == 25000 {
+                    vec![Frame::Err("jq memory limit of 25000 bytes exceeded".into())]
                 } else if input == long {
                     vec![Frame::Out(
                         "\"jq array limit of 100 elements exceeded\"".into(),
