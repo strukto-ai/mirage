@@ -152,8 +152,8 @@ async def handle_mapfile(
     index = origin
     stored = 0
     seen = 0
-    # What the array keeps counts too, so -O appends cannot grow it past
-    # the workspace's max_memory a few lines at a time.
+    # The array's bytes, what it keeps among them, so -O appends cannot
+    # grow it past the workspace's max_memory a few lines at a time.
     held = sum(len(encode_text(v)) for v in arr if v is not None)
     outputs: list[bytes] = []
     errors: list[bytes] = []
@@ -164,9 +164,13 @@ async def handle_mapfile(
         seen += 1
         if seen <= skip:
             continue
-        held += len(data) + len(delim)
+        record = data + delim if found and not strip else data
+        replaced = arr[index] if index < len(arr) else None
+        held += len(record) - (
+            len(encode_text(replaced)) if replaced is not None else 0
+        )
         check_memory(held)
-        text = decode_text(data + delim if found and not strip else data)
+        text = decode_text(record)
         array_set(arr, index, text)
         stored += 1
         if callback is not None and stored % quantum == 0:

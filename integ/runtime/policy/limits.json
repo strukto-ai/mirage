@@ -1497,6 +1497,22 @@
             "stdout": "n=500\nn=1000\n",
             "stderr": "line: memory exhausted\n"
           }
+        },
+        {
+          "command": "{ printf '\"'; seq 1 2000 | tr -d '\\n'; printf '\"\\n'; } | jq length; echo \"jq=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "jq=1\n",
+            "stderr": "jq: memory exhausted\n"
+          }
+        },
+        {
+          "command": "mapfile -t -O 0 b < <(seq 1 800); mapfile -t -O 0 b < <(seq 1 800); echo \"n=${#b[@]}\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "n=800\n",
+            "stderr": ""
+          }
         }
       ]
     },

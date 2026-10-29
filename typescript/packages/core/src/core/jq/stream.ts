@@ -37,6 +37,10 @@ import { checkMemory } from '../../io/memory.ts'
 export const READ_CHUNK = 4091
 
 const NEWLINE = 0x0a
+
+// The bytes JSON reads as whitespace between values. Mirrors Python's WHITESPACE.
+const WHITESPACE = [0x20, 0x09, 0x0d, 0x0a]
+
 /** An input's bytes not yet read, a growable window over one buffer. */
 class Pending {
   private buf = new Uint8Array(0)
@@ -113,6 +117,7 @@ export class InputReader {
   private jsonEof = false
   private slurped: string[] | NoValue = NO_VALUE
   private held = 0
+  private kept = 0
   private name: string | null = null
   private line = 0
   private chunks: AsyncIterator<Uint8Array> | null = null
@@ -196,15 +201,20 @@ export class InputReader {
       const value = await parser.next()
       if (value instanceof JqParseError) return value
       if (value !== NO_VALUE) {
+        const held = this.held
+        this.held = 0
         if (!Array.isArray(this.slurped)) return value
+        this.kept += held
         this.slurped.push(value)
         continue
       }
       if (this.jsonEof) break
       const [piece, last] = await this.readMore()
       this.jsonEof = last
-      if (Array.isArray(this.slurped)) this.count(piece)
-      else checkMemory(parser.held + piece.byteLength)
+      let start = 0
+      if (this.held === 0)
+        while (start < piece.length && WHITESPACE.includes(piece[start] ?? 0)) start++
+      this.count(piece.byteLength - start)
       parser.feed(piece, !last)
     }
     return this.takeSlurped()
@@ -215,7 +225,7 @@ export class InputReader {
     for (;;) {
       const [piece, isLast] = await this.readMore()
       if (piece.length > 0) {
-        this.count(piece)
+        this.count(piece.byteLength)
         if (Array.isArray(this.slurped)) {
           this.slurped.push(await decodeUtf8(piece, this.signal))
         } else if (piece[piece.length - 1] === NEWLINE) {
@@ -234,14 +244,15 @@ export class InputReader {
   }
 
   /**
-   * Count a piece read into memory, which must fit in what the workspace's
-   * `max_memory` has left: a raw line holds the pieces read of it, and a
-   * slurp the whole input. A JSON value counts what the scanner still holds
-   * instead. Mirrors Python's `_count`.
+   * Count bytes read into memory, which must fit in what the workspace's
+   * `max_memory` has left with what a slurp keeps: a raw line holds the
+   * pieces read of it, a raw slurp the whole input, and a JSON value what was
+   * read of it from its first byte, whitespace before it left out, as the
+   * scanner discards it. Mirrors Python's `_count`.
    */
-  private count(piece: Uint8Array): void {
-    this.held += piece.byteLength
-    checkMemory(this.held)
+  private count(size: number): void {
+    this.held += size
+    checkMemory(this.kept + this.held)
   }
 
   private takeSlurped(): string | NoValue {

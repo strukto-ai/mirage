@@ -160,10 +160,14 @@ export async function write(
       else later ??= setTimeout(publishLater, wait)
     }
   } finally {
-    publish()
-    const { buffer, view } = grown
-    if (view !== null && files.get(p) === view && view.byteLength < buffer.byteLength)
-      files.set(p, view.slice())
+    try {
+      publish()
+    } finally {
+      // A refused last publish still lets the spare buffer go.
+      const { buffer, view } = grown
+      if (view !== null && files.get(p) === view && view.byteLength < buffer.byteLength)
+        files.set(p, view.slice())
+    }
   }
   if (failed.error !== undefined) throw failed.error
   record(op, path.virtual, VFSName.RAM, size, timer)

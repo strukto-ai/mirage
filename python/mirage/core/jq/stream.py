@@ -88,6 +88,7 @@ class InputReader:
         self._json_eof = False
         self._slurped: "list[str] | NoValue" = [] if opts.slurp else NO_VALUE
         self._held = 0
+        self._kept = 0
         self._name: str | None = None
         self._line = 0
         self._chunks: AsyncIterator[bytes] | None = None
@@ -148,17 +149,18 @@ class InputReader:
             if isinstance(value, JqParseError):
                 return value
             if value is not NO_VALUE:
+                held, self._held = self._held, 0
                 if not isinstance(self._slurped, list):
                     return value
+                self._kept += held
                 self._slurped.append(value)
                 continue
             if self._json_eof:
                 break
             piece, self._json_eof = await self._read_more()
-            if isinstance(self._slurped, list):
-                self._count(piece)
-            else:
-                check_memory(parser.held + len(piece))
+            self._count(
+                len(piece) if self._held else len(piece.lstrip(WHITESPACE))
+            )
             parser.feed(piece, not self._json_eof)
         return self._take_slurped()
 
@@ -167,7 +169,7 @@ class InputReader:
         while True:
             piece, is_last = await self._read_more()
             if piece:
-                self._count(piece)
+                self._count(len(piece))
                 if isinstance(self._slurped, list):
                     self._slurped.append(await decode_utf8(piece))
                 elif piece.endswith(b"\n"):
@@ -183,17 +185,18 @@ class InputReader:
             return self._take_slurped()
         return NO_VALUE if parts is None else string_text("".join(parts))
 
-    def _count(self, piece: bytes) -> None:
-        """Count a piece read into memory, which must fit in what the
-        workspace's ``max_memory`` has left: a raw line holds the pieces
-        read of it, and a slurp the whole input. A JSON value counts
-        what the scanner still holds instead.
+    def _count(self, size: int) -> None:
+        """Count bytes read into memory, which must fit in what the
+        workspace's ``max_memory`` has left with what a slurp keeps: a
+        raw line holds the pieces read of it, a raw slurp the whole
+        input, and a JSON value what was read of it from its first byte,
+        whitespace before it left out, as the scanner discards it.
 
         Args:
-            piece (bytes): the bytes jq's reader read.
+            size (int): the bytes jq's reader read that are kept.
         """
-        self._held += len(piece)
-        check_memory(self._held)
+        self._held += size
+        check_memory(self._kept + self._held)
 
     def _take_slurped(self) -> "str | NoValue":
         slurped = self._slurped

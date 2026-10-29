@@ -102,8 +102,8 @@ export async function handleMapfile(
   let index = origin
   let stored = 0
   let seen = 0
-  // What the array keeps counts too, so -O appends cannot grow it past the
-  // workspace's max_memory a few lines at a time.
+  // The array's bytes, what it keeps among them, so -O appends cannot grow
+  // it past the workspace's max_memory a few lines at a time.
   let held = arr.reduce((sum, v) => sum + (v === null ? 0 : encodeText(v).byteLength), 0)
   const outputs: Uint8Array[] = []
   const errs: Uint8Array[] = []
@@ -112,9 +112,11 @@ export async function handleMapfile(
     if (!found && data.byteLength === 0) break
     seen++
     if (seen <= skip) continue
-    held += data.byteLength + 1
+    const record = found && !strip ? concat([data, Uint8Array.of(delim)]) : data
+    const replaced = arr[index] ?? null
+    held += record.byteLength - (replaced === null ? 0 : encodeText(replaced).byteLength)
     checkMemory(held)
-    const text = decodeText(found && !strip ? concat([data, Uint8Array.of(delim)]) : data)
+    const text = decodeText(record)
     arraySet(arr, index, text)
     stored++
     if (callback !== null && stored % quantum === 0) {
