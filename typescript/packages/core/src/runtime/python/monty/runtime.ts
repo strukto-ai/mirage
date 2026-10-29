@@ -70,7 +70,7 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
   }
 
   protected override openEngine(): Promise<MontyExecution> {
-    return Promise.resolve(new MontyExecution(this.maxMemory))
+    return Promise.resolve(new MontyExecution(this.maxMemory, true))
   }
 
   protected override closeEngine(engine: MontyExecution): Promise<void> {

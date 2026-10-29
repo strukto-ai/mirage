@@ -30,13 +30,13 @@ from mirage.context import (
 from mirage.errors.types import CommandTimeoutError
 from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import run_with_memory_limit
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
-from mirage.io.errors import MemoryExhausted
-from mirage.io.memory import run_with_memory_limit
 from mirage.policy.builtin.output_cap import (
     LINE_NAME,
     line_memory,
@@ -1066,7 +1066,8 @@ async def run_prepared_line(
             # line holds is checked against its ``@line`` memory limit.
             io, _ = await run_with_memory_limit(
                 line_memory(
-                    ws.registry.command_limits, effective_session.command_limits
+                    ws.registry.command_limits,
+                    effective_session.command_limits,
                 ),
                 run_with_timeout(
                     run_command_tree(
@@ -1094,7 +1095,7 @@ async def run_prepared_line(
                     context.frame.line_timeout if top_level else None,
                     LINE_NAME,
                     budget_start,
-                )
+                ),
             )
             # A record a nested line earned is the line's to report when
             # its own tree earned none (see NestedRefusal).

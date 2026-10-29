@@ -93,7 +93,7 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
         self.external_lookup: Mapping[str, Callable[..., Any]] = {}
 
     async def open_engine(self) -> MontyExecution:
-        return MontyExecution(self._max_memory)
+        return MontyExecution(self._max_memory, shared=True)
 
     async def close_engine(self, engine: MontyExecution) -> None:
         await engine.close()

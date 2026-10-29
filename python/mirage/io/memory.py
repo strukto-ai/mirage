@@ -21,7 +21,9 @@ from mirage.io.errors import MemoryExhausted
 T = TypeVar("T")
 
 # The running line's `max_memory`, None outside a line or once lifted.
-_limit: ContextVar[int | None] = ContextVar("mirage_memory_limit", default=None)
+_limit: ContextVar[int | None] = ContextVar(
+    "mirage_memory_limit", default=None
+)
 
 
 async def run_with_memory_limit(limit: int | None, call: Awaitable[T]) -> T:

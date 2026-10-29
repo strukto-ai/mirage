@@ -24,7 +24,7 @@ import {
   type MontyPoolLike,
   type MontySessionLike,
 } from './loader.ts'
-import { DEFAULT_PROG, LIMITS } from './constants.ts'
+import { DEFAULT_PROG, LIMITS, POOL_WORKERS } from './constants.ts'
 import { displayError } from './errors.ts'
 import { MontyFs } from './fs.ts'
 import type { RuntimeFiles } from '../../files.ts'
@@ -64,6 +64,59 @@ function killWorker(pid: number | undefined): void {
   }
 }
 
+/**
+ * The one pool of monty workers every workspace in the process runs on, so
+ * an idle workspace holds no worker of its own. The first runtime that needs
+ * it opens it and the last to let go closes it; `POOL_WORKERS` run at once
+ * and a run past them waits. Each run still checks out with its own limits.
+ * Mirrors Python's `_SharedPool`.
+ */
+class SharedPool {
+  private users = 0
+  private opened: Promise<MontyPoolLike> | null = null
+
+  /** The pool, opened by the first caller; every acquire is released once. */
+  async acquire(): Promise<MontyPoolLike> {
+    this.users += 1
+    const opened = (this.opened ??= SharedPool.open())
+    try {
+      return await opened
+    } catch (err) {
+      if (this.opened === opened) this.opened = null
+      await this.release()
+      throw err
+    }
+  }
+
+  private static async open(): Promise<MontyPoolLike> {
+    const module = await loadMontyModule()
+    return module.Monty.create({ maxProcesses: POOL_WORKERS })
+  }
+
+  /** Let go of the pool, closing it once no runtime holds it. */
+  async release(): Promise<void> {
+    this.users -= 1
+    const opened = this.opened
+    if (this.users > 0 || opened === null) return
+    this.opened = null
+    let pool: MontyPoolLike
+    try {
+      pool = await opened
+    } catch (err) {
+      console.debug('monty: the pool being opened at close failed', err)
+      return
+    }
+    await pool.close()
+  }
+}
+
+const sharedPool = new SharedPool()
+
+/**
+ * Runs on pooled monty workers: the process's shared pool, or one of its own
+ * for a run nested in another, which must not queue behind its parent's
+ * worker.
+ */
 export class MontyExecution {
   private readonly name = 'monty'
   private readonly limits: typeof LIMITS & { maxMemory?: number }
@@ -74,8 +127,12 @@ export class MontyExecution {
   /**
    * Args:
    *   maxMemory: the heap one run may use, in bytes; null for no cap.
+   *   shared: run on the process's shared pool.
    */
-  constructor(maxMemory: number | null = null) {
+  constructor(
+    maxMemory: number | null = null,
+    private readonly shared = false,
+  ) {
     this.limits = maxMemory === null ? LIMITS : { ...LIMITS, maxMemory }
   }
 
@@ -194,8 +251,10 @@ export class MontyExecution {
     }
     this.poolPromise = null
     if (this.pool !== null) {
-      await this.pool.close()
+      const pool = this.pool
       this.pool = null
+      if (this.shared) await sharedPool.release()
+      else await pool.close()
     }
   }
 
@@ -212,6 +271,7 @@ export class MontyExecution {
   }
 
   private async loadPool(): Promise<MontyPoolLike> {
+    if (this.shared) return sharedPool.acquire()
     const module = await this.loadModule()
     return module.Monty.create()
   }

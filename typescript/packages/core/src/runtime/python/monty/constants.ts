@@ -27,6 +27,11 @@ export const MAX_URANDOM_BYTES = 1_048_576
 // reaches; the command limits bound a run instead.
 export const LIMITS = { maxSuspensions: 2 ** 31 - 1 }
 
+// How many workers the process's shared pool runs at once, across every
+// workspace: an idle worker holds about 9 MB, and a run past this many
+// waits for one to come back.
+export const POOL_WORKERS = 4
+
 /**
  * What a refused readlink may mean "no link here". EINVAL is the backend
  * saying the path is not one, and the other three are CPython's own
