@@ -29,7 +29,8 @@ import { runAsProgram } from '../../../../context/session_context.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { ensureStream, yieldBytes } from '../../../../io/stream.ts'
-import { Channel, JobConsole } from '../../../../shell/console/index.ts'
+import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
+import { PipeConsole } from '../../../../shell/console/pipe.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { SignalStop, abortable, atDeadline, joinOrAbort } from '../../../../utils/abort.ts'
 import { STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
@@ -263,8 +264,12 @@ interface Supervision {
  * itself on STOP, and never wakes after CHLD; each ends as GNU's does. -v
  * says each signal on stderr. The deadline aborts the inner run, not just
  * the wait for it: a promise cannot be cancelled, so the signal is what
- * stops a `tail -f` from polling on after 124 was already returned.
+ * stops a `tail -f` from polling on after 124 was already returned. The
+ * command's stdout goes out as it writes it, as GNU's command writes to
+ * timeout's own stdout; the status, stderr and node settle once that stream
+ * ends.
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function handleTimeout(
   executeFn: ExecuteStringFn,
   args: readonly string[],
@@ -325,7 +330,7 @@ export async function handleTimeout(
     return refuse(encodeText(timeoutMissing(name)), NOT_FOUND_STATUS)
   }
 
-  const sink = new JobConsole()
+  const sink = new PipeConsole()
   // The inner result lands here as soon as it exists.
   const held: IOResult[] = []
   const abort = new AbortController()
@@ -345,17 +350,50 @@ export async function handleTimeout(
   // The run may be abandoned and reject later; without a handler that
   // becomes an unhandled rejection and can crash the process.
   run.catch(() => undefined)
-  try {
-    return await supervise(run, abort, sink, held, seconds, lineSignal, {
-      signal,
-      killAfter,
-      foreground: parse.flags.f === true,
-      preserve: parse.flags.p === true,
-      verbose: parse.flags.v === true,
-      name,
-    })
-  } finally {
+  const watch = supervise(run, abort, sink, held, seconds, lineSignal, {
+    signal,
+    killAfter,
+    foreground: parse.flags.f === true,
+    preserve: parse.flags.p === true,
+    verbose: parse.flags.v === true,
+    name,
+  }).finally(() => {
     abort.abort()
+    sink.end()
+  })
+  const io = new IOResult()
+  const node = new ExecutionNode({ command: 'timeout', exitCode: 0 })
+  return [streamed(sink, watch, abort, io, node), io, node]
+}
+
+/**
+ * The inner line's stdout as it writes it; once it ends, timeout's status
+ * and stderr settle on `io` and `node`. A reader that stops early closes the
+ * pipe, so the line's next write fails as a write to a closed pipe does, and
+ * the run is let go.
+ */
+async function* streamed(
+  sink: PipeConsole,
+  watch: Promise<Result>,
+  abort: AbortController,
+  io: IOResult,
+  node: ExecutionNode,
+): AsyncGenerator<Uint8Array, void, undefined> {
+  let settled = false
+  try {
+    yield* sink.stream()
+    const [, result] = await watch
+    io.exitCode = node.exitCode = result.exitCode
+    io.stderr = result.stderr
+    settled = true
+  } finally {
+    sink.closeReader()
+    if (!settled) {
+      abort.abort()
+      watch.catch((err: unknown) => {
+        console.debug(`timeout: the run ended: ${String(err)}`)
+      })
+    }
   }
 }
 
@@ -363,7 +401,7 @@ export async function handleTimeout(
 async function supervise(
   run: Promise<IOResult>,
   abort: AbortController,
-  sink: JobConsole,
+  sink: PipeConsole,
   held: IOResult[],
   seconds: number,
   lineSignal: AbortSignal | undefined,
@@ -389,22 +427,22 @@ async function supervise(
       })
     })
   }
-  // What the stopped run printed up to the stop is its output. What it
+  // What the stopped run printed up to the stop has gone out. What it
   // still does as it ends (a guest landing what it wrote) is done before
   // timeout answers, as Python joins the cancelled run, but what it prints
-  // on stdout then is lost: a JS run goes on past its abort, where a
-  // cancelled Python task stops at its next await. Its stderr is read after
-  // the join, since a runtime hands over what its guest wrote there as the
-  // run ends. One that will not end is let go after a stop's grace.
+  // on stdout then is lost, so the pipe ends at the stop: a JS run goes on
+  // past its abort, where a cancelled Python task stops at its next await.
+  // Its stderr is read after the join, since a runtime hands over what its
+  // guest wrote there as the run ends. One that will not end is let go
+  // after a stop's grace.
   const stop = async (said: readonly string[], exitCode: number): Promise<Result> => {
-    const printed = await sink.snapshot(Channel.STDOUT)
+    sink.end()
     try {
       await joinOrAbort(run, abort.signal, STOP_WAIT_SECONDS * 1000)
     } catch (err) {
       console.debug(`timeout: the stopped run ended: ${String(err)}`)
     }
-    const [, io, node] = await ended(sink, held, said, exitCode)
-    return [printed.byteLength > 0 ? printed : null, io, node]
+    return await ended(sink, held, said, exitCode)
   }
   try {
     const result =

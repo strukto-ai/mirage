@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as rs from '../../../rs/stream.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
-import { jqOptions, type JqOptions } from '../../../core/jq/index.ts'
+import { InputReader, jqOptions, type JqOptions } from '../../../core/jq/index.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { materialize, type ByteSource, type IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -26,6 +26,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { parseCommand, parseToKwargs } from '../../spec/parser.ts'
 import {
+  Engine,
   exitCode,
   indentWidth,
   inputName,
@@ -720,9 +721,8 @@ function joined(...parts: Uint8Array[]): Uint8Array {
 }
 
 describe('jq_eval', () => {
-  it('folds frames into outputs and the stop that ended the run', () => {
-    const outputs: string[] = []
-    const messages: [number, string][] = []
+  it('folds frames in order with the stop that ended the run', () => {
+    const frames: [number, string][] = []
     const wire = joined(
       frame(1, '1'),
       frame(4, '["DEBUG:",1]'),
@@ -730,23 +730,24 @@ describe('jq_eval', () => {
       frame(5, 'x'),
       frame(2, joined(Uint8Array.of(0), ENC.encode('{}'))),
     )
-    expect(readFrames(wire, outputs, messages)).toEqual({
+    expect(readFrames(wire, frames)).toEqual({
       kind: 'error',
       text: '{}',
       string: false,
     })
-    expect(outputs).toEqual(['1', '[2]'])
-    expect(messages).toEqual([
+    expect(frames).toEqual([
+      [1, '1'],
       [4, '["DEBUG:",1]'],
+      [1, '[2]'],
       [5, 'x'],
     ])
-    expect(readFrames(frame(3, '{"message":"bye","string":true,"code":3.0}'), [], [])).toEqual({
+    expect(readFrames(frame(3, '{"message":"bye","string":true,"code":3.0}'), [])).toEqual({
       kind: 'halt',
       message: 'bye',
       string: true,
       code: 3,
     })
-    expect(() => readFrames(frame(9, ''), [], [])).toThrow()
+    expect(() => readFrames(frame(9, ''), [])).toThrow()
   })
 
   it.each([
@@ -1103,6 +1104,27 @@ describe('outputs as a run makes them', () => {
     expect(first.done).toBe(false)
     expect(DEC.decode(first.value as Uint8Array)).toBe('0\n')
     await chunks.return?.()
+  })
+
+  it('writes messages and outputs in the order the run wrote them', async () => {
+    const engine = await Engine.open(
+      '1, ("a" | stderr | empty), 2, (3 | debug)',
+      jqOptions(),
+      null,
+      '{}',
+    )
+    if (engine === null) throw new Error('jq_eval declined the program')
+    const seen: string[] = []
+    try {
+      const reader = new InputReader([], jqOptions())
+      const ending = { stop: null, declined: false }
+      for await (const value of engine.run('null', reader, (line) => seen.push(line), ending)) {
+        seen.push(value)
+      }
+    } finally {
+      await engine.close()
+    }
+    expect(seen).toEqual(['1', 'a', '2', '["DEBUG:",3]\n', '3'])
   })
 
   it('stops a run at an output --raw-output0 cannot print, and runs the next', async () => {

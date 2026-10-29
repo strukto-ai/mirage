@@ -419,18 +419,15 @@ export function runStatus(run: JqRun<string>): number {
 }
 
 /**
- * Read one jq_eval drain into a run: every output frame's compact dump onto
- * `outputs`, every debug or stderr frame onto `messages` as its tag and
- * text, and the stop an error or halt frame names, or null. A frame is a
+ * Read one jq_eval drain into a run: every output frame's compact dump and
+ * every debug or stderr frame onto `frames` as its tag and text, in the
+ * order the run wrote them, and the stop an error or halt frame names, or
+ * null. A frame is a
  * tag, a little-endian u32 length and its payload: an output's dump, an
  * error's string flag byte then its text, a halt's JSON, a `debug` line's
  * dump, or the text `stderr` writes.
  */
-export function readFrames(
-  bytes: Uint8Array,
-  outputs: string[],
-  messages: [number, string][],
-): JqError | JqHalt | null {
+export function readFrames(bytes: Uint8Array, frames: [number, string][]): JqError | JqHalt | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   let stop: JqError | JqHalt | null = null
   let at = 0
@@ -441,10 +438,8 @@ export function readFrames(
     if (end > bytes.byteLength) throw new Error('jq_eval: truncated frame')
     const payload = bytes.subarray(at + 5, end)
     at = end
-    if (tag === FRAME_OUTPUT) {
-      outputs.push(DEC.decode(payload))
-    } else if (tag === FRAME_DEBUG || tag === FRAME_STDERR) {
-      messages.push([tag, DEC.decode(payload)])
+    if (tag === FRAME_OUTPUT || tag === FRAME_DEBUG || tag === FRAME_STDERR) {
+      frames.push([tag, DEC.decode(payload)])
     } else if (tag === FRAME_ERROR) {
       stop = { kind: 'error', text: DEC.decode(payload.subarray(1)), string: payload[0] === 1 }
     } else if (tag === FRAME_HALT) {
@@ -487,7 +482,7 @@ export async function inputReply(
  * that stopped it, if one did, and whether jq_eval left its document to
  * jq-wasm, which it says only before any output.
  */
-interface Ending {
+export interface Ending {
   stop: JqError | JqHalt | null
   declined: boolean
 }
@@ -497,7 +492,7 @@ interface Ending {
  * bounded number of VM steps per drain, so a program that never ends still
  * yields and the signal can stop it between two.
  */
-class Engine {
+export class Engine {
   private readonly budget: YieldBudget
   // jq's debug callback prints compactly, with -S and -a but none of the
   // layout or raw options (main.c's dumpopts less pretty).
@@ -570,21 +565,21 @@ class Engine {
   ): AsyncGenerator<string, void, undefined> {
     const stream = this.stream
     stream.begin(readerPosition(reader))
-    const outputs: string[] = []
-    const messages: [number, string][] = []
+    const frames: [number, string][] = []
     let stop: JqError | JqHalt | null
     let safe = true
     // Whether the caller stopped reading while the run was still going.
     let abandoned = true
     try {
-      stop = readFrames(stream.feed(ENC.encode(doc)), outputs, messages)
-      stop = readFrames(stream.finish(), outputs, messages) ?? stop
-      safe = outputs.length === 0 && messages.length === 0 && stop === null
+      stop = readFrames(stream.feed(ENC.encode(doc)), frames)
+      stop = readFrames(stream.finish(), frames) ?? stop
+      safe = frames.length === 0 && stop === null
       for (;;) {
-        for (const [tag, text] of messages) report(await this.message(tag, text))
-        messages.length = 0
-        for (const value of outputs) yield value
-        outputs.length = 0
+        for (const [tag, text] of frames) {
+          if (tag === FRAME_OUTPUT) yield text
+          else report(await this.message(tag, text))
+        }
+        frames.length = 0
         let wire: Uint8Array
         if (stream.busy()) {
           const pending = this.budget.run()
@@ -606,7 +601,7 @@ class Engine {
           wire = stream.respond(reply, data)
         }
         if (wire.byteLength > 0) safe = false
-        stop = readFrames(wire, outputs, messages) ?? stop
+        stop = readFrames(wire, frames) ?? stop
       }
       abandoned = false
     } catch (error) {

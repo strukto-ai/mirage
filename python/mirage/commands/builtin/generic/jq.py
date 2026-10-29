@@ -546,18 +546,18 @@ def parse_report(failure: JqParseError, opts: JqOptions) -> str:
 
 
 def read_frames(
-    wire: bytes, outputs: list[str], messages: list[tuple[int, str]]
+    wire: bytes, frames: list[tuple[int, str]]
 ) -> JqError | JqHalt | None:
     """Fold one drain of mirage-rs's jq_eval into a run: each output frame
-    is a compact dump, an error or a halt frame is what stopped the run,
-    and a debug or stderr frame is a message for stderr.
+    is a compact dump and a debug or stderr frame a message for stderr,
+    both kept in the order the run wrote them, and an error or a halt
+    frame is what stopped the run.
 
     Args:
         wire (bytes): the frames, a tag byte and a little-endian u32
             length before each payload.
-        outputs (list[str]): the run's outputs so far, appended to.
-        messages (list[tuple[int, str]]): the run's messages, its tag and
-            text, appended to.
+        frames (list[tuple[int, str]]): the run's outputs and messages so
+            far, each its tag and text, appended to.
     """
     stop: JqError | JqHalt | None = None
     at = 0
@@ -566,10 +566,8 @@ def read_frames(
         size = int.from_bytes(wire[at + 1 : at + 5], "little")
         payload = wire[at + 5 : at + 5 + size]
         at += 5 + size
-        if tag == FRAME_OUTPUT:
-            outputs.append(payload.decode())
-        elif tag in (FRAME_DEBUG, FRAME_STDERR):
-            messages.append((tag, payload.decode()))
+        if tag in (FRAME_OUTPUT, FRAME_DEBUG, FRAME_STDERR):
+            frames.append((tag, payload.decode()))
         elif tag == FRAME_ERROR:
             stop = JqError(payload[1:].decode(), payload[0] == 1)
         elif tag == FRAME_HALT:
@@ -704,20 +702,19 @@ class Engine:
         """
         stream = self._stream
         stream.begin(reader_position(reader))
-        outputs: list[str] = []
-        messages: list[tuple[int, str]] = []
+        frames: list[tuple[int, str]] = []
         safe = True
         try:
-            stop = read_frames(stream.feed(doc.encode()), outputs, messages)
-            stop = read_frames(stream.finish(), outputs, messages) or stop
-            safe = not outputs and not messages and stop is None
+            stop = read_frames(stream.feed(doc.encode()), frames)
+            stop = read_frames(stream.finish(), frames) or stop
+            safe = not frames and stop is None
             while True:
-                for tag, text in messages:
-                    report(await self._message(tag, text))
-                messages.clear()
-                for value in outputs:
-                    yield value
-                outputs.clear()
+                for tag, text in frames:
+                    if tag == FRAME_OUTPUT:
+                        yield text
+                    else:
+                        report(await self._message(tag, text))
+                frames.clear()
                 if stream.busy():
                     await self._budget.run()
                     wire = stream.drain()
@@ -738,7 +735,7 @@ class Engine:
                     break
                 if wire:
                     safe = False
-                stop = read_frames(wire, outputs, messages) or stop
+                stop = read_frames(wire, frames) or stop
         except StreamRefusal as exc:
             if not safe or exc.output:
                 raise

@@ -573,6 +573,12 @@ const SLICED: &[&str] = &[
     "[range(50)] | tostring",
     "[range(50)] | @json",
     "[range(2000)]",
+    "[range(20)] | del(.[range(0; 20; 3)], .[-1])",
+    r#"{"a":[1,2,3],"b":{"c":1,"d":2}} | delpaths([["a",0],["b","c"],["a",2],["x","y"]])"#,
+    "[[1,2],[3,4]] | del(.[][0])",
+    r#"{"a":1,"b":2,"c":3,"d":4} | del(.a, .c) | .e = 5 | keys_unsorted, .d"#,
+    r#"{"a":1} | delpaths([[]]), delpaths([])"#,
+    r#"try ([1] | delpaths([["a"]])) catch ., try delpaths([1]) catch ."#,
 ];
 
 #[test]
@@ -2332,6 +2338,40 @@ fn long_builtins_pause_with_the_budget() {
         let (count, got) = drains(program, "null", 1 << 10);
         assert!(count > 20, "{program}: {count} drains");
         assert_eq!(got, vec![Frame::Out(want.into())], "{program}");
+    }
+}
+
+/// `delpaths` sorts, checks and walks its paths within the budget, and a
+/// run cancelled during it ends cleanly.
+#[test]
+fn delpaths_pauses_with_the_budget() {
+    for (paths, root) in [
+        ("[range(3000) | [.]]", "[range(3000)]"),
+        (r#"[range(3000) | ["a", .]]"#, "{a: [range(3000)]}"),
+    ] {
+        let built = format!("{paths} as $p | {root}");
+        let (base, _) = drains(&format!("{built} | length"), "null", 1 << 10);
+        let program = format!("{built} | delpaths($p) | length");
+        let (count, got) = drains(&program, "null", 1 << 10);
+        assert!(
+            count > base + 20,
+            "{program}: {count} drains, {base} without"
+        );
+        let want = if root.starts_with('{') { "1" } else { "0" };
+        assert_eq!(got, vec![Frame::Out(want.into())], "{program}");
+        let mut stream = open(&program, 1 << 10);
+        let mut wire = Vec::new();
+        stream.feed(b"null", &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        for _ in 0..base + 10 {
+            stream.drain(&mut wire).unwrap();
+        }
+        assert!(stream.busy(), "{program}");
+        assert!(stream.cancel(), "{program}");
+        while stream.busy() {
+            stream.drain(&mut wire).unwrap();
+        }
+        assert!(wire.is_empty(), "{program}");
     }
 }
 

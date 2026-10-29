@@ -14,9 +14,10 @@
 
 import asyncio
 import contextlib
+import logging
 import math
 import re
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from mirage.commands.builtin.utils.strtod import STRTOD, strtod_double
@@ -38,6 +39,7 @@ from mirage.io.stream import ensure_stream, materialize, yield_bytes
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
+from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.constants import NOT_FOUND_STATUS, TIMEOUT_STATUS
 from mirage.shell.join import shell_join
 from mirage.workspace.executor.builtins.timeout.constants import (
@@ -58,6 +60,8 @@ from mirage.workspace.lookup.lookup import execs
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
+
+logger = logging.getLogger(__name__)
 
 _SYNOPSIS = "timeout [OPTION] DURATION COMMAND [ARG]..."
 
@@ -330,7 +334,10 @@ async def _supervise(
     flags: dict[str, str | bool],
     name: str,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Run the inner line under the deadline and answer as GNU does.
+    """Start the inner line under the deadline and hand back its stdout
+    as it writes it, as GNU's command writes to timeout's own stdout; the
+    status, stderr and node settle once that stream ends, as GNU's
+    answer does.
 
     Args:
         execute_fn (Callable): shell evaluator for the inner line.
@@ -346,7 +353,7 @@ async def _supervise(
     foreground = flags.get("f") is True
     preserve = flags.get("p") is True
     verbose = flags.get("v") is True
-    console = JobConsole()
+    console = PipeConsole()
     held: list[IOResult] = []
     # timeout execs its command, so a builtin that is also a program
     # answers as the program. The task copies the context it starts in.
@@ -359,22 +366,64 @@ async def _supervise(
         )
     finally:
         reset_program_invocation(token)
+
+    async def watch() -> Result:
+        # The deadline's answer, then the run's stdout ends, whatever the
+        # deadline answered.
+        try:
+            return await _deadline(
+                task,
+                console,
+                held,
+                seconds,
+                signal,
+                kill_after,
+                foreground,
+                preserve,
+                verbose,
+                name,
+            )
+        finally:
+            if not task.done():
+                await _cancel(task)
+            console.end()
+
+    watching = asyncio.ensure_future(watch())
+    io = IOResult()
+    node = ExecutionNode(command="timeout")
+    return _streamed(console, watching, io, node), io, node
+
+
+async def _streamed(
+    console: PipeConsole,
+    watch: asyncio.Future[Result],
+    io: IOResult,
+    node: ExecutionNode,
+) -> AsyncIterator[bytes]:
+    """The inner line's stdout as it writes it; once it ends, timeout's
+    status and stderr settle on `io` and `node`. A reader that stops early
+    closes the pipe, so the line's next write fails as a write to a closed
+    pipe does, and the run is let go.
+
+    Args:
+        console (PipeConsole): where the line writes.
+        watch (asyncio.Future[Result]): the deadline's watch over the
+            run.
+        io (IOResult): timeout's result, settled at the end.
+        node (ExecutionNode): timeout's node, settled at the end.
+    """
     try:
-        return await _deadline(
-            task,
-            console,
-            held,
-            seconds,
-            signal,
-            kill_after,
-            foreground,
-            preserve,
-            verbose,
-            name,
-        )
+        async for chunk in console.stream():
+            yield chunk
+        _, result, _ = await watch
+        io.exit_code = node.exit_code = result.exit_code
+        io.stderr = result.stderr
     finally:
-        if not task.done():
-            await _cancel(task)
+        console.close_reader()
+        if not watch.done():
+            await _cancel(watch)
+        elif not watch.cancelled() and watch.exception() is not None:
+            logger.debug("timeout: the run ended: %s", watch.exception())
 
 
 async def _deadline(
@@ -456,7 +505,7 @@ async def _deadline(
     )
 
 
-async def _cancel(task: _Run) -> None:
+async def _cancel(task: _Run | asyncio.Future[Result]) -> None:
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task

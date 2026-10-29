@@ -30,6 +30,7 @@ import { CLI } from '../../commands/cli/types.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
 import { IOResult, materialize } from '../../io/types.ts'
+import type { ExecutionNode } from '../types.ts'
 import { CAPACITY } from '../../io/pipe.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -2835,6 +2836,14 @@ describe('handleXargs', () => {
 
 describe('handleTimeout', () => {
   const session = new SessionState({ sessionId: 'test' })
+  // timeout streams its command's stdout, and its status settles once that
+  // stream is drained, as the shell's barriers drain it.
+  const timed = async (
+    ...args: Parameters<typeof handleTimeout>
+  ): Promise<[Uint8Array, IOResult, ExecutionNode]> => {
+    const [stdout, io, node] = await handleTimeout(...args)
+    return [await materialize(stdout), io, node]
+  }
 
   it('parses duration units', () => {
     expect(durationSeconds('1')).toBe(1)
@@ -2957,10 +2966,10 @@ describe('handleTimeout', () => {
 
   it('passes through when the command finishes in time', async () => {
     const shell = fakeShell([3])
-    const [stdout, io] = await handleTimeout(shell.fn, ['5', 'wc', '-l'], session)
+    const [stdout, io] = await timed(shell.fn, ['5', 'wc', '-l'], session)
     expect(shell.lines).toEqual(['wc -l'])
     expect(io.exitCode).toBe(3)
-    expect(decode(stdout as Uint8Array)).toBe('ran:wc -l\n')
+    expect(decode(stdout)).toBe('ran:wc -l\n')
   })
 
   it('exits 124 on overrun', async () => {
@@ -2970,7 +2979,7 @@ describe('handleTimeout', () => {
           resolve(new IOResult())
         }, 1000),
       )
-    const [, io] = await handleTimeout(slow, ['0.05', 'sleep', '1'], session)
+    const [, io] = await timed(slow, ['0.05', 'sleep', '1'], session)
     expect(io.exitCode).toBe(124)
   })
 
@@ -2985,14 +2994,38 @@ describe('handleTimeout', () => {
       await new Promise((resolve) => setTimeout(resolve, 1000))
       return new IOResult()
     }
-    const [stdout, io] = await handleTimeout(early, ['0.05', 'sleep', '1'], session)
+    const [stdout, io] = await timed(early, ['0.05', 'sleep', '1'], session)
     expect([decode(await materialize(stdout)), io.exitCode]).toEqual(['early\n', 124])
+  })
+
+  // The command's stdout is timeout's own, so its reader sees each write as
+  // it happens, and a reader that leaves early ends the run, as a write to a
+  // closed pipe ends GNU's command.
+  it('writes the output as the command writes it', async () => {
+    let seen: AbortSignal | undefined
+    const forever = async (
+      _cmd: string,
+      opts: { sessionId: string; signal?: AbortSignal; sink?: JobConsole },
+    ): Promise<IOResult> => {
+      seen = opts.signal
+      await opts.sink?.emit(Channel.STDOUT, new TextEncoder().encode('first\n'))
+      await new Promise((resolve) => setTimeout(resolve, 10_000))
+      return new IOResult()
+    }
+    const [stdout] = await handleTimeout(forever, ['5', 'tail', '-f'], session)
+    if (stdout === null || stdout instanceof Uint8Array)
+      throw new Error('timeout returned no stream')
+    const chunks = stdout[Symbol.asyncIterator]()
+    const first = await chunks.next()
+    expect(decode(first.value as Uint8Array)).toBe('first\n')
+    await chunks.return?.()
+    expect(seen?.aborted).toBe(true)
   })
 
   // What the line prints as it winds down past its stop is lost, as a
   // signalled process prints nothing more; what it lands is still joined.
   it('drops what the line prints after its stop', async () => {
-    const [stdout, io] = await handleTimeout(goesOn, ['0.05', 'rev', 'a', 'b'], session)
+    const [stdout, io] = await timed(goesOn, ['0.05', 'rev', 'a', 'b'], session)
     expect([decode(await materialize(stdout)), io.exitCode]).toEqual(['early\n', 124])
   })
 
@@ -3007,7 +3040,7 @@ describe('handleTimeout', () => {
       await new Promise((resolve) => setTimeout(resolve, 200))
       return new IOResult()
     }
-    const [, io] = await handleTimeout(late, ['-s', 'CONT', '0.05', 'sleep', '1'], session)
+    const [, io] = await timed(late, ['-s', 'CONT', '0.05', 'sleep', '1'], session)
     expect([io.exitCode, decode(await materialize(io.stderr))]).toEqual([124, 'warn\n'])
   })
 
@@ -3035,9 +3068,9 @@ describe('handleTimeout', () => {
           stderr: new TextEncoder().encode('tail: nope: No such file or directory\n'),
         }),
       )
-    const [stdout, io] = await handleTimeout(complaining, ['0.05', 'tail', '-F', 'nope'], session)
+    const [stdout, io] = await timed(complaining, ['0.05', 'tail', '-F', 'nope'], session)
     expect(io.exitCode).toBe(124)
-    expect(stdout).toBeNull()
+    expect(stdout.byteLength).toBe(0)
     expect(decode(await materialize(io.stderr))).toBe('tail: nope: No such file or directory\n')
   })
 
@@ -3059,14 +3092,14 @@ describe('handleTimeout', () => {
           { once: true },
         )
       })
-    const [, io] = await handleTimeout(follow, ['0.05', 'tail', '-f', 'x'], session)
+    const [, io] = await timed(follow, ['0.05', 'tail', '-f', 'x'], session)
     expect(io.exitCode).toBe(124)
     expect(seen?.aborted).toBe(true)
   })
 
   it('invalid duration exits 125', async () => {
     const shell = fakeShell()
-    const [, io] = await handleTimeout(shell.fn, ['xx', 'sleep', '1'], session)
+    const [, io] = await timed(shell.fn, ['xx', 'sleep', '1'], session)
     expect(io.exitCode).toBe(125)
     expect(decode(await materialize(io.stderr))).toBe(
       `timeout: invalid time interval 'xx'\n${TIMEOUT_TRY}`,
@@ -3076,7 +3109,7 @@ describe('handleTimeout', () => {
 
   it('missing operand exits 125', async () => {
     const shell = fakeShell()
-    const [, io] = await handleTimeout(shell.fn, ['5'], session)
+    const [, io] = await timed(shell.fn, ['5'], session)
     expect(io.exitCode).toBe(125)
     expect(decode(await materialize(io.stderr))).toBe(TIMEOUT_TRY)
   })
@@ -3102,7 +3135,7 @@ describe('handleTimeout', () => {
     [['-k', 'x', '1', 'true'], "timeout: invalid time interval 'x'\n"],
   ])('option refusals exit 125 (%j)', async (args, message) => {
     const shell = fakeShell()
-    const [, io] = await handleTimeout(shell.fn, args, session)
+    const [, io] = await timed(shell.fn, args, session)
     expect(io.exitCode).toBe(125)
     expect(decode(await materialize(io.stderr))).toBe(message + TIMEOUT_TRY)
     expect(shell.lines).toEqual([])
@@ -3135,7 +3168,7 @@ describe('handleTimeout', () => {
     ],
   ])('signal outcome (%j)', async (args, code, said) => {
     const shell = slowShell({ 'sleep 1': 1000 })
-    const [, io, node] = await handleTimeout(shell.fn, [...args, 'sleep', '1'], session)
+    const [, io, node] = await timed(shell.fn, [...args, 'sleep', '1'], session)
     expect(io.exitCode).toBe(code)
     expect(node.exitCode).toBe(code)
     expect(decode(await materialize(io.stderr))).toBe(said)
@@ -3149,14 +3182,14 @@ describe('handleTimeout', () => {
     [['-p', '-s', 'CONT'], 3],
   ])('ignored signals let the command finish (%j)', async (args, code) => {
     const shell = slowShell({ sh: 200 }, { sh: 3 })
-    const [stdout, io] = await handleTimeout(shell.fn, [...args, '0.05', 'sh'], session)
+    const [stdout, io] = await timed(shell.fn, [...args, '0.05', 'sh'], session)
     expect(io.exitCode).toBe(code)
-    expect(decode(stdout as Uint8Array)).toBe('ran:sh\n')
+    expect(decode(stdout)).toBe('ran:sh\n')
   })
 
   it('a stopped timeout never returns', async () => {
     const shell = slowShell({ sh: 50 })
-    const run = handleTimeout(shell.fn, ['-s', 'STOP', '0.01', 'sh'], session)
+    const run = timed(shell.fn, ['-s', 'STOP', '0.01', 'sh'], session)
     const late = new Promise((resolve) =>
       setTimeout(() => {
         resolve('late')
@@ -3172,7 +3205,7 @@ describe('handleTimeout', () => {
       return Promise.resolve(new IOResult())
     }
     const input = new TextEncoder().encode('hi\n')
-    await handleTimeout(execute, ['1', 'cat'], session, input)
+    await timed(execute, ['1', 'cat'], session, input)
     expect(seen).toEqual([input])
   })
 })

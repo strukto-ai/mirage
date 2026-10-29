@@ -2,13 +2,15 @@
 
 use std::sync::Arc;
 
-use super::builtin::{self, Cfunc, Containing, Fault, Indexing, Sorting, Splitting, Subtracting};
+use super::builtin::{
+    self, Cfunc, Containing, Deleting, Fault, Indexing, Sorting, Splitting, Subtracting,
+};
 use super::host::{self, Answer, Host, Messaging, Reply};
 use super::meter::{Charge, Meter};
 use super::parse::Decoding;
 use super::regex::Matching;
 use super::time::{self, Clock};
-use super::value::{Dumping, Object, Parsing, Retirement, Value};
+use super::value::{Deferring, Dumping, Object, Parsing, Retirement, Value, deferring};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Target {
@@ -223,6 +225,7 @@ pub(crate) enum Pending {
     Split(Box<Splitting>),
     Index(Box<Indexing>),
     Contain(Box<Containing>),
+    Delete(Box<Deleting>),
 }
 
 impl Pending {
@@ -238,10 +241,15 @@ impl Pending {
             Self::Split(task) => task.retire(),
             Self::Index(task) => task.retire(),
             Self::Contain(task) => task.retire(),
+            Self::Delete(task) => task.retire(),
         }
     }
 
-    fn begin(f: Cfunc, args: &[Value]) -> Option<Result<Pending, Fault>> {
+    fn begin(f: Cfunc, args: &mut [Value]) -> Option<Result<Pending, Fault>> {
+        if let (Cfunc::DelPaths, [root, paths, ..]) = (f, &mut *args) {
+            let root = std::mem::replace(root, Value::Null);
+            return Some(Deleting::begin(root, paths).map(|d| Pending::Delete(Box::new(d))));
+        }
         let input = &args[0];
         let dump = || Ok(Pending::Dump(Box::new(Dumping::begin(input.clone()))));
         let format = match args.get(1) {
@@ -307,6 +315,7 @@ impl Pending {
             Pending::Split(splitting) => splitting.run(budget, limits.items),
             Pending::Index(indexing) => indexing.run(budget, limits.items),
             Pending::Contain(containing) => containing.run(budget),
+            Pending::Delete(deleting) => deleting.run(budget, limits),
             Pending::Message(messaging) => messaging.run(budget, limits),
             Pending::Read(_) => unreachable!("a document reader is retired outside the VM"),
         }
@@ -662,7 +671,16 @@ impl Vm {
     }
 
     /// Run until the next output, the end, an error, or `budget` steps.
+    /// A container whose last reference drops meanwhile is freed with the
+    /// run's other dead values, one node a step.
     pub(crate) fn next(&mut self, budget: &mut u64) -> Next {
+        let deferred = deferring();
+        let next = self.advance(budget, &deferred);
+        self.teardown.extend(deferred.finish());
+        next
+    }
+
+    fn advance(&mut self, budget: &mut u64, deferred: &Deferring) -> Next {
         if let Some(halt) = self.halted.take() {
             return Next::Halt(halt);
         }
@@ -700,6 +718,7 @@ impl Vm {
                     self.limits.memory
                 ))));
             }
+            deferred.collect(&mut self.teardown);
             if self.retire_dead() {
                 continue;
             }
@@ -990,7 +1009,7 @@ impl Vm {
                     Some(task) => self.resume(task, budget),
                     None => {
                         *budget = budget.saturating_sub(builtin::cost(&args));
-                        match Pending::begin(*f, &args) {
+                        match Pending::begin(*f, &mut args) {
                             Some(Ok(task)) => self.resume(task, budget),
                             Some(Err(fault)) => Some(Err(fault)),
                             None => Some(match f {

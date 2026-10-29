@@ -737,9 +737,8 @@ def _frame(tag: int, payload: bytes) -> bytes:
     return bytes([tag]) + len(payload).to_bytes(4, "little") + payload
 
 
-def test_frames_fold_into_outputs_and_the_stop_that_ended_the_run():
-    outputs: list[str] = []
-    messages: list[tuple[int, str]] = []
+def test_frames_fold_in_order_with_the_stop_that_ended_the_run():
+    frames: list[tuple[int, str]] = []
     wire = (
         _frame(1, b"1")
         + _frame(4, b'["DEBUG:",1]')
@@ -747,13 +746,12 @@ def test_frames_fold_into_outputs_and_the_stop_that_ended_the_run():
         + _frame(5, b"x")
         + _frame(2, b"\x00{}")
     )
-    assert read_frames(wire, outputs, messages) == JqError("{}", False)
-    assert outputs == ["1", "[2]"]
-    assert messages == [(4, '["DEBUG:",1]'), (5, "x")]
+    assert read_frames(wire, frames) == JqError("{}", False)
+    assert frames == [(1, "1"), (4, '["DEBUG:",1]'), (1, "[2]"), (5, "x")]
     halt = b'{"message":"bye","string":true,"code":3.0}'
-    assert read_frames(_frame(3, halt), [], []) == JqHalt("bye", True, 3.0)
+    assert read_frames(_frame(3, halt), []) == JqHalt("bye", True, 3.0)
     with pytest.raises(ValueError):
-        read_frames(_frame(9, b""), [], [])
+        read_frames(_frame(9, b""), [])
 
 
 class _NoWorker:
@@ -881,6 +879,23 @@ async def test_each_output_goes_out_before_its_run_ends():
     chunks = aiter(source)
     assert await asyncio.wait_for(anext(chunks), 10) == b"0\n"
     await chunks.aclose()
+
+
+@pytest.mark.asyncio
+async def test_messages_and_outputs_go_out_in_the_order_the_run_wrote_them():
+    engine = Engine.open(
+        '1, ("a" | stderr | empty), 2, (3 | debug)', JqOptions(), None, "{}"
+    )
+    assert engine is not None
+    seen: list[str] = []
+    try:
+        async for value in engine.run(
+            "null", InputReader([], JqOptions()), seen.append, Ending()
+        ):
+            seen.append(value)
+    finally:
+        await engine.close()
+    assert seen == ["1", "a", "2", '["DEBUG:",3]\n', "3"]
 
 
 @pytest.mark.asyncio

@@ -817,10 +817,10 @@ pub(super) fn array_limit(items: Vec<Value>, limits: Limits) -> Answer {
     Ok(Value::array(items))
 }
 
+/// The builtin `f` over `args`, the input first. As jq's `f_plus` frees
+/// its input before it adds, and `setpath` and `delpaths` take theirs, a
+/// value nothing else holds, a `reduce` accumulator, changes in place.
 pub(crate) fn call(f: Cfunc, args: &mut [Value], limits: Limits) -> Answer {
-    // jq's f_plus frees its input before it adds, and setpath and delpaths
-    // take theirs, so a value nothing else holds, a `reduce` accumulator,
-    // is changed in place rather than copied.
     match f {
         Cfunc::Plus => {
             args[0] = Value::Null;
@@ -1210,9 +1210,13 @@ fn plus(a: Value, b: Value, limits: Limits) -> Answer {
         (Value::Null, b) => Ok(b),
         (a, Value::Null) => Ok(a),
         (Value::Number(x), Value::Number(y)) => Ok(Value::number(x.value() + y.value())),
-        (Value::String(x), Value::String(y)) => {
+        (Value::String(mut x), Value::String(y)) => {
             if x.len() + y.len() > limits.bytes {
                 return Err(string_too_long(limits));
+            }
+            if let Some(text) = Arc::get_mut(&mut x) {
+                text.push_str(&y);
+                return Ok(Value::String(x));
             }
             let mut text = String::with_capacity(x.len() + y.len());
             text.push_str(&x);
@@ -1356,8 +1360,13 @@ enum Piece {
     CodePoint,
     /// An empty separator: each character as a string.
     Char,
-    /// The text up to the next separator, and the separator's length.
-    Between(Box<Finder<'static>>, usize),
+    /// The text up to the next separator, and the separator's length; the
+    /// finder's copy of the separator stays charged while it searches.
+    Between {
+        finder: Box<Finder<'static>>,
+        len: usize,
+        _needle: Charge,
+    },
 }
 
 impl Splitting {
@@ -1378,10 +1387,11 @@ impl Splitting {
         let piece = if sep.is_empty() {
             Piece::Char
         } else {
-            Piece::Between(
-                Box::new(Finder::new(sep.as_bytes()).into_owned()),
-                sep.len(),
-            )
+            Piece::Between {
+                finder: Box::new(Finder::new(sep.as_bytes()).into_owned()),
+                len: sep.len(),
+                _needle: Charge::open(sep.len()),
+            }
         };
         Self::new(text, piece)
     }
@@ -1417,7 +1427,9 @@ impl Splitting {
                     };
                     (item, c.len_utf8())
                 }
-                Piece::Between(finder, sep) => match finder.find(rest.as_bytes()) {
+                Piece::Between {
+                    finder, len: sep, ..
+                } => match finder.find(rest.as_bytes()) {
                     Some(end) => (Value::string(&rest[..end]), end + sep),
                     None => {
                         self.ended = true;
@@ -1426,7 +1438,7 @@ impl Splitting {
                 },
             };
             self.at += len;
-            if !matches!(self.piece, Piece::Between(..)) {
+            if !matches!(self.piece, Piece::Between { .. }) {
                 self.ended = self.at == self.text.len();
             }
             *budget = budget.saturating_sub(1 + len as u64 / 64);
@@ -1468,12 +1480,14 @@ pub(crate) struct Indexing {
 
 /// Where an `indices` search stands.
 enum Within {
-    /// The byte the search goes on from, and the characters before it.
+    /// The byte the search goes on from, and the characters before it; the
+    /// finder's copy of the needle stays charged while it searches.
     Text {
         text: Arc<Text>,
         finder: Box<Finder<'static>>,
         at: usize,
         chars: usize,
+        _needle: Charge,
     },
     /// The position being tried, and how much of the needle matches there.
     List {
@@ -1506,6 +1520,7 @@ impl Indexing {
                 finder: Box::new(Finder::new(needle.as_bytes()).into_owned()),
                 at: 0,
                 chars: 0,
+                _needle: Charge::open(needle.len()),
             },
             found: Vec::new(),
             charge: Charge::open(0),
@@ -1568,6 +1583,7 @@ impl Indexing {
                 finder,
                 at,
                 chars,
+                ..
             } => {
                 let Some(offset) = finder.find(&text.as_bytes()[*at..]) else {
                     *budget = budget.saturating_sub((text.len() - *at) as u64 / 64);
@@ -2548,6 +2564,7 @@ fn dels(t: Value, keys: Vec<Value>) -> Answer {
             ))
         }
         Value::Object(mut fields) => {
+            let mut names = Vec::with_capacity(keys.len());
             for key in &keys {
                 let Value::String(k) = key else {
                     return Err(fail(format!(
@@ -2555,8 +2572,9 @@ fn dels(t: Value, keys: Vec<Value>) -> Answer {
                         key.kind()
                     )));
                 };
-                Arc::make_mut(&mut fields).remove(k);
+                names.push(k.as_str());
             }
+            Arc::make_mut(&mut fields).remove_all(names);
             Ok(Value::Object(fields))
         }
         other => Err(fail(format!("Cannot delete fields from {}", other.kind()))),
@@ -2566,96 +2584,187 @@ fn dels(t: Value, keys: Vec<Value>) -> Answer {
 /// jq's delpaths_sorted, walked with a stack of the values it is
 /// rebuilding. Each level covers the run of sorted paths that share its
 /// prefix, so no path is copied on the way down.
-fn delpaths_sorted(object: Value, paths: &[Vec<Value>], limits: Limits) -> Answer {
-    struct Level {
-        object: Value,
-        end: usize,
-        at: usize,
-        delkeys: Vec<Value>,
-        key: Value,
+/// `delpaths`: its paths sorted, checked, then walked one key a step, so
+/// many paths pause between drains as `sort` does.
+pub(crate) struct Deleting {
+    sorting: Option<Box<Sorting>>,
+    paths: Arc<List>,
+    checked: usize,
+    walk: Vec<Deletion>,
+}
+
+/// One container on the walk over the paths from `at` to `end`: the keys
+/// to delete from it, and the key of the paths from `at` to `scan`, or of
+/// the child being walked.
+struct Deletion {
+    object: Value,
+    end: usize,
+    at: usize,
+    scan: usize,
+    delkeys: Vec<Value>,
+    key: Value,
+}
+
+impl Deleting {
+    /// Deleting `paths` from `root`.
+    pub(crate) fn begin(root: Value, paths: &Value) -> Result<Deleting, Fault> {
+        if !matches!(paths, Value::Array(_)) {
+            return Err(fail("Paths must be specified as an array"));
+        }
+        Ok(Self {
+            sorting: Some(Box::new(sorting(Cfunc::Sort, std::slice::from_ref(paths))?)),
+            paths: Arc::default(),
+            checked: 0,
+            walk: vec![Deletion {
+                object: root,
+                end: 0,
+                at: 0,
+                scan: 0,
+                delkeys: Vec::new(),
+                key: Value::Null,
+            }],
+        })
     }
-    let mut stack = vec![Level {
-        object,
-        end: paths.len(),
-        at: 0,
-        delkeys: Vec::new(),
-        key: Value::Null,
-    }];
-    loop {
-        let start = stack.len() - 1;
-        let Some(level) = stack.last_mut() else {
+
+    pub(crate) fn retire(&mut self) -> Option<Value> {
+        if let Some(sorting) = &mut self.sorting {
+            if let Some(value) = sorting.retire() {
+                return Some(value);
+            }
+            self.sorting = None;
+        }
+        if let Some(level) = self.walk.last_mut() {
+            if !level.delkeys.is_empty() {
+                return Some(Value::array(std::mem::take(&mut level.delkeys)));
+            }
+            return self.walk.pop().map(|level| level.object);
+        }
+        if !self.paths.is_empty() {
+            return Some(Value::Array(std::mem::take(&mut self.paths)));
+        }
+        None
+    }
+
+    /// The answer once the walk ends, or None when its budget runs out.
+    pub(crate) fn run(&mut self, budget: &mut u64, limits: Limits) -> Option<Answer> {
+        if let Some(sorting) = &mut self.sorting {
+            match sorting.run(budget)? {
+                Ok(Value::Array(sorted)) => self.paths = sorted,
+                Ok(_) => unreachable!("a sort answers an array"),
+                Err(fault) => return Some(Err(fault)),
+            }
+            self.sorting = None;
+        }
+        while *budget > 0 {
+            *budget -= 1;
+            match self.step(limits) {
+                Ok(None) => {}
+                done => return done.transpose(),
+            }
+        }
+        None
+    }
+
+    /// Run to the end.
+    pub(crate) fn finish(mut self, limits: Limits) -> Answer {
+        let mut budget = u64::MAX;
+        self.run(&mut budget, limits)
+            .unwrap_or_else(|| unreachable!("an unbounded walk ends"))
+    }
+
+    fn step(&mut self, limits: Limits) -> Result<Option<Value>, Fault> {
+        if let Some(path) = self.paths.get(self.checked) {
+            let Value::Array(items) = path else {
+                return Err(fail(format!(
+                    "Path must be specified as array, not {}",
+                    path.kind()
+                )));
+            };
+            if items.len() > PATH_DEPTH {
+                return Err(fail("Path too deep"));
+            }
+            self.checked += 1;
+            return Ok(None);
+        }
+        let start = self.walk.len() - 1;
+        let Some(level) = self.walk.last_mut() else {
             unreachable!("the walk holds its root")
         };
+        if level.end == 0 {
+            return match self.paths.first() {
+                None => Ok(Some(std::mem::replace(&mut level.object, Value::Null))),
+                Some(Value::Array(first)) if first.is_empty() => Ok(Some(Value::Null)),
+                Some(_) => {
+                    level.end = self.paths.len();
+                    Ok(None)
+                }
+            };
+        }
         if level.at == level.end {
-            let Some(done) = stack.pop() else {
+            let Some(done) = self.walk.pop() else {
                 unreachable!("the walk holds its root")
             };
             let object = dels(done.object, done.delkeys)?;
-            let Some(parent) = stack.last_mut() else {
-                return Ok(object);
+            let Some(parent) = self.walk.last_mut() else {
+                return Ok(Some(object));
             };
             let key = std::mem::replace(&mut parent.key, Value::Null);
             let held = std::mem::replace(&mut parent.object, Value::Null);
             parent.object = set(held, &key, object, limits)?;
-            continue;
+            return Ok(None);
         }
         let i = level.at;
-        let key = paths[i][start].clone();
-        let mut j = i + 1;
-        while j < level.end && paths[j][start].equals(&key) {
-            j += 1;
+        if level.scan == i {
+            level.key = component(&self.paths, i, start).clone();
+            level.scan = i + 1;
+            return Ok(None);
         }
+        if level.scan < level.end && component(&self.paths, level.scan, start).equals(&level.key) {
+            level.scan += 1;
+            return Ok(None);
+        }
+        let j = level.scan;
         level.at = j;
-        if paths[i].len() == start + 1 {
-            level.delkeys.push(key);
-            continue;
+        if path_of(&self.paths, i).len() == start + 1 {
+            level
+                .delkeys
+                .push(std::mem::replace(&mut level.key, Value::Null));
+            return Ok(None);
         }
-        let sub = get(&level.object, &key).map_err(Fault::Error)?;
+        let sub = get(&level.object, &level.key).map_err(Fault::Error)?;
         if matches!(sub, Value::Null) {
-            continue;
+            level.key = Value::Null;
+            return Ok(None);
         }
         if start + 1 > PATH_DEPTH {
             return Err(fail("Path too deep"));
         }
-        level.key = key;
-        stack.push(Level {
+        self.walk.push(Deletion {
             object: sub,
             end: j,
             at: i,
+            scan: i,
             delkeys: Vec::new(),
             key: Value::Null,
         });
+        Ok(None)
     }
 }
 
+/// The `i`th of the sorted paths, which the walk checked are arrays.
+fn path_of(paths: &[Value], i: usize) -> &[Value] {
+    match &paths[i] {
+        Value::Array(items) => items,
+        _ => unreachable!("delpaths checks its paths before the walk"),
+    }
+}
+
+fn component(paths: &[Value], i: usize, at: usize) -> &Value {
+    &path_of(paths, i)[at]
+}
+
 fn delpaths(object: Value, paths: &Value, limits: Limits) -> Answer {
-    if !matches!(paths, Value::Array(_)) {
-        return Err(fail("Paths must be specified as an array"));
-    }
-    let sorted = sorting(Cfunc::Sort, std::slice::from_ref(paths))?.finish()?;
-    let Value::Array(sorted) = &sorted else {
-        unreachable!("a sort answers an array")
-    };
-    let mut keys: Vec<Vec<Value>> = Vec::with_capacity(sorted.len());
-    for path in sorted.iter() {
-        let Value::Array(items) = path else {
-            return Err(fail(format!(
-                "Path must be specified as array, not {}",
-                path.kind()
-            )));
-        };
-        if items.len() > PATH_DEPTH {
-            return Err(fail("Path too deep"));
-        }
-        keys.push(items.to_vec());
-    }
-    if keys.is_empty() {
-        return Ok(object);
-    }
-    if keys[0].is_empty() {
-        return Ok(Value::Null);
-    }
-    delpaths_sorted(object, &keys, limits)
+    Deleting::begin(object, paths)?.finish(limits)
 }
 
 #[cfg(test)]
@@ -2692,6 +2801,24 @@ mod tests {
         assert!(!meter.exceeded());
         drop(answer);
         assert_eq!(meter.live(), 0);
+    }
+
+    #[test]
+    fn searches_charge_their_copy_of_the_needle() {
+        let meter = Arc::new(Meter::default());
+        let _installed = meter::install(&meter);
+        let args = [
+            Value::string("x".repeat(10)),
+            Value::string("y".repeat(100_000)),
+        ];
+        let before = meter.live();
+        let splitting = Splitting::begin(Cfunc::Split, &args).unwrap();
+        assert!(meter.live() >= before + 100_000);
+        drop(splitting);
+        let indexing = Indexing::text(&args).unwrap();
+        assert!(meter.live() >= before + 100_000);
+        drop(indexing);
+        assert_eq!(meter.live(), before);
     }
 
     #[test]

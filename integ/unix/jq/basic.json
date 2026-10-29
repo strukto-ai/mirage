@@ -788,6 +788,63 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "jq_timeout_streams_into_head",
+      "seq": 701227,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 60 jq -n 'range(1e9)' | head -1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_del_of_every_key",
+      "seq": 701228,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 5 jq -n '[range(1e5) | {key: \"k\\(.)\", value: .}] | from_entries | del(.[]) | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_reduce_string_append",
+      "seq": 701229,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 5 jq -n 'reduce range(1e5) as $i (\"\"; . + \"x\") | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "100000\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

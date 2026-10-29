@@ -163,6 +163,7 @@ fn reduce_accumulators_grow_in_place() {
         "reduce range(20000) as $i ({}; . + {\"k\\($i)\": $i}) | length",
         "[range(20000) | {key: \"k\\(.)\", value: .}] | from_entries | length",
         "[range(20000)] | flatten | length",
+        "reduce range(20000) as $i (\"\"; . + \"xxxxx\") | length / 5",
     ] {
         let config = serde_json::to_vec(&serde_json::json!({ "program": program })).unwrap();
         let mut stream = mirage_rs::open("jq_eval", &config).unwrap();
