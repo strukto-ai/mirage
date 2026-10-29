@@ -33,6 +33,8 @@ const USAGE =
   'mapfile: usage: mapfile [-d delim] [-n count] [-O origin] [-s count] [-t] [-u fd] [-C callback] [-c quantum] [array]'
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 const DEFAULT_QUANTUM = 5000
+// The bytes one array slot costs, a hole the array pads with included.
+const SLOT = 8
 
 /**
  * Read input into an indexed array, one element per line. `-d C` splits
@@ -102,9 +104,13 @@ export async function handleMapfile(
   let index = origin
   let stored = 0
   let seen = 0
-  // The array's bytes, what it keeps among them, so -O appends cannot grow
-  // it past the workspace's max_memory a few lines at a time.
-  let held = arr.reduce((sum, v) => sum + (v === null ? 0 : encodeText(v).byteLength), 0)
+  // The array's bytes, its slots and what it keeps in them, so neither -O
+  // appends nor empty records grow it past the workspace's max_memory a few
+  // lines at a time.
+  let held = arr.reduce(
+    (sum, v) => sum + (v === null ? 0 : encodeText(v).byteLength),
+    SLOT * arr.length,
+  )
   const outputs: Uint8Array[] = []
   const errs: Uint8Array[] = []
   while (buffer !== null && (limit === 0 || stored < limit)) {
@@ -114,7 +120,10 @@ export async function handleMapfile(
     if (seen <= skip) continue
     const record = found && !strip ? concat([data, Uint8Array.of(delim)]) : data
     const replaced = arr[index] ?? null
-    held += record.byteLength - (replaced === null ? 0 : encodeText(replaced).byteLength)
+    held +=
+      SLOT * Math.max(index + 1 - arr.length, 0) +
+      record.byteLength -
+      (replaced === null ? 0 : encodeText(replaced).byteLength)
     checkMemory(held)
     const text = decodeText(record)
     arraySet(arr, index, text)

@@ -48,6 +48,8 @@ _USAGE = (
 )
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _DEFAULT_QUANTUM = 5000
+# The bytes one array slot costs, a hole the array pads with included.
+_SLOT = 8
 
 
 async def handle_mapfile(
@@ -152,9 +154,12 @@ async def handle_mapfile(
     index = origin
     stored = 0
     seen = 0
-    # The array's bytes, what it keeps among them, so -O appends cannot
-    # grow it past the workspace's max_memory a few lines at a time.
-    held = sum(len(encode_text(v)) for v in arr if v is not None)
+    # The array's bytes, its slots and what it keeps in them, so neither
+    # -O appends nor empty records grow it past the workspace's
+    # max_memory a few lines at a time.
+    held = _SLOT * len(arr) + sum(
+        len(encode_text(v)) for v in arr if v is not None
+    )
     outputs: list[bytes] = []
     errors: list[bytes] = []
     while buffer is not None and (limit == 0 or stored < limit):
@@ -166,8 +171,10 @@ async def handle_mapfile(
             continue
         record = data + delim if found and not strip else data
         replaced = arr[index] if index < len(arr) else None
-        held += len(record) - (
-            len(encode_text(replaced)) if replaced is not None else 0
+        held += (
+            _SLOT * max(index + 1 - len(arr), 0)
+            + len(record)
+            - (len(encode_text(replaced)) if replaced is not None else 0)
         )
         check_memory(held)
         text = decode_text(record)

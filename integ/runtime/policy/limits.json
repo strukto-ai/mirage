@@ -1491,10 +1491,10 @@
           }
         },
         {
-          "command": "for i in 1 2 3; do mapfile -t -O \"${#a[@]}\" a < <(seq 1 500); echo \"n=${#a[@]}\"; done",
+          "command": "for i in 1 2 3; do mapfile -t -O \"${#a[@]}\" a < <(seq 1 150); echo \"n=${#a[@]}\"; done",
           "expect": {
             "exit": 1,
-            "stdout": "n=500\nn=1000\n",
+            "stdout": "n=150\nn=300\n",
             "stderr": "line: memory exhausted\n"
           }
         },
@@ -1507,11 +1507,27 @@
           }
         },
         {
-          "command": "mapfile -t -O 0 b < <(seq 1 800); mapfile -t -O 0 b < <(seq 1 800); echo \"n=${#b[@]}\"",
+          "command": "mapfile -t -O 0 b < <(seq 1 250); mapfile -t -O 0 b < <(seq 1 250); echo \"n=${#b[@]}\"",
           "expect": {
             "exit": 0,
-            "stdout": "n=800\n",
+            "stdout": "n=250\n",
             "stderr": ""
+          }
+        },
+        {
+          "command": "printf '\\n' | { mapfile -t -O 10000000 a; echo \"n=${#a[@]}\"; }",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        },
+        {
+          "command": "seq 1 1000 | tr -d '0-9' | { mapfile -t a; echo \"n=${#a[@]}\"; }",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
           }
         },
         {
