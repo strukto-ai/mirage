@@ -64,7 +64,13 @@ async def is_counted(accessor: DiskAccessor, path: PathSpec) -> bool:
         accessor (DiskAccessor): the mount's root.
         path (PathSpec): the operand.
     """
-    host = await resolve_inside(accessor.root, path)
+    try:
+        host = await resolve_inside(accessor.root, path)
+    except PermissionError as exc:
+        logger.debug(
+            "ancestor skipped while counting %s: %s", path.virtual, exc
+        )
+        return False
     root = Path(os.path.abspath(accessor.root))
 
     def included() -> bool:

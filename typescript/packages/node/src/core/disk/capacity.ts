@@ -50,7 +50,16 @@ async function bytesUnder(host: string): Promise<number> {
 
 /** Whether whole-root counting can traverse the operand's ancestors. */
 export async function isCounted(accessor: DiskAccessor, spec: PathSpec): Promise<boolean> {
-  const host = await resolveInside(accessor.root, spec)
+  let host: string
+  try {
+    host = await resolveInside(accessor.root, spec)
+  } catch (err) {
+    if (['EACCES', 'EPERM'].includes((err as NodeJS.ErrnoException).code ?? '')) {
+      logger.debug?.(`ancestor skipped while counting ${spec.virtual}: ${String(err)}`)
+      return false
+    }
+    throw err
+  }
   const root = path.resolve(accessor.root)
   if (host !== root) {
     for (let at = path.dirname(host); ; at = path.dirname(at)) {

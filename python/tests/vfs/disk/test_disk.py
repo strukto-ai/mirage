@@ -120,7 +120,9 @@ async def test_skipped_bytes_never_credit_other_writes(
     try:
         locked.chmod(mode)
         changed = await ws.shell(command)
-        assert changed.exit_code == 0, await changed.stderr_str()
+        assert changed.exit_code == 1
+        assert "Permission denied" in await changed.stderr_str()
+        assert (await data.capacity()).used == 3
         assert data.usage is not None and data.usage.used == 3
         assert (await ws.shell("printf 12 > /d/new")).exit_code == 1
         assert not (tmp_path / "new").exists()
@@ -181,7 +183,7 @@ async def test_copy_from_an_unlisted_folder_reserves_actual_bytes(
         locked.chmod(0o111)
         refused = await ws.shell("cp /d/locked/source /d/destination")
         assert refused.exit_code == 1
-        assert "Disk quota exceeded" in await refused.stderr_str()
+        assert "Permission denied" in await refused.stderr_str()
         assert (
             destination.read_bytes() == b"Z"
             if existing
@@ -210,16 +212,13 @@ async def test_move_from_an_unlisted_folder_reserves_counted_growth(
     try:
         locked.chmod(0o333)
         moved = await ws.shell("mv /d/locked/source /d/destination")
-        assert moved.exit_code == (1 if limit == 4 else 0)
-        assert data.usage is not None and data.usage.used == (
-            3 if limit == 4 else 8
-        )
+        assert moved.exit_code == 1
+        assert "Permission denied" in await moved.stderr_str()
+        assert (await data.capacity()).used == 3
+        assert data.usage is not None and data.usage.used == 3
         assert data.usage.pending == 0
-        if limit == 4:
-            assert (locked / "source").read_bytes() == b"abcde"
-            assert not (tmp_path / "destination").exists()
-        else:
-            assert (tmp_path / "destination").read_bytes() == b"abcde"
+        assert (locked / "source").read_bytes() == b"abcde"
+        assert not (tmp_path / "destination").exists()
     finally:
         locked.chmod(0o755)
         await ws.close()
