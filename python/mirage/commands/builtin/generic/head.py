@@ -31,6 +31,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.io.async_line_iterator import SharedInput
+from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -66,6 +67,43 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> HeadFlags:
     )
 
 
+async def _count_lines(
+    chunk: bytes,
+    separator: bytes,
+    wanted: int,
+    budget: YieldBudget,
+    begin: int = 0,
+) -> tuple[int, int]:
+    """The lines of ``chunk`` from ``begin``, at most ``wanted``, and
+    where the last of them ends, just past its separator (``begin`` for
+    none), counted a bounded slice at a time with a turn of the loop
+    between slices, so a large chunk still lets its task be cancelled.
+
+    Args:
+        chunk (bytes): the bytes.
+        separator (bytes): the one byte that ends a line.
+        wanted (int): the most lines to count.
+        budget (YieldBudget): the reader's budget.
+        begin (int): the offset to count from.
+    """
+    found = 0
+    end = begin
+    for start in range(begin, len(chunk), CHUNK_SIZE):
+        stop = start + CHUNK_SIZE
+        count = chunk.count(separator, start, stop)
+        if found + count < wanted:
+            if count:
+                found += count
+                end = chunk.rfind(separator, start, stop) + 1
+            await budget.run()
+            continue
+        at = start
+        for _ in range(wanted - found):
+            at = chunk.find(separator, at, stop) + 1
+        return wanted, at
+    return found, end
+
+
 async def head(
     src: bytes | AsyncIterator[bytes],
     *,
@@ -78,9 +116,8 @@ async def head(
     Closes ``src`` whenever it stops, at its limit, at the end of the
     input, or when its own reader stops, so a read it leaves unfinished
     releases its mount at once rather than when it is collected. It
-    writes the producer's chunks on; a line count yields to the loop on
-    every pull and every 64 lines, and a held line split across chunks is
-    joined once.
+    writes the producer's chunks on, as much of each as it keeps in one
+    piece, and a line count yields to the loop on every pull.
 
     Args:
         src (bytes | AsyncIterator[bytes]): the input.
@@ -125,55 +162,64 @@ async def head(
             emitted_lines = 0
             async for chunk in stream:
                 await budget.run()
-                start = 0
-                while emitted_lines < target:
-                    end = chunk.find(separator, start)
-                    if end < 0:
-                        if start < len(chunk):
-                            yield chunk[start:]
-                        break
-                    if (
-                        emitted_lines + 1 >= target
-                        and isinstance(src, SharedInput)
-                        and src.seekable
-                    ):
-                        src.lines.unread(chunk[end + 1 :])
-                    yield chunk[start : end + 1]
-                    emitted_lines += 1
-                    if emitted_lines >= target:
-                        return
-                    start = end + 1
-                    if emitted_lines % 64 == 0:
-                        await budget.run()
+                found, end = await _count_lines(
+                    chunk, separator, target - emitted_lines, budget
+                )
+                emitted_lines += found
+                if emitted_lines < target:
+                    if chunk:
+                        yield chunk
+                    continue
+                if isinstance(src, SharedInput) and src.seekable:
+                    src.lines.unread(chunk[end:])
+                yield chunk[:end]
+                return
             return
 
+        # The chunks not yet written, each with its lines, the first from
+        # ``skip``: what lies before the last ``keep`` lines goes out as
+        # soon as it is known.
         keep = -target
-        recent: deque[bytes] = deque(maxlen=keep)
-        scanned = 0
-        pending: list[bytes] = []
+        kept: deque[tuple[bytes, int]] = deque()
+        lines = 0
+        skip = 0
         async for chunk in stream:
             await budget.run()
-            start = 0
-            end = chunk.find(separator)
-            while end >= 0:
-                line = chunk[start:end]
-                if pending:
-                    line = b"".join([*pending, line])
-                    pending = []
-                if len(recent) == keep:
-                    yield recent[0] + separator
-                recent.append(line)
-                start = end + 1
-                end = chunk.find(separator, start)
-                scanned += 1
-                if scanned % 64 == 0:
-                    await budget.run()
-            if start < len(chunk):
-                pending.append(chunk[start:])
-        if pending:
-            if len(recent) == keep:
-                yield recent[0] + separator
-            recent.append(b"".join(pending))
+            if not chunk:
+                continue
+            count, _ = await _count_lines(
+                chunk, separator, len(chunk) + 1, budget
+            )
+            kept.append((chunk, count))
+            lines += count
+            while lines > keep:
+                first, count = kept[0]
+                over = lines - keep
+                if count < over or (
+                    count == over and first.endswith(separator)
+                ):
+                    kept.popleft()
+                    lines -= count
+                    yield first[skip:]
+                    skip = 0
+                    continue
+                _, end = await _count_lines(
+                    first, separator, over, budget, skip
+                )
+                kept[0] = (first, count - over)
+                lines = keep
+                yield first[skip:end]
+                skip = end
+        if lines == keep and kept and not kept[-1][0].endswith(separator):
+            # The last line lacks its separator and still counts as one,
+            # so one line more is not among the last.
+            while kept:
+                first, count = kept.popleft()
+                if count:
+                    yield first[skip : first.find(separator, skip) + 1]
+                    break
+                yield first[skip:]
+                skip = 0
 
     finally:
         await close_quietly(stream)

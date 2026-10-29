@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { MemoryExhausted } from '../../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
 import { type ByteSource, type IOResult, materialize } from '../../../io/types.ts'
 import {
   DEFAULT_READ_TTL,
@@ -131,6 +133,46 @@ async function drainFor(
 function followOpts(abort: AbortController, extra: Record<string, string | boolean> = {}): Context {
   return ctx({ follow: true, sleep_interval: '0.02', ...extra }, abort.signal)
 }
+
+describe('tail -n', () => {
+  async function lastLines(parts: string[], n: string): Promise<string[]> {
+    const encoder = new TextEncoder()
+    async function* source(): AsyncIterable<Uint8Array> {
+      for (const part of parts) {
+        await Promise.resolve()
+        yield encoder.encode(part)
+      }
+    }
+    const ctx = { stdin: source(), flags: { n }, cwd: PathSpec.fromStrPath('/') }
+    const result = await tailGeneric(
+      [],
+      [],
+      ctx as Context,
+      () => {
+        throw new Error('stdin only')
+      },
+      () => Promise.reject(new Error('stdin only')),
+    )
+    const [stdout] = result as [AsyncIterable<Uint8Array>, IOResult]
+    const pieces: string[] = []
+    for await (const piece of stdout) pieces.push(new TextDecoder().decode(piece))
+    return pieces
+  }
+
+  // A piece per line costs a pipe a turn of the loop per line.
+  it('writes the last lines in one piece', async () => {
+    expect(await lastLines(['1\n', '2\n', '3\n', '4\n', '5'], '2')).toEqual(['4\n5'])
+  })
+
+  it('counts what it keeps against the memory budget', async () => {
+    const memory = new MemoryBudget(8, () => 0)
+    const parts = ['ab\n', 'cd\n', 'ef\n', 'gh']
+    expect(await runWithMemory(memory, () => lastLines(parts, '1'))).toEqual(['gh'])
+    await expect(
+      runWithMemory(memory, () => lastLines(['abcd', 'efgh', 'i'], '1')),
+    ).rejects.toThrow(MemoryExhausted)
+  })
+})
 
 describe('tail -f -s inf', () => {
   // GNU accepts `-s inf` (xstrtod passes and `0 <= inf`), so the value is

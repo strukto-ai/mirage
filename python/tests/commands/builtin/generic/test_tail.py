@@ -13,6 +13,8 @@ from mirage.commands.builtin.generic.tail import (
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.errors.fs import eacces, efbig, enoent
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.stream import close_quietly
 from mirage.shell.console import Channel
 from mirage.types import (
@@ -83,6 +85,25 @@ async def test_tail_cuts(body, kwargs, expected):
 async def test_tail_reads_one_byte_chunks(body, kwargs, expected):
     parts = [bytes([byte]) for byte in body]
     assert await _drain(tail(_stream(parts), **kwargs)) == expected
+
+
+@pytest.mark.asyncio
+async def test_tail_writes_the_last_lines_in_one_piece():
+    # A piece per line costs a pipe a turn of the loop per line.
+    parts = [b"1\n", b"2\n", b"3\n", b"4\n", b"5"]
+    assert [c async for c in tail(_stream(parts), n=2)] == [b"4\n5"]
+
+
+@pytest.mark.asyncio
+async def test_tail_counts_what_it_keeps_against_the_memory_budget():
+    memory = MemoryBudget(8, lambda: 0)
+    parts = [b"ab\n", b"cd\n", b"ef\n", b"gh"]
+    out = await run_with_memory(memory, _drain(tail(_stream(parts), n=1)))
+    assert out == b"gh"
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(
+            memory, _drain(tail(_stream([b"abcd", b"efgh", b"i"]), n=1))
+        )
 
 
 @pytest.mark.asyncio

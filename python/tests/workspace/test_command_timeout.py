@@ -448,7 +448,7 @@ async def test_python3_timeout_reclaims_monty_interpreter():
         "cat -s /blank",
         "head -n -1000000 /blank",
         "uniq /blank",
-        "tail -n 1 /blank",
+        "tail -n 1 /blank /blank /blank /blank /blank",
     ],
 )
 async def test_large_ram_command_honors_caller_cancel(command):

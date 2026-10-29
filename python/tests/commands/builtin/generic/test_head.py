@@ -15,12 +15,20 @@ async def _drain(gen):
     return b"".join([c async for c in gen])
 
 
+async def _five_lines_in_two_chunks():
+    yield b"1\n2\n"
+    yield b"3\n4\n5\n"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "chunks,flags,expected",
     [
         ([b"hel", b"lo wor", b"ld"], {"c": 8}, b"hello wo"),
         ([b"a\nb", b"\nc\nd\n"], {"n": 2}, b"a\nb\n"),
+        ([b"a\nb\nc"], {"n": -1}, b"a\nb\n"),
+        ([b"a\nb\n", b"c\n", b"d"], {"n": -2}, b"a\nb\n"),
+        ([b"a\nb\n", b"c\n", b"d\n"], {"n": -1}, b"a\nb\nc\n"),
     ],
 )
 async def test_head_reads_across_chunks(chunks, flags, expected):
@@ -29,6 +37,35 @@ async def test_head_reads_across_chunks(chunks, flags, expected):
             yield chunk
 
     assert await _drain(head(src(), **flags)) == expected
+
+
+@pytest.mark.asyncio
+async def test_head_writes_the_front_of_a_kept_chunk_without_copying_the_rest():
+    # A copy of the rest per line written makes a long kept chunk quadratic.
+    copied = 0
+
+    class Chunk(bytes):
+        def __getitem__(self, key):
+            nonlocal copied
+            piece = super().__getitem__(key)
+            copied += len(piece)
+            return Chunk(piece)
+
+    async def src():
+        yield Chunk(b"\n" * 1000)
+        for _ in range(1000):
+            yield Chunk(b"\n")
+
+    assert await _drain(head(src(), n=-1000)) == b"\n" * 1000
+    assert copied <= 2000
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flags", [{"n": 3}, {"n": -2}])
+async def test_head_writes_what_it_keeps_of_a_chunk_in_one_piece(flags):
+    # A piece per line costs a pipe a turn of the loop per line.
+    pieces = [c async for c in head(_five_lines_in_two_chunks(), **flags)]
+    assert pieces == [b"1\n2\n", b"3\n"]
 
 
 @pytest.mark.asyncio

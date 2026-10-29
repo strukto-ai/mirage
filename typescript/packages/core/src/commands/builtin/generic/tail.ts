@@ -37,7 +37,7 @@ import { shellQuote } from '../../../utils/quote.ts'
 import { reportFsError, splitOpened } from '../utils/operands.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { chunks } from '../../../io/cooperative.ts'
-import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { checkMemory } from '../../../io/memory.ts'
 import { quoteText } from '../../quote.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
@@ -263,25 +263,51 @@ async function* tail(source: ByteSource, rawCounts: TailCounts): AsyncIterable<U
   }
   const count = Math.abs(counts.lines ?? 10)
   if (count === 0) return
-  const reader = new AsyncLineIterator(source)
-  const kept: Uint8Array[] = []
-  let cursor = 0
-  try {
-    for (;;) {
-      const [line, ended] = await reader.readUntil(10)
-      if (line.length === 0 && !ended) break
-      const data = ended ? concat([line, Uint8Array.of(10)]) : line
-      if (kept.length < count) kept.push(data)
-      else {
-        kept[cursor] = data
-        cursor = (cursor + 1) % count
-      }
+  // The bounded chunks that may hold the last lines, each with its
+  // newlines: the first goes once the others hold a newline more than the
+  // count, which covers a last line that lacks its own.
+  const ends: [Uint8Array, number][] = []
+  let next = 0
+  let held = 0
+  let size = 0
+  for await (const part of chunks(source)) {
+    if (part.length === 0) continue
+    let newlines = 0
+    for (let at = part.indexOf(10); at >= 0; at = part.indexOf(10, at + 1)) newlines++
+    ends.push([part, newlines])
+    held += newlines
+    size += part.length
+    for (
+      let first = ends[next];
+      first !== undefined && held - first[1] > count;
+      first = ends[next]
+    ) {
+      held -= first[1]
+      size -= first[0].length
+      next++
     }
-    yield* kept.slice(cursor)
-    yield* kept.slice(0, cursor)
-  } finally {
-    await reader.discard()
+    checkMemory(size)
+    if (next * 2 > ends.length) {
+      ends.splice(0, next)
+      next = 0
+    }
   }
+  const last = ends.at(-1)
+  if (last === undefined || next >= ends.length) return
+  let wanted = count + (last[0].at(-1) === 10 ? 1 : 0)
+  const pieces: Uint8Array[] = []
+  for (const [part, newlines] of ends.slice(next).reverse()) {
+    if (newlines < wanted) {
+      wanted -= newlines
+      pieces.push(part)
+      continue
+    }
+    let at = part.length
+    for (; wanted > 0; wanted--) at = part.lastIndexOf(10, at - 1)
+    pieces.push(part.subarray(at + 1))
+    break
+  }
+  yield concat(pieces.reverse())
 }
 
 // Each opened operand's tail under its header. An unread operand (a

@@ -23,7 +23,7 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import { numberFlagError, parseByteCount } from '../tail_counts.ts'
 import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
 import { asyncChain, closeQuietly } from '../../../io/stream.ts'
-import { chunks } from '../../../io/cooperative.ts'
+import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
 import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { truncateStream } from '../utils/limit.ts'
@@ -61,16 +61,42 @@ function parseFlags(bag: Record<string, FlagValue>): HeadFlags | string {
 }
 
 /**
+ * The lines of `chunk`, at most `wanted`, and where the last of them ends,
+ * just past its delimiter (0 for none), counted a bounded slice at a time
+ * with the budget run between slices, so a large chunk still lets its run
+ * be stopped. Mirrors Python's `_count_lines`.
+ */
+async function countLines(
+  chunk: Uint8Array,
+  delimiter: number,
+  wanted: number,
+  budget: YieldBudget,
+): Promise<[number, number]> {
+  let found = 0
+  let end = 0
+  for (let start = 0; start < chunk.byteLength; start += CHUNK_SIZE) {
+    const slice = chunk.subarray(start, start + CHUNK_SIZE)
+    for (let at = slice.indexOf(delimiter); at >= 0; at = slice.indexOf(delimiter, at + 1)) {
+      found += 1
+      end = start + at + 1
+      if (found === wanted) return [found, end]
+    }
+    const paused = budget.run()
+    if (paused !== undefined) await paused
+  }
+  return [found, end]
+}
+
+/**
  * Emit the head of a stream like GNU `head`.
  *
  * Bytes (`bytesMode`): positive = first N bytes, negative = all but the last N
  * bytes, 0 = nothing. Lines (`lines`): positive = first N lines, negative = all
  * but the last N lines, 0 = nothing. A final line without a trailing newline is
  * preserved as-is (no newline is appended). head takes its input whole, writes
- * the producer's chunks on and may be called outside the factory's guard, so
- * each pull races the abort, and a line count checks it and yields to timers
- * every 64 lines. A held
- * line split across chunks is joined once.
+ * the producer's chunks on, as much of each as it keeps in one piece, and may
+ * be called outside the factory's guard, so each pull races the abort, and a
+ * line count checks it and yields to timers between bounded slices.
  */
 async function* headStream(
   source: AsyncIterable<Uint8Array>,
@@ -114,57 +140,59 @@ async function* headStream(
     if (lines === 0) return
     let emitted = 0
     for await (const chunk of pulls) {
-      let start = 0
-      while (emitted < lines) {
-        const nl = chunk.indexOf(delimiter, start)
-        if (nl < 0) {
-          if (start < chunk.byteLength) yield chunk.subarray(start)
-          break
-        }
-        if (emitted + 1 >= lines && source instanceof SharedInput && source.seekable)
-          source.lines.unread(chunk.subarray(nl + 1))
-        yield chunk.subarray(start, nl + 1)
-        emitted += 1
-        if (emitted >= lines) return
-        start = nl + 1
-        if (emitted % 64 === 0) {
-          const paused = budget.run()
-          if (paused !== undefined) await paused
-        }
+      const [found, end] = await countLines(chunk, delimiter, lines - emitted, budget)
+      emitted += found
+      if (emitted < lines) {
+        if (chunk.byteLength > 0) yield chunk
+        continue
       }
+      if (source instanceof SharedInput && source.seekable) source.lines.unread(chunk.subarray(end))
+      yield chunk.subarray(0, end)
+      return
     }
     return
   }
 
+  // The chunks not yet written, each with its lines: what lies before the
+  // last `keep` lines goes out as soon as it is known.
   const keep = -lines
-  const recent: Uint8Array[] = []
-  let scanned = 0
-  let pending: Uint8Array[] = []
+  const kept: [Uint8Array, number][] = []
+  let next = 0
+  let held = 0
   for await (const chunk of pulls) {
-    let start = 0
-    let nl = chunk.indexOf(delimiter)
-    while (nl >= 0) {
-      const tail = chunk.subarray(start, nl + 1)
-      recent.push(pending.length === 0 ? tail : concat([...pending, tail]))
-      pending = []
-      start = nl + 1
-      nl = chunk.indexOf(delimiter, start)
-      if (recent.length > keep) {
-        const out = recent.shift()
-        if (out !== undefined) yield out
+    if (chunk.byteLength === 0) continue
+    const [count] = await countLines(chunk, delimiter, chunk.byteLength + 1, budget)
+    kept.push([chunk, count])
+    held += count
+    for (let entry = kept[next]; entry !== undefined && held > keep; entry = kept[next]) {
+      const [first, firstCount] = entry
+      const over = held - keep
+      if (firstCount < over || (firstCount === over && first.at(-1) === delimiter)) {
+        next += 1
+        held -= firstCount
+        yield first
+        continue
       }
-      if (++scanned % 64 === 0) {
-        const paused = budget.run()
-        if (paused !== undefined) await paused
-      }
+      const [, end] = await countLines(first, delimiter, over, budget)
+      kept[next] = [first.subarray(end), firstCount - over]
+      held = keep
+      yield first.subarray(0, end)
     }
-    if (start < chunk.byteLength) pending.push(chunk.subarray(start))
+    if (next * 2 > kept.length) {
+      kept.splice(0, next)
+      next = 0
+    }
   }
-  if (pending.length > 0) {
-    recent.push(concat(pending))
-    if (recent.length > keep) {
-      const out = recent.shift()
-      if (out !== undefined) yield out
+  const last = kept.at(-1)
+  if (held === keep && last !== undefined && next < kept.length && last[0].at(-1) !== delimiter) {
+    // The last line lacks its separator and still counts as one, so one
+    // line more is not among the last.
+    for (const [first, count] of kept.slice(next)) {
+      if (count > 0) {
+        yield first.subarray(0, first.indexOf(delimiter) + 1)
+        break
+      }
+      yield first
     }
   }
 }
