@@ -19,8 +19,8 @@ export interface Part {
   bytes: Uint8Array<ArrayBuffer>
 }
 
-// Box is the one fake whose uploads are multipart, and the parsing is the
-// runtime's rather than hand-rolled: Node's Request implements the same
+// Box uploads are multipart, and so are Discord messages with attachments; the
+// parsing is the runtime's rather than hand-rolled: Node's Request implements the same
 // multipart reader fetch() uses, so what is decoded here is by construction
 // what a real client's FormData encoded. Both mirage hosts build the body with
 // FormData (TypeScript) and aiohttp.FormData (Python), and a hand-rolled

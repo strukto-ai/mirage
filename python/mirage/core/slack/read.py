@@ -20,7 +20,11 @@ from typing import Any
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.hierarchy.read import make_read, make_read_range, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.core.slack.client import download_file, download_file_stream
+from mirage.core.slack.client import (
+    download_file,
+    download_file_stream,
+    refusals_denied,
+)
 from mirage.core.slack.history import (
     fetch_messages_for_day,
     get_history_jsonl,
@@ -48,9 +52,10 @@ async def _read_chat(
 ) -> bytes:
     await guard_day(accessor, match, path.virtual)
     channel_id = day_channel_id(path, entry, parent)
-    return await get_history_jsonl(
-        accessor, channel_id, match.slots["day"], accessor.time_range
-    )
+    with refusals_denied(path):
+        return await get_history_jsonl(
+            accessor, channel_id, match.slots["day"], accessor.time_range
+        )
 
 
 async def _read_user(
@@ -176,10 +181,13 @@ async def _follow_chat(
     )
 
     async def after(last: dict[str, Any] | None) -> list[dict[str, Any]]:
-        return await fetch(after=None if last is None else last["ts"])
+        with refusals_denied(path):
+            return await fetch(after=None if last is None else last["ts"])
 
     _, end = accessor.time_range.day_bounds(day)
-    return followed_day(await fetch(), n, end, interval, after)
+    with refusals_denied(path):
+        first = await fetch()
+    return followed_day(first, n, end, interval, after)
 
 
 follow = per_kind(detect_scope, {"messages": _follow_chat})

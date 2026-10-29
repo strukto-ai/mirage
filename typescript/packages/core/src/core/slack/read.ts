@@ -26,6 +26,7 @@ import {
   streamMessagesForDay,
   type SlackMessage,
 } from './history.ts'
+import { refusalsDenied } from './client.ts'
 import { getUserProfile, userJsonBytes } from './users.ts'
 import { detectScope } from './scope.ts'
 
@@ -38,7 +39,7 @@ async function readChat(
 ): Promise<Uint8Array> {
   await guardDay(accessor, match, path.virtual)
   const channelId = dayChannelId(path, entry, parent)
-  return getHistoryJsonl(accessor, channelId, match.slots.day ?? '')
+  return refusalsDenied(path, () => getHistoryJsonl(accessor, channelId, match.slots.day ?? ''))
 }
 
 async function readUser(
@@ -150,11 +151,14 @@ async function followChat(
   const day = match.slots.day ?? ''
   const [, end] = accessor.timeRange.dayBounds(day)
   return followedDay<SlackMessage>(
-    await fetchMessagesForDay(accessor, channelId, day),
+    await refusalsDenied(path, () => fetchMessagesForDay(accessor, channelId, day)),
     n,
     end,
     interval,
-    (last) => fetchMessagesForDay(accessor, channelId, day, last === null ? undefined : last.ts),
+    (last) =>
+      refusalsDenied(path, () =>
+        fetchMessagesForDay(accessor, channelId, day, last === null ? undefined : last.ts),
+      ),
   )
 }
 

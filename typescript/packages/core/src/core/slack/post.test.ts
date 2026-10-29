@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
-import { postMessage, replyToThread } from './post.ts'
+import { postMessage, replyToThread, uploadFile } from './post.ts'
 
 class FakeTransport implements SlackTransport {
   public readonly calls: { endpoint: string; params?: Record<string, string>; body?: unknown }[] =
@@ -49,5 +49,38 @@ describe('replyToThread', () => {
     expect(t.calls[0]?.endpoint).toBe('chat.postMessage')
     expect(t.calls[0]?.body).toEqual({ channel: 'C1', thread_ts: '1.2', text: 'reply' })
     expect(out).toMatchObject({ ok: true, ts: '3.4' })
+  })
+})
+
+describe('uploadFile', () => {
+  it('asks for an upload URL, sends the bytes, then completes into the channel', async () => {
+    const answers: SlackResponse[] = [
+      { ok: true, upload_url: 'https://files.example/u/1', file_id: 'F1' },
+      { ok: true, files: [{ id: 'F1', title: 'reply.wav' }] },
+    ]
+    const sent: [string, Uint8Array][] = []
+    class Uploading extends FakeTransport {
+      uploadBytes(url: string, data: Uint8Array): Promise<void> {
+        sent.push([url, data])
+        return Promise.resolve()
+      }
+    }
+    const t = new Uploading(() => answers.shift() ?? { ok: true })
+    const data = new TextEncoder().encode('RIFF')
+    const out = await uploadFile(new SlackAccessor(t), 'C1', 'reply.wav', data, 'here', '9.9')
+    expect(t.calls).toEqual([
+      { endpoint: 'files.getUploadURLExternal', params: { filename: 'reply.wav', length: '4' } },
+      {
+        endpoint: 'files.completeUploadExternal',
+        body: {
+          files: [{ id: 'F1', title: 'reply.wav' }],
+          channel_id: 'C1',
+          initial_comment: 'here',
+          thread_ts: '9.9',
+        },
+      },
+    ])
+    expect(sent).toEqual([['https://files.example/u/1', data]])
+    expect(out).toMatchObject({ ok: true, files: [{ id: 'F1' }] })
   })
 })

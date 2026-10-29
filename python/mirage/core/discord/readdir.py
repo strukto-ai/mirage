@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 from datetime import date, datetime, timedelta, timezone
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.core.api.errors import ApiError
 from mirage.core.discord.channels import list_channels
+from mirage.core.discord.client import refusals_denied
 from mirage.core.discord.entry import (
     channel_entry,
     guild_entry,
@@ -34,17 +33,9 @@ from mirage.core.hierarchy.readdir import Listed, cut_listing, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.time_range import guard_day
-from mirage.types import ContentType, DirListing, FileStat, FileType
+from mirage.types import ContentType, DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_mime
 from mirage.utils.glob_walk import glob_span, has_glob_span
-
-logger = logging.getLogger(__name__)
-
-SOFT_HTTP_STATUSES = frozenset((403, 404, 429))
-
-
-def _is_soft_error(exc: Exception) -> bool:
-    return isinstance(exc, ApiError) and exc.status in SOFT_HTTP_STATUSES
 
 
 def _date_range(
@@ -146,30 +137,12 @@ async def _day_listing(
 ) -> DirListing:
     """One history fetch, answering the day dir and its files subdir.
 
-    A soft HTTP error (403/404/429) seals an empty day: the dir lists
-    nothing, and stat serves chat.jsonl with the size left unknown.
-
     Args:
         accessor (DiscordAccessor): discord accessor.
         channel_id (str): the channel snowflake.
         date_str (str): the day, ``YYYY-MM-DD``.
     """
-    try:
-        messages = await listed_messages_for_day(
-            accessor, channel_id, date_str
-        )
-    except ApiError as e:
-        if _is_soft_error(e):
-            logger.debug(
-                "discord: history denied for %s/%s (%d); empty day",
-                channel_id,
-                date_str,
-                e.status,
-            )
-            # A soft error is not the channel saying the day's messages
-            # are gone, so the empty day must not evict what it held.
-            return DirListing(entries=[], window=True)
-        raise
+    messages = await listed_messages_for_day(accessor, channel_id, date_str)
     # The day's messages are already in hand, so chat.jsonl's exact rendered
     # size is free here; read() renders the same messages the same way.
     blobs: list[FileStat] = []
@@ -234,13 +207,10 @@ async def _list_files(
     listing = await _day_listing(
         accessor, str(own.extra["channel_id"]), match.slots["day"]
     )
-    # A soft-error day proves nothing about its attachments either.
-    return DirListing(
-        entries=list(listing.seeds.get("files", [])), window=listing.window
-    )
+    return list(listing.seeds.get("files", []))
 
 
-readdir = make_readdir(
+_listing = make_readdir(
     detect_scope,
     listers={"root": _list_root},
     entry_listers={
@@ -255,3 +225,23 @@ readdir = make_readdir(
     pattern_kinds={"channel": has_glob_span},
     leaf_error="enotdir",
 )
+
+
+async def readdir(
+    accessor: DiscordAccessor,
+    path_spec: PathSpec,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
+    limit: int | None = None,
+) -> list[FileStat] | DirListing:
+    """List a Discord directory; a channel Discord will not show is EACCES.
+
+    Args:
+        accessor (DiscordAccessor): discord accessor.
+        path_spec (PathSpec): the directory, or a glob word in it.
+        entry (FileStat | None): the directory's own row.
+        parent (FileStat | None): its parent's row.
+        limit (int | None): the most entries a walk can still keep.
+    """
+    with refusals_denied(path_spec):
+        return await _listing(accessor, path_spec, entry, parent, limit)

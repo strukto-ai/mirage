@@ -42,6 +42,22 @@ async def test_send_message_posts_content():
 
 
 @pytest.mark.asyncio
+async def test_send_message_with_a_file_posts_multipart():
+    with patch(
+        "mirage.core.discord.post.discord_post_files",
+        new_callable=AsyncMock,
+        return_value={"id": "M3"},
+    ) as post:
+        await send_message(ACCESSOR, "C1", "", file=("reply.wav", b"RIFF"))
+    post.assert_awaited_once_with(
+        ACCESSOR,
+        "/channels/C1/messages",
+        {"content": ""},
+        [("reply.wav", b"RIFF")],
+    )
+
+
+@pytest.mark.asyncio
 async def test_send_message_with_reference():
     with patch(
         "mirage.core.discord.post.discord_post",

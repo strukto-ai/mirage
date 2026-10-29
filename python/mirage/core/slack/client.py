@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncGenerator
+import logging
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import contextmanager
 from functools import partial
 from typing import Any
 
@@ -23,8 +25,22 @@ from mirage.accessor.slack import SlackAccessor
 from mirage.core.api.client import api_request, api_stream, status_error
 from mirage.core.api.errors import ApiError
 from mirage.core.slack.config import SlackConfig
+from mirage.errors.fs import eacces
+from mirage.types import PathSpec
 from mirage.utils.ranges import window_for
 from mirage.vfs.secrets import reveal_secret
+
+logger = logging.getLogger(__name__)
+
+REFUSED_ERRORS = frozenset(
+    (
+        "not_in_channel",
+        "channel_not_found",
+        "missing_scope",
+        "is_archived",
+        "not_authed",
+    )
+)
 
 
 def _auth_token(config: SlackConfig, method: str) -> str:
@@ -53,7 +69,21 @@ def slack_headers(config: SlackConfig, method: str) -> dict[str, str]:
 
 class SlackApiError(ApiError):
     """A Slack call that failed: an ``ok: false`` payload, or a status
-    that carried none."""
+    that carried none.
+
+    Args:
+        message (str): the failure, in Slack's words where it gave any.
+        status (int | None): the HTTP status, None for an ``ok: false``
+            payload.
+        slack_error (str): Slack's ``error`` code (``not_in_channel``),
+            '' when the reply carried none.
+    """
+
+    def __init__(
+        self, message: str, status: int | None = None, slack_error: str = ""
+    ) -> None:
+        super().__init__(message, status)
+        self.slack_error = slack_error
 
 
 def _format_slack_error_message(method: str, data: dict[str, Any]) -> str:
@@ -79,7 +109,9 @@ def _error_of(
         data = None
     if isinstance(data, dict):
         return SlackApiError(
-            _format_slack_error_message(method, data), resp.status
+            _format_slack_error_message(method, data),
+            resp.status,
+            str(data.get("error", "unknown_error")),
         )
     return SlackApiError(
         f"Slack API error ({method}): HTTP {resp.status}", resp.status
@@ -89,8 +121,32 @@ def _error_of(
 def _checked(method: str, data: Any) -> dict[str, Any]:
     payload = data if isinstance(data, dict) else {}
     if not payload.get("ok"):
-        raise SlackApiError(_format_slack_error_message(method, payload))
+        raise SlackApiError(
+            _format_slack_error_message(method, payload),
+            slack_error=str(payload.get("error", "unknown_error")),
+        )
     return payload
+
+
+@contextmanager
+def refusals_denied(path_spec: PathSpec) -> Iterator[None]:
+    """Report a conversation Slack will not show as permission denied.
+
+    ``not_in_channel``, ``missing_scope`` and the rest are Slack declining
+    to show what the path names, never the conversation saying it is
+    empty, so the path answers the way a directory the caller may not
+    open does: ls names it and fails, find reports it and walks on.
+
+    Args:
+        path_spec (PathSpec): the path the operation was asked about.
+    """
+    try:
+        yield
+    except SlackApiError as exc:
+        if exc.slack_error not in REFUSED_ERRORS:
+            raise
+        logger.debug("slack %s refused: %s", path_spec.virtual, exc)
+        raise eacces(path_spec) from exc
 
 
 async def slack_get(
@@ -160,6 +216,26 @@ async def download_file(
         session=accessor.pool,
     )
     return data
+
+
+async def upload_bytes(accessor: SlackAccessor, url: str, data: bytes) -> None:
+    """Send a file's bytes to the URL ``files.getUploadURLExternal`` issued.
+
+    The URL is presigned, so the request carries no token.
+
+    Args:
+        accessor (SlackAccessor): Slack accessor.
+        url (str): the issued ``upload_url``.
+        data (bytes): the file's bytes.
+    """
+    await api_request(
+        "POST",
+        url,
+        error_of=status_error,
+        data=data,
+        read="none",
+        session=accessor.pool,
+    )
 
 
 def download_file_stream(

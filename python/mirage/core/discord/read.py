@@ -18,6 +18,7 @@ from functools import partial
 from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
+from mirage.core.discord.client import refusals_denied
 from mirage.core.discord.files import download_file, download_file_stream
 from mirage.core.discord.history import (
     get_history_jsonl,
@@ -50,7 +51,10 @@ async def _read_chat(
 ) -> bytes:
     await guard_day(accessor, match, path.virtual)
     channel_id = day_channel_id(path, entry, parent)
-    return await get_history_jsonl(accessor, channel_id, match.slots["day"])
+    with refusals_denied(path):
+        return await get_history_jsonl(
+            accessor, channel_id, match.slots["day"]
+        )
 
 
 async def _read_member(
@@ -182,10 +186,13 @@ async def _follow_chat(
     )
 
     async def after(last: dict[str, Any] | None) -> list[dict[str, Any]]:
-        return await fetch(after=None if last is None else last["id"])
+        with refusals_denied(path):
+            return await fetch(after=None if last is None else last["id"])
 
     _, end = accessor.time_range.day_bounds(day)
-    return followed_day(await fetch(), n, end, interval, after)
+    with refusals_denied(path):
+        first = await fetch()
+    return followed_day(first, n, end, interval, after)
 
 
 follow = per_kind(detect_scope, {"messages": _follow_chat})

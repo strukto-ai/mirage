@@ -12,18 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import patch
-
 import pytest
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.api.errors import ApiError
-from mirage.core.discord.readdir import _list_files
 from mirage.core.discord.readdir import readdir as discord_readdir
-from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.types import DirListing, FileStat, FileType, PathSpec
+from mirage.types import PathSpec
 from mirage.vfs.discord import DiscordVFS
-from tests.core.discord.conftest import BROKEN_DAY, DAY, SEALED_DAY
+from tests.core.discord.conftest import (
+    BROKEN_DAY,
+    DAY,
+    GONE_DAY,
+    SEALED_DAY,
+    THROTTLED_DAY,
+)
 from tests.fixtures.handed import call, entry_at
 from tests.fixtures.mounted import mounted
 
@@ -55,20 +57,27 @@ async def test_files_dir_lists_attachments(api, accessor):
     assert result == [f"/{CHANNEL}/{DAY}/files/kept__A1.txt"]
 
 
-async def test_fetch_day_swallows_soft_errors(api, accessor):
-    # A 403/404/429 seals an empty day rather than failing the listing.
-    result = await readdir(accessor, spec(f"/{CHANNEL}/{SEALED_DAY}"))
-    assert result == []
+async def test_a_day_discord_refuses_is_eacces(api, accessor):
+    # A 403 is Discord declining to show the channel, not an empty day.
+    day = f"/{CHANNEL}/{SEALED_DAY}"
+    with pytest.raises(PermissionError) as raised:
+        await readdir(accessor, spec(day))
+    assert raised.value.filename.endswith(day)
 
 
-async def test_fetch_day_propagates_hard_errors(api, accessor):
-    with pytest.raises(ApiError):
-        await readdir(accessor, spec(f"/{CHANNEL}/{BROKEN_DAY}"))
-
-
-async def test_files_under_a_sealed_day_is_enoent(api, accessor):
-    # The sealed day lists nothing, so its files subdir does not exist.
+async def test_a_day_of_a_vanished_channel_is_enoent(api, accessor):
     with pytest.raises(FileNotFoundError):
+        await readdir(accessor, spec(f"/{CHANNEL}/{GONE_DAY}"))
+
+
+@pytest.mark.parametrize("day", [BROKEN_DAY, THROTTLED_DAY])
+async def test_fetch_day_propagates_other_errors(api, accessor, day):
+    with pytest.raises(ApiError):
+        await readdir(accessor, spec(f"/{CHANNEL}/{day}"))
+
+
+async def test_files_under_a_refused_day_is_eacces(api, accessor):
+    with pytest.raises(PermissionError):
         await readdir(accessor, spec(f"/{CHANNEL}/{SEALED_DAY}/files"))
 
 
@@ -121,40 +130,10 @@ async def test_a_globbed_channel_listing_is_not_the_directory(api, accessor):
     assert len(result) == 30
 
 
-async def test_a_channel_and_a_sealed_day_are_windows(api, accessor):
-    # The channel lists the last 30 days, and a 403/404/429 seals an empty
-    # day: neither is the backend saying anything outside it is gone.
+async def test_a_channel_listing_is_a_window(api, accessor):
+    # The channel lists the last 30 days: not the backend saying anything
+    # outside them is gone.
     channel = await call(
         discord_readdir, discord_readdir, accessor, spec(f"/{CHANNEL}")
     )
-    day = await call(
-        discord_readdir,
-        discord_readdir,
-        accessor,
-        spec(f"/{CHANNEL}/{SEALED_DAY}"),
-    )
     assert channel.window is True
-    assert day.window is True
-
-
-async def _soft_day_listing(_accessor, _channel_id, _day):
-    return DirListing(entries=[], window=True)
-
-
-async def test_a_soft_error_files_listing_is_a_window_too(accessor):
-    # Reached when the files listing was evicted but the day survived; a
-    # soft error there must not evict the attachments it listed before.
-    own = FileStat(
-        name="files", type=FileType.DIRECTORY, extra={"channel_id": "C001"}
-    )
-
-    match = ScopeMatch(
-        kind="files",
-        vfs_path=f"{CHANNEL}/2026-05-10/files",
-        slots={"day": "2026-05-10"},
-    )
-    with patch(
-        "mirage.core.discord.readdir._day_listing", new=_soft_day_listing
-    ):
-        listing = await _list_files(accessor, match, own)
-    assert listing.window is True

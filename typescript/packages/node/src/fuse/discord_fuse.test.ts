@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DiscordApiError } from '@struktoai/mirage-core/core/discord/client'
 import { FileType, MountMode } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
@@ -41,7 +40,7 @@ interface Reply<T> {
 }
 
 class DiscordHTTP {
-  status = 403
+  status = 200
   readonly messageStatuses: number[] = []
   readonly responses: Response[] = []
   readonly fetch = vi.fn<typeof fetch>((input, init) => {
@@ -150,15 +149,11 @@ class Driver {
   }
 }
 
-async function world(kind: Adapter) {
+function world(kind: Adapter) {
   const http = new DiscordHTTP()
   vi.stubGlobal('fetch', http.fetch)
   const vfs = new DiscordVFS({ token: 'test-token', baseUrl: 'https://discord.test' })
   const ws = new Workspace({ '/discord/': vfs }, { mode: MountMode.READ })
-  const stat = await ws.vfs.stat(FILE)
-  expect(stat.type).toBe(FileType.FILE)
-  expect(stat.size).toBeNull()
-  expect(http.messageStatuses).toEqual([403])
   const driver = new Driver(kind, ws)
   return {
     ws,
@@ -175,6 +170,13 @@ async function world(kind: Adapter) {
   }
 }
 
+async function listDay(ws: Workspace, http: DiscordHTTP): Promise<void> {
+  const stat = await ws.vfs.stat(FILE)
+  expect(stat.type).toBe(FileType.FILE)
+  expect(stat.size).toBe(BYTES.length)
+  expect(http.messageStatuses).toEqual([200])
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -182,23 +184,22 @@ afterEach(() => {
 
 describe.each(['core', 'fuse'] as const)('Discord through %s', (kind) => {
   it.each([false, true])(
-    'hydrates an unknown-size file and serves ranges (early close: %s)',
+    "serves a listed day's exact bytes and ranges (early close: %s)",
     async (earlyClose) => {
-      const fixture = await world(kind)
-      const { driver, http } = fixture
+      const fixture = world(kind)
+      const { driver, http, ws } = fixture
       try {
-        expect((await driver.getattr()).value?.size).toBe(0)
-        expect(http.messageStatuses).toEqual([403])
-        http.status = 200
+        await listDay(ws, http)
+        expect((await driver.getattr()).value?.size).toBe(BYTES.length)
         const fd = await driver.open()
-        expect(http.messageStatuses).toEqual([403, 200])
+        expect(http.messageStatuses).toEqual([200])
         expect((await driver.getattr(fd)).value?.size).toBe(BYTES.length)
         expect((await driver.read(fd, 3, 9)).value).toEqual(BYTES.slice(3, 12))
         if (!earlyClose) {
           expect((await driver.read(fd)).value).toEqual(BYTES)
           expect((await driver.read(fd, BYTES.length, 9)).value).toEqual(new Uint8Array())
         }
-        expect(http.messageStatuses).toEqual([403, 200])
+        expect(http.messageStatuses).toEqual([200, 200])
         await driver.release(fd)
       } finally {
         await fixture.close()
@@ -206,51 +207,35 @@ describe.each(['core', 'fuse'] as const)('Discord through %s', (kind) => {
     },
   )
 
-  it.each(
-    [401, 403, 429].flatMap((status) => [false, true].map((recover) => ({ status, recover }))),
-  )('defers HTTP $status hydration failure (recover: $recover)', async ({ status, recover }) => {
-    const fixture = await world(kind)
-    const { driver, http } = fixture
-    try {
-      http.status = status
-      const attempts = status === 429 ? 3 : 1
-      const fd = await driver.open()
-      expect(http.messageStatuses).toEqual([403, ...Array<number>(attempts).fill(status)])
-      expect(driver.core.handles.get(fd)?.data).toBeUndefined()
-      const result = await driver.read(fd)
-      expect(result.code).toBe(-EIO)
-      expect(result.value).toBeUndefined()
-      if (kind === 'core') {
-        expect(result.error).toBeInstanceOf(DiscordApiError)
-        expect(result.error).toMatchObject({ status })
-      }
-      expect(http.messageStatuses).toEqual([403, ...Array<number>(attempts * 2).fill(status)])
-      expect(driver.core.handles.get(fd)?.data).toBeUndefined()
-      if (recover) {
+  it.each([
+    [401, 1, -EACCES],
+    [403, 1, -EACCES],
+    [429, 3, -EIO],
+  ] as const)(
+    'refuses a day Discord answers %i for and caches no empty answer',
+    async (status, attempts, code) => {
+      const fixture = world(kind)
+      const { driver, http } = fixture
+      try {
+        http.status = status
+        expect((await driver.getattr()).code).toBe(code)
+        expect(http.messageStatuses).toEqual(Array<number>(attempts).fill(status))
         http.status = 200
-        expect((await driver.read(fd)).value).toEqual(BYTES)
-        expect((await driver.getattr(fd)).value?.size).toBe(BYTES.length)
+        expect((await driver.getattr()).value?.size).toBe(BYTES.length)
+        expect(http.messageStatuses).toEqual([...Array<number>(attempts).fill(status), 200])
+      } finally {
+        await fixture.close()
       }
-      const calls = http.fetch.mock.calls.length
-      await driver.release(fd)
-      expect(http.fetch.mock.calls).toHaveLength(calls)
-      expect(http.messageStatuses).toEqual([
-        403,
-        ...Array<number>(attempts * 2).fill(status),
-        ...(recover ? [200] : []),
-      ])
-    } finally {
-      await fixture.close()
-    }
-  })
+    },
+  )
 
   it.each(['hide', 'deny'] as const)(
     'rechecks a warmed handle after session %s and restores it',
     async (restriction) => {
-      const fixture = await world(kind)
+      const fixture = world(kind)
       const { driver, http, ws } = fixture
       try {
-        http.status = 200
+        await listDay(ws, http)
         const fd = await driver.open()
         expect((await driver.read(fd)).value).toEqual(BYTES)
         const calls = http.fetch.mock.calls.length

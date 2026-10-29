@@ -30,10 +30,11 @@ import { readMessages } from './read_messages.ts'
 import { search } from './search.ts'
 import { sendMessage } from './send_message.ts'
 import { unpinMessage } from './unpin_message.ts'
+import { uploadFile } from './upload_file.ts'
 
 // The slack program, spelled with the OpenClaw Slack action vocabulary
-// (kebab verbs: send-message, read-messages, pin-message, list-pins,
-// member-info, emoji-list). search and list-members are mirage
+// (kebab verbs: send-message, upload-file, read-messages, pin-message,
+// list-pins, member-info, emoji-list). search and list-members are mirage
 // extensions carrying over the old mount commands' capabilities.
 // Install with a SlackConfig; two installs are two workspaces.
 export const SLACK = new CLI({
@@ -48,6 +49,20 @@ export const SLACK = new CLI({
           new Argument('--channel', { required: true }),
           new Argument('--text', { required: true }),
           new Argument('--thread-ts', { help: 'Reply in this thread' }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'upload-file',
+        description: 'Share a workspace file in a channel or thread',
+        arguments: [
+          new Argument('--channel', { required: true }),
+          new Argument('--file', {
+            type: 'path',
+            required: true,
+            help: 'Workspace file to upload',
+          }),
+          new Argument('--initial-comment', { help: 'Message posted with the file' }),
+          new Argument('--thread-ts', { help: 'Share in this thread' }),
         ],
       }),
       new CommandSpec({
@@ -123,6 +138,7 @@ export const SLACK = new CLI({
   }),
   handlers: {
     'send-message': new CLIHandler({ fn: sendMessage, write: true }),
+    'upload-file': new CLIHandler({ fn: uploadFile, write: true }),
     'read-messages': new CLIHandler({ fn: readMessages }),
     react: new CLIHandler({ fn: react, write: true }),
     reactions: new CLIHandler({ fn: reactions }),

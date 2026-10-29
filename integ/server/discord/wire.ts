@@ -17,9 +17,10 @@ import { DEFAULT_RUN, DEFAULT_TENANT, RUN_QUERY, TENANT_QUERY } from '../kit/typ
 import type { JsonValue, Reply } from '../kit/typescript/types.ts'
 
 export const DISCORD_EPOCH = 1420070400000n
-// 2026-06-03T00:00:00Z, one day past the newest fixture message, so the 30
-// date directories a channel lists are a fixed window.
-export const POST_SNOWFLAKE_BASE = 1511553600000n
+// 2026-06-03T00:00:00Z, one day past the newest fixture message and the day
+// POST_TIMESTAMP names, so a posted message files under the day it is
+// stamped, after every fixture day.
+export const POST_SNOWFLAKE_BASE = 1780444800000n
 export const MESSAGES_MAX_LIMIT = 100
 export const MEMBERS_MAX_LIMIT = 1000
 export const POST_TIMESTAMP = '2026-06-03T00:00:00.000000+00:00'
@@ -148,6 +149,10 @@ export function unauthorized(): Reply {
 
 export function unknownChannel(): Reply {
   return { status: 404, body: { message: 'Unknown Channel', code: 10003 } }
+}
+
+export function missingAccess(): Reply {
+  return { status: 403, body: { message: 'Missing Access', code: 50001 } }
 }
 
 export function unknownMessage(): Reply {

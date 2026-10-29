@@ -24,6 +24,10 @@ datasource db {
 
 // `membersJson` is the member ids; conversations.list reports only their
 // count (`num_members`), which is derived from it rather than stored beside it.
+// `isMember` is Slack's own `is_member`: whether the token's holder is in the
+// channel. Slack reads and posts there only for a member and answers
+// `not_in_channel` otherwise, so a fixture channel the bot never joined
+// spells it false.
 model Channel {
   tenant      String
   id          String
@@ -36,6 +40,7 @@ model Channel {
   topic       String  @default("")
   purpose     String  @default("")
   membersJson String  @default("[]")
+  isMember    Boolean @default(true)
   seq         Int
 
   @@id([tenant, id])
@@ -89,7 +94,24 @@ model SlackFile {
   timestamp   Int     @default(0)
   content     String  @default("")
   contentPath String?
+  // The bytes of a file shared through files.completeUploadExternal, which
+  // `content` (text) cannot hold. A fixture file never sets it.
+  blob        Bytes?
   seq         Int
+
+  @@id([tenant, id])
+}
+
+// A file between files.getUploadURLExternal and files.completeUploadExternal:
+// its name and declared length, then the bytes POSTed to its upload URL. It
+// becomes a SlackFile, in a channel, only once completed.
+model Upload {
+  tenant String
+  id     String
+  name   String
+  length Int
+  body   Bytes?
+  seq    Int
 
   @@id([tenant, id])
 }

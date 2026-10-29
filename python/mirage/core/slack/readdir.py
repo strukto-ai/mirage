@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -21,7 +20,7 @@ from mirage.core.hierarchy.readdir import Listed, cut_listing, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.slack.channels import list_channels, list_dms
-from mirage.core.slack.client import SlackApiError, slack_get
+from mirage.core.slack.client import refusals_denied, slack_get
 from mirage.core.slack.formatters import (
     channel_dirname,
     dm_dirname,
@@ -33,22 +32,12 @@ from mirage.core.slack.paginate import cursor_pages
 from mirage.core.slack.scope import detect_scope
 from mirage.core.slack.users import list_users, user_json_bytes
 from mirage.core.time_range import guard_day
-from mirage.types import ContentType, DirListing, FileStat, FileType
+from mirage.types import ContentType, DirListing, FileStat, FileType, PathSpec
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.filetype import content_type_for_mime
 from mirage.utils.glob_walk import glob_span, has_glob_span
 
-logger = logging.getLogger(__name__)
-
 VIRTUAL_ROOTS = ("channels", "dms", "users")
-
-_SOFT_HISTORY_ERRORS = (
-    "not_in_channel",
-    "channel_not_found",
-    "missing_scope",
-    "is_archived",
-    "not_authed",
-)
 
 
 def _date_range(
@@ -88,21 +77,11 @@ def _date_range(
 async def _latest_message_ts(
     accessor: SlackAccessor, channel_id: str
 ) -> float | None:
-    try:
-        data = await slack_get(
-            accessor,
-            "conversations.history",
-            params={"channel": channel_id, "limit": 1},
-        )
-    except SlackApiError as e:
-        if any(code in str(e) for code in _SOFT_HISTORY_ERRORS):
-            logger.debug(
-                "slack: history denied for %s (%s); treating as empty",
-                channel_id,
-                e,
-            )
-            return None
-        raise
+    data = await slack_get(
+        accessor,
+        "conversations.history",
+        params={"channel": channel_id, "limit": 1},
+    )
     messages = data.get("messages", [])
     if messages:
         return float(messages[0].get("ts", "0"))
@@ -252,31 +231,14 @@ async def _day_listing(
 ) -> DirListing:
     """One history fetch, answering the day dir and its files subdir.
 
-    A soft history error (not_in_channel, missing_scope, ...) seals an
-    empty day: the dir lists nothing, and stat serves chat.jsonl with
-    the size left unknown.
-
     Args:
         accessor (SlackAccessor): slack accessor.
         channel_id (str): the channel or DM id.
         date_str (str): the day, ``YYYY-MM-DD``.
     """
-    try:
-        messages = await fetch_messages_for_day(
-            accessor, channel_id, date_str, accessor.time_range
-        )
-    except SlackApiError as e:
-        if any(code in str(e) for code in _SOFT_HISTORY_ERRORS):
-            logger.debug(
-                "slack: history denied for %s/%s (%s); empty day",
-                channel_id,
-                date_str,
-                e,
-            )
-            # A soft error is not the channel saying the day's messages
-            # are gone, so the empty day must not evict what it held.
-            return DirListing(entries=[], window=True)
-        raise
+    messages = await fetch_messages_for_day(
+        accessor, channel_id, date_str, accessor.time_range
+    )
     blobs: list[FileStat] = []
     for msg in messages:
         for fmeta in msg.get("files", []) or []:
@@ -349,13 +311,10 @@ async def _list_files(
     listing = await _day_listing(
         accessor, str(own.extra["channel_id"]), match.slots["day"]
     )
-    # A soft-error day proves nothing about its attachments either.
-    return DirListing(
-        entries=list(listing.seeds.get("files", [])), window=listing.window
-    )
+    return list(listing.seeds.get("files", []))
 
 
-readdir = make_readdir(
+_listing = make_readdir(
     detect_scope,
     listers={
         "channels_root": _list_channels_root,
@@ -371,5 +330,26 @@ readdir = make_readdir(
     guards={"day": guard_day, "files": guard_day},
     pattern_kinds={"channel": has_glob_span},
 )
+
+
+async def readdir(
+    accessor: SlackAccessor,
+    path_spec: PathSpec,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
+    limit: int | None = None,
+) -> list[FileStat] | DirListing:
+    """List a Slack directory; a conversation Slack will not show is EACCES.
+
+    Args:
+        accessor (SlackAccessor): slack accessor.
+        path_spec (PathSpec): the directory, or a glob word in it.
+        entry (FileStat | None): the directory's own row.
+        parent (FileStat | None): its parent's row.
+        limit (int | None): the most entries a walk can still keep.
+    """
+    with refusals_denied(path_spec):
+        return await _listing(accessor, path_spec, entry, parent, limit)
+
 
 __all__ = ["readdir", "VIRTUAL_ROOTS"]

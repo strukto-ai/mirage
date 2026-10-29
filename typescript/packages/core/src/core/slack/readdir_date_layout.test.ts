@@ -20,7 +20,7 @@ import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { SlackVFSBase } from '../../vfs/slack/slack.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
+import { SlackApiError, type SlackResponse, type SlackTransport } from './client.ts'
 import { readdir } from './readdir.ts'
 
 class FakeTransport implements SlackTransport {
@@ -108,16 +108,10 @@ describe('readdir: date directory layout', () => {
     expect(t.calls).toHaveLength(before)
   })
 
-  it('readdir(<chan>/<date>) seals empty when conversations.history hits not_in_channel', async () => {
-    const t = new FakeTransport(() => {
-      const err = new Error('Slack API error (conversations.history): not_in_channel')
-      return err
-    })
-    const out = await readdir(
-      new SlackAccessor(t),
-      p(`${PREFIX}/channels/priv__CX/2024-01-01`),
-      dayRow('CX'),
-    )
-    expect(rowsOf(out)).toEqual([])
+  it('readdir(<chan>/<date>) is EACCES when conversations.history hits not_in_channel', async () => {
+    const t = new FakeTransport(() => new SlackApiError('conversations.history', 'not_in_channel'))
+    await expect(
+      readdir(new SlackAccessor(t), p(`${PREFIX}/channels/priv__CX/2024-01-01`), dayRow('CX')),
+    ).rejects.toMatchObject({ code: 'EACCES' })
   })
 })

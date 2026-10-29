@@ -20,6 +20,7 @@ import type { FileStat, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { makeRead, makeReadRange, perKind } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
+import { refusalsDenied } from './client.ts'
 import { downloadFile, downloadFileStream } from './files.ts'
 import {
   listMessagesForDay,
@@ -41,7 +42,7 @@ async function readChat(
 ): Promise<Uint8Array> {
   await guardDay(accessor, match, path.virtual)
   const channelId = dayChannelId(path, entry, parent)
-  return getHistoryJsonl(accessor, channelId, match.slots.day ?? '')
+  return refusalsDenied(path, () => getHistoryJsonl(accessor, channelId, match.slots.day ?? ''))
 }
 
 async function readMember(
@@ -142,12 +143,14 @@ async function followChat(
   const day = match.slots.day ?? ''
   const [, end] = accessor.timeRange.dayBounds(day)
   return followedDay<DiscordMessage>(
-    await listMessagesForDay(accessor, channelId, day),
+    await refusalsDenied(path, () => listMessagesForDay(accessor, channelId, day)),
     n,
     end,
     interval,
     (last) =>
-      listMessagesForDay(accessor, channelId, day, 100, last === null ? undefined : last.id),
+      refusalsDenied(path, () =>
+        listMessagesForDay(accessor, channelId, day, 100, last === null ? undefined : last.id),
+      ),
   )
 }
 

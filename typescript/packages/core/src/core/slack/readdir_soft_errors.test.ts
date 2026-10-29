@@ -15,16 +15,19 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
-import type { DirListing } from '../../types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { SlackVFSBase } from '../../vfs/slack/slack.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { SlackApiError, type SlackResponse, type SlackTransport } from './client.ts'
-import { latestMessageTs, listFiles, readdir } from './readdir.ts'
+import { read } from './read.ts'
+import { readdir } from './readdir.ts'
 
-// Mirrors python/tests/core/slack/test_readdir_soft_errors.py — guards the
-// behavior that Slack history errors like `not_in_channel` / `missing_scope`
-// degrade to "no messages" rather than aborting a workspace-wide walk.
+// Mirrors python/tests/core/slack/test_readdir_soft_errors.py: a Slack history
+// refusal like `not_in_channel` / `missing_scope` is EACCES on the path, never
+// an empty conversation.
+
+const CHANNEL = '/slack/channels/private__C_INACCESSIBLE'
+const DAY = `${CHANNEL}/2026-05-10`
 
 class FakeTransport implements SlackTransport {
   constructor(private readonly responder: (endpoint: string) => SlackResponse | Error) {}
@@ -35,119 +38,66 @@ class FakeTransport implements SlackTransport {
   }
 }
 
-describe('latestMessageTs soft errors', () => {
-  it('returns null on not_in_channel', async () => {
-    const t = new FakeTransport(() => new SlackApiError('conversations.history', 'not_in_channel'))
-    const ts = await latestMessageTs(new SlackAccessor(t), 'C_INACCESSIBLE')
-    expect(ts).toBeNull()
-  })
+function spec(virtual: string): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, '/slack') })
+}
 
-  it('returns null on missing_scope', async () => {
-    const t = new FakeTransport(
-      () =>
-        new SlackApiError(
-          'conversations.history',
-          'missing_scope',
-          'channels:history',
-          'channels:read',
-        ),
-    )
-    const ts = await latestMessageTs(new SlackAccessor(t), 'C_NO_SCOPE')
-    expect(ts).toBeNull()
-  })
-
-  it('returns null on channel_not_found', async () => {
-    const t = new FakeTransport(
-      () => new SlackApiError('conversations.history', 'channel_not_found'),
-    )
-    const ts = await latestMessageTs(new SlackAccessor(t), 'C_GONE')
-    expect(ts).toBeNull()
-  })
-
-  it('returns null on is_archived', async () => {
-    const t = new FakeTransport(() => new SlackApiError('conversations.history', 'is_archived'))
-    const ts = await latestMessageTs(new SlackAccessor(t), 'C_ARCH')
-    expect(ts).toBeNull()
-  })
-
-  it('re-raises unrelated errors (rate_limited)', async () => {
-    const t = new FakeTransport(() => new SlackApiError('conversations.history', 'rate_limited'))
-    await expect(latestMessageTs(new SlackAccessor(t), 'C1')).rejects.toThrow(/rate_limited/)
-  })
-})
-
-describe('readdir on inaccessible channel', () => {
-  it('returns [] dates instead of throwing when conversations.history fails', async () => {
-    const channelsPage = {
-      ok: true,
-      channels: [{ id: 'C_INACCESSIBLE', name: 'private', created: 1 }],
-      response_metadata: { next_cursor: '' },
+function historyFails(code: string): FakeTransport {
+  return new FakeTransport((endpoint) => {
+    if (endpoint === 'conversations.list') {
+      return {
+        ok: true,
+        channels: [{ id: 'C_INACCESSIBLE', name: 'private', created: 1 }],
+        response_metadata: { next_cursor: '' },
+      }
     }
-    const t = new FakeTransport((endpoint) => {
-      if (endpoint === 'conversations.list') return channelsPage
-      if (endpoint === 'conversations.history') {
-        return new SlackApiError('conversations.history', 'not_in_channel')
-      }
-      throw new Error(`unexpected ${endpoint}`)
+    if (endpoint === 'conversations.history') {
+      return new SlackApiError('conversations.history', code)
+    }
+    throw new Error(`unexpected ${endpoint}`)
+  })
+}
+
+function row(name: string): FileStat {
+  return new FileStat({ name, type: FileType.DIRECTORY, extra: { channel_id: 'C_INACCESSIBLE' } })
+}
+
+describe('a channel Slack refuses', () => {
+  it.each(['not_in_channel', 'channel_not_found', 'missing_scope', 'is_archived', 'not_authed'])(
+    'is EACCES on %s',
+    async (code) => {
+      const ws = new Workspace({
+        '/slack/': new SlackVFSBase({ accessor: new SlackAccessor(historyFails(code)) }),
+      })
+      await ws.dispatch('readdir', '/slack/channels')
+      await expect(ws.dispatch('readdir', CHANNEL)).rejects.toMatchObject({
+        code: 'EACCES',
+        virtualPath: CHANNEL,
+      })
+    },
+  )
+
+  it('propagates any other Slack error', async () => {
+    const ws = new Workspace({
+      '/slack/': new SlackVFSBase({ accessor: new SlackAccessor(historyFails('ratelimited')) }),
     })
-    const ws = new Workspace({ '/slack/': new SlackVFSBase({ accessor: new SlackAccessor(t) }) })
-    // Lists the channels first, as a prior `ls /slack/channels` does.
     await ws.dispatch('readdir', '/slack/channels')
-    const dates = await ws.dispatch('readdir', '/slack/channels/private__C_INACCESSIBLE')
-    expect(dates).toEqual([])
+    await expect(ws.dispatch('readdir', CHANNEL)).rejects.toThrow(/ratelimited/)
   })
 })
 
-describe('readdir of a soft-error day', () => {
-  it('lists the empty day as a window', async () => {
-    // An empty day from not_in_channel is not the backend saying the day's
-    // messages are gone, so it must not evict what an earlier listing held.
-    const t = new FakeTransport((endpoint) => {
-      if (endpoint === 'conversations.history') {
-        return new SlackApiError('conversations.history', 'not_in_channel')
-      }
-      throw new Error(`unexpected ${endpoint}`)
-    })
-    const day = '/slack/channels/foo__C_INACCESSIBLE/2026-05-10'
-    const own = new FileStat({
-      name: '2026-05-10',
-      type: FileType.DIRECTORY,
-      extra: { channel_id: 'C_INACCESSIBLE' },
-    })
-    const out = (await readdir(
-      new SlackAccessor(t),
-      new PathSpec({ virtual: day, directory: day, vfsPath: mountKey(day, '/slack') }),
-      own,
-    )) as DirListing
-    expect(out.entries).toEqual([])
-    expect(out.window).toBe(true)
+describe('a day Slack refuses', () => {
+  it.each(['', '/files'])('lists as EACCES at %s', async (below) => {
+    const own = row(below === '' ? '2026-05-10' : 'files')
+    await expect(
+      readdir(new SlackAccessor(historyFails('not_in_channel')), spec(DAY + below), own),
+    ).rejects.toMatchObject({ code: 'EACCES', virtualPath: DAY + below })
   })
-})
 
-describe('listFiles of a soft-error day', () => {
-  // Reached when the files listing was evicted but the day survived; a soft
-  // error there must not evict the attachments it listed before.
-  it('writes the files listing as a window too', async () => {
-    const t = new FakeTransport((endpoint) => {
-      if (endpoint === 'conversations.history') {
-        return new SlackApiError('conversations.history', 'not_in_channel')
-      }
-      throw new Error(`unexpected ${endpoint}`)
-    })
-    const own = new FileStat({
-      name: 'files',
-      type: FileType.DIRECTORY,
-      extra: { channel_id: 'C1' },
-    })
-    const listing = await listFiles(
-      new SlackAccessor(t),
-      {
-        kind: 'files',
-        vfsPath: 'channels/c__C1/2026-05-10/files',
-        slots: { day: '2026-05-10' },
-      } as never,
-      own,
-    )
-    expect((listing as DirListing).window).toBe(true)
+  it('reads chat.jsonl as EACCES', async () => {
+    const chat = `${DAY}/chat.jsonl`
+    await expect(
+      read(new SlackAccessor(historyFails('not_in_channel')), spec(chat), null, row('2026-05-10')),
+    ).rejects.toMatchObject({ code: 'EACCES', virtualPath: chat })
   })
 })

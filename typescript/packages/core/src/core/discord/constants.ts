@@ -14,6 +14,8 @@
 
 export const DISCORD_API = 'https://discord.com/api/v10'
 export const MAX_RETRIES = 3
+export const REFUSED_STATUSES: ReadonlySet<number> = new Set([401, 403])
+export const GONE_STATUS = 404
 
 export const CHAT_FILE = 'chat.jsonl'
 export const FILES_DIR = 'files'

@@ -63,8 +63,8 @@ FAKE_JSONL = (
     b'{"id":"2","content":"world","author":{"username":"bob"}}\n'
 )
 
-# The day lister records chat.jsonl's exact rendered size, so a sizeless
-# entry is the sealed-day case, which is what getattr reports 0 for.
+# The day lister records chat.jsonl's exact rendered size; a sizeless
+# entry, which getattr reports 0 for, is only ever made by a test.
 CHAT_ENTRY = FileStat(
     name=FILE,
     type=FileType.FILE,
@@ -333,7 +333,7 @@ HTTP_PATH = f"{PREFIX}/{FILE_PATH}"
 
 class _DiscordHTTP:
     def __init__(self):
-        self.status = 403
+        self.status = 200
         self.requests = []
         self.history_calls = 0
 
@@ -375,9 +375,9 @@ class _DiscordReader:
         )
         self.opened = []
 
-    async def seal(self):
+    async def list_day(self):
         stat = await self.ws.vfs.stat(HTTP_PATH)
-        assert stat.size is None
+        assert stat.size == len(HTTP_JSONL)
         assert self.http.history_calls > 0
 
     async def size(self, fh=None):
@@ -456,16 +456,15 @@ async def http_reader(request):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("early_close", [False, True])
-async def test_http_sealed_day_hydrates_exact_bytes_and_releases(
+async def test_http_listed_day_reads_exact_bytes_and_releases(
     http_reader, early_close
 ):
     reader = http_reader
-    await reader.seal()
-    assert await reader.size() == 0
-    reader.http.status = 200
+    await reader.list_day()
+    assert await reader.size() == len(HTTP_JSONL)
     before = reader.http.history_calls
     fh = await reader.open()
-    assert reader.http.history_calls == before + 1
+    assert reader.http.history_calls == before
     assert await reader.size(fh) == len(HTTP_JSONL)
     if early_close:
         assert await reader.read(fh, 9, 3) == HTTP_JSONL[3:12]
@@ -477,36 +476,22 @@ async def test_http_sealed_day_hydrates_exact_bytes_and_releases(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status,attempts", [(401, 1), (403, 1), (429, 3)])
-@pytest.mark.parametrize("recover", [False, True])
-async def test_http_failure_is_deferred_to_read_and_does_not_cache_empty(
-    http_reader, status, attempts, recover
+@pytest.mark.parametrize(
+    "status,attempts,code",
+    [(401, 1, errno.EACCES), (403, 1, errno.EACCES), (429, 3, errno.EIO)],
+)
+async def test_http_refused_day_fails_getattr_and_does_not_cache_empty(
+    http_reader, status, attempts, code
 ):
     reader = http_reader
-    await reader.seal()
     reader.http.status = status
-    before = reader.http.history_calls
-    fh = await reader.open()
-    assert fh in reader.core.handles
-    assert reader.http.history_calls == before + attempts
     with pytest.raises((ApiError, OSError)) as failure:
-        await reader.read(fh)
-    assert reader.http.history_calls == before + 2 * attempts
-    error = failure.value
-    if reader.fuse is not None:
-        assert isinstance(error, OSError)
-        assert error.errno == errno.EIO
-        error = error.__cause__
-    assert classify_error(error) == errno.EIO
-    assert isinstance(error, ApiError)
-    assert error.status == status
-    if status == 429:
-        assert str(error) == "Rate limited after 3 retries"
-    if recover:
-        reader.http.status = 200
-        assert await reader.read(fh) == HTTP_JSONL
-    await reader.release(fh)
-    assert reader.http.history_calls == before + 2 * attempts + int(recover)
+        await reader.size()
+    assert classify_error(failure.value) == code
+    assert reader.http.history_calls == attempts
+    reader.http.status = 200
+    assert await reader.size() == len(HTTP_JSONL)
+    assert reader.http.history_calls == attempts + 1
 
 
 @pytest.mark.asyncio
@@ -517,8 +502,7 @@ async def test_http_hydrated_handle_obeys_new_policy_before_retained_bytes(
     http_reader, kind, code
 ):
     reader = http_reader
-    await reader.seal()
-    reader.http.status = 200
+    await reader.list_day()
     fh = await reader.open()
     assert await reader.read(fh) == HTTP_JSONL
     before = len(reader.http.requests)

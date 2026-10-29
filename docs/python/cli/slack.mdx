@@ -4,7 +4,7 @@ description: "Supported Slack commands for messages, reactions, pins, members an
 icon: slack
 ---
 
-Read and send Slack messages, manage reactions and pins, and look up members or search messages. The action names follow [OpenClaw](https://github.com/openclaw/openclaw); `search` and `list-members` are Mirage extensions.
+Read and send Slack messages, share files, manage reactions and pins, and look up members or search messages. The action names follow [OpenClaw](https://github.com/openclaw/openclaw); `search` and `list-members` are Mirage extensions.
 
 ## Setup
 
@@ -32,6 +32,7 @@ This list is generated from Mirage's registered command tree.
 | Command | Description |
 | --- | --- |
 | `slack send-message` | Post a message to a channel or thread |
+| `slack upload-file` | Share a workspace file in a channel or thread |
 | `slack read-messages` | Read the most recent messages of a channel |
 | `slack react` | Add an emoji reaction to a message |
 | `slack reactions` | List the reactions on a message |
@@ -50,6 +51,7 @@ This list is generated from Mirage's registered command tree.
 slack read-messages --channel C04KEPWF6V7 --limit 20
 slack send-message --channel C04KEPWF6V7 --text "Release is ready"
 slack send-message --channel C04KEPWF6V7 --thread-ts 1712345678.123456 --text "Thread reply"
+slack upload-file --channel C04KEPWF6V7 --file /data/reply.wav --initial-comment "Spoken reply"
 slack react --channel C04KEPWF6V7 --ts 1712345678.123456 --emoji thumbsup
 slack reactions --channel C04KEPWF6V7 --ts 1712345678.123456
 slack pin-message --channel C04KEPWF6V7 --ts 1712345678.123456
@@ -59,6 +61,7 @@ slack unpin-message --channel C04KEPWF6V7 --ts 1712345678.123456
 
 Channels and users are Slack IDs. A message is identified by its channel
 and timestamp (`--ts`); replies use the parent's timestamp in `--thread-ts`.
+`upload-file` reads `--file` from the workspace, so any mount can be the source.
 
 ## Find people and messages
 

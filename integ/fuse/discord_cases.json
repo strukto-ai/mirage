@@ -33,22 +33,22 @@
   },
   "cases": [
     {
-      "id": "core-hydrate-0",
+      "id": "core-listed-0",
       "adapter": "core",
-      "kind": "hydrate",
+      "kind": "listed",
       "early_close": false,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     },
     {
-      "id": "core-hydrate-1",
+      "id": "core-listed-1",
       "adapter": "core",
-      "kind": "hydrate",
+      "kind": "listed",
       "early_close": true,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     },
@@ -58,10 +58,8 @@
       "kind": "failure",
       "status": 401,
       "recover": false,
-      "expected_errno": 5,
+      "expected_errno": 13,
       "expected_statuses": [
-        403,
-        401,
         401
       ]
     },
@@ -71,10 +69,8 @@
       "kind": "failure",
       "status": 401,
       "recover": true,
-      "expected_errno": 5,
+      "expected_errno": 13,
       "expected_statuses": [
-        403,
-        401,
         401,
         200
       ]
@@ -85,10 +81,8 @@
       "kind": "failure",
       "status": 403,
       "recover": false,
-      "expected_errno": 5,
+      "expected_errno": 13,
       "expected_statuses": [
-        403,
-        403,
         403
       ]
     },
@@ -98,10 +92,8 @@
       "kind": "failure",
       "status": 403,
       "recover": true,
-      "expected_errno": 5,
+      "expected_errno": 13,
       "expected_statuses": [
-        403,
-        403,
         403,
         200
       ]
@@ -114,10 +106,6 @@
       "recover": false,
       "expected_errno": 5,
       "expected_statuses": [
-        403,
-        429,
-        429,
-        429,
         429,
         429,
         429
@@ -131,10 +119,6 @@
       "recover": true,
       "expected_errno": 5,
       "expected_statuses": [
-        403,
-        429,
-        429,
-        429,
         429,
         429,
         429,
@@ -148,7 +132,7 @@
       "restriction": "hide",
       "expected_errno": 2,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     },
@@ -159,7 +143,7 @@
       "restriction": "deny",
       "expected_errno": 13,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     },
@@ -170,7 +154,7 @@
       "restriction": "pre_vfs",
       "expected_errno": 13,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     },
@@ -181,27 +165,27 @@
       "restriction": "post_vfs",
       "expected_errno": 13,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     },
     {
-      "id": "fuse-hydrate-0",
+      "id": "fuse-listed-0",
       "adapter": "fuse",
-      "kind": "hydrate",
+      "kind": "listed",
       "early_close": false,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     },
     {
-      "id": "fuse-hydrate-1",
+      "id": "fuse-listed-1",
       "adapter": "fuse",
-      "kind": "hydrate",
+      "kind": "listed",
       "early_close": true,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     },
@@ -211,10 +195,8 @@
       "kind": "failure",
       "status": 401,
       "recover": false,
-      "expected_errno": 5,
+      "expected_errno": 13,
       "expected_statuses": [
-        403,
-        401,
         401
       ]
     },
@@ -224,10 +206,8 @@
       "kind": "failure",
       "status": 401,
       "recover": true,
-      "expected_errno": 5,
+      "expected_errno": 13,
       "expected_statuses": [
-        403,
-        401,
         401,
         200
       ]
@@ -238,10 +218,8 @@
       "kind": "failure",
       "status": 403,
       "recover": false,
-      "expected_errno": 5,
+      "expected_errno": 13,
       "expected_statuses": [
-        403,
-        403,
         403
       ]
     },
@@ -251,10 +229,8 @@
       "kind": "failure",
       "status": 403,
       "recover": true,
-      "expected_errno": 5,
+      "expected_errno": 13,
       "expected_statuses": [
-        403,
-        403,
         403,
         200
       ]
@@ -267,10 +243,6 @@
       "recover": false,
       "expected_errno": 5,
       "expected_statuses": [
-        403,
-        429,
-        429,
-        429,
         429,
         429,
         429
@@ -284,10 +256,6 @@
       "recover": true,
       "expected_errno": 5,
       "expected_statuses": [
-        403,
-        429,
-        429,
-        429,
         429,
         429,
         429,
@@ -301,7 +269,7 @@
       "restriction": "hide",
       "expected_errno": 2,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     },
@@ -312,7 +280,7 @@
       "restriction": "deny",
       "expected_errno": 13,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     },
@@ -323,7 +291,7 @@
       "restriction": "pre_vfs",
       "expected_errno": 13,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     },
@@ -334,7 +302,7 @@
       "restriction": "post_vfs",
       "expected_errno": 13,
       "expected_statuses": [
-        403,
+        200,
         200
       ]
     }

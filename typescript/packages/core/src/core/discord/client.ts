@@ -12,8 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { eacces, enoent } from '../../errors/fs.ts'
+import type { PathSpec } from '../../types.ts'
+import { mimeTypeFor } from '../../utils/filetype.ts'
 import { NO_RETRY, apiRequest, type RetryPolicy } from '../api/client.ts'
-import { DISCORD_API, MAX_RETRIES } from './constants.ts'
+import { DISCORD_API, GONE_STATUS, MAX_RETRIES, REFUSED_STATUSES } from './constants.ts'
 import { ApiError } from '../api/errors.ts'
 
 const RATE_LIMIT_RETRY: RetryPolicy = {
@@ -39,6 +42,27 @@ export class DiscordApiError extends ApiError {
   }
 }
 
+/**
+ * Report a channel Discord will not show as permission denied.
+ *
+ * A 401 or 403 (Missing Access) is Discord declining to show what the path
+ * names, never the channel saying it is empty, so the path answers the way a
+ * directory the caller may not open does: ls names it and fails, find reports
+ * it and walks on. A 404 is the channel gone since it was listed. Any other
+ * failure, a 429 that outlasted its retries among them, propagates.
+ */
+export async function refusalsDenied<T>(pathSpec: PathSpec, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (err) {
+    if (err instanceof ApiError && err.status !== null) {
+      if (REFUSED_STATUSES.has(err.status)) throw eacces(pathSpec)
+      if (err.status === GONE_STATUS) throw enoent(pathSpec)
+    }
+    throw err
+  }
+}
+
 function discordError(endpoint: string, response: Response, body: string): DiscordApiError {
   let parsed: unknown = null
   try {
@@ -54,12 +78,22 @@ function discordError(endpoint: string, response: Response, body: string): Disco
   return new DiscordApiError(endpoint, response.status, message, parsed)
 }
 
+export interface DiscordFile {
+  name: string
+  data: Uint8Array
+}
+
 export interface DiscordTransport {
   call(
     method: DiscordMethod,
     endpoint: string,
     params?: Record<string, string | number>,
     body?: Record<string, unknown>,
+  ): Promise<DiscordResponse>
+  postFiles?(
+    endpoint: string,
+    body: Record<string, unknown>,
+    files: readonly DiscordFile[],
   ): Promise<DiscordResponse>
 }
 
@@ -87,6 +121,36 @@ export abstract class HttpDiscordTransport implements DiscordTransport {
       ...(params !== undefined ? { params } : {}),
       ...(body !== undefined ? { json: body } : {}),
       retry: RATE_LIMIT_RETRY,
+      errorOf: (response, text) => discordError(endpoint, response, text),
+    })
+  }
+
+  /**
+   * POST a message with attachments, as Discord takes them: a multipart body
+   * whose `payload_json` part is the JSON body and whose `files[n]` parts are
+   * the files, each named by an `attachments` entry of the same id.
+   */
+  async postFiles(
+    endpoint: string,
+    body: Record<string, unknown>,
+    files: readonly DiscordFile[],
+  ): Promise<DiscordResponse> {
+    const base = this.baseUrl().replace(/\/$/, '')
+    const form = new FormData()
+    const payload = { ...body, attachments: files.map((f, i) => ({ id: i, filename: f.name })) }
+    form.set('payload_json', new Blob([JSON.stringify(payload)], { type: 'application/json' }))
+    files.forEach((f, i) => {
+      form.set(
+        `files[${String(i)}]`,
+        new Blob([f.data as BlobPart], { type: mimeTypeFor(f.name) }),
+        f.name,
+      )
+    })
+    return apiRequest('POST', base + endpoint, {
+      fetchFn: this.fetch,
+      timeout: this.timeout,
+      headers: await this.authHeaders(),
+      body: form,
       errorOf: (response, text) => discordError(endpoint, response, text),
     })
   }

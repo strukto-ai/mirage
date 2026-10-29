@@ -1,6 +1,19 @@
 {
-  "baseline": 2904,
+  "baseline": 2903,
  "modules": {
+  "core/slack/client": {
+   "python_only": {
+    "upload_bytes": "Python sends an upload' + chr(39) + 's bytes with a module function over the accessor' + chr(39) + 's pool; TypeScript keeps the same request on the transport as uploadBytes, beside downloadFile, so a browser transport can leave it out."
+   }
+  },
+  "core/discord/client": {
+   "python_only": {
+    "discord_post_files": "Python posts a multipart message with a module function over the accessor' + chr(39) + 's pool; TypeScript keeps the same request on the transport as postFiles, beside call."
+   },
+   "typescript_only": {
+    "DiscordFile": "The shape postFiles takes for one attachment; Python passes a (name, bytes) tuple."
+   }
+  },
   "vfs/tidb_filesystem/config": {
    "typescript_only": {
     "TiDBFilesystemConfigRedacted": "The type of the redacted plain-object config that getState returns; Python's state is a dict built by config_state.",

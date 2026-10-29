@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "id": "slack_access_lists_a_refused_channel",
+      "seq": 9950000,
+      "targets": [
+        "slack-access"
+      ],
+      "command": "ls /slack/channels/",
+      "expect": {
+        "exit": 0,
+        "stdout": "general__C1\nops__C2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_access_ls_refused_channel",
+      "seq": 9950001,
+      "targets": [
+        "slack-access"
+      ],
+      "command": "ls /slack/channels/ops__C2",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot open directory '/slack/channels/ops__C2': Permission denied\n"
+      }
+    },
+    {
+      "id": "slack_access_ls_refused_day",
+      "seq": 9950002,
+      "targets": [
+        "slack-access"
+      ],
+      "command": "ls /slack/channels/ops__C2/2026-01-01",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/slack/channels/ops__C2/2026-01-01': Permission denied\n"
+      }
+    },
+    {
+      "id": "slack_access_cat_refused_chat",
+      "seq": 9950003,
+      "targets": [
+        "slack-access"
+      ],
+      "command": "cat /slack/channels/ops__C2/2026-01-01/chat.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /slack/channels/ops__C2/2026-01-01/chat.jsonl: Permission denied\n"
+      }
+    },
+    {
+      "id": "slack_access_find_walks_past_a_refused_channel",
+      "seq": 9950004,
+      "targets": [
+        "slack-access"
+      ],
+      "command": "find /slack/channels -name chat.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "/slack/channels/general__C1/2026-01-01/chat.jsonl\n",
+        "stderr": "find: '/slack/channels/ops__C2': Permission denied\n"
+      }
+    },
+    {
+      "id": "slack_access_grep_walks_past_a_refused_channel",
+      "seq": 9950005,
+      "targets": [
+        "slack-access"
+      ],
+      "command": "grep -r open /slack/channels",
+      "expect": {
+        "exit": 2,
+        "stdout": "/slack/channels/general__C1/2026-01-01/chat.jsonl:{\"type\":\"message\",\"user\":\"U1\",\"text\":\"general is open\",\"ts\":\"1767225600.000001\"}\n",
+        "stderr": "grep: /slack/channels/ops__C2: Permission denied\n"
+      }
+    },
+    {
+      "id": "slack_access_open_channel_still_reads",
+      "seq": 9950006,
+      "targets": [
+        "slack-access"
+      ],
+      "command": "cat /slack/channels/general__C1/2026-01-01/chat.jsonl | jq -r .text",
+      "expect": {
+        "exit": 0,
+        "stdout": "general is open\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

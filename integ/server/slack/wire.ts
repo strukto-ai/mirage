@@ -41,6 +41,7 @@ export interface ChannelRow {
   topic: string
   purpose: string
   membersJson: string
+  isMember: boolean
 }
 
 export interface FileRow {
@@ -55,6 +56,7 @@ export interface FileRow {
   timestamp: number
   content: string
   contentPath: string | null
+  blob: Uint8Array | null
 }
 
 // Slack takes a method's arguments in the query string or, on a POST, as a form

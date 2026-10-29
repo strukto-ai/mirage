@@ -170,17 +170,18 @@ async def test_stat_non_date_dir_not_found(accessor):
         )
 
 
-SEALED = SlackApiError(
-    "Slack API error (conversations.history): not_in_channel"
+REFUSED = SlackApiError(
+    "Slack API error (conversations.history): not_in_channel",
+    slack_error="not_in_channel",
 )
 
 
 @pytest.mark.asyncio
-async def test_stat_chat_jsonl_absent_from_day_is_enoent(accessor):
-    # A denied or empty day lists no chat.jsonl; stat must not fabricate
-    # a sizeless file for it.
-    with _workspace(history_error=SEALED):
-        with pytest.raises(FileNotFoundError):
+async def test_stat_chat_jsonl_in_a_refused_day_is_eacces(accessor):
+    # A day Slack will not show is not an empty day; stat must neither
+    # fabricate a sizeless file nor call it absent.
+    with _workspace(history_error=REFUSED):
+        with pytest.raises(PermissionError):
             await _stat_at(accessor, f"{DAY}/chat.jsonl")
 
 
@@ -192,10 +193,9 @@ async def test_stat_files_dir(accessor):
 
 
 @pytest.mark.asyncio
-async def test_stat_files_absent_from_day_is_enoent(accessor):
-    # A sealed day lists nothing, so its files subdir does not exist.
-    with _workspace(history_error=SEALED):
-        with pytest.raises(FileNotFoundError):
+async def test_stat_files_in_a_refused_day_is_eacces(accessor):
+    with _workspace(history_error=REFUSED):
+        with pytest.raises(PermissionError):
             await _stat_at(accessor, f"{DAY}/files")
 
 

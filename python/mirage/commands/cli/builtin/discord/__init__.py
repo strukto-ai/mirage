@@ -47,6 +47,11 @@ DISCORD = CLI(
                         "--reply-to",
                         help="Reply to this message ID",
                     ),
+                    Argument(
+                        "--file",
+                        type="path",
+                        help="Workspace file to attach",
+                    ),
                 ),
             ),
             CommandSpec(

@@ -13,18 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
+import type { DiscordFile } from './client.ts'
 
 export async function sendMessage(
   accessor: DiscordAccessor,
   channelId: string,
   text: string,
   messageReferenceId?: string,
+  file?: DiscordFile,
 ): Promise<unknown> {
   const body: Record<string, unknown> = { content: text }
   if (messageReferenceId !== undefined && messageReferenceId !== '') {
     body.message_reference = { message_id: messageReferenceId }
   }
-  return accessor.transport.call('POST', `/channels/${channelId}/messages`, undefined, body)
+  const endpoint = `/channels/${channelId}/messages`
+  if (file === undefined) return accessor.transport.call('POST', endpoint, undefined, body)
+  if (accessor.transport.postFiles === undefined) {
+    throw new Error('discord transport does not support file uploads')
+  }
+  return accessor.transport.postFiles(endpoint, body, [file])
 }
 
 export async function editMessage(

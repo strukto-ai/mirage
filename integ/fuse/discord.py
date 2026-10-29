@@ -36,7 +36,7 @@ BODY = CORPUS["body"].encode()
 
 class DiscordHTTP:
     def __init__(self):
-        self.status = 403
+        self.status = 200
         self.requests = []
         self.statuses = []
 
@@ -174,69 +174,64 @@ async def run(case):
         )
         driver = Driver(ws, backend, case["adapter"])
         try:
-            assert (await ws.vfs.stat(FILE)).size is None
-            assert await driver.size() == 0
-            assert http.statuses == [403]
-            http.status = case.get("status", 200)
-            fh = await driver.open()
             if case["kind"] == "failure":
-                error = await refused(driver.read(fh), case["expected_errno"])
+                http.status = case["status"]
+                error = await refused(driver.size(), case["expected_errno"])
                 if driver.fuse is not None:
-                    assert (
-                        isinstance(error, OSError) and error.errno == errno.EIO
-                    )
+                    assert isinstance(error, OSError)
                     error = error.__cause__
-                assert isinstance(error, ApiError)
-                assert error.status == case["status"]
                 if case["status"] == 429:
+                    assert isinstance(error, ApiError)
                     assert str(error) == "Rate limited after 3 retries"
                 if case["recover"]:
                     http.status = 200
+                    assert await driver.size() == len(BODY)
+                assert http.statuses == case["expected_statuses"]
+                return
+            assert (await ws.vfs.stat(FILE)).size == len(BODY)
+            assert await driver.size() == len(BODY)
+            assert http.statuses == [200]
+            fh = await driver.open()
+            assert await driver.size(fh) == len(BODY)
+            if case["kind"] == "listed":
+                partial = CORPUS["partial"]
+                offset, size = partial["offset"], partial["size"]
+                assert (
+                    await driver.read(fh, offset, size)
+                    == BODY[offset : offset + size]
+                )
+                if not case["early_close"]:
                     assert await driver.read(fh) == BODY
-                    assert await driver.size(fh) == len(BODY)
+                    assert await driver.read(fh, len(BODY), 9) == b""
             else:
-                assert await driver.size(fh) == len(BODY)
-                if case["kind"] == "hydrate":
-                    partial = CORPUS["partial"]
-                    offset, size = partial["offset"], partial["size"]
-                    assert (
-                        await driver.read(fh, offset, size)
-                        == BODY[offset : offset + size]
+                assert await driver.read(fh) == BODY
+                before = len(http.requests)
+                restriction = case["restriction"]
+                if restriction == "hide":
+                    await ws.set_session_profile(
+                        "reader", {"paths": {"hide": [FILE]}}
                     )
-                    if not case["early_close"]:
-                        assert await driver.read(fh) == BODY
-                        assert await driver.read(fh, len(BODY), 9) == b""
+                elif restriction == "deny":
+                    await ws.set_session_profile(
+                        "reader",
+                        {
+                            "commands": {
+                                "deny": [{"paths": [FILE], "reason": "sealed"}]
+                            }
+                        },
+                    )
                 else:
-                    assert await driver.read(fh) == BODY
-                    before = len(http.requests)
-                    restriction = case["restriction"]
-                    if restriction == "hide":
-                        await ws.set_session_profile(
-                            "reader", {"paths": {"hide": [FILE]}}
-                        )
-                    elif restriction == "deny":
-                        await ws.set_session_profile(
-                            "reader",
-                            {
-                                "commands": {
-                                    "deny": [
-                                        {"paths": [FILE], "reason": "sealed"}
-                                    ]
-                                }
-                            },
-                        )
-                    else:
-                        policy.stage = restriction
-                    await refused(driver.read(fh), case["expected_errno"])
-                    if restriction == "hide":
-                        await refused(driver.size(fh), errno.ENOENT)
-                    if restriction in ("pre_vfs", "post_vfs"):
-                        assert policy.seen == [restriction]
-                    assert len(http.requests) == before
-                    policy.stage = None
-                    await ws.set_session_profile("reader", {})
-                    assert await driver.read(fh) == BODY
-                    assert len(http.requests) == before
+                    policy.stage = restriction
+                await refused(driver.read(fh), case["expected_errno"])
+                if restriction == "hide":
+                    await refused(driver.size(fh), errno.ENOENT)
+                if restriction in ("pre_vfs", "post_vfs"):
+                    assert policy.seen == [restriction]
+                assert len(http.requests) == before
+                policy.stage = None
+                await ws.set_session_profile("reader", {})
+                assert await driver.read(fh) == BODY
+                assert len(http.requests) == before
             before = len(http.requests)
             await driver.release(fh)
             assert len(http.requests) == before

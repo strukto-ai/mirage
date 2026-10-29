@@ -19,6 +19,7 @@ from mirage.core.discord.client import (
     discord_delete,
     discord_patch,
     discord_post,
+    discord_post_files,
 )
 
 
@@ -27,6 +28,7 @@ async def send_message(
     channel_id: str,
     text: str,
     message_reference_id: str | None = None,
+    file: tuple[str, bytes] | None = None,
 ) -> dict[str, Any]:
     """Send a message to a channel.
 
@@ -35,6 +37,8 @@ async def send_message(
         channel_id (str): channel ID.
         text (str): message content.
         message_reference_id (str | None): reply to message.
+        file (tuple[str, bytes] | None): a file to attach, by name and
+            bytes.
 
     Returns:
         dict: API response.
@@ -42,9 +46,10 @@ async def send_message(
     body: dict[str, Any] = {"content": text}
     if message_reference_id:
         body["message_reference"] = {"message_id": message_reference_id}
-    return await discord_post(
-        accessor, f"/channels/{channel_id}/messages", body
-    )
+    endpoint = f"/channels/{channel_id}/messages"
+    if file is not None:
+        return await discord_post_files(accessor, endpoint, body, [file])
+    return await discord_post(accessor, endpoint, body)
 
 
 async def edit_message(

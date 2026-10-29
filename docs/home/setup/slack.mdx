@@ -23,7 +23,8 @@ description: Set up a Slack Bot Token for the Slack VFS.
    - `mpim:history`, `mpim:read` - group direct messages (optional)
    - `users:read` - the VFS `users/` directory
 
-Add `chat:write` only for the CLI `send-message` command. The mount never posts.
+Add `chat:write` only for the CLI `send-message` command, and `files:write` for
+`upload-file`. The mount never posts.
 
 ### 3. Install to Workspace
 
@@ -53,7 +54,8 @@ SLACK_USER_TOKEN=xoxp-xxxx...  # optional, only needed for workspace search
 
 ### 6. Invite the Bot
 
-The bot must be invited to channels it needs to read:
+The bot must be invited to channels it needs to read; a channel it is not in
+answers `Permission denied`:
 
 ```
 /invite @Mirage

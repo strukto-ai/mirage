@@ -14,37 +14,12 @@
 
 import { dayStat, guardDay } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
-import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
-import { enoent } from '../../errors/fs.ts'
-import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { makeStat } from '../hierarchy/stat.ts'
+import { makeStat, type StatHook } from '../hierarchy/stat.ts'
 import { detectScope } from './scope.ts'
 
-/**
- * Stat chat.jsonl, which survives a sealed day.
- *
- * A day whose history could not be listed (403/404/429) seals an empty date
- * dir; the file still stats, with the size left unknown.
- */
-async function statChat(
-  accessor: DiscordAccessor,
-  match: ScopeMatch,
-  path: PathSpec,
-  entry: FileStat | null,
-  parent: FileStat | null,
-): Promise<FileStat> {
-  await guardDay(accessor, match, path.virtual)
-  if (entry !== null) return entry
-  if (parent === null) throw enoent(path)
-  return new FileStat({ name: 'chat.jsonl', type: FileType.FILE, content: ContentType.TEXT })
-}
+// A chat.jsonl, a files directory or a blob is what its day's listing names,
+// which no day outside the mount's scope has; only a day itself exists beyond
+// what is listed.
+const day: StatHook<DiscordAccessor> = dayStat(guardDay)
 
-// A files directory or a blob is what its day's listing names, which no day
-// outside the mount's scope has; a day and its chat.jsonl exist beyond what
-// is listed.
-export const stat = makeStat<DiscordAccessor>(detectScope, {
-  overrides: {
-    day: dayStat(guardDay),
-    messages: statChat,
-  },
-})
+export const stat = makeStat<DiscordAccessor>(detectScope, { overrides: { day } })

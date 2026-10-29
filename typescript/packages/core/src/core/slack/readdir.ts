@@ -14,15 +14,16 @@
 
 import { guardDay } from '../time_range.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
-import { ContentType, DirListing, FileStat, FileType } from '../../types.ts'
+import { ContentType, DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { epochToIso } from '../../utils/dates.ts'
 import { contentTypeForMime } from '../../utils/filetype.ts'
 import { cutListing, makeReaddir, type Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { jsonlBytes } from '../render/json.ts'
 import { listChannels, listDms } from './channels.ts'
+import { refusalsDenied } from './client.ts'
 import { channelDirname, dmDirname, fileBlobName, userFilename } from './formatters.ts'
-import { fetchMessagesForDay, type SlackMessage } from './history.ts'
+import { fetchMessagesForDay } from './history.ts'
 import { cursorPages } from './paginate.ts'
 import { detectScope } from './scope.ts'
 import { listUsers, userJsonBytes } from './users.ts'
@@ -30,34 +31,15 @@ import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
 
 export const VIRTUAL_ROOTS = ['channels', 'dms', 'users'] as const
 
-const SOFT_HISTORY_ERRORS = [
-  'not_in_channel',
-  'channel_not_found',
-  'missing_scope',
-  'is_archived',
-  'not_authed',
-]
-
-function isSoftHistoryError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err)
-  return SOFT_HISTORY_ERRORS.some((code) => msg.includes(code))
-}
-
 export async function latestMessageTs(
   accessor: SlackAccessor,
   channelId: string,
 ): Promise<number | null> {
-  let messages: { ts?: string }[]
-  try {
-    const data = await accessor.transport.call('conversations.history', {
-      channel: channelId,
-      limit: '1',
-    })
-    messages = (data.messages as { ts?: string }[] | undefined) ?? []
-  } catch (err) {
-    if (isSoftHistoryError(err)) return null
-    throw err
-  }
+  const data = await accessor.transport.call('conversations.history', {
+    channel: channelId,
+    limit: '1',
+  })
+  const messages = (data.messages as { ts?: string }[] | undefined) ?? []
   if (messages.length === 0) return null
   return Number.parseFloat(messages[0]?.ts ?? '0')
 }
@@ -225,24 +207,13 @@ async function listChannelDays(
   return new DirListing({ entries: rows, partial: span !== null, window: true })
 }
 
-/**
- * One history fetch, answering the day dir and its files subdir.
- *
- * A soft history error (not_in_channel, missing_scope, ...) seals an empty
- * day: the dir lists nothing, and read reproduces the API's own answer.
- */
+/** One history fetch, answering the day dir and its files subdir. */
 async function dayListing(
   accessor: SlackAccessor,
   channelId: string,
   dateStr: string,
 ): Promise<DirListing> {
-  let messages: SlackMessage[]
-  try {
-    messages = await fetchMessagesForDay(accessor, channelId, dateStr)
-  } catch (err) {
-    if (isSoftHistoryError(err)) return new DirListing({ entries: [], window: true })
-    throw err
-  }
+  const messages = await fetchMessagesForDay(accessor, channelId, dateStr)
   const blobs: FileStat[] = []
   for (const msg of messages) {
     const files = (msg.files as { id?: string }[] | undefined) ?? []
@@ -318,14 +289,10 @@ export async function listFiles(
   // Normally served from the day lister's seed; reached only when the index
   // evicted the files listing while the day's rows survived.
   const listing = await dayListing(accessor, String(own.extra.channel_id), match.slots.day ?? '')
-  // A soft-error day proves nothing about its attachments either.
-  return new DirListing({
-    entries: [...(listing.seeds.get('files') ?? [])],
-    window: listing.window,
-  })
+  return [...(listing.seeds.get('files') ?? [])]
 }
 
-export const readdir = makeReaddir<SlackAccessor>(detectScope, {
+const listing = makeReaddir<SlackAccessor>(detectScope, {
   listers: {
     channels_root: listChannelsRoot,
     dms_root: listDmsRoot,
@@ -340,3 +307,14 @@ export const readdir = makeReaddir<SlackAccessor>(detectScope, {
   guards: { day: guardDay, files: guardDay },
   patternKinds: { channel: hasGlobSpan },
 })
+
+/** List a Slack directory; a conversation Slack will not show is EACCES. */
+export function readdir(
+  accessor: SlackAccessor,
+  pathSpec: PathSpec,
+  entry: FileStat | null = null,
+  parent: FileStat | null = null,
+  limit?: number,
+): Promise<FileStat[] | DirListing> {
+  return refusalsDenied(pathSpec, () => listing(accessor, pathSpec, entry, parent, limit))
+}

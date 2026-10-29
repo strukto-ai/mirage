@@ -190,11 +190,11 @@ describe('stat chat.jsonl and files dir', () => {
     )
   })
 
-  it('rejects chat.jsonl absent from a sealed day', async () => {
-    // A denied or empty day lists no chat.jsonl; stat must not fabricate a
-    // sizeless file for it.
+  it('rejects chat.jsonl in a refused day with EACCES', async () => {
+    // A day Slack will not show is not an empty day; stat must neither
+    // fabricate a sizeless file nor call it absent.
     const t = new FakeTransport(world(MESSAGES, 'not_in_channel'))
-    await expect(statAt(t, `${DAY}/chat.jsonl`)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(statAt(t, `${DAY}/chat.jsonl`)).rejects.toMatchObject({ code: 'EACCES' })
   })
 
   it('returns DIRECTORY files for a listed day', async () => {
@@ -203,10 +203,9 @@ describe('stat chat.jsonl and files dir', () => {
     expect(out.name).toBe('files')
   })
 
-  it('throws ENOENT for files under a sealed day', async () => {
-    // A sealed day lists nothing, so its files subdir does not exist.
+  it('throws EACCES for files under a refused day', async () => {
     const t = new FakeTransport(world(MESSAGES, 'not_in_channel'))
-    await expect(statAt(t, `${DAY}/files`)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(statAt(t, `${DAY}/files`)).rejects.toMatchObject({ code: 'EACCES' })
   })
 
   it.each([
