@@ -23,6 +23,7 @@ const ROW_WRITES_BY_PREFIX = new Map<string, number>()
 // Each row written within the last window, with its write count and time.
 const ROWS_WRITTEN_BY_PREFIX = new Map<string, Map<string, { count: number; at: number }>>()
 const HOLDERS_BY_PREFIX = new Map<string, number>()
+const MEMOS_BY_PREFIX = new Map<string, Set<WeakRef<ListingMemo>>>()
 
 interface Read {
   readonly writesBefore: number
@@ -77,6 +78,7 @@ function answer(listing: ListResult, child: string | undefined, kept: Read | nul
 export class ListingMemo {
   private readonly reads = new Map<string, Read>()
   private closed = false
+  private readonly reference = new WeakRef(this)
 
   /**
    * @param keyPrefix the store's key prefix, whose writes count.
@@ -88,6 +90,9 @@ export class ListingMemo {
     private readonly clock: Clock,
   ) {
     HOLDERS_BY_PREFIX.set(keyPrefix, (HOLDERS_BY_PREFIX.get(keyPrefix) ?? 0) + 1)
+    const peers = MEMOS_BY_PREFIX.get(keyPrefix) ?? new Set<WeakRef<ListingMemo>>()
+    peers.add(this.reference)
+    MEMOS_BY_PREFIX.set(keyPrefix, peers)
   }
 
   private written(): number {
@@ -115,17 +120,26 @@ export class ListingMemo {
     return true
   }
 
-  /** Whether a live kept listing leaves out one of the observed child keys. */
+  /** Whether a live listing kept at this prefix leaves out an observed child key. */
   contradicts(paths: readonly string[]): boolean {
     const observed = new Map<string, string[]>()
     for (const path of paths) {
       const folder = path.slice(0, path.lastIndexOf('/')) || '/'
       observed.set(folder, [...(observed.get(folder) ?? []), path])
     }
-    for (const [key, kept] of this.reads) {
-      const named = observed.get(key.slice(key.indexOf(':') + 1))
-      if (named === undefined || !this.live(kept)) continue
-      if (named.some((path) => !positions(kept).has(path))) return true
+    const peers = MEMOS_BY_PREFIX.get(this.keyPrefix)
+    if (peers === undefined) return false
+    for (const reference of peers) {
+      const peer = reference.deref()
+      if (peer === undefined) {
+        peers.delete(reference)
+        continue
+      }
+      for (const [key, kept] of peer.reads) {
+        const named = observed.get(key.slice(key.indexOf(':') + 1))
+        if (named === undefined || !peer.live(kept)) continue
+        if (named.some((path) => !positions(kept).has(path))) return true
+      }
     }
     return false
   }
@@ -251,12 +265,14 @@ export class ListingMemo {
     this.reads.clear()
     if (this.closed) return
     this.closed = true
+    MEMOS_BY_PREFIX.get(this.keyPrefix)?.delete(this.reference)
     const holders = (HOLDERS_BY_PREFIX.get(this.keyPrefix) ?? 0) - 1
     if (holders > 0) {
       HOLDERS_BY_PREFIX.set(this.keyPrefix, holders)
       return
     }
     HOLDERS_BY_PREFIX.delete(this.keyPrefix)
+    MEMOS_BY_PREFIX.delete(this.keyPrefix)
     WRITES_BY_PREFIX.delete(this.keyPrefix)
     ROW_WRITES_BY_PREFIX.delete(this.keyPrefix)
     ROWS_WRITTEN_BY_PREFIX.delete(this.keyPrefix)

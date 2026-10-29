@@ -1298,7 +1298,11 @@ class RedisIndexCacheStore(IndexCacheStore):
 
     async def invalidate_missing(self, paths: Sequence[str]) -> bool:
         await self._flush_seed()
-        if not paths or self._listings.allows(paths):
+        if not paths:
+            return False
+        if self._listings.allows(paths):
+            if self._listings.contradicts(paths):
+                self._listings.wrote()
             return False
         try:
             changed = bool(

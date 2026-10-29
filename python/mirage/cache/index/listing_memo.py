@@ -17,6 +17,7 @@ from collections import Counter, OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from time import monotonic
+from weakref import WeakSet
 
 from mirage.cache.index.config import ListResult
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW, ROW_READ_BATCH
@@ -29,6 +30,7 @@ _ROW_WRITES_BY_PREFIX: Counter[str] = Counter()
 # Each row written within the last window, with its write count and time.
 _ROWS_WRITTEN_BY_PREFIX: dict[str, OrderedDict[str, tuple[int, float]]] = {}
 _HOLDERS_BY_PREFIX: Counter[str] = Counter()
+_MEMOS_BY_PREFIX: dict[str, WeakSet["ListingMemo"]] = {}
 _PREFIX_LOCK = threading.Lock()
 
 
@@ -112,6 +114,7 @@ class ListingMemo:
         self._closed = False
         with _PREFIX_LOCK:
             _HOLDERS_BY_PREFIX[key_prefix] += 1
+            _MEMOS_BY_PREFIX.setdefault(key_prefix, WeakSet()).add(self)
 
     def _live(self, kept: _Read) -> bool:
         return (
@@ -139,7 +142,7 @@ class ListingMemo:
         return True
 
     def contradicts(self, paths: Sequence[str]) -> bool:
-        """Whether a live kept listing leaves out one of the paths.
+        """Whether a live listing kept at this prefix leaves out a path.
 
         Args:
             paths (Sequence[str]): observed immediate child keys.
@@ -147,10 +150,13 @@ class ListingMemo:
         observed: dict[str, list[str]] = {}
         for path in paths:
             observed.setdefault(path.rsplit("/", 1)[0] or "/", []).append(path)
+        with _PREFIX_LOCK:
+            peers = tuple(_MEMOS_BY_PREFIX.get(self._key_prefix, ()))
         return any(
-            self._live(kept)
+            peer._live(kept)
             and any(path not in _positions(kept) for path in observed[folder])
-            for (_, folder), kept in self._reads.items()
+            for peer in peers
+            for (_, folder), kept in tuple(peer._reads.items())
             if folder in observed
         )
 
@@ -274,9 +280,11 @@ class ListingMemo:
             return
         self._closed = True
         with _PREFIX_LOCK:
+            _MEMOS_BY_PREFIX[self._key_prefix].discard(self)
             _HOLDERS_BY_PREFIX[self._key_prefix] -= 1
             if _HOLDERS_BY_PREFIX[self._key_prefix] <= 0:
                 del _HOLDERS_BY_PREFIX[self._key_prefix]
+                del _MEMOS_BY_PREFIX[self._key_prefix]
                 _WRITES_BY_PREFIX.pop(self._key_prefix, None)
                 _ROW_WRITES_BY_PREFIX.pop(self._key_prefix, None)
                 _ROWS_WRITTEN_BY_PREFIX.pop(self._key_prefix, None)
