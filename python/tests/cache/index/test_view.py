@@ -936,3 +936,25 @@ async def test_failed_observation_recovery_cannot_touch_a_replacement_mount(
     )
     assert await view.invalidate_missing(["/data/new"]) is False
     assert (await index.list_dir("/data")).entries == ["/data/replacement"]
+
+
+@pytest.mark.asyncio
+async def test_listing_refill_recovers_a_failed_observation_scope(monkeypatch):
+    index = RAMIndexCacheStore()
+    view = IndexView(index, RAMFileCacheStore(), "/data", lambda p: not p.startswith("/data/nested"), excluded_prefixes=lambda: ("/data/nested",))
+    await index.set_dir("/data", [("old", _row())])
+    await index.set_dir("/other", [("keep", _row())])
+    await index.set_dir("/data/nested", [("keep", _row())])
+    old = await view.refill_token()
+    async def unavailable(paths):
+        raise RuntimeError("unavailable")
+    with monkeypatch.context() as patcher:
+        patcher.setattr(index, "invalidate_missing", unavailable)
+        with pytest.raises(RuntimeError):
+            await view.invalidate_missing(["/data/new"])
+    fresh = await view.refill_token()
+    assert await view.refill_dir("/data", [("old", _row())], old) is None
+    assert await view.refill_dir("/data", [("new", _row())], fresh) == []
+    assert (await view.list_dir("/data")).entries == ["/data/new"]
+    assert (await index.list_dir("/other")).entries == ["/other/keep"]
+    assert (await index.list_dir("/data/nested")).entries == ["/data/nested/keep"]

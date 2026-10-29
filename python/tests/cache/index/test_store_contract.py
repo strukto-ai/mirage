@@ -1228,3 +1228,20 @@ async def test_point_observation_fences_refills_from_incomplete_listings(
         await store.refill_dir("/dir", [("old", entry("old"))], ticket) is None
     )
     assert await store.list_dir("/dir") == before
+
+
+@pytest.mark.asyncio
+async def test_empty_listing_remains_readable_after_point_invalidation(store):
+    await store.set_dir("/dir", [])
+    assert await store.invalidate_missing(["/dir/first"]) is True
+    assert (await store.list_dir("/dir")).status == LookupStatus.EXPIRED
+    token = await store.refill_token()
+    assert await store.refill_dir("/dir", [("first", entry("first"))], token) == []
+    assert (await store.list_dir("/dir")).entries == ["/dir/first"]
+
+
+@pytest.mark.asyncio
+async def test_prefix_forget_retires_an_older_refill(store):
+    token = await store.refill_token()
+    await store.invalidate_prefix("/dir")
+    assert await store.refill_dir("/dir", [], token) is None

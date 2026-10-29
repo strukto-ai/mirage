@@ -111,6 +111,21 @@ for (const backend of ['ram', 'redis']) {
         expect(await store.refillDir('/dir', [['old', entry()]], ticket)).toBe(null)
       })
 
+      it('an empty listing stays readable after point invalidation', async () => {
+        await store.setDir('/dir', [])
+        expect(await store.invalidateMissing(['/dir/first'])).toBe(true)
+        expect((await store.listDir('/dir')).status).toBe(LookupStatus.EXPIRED)
+        const ticket = await store.refillToken()
+        expect(await store.refillDir('/dir', [['first', entry('first')]], ticket)).toEqual([])
+        expect((await store.listDir('/dir')).entries).toEqual(['/dir/first'])
+      })
+
+      it('prefix forget retires an older refill', async () => {
+        const ticket = await store.refillToken()
+        await store.invalidatePrefix('/dir')
+        expect(await store.refillDir('/dir', [], ticket)).toBe(null)
+      })
+
       it('returns only requested retained rows in a batch', async () => {
         expect(await store.getMany([])).toEqual(new Map())
         store.seed(

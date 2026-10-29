@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.types import DirListing, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.clock import ManualClock
@@ -774,5 +774,70 @@ async def test_stream_point_observation_does_not_drain_the_source(kind):
             assert await ws.vfs.readdir("/k") == ["/k/f", "/k/new"]
         assert not store.tail
         assert store.closed
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_rejected_warm_still_resolves_a_backend_id():
+    folders = Folders()
+    folders.add("found", data=b"present")
+    ws = Workspace({"/f": folders})
+    index = ws.mount("/f").index_store
+    await index.set_partial_dir("/f", [])
+    original = folders.readdir
+    async def retire_refill(path, entry=None):
+        rows = await original(path, entry)
+        await index.invalidate_missing(["/unrelated/new"])
+        return rows
+    folders.readdir = retire_refill
+    try:
+        assert (await ws.vfs.stat("/f/found")).name == "found"
+        assert (await index.list_dir("/f")).partial_entries == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["scratch", "retired", "live"])
+async def test_only_a_current_direct_stat_can_note_a_probe(kind):
+    keys = Keys({"new": b"present"})
+    ws = Workspace({"/k": keys})
+    mount = ws.mount("/k")
+    manager = mount.cache_manager
+    original = keys.stat
+    async def stat(path):
+        row = await original(path)
+        if kind != "live":
+            manager.retire()
+        return row
+    keys.stat = stat
+    index = ListingCheckStore() if kind == "scratch" else mount.index
+    try:
+        async with command_scope():
+            await mount.call("stat", "/k/new", index=index)
+            found = manager.probed_stat(PathSpec.from_str_path("/k/new"))
+            assert (found is not None) is (kind == "live")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_retired_beyond_stat_does_not_note_a_probe():
+    keys = Keys({"new": b"present"})
+    ws = Workspace({"/k": keys})
+    mount = ws.mount("/k")
+    await mount.index_store.set_dir("/k", [])
+    manager = mount.cache_manager
+    original = keys.stat
+    async def stat(path):
+        row = await original(path)
+        manager.retire()
+        return row
+    keys.stat = stat
+    try:
+        async with command_scope():
+            assert await ws.vfs.read("/k/new") == b"present"
+            assert manager.probed_stat(PathSpec.from_str_path("/k/new")) is None
     finally:
         await ws.close()

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { enoent } from '../../errors/fs.ts'
@@ -843,3 +843,62 @@ it.each(['prefix', 'empty', 'failure'])(
     }
   },
 )
+
+
+it('a rejected warm still resolves a backend id', async () => {
+  const folders = new Folders()
+  folders.add('found', 'root', ENC.encode('present'))
+  const ws = workspace(folders)
+  const index = ws.mount('/f').indexStore
+  await index.setPartialDir('/f', [])
+  const original = folders.readdir.bind(folders)
+  folders.readdir = async (path, handed) => {
+    const rows = await original(path, handed)
+    await index.invalidateMissing(['/unrelated/new'])
+    return rows
+  }
+  try {
+    expect((await ws.vfs.stat('/f/found')).name).toBe('found')
+    expect((await index.listDir('/f')).partialEntries).toEqual([])
+  } finally { await ws.close() }
+})
+
+it.each(['scratch', 'retired', 'live'])('only a current direct stat notes a probe (%s)', async (kind) => {
+  const keys = new Keys(new Map([['new', ENC.encode('present')]]))
+  const ws = keysWorkspace(keys)
+  const mount = ws.mount('/k')
+  const manager = mount.cacheManager!
+  const original = keys.stat.bind(keys)
+  keys.stat = async (path) => {
+    const row = await original(path)
+    if (kind !== 'live') manager.retire()
+    return row
+  }
+  const index = kind === 'scratch' ? new ListingCheckStore() : mount.index
+  try {
+    await runInCommandScope(async () => {
+      await mount.call('stat', '/k/new', [], { index })
+      expect(manager.probedStat(PathSpec.fromStrPath('/k/new')) !== null).toBe(kind === 'live')
+    })
+  } finally { await ws.close() }
+})
+
+it('a retired beyond stat does not note a probe', async () => {
+  const keys = new Keys(new Map([['new', ENC.encode('present')]]))
+  const ws = keysWorkspace(keys)
+  const mount = ws.mount('/k')
+  await mount.indexStore.setDir('/k', [])
+  const manager = mount.cacheManager!
+  const original = keys.stat.bind(keys)
+  keys.stat = async (path) => {
+    const row = await original(path)
+    manager.retire()
+    return row
+  }
+  try {
+    await runInCommandScope(async () => {
+      expect(await ws.vfs.read('/k/new')).toEqual(ENC.encode('present'))
+      expect(manager.probedStat(PathSpec.fromStrPath('/k/new'))).toBe(null)
+    })
+  } finally { await ws.close() }
+})
