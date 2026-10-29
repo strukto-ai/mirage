@@ -555,7 +555,8 @@ class _ExpiredOnArrival(RAMIndexCacheStore):
         evict: bool,
         excluded: tuple[str, ...] = (),
         version: str | None = None,
-    ) -> list[Evicted]:
+        refill: str | None = None,
+    ) -> list[Evicted] | None:
         return await super()._set_dir(
             vfs_path,
             entries,
@@ -564,6 +565,7 @@ class _ExpiredOnArrival(RAMIndexCacheStore):
             evict=evict,
             excluded=excluded,
             version=version,
+            refill=refill,
         )
 
 

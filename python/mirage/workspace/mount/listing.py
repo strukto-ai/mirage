@@ -85,7 +85,11 @@ async def beyond_window(index: IndexCacheStore, key: str) -> bool:
 
 
 async def keep_listing(
-    index: IndexCacheStore, key: str, listed: list[FileStat] | DirListing
+    index: IndexCacheStore,
+    key: str,
+    listed: list[FileStat] | DirListing,
+    refill: str | None = None,
+    fetched: dict[str, FileStat | None] | None = None,
 ) -> list[str]:
     """Keep what a backend listed, and answer the children's paths.
 
@@ -99,12 +103,37 @@ async def keep_listing(
         index (IndexCacheStore): the mount's index.
         key (str): the listed directory's key.
         listed (list[FileStat] | DirListing): the backend's answer.
+        refill (str | None): token taken before the fetch; None keeps
+            the listing unconditionally.
+        fetched (dict[str, FileStat | None] | None): keys a lookup asks
+            about; a rejected listing fills the rows it names and, when
+            complete, drops the keys it proves absent.
     """
     listing = listed if isinstance(listed, DirListing) else DirListing(listed)
     rows: list[tuple[str, FileStat]] = [
         (row.name, row) for row in listing.entries
     ]
-    if listing.partial:
+    if refill is not None:
+        accepted = await index.refill_dir(
+            key,
+            rows,
+            refill,
+            partial=listing.partial,
+            window=listing.window,
+            version=listing.version,
+        )
+        if accepted is None:
+            stem = "" if key == "/" else key
+            if fetched is not None:
+                named = {f"{stem}/{row.name}": row for row in listing.entries}
+                complete = not listing.partial and not listing.window
+                for child in list(fetched):
+                    if child in named:
+                        fetched[child] = named[child]
+                    elif complete:
+                        del fetched[child]
+            return [f"{stem}/{row.name}" for row in listing.entries]
+    elif listing.partial:
         await index.set_partial_dir(key, rows)
     else:
         await index.set_dir(
@@ -115,12 +144,19 @@ async def keep_listing(
         seeded: list[tuple[str, FileStat]] = [
             (row.name, row) for row in children
         ]
-        await index.set_dir(
-            f"{stem}/{relative.strip('/')}",
-            seeded,
-            window=listing.window,
-            version=listing.version,
-        )
+        folder = f"{stem}/{relative.strip('/')}"
+        if refill is not None:
+            await index.refill_dir(
+                folder,
+                seeded,
+                refill,
+                window=listing.window,
+                version=listing.version,
+            )
+        else:
+            await index.set_dir(
+                folder, seeded, window=listing.window, version=listing.version
+            )
     return [f"{stem}/{row.name}" for row in listing.entries]
 
 
@@ -237,7 +273,10 @@ async def stored_tree(
 
 
 async def keep_tree(
-    index: IndexCacheStore, key: str, tree: dict[str, FileStat]
+    index: IndexCacheStore,
+    key: str,
+    tree: dict[str, FileStat],
+    refill: str | None = None,
 ) -> None:
     """Keep a subtree read as the listings it proves.
 
@@ -267,4 +306,7 @@ async def keep_tree(
             listings.setdefault(f"{base}/{relative}", [])
     for folder, rows in listings.items():
         if (await index.list_dir(folder)).entries is None:
-            await index.set_dir(folder, rows)
+            if refill is None:
+                await index.set_dir(folder, rows)
+            else:
+                await index.refill_dir(folder, rows, refill)

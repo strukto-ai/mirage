@@ -41,6 +41,42 @@ import {
 } from './constants.ts'
 import { globEscape } from '../file/utils.ts'
 
+const INVALIDATE_MISSING = `
+local changed, unknown = false, false
+local current = redis.call('GET', KEYS[3])
+for i = 3, #ARGV do
+  local path = ARGV[i]
+  local folder = string.match(path, '^(.*)/[^/]+$')
+  if folder == '' then folder = '/' end
+  local key = KEYS[1] .. folder
+  local raw = redis.call('GET', key)
+  if raw then
+    local listing = cjson.decode(raw)
+    local directory = redis.call('GET', KEYS[4] .. folder)
+    local found = false
+    for _, child in ipairs(listing.entries) do
+      if child == path then found = true; break end
+    end
+    if not current or not directory
+        or listing.generation ~= current .. ':' .. directory
+        or listing.expires_at <= tonumber(ARGV[1]) then
+      unknown = true
+    elseif listing.partial or listing.window then
+      if not found then unknown = true end
+    elseif not found then
+      listing.expires_at = 0
+      listing.version = cjson.null
+      local encoded = string.gsub(string.gsub(cjson.encode(listing),
+        '"entries":{}', '"entries":[]'), '"folders":{}', '"folders":[]')
+      redis.call('SET', key, encoded)
+      changed = true
+    end
+  else unknown = true end
+end
+if changed or unknown then redis.call('SET', KEYS[2], ARGV[2]) end
+return changed and 1 or 0
+`
+
 const REPLACE_ENTRY = `
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 redis.call('SET', KEYS[1], ARGV[2])
@@ -288,7 +324,7 @@ return {0, ARGV[1]}
 `
 
 const DELETE_PATHS =
-  PATH_REGISTRY +
+  LISTING_HISTORY +
   `
 if not redis.call('ZSCORE', KEYS[1], '') then
   error('MIRAGE_INDEX_REGISTRY_MISSING')
@@ -313,6 +349,10 @@ for _, path in ipairs(paths) do
     end
   end
   if not protected then
+    if ARGV[10] == '1' then
+      local raw = redis.call('GET', ARGV[2] .. path)
+      if raw then bury(ARGV[3] .. path, cjson.decode(raw)) end
+    end
     for _, prefix in ipairs(removed) do redis.call('DEL', prefix .. path) end
     prune(KEYS[1], prefixes, path)
   end
@@ -379,6 +419,9 @@ prune(KEYS[1], prefixes, ARGV[5])
 const WRITE_LISTING =
   LISTING_HISTORY +
   `
+if ARGV[8] ~= '' and redis.call('GET', KEYS[4] .. '-observation') ~= ARGV[8] then
+  return nil
+end
 local next = cjson.decode(ARGV[1])
 local path = string.sub(KEYS[1], #ARGV[3] + 1)
 track(KEYS[3], {ARGV[2], ARGV[3], ARGV[4], ARGV[5]}, {path})
@@ -388,7 +431,7 @@ if next.partial then
 else
   redis.call('DEL', KEYS[2])
 end
-for i = 8, #ARGV, 2 do
+for i = 9, #ARGV, 2 do
   if next.partial then
     local old = redis.call('GET', ARGV[2] .. ARGV[i])
     if (old and is_dir(cjson.decode(old)))
@@ -407,6 +450,9 @@ return 1
 const SWAP_LISTING =
   LISTING_HISTORY +
   `
+if ARGV[8] ~= '' and redis.call('GET', KEYS[4] .. '-observation') ~= ARGV[8] then
+  return nil
+end
 if not redis.call('ZSCORE', KEYS[3], '') then
   error('MIRAGE_INDEX_REGISTRY_MISSING')
 end
@@ -425,7 +471,7 @@ local function protected(path)
   return false
 end
 local named = {}
-for i = 8, #ARGV, 2 do
+for i = 9, #ARGV, 2 do
   named[ARGV[i]] = is_dir(cjson.decode(ARGV[i + 1]))
 end
 local seen, gone, folders = {}, {}, {}
@@ -461,7 +507,7 @@ end
 if saved then
   for _, path in ipairs(saved.entries) do drop(path, buried[path]) end
 end
-for i = 8, #ARGV, 2 do drop(ARGV[i], false) end
+for i = 9, #ARGV, 2 do drop(ARGV[i], false) end
 local roots = {}
 for i, path in ipairs(gone) do
   if folders[i] == 1 then roots[#roots + 1] = path end
@@ -476,7 +522,7 @@ end
 for _, root in ipairs(roots) do
   for _, path in ipairs(subtree(KEYS[3], root)) do remove(path) end
 end
-for i = 8, #ARGV, 2 do
+for i = 9, #ARGV, 2 do
   redis.call('SET', ARGV[2] .. ARGV[i], ARGV[i + 1])
   redis.call('ZADD', KEYS[3], 0, ARGV[i])
 end
@@ -743,7 +789,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       if (current !== null) return current
       // A new token after eviction must never revive an old listing.
       const generation = this.ids.uuid7()
-      if (key === this.generationKey) {
+      if (!key.startsWith(`${this.generationKey}:`)) {
         await c.set(key, generation, { NX: true })
       } else {
         const pipe = c.multi()
@@ -1012,7 +1058,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       options.window !== true,
       options.excluded ?? [],
       options.version ?? null,
-    )
+    ).then((result) => result ?? [])
   }
 
   override async setPartialDir(
@@ -1031,7 +1077,8 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     evict: boolean,
     excluded: readonly string[] = [],
     version: string | null = null,
-  ): Promise<Evicted[]> {
+    refill: string | null = null,
+  ): Promise<Evicted[] | null> {
     return this.listings.writing(async () => {
       await this.flushSeed()
       const c = await this.client()
@@ -1053,7 +1100,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
         window: !partial && !evict,
       }
       if (!evict) {
-        await c.eval(WRITE_LISTING, {
+        const accepted = await c.eval(WRITE_LISTING, {
           keys: [
             this.childrenKey(vfsPath),
             this.tombstonePrefix + vfsPath,
@@ -1069,14 +1116,15 @@ export class RedisIndexCacheStore extends IndexCacheStore {
             `${this.generationKey}:`,
             '[]',
             this.ids.uuid7(),
+            refill ?? '',
             ...rows.flat(),
           ],
         })
-        return []
+        return accepted === null ? null : []
       }
       // One script, so no other writer lands between reading the previous
       // listing and replacing it; the diff is against the true predecessor.
-      const [gone, folders] = (await this.evalComplete(c, SWAP_LISTING, {
+      const result = (await this.evalComplete(c, SWAP_LISTING, {
         keys: [
           this.childrenKey(vfsPath),
           this.tombstonePrefix + vfsPath,
@@ -1092,15 +1140,68 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           `${this.generationKey}:`,
           JSON.stringify(excluded.map(rstripSlash)),
           this.ids.uuid7(),
+          refill ?? '',
           ...rows.flat(),
         ],
-      })) as [string[], number[]]
+      })) as [string[], number[]] | null
+      if (result === null) return null
+      const [gone, folders] = result
       const dropped: Evicted[] = []
       for (const [i, path] of gone.entries()) {
         dropped.push({ path, folder: folders[i] === 1 })
       }
       return dropped
     })
+  }
+
+  override async refillToken(): Promise<string> {
+    await this.flushSeed()
+    return this.generation(await this.client(), `${this.generationKey}-observation`)
+  }
+
+  override async invalidateMissing(paths: readonly string[]): Promise<boolean> {
+    await this.flushSeed()
+    if (paths.length === 0) return false
+    if (this.listings.allows(paths) && !this.listings.contradicts(paths)) return false
+    let changed: boolean
+    try {
+      const result = await (
+        await this.client()
+      ).eval(INVALIDATE_MISSING, {
+        keys: [
+          this.childrenPrefix,
+          `${this.generationKey}-observation`,
+          this.generationKey,
+          `${this.generationKey}:`,
+        ],
+        arguments: [String(this.clock.now()), this.ids.uuid7(), ...paths],
+      })
+      changed = result === 1
+    } catch (err) {
+      this.listings.wrote()
+      throw err
+    }
+    if (changed || this.listings.contradicts(paths)) this.listings.wrote()
+    return changed
+  }
+
+  override refillDir(
+    path: string,
+    entries: readonly [string, FileStat][],
+    token: string,
+    expiredAt?: Date | null,
+    options: SetDirOptions & { partial?: boolean } = {},
+  ): Promise<Evicted[] | null> {
+    return this.storeDir(
+      path,
+      entries,
+      expiredAt,
+      options.partial === true,
+      options.partial !== true && options.window !== true,
+      options.excluded ?? [],
+      options.version ?? null,
+      token,
+    )
   }
 
   invalidateEntry(vfsPath: string): Promise<void> {
@@ -1156,6 +1257,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     prefixes: readonly string[],
     vfsPath: string,
     excluded: readonly string[] = [],
+    remember = false,
   ): Promise<void> {
     const c = await this.client()
     let cursor = ''
@@ -1172,17 +1274,28 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           JSON.stringify(excluded.map(rstripSlash)),
           cursor,
           String(REGISTRY_PAGE),
+          remember ? '1' : '0',
         ],
       })) as string
     } while (cursor !== '')
   }
 
-  invalidatePrefix(vfsPath: string, excluded: readonly string[] = []): Promise<void> {
+  invalidatePrefix(
+    vfsPath: string,
+    excluded: readonly string[] = [],
+    remember = false,
+  ): Promise<void> {
     return this.listings.writing(async () => {
       await this.flushSeed()
+      await (await this.client()).set(`${this.generationKey}-observation`, this.ids.uuid7())
       // Tombstones survive until the next complete listing proves removals.
       await this.deletePaths([this.entryPrefix], vfsPath, excluded)
-      await this.deletePaths([this.childrenPrefix, `${this.generationKey}:`], vfsPath, excluded)
+      await this.deletePaths(
+        [this.childrenPrefix, `${this.generationKey}:`],
+        vfsPath,
+        excluded,
+        remember,
+      )
     })
   }
 
@@ -1205,6 +1318,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     return this.listings.writing(async () => {
       await this.flushSeed()
       const c = await this.client()
+      await c.set(`${this.generationKey}-observation`, this.ids.uuid7())
       // Atomically expire listings without overwriting concurrent refills/deletions.
       await c.set(this.generationKey, this.ids.uuid7())
     })
@@ -1213,6 +1327,8 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   clear(): Promise<void> {
     return this.listings.writing(() =>
       this.seedLock.withLock('seed', async () => {
+        const client = await this.client()
+        await client.set(`${this.generationKey}-observation`, this.ids.uuid7())
         this.pendingSeeds.length = 0
         await this.deletePaths([this.entryPrefix], '/')
         await this.deletePaths(
@@ -1227,8 +1343,11 @@ export class RedisIndexCacheStore extends IndexCacheStore {
 
   override async close(): Promise<void> {
     if (this.closed) return
-    await this.flushSeed()
-    this.listings.close()
+    try {
+      await this.flushSeed()
+    } finally {
+      this.listings.close()
+    }
     if (this.providedClient === null && this.clientPromise !== null) {
       const c = await this.clientPromise
       const typed = c as unknown as { destroy?: () => void }

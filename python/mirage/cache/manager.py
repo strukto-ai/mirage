@@ -385,13 +385,16 @@ class CacheManager:
         return self._read_generation
 
     def note_probed(self, path: PathSpec, stat: FileStat) -> None:
-        """Remember what the freshness probe got from the backend for ``path``.
+        """Remember what a probe or a direct stat got from the backend.
 
-        Only the reconciler's probe calls this, and only with an answer it
-        got from the backend, so a stat served from an index row -- which
-        may carry no content token -- never lands here. A path the backend
-        reports gone records nothing: the probe asks the backend only when
-        no answer is servable, so there is nothing left to take back.
+        Called only with an answer the backend gave: the reconciler's
+        probe, and under any read policy a stat that asked the backend
+        itself, since its point observation can expire the parent
+        listing the next lookup would otherwise walk again. A stat served
+        from an index row -- which may carry no content token -- never
+        lands here. A path the backend reports gone records nothing: the
+        probe asks the backend only when no answer is servable, so there
+        is nothing left to take back.
 
         Args:
             path (PathSpec): the probed path; only ``virtual`` is read.
@@ -424,8 +427,9 @@ class CacheManager:
         """The backend's answer for ``path`` from this command's probe.
 
         A read command stats its own operand after the probe already asked
-        the backend; under fresh, asking again resolves through listings the
-        command has not re-checked, and re-lists every folder on the path.
+        the backend; asking again resolves through listings the command has
+        not re-checked (or that its observation expired), and re-lists
+        every folder on the path.
         The answer is served only inside the command that probed, and only
         while no cache drop has landed since: a write in the command
         (``sed -i``, ``> f``), the clear after an external program, and a

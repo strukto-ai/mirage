@@ -17,6 +17,7 @@ from collections import Counter, OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from time import monotonic
+from weakref import WeakSet
 
 from mirage.cache.index.config import ListResult
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW, ROW_READ_BATCH
@@ -28,7 +29,8 @@ _WRITES_BY_PREFIX: Counter[str] = Counter()
 _ROW_WRITES_BY_PREFIX: Counter[str] = Counter()
 # Each row written within the last window, with its write count and time.
 _ROWS_WRITTEN_BY_PREFIX: dict[str, OrderedDict[str, tuple[int, float]]] = {}
-_HOLDERS_BY_PREFIX: Counter[str] = Counter()
+# The open memos on each prefix, which share its write count.
+_HOLDERS_BY_PREFIX: dict[str, WeakSet["ListingMemo"]] = {}
 _PREFIX_LOCK = threading.Lock()
 
 
@@ -111,13 +113,51 @@ class ListingMemo:
         self._reads: OrderedDict[tuple[int, str], _Read] = OrderedDict()
         self._closed = False
         with _PREFIX_LOCK:
-            _HOLDERS_BY_PREFIX[key_prefix] += 1
+            _HOLDERS_BY_PREFIX.setdefault(key_prefix, WeakSet()).add(self)
 
     def _live(self, kept: _Read) -> bool:
         return (
             kept.writes_before == _WRITES_BY_PREFIX[self._key_prefix]
             and monotonic() - kept.read_at < LISTING_TRUST_WINDOW
             and self._clock.now() < kept.expires_at
+        )
+
+    def allows(self, paths: Sequence[str]) -> bool:
+        """Whether this command's live listings already name every path.
+
+        Args:
+            paths (Sequence[str]): observed immediate child keys.
+        """
+        stamp = sole_command_started()
+        if stamp is None:
+            return False
+        for path in paths:
+            folder = path.rsplit("/", 1)[0] or "/"
+            kept = self._reads.get((stamp, folder))
+            if kept is None or not self._live(kept):
+                return False
+            if path not in _positions(kept):
+                return False
+        return True
+
+    def contradicts(self, paths: Sequence[str]) -> bool:
+        """Whether a live listing any open memo on this prefix keeps
+        leaves out one of the paths.
+
+        Args:
+            paths (Sequence[str]): observed immediate child keys.
+        """
+        observed: dict[str, list[str]] = {}
+        for path in paths:
+            observed.setdefault(path.rsplit("/", 1)[0] or "/", []).append(path)
+        with _PREFIX_LOCK:
+            memos = list(_HOLDERS_BY_PREFIX.get(self._key_prefix, ()))
+        return any(
+            memo._live(kept)
+            and any(path not in _positions(kept) for path in observed[folder])
+            for memo in memos
+            for (_, folder), kept in list(memo._reads.items())
+            if folder in observed
         )
 
     async def read(
@@ -240,9 +280,11 @@ class ListingMemo:
             return
         self._closed = True
         with _PREFIX_LOCK:
-            _HOLDERS_BY_PREFIX[self._key_prefix] -= 1
-            if _HOLDERS_BY_PREFIX[self._key_prefix] <= 0:
-                del _HOLDERS_BY_PREFIX[self._key_prefix]
+            holders = _HOLDERS_BY_PREFIX.get(self._key_prefix)
+            if holders is not None:
+                holders.discard(self)
+            if not holders:
+                _HOLDERS_BY_PREFIX.pop(self._key_prefix, None)
                 _WRITES_BY_PREFIX.pop(self._key_prefix, None)
                 _ROW_WRITES_BY_PREFIX.pop(self._key_prefix, None)
                 _ROWS_WRITTEN_BY_PREFIX.pop(self._key_prefix, None)

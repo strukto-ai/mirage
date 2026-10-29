@@ -98,6 +98,24 @@ export abstract class IndexCacheStore {
   reportGone(_gone: readonly Evicted[]): Promise<void> {
     return Promise.resolve()
   }
+  /** Token captured before fetching listings, including descendant seeds. */
+  refillToken(): Promise<string> {
+    throw new Error('refillToken is not implemented')
+  }
+  /** Expire complete parent listings contradicted by the observed immediate child keys. */
+  invalidateMissing(_paths: readonly string[]): Promise<boolean> {
+    throw new Error('invalidateMissing is not implemented')
+  }
+  /** null rejects an older refill without reporting any deletions. */
+  refillDir(
+    _path: string,
+    _entries: readonly [string, FileStat][],
+    _token: string,
+    _expiredAt?: Date | null,
+    _options: SetDirOptions & { partial?: boolean } = {},
+  ): Promise<Evicted[] | null> {
+    throw new Error('refillDir is not implemented')
+  }
   /**
    * Drop a changed row and demote its parent listing to partial.
    * Retain siblings, the original deadline and deletion history. Clear the
@@ -131,9 +149,15 @@ export abstract class IndexCacheStore {
    * because the listings further down were cached independently and nothing
    * above them expires them.
    *
+   * `remember` retains current membership as deletion history for the next
+   * complete listing; the default forgets it.
    * Mirrors Python `IndexCacheStore.invalidate_prefix`.
    */
-  abstract invalidatePrefix(vfsPath: string, excluded?: readonly string[]): Promise<void>
+  abstract invalidatePrefix(
+    vfsPath: string,
+    excluded?: readonly string[],
+    remember?: boolean,
+  ): Promise<void>
   /**
    * Whether the running command fetched `folder`'s listing itself.
    *

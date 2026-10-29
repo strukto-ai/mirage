@@ -77,6 +77,7 @@ class IndexView(IndexCacheStore):
             mount roots protected from recursive deletion.
         """
         super().__init__(store.clock)
+        self._unverified = False
         self._store = store
         self._cache = cache
         self._prefix = prefix or "/"
@@ -182,6 +183,8 @@ class IndexView(IndexCacheStore):
         async with self._fence():
             if not self._owns(vfs_path):
                 return ListResult(status=LookupStatus.NOT_FOUND)
+            if self._unverified:
+                return ListResult(status=LookupStatus.EXPIRED)
             result = await self._store.list_dir(vfs_path, child)
             if not self._owns(vfs_path):
                 return ListResult(status=LookupStatus.NOT_FOUND)
@@ -362,6 +365,74 @@ class IndexView(IndexCacheStore):
                 if self._owns(path)
             }
 
+    async def refill_token(self) -> str:
+        async with self._fence():
+            if self._unverified and self._owns(self._prefix):
+                await self._store.invalidate_prefix(
+                    self._prefix,
+                    excluded=self._excluded_prefixes(),
+                    remember=True,
+                )
+                self._unverified = False
+            return await self._store.refill_token()
+
+    async def invalidate_missing(self, paths: Sequence[str]) -> bool:
+        async with self._fence():
+            owned = [p for p in paths if self._owns(p)]
+            if not owned:
+                return False
+            try:
+                if self._unverified:
+                    await self._store.invalidate_prefix(
+                        self._prefix,
+                        excluded=self._excluded_prefixes(),
+                        remember=True,
+                    )
+                result = await self._store.invalidate_missing(owned)
+                self._unverified = False
+                return result
+            except Exception:
+                self._unverified = True
+                raise
+
+    async def refill_dir(
+        self,
+        vfs_path: str,
+        entries: Sequence[tuple[str, FileStat]],
+        token: str,
+        expired_at: datetime | None = None,
+        *,
+        partial: bool = False,
+        window: bool = False,
+        excluded: tuple[str, ...] = (),
+        version: str | None = None,
+    ) -> list[Evicted] | None:
+        async with self._fence():
+            if self._unverified or not self._owns(vfs_path):
+                return None
+            prefix = vfs_path.rstrip("/") + "/"
+            owned = [
+                (name, row)
+                for name, row in entries
+                if self._owns(prefix + name)
+            ]
+            gone = await self._store.refill_dir(
+                vfs_path,
+                owned,
+                token,
+                self._deadline(expired_at),
+                partial=partial,
+                window=window,
+                excluded=excluded + self._excluded_prefixes(),
+                version=version,
+            )
+            if gone is None:
+                return None
+            self._noted(vfs_path)
+            gone = [child for child in gone if self._owns(child.path)]
+        await self.report_gone(gone)
+        return gone
+
     async def invalidate_entry(self, vfs_path: str) -> None:
         async with self._fence():
             if self._owns(vfs_path):
@@ -373,12 +444,18 @@ class IndexView(IndexCacheStore):
                 await self._store.invalidate_dir(vfs_path)
 
     async def invalidate_prefix(
-        self, vfs_path: str, *, excluded: tuple[str, ...] = ()
+        self,
+        vfs_path: str,
+        *,
+        excluded: tuple[str, ...] = (),
+        remember: bool = False,
     ) -> None:
         async with self._fence():
             if self._owns(vfs_path):
                 await self._store.invalidate_prefix(
-                    vfs_path, excluded=excluded + self._excluded_prefixes()
+                    vfs_path,
+                    excluded=excluded + self._excluded_prefixes(),
+                    remember=remember,
                 )
 
     async def holds_subtree(self, vfs_path: str) -> bool:

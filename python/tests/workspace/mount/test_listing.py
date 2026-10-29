@@ -12,15 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from unittest.mock import patch
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.types import DirListing, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.clock import ManualClock
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount.listing import (
     beyond_window,
@@ -32,6 +34,10 @@ from mirage.workspace.mount.listing import (
     stored_stat,
     stored_tree,
 )
+
+
+async def _unavailable(paths):
+    raise RuntimeError("unavailable")
 
 
 class Folders(BaseVFS):
@@ -521,7 +527,7 @@ async def test_a_lookup_a_check_cleared_midway_looks_again():
     ws = Workspace({"/w/": (store, MountMode.READ)})
     try:
         index = ws.mount("/w").index_store
-        listed = index.set_dir
+        listed = index.refill_dir
         cleared: list[str] = []
 
         async def set_then_clear(key, *args, **kwargs):
@@ -531,7 +537,7 @@ async def test_a_lookup_a_check_cleared_midway_looks_again():
                 await index.clear()
             return gone
 
-        with patch.object(index, "set_dir", set_then_clear):
+        with patch.object(index, "refill_dir", set_then_clear):
             row, _ = await ws.dispatch("stat", _at("/w/chan"))
         assert row.type is FileType.DIRECTORY
         assert cleared == ["/w"]
@@ -636,3 +642,262 @@ async def test_a_miss_outside_a_command_asks_by_path():
     finally:
         await ws.close()
     assert found.name == "new"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["cat", "stat", "read"])
+async def test_a_point_observation_expires_a_contradictory_listing(operation):
+    keys = Keys({"f": b"1\n"})
+    ws = Workspace({"/k": keys})
+    try:
+        await ws.vfs.readdir("/k")
+        keys.files["new"] = b"2\n"
+        keys.calls.clear()
+        if operation == "cat":
+            result = await ws.shell("cat /k/new; ls /k")
+            assert await result.stdout_str() == "2\nf\nnew\n"
+            assert result.exit_code == 0
+        else:
+            if operation == "stat":
+                assert (await ws.vfs.stat("/k/new")).name == "new"
+            else:
+                assert await ws.vfs.read("/k/new") == b"2\n"
+            assert ("list", "") not in keys.calls
+            assert await ws.vfs.readdir("/k") == ["/k/f", "/k/new"]
+        assert keys.calls.count(("list", "")) == 1
+        await ws.vfs.readdir("/k")
+        assert keys.calls.count(("list", "")) == 1
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("partial", [False, True])
+async def test_a_late_listing_cannot_restore_absence_after_a_point_stat(
+    partial,
+):
+    keys = Keys({"f": b"1\n"})
+    ws = Workspace({"/k": keys})
+    if partial:
+        await ws.mount("/k").index_store.set_partial_dir(
+            "/k", [("f", FileStat(name="f", type=FileType.FILE))]
+        )
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = keys.readdir
+
+    async def delayed(path):
+        rows = await original(path)
+        if not entered.is_set():
+            entered.set()
+            await release.wait()
+        return rows
+
+    keys.readdir = delayed
+    listing = asyncio.create_task(ws.vfs.readdir("/k"))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        keys.files["new"] = b"2\n"
+        assert (await ws.vfs.stat("/k/new")).name == "new"
+        release.set()
+        await listing
+        assert await ws.vfs.readdir("/k") == ["/k/f", "/k/new"]
+    finally:
+        release.set()
+        await listing
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["/", "/data", "/nested/data"])
+async def test_a_point_read_repairs_a_deep_ancestor_without_cached_intermediates(
+    prefix,
+):
+    ram = RAMVFS()
+    ram.accessor.store.files["/keep"] = b"keep"
+    ws = Workspace({prefix: ram})
+    base = prefix.rstrip("/")
+    try:
+        await ws.vfs.readdir(prefix)
+        ram.accessor.store.files["/a/b/new"] = b"new"
+        assert await ws.vfs.read(base + "/a/b/new") == b"new"
+        names = await ws.vfs.readdir(prefix)
+        assert base + "/a" in names
+        assert base + "/keep" in names
+    finally:
+        await ws.close()
+
+
+class Pulls(BaseVFS):
+    def __init__(self, fail=False, empty=False):
+        super().__init__()
+        self.files = {"f": b"old"}
+        self.fail = fail
+        self.empty = empty
+        self.tail = False
+        self.closed = False
+
+    async def readdir(self, path):
+        return [
+            FileStat(name=name, type=FileType.FILE, size=len(data))
+            for name, data in sorted(self.files.items())
+        ]
+
+    async def read(self, path):
+        try:
+            if self.fail:
+                raise RuntimeError("read failed")
+            if not self.empty:
+                yield b"n"
+                self.tail = True
+                raise AssertionError("consumer pulled the tail")
+        finally:
+            self.closed = True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["prefix", "empty", "failure"])
+async def test_stream_point_observation_does_not_drain_the_source(kind):
+    store = Pulls(fail=kind == "failure", empty=kind == "empty")
+    ws = Workspace({"/k": store})
+    try:
+        await ws.vfs.readdir("/k")
+        store.files["new"] = b"new"
+        if kind == "failure":
+            with pytest.raises(RuntimeError, match="read failed"):
+                await ws.vfs.read("/k/new", stream=True)
+            assert (
+                await ws.mount("/k").index_store.list_dir("/k")
+            ).entries == ["/k/f"]
+        else:
+            stream = await ws.vfs.read("/k/new", stream=True)
+            if kind == "prefix":
+                assert await anext(stream) == b"n"
+            else:
+                assert [chunk async for chunk in stream] == []
+            await stream.aclose()
+            assert await ws.vfs.readdir("/k") == ["/k/f", "/k/new"]
+        assert not store.tail
+        assert store.closed
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_rejected_warm_still_resolves_a_backend_id():
+    folders = Folders()
+    folders.add("found", data=b"present")
+    ws = Workspace({"/f": folders})
+    index = ws.mount("/f").index_store
+    await index.set_partial_dir("/f", [])
+    original = folders.readdir
+
+    async def retire_refill(path, entry=None):
+        rows = await original(path, entry)
+        await index.invalidate_missing(["/unrelated/new"])
+        return rows
+
+    folders.readdir = retire_refill
+    try:
+        assert (await ws.vfs.stat("/f/found")).name == "found"
+        assert (await index.list_dir("/f")).partial_entries == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_complete_listing_answers_a_miss_without_relisting():
+    folders = Folders()
+    folders.add("found", data=b"present")
+    ws = Workspace({"/f": folders})
+    index = ws.mount("/f").index_store
+    original = folders.readdir
+
+    async def retire_refill(path, entry=None):
+        rows = await original(path, entry)
+        await index.invalidate_missing(["/unrelated/new"])
+        return rows
+
+    folders.readdir = retire_refill
+    try:
+        with pytest.raises(FileNotFoundError):
+            await ws.vfs.stat("/f/missing")
+        assert folders.calls.count(("list", "root")) == 1
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["scratch", "retired", "live"])
+async def test_only_a_current_direct_stat_can_note_a_probe(kind):
+    keys = Keys({"new": b"present"})
+    ws = Workspace({"/k": keys})
+    mount = ws.mount("/k")
+    manager = mount.cache_manager
+    original = keys.stat
+
+    async def stat(path):
+        row = await original(path)
+        if kind != "live":
+            manager.retire()
+        return row
+
+    keys.stat = stat
+    index = ListingCheckStore() if kind == "scratch" else mount.index
+    try:
+        async with command_scope():
+            await mount.call("stat", "/k/new", index=index)
+            found = manager.probed_stat(PathSpec.from_str_path("/k/new"))
+            assert (found is not None) is (kind == "live")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_retired_beyond_stat_does_not_note_a_probe():
+    keys = Keys({"new": b"present"})
+    ws = Workspace({"/k": keys})
+    mount = ws.mount("/k")
+    await mount.index_store.set_dir("/k", [])
+    manager = mount.cache_manager
+    original = keys.stat
+
+    async def stat(path):
+        row = await original(path)
+        manager.retire()
+        return row
+
+    keys.stat = stat
+    try:
+        async with command_scope():
+            assert await ws.vfs.read("/k/new") == b"present"
+            assert (
+                manager.probed_stat(PathSpec.from_str_path("/k/new")) is None
+            )
+    finally:
+        await ws.close()
+
+
+class CachedKeys(Keys):
+    caches_reads = True
+
+
+@pytest.mark.asyncio
+async def test_recovery_removes_bytes_of_a_file_the_peer_deleted(monkeypatch):
+    keys = CachedKeys({"old": b"deleted bytes"})
+    ws = Workspace({"/k": keys})
+    try:
+        await ws.vfs.readdir("/k")
+        assert await ws.vfs.read("/k/old") == b"deleted bytes"
+        del keys.files["old"]
+        keys.files["new"] = b"new"
+
+        with monkeypatch.context() as patcher:
+            patcher.setattr(
+                ws.mount("/k").index_store, "invalidate_missing", _unavailable
+            )
+            assert (await ws.vfs.stat("/k/new")).name == "new"
+        assert await ws.vfs.readdir("/k") == ["/k/new"]
+        with pytest.raises(FileNotFoundError):
+            await ws.vfs.read("/k/old")
+    finally:
+        await ws.close()

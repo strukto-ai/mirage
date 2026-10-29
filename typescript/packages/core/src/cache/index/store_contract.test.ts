@@ -5,6 +5,7 @@ import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
 import { IndexCacheStore } from './store.ts'
 import { IndexView } from './view.ts'
+import { runInCommandScope } from './scope.ts'
 import { RAMFileCacheStore } from '../file/ram.ts'
 
 const REDIS_URL = process.env.REDIS_URL
@@ -50,6 +51,138 @@ for (const backend of ['ram', 'redis']) {
         await store.clear()
         await store.close()
       })
+
+      it('expires only contradicted membership and retains metadata', async () => {
+        await store.setDir('/dir', [['a', entry()]], null, { version: 'before' })
+        await store.setDir('/other', [['a', entry()]])
+        expect(await store.invalidateMissing(['/dir/new'])).toBe(true)
+        expect((await store.listDir('/dir')).status).toBe(LookupStatus.EXPIRED)
+        expect((await store.get('/dir/a')).entry).toEqual(entry())
+        expect((await store.listDir('/other')).entries).toEqual(['/other/a'])
+        expect(await store.invalidateMissing(['/other/a'])).toBe(false)
+      })
+
+      it.each(['window', 'partial', 'expired', 'absent'])(
+        'does not reinterpret a %s listing',
+        async (kind) => {
+          if (kind === 'window')
+            await store.setDir('/dir', [['a', entry()]], null, { window: true })
+          else if (kind === 'partial') await store.setPartialDir('/dir', [['a', entry()]])
+          else if (kind === 'expired')
+            await store.setDir('/dir', [['a', entry()]], new Date(Date.now() - 1000))
+          const before = await store.listDir('/dir')
+          expect(await store.invalidateMissing(['/dir/new'])).toBe(false)
+          expect(await store.listDir('/dir')).toEqual(before)
+        },
+      )
+
+      it('fences an old refill across clients with no cached listing', async () => {
+        const peer = backend === 'ram' ? store : build()
+        try {
+          const ticket = await store.refillToken()
+          await peer.invalidateMissing(['/dir/new'])
+          expect(await store.refillDir('/dir', [['old', entry('old')]], ticket)).toBe(null)
+          expect((await store.listDir('/dir')).entries ?? null).toBe(null)
+          const fresh = await store.refillToken()
+          expect(await store.refillDir('/dir', [['new', entry('new')]], fresh)).toEqual([])
+          expect((await store.listDir('/dir')).entries).toEqual(['/dir/new'])
+        } finally {
+          if (peer !== store) await peer.close()
+        }
+      })
+
+      it.each(['partial', 'window'])('fences refills from a %s listing', async (kind) => {
+        if (kind === 'partial') await store.setPartialDir('/dir', [['a', entry()]])
+        else await store.setDir('/dir', [['a', entry()]], null, { window: true })
+        const ticket = await store.refillToken()
+        const before = await runInCommandScope(async () => {
+          const kept = await store.listDir('/dir')
+          expect(await store.invalidateMissing(['/dir/new'])).toBe(false)
+          expect(await store.listDir('/dir')).toEqual(kept)
+          return kept
+        })
+        expect(await store.refillDir('/dir', [['old', entry('old')]], ticket)).toBe(null)
+        expect(await store.listDir('/dir')).toEqual(before)
+      })
+
+      it('point observation refill tickets do not survive clear', async () => {
+        const ticket = await store.refillToken()
+        await store.clear()
+        expect(await store.refillDir('/dir', [['old', entry()]], ticket)).toBe(null)
+      })
+
+      it.each(['invalidated', 'expired-partial'])(
+        'a stale %s listing naming the path still fences refills',
+        async (kind) => {
+          if (kind === 'invalidated') {
+            await store.setDir('/dir', [['a', entry()]])
+            await store.invalidate()
+          } else {
+            await store.setPartialDir('/dir', [['a', entry()]], new Date(Date.now() - 1000))
+          }
+          const ticket = await store.refillToken()
+          expect(await store.invalidateMissing(['/dir/a'])).toBe(false)
+          expect(await store.refillDir('/dir', [], ticket)).toBe(null)
+        },
+      )
+
+      it('an empty listing stays readable after point invalidation', async () => {
+        await store.setDir('/dir', [])
+        expect(await store.invalidateMissing(['/dir/first'])).toBe(true)
+        expect((await store.listDir('/dir')).status).toBe(LookupStatus.EXPIRED)
+        const ticket = await store.refillToken()
+        expect(await store.refillDir('/dir', [['first', entry('first')]], ticket)).toEqual([])
+        expect((await store.listDir('/dir')).entries).toEqual(['/dir/first'])
+      })
+
+      it('prefix forget retires an older refill', async () => {
+        const ticket = await store.refillToken()
+        await store.invalidatePrefix('/dir')
+        expect(await store.refillDir('/dir', [], ticket)).toBe(null)
+      })
+
+      it.each([
+        [false, false, false],
+        [false, false, true],
+        [false, true, false],
+        [false, true, true],
+        [true, false, false],
+        [true, false, true],
+        [true, true, false],
+        [true, true, true],
+      ])(
+        'recovery preserves deletion history (deep=%s, directory=%s, observation=%s)',
+        async (deep, directory, observation) => {
+          const cache = new RAMFileCacheStore()
+          const parent = deep ? '/data/sub' : '/data'
+          const old = `${parent}/old`
+          const body = directory ? `${old}/inside` : old
+          await cache.set(body, new TextEncoder().encode('deleted bytes'))
+          await store.setDir(parent, [['old', directory ? folder('old') : entry('old')]])
+          if (directory) await store.setDir(old, [['inside', entry('inside')]])
+          const removed: string[] = []
+          const view = new IndexView(store, cache, '/data', () => true, {
+            onGone: async (gone) => {
+              for (const child of gone) {
+                removed.push(child.path)
+                await cache.remove(child.path, { subtree: child.folder })
+              }
+            },
+          })
+          const failure = vi
+            .spyOn(store, 'invalidateMissing')
+            .mockRejectedValueOnce(new Error('unavailable'))
+          await expect(view.invalidateMissing([`${parent}/new`])).rejects.toThrow('unavailable')
+          failure.mockRestore()
+          if (observation) await view.invalidateMissing([`${parent}/new`])
+          const ticket = await view.refillToken()
+          expect(await view.refillDir(parent, [['new', entry('new')]], ticket)).toEqual([
+            { path: old, folder: directory },
+          ])
+          expect(removed).toEqual([old])
+          expect(await cache.get(body)).toBe(null)
+        },
+      )
 
       it('returns only requested retained rows in a batch', async () => {
         expect(await store.getMany([])).toEqual(new Map())

@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { enoent } from '../../errors/fs.ts'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { type Clock, ManualClock } from '../../utils/clock.ts'
@@ -577,9 +578,9 @@ describe('a window', () => {
     const ws = new Workspace({ '/w/': store }, { mode: MountMode.READ })
     try {
       const index = ws.mount('/w').indexStore
-      const listed = index.setDir.bind(index)
+      const listed = index.refillDir.bind(index)
       const cleared: string[] = []
-      vi.spyOn(index, 'setDir').mockImplementation(async (key, ...rest) => {
+      vi.spyOn(index, 'refillDir').mockImplementation(async (key, ...rest) => {
         const gone = await listed(key, ...rest)
         if (key === '/w' && cleared.length === 0) {
           cleared.push(key)
@@ -692,4 +693,265 @@ describe('a name a listing leaves out', () => {
       await ws.close()
     }
   })
+})
+
+describe('point observation invalidation', () => {
+  it.each(['cat', 'stat', 'read'])(
+    'expires a contradictory listing after %s',
+    async (operation) => {
+      const keys = new Keys(new Map([['f', ENC.encode('1\n')]]))
+      const ws = keysWorkspace(keys)
+      try {
+        await ws.vfs.readdir('/k')
+        keys.files.set('new', ENC.encode('2\n'))
+        keys.calls.length = 0
+        if (operation === 'cat') {
+          const result = await ws.shell('cat /k/new; ls /k')
+          expect(new TextDecoder().decode(result.stdout)).toBe('2\nf\nnew\n')
+          expect(result.exitCode).toBe(0)
+        } else {
+          if (operation === 'stat') expect((await ws.vfs.stat('/k/new')).name).toBe('new')
+          else expect(await ws.vfs.read('/k/new')).toEqual(ENC.encode('2\n'))
+          expect(keys.calls).not.toContainEqual(['list', ''])
+          expect(await ws.vfs.readdir('/k')).toEqual(['/k/f', '/k/new'])
+        }
+        expect(keys.calls.filter(([op]) => op === 'list')).toHaveLength(1)
+        await ws.vfs.readdir('/k')
+        expect(keys.calls.filter(([op]) => op === 'list')).toHaveLength(1)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+})
+
+it.each([false, true])(
+  'a late listing cannot restore absence after a point stat (partial=%s)',
+  async (partial) => {
+    const keys = new Keys(new Map([['f', ENC.encode('1\n')]]))
+    const ws = keysWorkspace(keys)
+    if (partial)
+      await ws
+        .mount('/k')
+        .indexStore.setPartialDir('/k', [['f', new FileStat({ name: 'f', type: FileType.FILE })]])
+    let enter!: () => void
+    let resume!: () => void
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const original = keys.readdir.bind(keys)
+    let first = true
+    keys.readdir = async (path) => {
+      const rows = await original(path)
+      if (first) {
+        first = false
+        enter()
+        await release
+      }
+      return rows
+    }
+    const listing = ws.vfs.readdir('/k')
+    try {
+      await entered
+      keys.files.set('new', ENC.encode('2\n'))
+      expect((await ws.vfs.stat('/k/new')).name).toBe('new')
+      resume()
+      await listing
+      expect(await ws.vfs.readdir('/k')).toEqual(['/k/f', '/k/new'])
+    } finally {
+      resume()
+      await listing
+      await ws.close()
+    }
+  },
+)
+
+it.each(['/', '/data', '/nested/data'])('repairs deep ancestors at %s', async (prefix) => {
+  const ram = new RAMVFS()
+  ram.accessor.store.files.set('/keep', ENC.encode('keep'))
+  const ws = new Workspace({ [prefix]: ram })
+  const base = prefix.replace(/\/$/, '')
+  try {
+    await ws.vfs.readdir(prefix)
+    ram.accessor.store.files.set('/a/b/new', ENC.encode('new'))
+    expect(await ws.vfs.read(base + '/a/b/new')).toEqual(ENC.encode('new'))
+    const names = await ws.vfs.readdir(prefix)
+    expect(names).toContain(base + '/a')
+    expect(names).toContain(base + '/keep')
+  } finally {
+    await ws.close()
+  }
+})
+
+class Pulls extends BaseVFS {
+  override readonly name: string = 'pulls'
+  readonly files = new Map([['f', ENC.encode('old')]])
+  tail = false
+  closed = false
+  constructor(readonly kind: string) {
+    super()
+  }
+  override readdir(): Promise<FileStat[]> {
+    return Promise.resolve(
+      [...this.files].map(
+        ([name, data]) => new FileStat({ name, type: FileType.FILE, size: data.byteLength }),
+      ),
+    )
+  }
+  override async *read(): AsyncIterable<Uint8Array> {
+    await Promise.resolve()
+    try {
+      if (this.kind === 'failure') throw new Error('read failed')
+      if (this.kind !== 'empty') {
+        yield ENC.encode('n')
+        this.tail = true
+        throw new Error('consumer pulled the tail')
+      }
+    } finally {
+      this.closed = true
+    }
+  }
+}
+
+it.each(['prefix', 'empty', 'failure'])(
+  'observes a %s stream without draining it',
+  async (kind) => {
+    const store = new Pulls(kind)
+    const ws = new Workspace({ '/k': store })
+    try {
+      await ws.vfs.readdir('/k')
+      store.files.set('new', ENC.encode('new'))
+      if (kind === 'failure') {
+        await expect(ws.vfs.read('/k/new', { stream: true })).rejects.toThrow('read failed')
+        expect((await ws.mount('/k').indexStore.listDir('/k')).entries).toEqual(['/k/f'])
+      } else {
+        const stream = await ws.vfs.read('/k/new', { stream: true })
+        const iterator = stream[Symbol.asyncIterator]()
+        const first = await iterator.next()
+        if (kind === 'prefix') expect(first.value).toEqual(ENC.encode('n'))
+        else expect(first.done).toBe(true)
+        await iterator.return?.()
+        expect(await ws.vfs.readdir('/k')).toEqual(['/k/f', '/k/new'])
+      }
+      expect(store.tail).toBe(false)
+      expect(store.closed).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  },
+)
+
+it('a rejected warm still resolves a backend id', async () => {
+  const folders = new Folders()
+  folders.add('found', 'root', ENC.encode('present'))
+  const ws = workspace(folders)
+  const index = ws.mount('/f').indexStore
+  await index.setPartialDir('/f', [])
+  const original = folders.readdir.bind(folders)
+  folders.readdir = async (path, handed) => {
+    const rows = await original(path, handed)
+    await index.invalidateMissing(['/unrelated/new'])
+    return rows
+  }
+  try {
+    expect((await ws.vfs.stat('/f/found')).name).toBe('found')
+    expect((await index.listDir('/f')).partialEntries).toEqual([])
+  } finally {
+    await ws.close()
+  }
+})
+
+it('a rejected complete listing answers a miss without listing again', async () => {
+  const folders = new Folders()
+  folders.add('found', 'root', ENC.encode('present'))
+  const ws = workspace(folders)
+  const index = ws.mount('/f').indexStore
+  const original = folders.readdir.bind(folders)
+  folders.readdir = async (path, handed) => {
+    const rows = await original(path, handed)
+    await index.invalidateMissing(['/unrelated/new'])
+    return rows
+  }
+  try {
+    await expect(ws.vfs.stat('/f/missing')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(folders.calls.filter(([op, id]) => op === 'list' && id === 'root')).toHaveLength(1)
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each(['scratch', 'retired', 'live'])(
+  'only a current direct stat notes a probe (%s)',
+  async (kind) => {
+    const keys = new Keys(new Map([['new', ENC.encode('present')]]))
+    const ws = keysWorkspace(keys)
+    const mount = ws.mount('/k')
+    const manager = mount.cacheManager
+    if (manager === null) throw new Error('missing cache manager')
+    const original = keys.stat.bind(keys)
+    keys.stat = async (path) => {
+      const row = await original(path)
+      if (kind !== 'live') manager.retire()
+      return row
+    }
+    const index = kind === 'scratch' ? new ListingCheckStore() : mount.index
+    try {
+      await runInCommandScope(async () => {
+        await mount.call('stat', '/k/new', [], { index })
+        expect(manager.probedStat(PathSpec.fromStrPath('/k/new')) !== null).toBe(kind === 'live')
+      })
+    } finally {
+      await ws.close()
+    }
+  },
+)
+
+it('a retired beyond stat does not note a probe', async () => {
+  const keys = new Keys(new Map([['new', ENC.encode('present')]]))
+  const ws = keysWorkspace(keys)
+  const mount = ws.mount('/k')
+  await mount.indexStore.setDir('/k', [])
+  const manager = mount.cacheManager
+  if (manager === null) throw new Error('missing cache manager')
+  const original = keys.stat.bind(keys)
+  keys.stat = async (path) => {
+    const row = await original(path)
+    manager.retire()
+    return row
+  }
+  try {
+    await runInCommandScope(async () => {
+      expect(await ws.vfs.read('/k/new')).toEqual(ENC.encode('present'))
+      expect(manager.probedStat(PathSpec.fromStrPath('/k/new'))).toBe(null)
+    })
+  } finally {
+    await ws.close()
+  }
+})
+
+class CachedKeys extends Keys {
+  override readonly cachesReads: boolean = true
+}
+
+it('recovery removes bytes of a file the peer deleted', async () => {
+  const keys = new CachedKeys(new Map([['old', ENC.encode('deleted bytes')]]))
+  const ws = keysWorkspace(keys)
+  try {
+    await ws.vfs.readdir('/k')
+    expect(await ws.vfs.read('/k/old')).toEqual(ENC.encode('deleted bytes'))
+    keys.files.delete('old')
+    keys.files.set('new', ENC.encode('new'))
+    const failure = vi
+      .spyOn(ws.mount('/k').indexStore, 'invalidateMissing')
+      .mockRejectedValueOnce(new Error('unavailable'))
+    expect((await ws.vfs.stat('/k/new')).name).toBe('new')
+    failure.mockRestore()
+    expect(await ws.vfs.readdir('/k')).toEqual(['/k/new'])
+    await expect(ws.vfs.read('/k/old')).rejects.toThrow()
+  } finally {
+    await ws.close()
+  }
 })

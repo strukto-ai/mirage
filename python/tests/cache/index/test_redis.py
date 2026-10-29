@@ -21,6 +21,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.cache.index import LookupStatus
+from mirage.cache.index.config import IndexDirectory
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.store import IndexCacheStore
@@ -145,8 +146,16 @@ async def _replace(store: RedisIndexCacheStore) -> None:
     )
 
 
+async def _refill(store: RedisIndexCacheStore) -> None:
+    await store.refill_dir(
+        "/d", [("a", _row("a"))], await store.refill_token()
+    )
+
+
 COUNTING = {
     "seed": _seed,
+    "refill_dir": _refill,
+    "invalidate_missing": lambda s: s.invalidate_missing(["/d/new"]),
     "add_entry": lambda s: s.add_entry("/d/c", _row("c")),
     "set_dir": lambda s: s.set_dir("/d", [("a", _row("a"))]),
     "set_partial_dir": lambda s: s.set_partial_dir("/d", [("c", _row("c"))]),
@@ -165,6 +174,7 @@ NOT_COUNTING = {
 }
 
 READS = {
+    "refill_token",
     "ttl",
     "clock",
     "scope_snapshot",
@@ -369,3 +379,105 @@ async def test_a_new_command_reads_rows_changed_outside_the_process(
     async with command_scope():
         await store.list_dir("/d")
         assert (await store.get("/d/a")).entry.fingerprint == "external"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["complete", "partial", "window"])
+async def test_a_known_point_observation_keeps_the_listing_memo(
+    store, mgets, kind
+):
+    if kind == "partial":
+        await store.set_partial_dir("/d", LISTED)
+    else:
+        await store.set_dir("/d", LISTED, window=kind == "window")
+    mgets.clear()
+    async with command_scope():
+        before = await store.list_dir("/d")
+        assert await store.invalidate_missing(["/d/a"]) is False
+        assert await store.list_dir("/d") == before
+    assert len(mgets) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_point_observation_keeps_the_listing_memo(
+    store, mgets
+):
+    await store.set_dir("/d", LISTED)
+    mgets.clear()
+    async with command_scope():
+        before = await store.list_dir("/d")
+        assert await store.invalidate_missing(["/e/new"]) is False
+        assert await store.list_dir("/d") == before
+    assert len(mgets) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("observer", ["self", "peer"])
+async def test_an_observation_a_kept_listing_leaves_out_drops_the_memo(
+    store, peer, observer
+):
+    await store.set_dir("/d", LISTED)
+    writer = store if observer == "self" else peer
+    async with command_scope():
+        assert (await store.list_dir("/d")).entries == ["/d/a", "/d/b"]
+        await store._client.delete(store._children_key("/d"))
+        assert await writer.invalidate_missing(["/d/new"]) is False
+        assert (await store.list_dir("/d")).entries is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("known", [False, True])
+async def test_peer_observation_drops_a_contradicted_memo_after_eviction(
+    store, peer, known
+):
+    await store.set_dir("/d", LISTED)
+    key = store._children_key("/d")
+    async with command_scope():
+        assert (await store.list_dir("/d")).entries == ["/d/a", "/d/b"]
+        if known:
+            listing = IndexDirectory.model_validate_json(
+                await store._client.get(key)
+            )
+            listing.entries.append("/d/new")
+            listing.folders.append(0)
+            await store._client.set(key, listing.model_dump_json())
+            assert "/d/new" in (await peer.list_dir("/d")).entries
+        await store._client.delete(key)
+        ticket = await store.refill_token()
+        assert await peer.invalidate_missing(["/d/new"]) is False
+        assert await store.refill_dir("/d", LISTED, ticket) is None
+        assert (await store.list_dir("/d")).entries is None
+
+
+@pytest.mark.asyncio
+async def test_peer_unknown_observation_keeps_an_unrelated_memo(
+    store, peer, mgets
+):
+    await store.set_dir("/d", LISTED)
+    mgets.clear()
+    async with command_scope():
+        before = await store.list_dir("/d")
+        assert await peer.invalidate_missing(["/e/new"]) is False
+        assert await store.list_dir("/d") == before
+    assert len(mgets) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repeat", [False, True])
+async def test_observation_token_eviction_cannot_revive_an_old_refill(
+    store, repeat
+):
+    key = store._generation_key + "-observation"
+    await store._client.delete(key)
+    await store.set_dir("/dir", [])
+    if repeat:
+        await store.invalidate_missing(["/dir/first"])
+    ticket = await store.refill_token()
+    await store.invalidate_missing(["/dir/new"])
+    await store._client.delete(key)
+    if repeat:
+        await store.invalidate_missing(["/dir/another"])
+    assert await store.refill_dir("/dir", [], ticket) is None
+    fresh = await store.refill_token()
+    assert fresh != ticket
+    assert await store.refill_dir("/dir", [], fresh) == []

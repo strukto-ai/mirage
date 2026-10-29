@@ -502,6 +502,16 @@ export class ExpiredOnArrival extends RAMIndexCacheStore {
     return super.setDir(path, entries, this.expiryFor(path, expiredAt), options)
   }
 
+  override refillDir(
+    path: string,
+    entries: readonly [string, FileStat][],
+    token: string,
+    expiredAt?: Date | null,
+    options: SetDirOptions & { partial?: boolean } = {},
+  ): Promise<Evicted[] | null> {
+    return super.refillDir(path, entries, token, this.expiryFor(path, expiredAt), options)
+  }
+
   override setPartialDir(
     path: string,
     entries: readonly [string, FileStat][],

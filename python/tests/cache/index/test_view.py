@@ -41,6 +41,14 @@ from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import override
 
 
+async def _cancelled(paths):
+    raise asyncio.CancelledError
+
+
+async def _unavailable(paths):
+    raise RuntimeError("unavailable")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("store_kind", ["ram", "redis"])
 @pytest.mark.parametrize("phase", ["backend", "store"])
@@ -68,13 +76,13 @@ async def test_late_index_write_cannot_cross_mount_ownership(
         await release.wait()
 
     if phase == "store":
-        original = getattr(index, method)
+        original = index.refill_dir
 
         async def delayed_store(*args, **kwargs):
             await pause()
             return await original(*args, **kwargs)
 
-        monkeypatch.setattr(index, method, delayed_store)
+        monkeypatch.setattr(index, "refill_dir", delayed_store)
 
     async def delayed_readdir(_accessor, _path):
         if phase == "backend":
@@ -883,3 +891,100 @@ async def test_conditional_replacement_keeps_ownership(owned):
     assert (await store.get("/data/a")).entry.fingerprint == (
         "new" if owned else "a"
     )
+
+
+@pytest.mark.asyncio
+async def test_failed_point_observation_does_not_serve_the_known_stale_listing(
+    monkeypatch,
+):
+    index = RAMIndexCacheStore()
+    view = IndexView(index, RAMFileCacheStore(), "/data", lambda _: True)
+    await index.set_dir(
+        "/other", [("keep", FileStat(name="keep", type=FileType.FILE))]
+    )
+    await index.set_dir(
+        "/data", [("old", FileStat(name="old", type=FileType.FILE))]
+    )
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(index, "invalidate_missing", _unavailable)
+        with pytest.raises(RuntimeError, match="unavailable"):
+            await view.invalidate_missing(["/data/new"])
+    assert (await view.list_dir("/data")).status == LookupStatus.EXPIRED
+    await view.invalidate_missing(["/data/new"])
+    assert (await index.list_dir("/other")).entries == ["/other/keep"]
+    await view.set_dir(
+        "/data", [("new", FileStat(name="new", type=FileType.FILE))]
+    )
+    assert (await view.list_dir("/data")).entries == ["/data/new"]
+
+
+@pytest.mark.asyncio
+async def test_failed_observation_recovery_cannot_touch_a_replacement_mount(
+    monkeypatch,
+):
+    index = RAMIndexCacheStore()
+    owned = [True]
+    view = IndexView(index, RAMFileCacheStore(), "/data", lambda _: owned[0])
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(index, "invalidate_missing", _unavailable)
+        with pytest.raises(RuntimeError):
+            await view.invalidate_missing(["/data/new"])
+    owned[0] = False
+    await index.set_dir(
+        "/data",
+        [("replacement", FileStat(name="replacement", type=FileType.FILE))],
+    )
+    assert await view.invalidate_missing(["/data/new"]) is False
+    await view.refill_token()
+    assert (await index.list_dir("/data")).entries == ["/data/replacement"]
+
+
+@pytest.mark.asyncio
+async def test_listing_refill_recovers_a_failed_observation_scope(monkeypatch):
+    index = RAMIndexCacheStore()
+    view = IndexView(
+        index,
+        RAMFileCacheStore(),
+        "/data",
+        lambda p: not p.startswith("/data/nested"),
+        excluded_prefixes=lambda: ("/data/nested",),
+    )
+    await index.set_dir("/data", [("old", _row())])
+    await index.set_dir("/other", [("keep", _row())])
+    await index.set_dir("/data/nested", [("keep", _row())])
+    old = await view.refill_token()
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(index, "invalidate_missing", _unavailable)
+        with pytest.raises(RuntimeError):
+            await view.invalidate_missing(["/data/new"])
+    assert await view.refill_dir("/data", [("old", _row())], old) is None
+    fresh = await view.refill_token()
+    assert await view.refill_dir("/data", [("old", _row())], old) is None
+    assert await view.refill_dir("/data", [("new", _row())], fresh) == [
+        Evicted("/data/old", folder=False)
+    ]
+    assert (await view.list_dir("/data")).entries == ["/data/new"]
+    assert (await index.list_dir("/other")).entries == ["/other/keep"]
+    assert (await index.list_dir("/data/nested")).entries == [
+        "/data/nested/keep"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_point_observation_keeps_the_view_verified(
+    monkeypatch,
+):
+    index = RAMIndexCacheStore()
+    view = IndexView(index, RAMFileCacheStore(), "/data", lambda _: True)
+    await index.set_dir("/data", [("old", _row())])
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(index, "invalidate_missing", _cancelled)
+        with pytest.raises(asyncio.CancelledError):
+            await view.invalidate_missing(["/data/old"])
+    assert (await view.list_dir("/data")).entries == ["/data/old"]
+    await view.refill_token()
+    assert (await index.list_dir("/data")).entries == ["/data/old"]

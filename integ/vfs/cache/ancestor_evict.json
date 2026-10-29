@@ -97,6 +97,36 @@
         "stdout": "old.txt\na\nold.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cache_point_observation_repairs_ancestor_listing",
+      "seq": 941100,
+      "targets": [
+        "s3",
+        "s3-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "scenario": [
+        {
+          "command": "mkdir -p /data/point_observe; printf old > /data/point_observe/keep.txt; ls /data/point_observe"
+        },
+        {
+          "mutate": {
+            "path": "/data/point_observe/a/b/new.txt",
+            "content": "new\n"
+          }
+        },
+        {
+          "command": "cat /data/point_observe/a/b/new.txt; ls /data/point_observe; ls /data/point_observe/a/b; rm -rf /data/point_observe"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "keep.txt\nnew\na\nkeep.txt\nnew.txt\n",
+        "stderr": ""
+      },
+      "note": "A peer workspace creates a deep key without notifying the reader. A successful point read invalidates contradictory complete ancestor listings before their TTL."
     }
   ]
 }

@@ -898,8 +898,8 @@ export class MountEntry {
       if (vfs.supports('read')) {
         const read: ReadFn = (path, given, offset, size) =>
           vfs.read(path, given, offset, size, callerSignal())
-        levels.push((scope, _args, kw) =>
-          readWindow(
+        levels.push(async (scope, _args, kw) => {
+          const data = await readWindow(
             read,
             vfs.readsRanges,
             vfs instanceof RAMVFS,
@@ -907,8 +907,10 @@ export class MountEntry {
             kw,
             handedOf(kw),
             this.indexStore.clock,
-          ),
-        )
+          )
+          if (kw.size !== 0) await this.observe(kw.index ?? this.index, [scope])
+          return data
+        })
       }
       return levels
     }
@@ -1285,25 +1287,28 @@ export class MountEntry {
       if (probed !== null) return probed
     }
     const listed: string[] = []
+    const fetched = new Map<string, FileStat | null>([[key, null]])
     const warm = async (): Promise<string[]> => {
-      const names = await this.listed(this.folder(scope), index)
+      const names = await this.listed(this.folder(scope), index, fetched)
       listed.push(key)
       return names
     }
-    let row = await entryAt(index, key, warm)
+    let row = (await entryAt(index, key, warm)) ?? fetched.get(key) ?? null
     if (
       row === null &&
       listed.length > 0 &&
+      fetched.has(key) &&
       (await index.listDir(folderOf(key), key)).status === LookupStatus.NOT_FOUND
     ) {
-      row = await entryAt(index, key, warm)
+      row = (await entryAt(index, key, warm)) ?? fetched.get(key) ?? null
     }
     if (row !== null) return row
+    if (!fetched.has(key)) return null
     if (await beyondWindow(index, key)) return this.beyond(scope, index)
     if (!(await this.unproven(index, key))) return null
     if (this.asksByPath) return this.beyond(scope, index)
     await index.invalidateDir(folderOf(key))
-    return entryAt(index, key, warm)
+    return (await entryAt(index, key, warm)) ?? fetched.get(key) ?? null
   }
 
   /**
@@ -1341,6 +1346,48 @@ export class MountEntry {
     return (this.asksByPath || this.vfs.supports('write')) && unprovenMiss(index, key)
   }
 
+  /** Invalidate cached absences disproved by current backend answers. Mirrors Python's _observe. */
+  private async observe(index: IndexCacheStore, scopes: readonly PathSpec[]): Promise<void> {
+    if (!this.lists || index instanceof ListingCheckStore) return
+    const paths = new Set<string>()
+    for (const scope of scopes) {
+      if (this.revisions.has(scope.virtual) || this.livePipe(scope.virtual) !== null) continue
+      let key = indexKey(this.prefix, scope)
+      while (key !== this.rootKey && key !== '/') {
+        paths.add(key)
+        key = folderOf(key)
+      }
+    }
+    if (paths.size > 0) {
+      try {
+        await index.invalidateMissing([...paths].sort(compareCodePoints))
+      } catch (err) {
+        console.warn(`listing observation not kept for ${this.prefix}`, err)
+      }
+    }
+  }
+
+  /** Observe existence once without pulling beyond the consumer's demand. */
+  private async *observeStream(
+    scope: PathSpec,
+    index: IndexCacheStore,
+    source: AsyncIterable<Uint8Array>,
+  ): AsyncIterable<Uint8Array> {
+    let observed = false
+    try {
+      for await (const chunk of source) {
+        if (chunk.byteLength > 0 && !observed) {
+          await this.observe(index, [scope])
+          observed = true
+        }
+        yield chunk
+      }
+      if (!observed) await this.observe(index, [scope])
+    } finally {
+      await closeQuietly(source)
+    }
+  }
+
   /**
    * What is at a path its folder's stored listing leaves out without proving
    * it absent (a window, or a listing another command fetched): the backend's
@@ -1352,8 +1399,12 @@ export class MountEntry {
     if (this.wants('stat').includes('parent')) {
       handed.parent = await this.entry(this.folder(scope), index)
     }
+    const generation = this.cacheManager?.generation
     try {
-      return await this.vfs.stat(scope, handed)
+      const row = await this.vfs.stat(scope, handed)
+      if (this.wants('stat').length === 0) await this.observe(index, [scope])
+      this.noteLive(scope, index, row, generation)
+      return row
     } catch (err) {
       if (!isEnoent(err)) throw err
       console.debug(`nothing unlisted at ${scope.virtual}: ${String(err)}`)
@@ -1367,7 +1418,11 @@ export class MountEntry {
    * whose fetch may have proved this listing too (a seed). Mirrors Python's
    * `_listed`.
    */
-  private async listed(path: PathSpec, index: IndexCacheStore): Promise<string[]> {
+  private async listed(
+    path: PathSpec,
+    index: IndexCacheStore,
+    fetched?: Map<string, FileStat | null>,
+  ): Promise<string[]> {
     const key = indexKey(this.prefix, path)
     const glob = path.pattern !== null
     const stored = await storedListing(index, key, glob)
@@ -1375,8 +1430,9 @@ export class MountEntry {
     const handed = await this.handedFor('readdir', path, null, index)
     const seeded = await storedListing(index, key, glob)
     if (seeded !== null) return seeded
+    const refill = await index.refillToken()
     const listed = await this.vfs.readdir(path, handed)
-    return keepListing(index, key, listed)
+    return keepListing(index, key, listed, refill, fetched)
   }
 
   /**
@@ -1613,11 +1669,21 @@ export class MountEntry {
         if (stored !== null) return stored
       }
       for (const call of levels) {
+        const refill =
+          this.lists && (name === 'readdir' || name === 'read_tree')
+            ? await index.refillToken()
+            : null
+        const generation = this.cacheManager?.generation
         const result = await this.run(name, call, scope, args, kwargs, index, found)
         found = null
         if (result === null || result === undefined) continue
-        const kept = this.lists ? await this.kept(name, scope, index, result) : result
-        if (name === 'stat') this.noteLive(scope, index, kept)
+        const kept = this.lists ? await this.kept(name, scope, index, result, refill) : result
+        if (name === 'stat') {
+          if (kept instanceof FileStat && this.wants('stat').length === 0) {
+            await this.observe(index, [scope])
+          }
+          this.noteLive(scope, index, kept, generation)
+        }
         return kept
       }
       return null
@@ -1631,18 +1697,23 @@ export class MountEntry {
   }
 
   /**
-   * Under `fresh`, keep a stat the backend answered as the running command's
+   * Keep a current stat the backend answered as the running command's
    * probe answer: the cache gate would ask the backend the same question
    * again. Only a stat that asked the backend counts: one that takes neither
    * an index of its own nor a row the mount hands it, either of which a
    * listing filled. A probe's own store records through the probe. Mirrors
    * Python's `_note_live`.
    */
-  private noteLive(scope: PathSpec, index: IndexCacheStore, result: unknown): void {
+  private noteLive(
+    scope: PathSpec,
+    index: IndexCacheStore,
+    result: unknown,
+    generation: number | undefined,
+  ): void {
     const manager = this.cacheManager
     if (
       manager !== null &&
-      this.read.policy === ReadPolicy.FRESH &&
+      manager.generation === generation &&
       result instanceof FileStat &&
       !(index instanceof ListingCheckStore) &&
       this.lists &&
@@ -1661,14 +1732,15 @@ export class MountEntry {
     scope: PathSpec,
     index: IndexCacheStore,
     result: unknown,
+    refill: string | null = null,
   ): Promise<unknown> {
     const key = indexKey(this.prefix, scope)
     if (name === 'readdir') {
-      return keepListing(index, key, result as readonly FileStat[] | DirListing)
+      return keepListing(index, key, result as readonly FileStat[] | DirListing, refill)
     }
     if (name === 'read_tree' && result instanceof Map) {
       const tree = result as Map<string, FileStat>
-      await keepTree(index, key, tree)
+      await keepTree(index, key, tree, refill)
       return new Map([...tree].filter(([path]) => path !== ''))
     }
     return result
@@ -1701,7 +1773,9 @@ export class MountEntry {
       this.wants('read').length > 0 || vfs.read.constructor.name === 'AsyncFunction'
         ? this.streamed(vfs, scope, this.index, signal)
         : asStream(runWithCaller(caller, async () => vfs.read(scope, {}, 0, null, signal)))
-    return this.activity.hold(withCaller(stream, caller)) as AsyncIterable<Uint8Array>
+    return this.activity.hold(
+      withCaller(this.observeStream(scope, this.index, stream), caller),
+    ) as AsyncIterable<Uint8Array>
   }
 
   private resolveCascade<T>(
@@ -2306,7 +2380,12 @@ export class MountEntry {
       if (wants.includes('parent')) one.parent = await this.entry(this.folder(scope), index)
       handed.push(one)
     }
-    return this.vfs.readMany(scopes, limit, handed)
+    const result = await this.vfs.readMany(scopes, limit, handed)
+    await this.observe(
+      index,
+      scopes.filter((scope) => result.has(scope.virtual)),
+    )
+    return result
   }
 
   /**

@@ -61,6 +61,60 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
     return (store as unknown as { client: () => Promise<RedisClientLike> }).client()
   }
 
+  it.each([false, true])(
+    'eviction cannot revive an observation token (repeat=%s)',
+    async (repeat) => {
+      const client = await redis()
+      const key = `${prefix}${GENERATION_KEY}-observation`
+      await client.del(key)
+      await store.setDir('/dir', [])
+      if (repeat) await store.invalidateMissing(['/dir/first'])
+      const ticket = await store.refillToken()
+      await store.invalidateMissing(['/dir/new'])
+      await client.del(key)
+      if (repeat) await store.invalidateMissing(['/dir/another'])
+      expect(await store.refillDir('/dir', [], ticket)).toBe(null)
+      const fresh = await store.refillToken()
+      expect(fresh).not.toBe(ticket)
+      expect(await store.refillDir('/dir', [], fresh)).toEqual([])
+    },
+  )
+
+  it('a failed seed flush still releases the listing memo', async () => {
+    const closing = new RedisIndexCacheStore({ url: REDIS_URL ?? '', keyPrefix: prefix, ttl: 600 })
+    vi.spyOn(
+      closing as unknown as { flushSeed: () => Promise<void> },
+      'flushSeed',
+    ).mockRejectedValue(new Error('unavailable'))
+    await expect(closing.close()).rejects.toThrow('unavailable')
+    expect((closing as unknown as { listings: { closed: boolean } }).listings.closed).toBe(true)
+  })
+
+  it.each([false, true])(
+    'refill tokens stay out of the listing script (window=%s)',
+    async (window) => {
+      const client = await redis()
+      const sent = vi.spyOn(client, 'eval')
+      const tokens: string[] = []
+      for (const name of ['a', 'b']) {
+        tokens.push(await store.refillToken())
+        expect(
+          await store.refillDir('/dir', [[name, entry(name, name)]], tokens.at(-1) ?? '', null, {
+            window,
+          }),
+        ).not.toBe(null)
+        await store.invalidateMissing([`/dir/new-${name}`])
+      }
+      const scripts = sent.mock.calls.map(([script]) => script)
+      expect(new Set(tokens).size).toBe(2)
+      expect(scripts.some((script) => tokens.some((token) => script.includes(token)))).toBe(false)
+      expect(
+        new Set(scripts.filter((script) => script.includes('publish_listing(KEYS[1]'))).size,
+      ).toBe(1)
+      sent.mockRestore()
+    },
+  )
+
   it.each(['none', 'replace', 'delete'])('conditional replacement is atomic: %s', async (peer) => {
     await store.setDir('/dir', [['a', entry('old', 'a')]], undefined, { version: 'v1' })
     const old = (await store.get('/dir/a')).entry
@@ -1263,7 +1317,9 @@ describe('Redis client protocol', () => {
       ids: new SeededIdSource(5),
     })
     await store.invalidate()
-    expect(value.set).toHaveBeenCalledWith(`ids:${GENERATION_KEY}`, new SeededIdSource(5).uuid7())
+    const expected = new SeededIdSource(5)
+    expect(value.set).toHaveBeenCalledWith(`ids:${GENERATION_KEY}-observation`, expected.uuid7())
+    expect(value.set).toHaveBeenCalledWith(`ids:${GENERATION_KEY}`, expected.uuid7())
   })
 
   it.each([0, 1])('conditional replacement passes exact wire bytes to CAS: %s', async (result) => {
@@ -1436,6 +1492,8 @@ const LISTED: [string, FileStat][] = [
 type StoreWrite = (store: RedisIndexCacheStore) => Promise<unknown>
 
 const COUNTING = {
+  refillDir: async (store) => store.refillDir('/d', [['a', row('a')]], await store.refillToken()),
+  invalidateMissing: (store) => store.invalidateMissing(['/d/new']),
   seed: (store) => {
     store.seed(
       new Map([['/d/c', row('c')]]),
@@ -1465,6 +1523,7 @@ const NOT_COUNTING = {
 
 type StoreRead =
   | 'ttl'
+  | 'refillToken'
   | 'clock'
   | 'scopeSnapshot'
   | 'get'
@@ -1520,6 +1579,84 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
       }
     },
   )
+
+  it.each(['complete', 'partial', 'window'])(
+    'a known %s observation keeps the listing memo',
+    async (kind) => {
+      if (kind === 'partial') await store.setPartialDir('/d', LISTED)
+      else await store.setDir('/d', LISTED, null, { window: kind === 'window' })
+      const sent = await mGets()
+      await runInCommandScope(async () => {
+        const before = await store.listDir('/d')
+        expect(await store.invalidateMissing(['/d/a'])).toBe(false)
+        expect(await store.listDir('/d')).toEqual(before)
+      })
+      expect(sent.mock.calls).toHaveLength(1)
+    },
+  )
+
+  it('an unknown observation keeps the listing memo', async () => {
+    await store.setDir('/d', LISTED)
+    const sent = await mGets()
+    await runInCommandScope(async () => {
+      const before = await store.listDir('/d')
+      expect(await store.invalidateMissing(['/e/new'])).toBe(false)
+      expect(await store.listDir('/d')).toEqual(before)
+    })
+    expect(sent.mock.calls).toHaveLength(1)
+  })
+
+  it.each(['self', 'peer'])(
+    'an observation a kept listing leaves out drops the memo (%s)',
+    async (observer) => {
+      await store.setDir('/d', LISTED)
+      const writer = observer === 'self' ? store : peer
+      await runInCommandScope(async () => {
+        expect((await store.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
+        const childrenKey = (
+          store as unknown as { childrenKey: (path: string) => string }
+        ).childrenKey('/d')
+        await (await redis()).del(childrenKey)
+        expect(await writer.invalidateMissing(['/d/new'])).toBe(false)
+        expect((await store.listDir('/d')).entries ?? null).toBe(null)
+      })
+    },
+  )
+
+  it.each([false, true])(
+    'peer observation drops a contradicted memo after eviction (known=%s)',
+    async (known) => {
+      await store.setDir('/d', LISTED)
+      const client = await redis()
+      const key = (store as unknown as { childrenKey: (path: string) => string }).childrenKey('/d')
+      await runInCommandScope(async () => {
+        expect((await store.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
+        if (known) {
+          const listing = IndexDirectorySchema.parse(JSON.parse((await client.get(key)) ?? '{}'))
+          listing.entries.push('/d/new')
+          listing.folders.push(0)
+          await client.set(key, JSON.stringify(listing))
+          expect((await peer.listDir('/d')).entries).toContain('/d/new')
+        }
+        await client.del(key)
+        const ticket = await store.refillToken()
+        expect(await peer.invalidateMissing(['/d/new'])).toBe(false)
+        expect(await store.refillDir('/d', LISTED, ticket)).toBe(null)
+        expect((await store.listDir('/d')).entries ?? null).toBe(null)
+      })
+    },
+  )
+
+  it('peer unknown observation keeps an unrelated memo', async () => {
+    await store.setDir('/d', LISTED)
+    const sent = await mGets()
+    await runInCommandScope(async () => {
+      const before = await store.listDir('/d')
+      expect(await peer.invalidateMissing(['/e/new'])).toBe(false)
+      expect(await store.listDir('/d')).toEqual(before)
+    })
+    expect(sent.mock.calls).toHaveLength(1)
+  })
 
   it('keeps the siblings of a written row batched', async () => {
     await store.setDir('/d', LISTED)
