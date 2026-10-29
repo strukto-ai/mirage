@@ -243,6 +243,8 @@ fn mark_calls(node: &mut Node, groups: usize) -> Result<(Vec<bool>, Vec<bool>), 
     flag_calls(node, &mut chain, &reach);
     let mut bodies = vec![None; groups + 1];
     collect_bodies(node, &mut bodies);
+    let mut mins = vec![Min::Unknown; groups + 1];
+    let mut on_path = vec![false; groups + 1];
     for g in 0..=groups {
         if !(called[g] && has(&reach[g], g)) {
             continue;
@@ -250,12 +252,15 @@ fn mark_calls(node: &mut Node, groups: usize) -> Result<(Vec<bool>, Vec<bool>), 
         let Some(body) = bodies[g] else {
             continue;
         };
+        on_path[g] = true;
         let mut walk = Walk {
             bodies: &bodies,
+            mins: &mut mins,
             target: g,
-            path: vec![g],
+            on_path: &mut on_path,
         };
         let found = walk.infinite(body, true);
+        on_path[g] = false;
         if found.must || found.infinite {
             return Err(NEVER_ENDING_RECURSION.into());
         }
@@ -374,179 +379,330 @@ impl Found {
 
 /// The recursion check of one group, with the groups on the path down
 /// to the node at hand (MARK2), so no body is walked twice at once.
-struct Walk<'a> {
+struct Walk<'a, 'm> {
     bodies: &'a [Option<&'a Node>],
+    mins: &'m mut [Min],
     target: usize,
-    path: Vec<usize>,
+    on_path: &'m mut [bool],
 }
 
-impl Walk<'_> {
-    /// infinite_recursive_call_check: `head` while nothing has been
-    /// consumed on the way from the group's start.
-    fn infinite(&mut self, node: &Node, head: bool) -> Found {
-        match node {
-            Node::Seq(items) => {
-                let mut head = head;
-                let mut found = Found::default();
-                for item in items {
-                    let ret = self.infinite(item, head);
-                    if ret.infinite {
-                        return ret;
-                    }
-                    found = found.or(ret);
-                    if head && min_len(item, self.bodies, &mut Vec::new()) != 0 {
-                        head = false;
-                    }
-                }
-                found
-            }
-            Node::Alt(items) | Node::Super(items) => {
-                let mut found = Found::default();
-                let mut must = true;
-                for item in items {
-                    let ret = self.infinite(item, head);
-                    if ret.infinite {
-                        return ret;
-                    }
-                    found.exist |= ret.exist;
-                    must &= ret.must;
-                }
-                found.must = must;
-                found
-            }
-            Node::Repeat { body, min, max, .. } => {
-                if *max == Some(0) {
-                    return Found::default();
-                }
-                let mut found = self.infinite(body, head);
-                if found.must && *min == 0 {
-                    found.must = false;
-                }
-                found
-            }
-            Node::Look { body, .. } | Node::Atomic(body) | Node::Options(body) => {
-                self.infinite(body, head)
-            }
-            Node::Call(call) => self.group(call.group, head),
-            Node::Group(index, body) => {
-                if self.path.contains(index) {
-                    return Found::default();
-                }
-                self.path.push(*index);
-                let found = self.infinite(body, head);
-                self.path.pop();
-                found
-            }
-            Node::Cond {
-                cond,
-                then,
-                otherwise,
-            } => {
-                let mut found = self.infinite(cond, head);
-                if found.infinite {
-                    return found;
-                }
-                let consumed = head && min_len(cond, self.bodies, &mut Vec::new()) != 0;
-                let ret = self.infinite(then, head && !consumed);
-                if ret.infinite {
-                    return ret;
-                }
-                found = found.or(ret);
-                let other = self.infinite(otherwise, head);
-                if other.infinite {
-                    return other;
-                }
-                found.exist |= other.exist;
-                if !other.must {
-                    found.must = false;
-                }
-                found
-            }
-            _ => Found::default(),
-        }
-    }
+/// A step of the recursion check: a node to check with whether nothing
+/// has been consumed yet, or a node part way through, waiting on what its
+/// last child found.
+enum Visit<'a> {
+    Node(&'a Node, bool),
+    Seq {
+        items: &'a [Node],
+        next: usize,
+        head: bool,
+        found: Found,
+    },
+    Alt {
+        items: &'a [Node],
+        next: usize,
+        head: bool,
+        exist: bool,
+        must: bool,
+    },
+    Repeat {
+        min: u32,
+    },
+    /// A group's body is done: it leaves the path.
+    Leave(usize),
+    Cond {
+        cond: &'a Node,
+        then: &'a Node,
+        otherwise: &'a Node,
+        stage: u8,
+        head: bool,
+        found: Found,
+    },
+}
 
-    fn group(&mut self, index: usize, head: bool) -> Found {
-        if index == self.target {
-            return Found {
-                exist: true,
-                must: true,
-                infinite: head,
-            };
+impl<'a> Walk<'a, '_> {
+    /// infinite_recursive_call_check: `head` while nothing has been
+    /// consumed on the way from the group's start. It walks an explicit
+    /// stack, since a chain of calls runs as deep as the groups it
+    /// passes, and stops at the first call back to the group with
+    /// nothing consumed, which every caller hands up unchanged.
+    fn infinite(&mut self, node: &'a Node, head: bool) -> Found {
+        let mut stack = vec![Visit::Node(node, head)];
+        let mut ret = Found::default();
+        while let Some(visit) = stack.pop() {
+            match visit {
+                Visit::Node(node, head) => match node {
+                    Node::Seq(items) => stack.push(Visit::Seq {
+                        items,
+                        next: 0,
+                        head,
+                        found: Found::default(),
+                    }),
+                    Node::Alt(items) | Node::Super(items) => stack.push(Visit::Alt {
+                        items,
+                        next: 0,
+                        head,
+                        exist: false,
+                        must: true,
+                    }),
+                    Node::Repeat { max: Some(0), .. } => ret = Found::default(),
+                    Node::Repeat { body, min, .. } => {
+                        stack.push(Visit::Repeat { min: *min });
+                        stack.push(Visit::Node(body, head));
+                    }
+                    Node::Look { body, .. } | Node::Atomic(body) | Node::Options(body) => {
+                        stack.push(Visit::Node(body, head))
+                    }
+                    Node::Call(call) if call.group == self.target => {
+                        if head {
+                            return Found {
+                                exist: true,
+                                must: true,
+                                infinite: true,
+                            };
+                        }
+                        ret = Found {
+                            exist: true,
+                            must: true,
+                            infinite: false,
+                        };
+                    }
+                    Node::Call(call) => match self.bodies[call.group] {
+                        Some(body) if !self.on_path[call.group] => {
+                            self.on_path[call.group] = true;
+                            stack.push(Visit::Leave(call.group));
+                            stack.push(Visit::Node(body, head));
+                        }
+                        _ => ret = Found::default(),
+                    },
+                    Node::Group(index, body) => {
+                        if self.on_path[*index] {
+                            ret = Found::default();
+                        } else {
+                            self.on_path[*index] = true;
+                            stack.push(Visit::Leave(*index));
+                            stack.push(Visit::Node(body, head));
+                        }
+                    }
+                    Node::Cond {
+                        cond,
+                        then,
+                        otherwise,
+                    } => stack.push(Visit::Cond {
+                        cond,
+                        then,
+                        otherwise,
+                        stage: 0,
+                        head,
+                        found: Found::default(),
+                    }),
+                    _ => ret = Found::default(),
+                },
+                Visit::Seq {
+                    items,
+                    next,
+                    mut head,
+                    mut found,
+                } => {
+                    if next > 0 {
+                        found = found.or(ret);
+                        if head && min_len(&items[next - 1], self.bodies, self.mins) != 0 {
+                            head = false;
+                        }
+                    }
+                    if next == items.len() {
+                        ret = found;
+                    } else {
+                        stack.push(Visit::Seq {
+                            items,
+                            next: next + 1,
+                            head,
+                            found,
+                        });
+                        stack.push(Visit::Node(&items[next], head));
+                    }
+                }
+                Visit::Alt {
+                    items,
+                    next,
+                    head,
+                    mut exist,
+                    mut must,
+                } => {
+                    if next > 0 {
+                        exist |= ret.exist;
+                        must &= ret.must;
+                    }
+                    if next == items.len() {
+                        ret = Found {
+                            exist,
+                            must,
+                            infinite: false,
+                        };
+                    } else {
+                        stack.push(Visit::Alt {
+                            items,
+                            next: next + 1,
+                            head,
+                            exist,
+                            must,
+                        });
+                        stack.push(Visit::Node(&items[next], head));
+                    }
+                }
+                Visit::Repeat { min } => {
+                    if ret.must && min == 0 {
+                        ret.must = false;
+                    }
+                }
+                Visit::Leave(index) => self.on_path[index] = false,
+                Visit::Cond {
+                    cond,
+                    then,
+                    otherwise,
+                    stage,
+                    head,
+                    mut found,
+                } => {
+                    let next = match stage {
+                        0 => cond,
+                        1 => {
+                            found = ret;
+                            then
+                        }
+                        2 => {
+                            found = found.or(ret);
+                            otherwise
+                        }
+                        _ => {
+                            found.exist |= ret.exist;
+                            if !ret.must {
+                                found.must = false;
+                            }
+                            ret = found;
+                            continue;
+                        }
+                    };
+                    let consumed = stage == 1 && min_len(cond, self.bodies, self.mins) != 0;
+                    stack.push(Visit::Cond {
+                        cond,
+                        then,
+                        otherwise,
+                        stage: stage + 1,
+                        head,
+                        found,
+                    });
+                    stack.push(Visit::Node(next, head && !consumed));
+                }
+            }
         }
-        if self.path.contains(&index) {
-            return Found::default();
-        }
-        let Some(body) = self.bodies[index] else {
-            return Found::default();
-        };
-        self.path.push(index);
-        let found = self.infinite(body, head);
-        self.path.pop();
-        found
+        ret
     }
+}
+
+/// A group's shortest match while it is worked out: Oniguruma keeps it
+/// on the group once known (FIXED_MIN), and a group reached again while
+/// its own is pending counts nothing (MARK1).
+#[derive(Clone, Copy)]
+enum Min {
+    Unknown,
+    Pending,
+    Known(usize),
 }
 
 /// node_min_byte_len in characters: a recursive call counts nothing, nor
 /// does a backreference inside a group it names; any other counts the
-/// shortest of its groups.
-fn min_len(node: &Node, bodies: &[Option<&Node>], path: &mut Vec<usize>) -> usize {
-    match node {
-        Node::Char(_)
-        | Node::Byte(_)
-        | Node::Set(_)
-        | Node::Any(_)
-        | Node::Newline
-        | Node::TextSegment => 1,
-        Node::Caseless(_) => 1,
-        Node::Seq(items) => items.iter().map(|item| min_len(item, bodies, path)).sum(),
-        Node::Alt(items) | Node::Super(items) => items
-            .iter()
-            .map(|item| min_len(item, bodies, path))
-            .min()
-            .unwrap_or(0),
-        Node::Repeat { body, min, .. } => min_len(body, bodies, path).saturating_mul(*min as usize),
-        Node::Group(_, body) | Node::Atomic(body) | Node::Options(body) => {
-            min_len(body, bodies, path)
-        }
-        Node::Call(call) => {
-            if call.recursive || path.contains(&call.group) {
-                return 0;
+/// shortest of its groups. It walks an explicit stack, since calls and
+/// backreferences chain through as many groups as the pattern holds.
+fn min_len(node: &Node, bodies: &[Option<&Node>], mins: &mut [Min]) -> usize {
+    let mut tasks = vec![MinTask::Node(node)];
+    let mut out: Vec<usize> = Vec::new();
+    while let Some(task) = tasks.pop() {
+        match task {
+            MinTask::Known(group) => {
+                mins[group] = Min::Known(out.last().copied().unwrap_or(0));
             }
-            let Some(body) = bodies[call.group] else {
-                return 0;
-            };
-            path.push(call.group);
-            let len = min_len(body, bodies, path);
-            path.pop();
-            len
-        }
-        Node::Backref {
-            groups,
-            inside: false,
-            ..
-        } => groups
-            .iter()
-            .map(|&group| match bodies[group] {
-                Some(body) if !path.contains(&group) => {
-                    path.push(group);
-                    let len = min_len(body, bodies, path);
-                    path.pop();
-                    len
+            MinTask::Combine(node, count) => {
+                let values = out.split_off(out.len() - count);
+                out.push(match node {
+                    Node::Seq(_) => values.iter().fold(0, |sum, v| sum.saturating_add(*v)),
+                    Node::Repeat { min, .. } => values[0].saturating_mul(*min as usize),
+                    Node::Cond { .. } => values[0].saturating_add(values[1]).min(values[2]),
+                    _ => values.into_iter().min().unwrap_or(0),
+                });
+            }
+            MinTask::Node(node) => match node {
+                Node::Char(_)
+                | Node::Caseless(_)
+                | Node::Byte(_)
+                | Node::Set(_)
+                | Node::Any(_)
+                | Node::Newline
+                | Node::TextSegment => out.push(1),
+                Node::Seq(items) | Node::Alt(items) | Node::Super(items) => {
+                    tasks.push(MinTask::Combine(node, items.len()));
+                    tasks.extend(items.iter().map(MinTask::Node));
                 }
-                _ => 0,
-            })
-            .min()
-            .unwrap_or(0),
-        Node::Cond {
-            cond,
-            then,
-            otherwise,
-        } => {
-            let yes = min_len(cond, bodies, path) + min_len(then, bodies, path);
-            yes.min(min_len(otherwise, bodies, path))
+                Node::Repeat { body, .. } => {
+                    tasks.push(MinTask::Combine(node, 1));
+                    tasks.push(MinTask::Node(body));
+                }
+                Node::Group(_, body) | Node::Atomic(body) | Node::Options(body) => {
+                    tasks.push(MinTask::Node(body))
+                }
+                Node::Call(call) if call.recursive => out.push(0),
+                Node::Call(call) => group_min(call.group, bodies, mins, &mut tasks, &mut out),
+                Node::Backref {
+                    groups,
+                    inside: false,
+                    ..
+                } => {
+                    tasks.push(MinTask::Combine(node, groups.len()));
+                    for &group in groups {
+                        group_min(group, bodies, mins, &mut tasks, &mut out);
+                    }
+                }
+                Node::Cond {
+                    cond,
+                    then,
+                    otherwise,
+                } => {
+                    tasks.push(MinTask::Combine(node, 3));
+                    tasks.extend([
+                        MinTask::Node(otherwise),
+                        MinTask::Node(then),
+                        MinTask::Node(cond),
+                    ]);
+                }
+                _ => out.push(0),
+            },
         }
-        _ => 0,
+    }
+    out.pop().unwrap_or(0)
+}
+
+enum MinTask<'a> {
+    Node(&'a Node),
+    Combine(&'a Node, usize),
+    Known(usize),
+}
+
+/// A group's shortest match: known, nothing while pending, or worked out
+/// next.
+fn group_min<'a>(
+    group: usize,
+    bodies: &[Option<&'a Node>],
+    mins: &mut [Min],
+    tasks: &mut Vec<MinTask<'a>>,
+    out: &mut Vec<usize>,
+) {
+    match (mins[group], bodies[group]) {
+        (Min::Known(len), _) => out.push(len),
+        (Min::Unknown, Some(body)) => {
+            mins[group] = Min::Pending;
+            tasks.push(MinTask::Known(group));
+            tasks.push(MinTask::Node(body));
+        }
+        _ => out.push(0),
     }
 }
 

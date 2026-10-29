@@ -416,3 +416,21 @@ fn a_partly_scanned_grapheme_search_drops_without_affecting_the_next() {
         .unwrap();
     assert_eq!(found[0], Some((0, 1)));
 }
+
+/// A cycle of calls through thousands of groups is checked on explicit
+/// stacks, so it compiles on a 1 MiB thread and matches as jq does.
+#[test]
+fn a_long_cycle_of_calls_compiles_on_a_small_stack() {
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(|| {
+            let n = 3000;
+            let pattern: String = (0..n)
+                .map(|i| format!("(?<g{i}>a\\g<g{}>?)", (i + 1) % n))
+                .collect();
+            assert_eq!(sheet_answer(&pattern, "g", "aaaa"), "[]");
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
