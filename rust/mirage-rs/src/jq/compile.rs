@@ -820,7 +820,7 @@ impl<'a> Compiler<'a> {
                 bytes: usize::MAX,
                 memory: usize::MAX,
             };
-            match builtin::call(f, &[Value::Null, x, y], limits) {
+            match builtin::call(f, &mut [Value::Null, x, y], limits) {
                 Ok(v) => {
                     self.emit(bc, Op::LoadK(v));
                 }

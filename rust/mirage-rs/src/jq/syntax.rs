@@ -1808,7 +1808,7 @@ fn metadata_constant(ast: &Ast) -> Option<Value> {
                     bytes: usize::MAX,
                     memory: usize::MAX,
                 };
-                values.push(builtin::call(f, &[Value::Null, left, right], limits).ok()?);
+                values.push(builtin::call(f, &mut [Value::Null, left, right], limits).ok()?);
             }
             Step::Array(len) => {
                 let items = values.split_off(values.len() - len);
@@ -1854,7 +1854,7 @@ fn fold(op: BinOp, a: Ast, b: Ast) -> Ast {
             bytes: usize::MAX,
             memory: usize::MAX,
         };
-        match builtin::call(f, &[Value::Null, x.clone(), y.clone()], limits) {
+        match builtin::call(f, &mut [Value::Null, x.clone(), y.clone()], limits) {
             Ok(v) => return Ast::Literal(v),
             Err(Fault::Error(_)) => {}
             Err(_) => unreachable!("binops neither halt nor backtrack"),

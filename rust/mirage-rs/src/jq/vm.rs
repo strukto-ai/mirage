@@ -2,13 +2,15 @@
 
 use std::sync::Arc;
 
-use super::builtin::{self, Cfunc, Fault, Sorting, Subtracting};
+use super::builtin::{
+    self, Cfunc, Containing, Deleting, Fault, Indexing, Sorting, Splitting, Subtracting,
+};
 use super::host::{self, Answer, Host, Messaging, Reply};
 use super::meter::{Charge, Meter};
 use super::parse::Decoding;
 use super::regex::Matching;
 use super::time::{self, Clock};
-use super::value::{Dumping, Object, Parsing, Retirement, Value};
+use super::value::{Deferring, Dumping, Object, Parsing, Retirement, Value, deferring};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Target {
@@ -220,6 +222,10 @@ pub(crate) enum Pending {
     Read(Box<Parsing>),
     Message(Box<Messaging>),
     Subtract(Box<Subtracting>),
+    Split(Box<Splitting>),
+    Index(Box<Indexing>),
+    Contain(Box<Containing>),
+    Delete(Box<Deleting>),
 }
 
 impl Pending {
@@ -232,10 +238,18 @@ impl Pending {
             Self::Read(task) => task.retire(),
             Self::Message(task) => task.retire(),
             Self::Subtract(task) => task.retire(),
+            Self::Split(task) => task.retire(),
+            Self::Index(task) => task.retire(),
+            Self::Contain(task) => task.retire(),
+            Self::Delete(task) => task.retire(),
         }
     }
 
-    fn begin(f: Cfunc, args: &[Value]) -> Option<Result<Pending, Fault>> {
+    fn begin(f: Cfunc, args: &mut [Value]) -> Option<Result<Pending, Fault>> {
+        if let (Cfunc::DelPaths, [root, paths, ..]) = (f, &mut *args) {
+            let root = std::mem::replace(root, Value::Null);
+            return Some(Deleting::begin(root, paths).map(|d| Pending::Delete(Box::new(d))));
+        }
         let input = &args[0];
         let dump = || Ok(Pending::Dump(Box::new(Dumping::begin(input.clone()))));
         let format = match args.get(1) {
@@ -268,6 +282,14 @@ impl Pending {
                 _ => return None,
             },
             Cfunc::Minus => Ok(Pending::Subtract(Box::new(Subtracting::begin(args)?))),
+            Cfunc::Split | Cfunc::Divide | Cfunc::Explode => {
+                Ok(Pending::Split(Box::new(Splitting::begin(f, args)?)))
+            }
+            Cfunc::StrIndices => Ok(Pending::Index(Box::new(Indexing::text(args)?))),
+            Cfunc::Contains => Ok(Pending::Contain(Box::new(Containing::begin(
+                input,
+                args.get(1)?,
+            )?))),
             _ => return None,
         })
     }
@@ -290,6 +312,10 @@ impl Pending {
                 .run(budget)
                 .map(|result| result.map_err(builtin::fail)),
             Pending::Subtract(subtracting) => subtracting.run(budget),
+            Pending::Split(splitting) => splitting.run(budget, limits.items),
+            Pending::Index(indexing) => indexing.run(budget, limits.items),
+            Pending::Contain(containing) => containing.run(budget),
+            Pending::Delete(deleting) => deleting.run(budget, limits),
             Pending::Message(messaging) => messaging.run(budget, limits),
             Pending::Read(_) => unreachable!("a document reader is retired outside the VM"),
         }
@@ -645,7 +671,16 @@ impl Vm {
     }
 
     /// Run until the next output, the end, an error, or `budget` steps.
+    /// A container whose last reference drops meanwhile is freed with the
+    /// run's other dead values, one node a step.
     pub(crate) fn next(&mut self, budget: &mut u64) -> Next {
+        let deferred = deferring();
+        let next = self.advance(budget, &deferred);
+        self.teardown.extend(deferred.finish());
+        next
+    }
+
+    fn advance(&mut self, budget: &mut u64, deferred: &Deferring) -> Next {
         if let Some(halt) = self.halted.take() {
             return Next::Halt(halt);
         }
@@ -683,6 +718,7 @@ impl Vm {
                     self.limits.memory
                 ))));
             }
+            deferred.collect(&mut self.teardown);
             if self.retire_dead() {
                 continue;
             }
@@ -848,17 +884,31 @@ impl Vm {
                         t.dump_trunc()
                     ))));
                 }
-                match builtin::get(&t, &k) {
+                let found = match self.pending.take() {
+                    Some(task) => self.resume(task, budget),
+                    None => match Indexing::list(&t, &k) {
+                        Some(task) => self.resume(Pending::Index(Box::new(task)), budget),
+                        None => Some(builtin::get(&t, &k).map_err(Fault::Error)),
+                    },
+                };
+                let Some(found) = found else {
+                    self.push(k);
+                    self.push(t);
+                    self.pc = pc;
+                    return Flow::Pause;
+                };
+                match found {
                     Ok(v) => {
                         self.path_append(k, v.clone());
                         self.push(v);
                     }
-                    Err(message) => {
+                    Err(Fault::Error(message)) => {
                         if matches!(op, Op::Index) {
                             return Flow::Raise(Raise::Error(message));
                         }
                         return Flow::Backtrack;
                     }
+                    Err(Fault::Halt(..)) => unreachable!("indexing never halts"),
                 }
             }
             Op::Each | Op::EachOpt => {
@@ -959,7 +1009,7 @@ impl Vm {
                     Some(task) => self.resume(task, budget),
                     None => {
                         *budget = budget.saturating_sub(builtin::cost(&args));
-                        match Pending::begin(*f, &args) {
+                        match Pending::begin(*f, &mut args) {
                             Some(Ok(task)) => self.resume(task, budget),
                             Some(Err(fault)) => Some(Err(fault)),
                             None => Some(match f {
@@ -970,7 +1020,7 @@ impl Vm {
                                 | Cfunc::Strftime
                                 | Cfunc::StrfLocaltime
                                 | Cfunc::Strptime => time::call(*f, &args, &self.clock),
-                                _ => builtin::call(*f, &args, self.limits),
+                                _ => builtin::call(*f, &mut args, self.limits),
                             }),
                         }
                     }

@@ -35,6 +35,20 @@ describe('PipeConsole', () => {
     await expect(pipe.emit(Channel.STDOUT, enc('4\n'))).rejects.toBeInstanceOf(PipeClosed)
   })
 
+  it('ends the stream at a mute and drops what comes after without refusing it', async () => {
+    const pipe = new PipeConsole()
+    await pipe.emit(Channel.STDOUT, new Uint8Array(65536))
+    const blocked = pipe.emit(Channel.STDOUT, enc('blocked'))
+    await pipe.emit(Channel.STDERR, enc('err'))
+    pipe.mute()
+    await blocked
+    await pipe.emit(Channel.STDOUT, enc('late'))
+    const taken: Uint8Array[] = []
+    for await (const chunk of pipe.stream()) taken.push(chunk)
+    expect(taken.reduce((n, chunk) => n + chunk.byteLength, 0)).toBe(65536)
+    expect(dec(await pipe.snapshot(Channel.STDERR))).toBe('err')
+  })
+
   it('releases a draining writer on reader close and refuses more output', async () => {
     const pipe = new PipeConsole()
     await pipe.emit(Channel.STDOUT, enc('first'))

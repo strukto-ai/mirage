@@ -1,6 +1,7 @@
 // Adapted from jq 1.8.2 (MIT), src/jv.c, src/jv_aux.c and src/jv_print.c. See licenses/third_party/jq.txt.
 
 use std::borrow::Borrow;
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
@@ -183,17 +184,25 @@ fn list_bytes(len: usize) -> usize {
 
 /// A string's text, charged to the meter current when it was made.
 pub(crate) struct Text {
-    text: Box<str>,
-    _charge: Charge,
+    text: String,
+    charge: Charge,
 }
 
 impl Text {
     pub(crate) fn new(text: Box<str>) -> Self {
         let charge = Charge::open(BASE + text.len());
         Self {
-            text,
-            _charge: charge,
+            text: text.into_string(),
+            charge,
         }
+    }
+
+    /// Append `more` in place, the buffer growing as a `String` grows and
+    /// charged for its capacity, so a string a `reduce` grows is not copied
+    /// on every step.
+    pub(crate) fn push_str(&mut self, more: &str) {
+        self.text.push_str(more);
+        self.charge.set(BASE + self.text.capacity());
     }
 
     pub(crate) fn as_str(&self) -> &str {
@@ -364,7 +373,13 @@ impl Deref for List {
 
 impl Drop for List {
     fn drop(&mut self) {
-        teardown(std::mem::take(&mut self.items));
+        if self.items.is_empty() {
+            return;
+        }
+        let items = std::mem::take(&mut self.items);
+        if let Some(items) = defer(items, &mut self.charge) {
+            teardown(items);
+        }
     }
 }
 
@@ -406,8 +421,92 @@ impl fmt::Debug for Object {
 
 impl Drop for Object {
     fn drop(&mut self) {
-        self.index.clear();
-        teardown(self.entries.drain(..).map(|(_, v)| v).collect());
+        if self.entries.is_empty() {
+            return;
+        }
+        let deferred = DEFERRED.with(|cell| {
+            let mut cell = cell.borrow_mut();
+            let Some(sink) = cell.as_mut() else {
+                return false;
+            };
+            sink.push(Retirement::Object {
+                entries: std::mem::take(&mut self.entries).into_iter(),
+                index: std::mem::take(&mut self.index).into_iter(),
+                _charge: std::mem::replace(&mut self.charge, Charge::open(0)),
+            });
+            true
+        });
+        if !deferred {
+            self.index.clear();
+            teardown(self.entries.drain(..).map(|(_, v)| v).collect());
+        }
+    }
+}
+
+thread_local! {
+    /// While a run defers them, the children a container's last reference
+    /// held, which its run frees a bounded number of nodes at a time.
+    static DEFERRED: RefCell<Option<Vec<Retirement>>> = const { RefCell::new(None) };
+}
+
+/// A list's items for the run deferring them, with the charge they keep;
+/// the items back when no run defers them.
+fn defer(items: Vec<Value>, charge: &mut Charge) -> Option<Vec<Value>> {
+    DEFERRED.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        let Some(sink) = cell.as_mut() else {
+            return Some(items);
+        };
+        sink.push(Retirement::Values {
+            values: items,
+            _charge: std::mem::replace(charge, Charge::open(0)),
+        });
+        None
+    })
+}
+
+/// Containers whose last reference drops while this is held leave their
+/// children to the run, which `collect` and `finish` hand them to, so a run
+/// that drops a large value does not free it in one step.
+pub(crate) struct Deferring {
+    previous: Option<Vec<Retirement>>,
+    restored: bool,
+}
+
+pub(crate) fn deferring() -> Deferring {
+    Deferring {
+        previous: DEFERRED.with(|cell| cell.borrow_mut().replace(Vec::new())),
+        restored: false,
+    }
+}
+
+impl Deferring {
+    /// Move the children deferred so far onto `into`.
+    pub(crate) fn collect(&self, into: &mut Vec<Retirement>) {
+        DEFERRED.with(|cell| {
+            if let Some(sink) = cell.borrow_mut().as_mut() {
+                into.append(sink);
+            }
+        });
+    }
+
+    /// The children deferred while this was held.
+    pub(crate) fn finish(mut self) -> Vec<Retirement> {
+        self.restore().unwrap_or_default()
+    }
+
+    fn restore(&mut self) -> Option<Vec<Retirement>> {
+        self.restored = true;
+        let previous = self.previous.take();
+        DEFERRED.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), previous))
+    }
+}
+
+impl Drop for Deferring {
+    fn drop(&mut self) {
+        if !self.restored {
+            drop(self.restore());
+        }
     }
 }
 
@@ -507,16 +606,27 @@ impl Object {
         }
     }
 
-    pub(crate) fn remove(&mut self, key: &str) {
-        if let Some(at) = self.index.remove(key) {
-            self.entries.remove(at);
-            for slot in self.index.values_mut() {
-                if *slot > at {
-                    *slot -= 1;
-                }
-            }
-            self.recharge();
+    /// Drop each of `keys`, in one pass over the fields however many go.
+    pub(crate) fn remove_all<'a>(&mut self, keys: impl IntoIterator<Item = &'a str>) {
+        let mut gone: Vec<usize> = keys
+            .into_iter()
+            .filter_map(|key| self.index.remove(key))
+            .collect();
+        if gone.is_empty() {
+            return;
         }
+        gone.sort_unstable();
+        let mut at = 0;
+        let mut skip = gone.iter().peekable();
+        self.entries.retain(|_| {
+            let keep = skip.next_if_eq(&&at).is_none();
+            at += 1;
+            keep
+        });
+        for slot in self.index.values_mut() {
+            *slot -= gone.partition_point(|&g| g < *slot);
+        }
+        self.recharge();
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&Key, &Value)> {
@@ -2291,6 +2401,34 @@ mod tests {
         assert!(retirement.next().is_some());
         assert_eq!(meter.live(), before);
         drop(retirement);
+        assert_eq!(meter.live(), 0);
+    }
+
+    #[test]
+    fn deferred_drops_hand_their_children_to_the_run_still_charged() {
+        let meter = Arc::new(Meter::default());
+        let _installed = meter::install(&meter);
+        let child = Value::array(vec![Value::Null; 100]);
+        let Value::Array(held) = &child else {
+            unreachable!()
+        };
+        let mut fields = Object::default();
+        fields.insert("a".into(), child.clone());
+        let list = Value::array(vec![child.clone(), Value::object(fields)]);
+        let before = meter.live();
+        let deferred = deferring();
+        drop(list);
+        let mut retired = deferred.finish();
+        assert_eq!(Arc::strong_count(held), 3);
+        assert_eq!(meter.live(), before);
+        while let Some(chunk) = retired.last_mut() {
+            match chunk.next() {
+                Some(value) => retired.extend(Retirement::split(value)),
+                None => drop(retired.pop()),
+            }
+        }
+        assert_eq!(Arc::strong_count(held), 1);
+        drop(child);
         assert_eq!(meter.live(), 0);
     }
 

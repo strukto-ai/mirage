@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { jqRunTexts } from './eval.ts'
-import { errorReport, formatOne, haltReport, loadFailure, printable } from './format.ts'
+import { errorReport, formatOne, haltReport, loadFailure } from './format.ts'
 import { jqOptions, type JqOptions } from './types.ts'
 import { eacces, eisdir, enoent } from '../../errors/fs.ts'
 
@@ -168,24 +168,18 @@ describe('jq output flags', () => {
   })
 })
 
-describe('printable', () => {
-  it('refuses a string holding a NUL under --raw-output0', async () => {
+describe('formatOne under --raw-output0', () => {
+  it('refuses a string holding a NUL', async () => {
     // Pinned: printf '"a\u0000b" "c"' | jq --raw-output0 . fails the first
     // run with this error and prints the second.
     const opts = jqOptions({ rawOutput: true, nulOutput: true, compact: true })
-    const run = { outputs: ['"x"', '"a\\u0000b"', '"c"'], stop: null }
-    expect(await printable(run, opts)).toEqual({
-      outputs: ['"x"'],
-      stop: {
-        kind: 'error',
-        text: 'Cannot dump a string containing NUL with --raw-output0 option',
-        string: true,
-      },
-    })
-    const escaped = { outputs: ['"a\\\\u0000"'], stop: null }
-    expect(await printable(escaped, opts)).toBe(escaped)
-    expect(await printable(run, jqOptions({ rawOutput: true, compact: true }))).toBe(run)
-    expect(await printable(run, jqOptions({ nulOutput: true, asciiOutput: true }))).toBe(run)
+    expect(DEC.decode(await formatOne('"x"', opts))).toBe('x\x00')
+    await expect(formatOne('"a\\u0000b"', opts)).rejects.toThrow(
+      'Cannot dump a string containing NUL with --raw-output0 option',
+    )
+    expect(DEC.decode(await formatOne('"a\\\\u0000"', opts))).toBe('a\\u0000\x00')
+    const ascii = jqOptions({ nulOutput: true, asciiOutput: true })
+    expect(DEC.decode(await formatOne('"a\\u0000b"', ascii))).toBe('"a\\u0000b"\x00')
   })
 })
 

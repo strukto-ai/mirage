@@ -12,6 +12,7 @@ from mirage.workspace.executor.builtins.timeout.timeout import (
     signal_name,
 )
 from mirage.workspace.session.session import SessionState
+from mirage.workspace.types import ExecutionNode
 
 
 class FakeShell:
@@ -45,6 +46,13 @@ TRY = b"Try 'timeout --help' for more information.\n"
 
 def make_session() -> SessionState:
     return SessionState(session_id="s1")
+
+
+async def timed(*args, **kwargs) -> tuple[bytes, IOResult, ExecutionNode]:
+    # timeout streams its command's stdout, and its status settles once
+    # that stream is drained, as the shell's barriers drain it.
+    stdout, io, node = await handle_timeout(*args, **kwargs)
+    return await materialize(stdout), io, node
 
 
 def test_duration_seconds_units():
@@ -176,9 +184,7 @@ def test_signal_name(number, name):
 @pytest.mark.asyncio
 async def test_command_finishing_in_time_passes_through():
     shell = FakeShell(exit_code=3)
-    stdout, io, _ = await handle_timeout(
-        shell, ["5", "wc", "-l"], make_session()
-    )
+    stdout, io, _ = await timed(shell, ["5", "wc", "-l"], make_session())
     assert shell.lines == ["wc -l"]
     assert io.exit_code == 3
     assert stdout == b"done\n"
@@ -189,18 +195,14 @@ async def test_command_finishing_in_time_passes_through():
 @pytest.mark.asyncio
 async def test_overrun_keeps_what_the_line_wrote():
     shell = FakeShell(delay=1.0, early=b"early\n")
-    stdout, io, _ = await handle_timeout(
-        shell, ["0.05", "sleep", "1"], make_session()
-    )
+    stdout, io, _ = await timed(shell, ["0.05", "sleep", "1"], make_session())
     assert (stdout, io.exit_code) == (b"early\n", 124)
 
 
 @pytest.mark.asyncio
 async def test_overrun_exits_124():
     shell = FakeShell(delay=1.0)
-    _, io, node = await handle_timeout(
-        shell, ["0.05", "sleep", "1"], make_session()
-    )
+    _, io, node = await timed(shell, ["0.05", "sleep", "1"], make_session())
     assert io.exit_code == 124
     assert node.exit_code == 124
 
@@ -208,9 +210,7 @@ async def test_overrun_exits_124():
 @pytest.mark.asyncio
 async def test_invalid_duration_exits_125():
     shell = FakeShell()
-    _, io, _ = await handle_timeout(
-        shell, ["xx", "sleep", "1"], make_session()
-    )
+    _, io, _ = await timed(shell, ["xx", "sleep", "1"], make_session())
     assert io.exit_code == 125
     assert (
         await materialize(io.stderr)
@@ -221,7 +221,7 @@ async def test_invalid_duration_exits_125():
 @pytest.mark.asyncio
 async def test_missing_operand_exits_125():
     shell = FakeShell()
-    _, io, _ = await handle_timeout(shell, ["5"], make_session())
+    _, io, _ = await timed(shell, ["5"], make_session())
     assert io.exit_code == 125
     assert await materialize(io.stderr) == TRY
 
@@ -255,7 +255,7 @@ async def test_missing_operand_exits_125():
 )
 async def test_option_refusals_exit_125(args, message):
     shell = FakeShell()
-    _, io, _ = await handle_timeout(shell, args, make_session())
+    _, io, _ = await timed(shell, args, make_session())
     assert io.exit_code == 125
     assert await materialize(io.stderr) == message + TRY
     assert shell.lines == []
@@ -300,9 +300,7 @@ async def test_option_refusals_exit_125(args, message):
 )
 async def test_signal_outcomes(args, code, said):
     shell = FakeShell(delay=1.0)
-    _, io, node = await handle_timeout(
-        shell, [*args, "sleep", "1"], make_session()
-    )
+    _, io, node = await timed(shell, [*args, "sleep", "1"], make_session())
     assert io.exit_code == code
     assert node.exit_code == code
     assert (await materialize(io.stderr) or b"") == said
@@ -321,9 +319,7 @@ async def test_signal_outcomes(args, code, said):
 )
 async def test_ignored_signals_let_the_command_finish(args, code):
     shell = FakeShell(delay=0.2, exit_code=3)
-    stdout, io, _ = await handle_timeout(
-        shell, [*args, "0.05", "sh"], make_session()
-    )
+    stdout, io, _ = await timed(shell, [*args, "0.05", "sh"], make_session())
     assert io.exit_code == code
     assert stdout == b"done\n"
 
@@ -333,9 +329,7 @@ async def test_stopped_timeout_never_returns():
     shell = FakeShell(delay=0.05)
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(
-            handle_timeout(
-                shell, ["-s", "STOP", "0.01", "sh"], make_session()
-            ),
+            timed(shell, ["-s", "STOP", "0.01", "sh"], make_session()),
             timeout=0.3,
         )
 
@@ -343,14 +337,14 @@ async def test_stopped_timeout_never_returns():
 @pytest.mark.asyncio
 async def test_command_reads_timeouts_stdin():
     shell = FakeShell()
-    await handle_timeout(shell, ["1", "cat"], make_session(), b"hi\n")
+    await timed(shell, ["1", "cat"], make_session(), b"hi\n")
     assert shell.stdins == [b"hi\n"]
 
 
 @pytest.mark.asyncio
 async def test_quoting_survives_rejoin():
     shell = FakeShell()
-    await handle_timeout(shell, ["1", "grep", "a b", "f.txt"], make_session())
+    await timed(shell, ["1", "grep", "a b", "f.txt"], make_session())
     assert shell.lines == ["grep 'a b' f.txt"]
 
 
@@ -394,17 +388,17 @@ class ComplainingShell:
 
 @pytest.mark.asyncio
 async def test_overrun_keeps_the_stderr_the_command_had_produced():
-    stdout, io, _ = await handle_timeout(
+    stdout, io, _ = await timed(
         ComplainingShell(), ["0.1", "tail", "-F", "nope"], make_session()
     )
     assert io.exit_code == 124
-    assert stdout is None
+    assert stdout == b""
     assert io.stderr == b"tail: nope: No such file or directory\n"
 
 
 @pytest.mark.asyncio
 async def test_overrun_keeps_what_the_command_had_printed():
-    stdout, io, _ = await handle_timeout(
+    stdout, io, _ = await timed(
         StreamingShell(), ["0.1", "tail", "-f"], make_session()
     )
     assert io.exit_code == 124
@@ -427,9 +421,23 @@ async def _warns_then_finishes(
 # reports what it wrote on stderr once.
 @pytest.mark.asyncio
 async def test_a_run_finishing_past_an_ignored_deadline_reports_stderr_once():
-    _, io, _ = await handle_timeout(
+    _, io, _ = await timed(
         _warns_then_finishes,
         ["-s", "CONT", "0.05", "sleep", "1"],
         make_session(),
     )
     assert (io.exit_code, await materialize(io.stderr)) == (124, b"warn\n")
+
+
+# The command's stdout is timeout's own, so its reader sees each write as
+# it happens, and a reader that leaves early ends the run, as a write to a
+# closed pipe ends GNU's command.
+@pytest.mark.asyncio
+async def test_output_goes_out_as_the_command_writes_it():
+    stdout, io, _ = await handle_timeout(
+        StreamingShell(), ["5", "tail", "-f"], make_session()
+    )
+    assert not isinstance(stdout, bytes) and stdout is not None
+    chunks = aiter(stdout)
+    assert await asyncio.wait_for(anext(chunks), 1) == b"first\n"
+    await asyncio.wait_for(chunks.aclose(), 1)

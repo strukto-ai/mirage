@@ -555,12 +555,30 @@ fn programs_match_jq() {
 }
 
 const SLICED: &[&str] = &[
+    r#""a,b,,c," | split(",")"#,
+    r#""a,b,,c," / ",""#,
+    r#""" | split(",")"#,
+    r#""héllo" | split("")"#,
+    r#""héllo" | explode"#,
+    r#""abcabcab" | indices("ab")"#,
+    r#""aaaa" | indices("aa")"#,
+    "[1,2,1,2,1] | indices([1,2])",
+    "[1,2] | indices([])",
+    r#"[1,[2,3],{"a":4}] | contains([[3],{"a":4}])"#,
+    r#"{"a":[1,2],"b":"xyz"} | contains({"a":[2],"b":"y"})"#,
+    r#"{"a":[1,2]} | contains({"a":[3]})"#,
     "[range(300) | 300 - .] | sort",
     "[range(300) | 300 - .] | group_by(. % 7)",
     "[range(500)] | tojson",
     "[range(50)] | tostring",
     "[range(50)] | @json",
     "[range(2000)]",
+    "[range(20)] | del(.[range(0; 20; 3)], .[-1])",
+    r#"{"a":[1,2,3],"b":{"c":1,"d":2}} | delpaths([["a",0],["b","c"],["a",2],["x","y"]])"#,
+    "[[1,2],[3,4]] | del(.[][0])",
+    r#"{"a":1,"b":2,"c":3,"d":4} | del(.a, .c) | .e = 5 | keys_unsorted, .d"#,
+    r#"{"a":1} | delpaths([[]]), delpaths([])"#,
+    r#"try ([1] | delpaths([["a"]])) catch ., try delpaths([1]) catch ."#,
 ];
 
 #[test]
@@ -2294,6 +2312,134 @@ fn array_subtraction_pauses_with_the_budget() {
     assert!(drains > 100, "{drains} drains");
     assert_eq!(frames(&wire), vec![Frame::Out("3000".into())]);
     assert_eq!(outputs("[1,2,3,2,[4]] - [2,[4]]", "null"), vec!["[1,3]"]);
+}
+
+/// `split`, `/`, `explode`, both `indices` and `contains` work through
+/// their operands a piece at a time, so long operands pause with the
+/// budget rather than run in one step.
+#[test]
+fn long_builtins_pause_with_the_budget() {
+    for (program, want) in [
+        (r#"","*30000 | split(",") | length"#, "30001"),
+        (r#"","*30000 / "," | length"#, "30001"),
+        (r#""x"*30000 | split("") | length"#, "30000"),
+        (r#""x"*30000 | explode | length"#, "30000"),
+        (r#""a"*30000 | indices("a"*100) | length"#, "29901"),
+        (
+            "[range(3000) | 0] | indices([range(10) | 0]) | length",
+            "2991",
+        ),
+        ("[range(1000)] as $a | $a | contains($a | reverse)", "true"),
+        (
+            "[range(1000)] as $a | {a: $a} | contains({a: ($a | reverse)})",
+            "true",
+        ),
+    ] {
+        let (count, got) = drains(program, "null", 1 << 10);
+        assert!(count > 20, "{program}: {count} drains");
+        assert_eq!(got, vec![Frame::Out(want.into())], "{program}");
+    }
+}
+
+/// `delpaths` sorts, checks and walks its paths within the budget, and a
+/// run cancelled during it ends cleanly.
+#[test]
+fn delpaths_pauses_with_the_budget() {
+    for (paths, root) in [
+        ("[range(3000) | [.]]", "[range(3000)]"),
+        (r#"[range(3000) | ["a", .]]"#, "{a: [range(3000)]}"),
+    ] {
+        let built = format!("{paths} as $p | {root}");
+        let (base, _) = drains(&format!("{built} | length"), "null", 1 << 10);
+        let program = format!("{built} | delpaths($p) | length");
+        let (count, got) = drains(&program, "null", 1 << 10);
+        assert!(
+            count > base + 20,
+            "{program}: {count} drains, {base} without"
+        );
+        let want = if root.starts_with('{') { "1" } else { "0" };
+        assert_eq!(got, vec![Frame::Out(want.into())], "{program}");
+        let mut stream = open(&program, 1 << 10);
+        let mut wire = Vec::new();
+        stream.feed(b"null", &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        for _ in 0..base + 10 {
+            stream.drain(&mut wire).unwrap();
+        }
+        assert!(stream.busy(), "{program}");
+        assert!(stream.cancel(), "{program}");
+        while stream.busy() {
+            stream.drain(&mut wire).unwrap();
+        }
+        assert!(wire.is_empty(), "{program}");
+    }
+}
+
+/// A run cancelled while one of them is paused ends cleanly.
+#[test]
+fn cancel_ends_a_paused_split_search_or_containment() {
+    for program in [
+        r#"","*300000 | split(",") | length"#,
+        r#""a"*300000 | indices("a"*100) | length"#,
+        "[range(30000) | 0] | indices([range(10) | 0]) | length",
+        "[range(3000)] as $a | $a | contains($a | reverse)",
+    ] {
+        let mut stream = open(program, 1 << 10);
+        let mut wire = Vec::new();
+        stream.feed(b"null", &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        for _ in 0..50 {
+            stream.drain(&mut wire).unwrap();
+        }
+        assert!(stream.busy(), "{program}");
+        assert!(stream.cancel(), "{program}");
+        while stream.busy() {
+            stream.drain(&mut wire).unwrap();
+        }
+        assert!(wire.is_empty(), "{program}");
+    }
+}
+
+/// The array limit stops these before they build past it, and a result
+/// at the limit is kept; the string limit stops the formats as they grow.
+#[test]
+fn builders_stop_at_the_array_and_string_limits() {
+    for program in [
+        r#"","*20 | split(",")"#,
+        r#"","*20 / ",""#,
+        r#""x"*20 | split("")"#,
+        r#""x"*20 | explode"#,
+        r#"","*20 | indices(",")"#,
+        "[range(10)] + [range(10)]",
+    ] {
+        assert_eq!(
+            limited(serde_json::json!({ "program": program, "items": 15 })),
+            vec![Frame::Err("jq array limit of 15 elements exceeded".into())],
+            "{program}"
+        );
+    }
+    assert_eq!(
+        limited(serde_json::json!({
+            "program": r#"[(","*14 | split(",")), ("x"*15 | explode)] | map(length)"#,
+            "items": 15,
+        })),
+        vec![Frame::Out("[15,15]".into())]
+    );
+    for program in [
+        r#""<"*20 | @html"#,
+        r#""%"*20 | @uri"#,
+        r#""x"*40 | @base64"#,
+        r#"["a"*30, "b"*30] | @csv"#,
+        r#"["a"*30, "b"*30] | @tsv"#,
+        r#"["a"*30, "b"*30] | @sh"#,
+        r#""x"*30 + "y"*30"#,
+    ] {
+        assert_eq!(
+            limited(serde_json::json!({ "program": program, "bytes": 50 })),
+            vec![Frame::Err("jq string limit of 50 bytes exceeded".into())],
+            "{program}"
+        );
+    }
 }
 
 /// A drain hands back once it holds a piece of output, `debug` and

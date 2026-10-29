@@ -5,9 +5,13 @@ use std::cmp::Ordering;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use memchr::memmem::Finder;
+
 use super::meter::{self, Charge};
 use super::parse::parse_value;
-use super::value::{Comparing, Key, List, MAX_DEPTH, Number, Object, TooDeep, Value, try_compare};
+use super::value::{
+    Comparing, Key, List, MAX_DEPTH, Number, Object, Text, TooDeep, Value, try_compare,
+};
 use super::vm::Limits;
 
 const PATH_DEPTH: usize = 10000;
@@ -800,19 +804,41 @@ pub(super) fn string_limit(text: String, limits: Limits) -> Answer {
     StringBuffer::from(text).finish(limits)
 }
 
+fn array_too_long(items: usize) -> Fault {
+    fail(format!("jq array limit of {items} elements exceeded"))
+}
+
 pub(super) fn array_limit(items: Vec<Value>, limits: Limits) -> Answer {
     let mut charge = Charge::open(items.capacity() * std::mem::size_of::<Value>());
     if items.len() > limits.items {
-        return Err(fail(format!(
-            "jq array limit of {} elements exceeded",
-            limits.items
-        )));
+        return Err(array_too_long(limits.items));
     }
     charge.set(0);
     Ok(Value::array(items))
 }
 
-pub(crate) fn call(f: Cfunc, args: &[Value], limits: Limits) -> Answer {
+/// The builtin `f` over `args`, the input first. As jq's `f_plus` frees
+/// its input before it adds, and `setpath` and `delpaths` take theirs, a
+/// value nothing else holds, a `reduce` accumulator, changes in place.
+pub(crate) fn call(f: Cfunc, args: &mut [Value], limits: Limits) -> Answer {
+    match f {
+        Cfunc::Plus => {
+            args[0] = Value::Null;
+            let a = std::mem::replace(&mut args[1], Value::Null);
+            let b = std::mem::replace(&mut args[2], Value::Null);
+            return plus(a, b, limits);
+        }
+        Cfunc::SetPath => {
+            let root = std::mem::replace(&mut args[0], Value::Null);
+            let value = std::mem::replace(&mut args[2], Value::Null);
+            return setpath(root, &args[1], value, limits);
+        }
+        Cfunc::DelPaths => {
+            let root = std::mem::replace(&mut args[0], Value::Null);
+            return delpaths(root, &args[1], limits);
+        }
+        _ => {}
+    }
     let input = &args[0];
     let a = args.get(1).unwrap_or(&Value::Null);
     let b = args.get(2).unwrap_or(&Value::Null);
@@ -821,7 +847,7 @@ pub(crate) fn call(f: Cfunc, args: &[Value], limits: Limits) -> Answer {
             Value::Number(n) => Ok(Value::Number(n.negate())),
             _ => Err(type_error(input, "cannot be negated")),
         },
-        Cfunc::Plus => plus(a, b, limits),
+        Cfunc::Plus | Cfunc::SetPath | Cfunc::DelPaths => unreachable!("taken by value above"),
         Cfunc::Minus => minus(a, b),
         Cfunc::Multiply => multiply(a, b, limits),
         Cfunc::Divide => divide(a, b, limits),
@@ -881,20 +907,19 @@ pub(crate) fn call(f: Cfunc, args: &[Value], limits: Limits) -> Answer {
             (Value::String(s), Value::String(p)) => Ok(Value::bool(s.ends_with(p.as_str()))),
             _ => Err(fail("endswith() requires string inputs")),
         },
-        Cfunc::Split => match (input, a) {
-            (Value::String(s), Value::String(sep)) => split(s, sep, limits),
-            _ => Err(fail("split input and separator must be strings")),
+        Cfunc::Split => match Splitting::begin(f, args) {
+            Some(splitting) => splitting.finish(limits.items),
+            None => Err(fail("split input and separator must be strings")),
         },
-        Cfunc::Explode => match input {
-            Value::String(s) => array_limit(
-                s.chars().map(|c| Value::number(c as u32 as f64)).collect(),
-                limits,
-            ),
-            _ => Err(fail("explode input must be a string")),
+        Cfunc::Explode => match Splitting::begin(f, args) {
+            Some(splitting) => splitting.finish(limits.items),
+            None => Err(fail("explode input must be a string")),
         },
         Cfunc::Implode => implode(input, limits),
         Cfunc::StrIndices => match (input, a) {
-            (Value::String(s), Value::String(needle)) => Ok(Value::array(indices(s, needle))),
+            (Value::String(_), Value::String(_)) => Indexing::text(args)
+                .expect("two strings")
+                .finish(limits.items),
             (Value::String(_), _) => Err(type_error(a, "is not a string")),
             _ => Err(type_error(
                 input,
@@ -916,13 +941,11 @@ pub(crate) fn call(f: Cfunc, args: &[Value], limits: Limits) -> Answer {
             }
             _ => Err(fail("trim input must be a string")),
         },
-        Cfunc::SetPath => setpath(input.clone(), a, b.clone(), limits),
         Cfunc::GetPath => getpath(input, a),
-        Cfunc::DelPaths => delpaths(input.clone(), a, limits),
         Cfunc::Has => has(input, a),
         Cfunc::Contains => {
-            if input.kind() == a.kind() && (input.rank_kind() == a.rank_kind()) {
-                Ok(Value::bool(contains(input, a)?))
+            if let Some(containing) = Containing::begin(input, a) {
+                containing.finish()
             } else {
                 Err(type_error2(
                     input,
@@ -1182,30 +1205,39 @@ fn is_number(text: &str) -> bool {
     at == bytes.len()
 }
 
-fn plus(a: &Value, b: &Value, limits: Limits) -> Answer {
+fn plus(a: Value, b: Value, limits: Limits) -> Answer {
     match (a, b) {
-        (Value::Null, _) => Ok(b.clone()),
-        (_, Value::Null) => Ok(a.clone()),
+        (Value::Null, b) => Ok(b),
+        (a, Value::Null) => Ok(a),
         (Value::Number(x), Value::Number(y)) => Ok(Value::number(x.value() + y.value())),
-        (Value::String(x), Value::String(y)) => {
+        (Value::String(mut x), Value::String(y)) => {
+            if x.len() + y.len() > limits.bytes {
+                return Err(string_too_long(limits));
+            }
+            if let Some(text) = Arc::get_mut(&mut x) {
+                text.push_str(&y);
+                return Ok(Value::String(x));
+            }
             let mut text = String::with_capacity(x.len() + y.len());
-            text.push_str(x);
-            text.push_str(y);
+            text.push_str(&x);
+            text.push_str(&y);
             string_limit(text, limits)
         }
-        (Value::Array(x), Value::Array(y)) => {
-            let mut items = x.to_vec();
-            items.extend(y.iter().cloned());
-            array_limit(items, limits)
+        (Value::Array(mut x), Value::Array(y)) => {
+            if x.len() + y.len() > limits.items {
+                return Err(array_too_long(limits.items));
+            }
+            Arc::make_mut(&mut x).extend(y.iter().cloned());
+            Ok(Value::Array(x))
         }
-        (Value::Object(x), Value::Object(y)) => {
-            let mut merged: Object = (**x).clone();
+        (Value::Object(mut x), Value::Object(y)) => {
+            let merged = Arc::make_mut(&mut x);
             for (k, v) in y.iter() {
                 merged.insert(k.clone(), v.clone());
             }
-            Ok(Value::object(merged))
+            Ok(Value::Object(x))
         }
-        _ => Err(type_error2(a, b, "cannot be added")),
+        (a, b) => Err(type_error2(&a, &b, "cannot be added")),
     }
 }
 
@@ -1310,6 +1342,473 @@ impl Subtracting {
     }
 }
 
+/// The pieces `split` on a string, `/` on two strings and `explode` make
+/// of a string, one a step, so a long string pauses between drains and
+/// stops at the array limit before it builds past it.
+pub(crate) struct Splitting {
+    text: Arc<Text>,
+    piece: Piece,
+    at: usize,
+    ended: bool,
+    items: Vec<Value>,
+    charge: Charge,
+}
+
+/// What each piece of a split string is.
+enum Piece {
+    /// `explode`: each character's code point.
+    CodePoint,
+    /// An empty separator: each character as a string.
+    Char,
+    /// The text up to the next separator, and the separator's length; the
+    /// finder's copy of the separator stays charged while it searches.
+    Between {
+        finder: Box<Finder<'static>>,
+        len: usize,
+        _needle: Charge,
+    },
+}
+
+impl Splitting {
+    /// The split `f`'s operands ask for, when they are strings.
+    pub(crate) fn begin(f: Cfunc, args: &[Value]) -> Option<Splitting> {
+        match (f, args) {
+            (Cfunc::Explode, [Value::String(text), ..]) => Some(Self::new(text, Piece::CodePoint)),
+            (Cfunc::Split, [Value::String(text), Value::String(sep), ..])
+            | (Cfunc::Divide, [_, Value::String(text), Value::String(sep)]) => {
+                Some(Self::on(text, sep))
+            }
+            _ => None,
+        }
+    }
+
+    /// `text` split on `sep`.
+    fn on(text: &Arc<Text>, sep: &Text) -> Splitting {
+        let piece = if sep.is_empty() {
+            Piece::Char
+        } else {
+            Piece::Between {
+                finder: Box::new(Finder::new(sep.as_bytes()).into_owned()),
+                len: sep.len(),
+                _needle: Charge::open(sep.len()),
+            }
+        };
+        Self::new(text, piece)
+    }
+
+    fn new(text: &Arc<Text>, piece: Piece) -> Splitting {
+        Splitting {
+            text: Arc::clone(text),
+            piece,
+            at: 0,
+            ended: text.is_empty(),
+            items: Vec::new(),
+            charge: Charge::open(0),
+        }
+    }
+
+    /// Splits on, spending `budget`, into at most `limit` pieces: None
+    /// when it ran out before the end.
+    pub(crate) fn run(&mut self, budget: &mut u64, limit: usize) -> Option<Answer> {
+        while !self.ended {
+            if *budget == 0 {
+                return None;
+            }
+            if self.items.len() >= limit {
+                return Some(Err(array_too_long(limit)));
+            }
+            let rest = &self.text[self.at..];
+            let (item, len) = match &self.piece {
+                Piece::CodePoint | Piece::Char => {
+                    let c = rest.chars().next().expect("a character is left");
+                    let item = match self.piece {
+                        Piece::CodePoint => Value::number(c as u32 as f64),
+                        _ => Value::string(c.to_string()),
+                    };
+                    (item, c.len_utf8())
+                }
+                Piece::Between {
+                    finder, len: sep, ..
+                } => match finder.find(rest.as_bytes()) {
+                    Some(end) => (Value::string(&rest[..end]), end + sep),
+                    None => {
+                        self.ended = true;
+                        (Value::string(rest), rest.len())
+                    }
+                },
+            };
+            self.at += len;
+            if !matches!(self.piece, Piece::Between { .. }) {
+                self.ended = self.at == self.text.len();
+            }
+            *budget = budget.saturating_sub(1 + len as u64 / 64);
+            self.items.push(item);
+            self.charge
+                .set(self.items.capacity() * std::mem::size_of::<Value>());
+            if meter::should_pause() {
+                *budget = 0;
+                return None;
+            }
+        }
+        self.charge.set(0);
+        Some(Ok(Value::array(std::mem::take(&mut self.items))))
+    }
+
+    /// The whole split at once, for a caller that cannot pause.
+    pub(crate) fn finish(mut self, limit: usize) -> Answer {
+        let _recording = meter::record_only();
+        let mut budget = u64::MAX;
+        self.run(&mut budget, limit)
+            .unwrap_or_else(|| unreachable!("an unbounded budget finishes the split"))
+    }
+
+    pub(crate) fn retire(&mut self) -> Option<Value> {
+        self.items.pop()
+    }
+}
+
+/// One `indices` in progress, of a string in a string (`_strindices`) or
+/// of an array in an array (`.[$array]`): every position is tried, which a
+/// long needle makes quadratic, so the search pauses between drains and
+/// stops at the array limit.
+pub(crate) struct Indexing {
+    within: Within,
+    ended: bool,
+    found: Vec<Value>,
+    charge: Charge,
+}
+
+/// Where an `indices` search stands.
+enum Within {
+    /// The byte the search goes on from, and the characters before it; the
+    /// finder's copy of the needle stays charged while it searches.
+    Text {
+        text: Arc<Text>,
+        finder: Box<Finder<'static>>,
+        at: usize,
+        chars: usize,
+        _needle: Charge,
+    },
+    /// The position being tried, and how much of the needle matches there.
+    List {
+        items: Arc<List>,
+        needle: Arc<List>,
+        start: usize,
+        matched: usize,
+        comparing: Option<Comparing>,
+    },
+}
+
+/// What one step of an `indices` search came to.
+enum Found {
+    At(usize),
+    Searching,
+    Ended,
+    Paused,
+}
+
+impl Indexing {
+    /// `_strindices`, when its operands are strings.
+    pub(crate) fn text(args: &[Value]) -> Option<Indexing> {
+        let [Value::String(text), Value::String(needle), ..] = args else {
+            return None;
+        };
+        Some(Indexing {
+            ended: needle.is_empty(),
+            within: Within::Text {
+                text: Arc::clone(text),
+                finder: Box::new(Finder::new(needle.as_bytes()).into_owned()),
+                at: 0,
+                chars: 0,
+                _needle: Charge::open(needle.len()),
+            },
+            found: Vec::new(),
+            charge: Charge::open(0),
+        })
+    }
+
+    /// `.[$needle]`, when both are arrays.
+    pub(crate) fn list(items: &Value, needle: &Value) -> Option<Indexing> {
+        let (Value::Array(items), Value::Array(needle)) = (items, needle) else {
+            return None;
+        };
+        Some(Indexing {
+            ended: needle.is_empty() || needle.len() > items.len(),
+            within: Within::List {
+                items: Arc::clone(items),
+                needle: Arc::clone(needle),
+                start: 0,
+                matched: 0,
+                comparing: None,
+            },
+            found: Vec::new(),
+            charge: Charge::open(0),
+        })
+    }
+
+    /// Searches on, spending `budget`, for at most `limit` positions: None
+    /// when it ran out before the end.
+    pub(crate) fn run(&mut self, budget: &mut u64, limit: usize) -> Option<Answer> {
+        while !self.ended {
+            if *budget == 0 {
+                return None;
+            }
+            *budget -= 1;
+            match self.step(budget) {
+                Found::At(at) => {
+                    if self.found.len() >= limit {
+                        return Some(Err(array_too_long(limit)));
+                    }
+                    self.found.push(Value::number(at as f64));
+                    self.charge
+                        .set(self.found.capacity() * std::mem::size_of::<Value>());
+                    if meter::should_pause() {
+                        *budget = 0;
+                        return None;
+                    }
+                }
+                Found::Searching => {}
+                Found::Ended => self.ended = true,
+                Found::Paused => return None,
+            }
+        }
+        self.charge.set(0);
+        Some(Ok(Value::array(std::mem::take(&mut self.found))))
+    }
+
+    fn step(&mut self, budget: &mut u64) -> Found {
+        match &mut self.within {
+            Within::Text {
+                text,
+                finder,
+                at,
+                chars,
+                ..
+            } => {
+                let Some(offset) = finder.find(&text.as_bytes()[*at..]) else {
+                    *budget = budget.saturating_sub((text.len() - *at) as u64 / 64);
+                    return Found::Ended;
+                };
+                let byte = *at + offset;
+                *chars += text[*at..byte].chars().count();
+                let found = *chars;
+                *budget = budget.saturating_sub((offset + finder.needle().len()) as u64 / 64);
+                *at = byte + text[byte..].chars().next().map_or(1, char::len_utf8);
+                *chars += 1;
+                Found::At(found)
+            }
+            Within::List {
+                items,
+                needle,
+                start,
+                matched,
+                comparing,
+            } => {
+                if *start + needle.len() > items.len() {
+                    return Found::Ended;
+                }
+                if *matched == needle.len() {
+                    let found = *start;
+                    *start += 1;
+                    *matched = 0;
+                    return Found::At(found);
+                }
+                if *budget == 0 {
+                    *budget = 1;
+                }
+                let pair = comparing.get_or_insert_with(|| {
+                    Comparing::equality(items[*start + *matched].clone(), needle[*matched].clone())
+                });
+                let Some(answer) = pair.run(budget) else {
+                    return Found::Paused;
+                };
+                *comparing = None;
+                if answer.is_ok_and(|order| order == Ordering::Equal) {
+                    *matched += 1;
+                } else {
+                    *start += 1;
+                    *matched = 0;
+                }
+                Found::Searching
+            }
+        }
+    }
+
+    /// The whole search at once, for a caller that cannot pause.
+    pub(crate) fn finish(mut self, limit: usize) -> Answer {
+        let _recording = meter::record_only();
+        let mut budget = u64::MAX;
+        self.run(&mut budget, limit)
+            .unwrap_or_else(|| unreachable!("an unbounded budget finishes the search"))
+    }
+
+    pub(crate) fn retire(&mut self) -> Option<Value> {
+        if let Within::List {
+            comparing: Some(pair),
+            ..
+        } = &mut self.within
+        {
+            if let Some(value) = pair.retire() {
+                return Some(value);
+            }
+        }
+        if let Within::List { comparing, .. } = &mut self.within {
+            *comparing = None;
+        }
+        self.found.pop().or_else(|| match &mut self.within {
+            Within::List { items, needle, .. } => {
+                if !items.is_empty() {
+                    Some(Value::Array(std::mem::take(items)))
+                } else if !needle.is_empty() {
+                    Some(Value::Array(std::mem::take(needle)))
+                } else {
+                    None
+                }
+            }
+            Within::Text { .. } => None,
+        })
+    }
+}
+
+/// One `contains` in progress: jv_contains walked with a stack of the
+/// levels it is in, one pair a step, so long arrays, which it matches item
+/// against item, pause between drains.
+pub(crate) struct Containing {
+    stack: Vec<Containment>,
+    answer: Option<bool>,
+    charge: Charge,
+}
+
+/// A level of `contains`: an object's keys checked so far, or an array's
+/// wanted item and the candidate it is being matched against.
+enum Containment {
+    Object(Arc<Object>, Arc<Object>, usize),
+    Array(Arc<List>, Arc<List>, usize, usize),
+}
+
+impl Containing {
+    /// Whether `a` contains `b`, when they are of one kind.
+    pub(crate) fn begin(a: &Value, b: &Value) -> Option<Containing> {
+        if !same_kind(a, b) {
+            return None;
+        }
+        let mut containing = Containing {
+            stack: Vec::new(),
+            answer: None,
+            charge: Charge::open(0),
+        };
+        containing.answer = containing.enter(a, b);
+        Some(containing)
+    }
+
+    /// Start checking that `a` contains `b`: the answer for scalars, or a
+    /// level pushed for containers.
+    fn enter(&mut self, a: &Value, b: &Value) -> Option<bool> {
+        match (a, b) {
+            (Value::Object(x), Value::Object(y)) => {
+                self.stack
+                    .push(Containment::Object(Arc::clone(x), Arc::clone(y), 0));
+                None
+            }
+            (Value::Array(x), Value::Array(y)) => {
+                self.stack
+                    .push(Containment::Array(Arc::clone(x), Arc::clone(y), 0, 0));
+                None
+            }
+            (Value::String(x), Value::String(y)) => Some(x.contains(y.as_str())),
+            _ => Some(a.equals(b)),
+        }
+    }
+
+    /// Checks on, spending `budget`: None when it ran out before the end.
+    pub(crate) fn run(&mut self, budget: &mut u64) -> Option<Answer> {
+        loop {
+            if self.stack.len() > MAX_DEPTH {
+                return Some(Err(fail("Containment check too deep")));
+            }
+            if *budget == 0 {
+                return None;
+            }
+            *budget -= 1;
+            let next = match self.stack.last_mut() {
+                None => return Some(Ok(Value::bool(self.answer.unwrap_or(true)))),
+                Some(Containment::Object(x, y, at)) => {
+                    if let Some(found) = self.answer.take() {
+                        if !found {
+                            self.stack.pop();
+                            self.answer = Some(false);
+                            continue;
+                        }
+                        *at += 1;
+                    }
+                    match y.entry(*at) {
+                        None => None,
+                        Some((k, v)) => match x.get(k) {
+                            Some(u) if same_kind(u, v) => Some((u.clone(), v.clone())),
+                            _ => {
+                                self.stack.pop();
+                                self.answer = Some(false);
+                                continue;
+                            }
+                        },
+                    }
+                }
+                Some(Containment::Array(x, y, i, j)) => {
+                    if let Some(found) = self.answer.take() {
+                        if found {
+                            *i += 1;
+                            *j = 0;
+                        } else {
+                            *j += 1;
+                        }
+                    }
+                    if *i >= y.len() {
+                        None
+                    } else if *j >= x.len() {
+                        self.stack.pop();
+                        self.answer = Some(false);
+                        continue;
+                    } else if !same_kind(&x[*j], &y[*i]) {
+                        *j += 1;
+                        continue;
+                    } else {
+                        Some((x[*j].clone(), y[*i].clone()))
+                    }
+                }
+            };
+            match next {
+                Some((u, v)) => {
+                    if let Value::String(text) = &u {
+                        *budget = budget.saturating_sub(text.len() as u64 / 64);
+                    }
+                    self.answer = self.enter(&u, &v);
+                    self.charge
+                        .set(self.stack.capacity() * std::mem::size_of::<Containment>());
+                }
+                None => {
+                    self.stack.pop();
+                    self.answer = Some(true);
+                }
+            }
+        }
+    }
+
+    /// The whole check at once, for a caller that cannot pause.
+    pub(crate) fn finish(mut self) -> Answer {
+        let _recording = meter::record_only();
+        let mut budget = u64::MAX;
+        self.run(&mut budget)
+            .unwrap_or_else(|| unreachable!("an unbounded budget finishes the check"))
+    }
+
+    pub(crate) fn retire(&mut self) -> Option<Value> {
+        self.stack.pop().map(|level| match level {
+            Containment::Object(x, y, _) => Value::array(vec![Value::Object(x), Value::Object(y)]),
+            Containment::Array(x, y, ..) => Value::array(vec![Value::Array(x), Value::Array(y)]),
+        })
+    }
+}
+
 fn multiply(a: &Value, b: &Value, limits: Limits) -> Answer {
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => Ok(Value::number(x.value() * y.value())),
@@ -1394,7 +1893,7 @@ fn divide(a: &Value, b: &Value, limits: Limits) -> Answer {
             }
             Ok(Value::number(x.value() / y.value()))
         }
-        (Value::String(s), Value::String(sep)) => split(s, sep, limits),
+        (Value::String(s), Value::String(sep)) => Splitting::on(s, sep).finish(limits.items),
         _ => Err(type_error2(a, b, "cannot be divided")),
     }
 }
@@ -1434,18 +1933,6 @@ fn modulo(a: &Value, b: &Value) -> Answer {
     }
 }
 
-fn split(s: &str, sep: &str, limits: Limits) -> Answer {
-    if s.is_empty() {
-        return Ok(Value::array(Vec::new()));
-    }
-    let parts: Vec<Value> = if sep.is_empty() {
-        s.chars().map(|c| Value::string(c.to_string())).collect()
-    } else {
-        s.split(sep).map(Value::string).collect()
-    };
-    array_limit(parts, limits)
-}
-
 /// ldexp: `x` times two to the `e`, scaled in two halves so an
 /// intermediate power of two neither overflows nor underflows when the
 /// answer does not.
@@ -1453,23 +1940,6 @@ fn scale(x: f64, e: f64) -> f64 {
     let e = e.trunc().clamp(-2200.0, 2200.0) as i32;
     let half = e / 2;
     x * 2f64.powi(half) * 2f64.powi(e - half)
-}
-
-fn indices(s: &str, needle: &str) -> Vec<Value> {
-    if needle.is_empty() {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    let (mut from, mut chars) = (0, 0);
-    while let Some(at) = s[from..].find(needle) {
-        let byte = from + at;
-        chars += s[from..byte].chars().count();
-        out.push(Value::number(chars as f64));
-        let step = s[byte..].chars().next().map_or(1, char::len_utf8);
-        from = byte + step;
-        chars += 1;
-    }
-    out
 }
 
 fn implode(input: &Value, limits: Limits) -> Answer {
@@ -1511,98 +1981,9 @@ fn has(t: &Value, k: &Value) -> Answer {
     }
 }
 
-/// A level of `contains` in progress: an object's keys checked so far, or
-/// an array's wanted item and the candidate it is being matched against.
-enum Containment<'a> {
-    Object(&'a Object, &'a Object, usize),
-    Array(&'a [Value], &'a [Value], usize, usize),
-}
-
 /// jv_get_kind's equality, which tells `true` from `false`.
 fn same_kind(a: &Value, b: &Value) -> bool {
     a.kind() == b.kind() && a.rank_kind() == b.rank_kind()
-}
-
-/// Start checking that `a` contains `b`: the answer for scalars, or a
-/// level pushed for containers.
-fn enter<'a>(a: &'a Value, b: &'a Value, stack: &mut Vec<Containment<'a>>) -> Option<bool> {
-    match (a, b) {
-        (Value::Object(x), Value::Object(y)) => {
-            stack.push(Containment::Object(x, y, 0));
-            None
-        }
-        (Value::Array(x), Value::Array(y)) => {
-            stack.push(Containment::Array(x, y, 0, 0));
-            None
-        }
-        (Value::String(x), Value::String(y)) => Some(x.contains(y.as_str())),
-        _ => Some(a.equals(b)),
-    }
-}
-
-/// jv_contains, walked with a stack, refused past jq's depth limit.
-fn contains(a: &Value, b: &Value) -> Result<bool, Fault> {
-    let mut stack: Vec<Containment> = Vec::new();
-    let mut answer = enter(a, b, &mut stack);
-    loop {
-        if stack.len() > MAX_DEPTH {
-            return Err(fail("Containment check too deep"));
-        }
-        let next = match stack.last_mut() {
-            None => return Ok(answer.unwrap_or(true)),
-            Some(Containment::Object(x, y, at)) => {
-                if let Some(found) = answer.take() {
-                    if !found {
-                        stack.pop();
-                        answer = Some(false);
-                        continue;
-                    }
-                    *at += 1;
-                }
-                match y.entry(*at) {
-                    None => None,
-                    Some((k, v)) => match x.get(k) {
-                        Some(u) if same_kind(u, v) => Some((u, v)),
-                        _ => {
-                            stack.pop();
-                            answer = Some(false);
-                            continue;
-                        }
-                    },
-                }
-            }
-            Some(Containment::Array(x, y, i, j)) => {
-                if let Some(found) = answer.take() {
-                    if found {
-                        *i += 1;
-                        *j = 0;
-                    } else {
-                        *j += 1;
-                    }
-                }
-                if *i >= y.len() {
-                    None
-                } else {
-                    while *j < x.len() && !same_kind(&x[*j], &y[*i]) {
-                        *j += 1;
-                    }
-                    if *j >= x.len() {
-                        stack.pop();
-                        answer = Some(false);
-                        continue;
-                    }
-                    Some((&x[*j], &y[*i]))
-                }
-            }
-        };
-        match next {
-            Some((u, v)) => answer = enter(u, v, &mut stack),
-            None => {
-                stack.pop();
-                answer = Some(true);
-            }
-        }
-    }
 }
 
 fn bsearch(input: &Value, target: &Value) -> Answer {
@@ -1672,21 +2053,34 @@ impl StringBuffer {
         Value::string(self.text)
     }
 
-    fn finish(self, limits: Limits) -> Answer {
+    /// Refuses a string grown past the limit, before it grows further.
+    fn check(&self, limits: Limits) -> Result<(), Fault> {
         if self.text.len() > limits.bytes {
             return Err(string_too_long(limits));
         }
+        Ok(())
+    }
+
+    fn finish(self, limits: Limits) -> Answer {
+        self.check(limits)?;
         Ok(self.into_value())
     }
 }
 
-fn escape(text: &str, table: &[(char, &str)], out: &mut StringBuffer) {
+fn escape(
+    text: &str,
+    table: &[(char, &str)],
+    out: &mut StringBuffer,
+    limits: Limits,
+) -> Result<(), Fault> {
     for c in text.chars() {
         match table.iter().find(|(from, _)| *from == c) {
             Some((_, to)) => out.push_str(to),
             None => out.push(c),
         }
+        out.check(limits)?;
     }
+    Ok(())
 }
 
 fn to_text(v: &Value) -> FormatInput<'_> {
@@ -1752,18 +2146,20 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
                     Value::String(s) => {
                         if csv {
                             line.push('"');
-                            escape(s, &[('"', "\"\"")], &mut line);
+                            escape(s, &[('"', "\"\"")], &mut line, limits)?;
                             line.push('"');
                         } else {
                             escape(
                                 s,
                                 &[('\t', "\\t"), ('\r', "\\r"), ('\n', "\\n"), ('\\', "\\\\")],
                                 &mut line,
-                            );
+                                limits,
+                            )?;
                         }
                     }
                     _ => return Err(type_error(x, "is not valid in a csv row")),
                 }
+                line.check(limits)?;
             }
             line
         }
@@ -1780,7 +2176,8 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
                     ('"', "&quot;"),
                 ],
                 &mut out,
-            );
+                limits,
+            )?;
             out
         }
         "uri" => {
@@ -1795,6 +2192,7 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
                     out.push(HEX[(byte >> 4) as usize] as char);
                     out.push(HEX[(byte & 0xf) as usize] as char);
                 }
+                out.check(limits)?;
             }
             out
         }
@@ -1841,7 +2239,7 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
                 match x {
                     Value::String(s) => {
                         line.push('\'');
-                        escape(s, &[('\'', "'\\''")], &mut line);
+                        escape(s, &[('\'', "'\\''")], &mut line, limits)?;
                         line.push('\'');
                     }
                     Value::Array(_) | Value::Object(_) => {
@@ -1849,12 +2247,16 @@ fn format(input: &Value, fmt: &Value, limits: Limits) -> Answer {
                     }
                     _ => line.push_str(&to_text(x)),
                 }
+                line.check(limits)?;
             }
             line
         }
         "base64" => {
             let data = to_text(input);
             let bytes = data.as_bytes();
+            if bytes.len().div_ceil(3) * 4 > limits.bytes {
+                return Err(string_too_long(limits));
+            }
             let mut out = StringBuffer::with_capacity(bytes.len().div_ceil(3) * 4);
             for chunk in bytes.chunks(3) {
                 let mut code = 0u32;
@@ -1958,7 +2360,10 @@ pub(crate) fn get(t: &Value, k: &Value) -> Result<Value, Value> {
                     .into_value(),
             )
         }
-        (Value::Array(items), Value::Array(needle)) => Ok(array_indexes(items, needle)),
+        (Value::Array(_), Value::Array(_)) => Ok(Indexing::list(t, k)
+            .expect("two arrays")
+            .finish(usize::MAX)
+            .unwrap_or_else(|_| unreachable!("an array holds every position in it"))),
         (Value::Null, Value::String(_) | Value::Number(_) | Value::Object(_)) => Ok(Value::Null),
         _ => Err(Value::string(format!(
             "Cannot index {} with {} ({})",
@@ -1967,22 +2372,6 @@ pub(crate) fn get(t: &Value, k: &Value) -> Result<Value, Value> {
             k.dump_trunc()
         ))),
     }
-}
-
-fn array_indexes(items: &[Value], needle: &[Value]) -> Value {
-    let mut out = Vec::new();
-    if !needle.is_empty() && needle.len() <= items.len() {
-        for start in 0..=items.len() - needle.len() {
-            if needle
-                .iter()
-                .enumerate()
-                .all(|(j, n)| items[start + j].equals(n))
-            {
-                out.push(Value::number(start as f64));
-            }
-        }
-    }
-    Value::array(out)
 }
 
 fn parse_slice(len: usize, slice: &Object) -> Result<(usize, usize), Value> {
@@ -2175,6 +2564,7 @@ fn dels(t: Value, keys: Vec<Value>) -> Answer {
             ))
         }
         Value::Object(mut fields) => {
+            let mut names = Vec::with_capacity(keys.len());
             for key in &keys {
                 let Value::String(k) = key else {
                     return Err(fail(format!(
@@ -2182,8 +2572,9 @@ fn dels(t: Value, keys: Vec<Value>) -> Answer {
                         key.kind()
                     )));
                 };
-                Arc::make_mut(&mut fields).remove(k);
+                names.push(k.as_str());
             }
+            Arc::make_mut(&mut fields).remove_all(names);
             Ok(Value::Object(fields))
         }
         other => Err(fail(format!("Cannot delete fields from {}", other.kind()))),
@@ -2193,96 +2584,187 @@ fn dels(t: Value, keys: Vec<Value>) -> Answer {
 /// jq's delpaths_sorted, walked with a stack of the values it is
 /// rebuilding. Each level covers the run of sorted paths that share its
 /// prefix, so no path is copied on the way down.
-fn delpaths_sorted(object: Value, paths: &[Vec<Value>], limits: Limits) -> Answer {
-    struct Level {
-        object: Value,
-        end: usize,
-        at: usize,
-        delkeys: Vec<Value>,
-        key: Value,
+/// `delpaths`: its paths sorted, checked, then walked one key a step, so
+/// many paths pause between drains as `sort` does.
+pub(crate) struct Deleting {
+    sorting: Option<Box<Sorting>>,
+    paths: Arc<List>,
+    checked: usize,
+    walk: Vec<Deletion>,
+}
+
+/// One container on the walk over the paths from `at` to `end`: the keys
+/// to delete from it, and the key of the paths from `at` to `scan`, or of
+/// the child being walked.
+struct Deletion {
+    object: Value,
+    end: usize,
+    at: usize,
+    scan: usize,
+    delkeys: Vec<Value>,
+    key: Value,
+}
+
+impl Deleting {
+    /// Deleting `paths` from `root`.
+    pub(crate) fn begin(root: Value, paths: &Value) -> Result<Deleting, Fault> {
+        if !matches!(paths, Value::Array(_)) {
+            return Err(fail("Paths must be specified as an array"));
+        }
+        Ok(Self {
+            sorting: Some(Box::new(sorting(Cfunc::Sort, std::slice::from_ref(paths))?)),
+            paths: Arc::default(),
+            checked: 0,
+            walk: vec![Deletion {
+                object: root,
+                end: 0,
+                at: 0,
+                scan: 0,
+                delkeys: Vec::new(),
+                key: Value::Null,
+            }],
+        })
     }
-    let mut stack = vec![Level {
-        object,
-        end: paths.len(),
-        at: 0,
-        delkeys: Vec::new(),
-        key: Value::Null,
-    }];
-    loop {
-        let start = stack.len() - 1;
-        let Some(level) = stack.last_mut() else {
+
+    pub(crate) fn retire(&mut self) -> Option<Value> {
+        if let Some(sorting) = &mut self.sorting {
+            if let Some(value) = sorting.retire() {
+                return Some(value);
+            }
+            self.sorting = None;
+        }
+        if let Some(level) = self.walk.last_mut() {
+            if !level.delkeys.is_empty() {
+                return Some(Value::array(std::mem::take(&mut level.delkeys)));
+            }
+            return self.walk.pop().map(|level| level.object);
+        }
+        if !self.paths.is_empty() {
+            return Some(Value::Array(std::mem::take(&mut self.paths)));
+        }
+        None
+    }
+
+    /// The answer once the walk ends, or None when its budget runs out.
+    pub(crate) fn run(&mut self, budget: &mut u64, limits: Limits) -> Option<Answer> {
+        if let Some(sorting) = &mut self.sorting {
+            match sorting.run(budget)? {
+                Ok(Value::Array(sorted)) => self.paths = sorted,
+                Ok(_) => unreachable!("a sort answers an array"),
+                Err(fault) => return Some(Err(fault)),
+            }
+            self.sorting = None;
+        }
+        while *budget > 0 {
+            *budget -= 1;
+            match self.step(limits) {
+                Ok(None) => {}
+                done => return done.transpose(),
+            }
+        }
+        None
+    }
+
+    /// Run to the end.
+    pub(crate) fn finish(mut self, limits: Limits) -> Answer {
+        let mut budget = u64::MAX;
+        self.run(&mut budget, limits)
+            .unwrap_or_else(|| unreachable!("an unbounded walk ends"))
+    }
+
+    fn step(&mut self, limits: Limits) -> Result<Option<Value>, Fault> {
+        if let Some(path) = self.paths.get(self.checked) {
+            let Value::Array(items) = path else {
+                return Err(fail(format!(
+                    "Path must be specified as array, not {}",
+                    path.kind()
+                )));
+            };
+            if items.len() > PATH_DEPTH {
+                return Err(fail("Path too deep"));
+            }
+            self.checked += 1;
+            return Ok(None);
+        }
+        let start = self.walk.len() - 1;
+        let Some(level) = self.walk.last_mut() else {
             unreachable!("the walk holds its root")
         };
+        if level.end == 0 {
+            return match self.paths.first() {
+                None => Ok(Some(std::mem::replace(&mut level.object, Value::Null))),
+                Some(Value::Array(first)) if first.is_empty() => Ok(Some(Value::Null)),
+                Some(_) => {
+                    level.end = self.paths.len();
+                    Ok(None)
+                }
+            };
+        }
         if level.at == level.end {
-            let Some(done) = stack.pop() else {
+            let Some(done) = self.walk.pop() else {
                 unreachable!("the walk holds its root")
             };
             let object = dels(done.object, done.delkeys)?;
-            let Some(parent) = stack.last_mut() else {
-                return Ok(object);
+            let Some(parent) = self.walk.last_mut() else {
+                return Ok(Some(object));
             };
             let key = std::mem::replace(&mut parent.key, Value::Null);
             let held = std::mem::replace(&mut parent.object, Value::Null);
             parent.object = set(held, &key, object, limits)?;
-            continue;
+            return Ok(None);
         }
         let i = level.at;
-        let key = paths[i][start].clone();
-        let mut j = i + 1;
-        while j < level.end && paths[j][start].equals(&key) {
-            j += 1;
+        if level.scan == i {
+            level.key = component(&self.paths, i, start).clone();
+            level.scan = i + 1;
+            return Ok(None);
         }
+        if level.scan < level.end && component(&self.paths, level.scan, start).equals(&level.key) {
+            level.scan += 1;
+            return Ok(None);
+        }
+        let j = level.scan;
         level.at = j;
-        if paths[i].len() == start + 1 {
-            level.delkeys.push(key);
-            continue;
+        if path_of(&self.paths, i).len() == start + 1 {
+            level
+                .delkeys
+                .push(std::mem::replace(&mut level.key, Value::Null));
+            return Ok(None);
         }
-        let sub = get(&level.object, &key).map_err(Fault::Error)?;
+        let sub = get(&level.object, &level.key).map_err(Fault::Error)?;
         if matches!(sub, Value::Null) {
-            continue;
+            level.key = Value::Null;
+            return Ok(None);
         }
         if start + 1 > PATH_DEPTH {
             return Err(fail("Path too deep"));
         }
-        level.key = key;
-        stack.push(Level {
+        self.walk.push(Deletion {
             object: sub,
             end: j,
             at: i,
+            scan: i,
             delkeys: Vec::new(),
             key: Value::Null,
         });
+        Ok(None)
     }
 }
 
+/// The `i`th of the sorted paths, which the walk checked are arrays.
+fn path_of(paths: &[Value], i: usize) -> &[Value] {
+    match &paths[i] {
+        Value::Array(items) => items,
+        _ => unreachable!("delpaths checks its paths before the walk"),
+    }
+}
+
+fn component(paths: &[Value], i: usize, at: usize) -> &Value {
+    &path_of(paths, i)[at]
+}
+
 fn delpaths(object: Value, paths: &Value, limits: Limits) -> Answer {
-    if !matches!(paths, Value::Array(_)) {
-        return Err(fail("Paths must be specified as an array"));
-    }
-    let sorted = sorting(Cfunc::Sort, std::slice::from_ref(paths))?.finish()?;
-    let Value::Array(sorted) = &sorted else {
-        unreachable!("a sort answers an array")
-    };
-    let mut keys: Vec<Vec<Value>> = Vec::with_capacity(sorted.len());
-    for path in sorted.iter() {
-        let Value::Array(items) = path else {
-            return Err(fail(format!(
-                "Path must be specified as array, not {}",
-                path.kind()
-            )));
-        };
-        if items.len() > PATH_DEPTH {
-            return Err(fail("Path too deep"));
-        }
-        keys.push(items.to_vec());
-    }
-    if keys.is_empty() {
-        return Ok(object);
-    }
-    if keys[0].is_empty() {
-        return Ok(Value::Null);
-    }
-    delpaths_sorted(object, &keys, limits)
+    Deleting::begin(object, paths)?.finish(limits)
 }
 
 #[cfg(test)]
@@ -2314,11 +2796,29 @@ mod tests {
         let b = Value::string("y".repeat(100));
         let meter = Arc::new(Meter::limited(150));
         let _installed = meter::install(&meter);
-        let answer = plus(&a, &b, Limits { bytes: 1, ..LIMITS });
+        let answer = plus(a, b, Limits { bytes: 1, ..LIMITS });
         assert!(answer.is_err());
-        assert!(meter.exceeded());
+        assert!(!meter.exceeded());
         drop(answer);
         assert_eq!(meter.live(), 0);
+    }
+
+    #[test]
+    fn searches_charge_their_copy_of_the_needle() {
+        let meter = Arc::new(Meter::default());
+        let _installed = meter::install(&meter);
+        let args = [
+            Value::string("x".repeat(10)),
+            Value::string("y".repeat(100_000)),
+        ];
+        let before = meter.live();
+        let splitting = Splitting::begin(Cfunc::Split, &args).unwrap();
+        assert!(meter.live() >= before + 100_000);
+        drop(splitting);
+        let indexing = Indexing::text(&args).unwrap();
+        assert!(meter.live() >= before + 100_000);
+        drop(indexing);
+        assert_eq!(meter.live(), before);
     }
 
     #[test]
@@ -2383,8 +2883,8 @@ mod tests {
         let output_bytes = {
             let meter = Arc::new(Meter::default());
             let _installed = meter::install(&meter);
-            let answer = call(Cfunc::Keys, std::slice::from_ref(&input), LIMITS)
-                .unwrap_or_else(|_| unreachable!());
+            let answer =
+                call(Cfunc::Keys, &mut [input.clone()], LIMITS).unwrap_or_else(|_| unreachable!());
             let bytes = meter.live();
             drop(answer);
             assert_eq!(meter.live(), 0);
@@ -2393,8 +2893,8 @@ mod tests {
         for function in [Cfunc::KeysUnsorted, Cfunc::Keys] {
             let meter = Arc::new(Meter::limited(output_bytes + 4000));
             let _installed = meter::install(&meter);
-            let answer = call(function, std::slice::from_ref(&input), LIMITS)
-                .unwrap_or_else(|_| unreachable!());
+            let answer =
+                call(function, &mut [input.clone()], LIMITS).unwrap_or_else(|_| unreachable!());
             assert_eq!(meter.exceeded(), function == Cfunc::Keys);
             drop(answer);
             assert_eq!(meter.live(), 0);

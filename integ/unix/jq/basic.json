@@ -693,6 +693,158 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "jq_timeout_ends_a_long_contains",
+      "seq": 701222,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 0.5 jq -n '[range(1e5)] as $a | $a | contains($a | reverse)'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=124\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_timeout_ends_a_long_array_indices",
+      "seq": 701223,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 0.5 jq -n '[range(1e5) | 0] | indices([range(1e4) | 0]) | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=124\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_reduce_appends_to_an_array_in_place",
+      "seq": 701224,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 5 jq -n 'reduce range(1e5) as $i ([]; . + [$i]) | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "100000\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_from_entries_builds_a_large_object",
+      "seq": 701225,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 5 jq -n '[range(1e5) | {key: \"k\\(.)\", value: .}] | from_entries | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "100000\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_flatten_of_a_long_array",
+      "seq": 701226,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 5 jq -n '[range(1e5)] | flatten | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "100000\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_timeout_streams_into_head",
+      "seq": 701227,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 60 jq -n 'range(1e9)' | head -1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_del_of_every_key",
+      "seq": 701228,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 5 jq -n '[range(1e5) | {key: \"k\\(.)\", value: .}] | from_entries | del(.[]) | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_reduce_string_append",
+      "seq": 701229,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 5 jq -n 'reduce range(1e5) as $i (\"\"; . + \"x\") | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "100000\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

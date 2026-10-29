@@ -18,14 +18,13 @@ from mirage.core.jq import (
     JqError,
     JqHalt,
     JqOptions,
-    JqRun,
     error_report,
     format_one,
     halt_report,
     jq_run_texts,
     load_failure,
-    printable,
 )
+from mirage.rs.errors import StreamRefusal
 
 PRETTY = JqOptions()
 COMPACT = JqOptions(compact=True)
@@ -189,23 +188,19 @@ async def test_raw_output0_refuses_a_string_holding_a_nul():
     # Pinned: printf '"a\u0000b" "c"' | jq --raw-output0 . fails the first
     # run with this error and prints the second.
     opts = JqOptions(raw_output=True, nul_output=True, compact=True)
-    run = JqRun(['"x"', '"a\\u0000b"', '"c"'])
-    assert (await printable(run, opts)) == JqRun(
-        ['"x"'],
-        JqError(
-            "Cannot dump a string containing NUL with --raw-output0 option",
-            True,
-        ),
+    assert await format_one('"x"', opts) == b"x\0"
+    with pytest.raises(StreamRefusal) as refused:
+        await format_one('"a\\u0000b"', opts)
+    assert refused.value.message == (
+        "Cannot dump a string containing NUL with --raw-output0 option"
     )
-    assert (await printable(JqRun(['"a\\\\u0000"']), opts)) == JqRun(
-        ['"a\\\\u0000"']
+    assert await format_one('"a\\\\u0000"', opts) == b"a\\u0000\0"
+    assert (
+        await format_one(
+            '"a\\u0000b"', JqOptions(nul_output=True, ascii_output=True)
+        )
+        == b'"a\\u0000b"\0'
     )
-    assert (
-        await printable(run, JqOptions(raw_output=True, compact=True))
-    ) == run
-    assert (
-        await printable(run, JqOptions(nul_output=True, ascii_output=True))
-    ) == run
 
 
 @pytest.mark.asyncio

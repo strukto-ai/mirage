@@ -35,7 +35,6 @@ import {
   jqCheck,
   jqOptions,
   loadFailure,
-  printable,
   readTexts,
   referencesArgs,
   streamReads,
@@ -420,18 +419,15 @@ export function runStatus(run: JqRun<string>): number {
 }
 
 /**
- * Read one jq_eval drain into a run: every output frame's compact dump onto
- * `outputs`, every debug or stderr frame onto `messages` as its tag and
- * text, and the stop an error or halt frame names, or null. A frame is a
+ * Read one jq_eval drain into a run: every output frame's compact dump and
+ * every debug or stderr frame onto `frames` as its tag and text, in the
+ * order the run wrote them, and the stop an error or halt frame names, or
+ * null. A frame is a
  * tag, a little-endian u32 length and its payload: an output's dump, an
  * error's string flag byte then its text, a halt's JSON, a `debug` line's
  * dump, or the text `stderr` writes.
  */
-export function readFrames(
-  bytes: Uint8Array,
-  outputs: string[],
-  messages: [number, string][],
-): JqError | JqHalt | null {
+export function readFrames(bytes: Uint8Array, frames: [number, string][]): JqError | JqHalt | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   let stop: JqError | JqHalt | null = null
   let at = 0
@@ -442,10 +438,8 @@ export function readFrames(
     if (end > bytes.byteLength) throw new Error('jq_eval: truncated frame')
     const payload = bytes.subarray(at + 5, end)
     at = end
-    if (tag === FRAME_OUTPUT) {
-      outputs.push(DEC.decode(payload))
-    } else if (tag === FRAME_DEBUG || tag === FRAME_STDERR) {
-      messages.push([tag, DEC.decode(payload)])
+    if (tag === FRAME_OUTPUT || tag === FRAME_DEBUG || tag === FRAME_STDERR) {
+      frames.push([tag, DEC.decode(payload)])
     } else if (tag === FRAME_ERROR) {
       stop = { kind: 'error', text: DEC.decode(payload.subarray(1)), string: payload[0] === 1 }
     } else if (tag === FRAME_HALT) {
@@ -484,11 +478,21 @@ export async function inputReply(
 }
 
 /**
+ * How a run whose outputs went out as it made them ended: the error or halt
+ * that stopped it, if one did, and whether jq_eval left its document to
+ * jq-wasm, which it says only before any output.
+ */
+export interface Ending {
+  stop: JqError | JqHalt | null
+  declined: boolean
+}
+
+/**
  * A program compiled once by mirage-rs's jq_eval and run on this thread, a
  * bounded number of VM steps per drain, so a program that never ends still
  * yields and the signal can stop it between two.
  */
-class Engine {
+export class Engine {
   private readonly budget: YieldBudget
   // jq's debug callback prints compactly, with -S and -a but none of the
   // layout or raw options (main.c's dumpopts less pretty).
@@ -543,30 +547,39 @@ class Engine {
   }
 
   /**
-   * Run the program on one document's JSON text, or null for a document
-   * jq_eval cannot read, which the caller runs elsewhere.
+   * Run the program on one document's JSON text, yielding each output as a
+   * drain decodes it, and leave on `ending` how the run stopped, or that
+   * jq_eval cannot read the document, which the caller then runs elsewhere.
    *
    * Each `input` the program calls takes the reader's next document then and
    * there, as jq's input callback does, so the run consumes exactly what it
    * asks for and the main loop reads on after it. `report` takes each line
-   * `debug` and `stderr` write, in order.
+   * `debug` and `stderr` write, in order. A run its caller stops reading is
+   * cancelled, so the next can begin.
    */
-  async run(
+  async *run(
     doc: string,
     reader: InputReader,
     report: (line: string) => void,
-  ): Promise<JqRun<string> | null> {
+    ending: Ending,
+  ): AsyncGenerator<string, void, undefined> {
     const stream = this.stream
     stream.begin(readerPosition(reader))
-    const outputs: string[] = []
-    const messages: [number, string][] = []
+    const frames: [number, string][] = []
     let stop: JqError | JqHalt | null
     let safe = true
+    // Whether the caller stopped reading while the run was still going.
+    let abandoned = true
     try {
-      stop = readFrames(stream.feed(ENC.encode(doc)), outputs, messages)
-      stop = readFrames(stream.finish(), outputs, messages) ?? stop
-      safe = outputs.length === 0 && messages.length === 0 && stop === null
+      stop = readFrames(stream.feed(ENC.encode(doc)), frames)
+      stop = readFrames(stream.finish(), frames) ?? stop
+      safe = frames.length === 0 && stop === null
       for (;;) {
+        for (const [tag, text] of frames) {
+          if (tag === FRAME_OUTPUT) yield text
+          else report(await this.message(tag, text))
+        }
+        frames.length = 0
         let wire: Uint8Array
         if (stream.busy()) {
           const pending = this.budget.run()
@@ -588,23 +601,30 @@ class Engine {
           wire = stream.respond(reply, data)
         }
         if (wire.byteLength > 0) safe = false
-        stop = readFrames(wire, outputs, messages) ?? stop
-        for (const [tag, text] of messages) report(await this.message(tag, text))
-        messages.length = 0
+        stop = readFrames(wire, frames) ?? stop
       }
+      abandoned = false
     } catch (error) {
+      abandoned = false
       if (!(error instanceof StreamRefusal) || !safe || error.output.byteLength > 0) throw error
       console.debug(`jq: jq_eval leaves the document to jq-wasm: ${error.message}`)
-      if (stream.cancel()) {
-        while (stream.busy()) {
-          const pending = this.budget.run()
-          if (pending !== undefined) await pending
-          stream.drain()
-        }
-      }
-      return null
+      await this.cancel()
+      ending.declined = true
+      return
+    } finally {
+      if (abandoned) await this.cancel()
     }
-    return { outputs, stop }
+    ending.stop = stop
+  }
+
+  // Stop the run in flight and retire it, so the next can begin.
+  private async cancel(): Promise<void> {
+    if (!this.stream.cancel()) return
+    while (this.stream.busy()) {
+      const pending = this.budget.run()
+      if (pending !== undefined) await pending
+      this.stream.drain()
+    }
   }
 
   // `debug` prints its line through jq's dumper, `stderr` its text.
@@ -690,6 +710,7 @@ export class MainLoop {
   private readonly reports: string[] = []
   private readonly reader: InputReader
   private readonly budget: YieldBudget
+  private halted = false
 
   constructor(
     sources: readonly InputSource[],
@@ -705,17 +726,11 @@ export class MainLoop {
     this.reader = new InputReader(sources, opts, (line) => this.reports.push(line), signal)
   }
 
-  /** The invocation's stdout, run by run. */
+  /** The invocation's stdout, each output as its run makes it. */
   async *outputs(): AsyncIterable<Uint8Array> {
     try {
       if (this.opts.nullInput) {
-        const [run, position] = await this.run('null')
-        for (const value of run.outputs) {
-          const pending = this.budget.run()
-          if (pending !== undefined) await pending
-          yield await formatOne(value, this.opts, this.signal)
-        }
-        this.settle(run, position)
+        yield* this.run('null')
         return
       }
       while (this.reader.failures() === 0) {
@@ -726,13 +741,8 @@ export class MainLoop {
           if (this.opts.seq) continue
           return
         }
-        const [run, position] = await this.run(item)
-        for (const value of run.outputs) {
-          const pending = this.budget.run()
-          if (pending !== undefined) await pending
-          yield await formatOne(value, this.opts, this.signal)
-        }
-        if (this.settle(run, position)) return
+        yield* this.run(item)
+        if (this.halted) return
       }
     } finally {
       this.io.exitCode =
@@ -750,18 +760,47 @@ export class MainLoop {
   }
 
   /**
-   * Run the program on one document (null under -n), and say where the
-   * reader stands after it, for its error report. The run is what jq's main
-   * loop gets to print (see printable).
+   * Run the program on one document (null under -n), printing each output as
+   * the run makes it, then fold the run into the invocation, its error
+   * reported where the reader stands after it. An output --raw-output0
+   * cannot print stops the run with that error, as it does jq's.
    */
-  private async run(doc: string): Promise<[JqRun<string>, string]> {
+  private async *run(doc: string): AsyncGenerator<Uint8Array, void, undefined> {
+    const ending: Ending = { stop: null, declined: false }
+    let last: string | null = null
+    for await (const value of this.values(doc, ending)) {
+      const pending = this.budget.run()
+      if (pending !== undefined) await pending
+      let chunk: Uint8Array
+      try {
+        chunk = await formatOne(value, this.opts, this.signal)
+      } catch (error) {
+        if (!(error instanceof StreamRefusal) || !this.opts.nulOutput) throw error
+        ending.stop = { kind: 'error', text: error.message, string: true }
+        break
+      }
+      last = value
+      yield chunk
+    }
+    const run = { outputs: last === null ? [] : [last], stop: ending.stop }
+    this.halted = this.settle(run, this.reader.position())
+  }
+
+  /**
+   * The run's outputs: from jq_eval as it makes them, or from jq-wasm for a
+   * program or a document jq_eval leaves to it.
+   */
+  private async *values(doc: string, ending: Ending): AsyncGenerator<string, void, undefined> {
     if (this.engine === undefined) {
       this.engine = await Engine.open(this.expr, this.opts, this.args, this.env, this.signal)
     }
-    const run =
-      (await this.engine?.run(doc, this.reader, (line) => this.reports.push(line))) ??
-      (await this.evaluateReading(doc))
-    return [await printable(run, this.opts, this.signal), this.reader.position()]
+    if (this.engine !== null) {
+      yield* this.engine.run(doc, this.reader, (line) => this.reports.push(line), ending)
+      if (!ending.declined) return
+    }
+    const run = await this.evaluateReading(doc)
+    ending.stop = run.stop
+    yield* run.outputs
   }
 
   /**
