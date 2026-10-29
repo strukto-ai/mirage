@@ -41,6 +41,10 @@ from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import override
 
 
+async def _cancelled(paths):
+    raise asyncio.CancelledError
+
+
 async def _unavailable(paths):
     raise RuntimeError("unavailable")
 
@@ -977,11 +981,8 @@ async def test_cancelled_point_observation_keeps_the_view_verified(
     view = IndexView(index, RAMFileCacheStore(), "/data", lambda _: True)
     await index.set_dir("/data", [("old", _row())])
 
-    async def cancelled(paths):
-        raise asyncio.CancelledError
-
     with monkeypatch.context() as patcher:
-        patcher.setattr(index, "invalidate_missing", cancelled)
+        patcher.setattr(index, "invalidate_missing", _cancelled)
         with pytest.raises(asyncio.CancelledError):
             await view.invalidate_missing(["/data/old"])
     assert (await view.list_dir("/data")).entries == ["/data/old"]
