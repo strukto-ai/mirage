@@ -27,6 +27,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.policy import resolve_producer
+from mirage.policy.base import Policy
 from mirage.policy.builtin import output_cap as sg
 from mirage.runtime.python import LocalRuntime
 from mirage.shell.console import Channel
@@ -564,3 +565,28 @@ async def test_every_program_settles_soon_after_a_cancel():
                 )
     await ws.close()
     assert late == []
+
+
+@pytest.mark.asyncio
+async def test_keeps_already_produced_redirect_output_after_killing_job():
+    sleeping = asyncio.Event()
+
+    class ReadyPolicy(Policy):
+        def pre_command(self, ctx):
+            if ctx.command == "sleep":
+                sleeping.set()
+
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, policies=[ReadyPolicy()]
+    )
+    try:
+        assert (
+            await ws.shell("(echo one; sleep 60) > /data/out &")
+        ).exit_code == 0
+        await sleeping.wait()
+        result = await ws.shell("kill %1; wait %1; cat /data/out")
+        assert result.exit_code == 0
+        assert result.stdout == b"one\n"
+        assert not result.stderr
+    finally:
+        await ws.close()

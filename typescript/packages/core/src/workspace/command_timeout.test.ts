@@ -530,3 +530,34 @@ it('every program settles soon after an abort', async () => {
   }
   expect(late).toEqual([])
 }, 300_000)
+
+it('keeps already produced redirect output after killing its job', async () => {
+  let entered = (): void => undefined
+  const sleeping = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          preCommand(ctx) {
+            if (ctx.command === 'sleep') entered()
+            return null
+          },
+        },
+      ],
+    },
+  )
+  try {
+    expect((await ws.shell('(echo one; sleep 60) > /data/out &')).exitCode).toBe(0)
+    await sleeping
+    const result = await ws.shell('kill %1; wait %1; cat /data/out')
+    expect(result.exitCode).toBe(0)
+    expect(result.stdoutText).toBe('one\n')
+    expect(result.stderrText).toBe('')
+  } finally {
+    await ws.close()
+  }
+})

@@ -25,6 +25,7 @@ from mirage.context.session_context import (
     bind_caller,
     current_caller,
     reset_caller,
+    run_landing,
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import is_aborting, strerror_of
@@ -1027,7 +1028,9 @@ async def _handle_redirect(
                 session.descriptors.pop(fd, None)
     if cancelled is not None:
         try:
-            await _keep_output(recorder, outputs, dispatch, session)
+            await run_landing(
+                _keep_output(recorder, outputs, dispatch, session)
+            )
         except Exception as exc:
             logger.debug("kept output not written: %s", exc)
         raise cancelled
