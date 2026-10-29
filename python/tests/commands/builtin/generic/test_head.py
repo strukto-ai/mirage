@@ -15,6 +15,11 @@ async def _drain(gen):
     return b"".join([c async for c in gen])
 
 
+async def _five_lines_in_two_chunks():
+    yield b"1\n2\n"
+    yield b"3\n4\n5\n"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "chunks,flags,expected",
@@ -59,11 +64,8 @@ async def test_head_writes_the_front_of_a_kept_chunk_without_copying_the_rest():
 @pytest.mark.parametrize("flags", [{"n": 3}, {"n": -2}])
 async def test_head_writes_what_it_keeps_of_a_chunk_in_one_piece(flags):
     # A piece per line costs a pipe a turn of the loop per line.
-    async def src():
-        yield b"1\n2\n"
-        yield b"3\n4\n5\n"
-
-    assert [c async for c in head(src(), **flags)] == [b"1\n2\n", b"3\n"]
+    pieces = [c async for c in head(_five_lines_in_two_chunks(), **flags)]
+    assert pieces == [b"1\n2\n", b"3\n"]
 
 
 @pytest.mark.asyncio
