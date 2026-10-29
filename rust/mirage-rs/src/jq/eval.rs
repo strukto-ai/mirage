@@ -296,7 +296,7 @@ impl Formatting {
 /// for `{"op": "input"}`, and `respond` takes the next document, the end
 /// of the stream, or the reader's parse error, as jq's input callback
 /// answers it, and the reader's position after it.
-struct Eval {
+pub(super) struct Eval {
     program: Arc<Program>,
     limits: Limits,
     meter: Arc<Meter>,
@@ -321,6 +321,11 @@ struct Eval {
 /// refused with jq's report, whose last line is its `jq: N compile
 /// error(s)` count; any other refusal names what jq_eval cannot run yet.
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
+    Ok(Box::new(compile(config)?))
+}
+
+/// The configured program compiled, as `open` refuses it.
+pub(super) fn compile(config: &[u8]) -> Result<Eval, StreamError> {
     let config: Config = serde_json::from_slice(config)
         .map_err(|e| StreamError::new(format!("bad jq_eval config: {e}")))?;
     let meter = Arc::new(Meter::limited(config.memory));
@@ -345,7 +350,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         zone: Arc::new(Zone::parse(config.zone.as_deref().unwrap_or("UTC"))),
     };
     let compile_limited = meter.exceeded();
-    Ok(Box::new(Eval {
+    Ok(Eval {
         program,
         limits: Limits {
             blocks: config.blocks,
@@ -369,7 +374,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         print: config.print,
         formatting: None,
         state: State::Feeding,
-    }))
+    })
 }
 
 fn place(host: &mut Host, position: Position) {
@@ -791,6 +796,29 @@ impl Drop for Eval {
 }
 
 impl Eval {
+    /// Take a whole document's text, as `feed` takes it, without copying
+    /// it: what the reader read of the document is the run's input.
+    pub(super) fn feed_owned(&mut self, mut text: Vec<u8>) -> Result<(), StreamError> {
+        if !self.pending.is_empty() {
+            return self.feed(&text, &mut Vec::new());
+        }
+        if !matches!(self.state, State::Feeding) {
+            return Err(StreamError::new("jq_eval: begin the next document first"));
+        }
+        let _metered = meter::install(&self.meter);
+        text.shrink_to_fit();
+        if self.input_limited
+            || self.meter.live().saturating_add(text.capacity()) > self.limits.memory
+        {
+            self.input_limited = true;
+            return Ok(());
+        }
+        self.pending = text;
+        self.pending_charge.set(self.pending.capacity());
+        self.input_limited |= self.meter.exceeded();
+        Ok(())
+    }
+
     fn compiled(&self) -> Arc<Program> {
         Arc::clone(&self.program)
     }

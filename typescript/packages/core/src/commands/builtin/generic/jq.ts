@@ -38,6 +38,7 @@ import { closeStream, openStream, serveRequests, type Served } from '../../../rs
 import { MemoryExhausted } from '../../../io/errors.ts'
 import { memoryRoom } from '../../../io/memory.ts'
 import { ByteSpool } from '../../../io/spool.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec, type JsonValue } from '../../../types.ts'
@@ -377,14 +378,17 @@ const EXHAUSTED = new MemoryExhausted().message
 /**
  * The inputs jq's main loop reads, each opened when the loop first asks for
  * its bytes, as jq opens its files one after another, and the clock `now`
- * reads. `sources` are the inputs, in order, not yet opened. Mirrors
- * Python's JqInputs.
+ * reads. `sources` are the inputs, in order, not yet opened; each goes over
+ * in bounded pieces, so the loop holds no more of it than it is reading.
+ * Mirrors Python's JqInputs.
  */
 export class JqInputs {
   readonly errors = new ByteSpool()
   private readonly iterators: (AsyncIterator<Uint8Array> | null)[]
+  private readonly sources: readonly AsyncIterable<Uint8Array>[]
 
-  constructor(private readonly sources: readonly AsyncIterable<Uint8Array>[]) {
+  constructor(sources: readonly AsyncIterable<Uint8Array>[], signal?: AbortSignal) {
+    this.sources = sources.map((source) => chunks(source, signal))
     this.iterators = sources.map(() => null)
   }
 
@@ -576,7 +580,10 @@ export async function jqGeneric(
   const config = runConfig(expression.trim(), jq, env, zone, origin, names)
   // Each input opens when the loop first reads it, as jq opens its files one
   // after another, so -n never opens one its program does not read.
-  const inputs = new JqInputs(operands.map((path) => readInput(path)))
+  const inputs = new JqInputs(
+    operands.map((path) => readInput(path)),
+    ctx.signal,
+  )
   const io = new IOResult()
   return [runOutputs(config, inputs, io, ctx.signal), io]
 }

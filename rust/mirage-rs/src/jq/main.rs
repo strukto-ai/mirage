@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::{Stream, StreamError};
 
-use super::eval::{self, DEBUG, ERROR, Formatting, HALT, PRINT, STDERR};
+use super::eval::{self, DEBUG, ERROR, Eval, Formatting, HALT, PRINT, STDERR};
 use super::format;
 use super::parse;
 use super::unicode::{Bytes, DecodeCursor, WORK};
@@ -690,7 +690,7 @@ enum Ask {
 /// as jq_eval takes it. Once it is done, `status` is jq's exit status and
 /// `take_stderr` what it wrote to stderr.
 struct Main {
-    eval: Box<dyn Stream>,
+    eval: Box<Eval>,
     reader: Reader,
     debug: format::Config,
     null_input: bool,
@@ -769,7 +769,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     if let Some(steps) = config.steps {
         eval_config["steps"] = steps.into();
     }
-    let eval = eval::open(eval_config.to_string().as_bytes())?;
+    let eval = Box::new(eval::compile(eval_config.to_string().as_bytes())?);
     Ok(Box::new(Main {
         eval,
         reader: Reader::new(&config)?,
@@ -799,10 +799,10 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 
 impl Main {
     /// Start a run on one document, from where the reader stands.
-    fn start(&mut self, text: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+    fn start(&mut self, text: Vec<u8>, out: &mut Vec<u8>) -> Result<(), StreamError> {
         self.eval
             .begin(self.reader.place().to_string().as_bytes())?;
-        self.eval.feed(text, &mut self.wire)?;
+        self.eval.feed_owned(text)?;
         self.eval.finish(&mut self.wire)?;
         self.task = Task::Run;
         self.frames(out)
@@ -891,7 +891,7 @@ impl Main {
         match self.task {
             Task::Next if self.null_input && !self.ran => {
                 self.ran = true;
-                self.start(b"null", out)?;
+                self.start(b"null".to_vec(), out)?;
             }
             Task::Next if !self.reading && self.reader.failures > 0 => self.end(),
             Task::Next | Task::Input => self.read(out, budget)?,
@@ -1011,7 +1011,7 @@ impl Main {
             (Task::Input, Read::Text(text)) => self.answer("value", &text, out)?,
             (Task::Input, Read::Error(message)) => self.answer("error", message.as_bytes(), out)?,
             (Task::Input, Read::End) => self.answer("end", b"", out)?,
-            (_, Read::Text(text)) => self.start(&text, out)?,
+            (_, Read::Text(text)) => self.start(text, out)?,
             (_, Read::Error(message)) => {
                 let kind = if self.seq {
                     "ignoring parse error"

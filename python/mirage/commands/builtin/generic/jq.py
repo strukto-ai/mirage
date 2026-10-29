@@ -47,6 +47,7 @@ from mirage.core.jq.types import (
 )
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import fs_strerror
+from mirage.io.cooperative import chunks
 from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import memory_room
 from mirage.io.spool import ByteSpool
@@ -446,7 +447,8 @@ EXHAUSTED = str(MemoryExhausted())
 class JqInputs:
     """The inputs jq's main loop reads, each opened when the loop first
     asks for its bytes, as jq opens its files one after another, and the
-    clock `now` reads.
+    clock `now` reads. An input goes over in bounded pieces, so the loop
+    holds no more of it than it is reading.
 
     Args:
         sources (Sequence[AsyncIterator[bytes]]): the inputs, in order, not
@@ -454,7 +456,7 @@ class JqInputs:
     """
 
     def __init__(self, sources: Sequence[AsyncIterator[bytes]]) -> None:
-        self._sources = sources
+        self._sources = [chunks(source) for source in sources]
         self.errors = ByteSpool()
 
     async def serve(
