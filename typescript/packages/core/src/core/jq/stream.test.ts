@@ -524,6 +524,20 @@ describe('valueText', () => {
 })
 
 describe('the memory budget', () => {
+  it('counts the commas a slurp joins with', async () => {
+    const reader = new InputReader(sources([bytes('1\n'.repeat(3000))]), jqOptions({ slurp: true }))
+    const drain = async (): Promise<void> => {
+      for (;;) if ((await reader.nextInput()) === NO_VALUE) return
+    }
+    try {
+      await expect(runWithMemory(new MemoryBudget(4096, () => 0), drain)).rejects.toThrow(
+        MemoryExhausted,
+      )
+    } finally {
+      await reader.close()
+    }
+  })
+
   it('counts each value a slurp keeps', async () => {
     // A failed record before each value clears what was read of it, so
     // only the values' own bytes show the list growing.

@@ -154,7 +154,8 @@ class InputReader:
                 self._held = 0
                 if not isinstance(self._slurped, list):
                     return value
-                self._kept += len(value.encode())
+                # The value and the comma or bracket after it in the list.
+                self._kept += len(value.encode()) + 1
                 check_memory(self._kept)
                 self._slurped.append(value)
                 continue
@@ -209,6 +210,7 @@ class InputReader:
             return slurped
         if self._parser is None:
             return string_text("".join(slurped))
+        check_memory(self._kept + 1)
         return f"[{','.join(slurped)}]"
 
     async def _open_next(self) -> None:

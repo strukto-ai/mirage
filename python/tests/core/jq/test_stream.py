@@ -565,3 +565,18 @@ async def test_a_slurp_counts_each_value_it_keeps():
             await run_with_memory(MemoryBudget(4096, lambda: 0), drain())
     finally:
         await reader.close()
+
+
+@pytest.mark.asyncio
+async def test_a_slurp_counts_the_commas_it_joins_with():
+    reader = InputReader(_sources(b"1\n" * 3000), JqOptions(slurp=True))
+
+    async def drain() -> None:
+        while await reader.next_input() is not NO_VALUE:
+            pass
+
+    try:
+        with pytest.raises(MemoryExhausted):
+            await run_with_memory(MemoryBudget(4096, lambda: 0), drain())
+    finally:
+        await reader.close()

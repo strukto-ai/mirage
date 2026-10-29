@@ -207,7 +207,8 @@ export class InputReader {
       if (value !== NO_VALUE) {
         this.held = 0
         if (!Array.isArray(this.slurped)) return value
-        this.kept += new TextEncoder().encode(value).byteLength
+        // The value and the comma or bracket after it in the list.
+        this.kept += new TextEncoder().encode(value).byteLength + 1
         checkMemory(this.kept)
         this.slurped.push(value)
         continue
@@ -265,6 +266,7 @@ export class InputReader {
     this.slurped = NO_VALUE
     if (slurped === NO_VALUE) return slurped
     if (this.parser === null) return stringText(slurped.join(''))
+    checkMemory(this.kept + 1)
     return `[${slurped.join(',')}]`
   }
 
