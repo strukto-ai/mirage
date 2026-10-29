@@ -514,11 +514,10 @@ impl Parser {
                 self.flags = frame.saved;
                 self.leave();
                 self.leave();
-                let node = alt(frame.branches);
                 if matches!(frame.kind, Body::Root) {
-                    return Ok(node);
+                    return Ok(alt(frame.branches));
                 }
-                self.finish_body(frame.kind, node)?
+                self.finish_body(frame.kind, frame.branches)?
             } else {
                 self.atom()?
             };
@@ -537,31 +536,31 @@ impl Parser {
         }
     }
 
-    fn finish_body(&mut self, kind: Body, body: Node) -> Result<Atom, String> {
+    /// The node a group's body makes, from its branches: an absent or
+    /// conditional group splits on its own `|`, never on one a `(?:...)`
+    /// inside holds.
+    fn finish_body(&mut self, kind: Body, mut branches: Vec<Node>) -> Result<Atom, String> {
         Ok(Atom::Node(match kind {
             Body::Root => unreachable!("the root is returned directly"),
-            Body::Plain => body,
-            Body::Group(index) => Node::Group(index, Box::new(body)),
+            Body::Plain => alt(branches),
+            Body::Group(index) => Node::Group(index, Box::new(alt(branches))),
             Body::Look(behind, negate) => Node::Look {
                 behind,
                 negate,
-                body: Box::new(body),
+                body: Box::new(alt(branches)),
             },
-            Body::Atomic => Node::Atomic(Box::new(body)),
-            Body::Options => Node::Options(Box::new(body)),
-            Body::Absent(head_bar) => self.absent_body(body, head_bar),
-            Body::Condition => return self.condition_body(body, false),
+            Body::Atomic => Node::Atomic(Box::new(alt(branches))),
+            Body::Options => Node::Options(Box::new(alt(branches))),
+            Body::Absent(head_bar) => self.absent_body(branches, head_bar),
+            Body::Condition => return self.condition_body(alt(branches), false),
             Body::Conditional { cond, then_empty } => {
                 let (then, otherwise) = if then_empty {
-                    (Node::Empty, body)
+                    (Node::Empty, alt(branches))
+                } else if branches.len() > 1 {
+                    let then = branches.remove(0);
+                    (then, alt(branches))
                 } else {
-                    match body {
-                        Node::Alt(mut branches) => {
-                            let then = branches.remove(0);
-                            (then, alt(branches))
-                        }
-                        body => (body, Node::Empty),
-                    }
+                    (alt(branches), Node::Empty)
                 };
                 Node::Cond {
                     cond,
@@ -1521,17 +1520,14 @@ impl Parser {
         Ok(self.open(Body::Absent(head_bar)))
     }
 
-    fn absent_body(&mut self, parsed: Node, head_bar: bool) -> Node {
-        let (absent, expr, cutter) = if head_bar {
-            match parsed {
-                Node::Alt(mut branches) => {
-                    let absent = branches.remove(0);
-                    (absent, Some(alt(branches)), false)
-                }
-                absent => (absent, None, true),
-            }
+    fn absent_body(&mut self, mut branches: Vec<Node>, head_bar: bool) -> Node {
+        let (absent, expr, cutter) = if !head_bar {
+            (alt(branches), None, false)
+        } else if branches.len() > 1 {
+            let absent = branches.remove(0);
+            (absent, Some(alt(branches)), false)
         } else {
-            (parsed, None, false)
+            (alt(branches), None, true)
         };
         self.absent_tree(absent, expr, cutter)
     }
