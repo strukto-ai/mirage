@@ -277,3 +277,142 @@ fn a_search_pauses_and_resumes_with_the_same_answer() {
     assert!(pauses > 10, "{pauses} pauses");
     assert_eq!(found.unwrap().unwrap()[0], Some((0, hay.len())));
 }
+
+fn sheet_answer(pattern: &str, flags: &str, input: &str) -> String {
+    let options = Options {
+        ignore_case: flags.contains('i'),
+        extend: flags.contains('x'),
+        dotall: flags.contains('m'),
+        longest: flags.contains('l'),
+        not_empty: flags.contains('n'),
+    };
+    let regex = match Regex::new(pattern, options) {
+        Ok(regex) => regex,
+        Err(message) => return format!("error: {message}"),
+    };
+    let hay = input.as_bytes();
+    let mut found = Vec::new();
+    let mut search = Search::new(0);
+    loop {
+        let region = match unbounded(|budget| search.run(&regex, hay, budget)) {
+            Err(message) => return format!("error: {message}"),
+            Ok(None) => break,
+            Ok(Some(region)) => region,
+        };
+        let (start, end) = region[0].expect("a match");
+        let offset = input.char_indices().filter(|(at, _)| *at < start).count();
+        let len = input
+            .char_indices()
+            .filter(|(at, _)| *at >= start && *at < end)
+            .count();
+        let text = String::from_utf8_lossy(&hay[start..end]);
+        let caps: Vec<serde_json::Value> = region[1..]
+            .iter()
+            .map(|group| match group {
+                Some((start, end)) => serde_json::Value::String(
+                    String::from_utf8_lossy(&hay[*start..*end]).into_owned(),
+                ),
+                None => serde_json::Value::Null,
+            })
+            .collect();
+        found.push(serde_json::json!([offset, len, text, caps]));
+        let next = if start == end { end + 1 } else { end };
+        if next > hay.len() {
+            break;
+        }
+        search.restart(next);
+    }
+    serde_json::Value::Array(found).to_string()
+}
+
+#[test]
+fn extended_patterns_match_the_jq_oracle() {
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(|| {
+            let cases: Vec<serde_json::Value> =
+                serde_json::from_str(include_str!("corpus.json")).unwrap();
+            assert_eq!(cases.len(), 344);
+            for case in cases {
+                let pattern = case["p"].as_str().unwrap();
+                let flags = case["f"].as_str().unwrap();
+                let input = case["i"].as_str().unwrap();
+                assert_eq!(
+                    sheet_answer(pattern, flags, input),
+                    case["answer"].as_str().unwrap(),
+                    "{case}"
+                );
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn group_nesting_matches_jqs_limit_on_a_small_stack() {
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(|| {
+            let pattern = format!("{}a{}", "(".repeat(511), ")".repeat(511));
+            assert_eq!(strings(&pattern, "a"), ["a"]);
+            let too_deep = format!("({pattern})");
+            assert_eq!(error(&too_deep), "parse depth limit over");
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn paused_match(pattern: &str, hay: &str, from: usize, slice: u64) -> (super::Region, usize) {
+    let regex = Regex::new(pattern, Options::default()).unwrap();
+    let mut search = Search::new(from);
+    for pauses in 0..hay.len() * 4 + 100 {
+        let mut budget = slice;
+        match search.run(&regex, hay.as_bytes(), &mut budget) {
+            crate::regex::Step::Paused => {}
+            crate::regex::Step::Done(found) => return (found.unwrap().unwrap(), pauses),
+        }
+    }
+    panic!("a finite match must complete at budget {slice}");
+}
+
+#[test]
+fn grapheme_clusters_and_boundaries_resume_at_tiny_budgets() {
+    let hay = format!("a{}x", "\u{301}".repeat(10_000));
+    for slice in [1, 7, 32] {
+        for (pattern, end) in [("\\X", hay.len() - 1), ("a\\Y", 1)] {
+            let (region, pauses) = paused_match(pattern, &hay, 0, slice);
+            assert_eq!(region[0], Some((0, end)), "{pattern} at {slice}");
+            assert!(
+                pauses > hay.len() / (slice as usize * 2),
+                "{pauses} pauses for {pattern}"
+            );
+        }
+        let hay = "x".repeat(10_000);
+        let from = hay.len() - 1;
+        let (region, pauses) = paused_match("\\y", &hay, from, slice);
+        assert_eq!(region[0], Some((from, from)));
+        assert!(
+            pauses > hay.len() / (slice as usize * 2),
+            "{pauses} boundary pauses"
+        );
+    }
+}
+
+#[test]
+fn a_partly_scanned_grapheme_search_drops_without_affecting_the_next() {
+    let regex = Regex::new("\\X", Options::default()).unwrap();
+    let hay = format!("a{}", "\u{301}".repeat(100_000));
+    let mut search = Search::new(0);
+    assert!(matches!(
+        search.run(&regex, hay.as_bytes(), &mut 16),
+        crate::regex::Step::Paused
+    ));
+    drop(search);
+    let mut search = Search::new(0);
+    let found = unbounded(|budget| search.run(&regex, b"a", budget))
+        .unwrap()
+        .unwrap();
+    assert_eq!(found[0], Some((0, 1)));
+}

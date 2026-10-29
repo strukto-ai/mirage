@@ -168,9 +168,10 @@ fn run(chars: &[char], in_behind: bool) -> Vec<Node> {
 /// parse_branch splices a `(?:...)` list into its parent.
 fn splice(items: Vec<Node>) -> Vec<Node> {
     let mut out = Vec::with_capacity(items.len());
-    for item in items {
+    let mut stack: Vec<Node> = items.into_iter().rev().collect();
+    while let Some(item) = stack.pop() {
         match item {
-            Node::Seq(inner) => out.extend(splice(inner)),
+            Node::Seq(inner) => stack.extend(inner.into_iter().rev()),
             item => out.push(item),
         }
     }
@@ -188,61 +189,131 @@ fn flush(out: &mut Vec<Node>, chars: &mut Vec<char>, in_behind: bool) {
 /// ones in a sequence fold together as one string, anything else bounds
 /// a run.
 pub(super) fn unravel(node: Node, in_behind: bool) -> Node {
-    match node {
-        Node::Caseless(c) => seq(run(&[c], in_behind)),
-        Node::Seq(items) => {
-            let mut out = Vec::new();
-            let mut chars = Vec::new();
-            for item in splice(items) {
-                match item {
-                    Node::Caseless(c) => chars.push(c),
-                    item => {
-                        flush(&mut out, &mut chars, in_behind);
-                        out.push(unravel(item, in_behind));
-                    }
-                }
-            }
-            flush(&mut out, &mut chars, in_behind);
-            seq(out)
-        }
-        Node::Alt(items) => Node::Alt(
-            items
-                .into_iter()
-                .map(|item| unravel(item, in_behind))
-                .collect(),
-        ),
-        Node::Group(index, body) => Node::Group(index, Box::new(unravel(*body, in_behind))),
-        Node::Repeat {
-            body,
-            min,
-            max,
-            greedy,
-        } => Node::Repeat {
-            body: Box::new(unravel(*body, in_behind)),
-            min,
-            max,
-            greedy,
-        },
-        Node::Atomic(body) => Node::Atomic(Box::new(unravel(*body, in_behind))),
-        Node::Options(body) => Node::Options(Box::new(unravel(*body, in_behind))),
-        Node::Look {
-            behind,
-            negate,
-            body,
-        } => Node::Look {
-            behind,
-            negate,
-            body: Box::new(unravel(*body, in_behind || behind)),
-        },
-        Node::Cond(groups, Some((yes, no))) => Node::Cond(
-            groups,
-            Some((
-                Box::new(unravel(*yes, in_behind)),
-                Box::new(unravel(*no, in_behind)),
-            )),
-        ),
-        node => node,
+    enum Task {
+        Visit(Node, bool),
+        Rebuild(Node, usize),
     }
+    let mut tasks = vec![Task::Visit(node, in_behind)];
+    let mut out = Vec::new();
+    while let Some(task) = tasks.pop() {
+        match task {
+            Task::Visit(node, in_behind) => {
+                let (shell, children, child_behind) = match node {
+                    Node::Caseless(c) => {
+                        out.push(seq(run(&[c], in_behind)));
+                        continue;
+                    }
+                    Node::Seq(items) => {
+                        let mut children = Vec::new();
+                        let mut chars = Vec::new();
+                        for item in splice(items) {
+                            match item {
+                                Node::Caseless(c) => chars.push(c),
+                                item => {
+                                    flush(&mut children, &mut chars, in_behind);
+                                    children.push(item);
+                                }
+                            }
+                        }
+                        flush(&mut children, &mut chars, in_behind);
+                        (Node::Seq(Vec::new()), children, in_behind)
+                    }
+                    Node::Alt(items) => (Node::Alt(Vec::new()), items, in_behind),
+                    Node::Super(items) => (Node::Super(Vec::new()), items, in_behind),
+                    Node::Group(index, body) => (
+                        Node::Group(index, Box::new(Node::Empty)),
+                        vec![*body],
+                        in_behind,
+                    ),
+                    Node::Repeat {
+                        body,
+                        min,
+                        max,
+                        greedy,
+                    } => (
+                        Node::Repeat {
+                            body: Box::new(Node::Empty),
+                            min,
+                            max,
+                            greedy,
+                        },
+                        vec![*body],
+                        in_behind,
+                    ),
+                    Node::Atomic(body) => {
+                        (Node::Atomic(Box::new(Node::Empty)), vec![*body], in_behind)
+                    }
+                    Node::Options(body) => {
+                        (Node::Options(Box::new(Node::Empty)), vec![*body], in_behind)
+                    }
+                    Node::Look {
+                        behind,
+                        negate,
+                        body,
+                    } => (
+                        Node::Look {
+                            behind,
+                            negate,
+                            body: Box::new(Node::Empty),
+                        },
+                        vec![*body],
+                        in_behind || behind,
+                    ),
+                    Node::Cond {
+                        cond,
+                        then,
+                        otherwise,
+                    } => (
+                        Node::Cond {
+                            cond: Box::new(Node::Empty),
+                            then: Box::new(Node::Empty),
+                            otherwise: Box::new(Node::Empty),
+                        },
+                        vec![*cond, *then, *otherwise],
+                        in_behind,
+                    ),
+                    node => {
+                        out.push(node);
+                        continue;
+                    }
+                };
+                tasks.push(Task::Rebuild(shell, children.len()));
+                tasks.extend(
+                    children
+                        .into_iter()
+                        .rev()
+                        .map(|node| Task::Visit(node, child_behind)),
+                );
+            }
+            Task::Rebuild(mut shell, count) => {
+                let children = out.split_off(out.len() - count);
+                match &mut shell {
+                    Node::Seq(_) => shell = seq(children),
+                    Node::Alt(items) | Node::Super(items) => *items = children,
+                    Node::Group(_, body)
+                    | Node::Repeat { body, .. }
+                    | Node::Atomic(body)
+                    | Node::Options(body)
+                    | Node::Look { body, .. } => {
+                        **body = children.into_iter().next().expect("one body")
+                    }
+                    Node::Cond {
+                        cond,
+                        then,
+                        otherwise,
+                    } => {
+                        let mut children = children.into_iter();
+                        **cond = children.next().expect("a condition");
+                        **then = children.next().expect("a true branch");
+                        **otherwise = children.next().expect("a false branch");
+                    }
+                    _ => unreachable!("a composite shell"),
+                }
+                out.push(shell);
+            }
+        }
+    }
+    out.pop().expect("the rewritten root")
 }
 
 /// `set` closed under folding to one character: a class holding any

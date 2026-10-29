@@ -9,33 +9,6 @@ use super::value::{Key, Object, Text, Value};
 use super::vm::Limits;
 use crate::regex::Step;
 
-/// For a regex builtin called with a literal pattern (and literal or no
-/// modifiers), the reason this matcher cannot run it, if it cannot: the
-/// compiler then refuses the program, which the host runs on libjq.
-/// Patterns jq itself rejects are left to fail at run time as jq's do.
-pub(crate) fn unsupported(pattern: &str, modifiers: Option<&str>) -> Option<String> {
-    let mut options = Options::default();
-    for letter in modifiers.unwrap_or("").chars() {
-        match letter {
-            'i' => options.ignore_case = true,
-            'x' => options.extend = true,
-            'm' | 's' | 'p' => options.dotall |= letter != 's',
-            'l' => options.longest = true,
-            'n' => options.not_empty = true,
-            'g' => {}
-            _ => return None,
-        }
-    }
-    match Regex::new(pattern, options) {
-        Err(message)
-            if message.ends_with(" is not supported") || message == "parse depth limit over" =>
-        {
-            Some(message)
-        }
-        _ => None,
-    }
-}
-
 /// One `_match_impl` call in progress: jq's f_match, whose search can stop
 /// when the step budget runs out and go on at the next drain.
 pub(crate) struct Matching {

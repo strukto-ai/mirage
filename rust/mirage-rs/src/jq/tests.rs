@@ -2125,30 +2125,23 @@ fn now_asks_the_hosts_clock_at_each_call() {
     assert_eq!(frames(&wire), vec![Frame::Out("[1.5,2.5]".into())]);
 }
 
+/// The absent operator, grapheme clusters and text segment boundaries
+/// run on the matcher with jq 1.8.2's answers.
 #[test]
-fn regex_the_matcher_cannot_run_exactly_never_answers_wrong() {
-    assert_eq!(
-        outputs(
-            r#"[test("strasse"; "i"), test("(?i)STRASSE")]"#,
-            r#""Strasse""#
+fn regex_constructs_answer_as_jq_does() {
+    let doc = r#"{"s":"éa","t":"xaby"}"#;
+    for (program, want) in [
+        (
+            r#".t | [test("(?~ab)"), match("(?~ab)").string]"#,
+            r#"[true,"x"]"#,
         ),
-        vec!["[true,true]"]
-    );
-    for program in [r#"test("(?~ab)")"#, r#"sub("\\X"; "y")"#] {
-        assert!(compile(program, &HashMap::new()).is_err(), "{program}");
-    }
-    for program in [
-        r#"test("ß")"#,
-        r#"test("ß"; "i")"#,
-        r#"test("(?i)ß")"#,
-        r#"test("\\x{df}"; "i")"#,
-        r#"test("(?i)\\x{df}")"#,
-        r#"test("[\\x{c0}-\\x{ff}]"; "i")"#,
-        r#"test("[[:alpha:]]"; "i")"#,
-        r#"test("[^\\x{df}]"; "i")"#,
-        r#"test("[a-z]"; "i")"#,
+        (
+            r#".s | [sub("\\X"; "y"), gsub("\\X"; "y"), [scan("\\X") | length]]"#,
+            r#"["ya","yy",[2,1]]"#,
+        ),
+        (r#".t | [match("\\y"; "g").offset]"#, "[0,1,2,3,4]"),
     ] {
-        assert!(compile(program, &HashMap::new()).is_ok(), "{program}");
+        assert_eq!(outputs(program, doc), [want], "{program}");
     }
 }
 
@@ -2247,33 +2240,34 @@ fn regex_case_folding_to_several_characters_matches_as_jq_does() {
     }
 }
 
-/// A pattern the compiler cannot read is refused rather than fall over
-/// at run time: a literal, a `[pattern, flags]` pair and a global are
-/// read; anything else is left to libjq.
+/// A pattern or modifiers named only at run time compile when the
+/// builtin runs, and a pattern jq rejects fails then with jq's report.
 #[test]
-fn regex_fallback_is_decided_at_compile_time() {
-    let mut globals = HashMap::new();
-    globals.insert("re".to_string(), Value::string("\\X"));
-    globals.insert("ok".to_string(), Value::string("a+"));
-    for program in [
-        r#"test(.p)"#,
-        r#"test("a"; .f)"#,
-        r#"test($re)"#,
-        r#"sub(.p; "y")"#,
-        r#"["a"] as $p | test($p[0])"#,
+fn regex_patterns_compile_when_the_builtin_runs() {
+    let doc = r#"{"s":"e\u0301a","t":"xaby","p":"\\X","f":"g","deep":511}"#;
+    let literal = format!(r#""a" | test("{}a{}")"#, "(".repeat(512), ")".repeat(512));
+    for (program, want) in [
+        (r#".p as $p | [.s | scan($p) | length]"#, "[2,1]"),
+        (r#".f as $f | .s | gsub("\\X"; "y"; $f)"#, r#""yy""#),
+        (r#"[.p, .f] as $re | .s | [match($re).length]"#, "[2,1]"),
+        (
+            r#".f as $f | .t | [scan("(?~ab)"; $f)]"#,
+            r#"["x","","by",""]"#,
+        ),
+        (
+            r#"("(" * .deep + "a" + ")" * .deep) as $p | "a" | test($p)"#,
+            "true",
+        ),
+        (
+            r#"("(" * (.deep + 1) + "a" + ")" * (.deep + 1)) as $p | "a" | test($p)"#,
+            "error: Regex failure: parse depth limit over",
+        ),
+        (
+            literal.as_str(),
+            "error: Regex failure: parse depth limit over",
+        ),
     ] {
-        assert!(
-            matches!(compile(program, &globals), Err(Refusal::Unsupported(_))),
-            "{program}"
-        );
-    }
-    for program in [
-        r#"test($ok)"#,
-        r#"test(["a+", "x"])"#,
-        r#"test(["ß", "i"])"#,
-        r#"test("a"; null)"#,
-    ] {
-        assert!(compile(program, &globals).is_ok(), "{program}");
+        assert_eq!(outputs(program, doc), [want], "{program}");
     }
 }
 

@@ -142,7 +142,6 @@ enum Step<'a> {
     /// None keeps a stretch out of the rewrite, as jq's closures are.
     Storevn(Option<usize>),
     Restore,
-    Library(bool),
 }
 
 struct Compiler<'a> {
@@ -158,7 +157,6 @@ struct Compiler<'a> {
     marks: Vec<(usize, usize)>,
     envs: Vec<Env>,
     saved: Vec<Option<usize>>,
-    in_library: usize,
     unsupported: Option<String>,
     unavailable_config: bool,
 }
@@ -223,7 +221,6 @@ pub(crate) fn compile(source: &str, globals: &HashMap<String, Value>) -> Result<
         marks: Vec::new(),
         envs: Vec::new(),
         saved: Vec::new(),
-        in_library: 0,
         unsupported: None,
         unavailable_config,
     };
@@ -384,13 +381,6 @@ impl<'a> Compiler<'a> {
                 break;
             }
             match step {
-                Step::Library(enter) => {
-                    if enter {
-                        self.in_library += 1;
-                    } else {
-                        self.in_library -= 1;
-                    }
-                }
                 Step::Emit(op) => {
                     self.emit(bc, op);
                 }
@@ -1067,59 +1057,8 @@ impl<'a> Compiler<'a> {
         self.referenced.extend(check::references(&def.body));
         let (fbc, index) = self.function(0);
         self.linked.insert(key, index);
-        self.tasks.push((fbc, Step::Library(false)));
         self.body(fbc, def, &None);
-        self.tasks.push((fbc, Step::Library(true)));
         Some(index)
-    }
-
-    /// What a regex call's pattern or modifiers are at compile time: a
-    /// literal, or a `--arg`-style global nothing in scope shadows. None
-    /// when only the run knows.
-    fn known<'v>(&'v self, node: &'v Node, env: &Env) -> Option<&'v Value> {
-        match node {
-            Node::Const(value) | Node::Ast(Ast::Literal(value)) => Some(value),
-            Node::Ast(Ast::Var(name, _)) if find_var(env, name).is_none() => self.globals.get(name),
-            _ => None,
-        }
-    }
-
-    /// Why one of builtin.jq's regex functions, called from the program,
-    /// cannot run on this matcher (see regex::unsupported): its pattern
-    /// needs syntax the matcher lacks, or is only known at run time, when
-    /// a pattern the matcher lacks could no longer go to libjq. The
-    /// compiler then refuses the program, which the host runs on libjq.
-    fn unsupported_regex(&self, name: &str, args: &[Node], env: &Env) -> Option<String> {
-        if self.in_library > 0 {
-            return None;
-        }
-        let (pattern, modifiers) = match (name, args.len()) {
-            ("test" | "match" | "capture" | "scan" | "splits", 1) => (&args[0], None),
-            ("test" | "match" | "capture" | "scan" | "splits" | "split", 2) => {
-                (&args[0], Some(&args[1]))
-            }
-            ("sub" | "gsub", 2) => (&args[0], None),
-            ("sub" | "gsub", 3) => (&args[0], Some(&args[2])),
-            _ => return None,
-        };
-        let modifiers = match modifiers.map(|m| self.known(m, env)) {
-            None | Some(Some(Value::Null)) => None,
-            Some(Some(Value::String(m))) => Some(m.as_str()),
-            Some(Some(_)) => return None,
-            Some(None) => return Some("modifiers known only at run time".into()),
-        };
-        match self.known(pattern, env) {
-            Some(Value::String(pattern)) => super::regex::unsupported(pattern, modifiers),
-            Some(Value::Array(pair)) => match (pair.first(), pair.get(1)) {
-                (Some(Value::String(pattern)), Some(Value::String(m))) => {
-                    super::regex::unsupported(pattern, Some(m))
-                }
-                (Some(Value::String(pattern)), _) => super::regex::unsupported(pattern, None),
-                _ => None,
-            },
-            Some(_) => None,
-            None => Some("a pattern known only at run time".into()),
-        }
     }
 
     fn closure(&mut self, bc: usize, arg: Node<'a>, env: &Env) -> ClosureRef {
@@ -1206,10 +1145,6 @@ impl<'a> Compiler<'a> {
             ("last", 1) => return self.last(bc, args[0].clone(), env),
             ("range", 2) => return self.range(bc, args[0].clone(), args[1].clone(), env),
             _ => {}
-        }
-        if let Some(reason) = self.unsupported_regex(name, args, env) {
-            self.unsupported = Some(format!("unsupported regex: {reason}"));
-            return;
         }
         if let Some(index) = self.link(name, arity) {
             let callee = ClosureRef {
