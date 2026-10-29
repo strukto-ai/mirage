@@ -80,6 +80,7 @@ import {
 } from './cp.ts'
 import type { FlagView } from '../../spec/flag_view.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
+import { MoveError } from '../../../errors/types.ts'
 import type { FsCondition } from '../../../errors/types.ts'
 
 const ENC = new TextEncoder()
@@ -662,15 +663,29 @@ export async function mvGeneric(
       try {
         await strategy.rename(src, target)
       } catch (err) {
+        if (err instanceof MoveError) {
+          errors.push(`mv: cannot remove '${src.rawPath}': ${strerrorOf(err.error)}`)
+          errors.push(
+            `mv: rollback of '${target.rawPath}' incomplete: ${err.recoveryReason}; destination may remain`,
+          )
+          if (!srcIsDir && !err.recovered) created.add(keyOf(target))
+          continue
+        }
         if (!isFsError(err)) throw err
         // A stale key inside a walk is named; other refusals, the operand.
         const stale = isStaleWrite(err)
         const inner = stale ? innerSuffix(src, err) || innerSuffix(target, err) : ''
         const from = withInner(src.rawPath, inner)
         if (isLandedMove(err)) {
-          // Copy landed, source delete lost: GNU's cross-device unlink failure.
+          // Report the source refusal even when compensation reverted the copy.
           errors.push(`mv: cannot remove '${from}': ${String(fsStrerror(err))}`)
-          if (!srcIsDir) created.add(keyOf(target))
+          if (!srcIsDir && err.recovered !== true) created.add(keyOf(target))
+          if (err.recovered === false) {
+            const reason = err.recoveryError ?? err.recoveryReason ?? 'cleanup incomplete'
+            errors.push(
+              `mv: rollback of '${target.rawPath}' incomplete: ${reason}; destination may remain`,
+            )
+          }
           continue
         }
         // A backend rename that refuses (e.g. a destination whose parent

@@ -16,7 +16,7 @@ import type { Measured } from '../../cache/types.ts'
 
 /** What a refusal carries besides its keys. Mirrors Python's keyword arguments. */
 export interface LostOptions {
-  /** A move's copy landed and only its source's delete lost, so the destination holds the copy. */
+  /** A move's copy landed before its source delete lost; recovered records compensation. */
   readonly landed?: boolean
   /** The object no longer exists, so no newer bytes are there for a retry to overwrite. */
   readonly gone?: boolean
@@ -24,6 +24,11 @@ export interface LostOptions {
   readonly versions?: ReadonlyMap<string, Measured>
   /** A later failure that stopped a walk after these keys were lost; the caller keeps their versions and throws it. */
   readonly error?: unknown
+  /** Whether the copied destination was reverted; null for other operations. */
+  readonly recovered?: boolean | null
+  /** A secondary cleanup failure, without replacing the source failure. */
+  readonly recoveryError?: unknown
+  readonly recoveryReason?: string | null
 }
 
 /**
@@ -35,6 +40,9 @@ export class ConditionLostError extends Error {
   readonly gone: boolean
   readonly versions: ReadonlyMap<string, Measured>
   readonly error: unknown
+  readonly recovered: boolean | null
+  readonly recoveryError: unknown
+  readonly recoveryReason: string | null
 
   /** @param keys the raw keys whose condition did not hold, in order met */
   constructor(
@@ -47,5 +55,8 @@ export class ConditionLostError extends Error {
     this.gone = options.gone ?? false
     this.versions = options.versions ?? new Map()
     this.error = options.error ?? null
+    this.recovered = options.recovered ?? null
+    this.recoveryError = options.recoveryError ?? null
+    this.recoveryReason = options.recoveryReason ?? null
   }
 }

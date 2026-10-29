@@ -178,6 +178,30 @@ class QuotaExceededError(OSError):
     """
 
 
+class MoveError(Exception):
+    """A failed source removal after a confirmed copy.
+
+    Args:
+        error (Exception): the original source failure.
+        recovery_reason (str): why the copy could not be reverted.
+        recovered (bool): whether the copied destination was reverted.
+        recovery_error (Exception | None): a secondary cleanup failure.
+    """
+
+    def __init__(
+        self,
+        error: Exception,
+        recovery_reason: str,
+        recovered: bool = False,
+        recovery_error: Exception | None = None,
+    ) -> None:
+        super().__init__(str(error))
+        self.error = error
+        self.recovery_reason = recovery_reason
+        self.recovered = recovered
+        self.recovery_error = recovery_error
+
+
 class StaleWriteError(OSError):
     """A conditional write the backend refused: the file changed since it
     was read.
@@ -194,6 +218,9 @@ class StaleWriteError(OSError):
     """
 
     landed: bool = False
+    recovered: bool | None = None
+    recovery_error: str | None = None
+    recovery_reason: str | None = None
 
 
 class BadDescriptorError(OSError):

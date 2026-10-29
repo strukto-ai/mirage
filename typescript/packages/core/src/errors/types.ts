@@ -121,6 +121,9 @@ export interface DotWalkError extends FsError {
  */
 export interface StaleWriteError extends FsError {
   readonly landed: boolean
+  readonly recovered?: boolean | null
+  readonly recoveryError?: string | null
+  readonly recoveryReason?: string | null
 }
 
 // The registry's refusal for a path that falls outside every mount. Mirrors
@@ -186,5 +189,18 @@ export class CommandTimeoutError extends Error {
     this.name = 'CommandTimeoutError'
     this.command = command
     this.seconds = seconds
+  }
+}
+
+/** A source-removal failure after a confirmed copy. Mirrors Python's MoveError. */
+export class MoveError extends Error {
+  constructor(
+    readonly error: unknown,
+    readonly recoveryReason: string,
+    readonly recovered = false,
+    readonly recoveryError: unknown = null,
+  ) {
+    super(error instanceof Error ? error.message : String(error), { cause: error })
+    this.name = 'MoveError'
   }
 }

@@ -30,7 +30,7 @@ from mirage.core.object_store.driver import (
     keep_walk,
 )
 from mirage.core.object_store.errors import ConditionLostError
-from mirage.errors.fs import enoent
+from mirage.errors.fs import enoent, strerror_of
 from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
@@ -150,9 +150,17 @@ def make_rename(
                         await drop_cached(src_spec, source)
                 elif cond is not None and condition_version(cond):
                     await drop_cached(dst_spec, condition_version(cond))
-                raise await stale(
+                refusal = await stale(
                     lost, landed=exc.landed, gone=exc.gone, version=sent
-                ) from exc
+                )
+                refusal.recovered = exc.recovered
+                refusal.recovery_error = (
+                    strerror_of(exc.recovery_error)
+                    if exc.recovery_error is not None
+                    else None
+                )
+                refusal.recovery_reason = exc.recovery_reason
+                raise refusal from exc
         if not moved:
             raise enoent(src_spec.virtual)
         lift_lost(src_spec, upto, subtree=op != "rename")
