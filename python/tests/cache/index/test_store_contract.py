@@ -1236,7 +1236,10 @@ async def test_empty_listing_remains_readable_after_point_invalidation(store):
     assert await store.invalidate_missing(["/dir/first"]) is True
     assert (await store.list_dir("/dir")).status == LookupStatus.EXPIRED
     token = await store.refill_token()
-    assert await store.refill_dir("/dir", [("first", entry("first"))], token) == []
+    assert (
+        await store.refill_dir("/dir", [("first", entry("first"))], token)
+        == []
+    )
     assert (await store.list_dir("/dir")).entries == ["/dir/first"]
 
 

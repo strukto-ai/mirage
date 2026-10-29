@@ -1040,21 +1040,30 @@ it('failed observation recovery cannot touch a replacement mount', async () => {
     ['replacement', new FileStat({ name: 'replacement', type: FileType.FILE })],
   ])
   expect(await view.invalidateMissing(['/data/new'])).toBe(false)
+  await view.refillToken()
   expect((await index.listDir('/data')).entries).toEqual(['/data/replacement'])
 })
 
-
 it('listing refills recover a failed observation scope', async () => {
   const index = new RAMIndexCacheStore()
-  const view = new IndexView(index, new RAMFileCacheStore(), '/data', (p) => !p.startsWith('/data/nested'), { excludedPrefixes: () => ['/data/nested'] })
+  const view = new IndexView(
+    index,
+    new RAMFileCacheStore(),
+    '/data',
+    (p) => !p.startsWith('/data/nested'),
+    { excludedPrefixes: () => ['/data/nested'] },
+  )
   const row = new FileStat({ name: 'old', type: FileType.FILE })
   await index.setDir('/data', [['old', row]])
   await index.setDir('/other', [['keep', row]])
   await index.setDir('/data/nested', [['keep', row]])
   const old = await view.refillToken()
-  const failure = vi.spyOn(index, 'invalidateMissing').mockRejectedValueOnce(new Error('unavailable'))
+  const failure = vi
+    .spyOn(index, 'invalidateMissing')
+    .mockRejectedValueOnce(new Error('unavailable'))
   await expect(view.invalidateMissing(['/data/new'])).rejects.toThrow('unavailable')
   failure.mockRestore()
+  expect(await view.refillDir('/data', [['old', row]], old)).toBe(null)
   const fresh = await view.refillToken()
   expect(await view.refillDir('/data', [['old', row]], old)).toBe(null)
   expect(await view.refillDir('/data', [['new', row]], fresh)).toEqual([])

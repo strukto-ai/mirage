@@ -105,7 +105,6 @@ import {
   type WalkProbe,
   DEFAULT_READ_SPEC,
   FileChangeKind,
-  DirListing,
   FileStat,
   WritePolicy,
   FileType,
@@ -1417,7 +1416,11 @@ export class MountEntry {
    * whose fetch may have proved this listing too (a seed). Mirrors Python's
    * `_listed`.
    */
-  private async listed(path: PathSpec, index: IndexCacheStore, fetched?: Map<string, FileStat | null>): Promise<string[]> {
+  private async listed(
+    path: PathSpec,
+    index: IndexCacheStore,
+    fetched?: Map<string, FileStat | null>,
+  ): Promise<string[]> {
     const key = indexKey(this.prefix, path)
     const glob = path.pattern !== null
     const stored = await storedListing(index, key, glob)
@@ -1427,14 +1430,7 @@ export class MountEntry {
     if (seeded !== null) return seeded
     const refill = await index.refillToken()
     const listed = await this.vfs.readdir(path, handed)
-    if (fetched !== undefined) {
-      const stem = key === '/' ? '' : key
-      for (const row of listed instanceof DirListing ? listed.entries : listed) {
-        const child = `${stem}/${row.name}`
-        if (fetched.has(child)) fetched.set(child, row)
-      }
-    }
-    return keepListing(index, key, listed, refill)
+    return keepListing(index, key, listed, refill, fetched)
   }
 
   /**
@@ -1706,7 +1702,12 @@ export class MountEntry {
    * listing filled. A probe's own store records through the probe. Mirrors
    * Python's `_note_live`.
    */
-  private noteLive(scope: PathSpec, index: IndexCacheStore, result: unknown, generation: number | undefined): void {
+  private noteLive(
+    scope: PathSpec,
+    index: IndexCacheStore,
+    result: unknown,
+    generation: number | undefined,
+  ): void {
     const manager = this.cacheManager
     if (
       manager !== null &&

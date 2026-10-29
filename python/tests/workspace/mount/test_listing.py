@@ -786,10 +786,12 @@ async def test_rejected_warm_still_resolves_a_backend_id():
     index = ws.mount("/f").index_store
     await index.set_partial_dir("/f", [])
     original = folders.readdir
+
     async def retire_refill(path, entry=None):
         rows = await original(path, entry)
         await index.invalidate_missing(["/unrelated/new"])
         return rows
+
     folders.readdir = retire_refill
     try:
         assert (await ws.vfs.stat("/f/found")).name == "found"
@@ -806,11 +808,13 @@ async def test_only_a_current_direct_stat_can_note_a_probe(kind):
     mount = ws.mount("/k")
     manager = mount.cache_manager
     original = keys.stat
+
     async def stat(path):
         row = await original(path)
         if kind != "live":
             manager.retire()
         return row
+
     keys.stat = stat
     index = ListingCheckStore() if kind == "scratch" else mount.index
     try:
@@ -830,14 +834,18 @@ async def test_a_retired_beyond_stat_does_not_note_a_probe():
     await mount.index_store.set_dir("/k", [])
     manager = mount.cache_manager
     original = keys.stat
+
     async def stat(path):
         row = await original(path)
         manager.retire()
         return row
+
     keys.stat = stat
     try:
         async with command_scope():
             assert await ws.vfs.read("/k/new") == b"present"
-            assert manager.probed_stat(PathSpec.from_str_path("/k/new")) is None
+            assert (
+                manager.probed_stat(PathSpec.from_str_path("/k/new")) is None
+            )
     finally:
         await ws.close()

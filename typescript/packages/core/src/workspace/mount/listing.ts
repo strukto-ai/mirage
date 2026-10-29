@@ -76,6 +76,7 @@ export async function keepListing(
   key: string,
   listed: readonly FileStat[] | DirListing,
   refill: string | null = null,
+  fetched?: Map<string, FileStat | null>,
 ): Promise<string[]> {
   const listing = listed instanceof DirListing ? listed : new DirListing({ entries: listed })
   const rows: [string, FileStat][] = listing.entries.map((row) => [row.name, row])
@@ -87,6 +88,12 @@ export async function keepListing(
     })
     if (accepted === null) {
       const stem = key === '/' ? '' : key
+      if (fetched !== undefined) {
+        for (const row of listing.entries) {
+          const child = `${stem}/${row.name}`
+          if (fetched.has(child)) fetched.set(child, row)
+        }
+      }
       return listing.entries.map((row) => `${stem}/${row.name}`)
     }
   } else if (listing.partial) await index.setPartialDir(key, rows)

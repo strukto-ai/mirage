@@ -89,6 +89,7 @@ async def keep_listing(
     key: str,
     listed: list[FileStat] | DirListing,
     refill: str | None = None,
+    fetched: dict[str, FileStat | None] | None = None,
 ) -> list[str]:
     """Keep what a backend listed, and answer the children's paths.
 
@@ -118,6 +119,11 @@ async def keep_listing(
         )
         if accepted is None:
             stem = "" if key == "/" else key
+            if fetched is not None:
+                for row in listing.entries:
+                    child = f"{stem}/{row.name}"
+                    if child in fetched:
+                        fetched[child] = row
             return [f"{stem}/{row.name}" for row in listing.entries]
     elif listing.partial:
         await index.set_partial_dir(key, rows)

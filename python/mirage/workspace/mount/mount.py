@@ -117,7 +117,6 @@ from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.types import (
-    DirListing,
     FileChangeKind,
     FileStat,
     FileType,
@@ -2164,7 +2163,9 @@ class MountEntry:
         if "parent" in _wants(stat):
             handed["parent"] = await self._entry(self._folder(scope), index)
         generation = (
-            None if self.cache_manager is None else self.cache_manager.generation
+            None
+            if self.cache_manager is None
+            else self.cache_manager.generation
         )
         try:
             row = await stat(scope, **_handed_on(stat, index, **handed))
@@ -2204,14 +2205,7 @@ class MountEntry:
             return stored
         refill = await index.refill_token()
         listed = await readdir(path, **_handed_on(readdir, index, **handed))
-        if fetched is not None:
-            stem = "" if key == "/" else key
-            rows = listed.entries if isinstance(listed, DirListing) else listed
-            for row in rows:
-                child = f"{stem}/{row.name}"
-                if child in fetched:
-                    fetched[child] = row
-        return await keep_listing(index, key, listed, refill)
+        return await keep_listing(index, key, listed, refill, fetched)
 
     async def _level(
         self, virtual: str, limit: int | None
@@ -2675,7 +2669,8 @@ class MountEntry:
                                 else None
                             )
                             generation = (
-                                None if self.cache_manager is None
+                                None
+                                if self.cache_manager is None
                                 else self.cache_manager.generation
                             )
                             result = await self._run(
@@ -2698,7 +2693,9 @@ class MountEntry:
                                     self._backend_fn(fn)
                                 ):
                                     await self._observe(index, [scope])
-                                self._note_live(scope, index, fn, result, generation)
+                                self._note_live(
+                                    scope, index, fn, result, generation
+                                )
                             elif (
                                 name == "read"
                                 and self._backend_fn(fn) == self.vfs.read
