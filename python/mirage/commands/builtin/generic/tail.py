@@ -38,6 +38,7 @@ from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import enoent, fs_strerror
 from mirage.io.cooperative import chunks
+from mirage.io.memory import check_memory
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
@@ -242,22 +243,27 @@ async def tail(
         # The bounded chunks that may hold the last lines, each with its
         # newlines: the first goes once the others hold a newline more
         # than the target, which covers a last line that lacks its own.
-        kept: deque[tuple[bytes, int]] = deque()
+        ends: deque[tuple[bytes, int]] = deque()
         held = 0
+        size = 0
         async for chunk in source:
             if not chunk:
                 continue
             count = chunk.count(b"\n")
-            kept.append((chunk, count))
+            ends.append((chunk, count))
             held += count
-            while held - kept[0][1] > target:
-                held -= kept.popleft()[1]
-        if not kept:
+            size += len(chunk)
+            while held - ends[0][1] > target:
+                first, first_count = ends.popleft()
+                held -= first_count
+                size -= len(first)
+            check_memory(size)
+        if not ends:
             return
-        wanted = target + kept[-1][0].endswith(b"\n")
+        wanted = target + ends[-1][0].endswith(b"\n")
         pieces: list[bytes] = []
-        while kept:
-            chunk, count = kept.pop()
+        while ends:
+            chunk, count = ends.pop()
             if count < wanted:
                 wanted -= count
                 pieces.append(chunk)

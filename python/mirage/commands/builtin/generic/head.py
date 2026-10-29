@@ -68,22 +68,27 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> HeadFlags:
 
 
 async def _count_lines(
-    chunk: bytes, separator: bytes, wanted: int, budget: YieldBudget
+    chunk: bytes,
+    separator: bytes,
+    wanted: int,
+    budget: YieldBudget,
+    begin: int = 0,
 ) -> tuple[int, int]:
-    """The lines of ``chunk``, at most ``wanted``, and where the last of
-    them ends, just past its separator (0 for none), counted a bounded
-    slice at a time with a turn of the loop between slices, so a large
-    chunk still lets its task be cancelled.
+    """The lines of ``chunk`` from ``begin``, at most ``wanted``, and
+    where the last of them ends, just past its separator (``begin`` for
+    none), counted a bounded slice at a time with a turn of the loop
+    between slices, so a large chunk still lets its task be cancelled.
 
     Args:
         chunk (bytes): the bytes.
         separator (bytes): the one byte that ends a line.
         wanted (int): the most lines to count.
         budget (YieldBudget): the reader's budget.
+        begin (int): the offset to count from.
     """
     found = 0
-    end = 0
-    for start in range(0, len(chunk), CHUNK_SIZE):
+    end = begin
+    for start in range(begin, len(chunk), CHUNK_SIZE):
         stop = start + CHUNK_SIZE
         count = chunk.count(separator, start, stop)
         if found + count < wanted:
@@ -171,11 +176,13 @@ async def head(
                 return
             return
 
-        # The chunks not yet written, each with its lines: what lies
-        # before the last ``keep`` lines goes out as soon as it is known.
+        # The chunks not yet written, each with its lines, the first from
+        # ``skip``: what lies before the last ``keep`` lines goes out as
+        # soon as it is known.
         keep = -target
         kept: deque[tuple[bytes, int]] = deque()
         lines = 0
+        skip = 0
         async for chunk in stream:
             await budget.run()
             if not chunk:
@@ -193,21 +200,26 @@ async def head(
                 ):
                     kept.popleft()
                     lines -= count
-                    yield first
+                    yield first[skip:]
+                    skip = 0
                     continue
-                _, end = await _count_lines(first, separator, over, budget)
-                kept[0] = (first[end:], count - over)
+                _, end = await _count_lines(
+                    first, separator, over, budget, skip
+                )
+                kept[0] = (first, count - over)
                 lines = keep
-                yield first[:end]
+                yield first[skip:end]
+                skip = end
         if lines == keep and kept and not kept[-1][0].endswith(separator):
             # The last line lacks its separator and still counts as one,
             # so one line more is not among the last.
             while kept:
                 first, count = kept.popleft()
                 if count:
-                    yield first[: first.find(separator) + 1]
+                    yield first[skip : first.find(separator, skip) + 1]
                     break
-                yield first
+                yield first[skip:]
+                skip = 0
 
     finally:
         await close_quietly(stream)

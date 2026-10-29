@@ -113,15 +113,13 @@ const firstLinesOrFail = (p: PathSpec): Promise<Uint8Array> => {
   return Promise.resolve(ENC.encode('ok\n'))
 }
 
-// Mirrors the head_generic cases in test_head.py.
-describe('headGeneric writes what it keeps of a chunk in one piece', () => {
-  // A piece per line costs a pipe a turn of the loop per line.
-  it.each(['3', '-2'])('-n %s', async (lines) => {
-    const encoder = new TextEncoder()
+describe('headGeneric over chunks', () => {
+  async function headOf(parts: string[], lines: string): Promise<string[]> {
     async function* source(): AsyncIterable<Uint8Array> {
-      await Promise.resolve()
-      yield encoder.encode('1\n2\n')
-      yield encoder.encode('3\n4\n5\n')
+      for (const part of parts) {
+        await Promise.resolve()
+        yield ENC.encode(part)
+      }
     }
     const ctx = { stdin: source(), flags: { lines }, cwd: PathSpec.fromStrPath('/') }
     const result = await headGeneric(
@@ -133,12 +131,25 @@ describe('headGeneric writes what it keeps of a chunk in one piece', () => {
     )
     const [stdout] = result ?? [null]
     const pieces: string[] = []
-    for await (const piece of stdout as AsyncIterable<Uint8Array>)
-      pieces.push(new TextDecoder().decode(piece))
-    expect(pieces).toEqual(['1\n2\n', '3\n'])
+    for await (const piece of stdout as AsyncIterable<Uint8Array>) pieces.push(DEC.decode(piece))
+    return pieces
+  }
+
+  // A piece per line costs a pipe a turn of the loop per line.
+  it.each(['3', '-2'])('-n %s writes what it keeps of a chunk in one piece', async (lines) => {
+    expect(await headOf(['1\n2\n', '3\n4\n5\n'], lines)).toEqual(['1\n2\n', '3\n'])
+  })
+
+  it.each([
+    [['a\nb\nc'], '-1', 'a\nb\n'],
+    [['a\nb\n', 'c\n', 'd'], '-2', 'a\nb\n'],
+    [['a\nb\n', 'c\n', 'd\n'], '-1', 'a\nb\nc\n'],
+  ])('%j -n %s', async (parts, lines, expected) => {
+    expect((await headOf(parts, lines)).join('')).toBe(expected)
   })
 })
 
+// Mirrors the head_generic cases in test_head.py.
 describe('head asks the mount for the first lines', () => {
   it.each([
     [{}, 10],
