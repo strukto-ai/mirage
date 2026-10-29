@@ -412,14 +412,16 @@ async def test_an_unknown_point_observation_keeps_the_listing_memo(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("observer", ["self", "peer"])
 async def test_an_observation_a_kept_listing_leaves_out_drops_the_memo(
-    store, mgets
+    store, peer, observer
 ):
     await store.set_dir("/d", LISTED)
+    writer = store if observer == "self" else peer
     async with command_scope():
         assert (await store.list_dir("/d")).entries == ["/d/a", "/d/b"]
         await store._client.delete(store._children_key("/d"))
-        assert await store.invalidate_missing(["/d/new"]) is False
+        assert await writer.invalidate_missing(["/d/new"]) is False
         assert (await store.list_dir("/d")).entries is None
 
 

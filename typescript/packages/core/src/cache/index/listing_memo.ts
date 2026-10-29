@@ -22,8 +22,8 @@ const WRITES_BY_PREFIX = new Map<string, number>()
 const ROW_WRITES_BY_PREFIX = new Map<string, number>()
 // Each row written within the last window, with its write count and time.
 const ROWS_WRITTEN_BY_PREFIX = new Map<string, Map<string, { count: number; at: number }>>()
-const HOLDERS_BY_PREFIX = new Map<string, number>()
-const MEMOS_BY_PREFIX = new Map<string, Set<WeakRef<ListingMemo>>>()
+// The open memos on each prefix, which share its write count.
+const HOLDERS_BY_PREFIX = new Map<string, Set<WeakRef<ListingMemo>>>()
 
 interface Read {
   readonly writesBefore: number
@@ -89,10 +89,9 @@ export class ListingMemo {
     private readonly keyPrefix: string,
     private readonly clock: Clock,
   ) {
-    HOLDERS_BY_PREFIX.set(keyPrefix, (HOLDERS_BY_PREFIX.get(keyPrefix) ?? 0) + 1)
-    const peers = MEMOS_BY_PREFIX.get(keyPrefix) ?? new Set<WeakRef<ListingMemo>>()
-    peers.add(this.reference)
-    MEMOS_BY_PREFIX.set(keyPrefix, peers)
+    const holders = HOLDERS_BY_PREFIX.get(keyPrefix) ?? new Set<WeakRef<ListingMemo>>()
+    holders.add(this.reference)
+    HOLDERS_BY_PREFIX.set(keyPrefix, holders)
   }
 
   private written(): number {
@@ -120,24 +119,23 @@ export class ListingMemo {
     return true
   }
 
-  /** Whether a live listing kept at this prefix leaves out an observed child key. */
+  /** Whether a live listing any open memo on this prefix keeps leaves out an observed child key. */
   contradicts(paths: readonly string[]): boolean {
     const observed = new Map<string, string[]>()
     for (const path of paths) {
       const folder = path.slice(0, path.lastIndexOf('/')) || '/'
       observed.set(folder, [...(observed.get(folder) ?? []), path])
     }
-    const peers = MEMOS_BY_PREFIX.get(this.keyPrefix)
-    if (peers === undefined) return false
-    for (const reference of peers) {
-      const peer = reference.deref()
-      if (peer === undefined) {
-        peers.delete(reference)
+    const holders = HOLDERS_BY_PREFIX.get(this.keyPrefix)
+    for (const reference of holders ?? []) {
+      const memo = reference.deref()
+      if (memo === undefined) {
+        holders?.delete(reference)
         continue
       }
-      for (const [key, kept] of peer.reads) {
+      for (const [key, kept] of memo.reads) {
         const named = observed.get(key.slice(key.indexOf(':') + 1))
-        if (named === undefined || !peer.live(kept)) continue
+        if (named === undefined || !memo.live(kept)) continue
         if (named.some((path) => !positions(kept).has(path))) return true
       }
     }
@@ -265,14 +263,15 @@ export class ListingMemo {
     this.reads.clear()
     if (this.closed) return
     this.closed = true
-    MEMOS_BY_PREFIX.get(this.keyPrefix)?.delete(this.reference)
-    const holders = (HOLDERS_BY_PREFIX.get(this.keyPrefix) ?? 0) - 1
-    if (holders > 0) {
-      HOLDERS_BY_PREFIX.set(this.keyPrefix, holders)
-      return
+    const holders = HOLDERS_BY_PREFIX.get(this.keyPrefix)
+    if (holders !== undefined) {
+      holders.delete(this.reference)
+      for (const reference of holders) {
+        if (reference.deref() === undefined) holders.delete(reference)
+      }
+      if (holders.size > 0) return
     }
     HOLDERS_BY_PREFIX.delete(this.keyPrefix)
-    MEMOS_BY_PREFIX.delete(this.keyPrefix)
     WRITES_BY_PREFIX.delete(this.keyPrefix)
     ROW_WRITES_BY_PREFIX.delete(this.keyPrefix)
     ROWS_WRITTEN_BY_PREFIX.delete(this.keyPrefix)
