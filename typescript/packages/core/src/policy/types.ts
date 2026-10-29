@@ -17,7 +17,7 @@ import type { FileView, SessionAccess } from '../view/types.ts'
 import type { VfsCall } from '../vfs/types.ts'
 import type { ScriptSource } from '../runtime/types.ts'
 import type { SecretRef } from '../secrets/config.ts'
-import type { Limit, MountMode, PathSpec, Producer, Refusal } from '../types.ts'
+import type { JsonValue, Limit, MountMode, PathSpec, Producer, Refusal } from '../types.ts'
 import type { WordKind } from '../commands/spec/types.ts'
 import type { SessionView } from '../view/types.ts'
 
@@ -461,7 +461,7 @@ export interface ProfileScript {
 }
 
 /** A session's policy programs, by method. */
-export type ProfileScripts = Readonly<Partial<Record<ScriptMethod, readonly ProfileScript[]>>>
+export type ProfileScripts = Readonly<Partial<Record<PolicyMethod, readonly ProfileScript[]>>>
 
 /**
  * The one session question the script policy asks, satisfied the same
@@ -537,11 +537,13 @@ export interface CallerSession {
 /**
  * Who makes the call a method judges, as the method reads it: a frozen copy
  * of the facts, so nothing a method does to it reaches the session or the
- * call. `session` is null for the unbound host view. Mirrors Python's
- * `PolicyCaller`.
+ * call. `session` is null for the unbound host view, and `account` is
+ * the account a server's request signed in as, null outside a server or
+ * where it keeps no accounts. Mirrors Python's `PolicyCaller`.
  */
 export interface PolicyCaller {
   readonly session: CallerSession | null
+  readonly account: string | null
 }
 
 /** The session identity a policy may read, without owning its state. */
@@ -551,13 +553,18 @@ export interface CallerSessionQuery {
 }
 
 /**
- * `session` as a method's `ctx.caller` reads it. Mirrors Python's
- * `policy_caller`.
+ * `session` as a method's `ctx.caller` reads it; `account` is the account
+ * the workspace's server holds it for, null outside a server or where it
+ * keeps no accounts. Mirrors Python's `policy_caller`.
  */
-export function policyCaller(session: CallerSessionQuery | null): PolicyCaller {
+export function policyCaller(
+  session: CallerSessionQuery | null,
+  account: string | null = null,
+): PolicyCaller {
   return Object.freeze({
     session:
       session === null ? null : Object.freeze({ sessionId: session.sessionId, cwd: session.cwd }),
+    account,
   })
 }
 
@@ -783,6 +790,19 @@ export interface SessionResultContext extends SessionContext {
   old: string | null
 }
 
+/**
+ * One workspace a server is about to build, as preWorkspace methods see
+ * it: before any of it is built or any secret it names is read. `config`
+ * is the config as the caller wrote it, validated: a create's whole
+ * config, a clone's or a load's override, each secret still a pointer and
+ * no default filled in. `caller.account` is the account the request
+ * signed in as. Mirrors the Python WorkspaceContext.
+ */
+export interface WorkspaceContext {
+  config: Record<string, JsonValue>
+  caller?: PolicyCaller
+}
+
 export const VALIDITY: Readonly<
   Record<
     | 'preCommand'
@@ -792,7 +812,8 @@ export const VALIDITY: Readonly<
     | 'postVfs'
     | 'postExecute'
     | 'preSession'
-    | 'postSession',
+    | 'postSession'
+    | 'preWorkspace',
     ReadonlySet<string>
   >
 > = {
@@ -804,6 +825,7 @@ export const VALIDITY: Readonly<
   postExecute: new Set(['deny', 'ask', 'limit']),
   preSession: new Set(['deny', 'ask']),
   postSession: new Set(['deny', 'ask']),
+  preWorkspace: new Set(['deny']),
 }
 
 /** The name of one Policy method, as the interface spells it. */

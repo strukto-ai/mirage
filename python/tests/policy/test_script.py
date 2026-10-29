@@ -35,6 +35,7 @@ from mirage.policy.types import (
     SessionContext,
     VfsContext,
     VfsResultContext,
+    WorkspaceContext,
     policy_caller,
 )
 from mirage.runtime.binding import WorkspaceBinding
@@ -54,6 +55,7 @@ from mirage.types import (
     CapacityState,
     FileStat,
     FileType,
+    JsonValue,
     MountMode,
     PathSpec,
     Visibility,
@@ -349,12 +351,27 @@ def test_a_context_reads_as_its_fields_with_the_session_as_data():
 def test_a_caller_reads_as_its_sessions_id_and_working_directory():
     state = SessionState(session_id="s", cwd="/data")
     data = script_context(_ctx(caller=policy_caller(state)))
-    assert data["caller"] == {"session": {"session_id": "s", "cwd": "/data"}}
-    assert script_context(_ctx(caller=PolicyCaller()))["caller"] == {
-        "session": None
+    assert data["caller"] == {
+        "session": {"session_id": "s", "cwd": "/data"},
+        "account": None,
     }
+    assert script_context(_ctx(caller=PolicyCaller(account="acme")))[
+        "caller"
+    ] == {"session": None, "account": "acme"}
     assert script_context(_ctx())["caller"] is None
     json.dumps(data)
+
+
+def test_a_workspace_config_reads_with_its_keys_as_written():
+    config: dict[str, JsonValue] = {
+        "mounts": {"/host": {"vfs": "disk", "config": {"root": "/"}}},
+        "env": {"HOME_DIR": "/h", "camelCase": "x"},
+    }
+    ctx = WorkspaceContext(config, PolicyCaller(account="acme"))
+    assert script_context(ctx) == {
+        "config": config,
+        "caller": {"session": None, "account": "acme"},
+    }
 
 
 def test_a_line_lists_each_command_as_pre_command_reads_it():

@@ -138,6 +138,25 @@ describe('Workspace.snapshot', () => {
     }
   })
 
+  it.each([false, { allow: ['10.0.0.0/8'] }])(
+    'keeps network %o across a round trip',
+    async (network) => {
+      const src = new Workspace({ '/m': new RAMVFS() }, { network })
+      const tar = await src.snapshot()
+      for (const dst of [await src.copy(), await Workspace.load(tar)]) {
+        expect(dst.network).toEqual(network)
+        expect(dst.registry.network).not.toBeNull()
+      }
+    },
+  )
+
+  it('narrows network on a copy that asks it', async () => {
+    const src = new Workspace({ '/m': new RAMVFS() })
+    const copy = await src.copy({ network: false })
+    expect(copy.network).toBe(false)
+    expect(copy.registry.network?.lets('', '127.0.0.1')).toBe(false)
+  })
+
   it('copies a read-only scratch root read-only', async () => {
     const src = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.READ })
     const copy = await src.copy()

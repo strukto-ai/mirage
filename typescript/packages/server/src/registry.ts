@@ -12,11 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { join } from 'node:path'
+import {
+  networkRule,
+  type NetworkRule,
+  type NetworkSetting,
+} from '@struktoai/mirage-core/io/network'
+import type { Policy } from '@struktoai/mirage-core/policy/base'
+import { Policies } from '@struktoai/mirage-core/policy/policies'
+import { ScriptPolicy } from '@struktoai/mirage-core/policy/script'
+import {
+  Outcome,
+  type Deny,
+  type Explanation,
+  type ProfileScripts,
+  type WorkspaceContext,
+} from '@struktoai/mirage-core/policy/types'
+import type { JsonValue } from '@struktoai/mirage-core/types'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
-import type { DiskRecordClient, Workspace } from '@struktoai/mirage-node'
-import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
-import { ENV_MAX_WORKSPACES } from './env.ts'
+import { loadPolicyFile, type DiskRecordClient, type Workspace } from '@struktoai/mirage-node'
+import { watchNetwork } from '@struktoai/mirage-node/io/network'
+import { DaemonConfigError, parseNetwork, readDaemonTable } from './daemon_config.ts'
+import { ENV_MAX_WORKSPACES, ENV_POLICY_FILE } from './env.ts'
 import { ExecutionTable } from './jobs.ts'
 import { mirageHome } from './paths.ts'
 
@@ -43,6 +61,11 @@ export class WorkspaceEntry {
   /** The fingerprint of the config it was created from, when it was. */
   configDigest: string | null = null
   acceptingJobs = true
+  /**
+   * The server's policy file's programs, as this workspace runs them;
+   * null when the file names none past preWorkspace.
+   */
+  programs: ScriptPolicy | null = null
 
   constructor(id: string, runner: WorkspaceRunner, owner: string | null = null) {
     this.id = id
@@ -68,6 +91,19 @@ export interface WorkspaceRegistryOptions {
   owners?: DiskRecordClient
   /** The most workspaces held at once, those being built among them; null for no cap. */
   maxWorkspaces?: number | null
+  /**
+   * The server's own policies, which answer `preWorkspace` and are
+   * registered on every workspace it builds, after the workspace's own.
+   */
+  policies?: readonly Policy[]
+  /** The server's policy programs, by method, which answer the same way. */
+  programs?: ProfileScripts
+  /**
+   * What every workspace it builds is held to besides its own `network`; in
+   * jwt mode (`accountsRequired`) the cloud metadata addresses are refused
+   * too.
+   */
+  network?: NetworkSetting
 }
 
 /**
@@ -98,6 +134,48 @@ export function resolveMaxWorkspaces(
   return cap
 }
 
+/**
+ * The server's policy programs: those of `policyFile` when given, else of
+ * `$MIRAGE_POLICY_FILE`, else of the `policy_file` key in config.toml's
+ * `[daemon]` table, read next to it, else none. Mirrors Python's
+ * `resolve_policy_file`.
+ */
+export function resolvePolicyFile(
+  policyFile?: string,
+  env: Record<string, string | undefined> = process.env,
+): ProfileScripts {
+  let path = policyFile ?? env[ENV_POLICY_FILE]
+  if (path === undefined || path === '') {
+    const named = readDaemonTable(mirageHome(env)).policy_file
+    if (named === undefined || named === '') return {}
+    path = join(mirageHome(env), named)
+  }
+  return loadPolicyFile(path)
+}
+
+/**
+ * What every workspace the server builds is held to besides its own
+ * `network`: `network` when given, else the `network` key in config.toml's
+ * `[daemon]` table, else no limit. Mirrors Python's `resolve_network`.
+ */
+export function resolveNetwork(
+  network?: NetworkSetting,
+  env: Record<string, string | undefined> = process.env,
+): NetworkSetting {
+  if (network !== undefined) return network
+  const named = readDaemonTable(mirageHome(env)).network
+  return named === undefined ? true : parseNetwork(named)
+}
+
+/** The server's policy programs, which every session answers to. */
+class Programs {
+  constructor(private readonly programs: ProfileScripts) {}
+
+  scriptsOf(): ProfileScripts {
+    return this.programs
+  }
+}
+
 export class WorkspaceRegistry {
   readonly jobs = new ExecutionTable()
   private entries = new Map<string, WorkspaceEntry>()
@@ -109,13 +187,66 @@ export class WorkspaceRegistry {
   accountsRequired: boolean
   private readonly owners: DiskRecordClient | null
   readonly maxWorkspaces: number | null
+  readonly policies: readonly Policy[]
+  readonly network: NetworkSetting
+  private readonly programs: ProfileScripts
+  private readonly admissionPrograms: ScriptPolicy
+  private readonly admission: Policies
 
   constructor(options: WorkspaceRegistryOptions = {}) {
     this.maxWorkspaces = options.maxWorkspaces ?? null
+    this.policies = [...(options.policies ?? [])]
+    this.programs = Object.fromEntries(
+      Object.entries(options.programs ?? {}).filter(([method]) => method !== 'preWorkspace'),
+    )
+    this.admissionPrograms = new ScriptPolicy(new Programs(options.programs ?? {}))
+    this.admission = new Policies([...this.policies, this.admissionPrograms])
+    this.network = options.network ?? true
+    // A bad ceiling fails the server as it starts, not its first create.
+    networkRule(true, this.network)
     this.idleGraceSeconds = options.idleGraceSeconds ?? 30
     this.onIdleExit = options.onIdleExit ?? null
     this.accountsRequired = options.accountsRequired ?? false
     this.owners = options.owners ?? null
+  }
+
+  /**
+   * The rule a workspace with this `network` is held to here: its own
+   * setting under the server's, null when nothing limits it. Throws when the
+   * setting or one of its entries is not valid.
+   */
+  ruleFor(setting: NetworkSetting = true): NetworkRule | null {
+    const rule = networkRule(setting, this.network, this.accountsRequired)
+    if (rule !== null) watchNetwork()
+    return rule
+  }
+
+  /**
+   * The server's refusal of a workspace about to be built, null when its
+   * policies let it. `config` is the config as the caller wrote it: a
+   * create's whole config, a clone's or a load's override.
+   */
+  async refusal(config: Record<string, JsonValue>, account: string | null): Promise<Deny | null> {
+    return this.admission.preWorkspace(workspaceContext(config, account))
+  }
+
+  /**
+   * What the server's policies say of a workspace about to be built, every
+   * answer included, without building it.
+   */
+  async explanation(
+    config: Record<string, JsonValue>,
+    account: string | null,
+  ): Promise<Explanation> {
+    const answers = await this.admission.answers('preWorkspace', workspaceContext(config, account))
+    const deny = answers.find((answer) => answer.kind === 'deny')
+    return {
+      outcome: deny === undefined ? Outcome.ALLOW : Outcome.DENY,
+      reason: deny?.reason ?? '',
+      source: '',
+      answers,
+      refusal: null,
+    }
   }
 
   has(id: string): boolean {
@@ -245,11 +376,47 @@ export class WorkspaceRegistry {
     if (this.owners !== null) await this.owners.delete([id])
   }
 
-  add(ws: Workspace, id?: string, owner: string | null = null): WorkspaceEntry {
+  /**
+   * `fn` handed the server's policies, for a snapshot restore to meet as it
+   * reads the snapshot's saved values, as a live write meets them. The
+   * programs' runner is the restore's own, closed as it ends; `add` takes
+   * the list back as `restoredWith`. Mirrors Python's `restoring`.
+   */
+  async restoring<T>(fn: (policies: readonly Policy[]) => Promise<T>): Promise<T> {
+    const programs =
+      Object.keys(this.programs).length > 0 ? new ScriptPolicy(new Programs(this.programs)) : null
+    try {
+      return await fn([...this.policies, ...(programs === null ? [] : [programs])])
+    } finally {
+      await programs?.close()
+    }
+  }
+
+  /**
+   * Wrap `ws` in a runner and register it. `restoredWith` is the list
+   * `restoring` gave the restore that built it, taken off before the
+   * server's own policies are attached.
+   */
+  add(
+    ws: Workspace,
+    id?: string,
+    owner: string | null = null,
+    restoredWith: readonly Policy[] = [],
+  ): WorkspaceEntry {
     const wid = id ?? newWorkspaceId()
     if (this.entries.has(wid) || this.removals.has(wid))
       throw new Error(`workspace id already exists: ${wid}`)
+    for (const policy of restoredWith) ws.policies.remove(policy)
+    for (const policy of this.policies) ws.policies.add(policy)
+    ws.registry.network = this.ruleFor(ws.network)
+    // An account reaches only the workspaces it owns, so every method's
+    // caller is the owner's account.
+    ws.policies.account = owner
     const entry = new WorkspaceEntry(wid, new WorkspaceRunner(ws), owner)
+    if (Object.keys(this.programs).length > 0) {
+      entry.programs = new ScriptPolicy(new Programs(this.programs))
+      ws.policies.add(entry.programs)
+    }
     this.entries.set(wid, entry)
     this.cancelIdleTimer()
     return entry
@@ -282,7 +449,7 @@ export class WorkspaceRegistry {
   /** Run one deletion, releasing the id once it is done. */
   private async drop(entry: WorkspaceEntry): Promise<WorkspaceEntry> {
     try {
-      await entry.runner.stop({ delete: true })
+      await stop(entry, true)
       if (this.owners !== null) await this.owners.delete([entry.id])
     } finally {
       this.jobs.discardWorkspace(entry.id)
@@ -317,7 +484,7 @@ export class WorkspaceRegistry {
   /** Run one close, releasing the id once the runner has stopped. */
   private async shut(entry: WorkspaceEntry): Promise<WorkspaceEntry> {
     try {
-      await entry.runner.stop()
+      await stop(entry)
     } finally {
       this.removals.delete(entry.id)
       if (this.entries.size === 0) this.startIdleTimer()
@@ -333,9 +500,10 @@ export class WorkspaceRegistry {
       this.entries.delete(id)
       if (entry !== undefined) {
         entry.acceptingJobs = false
-        await entry.runner.stop()
+        await stop(entry)
       }
     }
+    await this.admissionPrograms.close()
   }
 
   private startIdleTimer(): void {
@@ -357,4 +525,26 @@ export class WorkspaceRegistry {
       this.idleTimer = null
     }
   }
+}
+
+function workspaceContext(
+  config: Record<string, JsonValue>,
+  account: string | null,
+): WorkspaceContext {
+  return { config, caller: Object.freeze({ session: null, account }) }
+}
+
+/**
+ * Stop an entry's runner, closing the runtimes its server policy programs
+ * ran on before the workspace goes. Mirrors Python's `_stop`.
+ */
+async function stop(entry: WorkspaceEntry, drop = false): Promise<void> {
+  if (entry.programs !== null) {
+    try {
+      await entry.runner.call(entry.programs.close())
+    } catch (error) {
+      console.error(`closing ${entry.id}'s policy programs: ${String(error)}`)
+    }
+  }
+  await entry.runner.stop(drop ? { delete: true } : {})
 }

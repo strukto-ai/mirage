@@ -22,7 +22,14 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from mirage.commands.spec.types import WordKind
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import SecretRef
-from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
+from mirage.types import (
+    JsonValue,
+    Limit,
+    MountMode,
+    PathSpec,
+    Producer,
+    Refusal,
+)
 from mirage.vfs.types import VfsCall
 from mirage.view.types import FileView, SessionView
 
@@ -703,9 +710,12 @@ class PolicyCaller:
     Args:
         session (CallerSession | None): the session the call is made as,
             None for the unbound host view.
+        account (str | None): the account a server's request signed in
+            as, None outside a server or where it keeps no accounts.
     """
 
     session: CallerSession | None = None
+    account: str | None = None
 
 
 class CallerSessionQuery(Protocol):
@@ -718,15 +728,21 @@ class CallerSessionQuery(Protocol):
     def cwd(self) -> str: ...
 
 
-def policy_caller(session: CallerSessionQuery | None) -> PolicyCaller:
+def policy_caller(
+    session: CallerSessionQuery | None, account: str | None = None
+) -> PolicyCaller:
     """``session`` as a method's ``ctx.caller`` reads it.
 
     Args:
         session (CallerSessionQuery | None): the session the call is made as.
+        account (str | None): the account the workspace's server holds it
+            for, None outside a server or where it keeps no accounts.
     """
     if session is None:
-        return PolicyCaller()
-    return PolicyCaller(CallerSession(session.session_id, session.cwd))
+        return PolicyCaller(account=account)
+    return PolicyCaller(
+        CallerSession(session.session_id, session.cwd), account
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -987,6 +1003,24 @@ class SessionResultContext(SessionContext):
     old: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceContext:
+    """One workspace a server is about to build, as pre_workspace methods
+    see it: before any of it is built or any secret it names is read.
+
+    Args:
+        config (dict[str, JsonValue]): the config as the caller wrote it,
+            validated: a create's whole config, a clone's or a load's
+            override. Each secret is still a pointer and no default is
+            filled in.
+        caller (PolicyCaller | None): who asks, read only: its
+            ``account`` is the account the request signed in as.
+    """
+
+    config: dict[str, JsonValue]
+    caller: PolicyCaller | None = None
+
+
 VALIDITY: dict[str, frozenset[str]] = {
     "pre_command": frozenset({Deny.kind, Ask.kind}),
     "post_command": frozenset({Deny.kind, Ask.kind}),
@@ -996,6 +1030,7 @@ VALIDITY: dict[str, frozenset[str]] = {
     "post_execute": frozenset({Deny.kind, Ask.kind, Limit.kind}),
     "pre_session": frozenset({Deny.kind, Ask.kind}),
     "post_session": frozenset({Deny.kind, Ask.kind}),
+    "pre_workspace": frozenset({Deny.kind}),
 }
 
 

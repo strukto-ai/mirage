@@ -360,11 +360,22 @@ describe('scriptContext', () => {
   it("reads a caller as its session's id and working directory", () => {
     const session = new SessionState({ sessionId: 's', cwd: '/data' })
     const data = scriptContext(ctx('cat', { caller: policyCaller(session) }))
-    expect(data.caller).toEqual({ session: { session_id: 's', cwd: '/data' } })
-    expect(scriptContext(ctx('cat', { caller: policyCaller(null) })).caller).toEqual({
-      session: null,
-    })
+    expect(data.caller).toEqual({ session: { session_id: 's', cwd: '/data' }, account: null })
+    expect(
+      scriptContext(ctx('cat', { caller: { session: null, account: 'acme' } })).caller,
+    ).toEqual({ session: null, account: 'acme' })
     expect(scriptContext(ctx('cat'))).not.toHaveProperty('caller')
+  })
+
+  it('reads a workspace config with its keys as written', () => {
+    const config = {
+      mounts: { '/host': { vfs: 'disk', config: { root: '/' } } },
+      env: { HOME_DIR: '/h', camelCase: 'x' },
+    }
+    expect(scriptContext({ config, caller: { session: null, account: 'acme' } })).toEqual({
+      config,
+      caller: { session: null, account: 'acme' },
+    })
   })
 
   it('lists each command of a line as preCommand reads it', () => {

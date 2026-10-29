@@ -6,6 +6,41 @@
     "specOf": "A topic's spec by name: Python indexes SHELL_SPECS and lets a missing name raise KeyError; TypeScript's index type carries undefined, so the lookup that throws lives in this helper."
    }
   },
+  "io/network": {
+   "python_only": {
+    "_CONNECTING": "Python watches a connection through a getaddrinfo wrapper, on a thread and on the event loop, that judges each answer by the name it was asked for and records the addresses a rule let, and an audit hook on socket.connect that opens only to those; Node judges the name at connect time through the socket's lookup, and the browser at fetch.",
+    "_RESOLVED_SIZE": "Python watches a connection through a getaddrinfo wrapper, on a thread and on the event loop, that judges each answer by the name it was asked for and records the addresses a rule let, and an audit hook on socket.connect that opens only to those; Node judges the name at connect time through the socket's lookup, and the browser at fetch.",
+    "_getaddrinfo": "Python watches a connection through a getaddrinfo wrapper, on a thread and on the event loop, that judges each answer by the name it was asked for and records the addresses a rule let, and an audit hook on socket.connect that opens only to those; Node judges the name at connect time through the socket's lookup, and the browser at fetch.",
+    "_loop_getaddrinfo": "Python watches a connection through a getaddrinfo wrapper, on a thread and on the event loop, that judges each answer by the name it was asked for and records the addresses a rule let, and an audit hook on socket.connect that opens only to those; Node judges the name at connect time through the socket's lookup, and the browser at fetch.",
+    "_loop_resolve": "Python watches a connection through a getaddrinfo wrapper, on a thread and on the event loop, that judges each answer by the name it was asked for and records the addresses a rule let, and an audit hook on socket.connect that opens only to those; Node judges the name at connect time through the socket's lookup, and the browser at fetch.",
+    "_resolve": "Python watches a connection through a getaddrinfo wrapper, on a thread and on the event loop, that judges each answer by the name it was asked for and records the addresses a rule let, and an audit hook on socket.connect that opens only to those; Node judges the name at connect time through the socket's lookup, and the browser at fetch.",
+    "_watch_lock": "Python watches a connection through a getaddrinfo wrapper, on a thread and on the event loop, that judges each answer by the name it was asked for and records the addresses a rule let, and an audit hook on socket.connect that opens only to those; Node judges the name at connect time through the socket's lookup, and the browser at fetch."
+   },
+   "typescript_only": {
+    "ConnectOptions": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "Found": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "Lookup": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "LookupDone": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "REACHING": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "connect": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "lets": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "pools": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "refusal": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "releaseNetwork": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "rulePool": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these."
+   }
+  },
+  "commands/builtin/utils/http": {
+   "typescript_only": {
+    "INSECURE": "Node's curl -k agent pools its sockets, so it keeps one per network rule; Python's httpx client is built per call and pools nothing across workspaces.",
+    "insecureAgent": "Node's curl -k agent pools its sockets, so it keeps one per network rule; Python's httpx client is built per call and pools nothing across workspaces."
+   }
+  },
+  "server/daemon_config": {
+   "typescript_only": {
+    "parseNetwork": "The TypeScript daemon reads config.toml by hand, line by line, so it reads the network table itself; Python's tomllib returns it parsed."
+   }
+  },
   "core/slack/client": {
    "python_only": {
     "upload_bytes": "Python sends an upload's bytes with a module function over the accessor's pool; TypeScript keeps the same request on the transport as uploadBytes, beside downloadFile, so a browser transport can leave it out."
@@ -1091,6 +1126,11 @@
   "utils/posix": {
    "typescript_only": {
     "POSIX_CLASSES": "git's -P patterns name POSIX classes ([[:alpha:]]); JavaScript's RegExp has none, so git/history expands them from this table, where Python hands -P to the regex module, which reads them itself."
+   }
+  },
+  "cli/settings": {
+   "python_only": {
+    "_network_text": "tomllib hands Python the network table parsed, so it writes it back as config.toml spells it; the TypeScript CLI reads the line by hand and shows it as written."
    }
   }
  }

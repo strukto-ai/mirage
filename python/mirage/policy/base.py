@@ -22,6 +22,7 @@ from mirage.policy.types import (
     SessionResultContext,
     VfsContext,
     VfsResultContext,
+    WorkspaceContext,
 )
 
 
@@ -41,7 +42,9 @@ class Policy:
     ``session.vfs`` call (``pre_vfs`` / ``post_vfs``) and each session
     write (``pre_session`` / ``post_session``). Every method may answer
     Deny or Ask; a Limit only at ``post_execute``, where a line's output
-    comes back to cap, a Route only at ``pre_execute``.
+    comes back to cap, a Route only at ``pre_execute``. One more,
+    ``pre_workspace``, answers on a server before a workspace is built,
+    with a Deny only.
     A post method sees what its pre method saw, plus what came back, and
     never undoes a side effect: it holds back what came back. Hides,
     mount modes and path rules are not methods: they apply to every
@@ -170,5 +173,21 @@ class Policy:
         Args:
             ctx (ExecuteResultContext): what ``pre_execute`` saw, plus
                 the exit code, the output and each command's result.
+        """
+        return None
+
+    async def pre_workspace(
+        self, ctx: WorkspaceContext
+    ) -> Action | tuple[Action, ...] | None:
+        """Refuse a workspace a server is about to build.
+
+        Fires on a server's create, clone and load, before any mount is
+        built or any secret the config names is read, for the policies
+        the server was started with; a workspace's own policies cannot
+        answer, as it does not exist yet. A Deny refuses the request
+        with 403 and its reason; nothing else may be answered.
+
+        Args:
+            ctx (WorkspaceContext): the config and who asks.
         """
         return None

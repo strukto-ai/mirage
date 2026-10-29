@@ -15,6 +15,7 @@ import { DiffPool } from '../../rs/diff_pool.ts'
 
 import { IOConfig } from '../../io/config.ts'
 import { MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
+import { networkRule, runWithNetwork, type NetworkSetting } from '../../io/network.ts'
 import { parseLimit } from '../../utils/size.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { ShellExecution } from '../shell_execution.ts'
@@ -189,6 +190,7 @@ export class Workspace {
   readonly io: IOConfig
   private readonly runtimeBinding: WorkspaceBinding
   readonly registry: MountRegistry
+  private readonly networkSetting: NetworkSetting
   readonly sessionManager: SessionManager
   private readonly wsId: string
   private readonly stateStoreInternal: WorkspaceStateStore
@@ -455,7 +457,7 @@ export class Workspace {
       const vfs = withCaller(this.vfs.forSession(session.sessionId), {
         explaining: DryRun.DECIDING,
       })
-      const called = policyCaller(session)
+      const called = policyCaller(session, this.policies.account)
       if (asyncContextIsolatesTasks) return { session: view, vfs, caller: called }
       // Without task isolation the mark cannot reach a session write through
       // the async context, so there its session refuses every write.
@@ -543,6 +545,10 @@ export class Workspace {
       maxMemory === null
         ? null
         : new MemoryBudget(parseLimit(maxMemory, 'max_memory'), () => this.registry.heldInMemory())
+    // Every connection a line or an op opens must clear the workspace's
+    // network setting and the process's ceiling.
+    this.networkSetting = options.network ?? true
+    this.registry.network = networkRule(this.networkSetting)
     for (const [prefix, limits] of Object.entries(normalized.commandLimits)) {
       const mount = this.registry.mountForPrefix(prefix)
       for (const [name, limit] of Object.entries(limits)) mount.commandLimits.set(name, limit)
@@ -1117,6 +1123,11 @@ export class Workspace {
 
   getSession(sessionId: string): SessionState {
     return this.sessionManager.get(sessionId)
+  }
+
+  /** The workspace's `network` setting, as it was written. */
+  get network(): NetworkSetting {
+    return this.networkSetting
   }
 
   /** The profile table every session here runs under. */
@@ -2146,14 +2157,18 @@ export class Workspace {
     // memory, until the restored mounts have copied them in.
     const staging = typeof source === 'string' && s3 === undefined ? await makeStagingDir() : null
     try {
-      const state = (await readSnapshot(source, {
-        ...(maxSnapshotBytes !== undefined ? { maxBytes: maxSnapshotBytes } : {}),
-        ...(maxSnapshotEncodedBytes !== undefined
-          ? { maxEncodedBytes: maxSnapshotEncodedBytes }
-          : {}),
-        ...(s3 !== undefined ? { s3 } : {}),
-        ...(staging !== null ? { staging } : {}),
-      })) as WorkspaceStateDict
+      // The store is the loader's to reach, not the workspace's: a rule
+      // bound to the restore leaves the read of its tar alone.
+      const state = (await runWithNetwork(null, () =>
+        readSnapshot(source, {
+          ...(maxSnapshotBytes !== undefined ? { maxBytes: maxSnapshotBytes } : {}),
+          ...(maxSnapshotEncodedBytes !== undefined
+            ? { maxEncodedBytes: maxSnapshotEncodedBytes }
+            : {}),
+          ...(s3 !== undefined ? { s3 } : {}),
+          ...(staging !== null ? { staging } : {}),
+        }),
+      )) as WorkspaceStateDict
       return await this.fromState(state, rest, overrides, cliOverrides)
     } finally {
       if (staging !== null) await removeDir(staging)
@@ -2171,7 +2186,9 @@ export class Workspace {
     try {
       await ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
     } catch (err) {
-      ws.registry.releaseClocks()
+      await ws.close().catch((closeError: unknown) => {
+        console.debug('restore not closed:', closeError)
+      })
       throw err
     }
     return ws
@@ -2226,6 +2243,7 @@ export class Workspace {
     const mergedOptions: WorkspaceOptions = {
       io: args.io,
       maxMemory: args.maxMemory,
+      network: args.network,
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
       commandLimits: args.commandLimits,
@@ -2249,7 +2267,11 @@ export class Workspace {
         shared,
       })
     } catch (err) {
-      ws.registry.releaseClocks()
+      // A refused restore closes what it started, a profile program's
+      // runtime among them, and lets go of the clocks.
+      await ws.close().catch((closeError: unknown) => {
+        console.debug('restore not closed:', closeError)
+      })
       throw err
     }
     return ws
@@ -2288,6 +2310,7 @@ export class Workspace {
       clock: options.clock ?? this.clock,
       ids: options.ids ?? this.ids,
       ...(options.commandLimits !== undefined ? { commandLimits: options.commandLimits } : {}),
+      ...(options.network !== undefined ? { network: options.network } : {}),
       ...(options.profiles != null ? { profiles: options.profiles, profile: null } : {}),
       ...(options.profile != null ? { profile: options.profile } : {}),
     }

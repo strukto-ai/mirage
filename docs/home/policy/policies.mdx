@@ -95,6 +95,7 @@ flowchart LR
 | `post_vfs` | `postVfs` | after each VFS call | Deny, Ask |
 | `pre_session` | `preSession` | before each variable write | Deny, Ask |
 | `post_session` | `postSession` | after the write lands | Deny, Ask |
+| `pre_workspace` | `preWorkspace` | on a server, before a create, clone or load builds anything | Deny |
 
 | What | Example | Covered by |
 | --- | --- | --- |
@@ -131,6 +132,7 @@ TypeScript spells the fields in camelCase (`ctx.sessionId`, `ctx.exitCode`).
 | `pre_command`, `post_command` | `line` and the command: `command`, `words`, `paths`, `walks` | `exit_code`, `stderr`, `records` |
 | `pre_vfs`, `post_vfs` | `call`, `path`, `write` | `result` |
 | `pre_session`, `post_session` | `verb`, `key`, `value` | `old` |
+| `pre_workspace` | `config`: the config as the caller wrote it, secrets still pointers | |
 
 `pre_command` is `pre_execute` narrowed to one command: each entry of
 `ctx.commands` is the context `pre_command` gets for that command, read
@@ -144,7 +146,7 @@ Every `ctx` also carries:
 | `session_id` | the session the action runs as |
 | `session` | the session, read only: `get(name)`, `snapshot()`, `cwd()`, `is_readonly(name)`, `profile()` |
 | `vfs` | the session's files, read only: `read`, `stat`, `readdir`, `exists`, and where the mounts are (`mount_of`, `is_mount`, `submounts`), hides applied |
-| `caller` | who makes the call (a `PolicyCaller`), a frozen copy: `caller.session` is the session above, with its `session_id` and `cwd` when the method was asked |
+| `caller` | who makes the call (a `PolicyCaller`), a frozen copy: `caller.session` is the session above, with its `session_id` and `cwd` when the method was asked, and `caller.account` the account a server holds the workspace for (the one its requests sign in as), null outside a server or without accounts |
 
 `words` is the command line word by word, after expansion. Each word has
 a `text`, a `kind` (`name`, `subcommand`, `option`, `value`, `operand` or
@@ -385,6 +387,48 @@ const noCredentials: Policy = {
 
 `export AWS_SECRET=x` gets `AWS_SECRET: permission denied`, exit 1. A
 Deny at `post_session` gives the same answer and puts the old value back.
+
+### pre_workspace
+
+Only a server asks `pre_workspace`, with the policies it was started with
+(see [Server policies](/home/access/http#server-policies)). It sees the
+config before any mount is built or any secret is read: a create's whole
+config, a clone's or a load's `override`. `ctx` carries `config` and
+`caller` only.
+
+<CodeGroup>
+
+```python Python
+from mirage.policy import Deny, Policy, WorkspaceContext
+
+class NoHostFiles(Policy):
+    async def pre_workspace(self, ctx: WorkspaceContext) -> Deny | None:
+        mounts = ctx.config.get("mounts") or {}
+        if any(block.get("vfs") == "disk" for block in mounts.values()):
+            return Deny("disk mounts are not offered here")
+        if "runtimes" in ctx.config:
+            return Deny("runtimes are set by the operator")
+        return None
+```
+
+```typescript TypeScript
+const noHostFiles: Policy = {
+  preWorkspace(ctx) {
+    const mounts = (ctx.config.mounts ?? {}) as Record<string, { vfs?: string }>
+    if (Object.values(mounts).some((block) => block.vfs === 'disk')) {
+      return { kind: 'deny', reason: 'disk mounts are not offered here' }
+    }
+    if ('runtimes' in ctx.config) {
+      return { kind: 'deny', reason: 'runtimes are set by the operator' }
+    }
+    return null
+  },
+}
+```
+
+</CodeGroup>
+
+The create answers 403 with the reason, and nothing is built.
 
 ## Answers
 

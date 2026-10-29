@@ -13,6 +13,11 @@ reads, as JSON, and prints its answer. Two places take a program:
 | --- | --- | --- |
 | a profile's `policy:` | at `pre_execute`, `pre_command`, `pre_vfs` and `pre_session` before the action, and at their `post_` four after it, for the sessions under that profile | deny or ask; a route at `pre_execute` |
 | [`route_policy:`](/home/policy/route-runtime) | at `pre_execute`, for every session | a route, or a deny or ask |
+| a server's [policy file](/home/access/http#server-policies) | at the same methods for every session of every workspace it builds, and at `pre_workspace` before it builds one | as a profile's; a deny only at `pre_workspace` |
+
+A server's programs read no workspace files: at `pre_workspace` the
+workspace does not exist yet, and its `ctx` is the `config` and the
+`caller`.
 
 ## A profile's policy
 

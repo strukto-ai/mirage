@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -20,12 +22,19 @@ import { Workspace } from '@struktoai/mirage-node'
 import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/workspace/snapshot/tar_io'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { buildApp } from '../app.ts'
+import { buildApp, type MirageApp } from '../app.ts'
 import type * as multipart from '../multipart.ts'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
+import type { Policy } from '@struktoai/mirage-core/policy/base'
+import type {
+  CommandContext,
+  Deny,
+  SessionContext,
+  WorkspaceContext,
+} from '@struktoai/mirage-core/policy/types'
 
 const limits = vi.hoisted(() => ({
   snapshot: undefined as number | undefined,
@@ -152,6 +161,178 @@ describe('workspaces router', () => {
       expect((await create()).statusCode).toBe(201)
     } finally {
       await app.close()
+    }
+  })
+
+  class NoDisk implements Policy {
+    preWorkspace(ctx: WorkspaceContext): Deny | null {
+      const mounts = (ctx.config.mounts ?? {}) as Record<string, { vfs?: string }>
+      if (Object.values(mounts).some((block) => block.vfs === 'disk')) {
+        return { kind: 'deny', reason: `no disk mounts for ${String(ctx.caller?.account)}` }
+      }
+      return null
+    }
+
+    preCommand(ctx: CommandContext): Deny | null {
+      return ctx.command === 'rm' ? { kind: 'deny', reason: 'no rm here' } : null
+    }
+  }
+
+  const DISK = (root: string) => ({
+    mounts: { '/': { vfs: 'ram', mode: 'WRITE' }, '/host': { vfs: 'disk', config: { root } } },
+  })
+
+  it('refuses a workspace its policies refuse before it is built', async () => {
+    const app = buildApp({ policies: [new NoDisk()] })
+    const root = mkdtempSync(join(tmpdir(), 'mirage-nodisk-'))
+    const post = (url: string, payload: object) => app.inject({ method: 'POST', url, payload })
+    try {
+      const refused = await post('/v1/workspaces', { config: DISK(root) })
+      expect([refused.statusCode, refused.json()]).toEqual([
+        403,
+        { detail: 'no disk mounts for null' },
+      ])
+      const said = await post('/v1/workspaces?explain=true', { config: DISK(root) })
+      expect(said.statusCode).toBe(200)
+      expect(said.json()).toMatchObject({
+        outcome: 'deny',
+        reason: 'no disk mounts for null',
+        answers: [{ kind: 'deny', reason: 'no disk mounts for null', policy: 'NoDisk' }],
+      })
+      const allowed = await post('/v1/workspaces?explain=true', { config: RAM })
+      expect(allowed.json()).toMatchObject({ outcome: 'allow', answers: [] })
+      const made = await post('/v1/workspaces', { config: RAM })
+      expect(made.statusCode).toBe(201)
+      const id = made.json<{ id: string }>().id
+      const ran = await post(`/v1/workspaces/${id}/shell`, { command: 'touch /a; rm /a' })
+      expect(ran.json<{ exit_code: number }>().exit_code).toBe(126)
+      const override = { mounts: { '/host': { vfs: 'disk', config: { root: '/' } } } }
+      expect((await post(`/v1/workspaces/${id}/clone`, { override })).statusCode).toBe(403)
+      expect((await post('/v1/workspaces/load', { key: 'snap.tar', override })).statusCode).toBe(
+        403,
+      )
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('runs a policy file the way it runs its policies', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-policy-file-'))
+    writeFileSync(
+      join(dir, 'no_runtimes.py'),
+      [
+        'import json, os',
+        'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
+        'if "runtimes" in ctx["config"]:',
+        '    print(json.dumps({"kind": "deny", "reason": "runtimes are the server\'s"}))',
+      ].join('\n'),
+    )
+    writeFileSync(
+      join(dir, 'no_cat.py'),
+      [
+        'import json, os',
+        'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
+        'if ctx["command"] == "cat":',
+        '    print(json.dumps({"kind": "deny", "reason": "no cat"}))',
+      ].join('\n'),
+    )
+    writeFileSync(
+      join(dir, 'policy.yaml'),
+      'pre_workspace:\n  - script: no_runtimes.py\npre_command:\n  - script: no_cat.py\n',
+    )
+    const app = buildApp({ policyFile: join(dir, 'policy.yaml') })
+    const post = (url: string, payload: object) => app.inject({ method: 'POST', url, payload })
+    try {
+      const refused = await post('/v1/workspaces', { config: { ...RAM, runtimes: ['monty'] } })
+      expect([refused.statusCode, refused.json()]).toEqual([
+        403,
+        { detail: "runtimes are the server's" },
+      ])
+      const made = await post('/v1/workspaces', { config: RAM })
+      expect(made.statusCode).toBe(201)
+      const id = made.json<{ id: string }>().id
+      const ran = await post(`/v1/workspaces/${id}/shell`, { command: 'echo hi > /a; cat /a' })
+      expect(ran.json<{ exit_code: number }>().exit_code).toBe(126)
+      expect((await app.inject({ method: 'DELETE', url: `/v1/workspaces/${id}` })).statusCode).toBe(
+        200,
+      )
+    } finally {
+      await app.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a policy file naming no method', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-policy-file-'))
+    try {
+      writeFileSync(join(dir, 'policy.yaml'), 'pre_build: []\n')
+      expect(() => buildApp({ policyFile: join(dir, 'policy.yaml') })).toThrow(/names pre_build/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('holds every workspace to the server network', async () => {
+    const server = createServer((_req, res) => res.end('ok\n'))
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
+    const port = (server.address() as AddressInfo).port
+    const held = buildApp({ network: false })
+    const free = buildApp()
+    const curl = async (app: MirageApp): Promise<number> => {
+      const made = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { config: { ...RAM, network: true } },
+      })
+      const id = made.json<{ id: string }>().id
+      const ran = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${id}/shell`,
+        payload: { command: `curl -sS http://127.0.0.1:${String(port)}/` },
+      })
+      return ran.json<{ exit_code: number }>().exit_code
+    }
+    try {
+      expect(await curl(free)).toBe(0)
+      expect(await curl(held)).toBe(7)
+    } finally {
+      await held.close()
+      await free.close()
+      server.close()
+    }
+  })
+
+  it("refuses a snapshot whose saved values the server's policies refuse", async () => {
+    const noSecret: Policy = {
+      preSession(ctx: SessionContext) {
+        return ctx.key === 'SECRET' ? { kind: 'deny', reason: "SECRET is the server's" } : null
+      },
+    }
+    const free = buildApp()
+    const held = buildApp({ policies: [noSecret] })
+    try {
+      const made = await free.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { config: RAM },
+      })
+      const id = made.json<{ id: string }>().id
+      const ran = await free.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${id}/shell`,
+        payload: { command: 'export SECRET=1' },
+      })
+      expect(ran.json<{ exit_code: number }>().exit_code).toBe(0)
+      const tar = await download(free, id)
+      const close = vi.spyOn(Workspace.prototype, 'close')
+      expect((await upload(held, tar)).statusCode).toBe(403)
+      expect(close).toHaveBeenCalledTimes(1)
+      close.mockRestore()
+      expect((await upload(free, tar)).statusCode).toBe(201)
+    } finally {
+      await free.close()
+      await held.close()
     }
   })
 
@@ -794,6 +975,7 @@ describe('workspaces router', () => {
         s3: STORE,
         maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
         maxSnapshotEncodedBytes: 1024 * 1024 * 1024,
+        policies: [],
       })
       load.mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }))
       const missing = await app.inject({

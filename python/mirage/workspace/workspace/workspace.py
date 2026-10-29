@@ -68,6 +68,7 @@ from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_MEMORY, MemoryBudget
+from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
@@ -258,6 +259,7 @@ class Workspace:
         mounts: dict[str, VFSMount],
         cache_limit: str | int = "32MB",
         max_memory: str | int | None = MAX_MEMORY,
+        network: NetworkSetting = True,
         cache: CacheConfig | None = None,
         index: IndexConfig | None = None,
         mode: MountMode = MountMode.READ,
@@ -324,6 +326,10 @@ class Workspace:
                 self._registry.held_in_memory,
             )
         )
+        # Every connection a line or an op opens must clear the
+        # workspace's network setting and the process's ceiling.
+        self._network = network
+        self._registry.network = network_rule(network)
         # One provider scopes every control-plane store by workspace id;
         # the per-plane params (observe / namespace_store / session_store)
         # remain as direct overrides that win over the provider.
@@ -499,7 +505,7 @@ class Workspace:
             return (
                 session_view(session, self.policies),
                 self.vfs._for_session(session.session_id),
-                policy_caller(session),
+                policy_caller(session, self.policies.account),
             )
 
         self._registry.policies.views = views
@@ -1559,6 +1565,11 @@ class Workspace:
         return self._registry.io
 
     @property
+    def network(self) -> NetworkSetting:
+        """The workspace's ``network`` setting, as it was written."""
+        return self._network
+
+    @property
     def registry(self) -> MountRegistry:
         """Mount table; consumed by the event runtime."""
         return self._registry
@@ -1896,14 +1907,20 @@ class Workspace:
             await run_blocking(tempfile.mkdtemp, prefix="mirage-restore-")
         )
         try:
-            return await cls.from_state(
-                await read_snapshot(
+            # The store is the loader's to reach, not the workspace's: a
+            # rule bound to the restore leaves the read of its tar alone.
+            state = await run_with_network(
+                None,
+                read_snapshot(
                     source,
                     s3=s3,
                     staging=staging,
                     max_bytes=max_snapshot_bytes,
                     max_encoded_bytes=max_snapshot_encoded_bytes,
                 ),
+            )
+            return await cls.from_state(
+                state,
                 mounts=mounts,
                 clis=clis,
                 secrets=secrets,
@@ -2008,7 +2025,10 @@ class Workspace:
                 drift_policy,
             )
         except BaseException:
-            ws._registry.release_clocks()
+            try:
+                await ws.close()
+            except Exception as exc:
+                logger.debug("restore not closed: %s", exc)
             raise
         live_only = state.get(StateKey.LIVE_ONLY_MOUNTS) or []
         if live_only:
@@ -2088,6 +2108,7 @@ class Workspace:
             args.mount_args,
             io=args.io,
             max_memory=args.max_memory,
+            network=args.network,
             mode=MountMode.READ,
             write=args.write_default,
             session_id=args.default_session_id,
@@ -2115,7 +2136,12 @@ class Workspace:
                 ws, state, built_for_state=built_for_state, shared=shared
             )
         except BaseException:
-            ws._registry.release_clocks()
+            # A refused restore closes what it started, a profile
+            # program's runtime among them, and lets go of the clocks.
+            try:
+                await ws.close()
+            except Exception as exc:
+                logger.debug("restore not closed: %s", exc)
             raise
         return ws
 

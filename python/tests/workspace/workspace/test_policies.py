@@ -1944,7 +1944,7 @@ async def test_a_method_cannot_change_the_session_through_its_caller():
         await ws.shell("cd /data", session_id="agent")
         await ws.shell("cat /data/owner.txt", session_id="agent")
         assert toucher.refused == ["cwd"]
-        assert toucher.fields == {"session"}
+        assert toucher.fields == {"session", "account"}
         assert (await ws.shell("pwd", session_id="agent")).stdout == (
             b"/data\n"
         )

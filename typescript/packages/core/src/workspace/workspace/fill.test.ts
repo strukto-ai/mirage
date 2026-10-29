@@ -27,6 +27,7 @@ import type { RouteDecision } from '../../runtime/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import { ScriptSource, type RunResult } from '../../runtime/types.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
+import { networkBound, type NetworkRule } from '../../io/network.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ResolvedSecret } from '../../secrets/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
@@ -195,6 +196,25 @@ describe('fillEnv through execute', () => {
     try {
       const io = await ws.shell('echo $TOKEN')
       expect([io.exitCode, stderrStr(io)]).toEqual([124, 'line: timed out after 0.2s\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("fetches a managed value under the workspace's network", async () => {
+    const bound: (NetworkRule | null)[] = []
+    registerSecrets('fake-net', FakeConfig, () => {
+      bound.push(networkBound())
+      return Promise.resolve({ fields: { TOKEN: 't0' } })
+    })
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.WRITE, env: { TOKEN: { from: 'fake-net', ref: 'r' } }, network: false },
+    )
+    try {
+      expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('t0\n')
+      expect(bound).toEqual([ws.registry.network])
+      expect(bound[0]).not.toBeNull()
     } finally {
       await ws.close()
     }

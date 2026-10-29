@@ -22,16 +22,25 @@ import os
 import tarfile
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import boto3
 import jwt as pyjwt
 import pytest
+import pytest_asyncio
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient, Response
 from moto.server import ThreadedMotoServer
 from pydantic import BaseModel
 
 from mirage import MountMode, Workspace
+from mirage.policy.base import Policy
+from mirage.policy.types import (
+    CommandContext,
+    Deny,
+    SessionContext,
+    WorkspaceContext,
+)
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
@@ -283,6 +292,227 @@ async def test_a_server_at_max_workspaces_answers_503():
         assert r.status_code == 200
         r = await client.post("/v1/workspaces", json=_minimal_config())
         assert r.status_code == 201, r.text
+
+
+class NoDisk(Policy):
+    async def pre_workspace(self, ctx: WorkspaceContext) -> Deny | None:
+        mounts = ctx.config.get("mounts") or {}
+        assert isinstance(mounts, dict)
+        if any(
+            isinstance(block, dict) and block.get("vfs") == "disk"
+            for block in mounts.values()
+        ):
+            account = ctx.caller.account if ctx.caller else None
+            return Deny(f"no disk mounts for {account}")
+        return None
+
+    async def pre_command(self, ctx: CommandContext) -> Deny | None:
+        return Deny("no rm here") if ctx.command == "rm" else None
+
+
+def _disk_config(root: str) -> dict:
+    return {
+        "config": {
+            "mounts": {
+                "/": {"vfs": "ram", "mode": "WRITE"},
+                "/host": {"vfs": "disk", "config": {"root": root}},
+            }
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_server_policies_refuse_a_workspace_before_it_is_built(
+    tmp_path,
+):
+    app = build_app(idle_grace_seconds=10.0, policies=[NoDisk()])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        r = await client.post(
+            "/v1/workspaces", json=_disk_config(str(tmp_path))
+        )
+        assert r.status_code == 403
+        assert r.json()["detail"] == "no disk mounts for None"
+        assert len(app.state.registry) == 0
+        r = await client.post(
+            "/v1/workspaces?explain=true", json=_disk_config(str(tmp_path))
+        )
+        assert r.status_code == 200
+        said = r.json()
+        assert [said["outcome"], said["reason"]] == [
+            "deny",
+            "no disk mounts for None",
+        ]
+        assert said["answers"] == [
+            {
+                "kind": "deny",
+                "reason": "no disk mounts for None",
+                "policy": "NoDisk",
+            }
+        ]
+        r = await client.post(
+            "/v1/workspaces?explain=true", json=_minimal_config()
+        )
+        assert [r.json()["outcome"], r.json()["answers"]] == ["allow", []]
+        assert len(app.state.registry) == 0
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+        assert r.status_code == 201, r.text
+        wid = r.json()["id"]
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            json={"command": "touch /a; rm /a"},
+        )
+        assert r.json()["exit_code"] == 126
+        override = {
+            "mounts": {"/host": {"vfs": "disk", "config": {"root": "/"}}}
+        }
+        r = await client.post(
+            f"/v1/workspaces/{wid}/clone", json={"override": override}
+        )
+        assert r.status_code == 403
+        r = await client.post(
+            "/v1/workspaces/load",
+            json={"key": "snap.tar", "override": override},
+        )
+        assert r.status_code == 403
+
+
+_NO_RUNTIMES = """
+import json, os
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+if "runtimes" in ctx["config"]:
+    print(json.dumps({"kind": "deny", "reason": "runtimes are the server's"}))
+"""
+
+_NO_CAT = """
+import json, os
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+if ctx["command"] == "cat":
+    print(json.dumps({"kind": "deny", "reason": "no cat"}))
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_policy_file_answers_like_the_server_policies(tmp_path):
+    (tmp_path / "no_runtimes.py").write_text(_NO_RUNTIMES)
+    (tmp_path / "no_cat.py").write_text(_NO_CAT)
+    policy_file = tmp_path / "policy.yaml"
+    policy_file.write_text(
+        "pre_workspace:\n  - script: no_runtimes.py\n"
+        "pre_command:\n  - script: no_cat.py\n"
+    )
+    app = build_app(idle_grace_seconds=10.0, policy_file=policy_file)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        refused = _minimal_config()
+        refused["config"]["runtimes"] = ["monty"]
+        r = await client.post("/v1/workspaces", json=refused)
+        assert r.status_code == 403
+        assert r.json()["detail"] == "runtimes are the server's"
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+        assert r.status_code == 201, r.text
+        wid = r.json()["id"]
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            json={"command": "echo hi > /a; cat /a"},
+        )
+        assert r.json()["exit_code"] == 126
+        r = await client.delete(f"/v1/workspaces/{wid}")
+        assert r.status_code == 200
+
+
+def test_a_policy_file_names_only_methods(tmp_path):
+    policy_file = tmp_path / "policy.yaml"
+    policy_file.write_text("pre_build: []\n")
+    with pytest.raises(ValueError, match="names pre_build"):
+        build_app(idle_grace_seconds=10.0, policy_file=policy_file)
+
+
+async def _answer(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    await reader.read(1024)
+    writer.write(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n"
+        b"Connection: close\r\n\r\nok\n"
+    )
+    await writer.drain()
+    writer.close()
+
+
+@pytest_asyncio.fixture
+async def listening() -> AsyncIterator[int]:
+    server = await asyncio.start_server(_answer, "127.0.0.1", 0)
+    yield server.sockets[0].getsockname()[1]
+    server.close()
+    await server.wait_closed()
+
+
+async def _curl_from(app: FastAPI, port: int) -> int:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        body = _minimal_config()
+        body["config"]["network"] = True
+        r = await client.post("/v1/workspaces", json=body)
+        wid = r.json()["id"]
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            json={"command": f"curl -sS http://127.0.0.1:{port}/"},
+        )
+        await client.delete(f"/v1/workspaces/{wid}")
+        return int(r.json()["exit_code"])
+
+
+@pytest.mark.asyncio
+async def test_the_server_network_holds_every_workspace(listening):
+    held = build_app(idle_grace_seconds=10.0, network=False)
+    free = build_app(idle_grace_seconds=10.0)
+    assert await _curl_from(free, listening) == 0
+    assert await _curl_from(held, listening) == 7
+
+
+class NoSecretVar(Policy):
+    async def pre_session(self, ctx: SessionContext) -> Deny | None:
+        return Deny("SECRET is the server's") if ctx.key == "SECRET" else None
+
+
+@pytest.mark.asyncio
+async def test_a_load_meets_the_server_policies_with_its_saved_values(
+    monkeypatch,
+):
+    closed: list[Workspace] = []
+    real_close = Workspace.close
+
+    async def spy(self: Workspace) -> None:
+        closed.append(self)
+        await real_close(self)
+
+    free = build_app(idle_grace_seconds=10.0)
+    held = build_app(idle_grace_seconds=10.0, policies=[NoSecretVar()])
+    async with AsyncClient(
+        transport=ASGITransport(app=free), base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+        wid = r.json()["id"]
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell", json={"command": "export SECRET=1"}
+        )
+        assert r.json()["exit_code"] == 0
+        tar = await _download(client, wid)
+        assert (await _upload(client, tar)).status_code == 201
+    monkeypatch.setattr(Workspace, "close", spy)
+    async with AsyncClient(
+        transport=ASGITransport(app=held), base_url="http://test"
+    ) as client:
+        r = await _upload(client, tar)
+        assert r.status_code == 403, r.text
+    assert len(closed) == 1
 
 
 @pytest.mark.asyncio

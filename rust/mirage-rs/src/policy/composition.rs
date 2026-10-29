@@ -21,6 +21,7 @@ enum Hook {
     PostVfs,
     PreSession,
     PostSession,
+    PreWorkspace,
 }
 
 impl Hook {
@@ -28,6 +29,7 @@ impl Hook {
         match self {
             Self::PreExecute => vec!["ask", "deny", "route"],
             Self::PostExecute => vec!["ask", "deny", "limit"],
+            Self::PreWorkspace => vec!["deny"],
             _ => vec!["ask", "deny"],
         }
     }

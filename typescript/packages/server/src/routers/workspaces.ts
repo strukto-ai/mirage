@@ -19,6 +19,9 @@ import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/works
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { runWithNetwork } from '@struktoai/mirage-core/io/network'
+import type { Policy } from '@struktoai/mirage-core/policy/base'
+import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { DiskWorkspaceStateStore, DOT_IDS, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
@@ -45,6 +48,9 @@ import type {
 import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from '../multipart.ts'
 import { SharedStorageError, WritePolicyError } from '@struktoai/mirage-core/workspace/mount/errors'
 import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
+import { explanationToDict } from '../io_serde.ts'
+import { queryFlag } from './vfs.ts'
+import type { JsonValue } from '@struktoai/mirage-core/types'
 
 export interface WorkspaceRoutesDeps {
   registry: WorkspaceRegistry
@@ -171,6 +177,22 @@ async function hasState(stateRoot: string, id: string): Promise<boolean> {
  * answers this way, so the route sends only once the id is released and a
  * client that read the answer finds the id free.
  */
+/**
+ * The server's refusal of a workspace about to be built, as the 403 its
+ * route answers with the reason; null when its policies let it, before
+ * any of it is built or any secret it names is read. Mirrors Python's
+ * `_admit`.
+ */
+async function admit(
+  deps: WorkspaceRoutesDeps,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  config: unknown,
+): Promise<{ detail: string } | null> {
+  const deny = await deps.registry.refusal((config ?? {}) as Record<string, JsonValue>, req.account)
+  return deny === null ? null : answer(reply, 403, { detail: deny.reason })
+}
+
 function answer<T>(reply: FastifyReply, status: number, body: T): T {
   void reply.status(status)
   return body
@@ -250,9 +272,12 @@ function configDigest(config: unknown): string {
 }
 
 export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRoutesDeps): void {
-  app.post<{ Body: CreateWorkspaceRequest }>(
+  app.post<{ Body: CreateWorkspaceRequest; Querystring: { explain?: string } }>(
     '/v1/workspaces',
-    async (req: FastifyRequest<{ Body: CreateWorkspaceRequest }>, reply: FastifyReply) => {
+    async (
+      req: FastifyRequest<{ Body: CreateWorkspaceRequest; Querystring: { explain?: string } }>,
+      reply: FastifyReply,
+    ) => {
       const body = req.body
       const config: unknown = body.config
       if (config === null || typeof config !== 'object' || Array.isArray(config)) {
@@ -274,6 +299,18 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         }
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })
+      }
+      // The server's policies judge the config as written before any of it
+      // is built; explain answers what they say without creating anything.
+      let explain: boolean
+      try {
+        explain = queryFlag(req.query.explain, 'explain')
+      } catch (e) {
+        return reply.status(400).send({ detail: (e as Error).message })
+      }
+      if (explain) {
+        const written = config as Record<string, JsonValue>
+        return explanationToDict(await deps.registry.explanation(written, req.account))
       }
       // The registry id and the state-store scope must be the same identity,
       // so resolve it before construction: explicit REST id, then the
@@ -299,10 +336,17 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           }
           return answer(reply, 200, await makeDetail(held))
         }
+        const refusal = await admit(deps, req, reply, config)
+        if (refusal !== null) return refusal
         return claimed(deps, req, reply, wid, async () => {
           let args: WorkspaceArgs
           try {
-            args = await configToWorkspaceArgs(cfg)
+            // Mounts that answer as they are built, and the secrets the
+            // config names, go out under the network the workspace will be
+            // held to.
+            args = await runWithNetwork(deps.registry.ruleFor(cfg.network), () =>
+              configToWorkspaceArgs(cfg),
+            )
           } catch (e) {
             if (
               e instanceof SecretsError ||
@@ -394,32 +438,49 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     ) {
       return reply.status(409).send({ detail: `workspace id already exists: ${workspaceId}` })
     }
+    const refusal = await admit(deps, req, reply, override)
+    if (refusal !== null) return refusal
     const store = typeof source === 'string' ? deps.snapshotStore : undefined
     if (typeof source === 'string' && store === undefined) return noStore(reply)
     const wid = workspaceId ?? newWorkspaceId()
+    // What the snapshot holds is built under the server's network; its own
+    // setting is not known until it is read.
+    const rule = deps.registry.ruleFor()
     return building(deps, req, reply, wid, async () => {
       let overrides: Record<string, BaseVFS | Mount>
       try {
         // An override mount's credential may be a pointer at one of
         // these declarations; a container the constructor will reject
         // is left for it to reject. Mirrors the python load route.
-        overrides = await buildOverrideMounts(override ?? null, override?.secrets)
+        overrides = await runWithNetwork(rule, () =>
+          buildOverrideMounts(override ?? null, override?.secrets),
+        )
       } catch (e) {
         return answer(reply, 400, { detail: `override build failed: ${(e as Error).message}` })
       }
       let ws: Workspace
+      let restoredWith: readonly Policy[] = []
       try {
-        ws = await Workspace.load(
-          source,
-          {
-            maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
-            maxSnapshotEncodedBytes: MAX_SNAPSHOT_PART,
-            ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
-            ...(store !== undefined ? { s3: store } : {}),
-          },
-          overrides,
-        )
+        // The snapshot's saved values meet the server's policies as a live
+        // write does, before any of them lands.
+        ws = await deps.registry.restoring((policies) => {
+          restoredWith = policies
+          return runWithNetwork(rule, () =>
+            Workspace.load(
+              source,
+              {
+                maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
+                maxSnapshotEncodedBytes: MAX_SNAPSHOT_PART,
+                ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
+                ...(store !== undefined ? { s3: store } : {}),
+                policies,
+              },
+              overrides,
+            ),
+          )
+        })
       } catch (e) {
+        if (e instanceof PolicyDenied) return answer(reply, 403, { detail: e.message })
         if ((e as { code?: unknown }).code === 'ENOENT') {
           return answer(reply, 400, { detail: `snapshot not found: ${String(key)}` })
         }
@@ -427,7 +488,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       }
       let entry
       try {
-        entry = deps.registry.add(ws, wid, req.account)
+        entry = deps.registry.add(ws, wid, req.account, restoredWith)
       } catch (e) {
         await ws.close()
         return answer(reply, 409, { detail: (e as Error).message })
@@ -526,11 +587,15 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         return reply.status(409).send({ detail: `workspace id already exists: ${body.id}` })
       }
       const wid = body.id ?? newWorkspaceId()
+      const refusal = await admit(deps, req, reply, body.override)
+      if (refusal !== null) return refusal
       return building(deps, req, reply, wid, async () => {
         const src = source.runner.ws
         let newWs
         try {
-          newWs = await cloneWorkspaceWithOverride(src, body.override ?? null)
+          newWs = await runWithNetwork(deps.registry.ruleFor(src.network), () =>
+            cloneWorkspaceWithOverride(src, body.override ?? null),
+          )
         } catch (e) {
           if (
             e instanceof SecretsError ||

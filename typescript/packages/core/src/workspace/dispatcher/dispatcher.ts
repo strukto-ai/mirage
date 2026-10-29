@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runWithMemory } from '../../io/memory.ts'
+import { runWithNetwork } from '../../io/network.ts'
 import { closeQuietly, ensureStream } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 
@@ -812,16 +813,18 @@ export class Dispatcher {
       // call must keep the conservative live-session checks rather than
       // borrow the newest binding, which can belong to a wider concurrent
       // session.
-      // Under the workspace's max_memory, which FUSE and ws.vfs writes reach
-      // only here.
+      // Under the workspace's max_memory and network, which FUSE and ws.vfs
+      // calls reach only here.
       const run = (): ReturnType<DispatchFn> =>
-        runWithMemory(this.namespace.memory, () =>
-          name === 'read' &&
-          kwargs?.warm !== true &&
-          kwargs?.admit_only !== true &&
-          !('retained' in (kwargs ?? {}))
-            ? this.readRefusingDirs(path, args, kwargs, report)
-            : this.dispatchAdmitted(name, path, args, kwargs, report),
+        runWithNetwork(this.namespace.network, () =>
+          runWithMemory(this.namespace.memory, () =>
+            name === 'read' &&
+            kwargs?.warm !== true &&
+            kwargs?.admit_only !== true &&
+            !('retained' in (kwargs ?? {}))
+              ? this.readRefusingDirs(path, args, kwargs, report)
+              : this.dispatchAdmitted(name, path, args, kwargs, report),
+          ),
         )
       if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return await run()
       return await this.admitWrite(run)

@@ -32,6 +32,7 @@ from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import run_with_memory
+from mirage.io.network import run_with_network
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
@@ -920,32 +921,40 @@ async def run_prepared_line(
                     # every managed name) still read a bootstrap source.
                     # The TypeScript twin shares one helper with the
                     # per-command path and skipped this by construction.
+                    # A store answers under the workspace's network, as
+                    # the line does.
                     if whole_names:
-                        await fill_env(
+                        await run_with_network(
+                            ws.registry.network,
+                            fill_env(
+                                effective_session,
+                                whole_names,
+                                await ws.secret_sources(),
+                            ),
+                        )
+                io = await run_with_network(
+                    ws.registry.network,
+                    run_with_memory(
+                        ws.registry.memory,
+                        run_whole_line(
+                            line_runtime,
+                            command,
+                            stdin,
                             effective_session,
-                            whole_names,
-                            await ws.secret_sources(),
-                        )
-                io = await run_with_memory(
-                    ws.registry.memory,
-                    run_whole_line(
-                        line_runtime,
-                        command,
-                        stdin,
-                        effective_session,
-                        ws.registry,
-                        claimant_for(ast, handed),
-                        cancel,
-                        ws.router.context(
-                            command, effective_session, await judged()
-                        )
-                        if await ws.registry.policies.wants_for(
-                            "post_execute", effective_session.session_id
-                        )
-                        else None,
-                        sink,
-                        context.frame.line_timeout if top_level else None,
-                        budget_start,
+                            ws.registry,
+                            claimant_for(ast, handed),
+                            cancel,
+                            ws.router.context(
+                                command, effective_session, await judged()
+                            )
+                            if await ws.registry.policies.wants_for(
+                                "post_execute", effective_session.session_id
+                            )
+                            else None,
+                            sink,
+                            context.frame.line_timeout if top_level else None,
+                            budget_start,
+                        ),
                     ),
                 )
                 if io.refusal is None:
@@ -1050,42 +1059,48 @@ async def run_prepared_line(
                         # unreachable store gets. Memoized, so the loop's
                         # later passes cost one await.
                         sources = await ws.secret_sources()
-                        await fill_env(effective_session, names, sources)
+                        await run_with_network(
+                            ws.registry.network,
+                            fill_env(effective_session, names, sources),
+                        )
                         names = plan_names(nodes)
             # No seam of its own: the whole line is one task under
             # ``Workspace.shell``, and a cancel lands on whichever await
             # the tree is in. A top-level line runs under its ``@line``
             # deadline, which a nested one shares, and every object a
             # line builds must fit in what the workspace's max_memory has
-            # left.
-            io, _ = await run_with_memory(
-                ws.registry.memory,
-                run_with_timeout(
-                    run_command_tree(
-                        ws.dispatch,
-                        ws.registry,
-                        ws.namespace,
-                        job_table or ws.job_table,
-                        exec_recursion,
-                        ast,
-                        context,
-                        stdin,
-                        cancel,
-                        handed=handed,
-                        sink=sink,
-                        call_stack=call_stack,
-                        execution_scope=execution_scope,
-                        route=ws.router.context(
-                            command, effective_session, await judged()
-                        )
-                        if await ws.registry.policies.wants_for(
-                            "post_execute", effective_session.session_id
-                        )
-                        else None,
+            # left, and every connection it opens must clear its network.
+            io, _ = await run_with_network(
+                ws.registry.network,
+                run_with_memory(
+                    ws.registry.memory,
+                    run_with_timeout(
+                        run_command_tree(
+                            ws.dispatch,
+                            ws.registry,
+                            ws.namespace,
+                            job_table or ws.job_table,
+                            exec_recursion,
+                            ast,
+                            context,
+                            stdin,
+                            cancel,
+                            handed=handed,
+                            sink=sink,
+                            call_stack=call_stack,
+                            execution_scope=execution_scope,
+                            route=ws.router.context(
+                                command, effective_session, await judged()
+                            )
+                            if await ws.registry.policies.wants_for(
+                                "post_execute", effective_session.session_id
+                            )
+                            else None,
+                        ),
+                        context.frame.line_timeout if top_level else None,
+                        LINE_NAME,
+                        budget_start,
                     ),
-                    context.frame.line_timeout if top_level else None,
-                    LINE_NAME,
-                    budget_start,
                 ),
             )
             # A record a nested line earned is the line's to report when

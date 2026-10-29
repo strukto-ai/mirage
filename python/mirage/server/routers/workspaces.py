@@ -23,6 +23,7 @@ from typing import Any, TypeVar
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from mirage import Workspace
 from mirage.concurrency.limiter import run_blocking
@@ -31,7 +32,8 @@ from mirage.config import (
     _load_profile_policy,
     resolve_secrets,
 )
-from mirage.policy.errors import PolicyError
+from mirage.io.network import run_with_network
+from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.profile import SessionProfile
 from mirage.secrets.errors import SecretsError
 from mirage.server.clone import (
@@ -39,6 +41,7 @@ from mirage.server.clone import (
     clone_workspace_with_override,
 )
 from mirage.server.constants import MAX_SNAPSHOT_BYTES
+from mirage.server.io_serde import explanation_to_dict
 from mirage.server.multipart import (
     MAX_REQUEST_PART,
     MAX_SNAPSHOT_PART,
@@ -202,6 +205,24 @@ def _refuse_dot_id(workspace_id: str | None) -> None:
         )
 
 
+async def _admit(request: Request, config: dict[str, Any]) -> None:
+    """Refuse a workspace the server's policies refuse, before any of it
+    is built or any secret it names is read.
+
+    Args:
+        request (Request): the request, for the registry and its account.
+        config (dict[str, Any]): the config as the caller wrote it.
+
+    Raises:
+        HTTPException: 403 with the refusal's reason.
+    """
+    refused = await request.app.state.registry.refusal(
+        config, request.state.account
+    )
+    if refused is not None:
+        raise HTTPException(status_code=403, detail=refused.reason)
+
+
 def config_digest(config: WorkspaceConfig) -> str:
     """A stable fingerprint of the config a workspace was created from.
 
@@ -217,24 +238,36 @@ def config_digest(config: WorkspaceConfig) -> str:
 
 @router.post("", response_model=WorkspaceDetail, status_code=201)
 async def create_workspace(
-    req: CreateWorkspaceRequest, request: Request, response: Response
-) -> WorkspaceDetail:
+    req: CreateWorkspaceRequest,
+    request: Request,
+    response: Response,
+    explain: bool = Query(False),
+) -> WorkspaceDetail | Response:
     """Create a workspace, or answer the live one created from this config.
 
     Creating is idempotent for one config: an id already held by a
     workspace created from an identical config answers that workspace
     with 200, so a client that names its workspace can run again and
-    reach it; an id held by anything else is refused with 409.
+    reach it; an id held by anything else is refused with 409. The
+    server's policies judge the config as written (``pre_workspace``)
+    before any of it is built: a refusal is 403 with its reason, and
+    ``explain`` answers what they say without creating anything.
 
     Args:
         req (CreateWorkspaceRequest): the config and an optional id.
         request (Request): the HTTP request, for the app's registry.
         response (Response): the response, whose status a held id sets.
+        explain (bool): answer what the server's policies say instead.
 
     Returns:
-        WorkspaceDetail: the created or the matching live workspace.
+        WorkspaceDetail | Response: the created or the matching live
+            workspace, or the explanation.
     """
     registry = request.app.state.registry
+    written = (await request.json())["config"]
+    if explain:
+        said = await registry.explanation(written, request.state.account)
+        return JSONResponse(content=explanation_to_dict(said))
     digest = config_digest(req.config)
     # The registry id and the state-store scope must be the same identity,
     # so resolve it before construction: explicit REST id, then the
@@ -269,13 +302,19 @@ async def create_workspace(
                 )
             response.status_code = 200
             return await make_detail(held)
+        await _admit(request, written)
         async with _claimed(request, wid):
             try:
                 # Map runtime entries construct their instances here, so a bad
                 # entry (a wasi build dir that does not exist, an unknown
-                # option) fails the create like any other config mistake.
+                # option) fails the create like any other config mistake. A
+                # secret the config names is read under the network the
+                # workspace will be held to.
                 kwargs = (
-                    await resolve_secrets(req.config)
+                    await run_with_network(
+                        registry.rule_for(req.config.network),
+                        resolve_secrets(req.config),
+                    )
                 ).to_workspace_kwargs()
             except (
                 FileNotFoundError,
@@ -441,12 +480,16 @@ async def clone_workspace(
             status_code=409, detail=f"workspace id already exists: {req.id!r}"
         )
     wid = req.id or new_workspace_id()
+    await _admit(request, req.override or {})
     async with _building(request, wid):
         try:
             new_ws = await run_capture(
                 src_entry,
-                clone_workspace_with_override(
-                    src_entry.runner.ws, req.override
+                run_with_network(
+                    registry.rule_for(src_entry.runner.ws.network),
+                    clone_workspace_with_override(
+                        src_entry.runner.ws, req.override
+                    ),
                 ),
             )
         except (SecretsError, ValueError) as e:
@@ -505,19 +548,25 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
         raise HTTPException(
             status_code=409, detail=f"workspace id already exists: {req.id!r}"
         )
+    await _admit(request, req.override or {})
     store: S3Config | None = None
     source: Any = tar
     if tar is None and req.key is not None:
         store = _snapshot_store(request)
         source = store_key(request, req.key)
     wid = req.id or new_workspace_id()
+    # What the snapshot holds is built under the server's network; its own
+    # setting is not known until it is read.
+    rule = registry.rule_for()
     async with _building(request, wid):
         secrets = _build_load_secrets(req.override)
         try:
             # An override mount's credential may be a pointer at one of
             # these declarations; a container the constructor will reject
             # is left for it to reject.
-            mounts = await build_override_mounts(req.override, secrets)
+            mounts = await run_with_network(
+                rule, build_override_mounts(req.override, secrets)
+            )
         except (KeyError, TypeError, ValueError, SecretsError) as e:
             # An override naming a VFS the daemon cannot build (an
             # unknown name, an unloadable ref, a ref that is not a VFS,
@@ -528,14 +577,23 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
                 status_code=400, detail=f"override build failed: {e}"
             )
         try:
-            ws = await Workspace.load(
-                source,
-                mounts=mounts,
-                secrets=secrets,
-                s3=store,
-                max_snapshot_bytes=MAX_SNAPSHOT_BYTES,
-                max_snapshot_encoded_bytes=MAX_SNAPSHOT_PART,
-            )
+            # The snapshot's saved values meet the server's policies as a
+            # live write does, before any of them lands.
+            async with registry.restoring() as policies:
+                ws = await run_with_network(
+                    rule,
+                    Workspace.load(
+                        source,
+                        mounts=mounts,
+                        secrets=secrets,
+                        s3=store,
+                        max_snapshot_bytes=MAX_SNAPSHOT_BYTES,
+                        max_snapshot_encoded_bytes=MAX_SNAPSHOT_PART,
+                        policies=policies,
+                    ),
+                )
+        except PolicyDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
         except FileNotFoundError:
             raise HTTPException(
                 status_code=400, detail=f"snapshot not found: {req.key}"
@@ -548,7 +606,10 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
             raise HTTPException(status_code=400, detail=f"load failed: {e}")
         try:
             entry = registry.add(
-                ws, workspace_id=wid, owner=request.state.account
+                ws,
+                workspace_id=wid,
+                owner=request.state.account,
+                restored_with=policies,
             )
         except ValueError as e:
             await ws.close()

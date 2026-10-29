@@ -17,6 +17,7 @@ import { REDACTED_SECRET, hasRedactedSecret } from '../../vfs/secrets.ts'
 import type { CLI } from '../../commands/cli/types.ts'
 import type { Mount } from '../mount/spec.ts'
 import type { IOConfig } from '../../io/config.ts'
+import type { NetworkSetting } from '../../io/network.ts'
 import type { SessionProfile } from '../../policy/profile.ts'
 import type { Limit, WritePolicy } from '../../types.ts'
 
@@ -34,6 +35,8 @@ export interface MountArgs {
   profile: string | null
   // The workspace's max_memory in bytes, null for no cap.
   maxMemory: number | null
+  // The workspace's network setting, as written.
+  network: NetworkSetting
 }
 
 export interface IndexConfigSnapshot {

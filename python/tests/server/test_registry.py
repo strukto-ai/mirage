@@ -18,6 +18,8 @@ import time
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.policy.base import Policy
+from mirage.policy.types import Action, CommandContext, VfsContext
 from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import ENV_MAX_WORKSPACES
 from mirage.server.registry import (
@@ -68,6 +70,32 @@ async def test_an_account_sees_only_the_workspaces_it_owns():
     assert registry.visible("missing", "alice") is None
     assert registry.visible("theirs", None) is not None
     await registry.close_all()
+
+
+class SeesAccount(Policy):
+    def __init__(self) -> None:
+        self.accounts: set[str | None] = set()
+
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        self.accounts.add(ctx.caller.account if ctx.caller else "")
+        return None
+
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        self.accounts.add(ctx.caller.account if ctx.caller else "")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_server_policy_reads_the_owners_account():
+    seen = SeesAccount()
+    registry = WorkspaceRegistry(idle_grace_seconds=10.0, policies=[seen])
+    entry = registry.add(_ws(), "mine", owner="alice")
+    try:
+        result = await entry.runner.call(entry.runner.ws.shell("echo hi > /a"))
+        assert result.exit_code == 0
+        assert seen.accounts == {"alice"}
+    finally:
+        await registry.close_all()
 
 
 @pytest.mark.asyncio

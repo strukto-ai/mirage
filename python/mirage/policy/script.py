@@ -57,6 +57,7 @@ from mirage.policy.types import (
     SessionScriptsQuery,
     VfsContext,
     VfsResultContext,
+    WorkspaceContext,
 )
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT_SECONDS
@@ -93,7 +94,8 @@ def _caller_data(caller: PolicyCaller | None) -> JsonValue:
             None
             if session is None
             else {"session_id": session.session_id, "cwd": session.cwd}
-        )
+        ),
+        "account": caller.account,
     }
 
 
@@ -135,7 +137,11 @@ def _plain(value: Any) -> JsonValue:
 
 
 def script_context(
-    ctx: CommandContext | RouteContext | VfsContext | SessionContext,
+    ctx: CommandContext
+    | RouteContext
+    | VfsContext
+    | SessionContext
+    | WorkspaceContext,
 ) -> dict[str, JsonValue]:
     """A policy context as a program reads it: every field a coded
     policy reads, under the same name, as plain data.
@@ -147,11 +153,14 @@ def script_context(
     ``NAME=value`` prefix included.
 
     Args:
-        ctx (CommandContext | RouteContext | VfsContext | SessionContext):
-            the context a method was handed, a ``post_`` one included.
+        ctx (CommandContext | RouteContext | VfsContext | SessionContext |
+            WorkspaceContext): the context a method was handed, a
+            ``post_`` one included.
     """
     data = _plain(ctx)
     assert isinstance(data, dict)
+    if isinstance(ctx, WorkspaceContext):
+        return data
     if isinstance(ctx, RouteContext):
         commands = data["commands"]
         assert isinstance(commands, list)
@@ -362,6 +371,11 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     ) -> tuple[Deny | Ask | Route, ...] | None:
         return await self._judge("post_session", ctx)
 
+    async def pre_workspace(
+        self, ctx: WorkspaceContext
+    ) -> tuple[Deny | Ask | Route, ...] | None:
+        return await self._judge("pre_workspace", ctx)
+
     async def wants_for(self, method: str, session_id: str) -> bool:
         """Whether this session's profile names a program at ``method``.
 
@@ -410,7 +424,11 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     async def _judge(
         self,
         method: str,
-        ctx: CommandContext | RouteContext | VfsContext | SessionContext,
+        ctx: CommandContext
+        | RouteContext
+        | VfsContext
+        | SessionContext
+        | WorkspaceContext,
     ) -> tuple[Deny | Ask | Route, ...] | None:
         """Every program the session's profile names at one method, each
         answer in order, up to the first deny.
@@ -418,9 +436,12 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         Args:
             method (str): the method the entry point fired.
             ctx (CommandContext | RouteContext | VfsContext |
-                SessionContext): its context.
+                SessionContext | WorkspaceContext): its context.
         """
-        programs = self._sessions.scripts_of(ctx.session_id).get(method, ())
+        session_id = (
+            "" if isinstance(ctx, WorkspaceContext) else ctx.session_id
+        )
+        programs = self._sessions.scripts_of(session_id).get(method, ())
         if not programs:
             return None
         payload = json.dumps(script_context(ctx))
@@ -438,7 +459,12 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         return tuple(answers) or None
 
     async def _cwd(
-        self, ctx: CommandContext | RouteContext | VfsContext | SessionContext
+        self,
+        ctx: CommandContext
+        | RouteContext
+        | VfsContext
+        | SessionContext
+        | WorkspaceContext,
     ) -> str:
         """The directory a program starts in: the session's, or ``/``
         once the session's has gone, since a runtime that enters it
@@ -446,8 +472,10 @@ class ScriptPolicy(Policy, SessionScopedMixin):
 
         Args:
             ctx (CommandContext | RouteContext | VfsContext |
-                SessionContext): the method's context.
+                SessionContext | WorkspaceContext): the method's context.
         """
+        if isinstance(ctx, WorkspaceContext):
+            return "/"
         cwd = ctx.session.cwd() if ctx.session is not None else "/"
         if (
             cwd != "/"

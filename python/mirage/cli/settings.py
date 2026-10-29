@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 import os
 import tomllib
 from dataclasses import dataclass
@@ -28,12 +29,14 @@ from mirage.server.daemon_config import (
     NUMERIC_KEYS,
     DaemonConfigError,
     read_daemon_table,
+    validate_daemon_table,
 )
 from mirage.server.env import (
     ENV_ALLOWED_HOSTS,
     ENV_DAEMON_PORT,
     ENV_IDLE_GRACE_SECONDS,
     ENV_MAX_WORKSPACES,
+    ENV_POLICY_FILE,
 )
 from mirage.server.host_validation_constants import DEFAULT_ALLOWED_HOSTS
 from mirage.server.paths import mirage_home
@@ -54,6 +57,7 @@ _ENV_FOR_KEY = {
     "auth_token": ENV_TOKEN,
     "idle_grace_seconds": ENV_IDLE_GRACE_SECONDS,
     "max_workspaces": ENV_MAX_WORKSPACES,
+    "policy_file": ENV_POLICY_FILE,
     "port": ENV_DAEMON_PORT,
     **SSH_ENV_KEYS,
 }
@@ -159,6 +163,8 @@ def _default_for_key(key: str) -> str:
         "auth_token": "",
         "idle_grace_seconds": "30",
         "max_workspaces": "",
+        "network": "true",
+        "policy_file": "",
         "port": "8765",
         "ssh_port": "",
         "ssh_host": DEFAULT_SSH_HOST,
@@ -166,6 +172,12 @@ def _default_for_key(key: str) -> str:
         "ssh_authorized_keys": str(default_ssh_dir() / AUTHORIZED_KEYS_NAME),
     }
     return defaults[key]
+
+
+def _network_text(value: bool | dict[str, list[str]]) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return f"{{ allow = {json.dumps(value['allow'])} }}"
 
 
 def resolved_config() -> dict[str, tuple[str, str]]:
@@ -186,6 +198,8 @@ def resolved_config() -> dict[str, tuple[str, str]]:
         env_value = os.environ.get(env_name) if env_name else None
         if env_value:
             out[key] = (env_value, f"env {env_name}")
+        elif key == "network" and key in table:
+            out[key] = (_network_text(table[key]), "file")
         elif str(table.get(key, "")):
             out[key] = (str(table[key]), "file")
         else:
@@ -202,7 +216,7 @@ def _check_key(key: str) -> None:
 
 
 def _format_value(key: str, value: str) -> str:
-    if key in NUMERIC_KEYS:
+    if key in NUMERIC_KEYS or key == "network":
         return value
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
@@ -234,7 +248,10 @@ def list_config(path: Path | None = None) -> dict[str, Any]:
             table = tomllib.load(f).get("daemon", {})
     except tomllib.TOMLDecodeError as e:
         raise DaemonConfigError(f"malformed {use_path}: {e}") from e
-    return {k: str(v) for k, v in table.items()}
+    return {
+        k: _network_text(v) if k == "network" else str(v)
+        for k, v in table.items()
+    }
 
 
 def get_config(key: str, path: Path | None = None) -> str | None:
@@ -264,6 +281,14 @@ def set_config(key: str, value: str, path: Path | None = None) -> None:
         path (Path | None): config file. Defaults to ``config_path()``.
     """
     _check_key(key)
+    if key == "network":
+        try:
+            validate_daemon_table(tomllib.loads(f"network = {value}"))
+        except tomllib.TOMLDecodeError as exc:
+            raise DaemonConfigError(
+                "config.toml: [daemon] network is true, false or "
+                "{allow = [hosts and ranges]}"
+            ) from exc
     use_path = path or config_path()
     lines = _config_lines(use_path)
     rendered = f"{key} = {_format_value(key, value)}"

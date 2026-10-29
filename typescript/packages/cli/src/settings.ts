@@ -23,12 +23,14 @@ import {
   ENV_DAEMON_PORT,
   ENV_IDLE_GRACE_SECONDS,
   ENV_MAX_WORKSPACES,
+  ENV_POLICY_FILE,
 } from '@struktoai/mirage-server/env'
 import {
   ALLOWED_KEYS,
   DaemonConfigError,
   NUMERIC_KEYS,
   parseDaemonTable,
+  parseNetwork,
   readDaemonTable,
 } from '@struktoai/mirage-server/daemon_config'
 import { DEFAULT_ALLOWED_HOSTS } from '@struktoai/mirage-server/host_validation_constants'
@@ -126,6 +128,7 @@ const ENV_FOR_KEY: Record<string, string> = {
   auth_token: ENV_TOKEN,
   idle_grace_seconds: ENV_IDLE_GRACE_SECONDS,
   max_workspaces: ENV_MAX_WORKSPACES,
+  policy_file: ENV_POLICY_FILE,
   port: ENV_DAEMON_PORT,
   ...SSH_ENV_KEYS,
 }
@@ -147,6 +150,8 @@ function defaultForKey(key: string, home: string): string {
     auth_token: '',
     idle_grace_seconds: '30',
     max_workspaces: '',
+    network: 'true',
+    policy_file: '',
     port: '8765',
     ssh_port: '',
     ssh_host: DEFAULT_SSH_HOST,
@@ -190,7 +195,7 @@ function checkKey(key: string): void {
 }
 
 function formatValue(key: string, value: string): string {
-  if (NUMERIC_KEYS.has(key)) return value
+  if (NUMERIC_KEYS.has(key) || key === 'network') return value
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 }
 
@@ -207,6 +212,7 @@ export function getConfig(key: string, path?: string): string | undefined {
 
 export function setConfig(key: string, value: string, path?: string): void {
   checkKey(key)
+  if (key === 'network') parseNetwork(value)
   const p = path ?? configPath(process.env as Record<string, string | undefined>)
   const lines = existsSync(p) ? readFileSync(p, 'utf-8').split('\n') : []
   if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()

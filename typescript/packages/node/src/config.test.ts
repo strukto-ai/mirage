@@ -389,6 +389,27 @@ describe('configToWorkspaceArgs', () => {
     ).toThrow(/max_memory must be a size/)
   })
 
+  it.each([
+    [{}, undefined],
+    [{ network: false }, false],
+    [
+      { network: { allow: ['*.github.com', '10.0.0.0/8'] } },
+      { allow: ['*.github.com', '10.0.0.0/8'] },
+    ],
+  ])('passes the workspace network %o on', async (block, expected) => {
+    const cfg = loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, ...block })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.network).toEqual(expected)
+  })
+
+  it.each([
+    ['off', /network is true, false or/],
+    [{ deny: ['10.0.0.0/8'] }, /network is true, false or/],
+    [{ allow: ['10.0.0.0/33'] }, /is not an address, a range/],
+  ])('refuses the workspace network %o', (network, message) => {
+    expect(() => loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, network })).toThrow(message)
+  })
+
   it('refuses a runtime entry script', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
