@@ -1,7 +1,5 @@
 const computations: Record<string, () => Promise<unknown>> = {
   diffDispatch: async () => (await import('../rs/diff_worker.ts')).diffDispatch,
-  jqRunRaised: async () => (await import('../core/jq/eval.ts')).jqRunRaised,
-  jqRunTexts: async () => (await import('../core/jq/eval.ts')).jqRunTexts,
 }
 
 interface Request {

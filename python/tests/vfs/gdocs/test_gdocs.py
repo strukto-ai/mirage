@@ -14,10 +14,10 @@
 
 import pytest
 
-from mirage.core.jq.eval import jq_eval
 from mirage.types import VFSName
 from mirage.vfs.gdocs.config import GDocsConfig
 from mirage.vfs.gdocs.gdocs import VFS_MD, GDocsVFS
+from tests.commands.builtin.jq.conftest import jq_eval
 from tests.fixtures.mount_commands import mount_commands
 
 

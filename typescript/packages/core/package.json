@@ -64,10 +64,10 @@
     "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
-    "build": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-jq.mjs && node scripts/embed-worker.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json",
-    "test": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-jq.mjs && node scripts/embed-worker.mjs && vitest run",
-    "typecheck": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-jq.mjs && node scripts/embed-worker.mjs && tsc --noEmit",
-    "prepare": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-jq.mjs && node scripts/embed-worker.mjs"
+    "build": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json",
+    "test": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && vitest run",
+    "typecheck": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && tsc --noEmit",
+    "prepare": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/server": "^2.3.0",
@@ -91,7 +91,6 @@
     "@octokit/request-error": "^7.1.1",
     "bson": "^6.10.4",
     "isomorphic-git": "^1.38.1",
-    "jq-wasm": "3.0.0-jq-1.8.2",
     "sha.js": "^2.4.12",
     "zod": "^4.6.6"
   },

@@ -27,7 +27,7 @@ for (const [name, entry] of Object.entries(workers)) {
     logLevel: 'warning',
     external: ['node:*', 'pyodide'],
     // A blob has no URL to resolve a sibling against, and a module that
-    // resolves one as it loads (jq-wasm's browser build) throws there.
+    // resolves one as it loads throws there.
     // Nothing in a worker fetches a sibling in a browser, so the bundle
     // gets a base that only has to parse.
     define: { 'import.meta.url': JSON.stringify('https://mirage.invalid/') },

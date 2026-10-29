@@ -213,6 +213,47 @@
         "c",
         "arg"
       ]
+    },
+    {
+      "id": "jq_get_prog_origin_is_the_working_directory",
+      "seq": 18700012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && jq -nc '[get_prog_origin, get_jq_origin]')",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"/data\",\".\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_get_prog_origin_is_the_program_files_directory",
+      "seq": 18700013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '[get_prog_origin, get_jq_origin]' > /data/jq_origin.jq && (cd / && jq -nc -f /data/jq_origin.jq); rm -f /data/jq_origin.jq",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"/data\",\".\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c",
+        "f"
+      ]
     }
   ]
 }

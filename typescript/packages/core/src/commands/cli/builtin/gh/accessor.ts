@@ -19,8 +19,7 @@ import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { GITHUB_API_BASE } from '../../../../core/github/client.ts'
 import { parseRepo, repoHost, type RepoRef } from '../../../../core/github/repo.ts'
 import { InputReader, jqOptions, type JqRun } from '../../../../core/jq/index.ts'
-import { Worker } from '../../../../concurrency/worker.ts'
-import { Engine, type Ending } from '../../../builtin/generic/jq.ts'
+import { Engine, localZone, type Ending } from '../../../builtin/generic/jq.ts'
 import { UsageError } from '../../../errors.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
@@ -288,8 +287,8 @@ function goEncoded(value: unknown, quote: (text: string) => string): string {
 /**
  * A number as go-gh prints a float64 on its own line: in fixed notation, with
  * no decimals when it is whole and two otherwise, rounded half to even as
- * strconv rounds. An infinity jq-wasm hands over counts as the largest finite
- * float, which is what jq.py hands over for one.
+ * strconv rounds. An infinity counts as the largest finite float, which is
+ * what jq_eval hands over for one.
  */
 function fixedNumber(number: number): string {
   const finite = Math.min(Math.max(number, -Number.MAX_VALUE), Number.MAX_VALUE)
@@ -399,11 +398,10 @@ function jqFailure(run: JqRun): string | null {
  * lines printed before it (see jqFailure): a StreamRefusal carries them.
  *
  * The program runs in mirage-rs's jq_eval, a bounded number of steps at a
- * time, so one that never ends still yields and the signal stops it. One
- * jq_eval refuses runs in jq-wasm in a worker, away from the loop. `input`
- * finds no more input, `$ENV` is the command's environment, and what `debug`
- * and `stderr` write is not printed. Throws JqCompileError for a program jq
- * refuses.
+ * time, so one that never ends still yields and the signal stops it.
+ * `input` finds no more input, `$ENV` is the command's environment, and what
+ * `debug` and `stderr` write is not printed. Throws JqCompileError for a
+ * program jq refuses.
  */
 export async function jqLines(
   values: readonly unknown[],
@@ -411,30 +409,18 @@ export async function jqLines(
   ctx: Context,
 ): Promise<string> {
   const env = JSON.stringify(ctx.env ?? {})
-  const engine = await Engine.open(program, jqOptions(), null, env, ctx.signal)
+  const zone = localZone(ctx.env)
+  const engine = await Engine.open(program, jqOptions(), null, env, zone, null, ctx.signal)
   const reader = new InputReader([], jqOptions())
-  let worker: Worker | null = null
   const lines: string[] = []
   try {
     for (const value of values) {
-      let run: JqRun | null = null
-      if (engine !== null) {
-        const ending: Ending = { stop: null, declined: false }
-        const outputs: unknown[] = []
-        for await (const text of engine.run(
-          JSON.stringify(value),
-          reader,
-          () => undefined,
-          ending,
-        )) {
-          outputs.push(JSON.parse(text))
-        }
-        if (!ending.declined) run = { outputs, stop: ending.stop }
+      const ending: Ending = { stop: null }
+      const outputs: unknown[] = []
+      for await (const text of engine.run(JSON.stringify(value), reader, () => undefined, ending)) {
+        outputs.push(JSON.parse(text))
       }
-      if (run === null) {
-        worker ??= new Worker()
-        run = await worker.call<JqRun>('jqRunRaised', [value, program, env], ctx.signal)
-      }
+      const run: JqRun = { outputs, stop: ending.stop }
       for (const item of run.outputs) lines.push(`${jqLine(item)}\n`)
       const failure = jqFailure(run)
       if (failure !== null) {
@@ -442,8 +428,7 @@ export async function jqLines(
       }
     }
   } finally {
-    await engine?.close()
-    await worker?.close()
+    await engine.close()
     await reader.close()
   }
   return lines.join('')

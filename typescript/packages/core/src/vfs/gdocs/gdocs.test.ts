@@ -13,8 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { jqEval } from '../../core/jq/eval.ts'
+import { Engine, type Ending } from '../../commands/builtin/generic/jq.ts'
+import { InputReader, jqOptions } from '../../core/jq/index.ts'
 import { VFS_MD } from './gdocs.ts'
+
+async function jqEval(obj: unknown, expr: string): Promise<unknown[]> {
+  const engine = await Engine.open(expr, jqOptions(), null, '{}', 'UTC', null)
+  const reader = new InputReader([], jqOptions())
+  const ending: Ending = { stop: null }
+  const outputs: unknown[] = []
+  try {
+    for await (const text of engine.run(JSON.stringify(obj), reader, () => undefined, ending)) {
+      outputs.push(JSON.parse(text))
+    }
+  } finally {
+    await engine.close()
+    await reader.close()
+  }
+  if (ending.stop?.kind === 'error') throw new Error(ending.stop.text)
+  return outputs
+}
 
 const ALL_TEXT = '[.. | .textRun? // empty | .content] | add'
 const TAB_NAMES = '[.. | .tabProperties? // empty | .title]'

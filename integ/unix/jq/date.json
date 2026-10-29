@@ -762,6 +762,66 @@
         "n",
         "c"
       ]
+    },
+    {
+      "id": "jq_local_time_reads_the_tz_the_command_is_given",
+      "seq": 18710040,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "TZ=Europe/Paris jq -nc '1690000000 | [strflocaltime(\"%H:%M %Z %z\"), (localtime | .[3]), (localtime | mktime), (gmtime | strftime(\"%H:%M %Z\"))]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"06:26 CEST +0200\",6,1690007200,\"04:26 GMT\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_local_time_names_a_half_hour_zone",
+      "seq": 18710041,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "TZ=Asia/Kolkata jq -nc '1690000000 | [strflocaltime(\"%H:%M %Z %z\"), (localtime | .[3])]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"09:56 IST +0530\",9]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strflocaltime_reads_a_doubled_hour_as_jq_does",
+      "seq": 18710042,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "TZ=America/New_York jq -nc '[1699165800, 1699169400] | map(strflocaltime(\"%F %T %Z\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"2023-11-05 01:30:00 EDT\",\"2023-11-05 02:30:00 EST\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
     }
   ]
 }

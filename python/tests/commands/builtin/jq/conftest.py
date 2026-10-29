@@ -14,10 +14,14 @@
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
-from mirage.core.jq import InputSource, jq_eval, read_texts
+from mirage.commands.builtin.generic.jq import FRAME_OUTPUT, read_frames
+from mirage.core.jq import InputSource, JqError, read_texts
 from mirage.io.stream import yield_bytes
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.stream import open_stream
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -33,10 +37,62 @@ def write_to_backend(backend, path, data):
     store.files[_norm(path)] = data
 
 
+def jq_eval(obj: object, expr: str) -> list[object]:
+    """Every output of a jq program on one value (see jq_texts).
+
+    Args:
+        obj (object): JSON-like input value.
+        expr (str): jq program text.
+
+    Raises:
+        ValueError: jq's refusal of the program, or the error that ended
+            the run.
+    """
+    return jq_texts(json.dumps(obj), expr)
+
+
+def jq_texts(text: str, expr: str) -> list[object]:
+    """Every output of a jq program on one document's JSON text, run to
+    its end in mirage-rs's jq_eval, with no input left to read.
+
+    Args:
+        text (str): the document, as jq reads it.
+        expr (str): jq program text.
+
+    Raises:
+        ValueError: jq's refusal of the program, or the error that ended
+            the run.
+    """
+    try:
+        stream = open_stream("jq_eval", {"program": expr, "env": "{}"})
+    except StreamRefusal as exc:
+        raise ValueError(exc.message) from exc
+    position = {"filename": None, "line": 0}
+    stream.begin(position)
+    frames: list[tuple[int, str]] = []
+    stop = read_frames(stream.feed(text.encode()), frames)
+    stop = read_frames(stream.finish(), frames) or stop
+    while True:
+        if stream.busy():
+            wire = stream.drain()
+        elif (asked := stream.request()) is not None:
+            if asked[0].get("op") == "now":
+                reply = {"kind": "now", "now": time.time()}
+            else:
+                reply = {"kind": "end", **position}
+            wire = stream.respond(reply, b"")
+        else:
+            break
+        stop = read_frames(wire, frames) or stop
+    if isinstance(stop, JqError):
+        raise ValueError(stop.text)
+    return [json.loads(out) for tag, out in frames if tag == FRAME_OUTPUT]
+
+
 def eval_one(obj: object, expr: str) -> object:
     """Evaluate expr and return its single output.
 
-    jq_eval is arity-preserving, so a program that emits one value still
+    jq_eval keeps every output, so a program that emits one value still
     comes back as a one-element list. Tests of single-valued programs go
     through here, which asserts the arity instead of assuming it.
 

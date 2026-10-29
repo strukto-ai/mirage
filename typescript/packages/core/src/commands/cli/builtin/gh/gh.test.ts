@@ -954,9 +954,9 @@ describe('gh api --jq', () => {
     expect([partial.message, new TextDecoder().decode(partial.output)]).toEqual(['break', 'x\n'])
   })
 
-  // A program jq_eval leaves to jq-wasm runs in a worker, away from the loop,
-  // and the program's own errors still read as gojq words them.
-  it('runs a program jq_eval refuses in a worker', async () => {
+  // A math builtin runs in jq_eval too, and the program's own errors after it
+  // still read as gojq words them.
+  it("runs math builtins and keeps the program's errors", async () => {
     reset({ a: 'x' })
     const failure = await api(...args(['repos/o/r'], { jq: '[1 | lgamma], error("boom")' })).catch(
       (error: unknown) => error,

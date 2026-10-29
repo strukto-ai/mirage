@@ -1,5 +1,4 @@
 import asyncio
-from collections.abc import Mapping, Sequence
 
 import pytest
 
@@ -41,6 +40,8 @@ FILES = {
     "/d/one.json": b"1",
     "/d/two.json": b" 2\n",
     "/d/-": b"42\n",
+    "/d/spelled.json": b'{"b":1.000,"1":2}',
+    "/d/origin.jq": b"[get_prog_origin, get_jq_origin]",
 }
 
 DIRS = {"/d/dir"}
@@ -132,6 +133,19 @@ async def _run(paths: list[str], *texts: str, **flags: FlagValue) -> tuple:
         **flags,
     )
     return await materialize(source) if source is not None else b"", io
+
+
+@pytest.mark.asyncio
+async def test_outputs_keep_the_spelling_jq_gives_them():
+    out, io = await _run(
+        ["/d/spelled.json"],
+        "., .b, (.b + 0), (1e17 * 1), -0, keys_unsorted",
+        compact_output=True,
+    )
+    assert (out, io.exit_code) == (
+        b'{"b":1.000,"1":2}\n1.000\n1\n1e+17\n0\n["b","1"]\n',
+        0,
+    )
 
 
 def test_join_and_nul_output_imply_raw():
@@ -755,16 +769,8 @@ def test_frames_fold_in_order_with_the_stop_that_ended_the_run():
         read_frames(_frame(9, b""), [])
 
 
-class _NoWorker:
-    def __init__(self) -> None:
-        raise AssertionError("the run should stay on the loop's thread")
-
-
 @pytest.mark.asyncio
-async def test_a_program_that_never_ends_is_cancelled_on_this_thread(
-    monkeypatch,
-):
-    monkeypatch.setattr(jq_module, "Worker", _NoWorker)
+async def test_a_program_that_never_ends_is_cancelled_on_this_thread():
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(
             _run([], "until(false; .)", null_input=True), timeout=0.2
@@ -774,14 +780,15 @@ async def test_a_program_that_never_ends_is_cancelled_on_this_thread(
 
 
 @pytest.mark.asyncio
-async def test_a_program_jq_eval_refuses_runs_in_libjqs_worker(monkeypatch):
-    out, io = await _run([], "5 | tgamma", null_input=True)
-    assert (out, io.exit_code) == (b"24\n", 0)
+async def test_math_builtins_run_in_jq_eval():
+    out, io = await _run(
+        [], "5 | tgamma, (4 | lgamma_r)", null_input=True, compact_output=True
+    )
+    assert (out, io.exit_code) == (b"24\n[1.791759469228055,1]\n", 0)
 
 
 @pytest.mark.asyncio
 async def test_dates_and_the_clock_stay_on_the_loops_thread(monkeypatch):
-    monkeypatch.setattr(jq_module, "Worker", _NoWorker)
     monkeypatch.setenv("TZ", "EST5EDT,M3.2.0,M11.1.0")
     out, io = await _run(
         [],
@@ -794,42 +801,49 @@ async def test_dates_and_the_clock_stay_on_the_loops_thread(monkeypatch):
     )
 
 
-def test_local_zone_is_the_process_tz_or_a_zone_that_is_utc(monkeypatch):
+def test_local_zone_is_the_sessions_tz_else_the_hosts(monkeypatch):
     monkeypatch.setenv("TZ", "EST5EDT")
-    assert jq_module.local_zone() == "EST5EDT"
+    assert jq_module.local_zone({"TZ": ":Asia/Tokyo"}) == ":Asia/Tokyo"
+    assert jq_module.local_zone({"TZ": ""}) == ""
+    assert jq_module.local_zone({}) == "EST5EDT"
     monkeypatch.delenv("TZ")
-    assert jq_module.local_zone() in (None, "UTC", "GMT")
+    monkeypatch.setattr(
+        jq_module.os.path,
+        "realpath",
+        lambda _path: "/usr/share/zoneinfo/Europe/Paris",
+    )
+    assert jq_module.local_zone(None) == "Europe/Paris"
+    monkeypatch.setattr(jq_module.os.path, "realpath", lambda path: path)
+    assert jq_module.local_zone(None) is None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "zone",
-    [
-        "/usr/share/zoneinfo/Europe/Paris",
-        ":/usr/share/zoneinfo/Europe/Paris",
-        "posix/Europe/Paris",
-        ":posix/Europe/Paris",
-        "right/Europe/Paris",
-        ":right/Europe/Paris",
-    ],
-)
-async def test_timezone_files_fall_back_before_debug_and_leave_utc_native(
-    monkeypatch, zone
+async def test_local_time_reads_the_sessions_zone_from_the_tz_database(
+    monkeypatch,
 ):
-    monkeypatch.setenv("TZ", zone)
-    assert Engine.open("localtime", JqOptions(), None, "{}") is None
-    out, io = await _run(
-        [], "1 | debug | (0 | localtime) | 42", null_input=True
+    monkeypatch.setenv("TZ", "/usr/share/zoneinfo/Europe/Paris")
+    program = (
+        '1690000000 | strflocaltime("%H:%M %Z %z"), strftime("%Z"), '
+        "(1 | debug | (0 | localtime) | .[3])"
     )
-    assert (out, io.exit_code) == (b"42\n", 0)
-    assert await materialize(io.stderr) == b""
-    monkeypatch.setattr(jq_module, "Worker", _NoWorker)
-    for program, expected in [
-        ("0 | gmtime | .[3]", b"0\n"),
-        ("41+1", b"42\n"),
-    ]:
-        out, io = await _run([], program, null_input=True)
-        assert (out, io.exit_code) == (expected, 0)
+    out, io = await _run([], program, null_input=True)
+    assert (out, io.exit_code) == (b'"06:26 CEST +0200"\n"GMT"\n1\n', 0)
+    assert await materialize(io.stderr) == b'["DEBUG:",1]\n'
+    bag = parse_to_kwargs(
+        parse_command(SPECS["jq"], ["-n", program], "/", "jq")
+    )
+    source, _ = await jq_generic(
+        [],
+        [program],
+        Context(flags=bag, env={"TZ": "Asia/Kolkata"}),
+        _read_stream,
+    )
+    assert source is not None
+    assert await materialize(source) == b'"09:56 IST +0530"\n"GMT"\n5\n'
+
+
+def _open(expr: str) -> Engine:
+    return Engine.open(expr, JqOptions(), None, "{}", None, None)
 
 
 async def _engine_run(
@@ -843,28 +857,11 @@ async def _engine_run(
 
 
 @pytest.mark.asyncio
-async def test_a_document_jq_eval_cannot_read_is_handed_back():
-    engine = Engine.open(".", JqOptions(), None, "{}")
-    assert engine is not None
-    reader = InputReader([], JqOptions())
-    assert await _engine_run(engine, "[", reader, print) == (
-        [],
-        Ending(declined=True),
-    )
-    assert await _engine_run(engine, '{"a":1}', reader, print) == (
-        ['{"a":1}'],
-        Ending(),
-    )
-    await engine.close()
-
-
-@pytest.mark.asyncio
 async def test_each_output_goes_out_before_its_run_ends():
     # An output is yielded as its drain decodes it, so the first of a run
     # that never ends can be read, and a run its reader stops is cancelled
     # so the next document can begin.
-    engine = Engine.open("., until(false; .)", JqOptions(), None, "{}")
-    assert engine is not None
+    engine = _open("., until(false; .)")
     reader = InputReader([], JqOptions())
     try:
         for doc in ("1", "2"):
@@ -884,10 +881,7 @@ async def test_each_output_goes_out_before_its_run_ends():
 
 @pytest.mark.asyncio
 async def test_messages_and_outputs_go_out_in_the_order_the_run_wrote_them():
-    engine = Engine.open(
-        '1, ("a" | stderr | empty), 2, (3 | debug)', JqOptions(), None, "{}"
-    )
-    assert engine is not None
+    engine = _open('1, ("a" | stderr | empty), 2, (3 | debug)')
     seen: list[str] = []
     try:
         async for value in engine.run(
@@ -950,9 +944,8 @@ async def test_a_raw_output0_refusal_stops_its_run_and_the_next_runs():
     ],
 )
 async def test_input_takes_each_document_when_the_program_asks(
-    monkeypatch, program, flags, out, err, code
+    program, flags, out, err, code
 ):
-    monkeypatch.setattr(jq_module, "Worker", _NoWorker)
     got, io = await _run(
         ["/d/four.json"], program, compact_output=True, **flags
     )
@@ -1025,18 +1018,8 @@ async def test_env_reads_the_sessions_exported_environment(program, out):
     assert out == b"{}\n"
 
 
-def _no_libjq(
-    expr: str,
-    named: Mapping[str, str] | None = None,
-    inputs: Sequence[str] | None = None,
-    args: str | None = None,
-) -> None:
-    raise AssertionError("jq_eval should word the refusal itself")
-
-
 @pytest.mark.asyncio
-async def test_jq_eval_reports_a_refused_program_as_jq_does(monkeypatch):
-    monkeypatch.setattr(jq_module, "jq_check", _no_libjq)
+async def test_jq_eval_reports_a_refused_program_as_jq_does():
     out, io = await _run([], "  $x | nosuch(1) +", null_input=True)
     assert (out, io.exit_code) == (b"", 3)
     assert await materialize(io.stderr) == (
@@ -1054,16 +1037,30 @@ async def test_jq_eval_reports_a_refused_program_as_jq_does(monkeypatch):
     )
 
 
-def test_engine_tells_a_refused_program_from_one_it_leaves_to_libjq():
+def test_engine_refuses_a_program_with_jqs_report():
     with pytest.raises(JqCompileError, match=r"\njq: 1 compile error\Z"):
-        Engine.open("if", JqOptions(), None, "{}")
+        _open("if")
     with pytest.raises(JqCompileError) as error:
-        Engine.open('import "a" as a; .', JqOptions(), None, "{}")
+        _open('import "a" as a; .')
     assert (
         str(error.value)
         == "jq: error: module not found: a\n\njq: 1 compile error"
     )
-    assert Engine.open("get_jq_origin", JqOptions(), None, "{}") is None
+
+
+@pytest.mark.asyncio
+async def test_get_prog_origin_is_the_program_files_directory_else_the_cwd():
+    program = "[get_prog_origin, get_jq_origin]"
+    bag = parse_to_kwargs(
+        parse_command(SPECS["jq"], ["-c", "-n", program], "/", "jq")
+    )
+    source, _ = await jq_generic(
+        [], [program], Context(flags=bag, cwd=_path("/d/dir")), _read_stream
+    )
+    assert source is not None
+    assert await materialize(source) == b'["/d/dir","."]\n'
+    out, io = await _run_program_file("-c", "-n", "-f", "/d/origin.jq")
+    assert (out, io.exit_code) == (b'["/d","."]\n', 0)
 
 
 @pytest.mark.asyncio
@@ -1075,28 +1072,8 @@ async def test_now_reads_the_clock_at_each_call():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("zone", ["Europe/Paris", "America/New_York"])
-async def test_host_zone_time_calls_fall_back_before_debug(monkeypatch, zone):
-    monkeypatch.setenv("TZ", zone)
-    for program in [
-        "1 | debug | (0 | localtime) | 42",
-        '1 | debug | (try (0 | strflocaltime("%Z")) catch .) | 42',
-        '1 | debug | (try ("0" | strptime("%s")) catch .) | 42',
-        '"%Z" as $format | 1 | debug | (try (0 | strflocaltime($format)) catch .) | 42',
-    ]:
-        assert Engine.open(program, JqOptions(), None, "{}") is None
-        out, io = await _run([], program, null_input=True)
-        assert (out, io.exit_code) == (b"42\n", 0)
-        assert await materialize(io.stderr) == b""
-    monkeypatch.setattr(jq_module, "Worker", _NoWorker)
-    out, io = await _run([], '0 | strftime("%Z")', null_input=True)
-    assert (out, io.exit_code) == (b'"UTC"\n', 0)
-
-
-@pytest.mark.asyncio
 async def test_a_refusal_after_input_is_not_replayed(monkeypatch):
-    engine = Engine.open("input", JqOptions(), None, "{}")
-    assert engine is not None
+    engine = _open("input")
     reader = InputReader([], JqOptions())
     reads = 0
 
@@ -1122,10 +1099,7 @@ async def test_a_refusal_after_input_is_not_replayed(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_refusal_after_debug_is_not_replayed(monkeypatch):
-    engine = Engine.open(
-        "1 | debug | until(false; .)", JqOptions(), None, "{}"
-    )
-    assert engine is not None
+    engine = _open("1 | debug | until(false; .)")
     reader = InputReader([], JqOptions())
     original = jq_module.OpenStream.drain
     seen = False
@@ -1154,8 +1128,7 @@ async def test_a_refusal_after_debug_is_not_replayed(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_an_unknown_request_does_not_consume_input(monkeypatch):
-    engine = Engine.open("input", JqOptions(), None, "{}")
-    assert engine is not None
+    engine = _open("input")
     reader = InputReader([], JqOptions())
     reads = 0
 

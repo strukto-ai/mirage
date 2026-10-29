@@ -5,6 +5,7 @@ import dataclasses
 import json
 import logging
 import os
+import posixpath
 import re
 import time
 from collections.abc import (
@@ -31,15 +32,12 @@ from mirage.commands.spec.constants import OPERAND, REFUSED
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
-from mirage.concurrency.worker import Worker
 from mirage.core.jq import (
     args_text,
     decode_utf8,
     error_report,
     format_one,
     halt_report,
-    jq_check,
-    jq_run_texts,
     load_failure,
     read_texts,
     references_args,
@@ -59,7 +57,6 @@ from mirage.core.jq.types import (
     JqOptions,
     JqParseError,
     JqRun,
-    StreamReads,
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.errors import MemoryExhausted
@@ -71,6 +68,7 @@ from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import OpenStream, close_stream, open_stream
 from mirage.runtime.types import DispatchFn
 from mirage.types import JsonValue, PathSpec, ReadStreamFn
+from mirage.utils.timezone import TZ_VAR
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +110,7 @@ ERROR_COMPILE = 3
 ERROR_SYSTEM = 2
 
 # The last line of jq's report of a program it refuses, which jq_eval's
-# refusal to compile such a program ends in; any other refusal names what
-# jq_eval cannot run yet.
+# refusal to compile such a program ends in.
 COMPILE_REPORT = re.compile(r"(?:\A|\n)jq: [0-9]+ compile errors?\Z")
 
 # The error jq_eval ends a run with once it holds more than its memory.
@@ -158,27 +155,20 @@ SHORT_USAGE = (
 )
 
 
-def local_zone() -> str | None:
-    """The time zone libjq reads, as a POSIX `TZ` rule, for jq_eval.
+def local_zone(env: Mapping[str, str] | None) -> str | None:
+    """The time zone jq's local time reads, as a `TZ` value: the command
+    environment's, else the process's, else the tz database zone
+    /etc/localtime links to; None for a host zone with no name, which
+    jq_eval reads as UTC.
 
-    The `TZ` of the process when it sets one, else a zone that is UTC under
-    its own name; None for any other, which jq_eval does not carry the
-    database of, so a program that needs local time runs in libjq.
+    Args:
+        env (Mapping[str, str] | None): the command's environment.
     """
-    zone = os.environ.get("TZ")
-    if zone is not None:
-        return zone
-    if (
-        not time.daylight
-        and not time.timezone
-        and time.tzname[0]
-        in (
-            "UTC",
-            "GMT",
-        )
-    ):
-        return time.tzname[0]
-    return None
+    for zone in ((env or {}).get(TZ_VAR), os.environ.get(TZ_VAR)):
+        if zone is not None:
+            return zone
+    _, marker, key = os.path.realpath("/etc/localtime").partition("/zoneinfo/")
+    return key if marker else None
 
 
 def _pair_args(values: Sequence[Any]) -> list[tuple[str, Any]]:
@@ -621,11 +611,9 @@ async def input_reply(
 @dataclasses.dataclass
 class Ending:
     """How a run whose outputs went out as it made them ended: the error
-    or halt that stopped it, if one did, and whether jq_eval left its
-    document to libjq, which it says only before any output."""
+    or halt that stopped it, if one did."""
 
     stop: JqError | JqHalt | None = None
-    declined: bool = False
 
 
 class Engine:
@@ -660,15 +648,23 @@ class Engine:
 
     @classmethod
     def open(
-        cls, expr: str, opts: JqOptions, args: str | None, env: str
-    ) -> "Engine | None":
-        """Compile `expr`, or None when the engine cannot run it yet.
+        cls,
+        expr: str,
+        opts: JqOptions,
+        args: str | None,
+        env: str,
+        zone: str | None,
+        origin: str | None,
+    ) -> "Engine":
+        """Compile `expr`.
 
         Args:
             expr (str): jq program text, as typed.
             opts (JqOptions): resolved options, for the named bindings.
             args (str | None): the value of `$ARGS`, as text.
             env (str): the environment `$ENV` and `env` read, as text.
+            zone (str | None): the `TZ` local time reads (local_zone).
+            origin (str | None): the directory `get_prog_origin` answers.
 
         Raises:
             JqCompileError: a program jq itself refuses, with jq's report.
@@ -682,15 +678,15 @@ class Engine:
                     "named": dict(opts.named_args),
                     "args": args,
                     "env": env,
-                    "zone": local_zone(),
+                    "zone": zone,
+                    "prog_origin": origin,
                     **({} if limit is None else {"memory": limit}),
                 },
             )
         except StreamRefusal as exc:
             if COMPILE_REPORT.search(exc.message):
                 raise JqCompileError(exc.message) from exc
-            logger.debug("jq_eval leaves the program to libjq: %s", exc)
-            return None
+            raise
         return cls(stream, opts, limit)
 
     async def run(
@@ -701,9 +697,7 @@ class Engine:
         ending: Ending,
     ) -> AsyncGenerator[str, None]:
         """Run the program on one document, yielding each output as a
-        drain decodes it, and leave on `ending` how the run stopped, or
-        that jq_eval cannot read the document, which the caller then runs
-        elsewhere.
+        drain decodes it, and leave on `ending` how the run stopped.
 
         Each `input` the program calls takes the reader's next document
         then and there, as jq's input callback does, so the run consumes
@@ -720,11 +714,9 @@ class Engine:
         stream = self._stream
         stream.begin(reader_position(reader))
         frames: list[tuple[int, str]] = []
-        safe = True
         try:
             stop = read_frames(stream.feed(doc.encode()), frames)
             stop = read_frames(stream.finish(), frames) or stop
-            safe = not frames and stop is None
             while True:
                 for tag, text in frames:
                     if tag == FRAME_OUTPUT:
@@ -736,7 +728,6 @@ class Engine:
                     await self._budget.run()
                     wire = stream.drain()
                 elif (asked := stream.request()) is not None:
-                    safe = False
                     reply: dict[str, JsonValue]
                     op = asked[0].get("op")
                     if op == "now":
@@ -750,16 +741,7 @@ class Engine:
                     wire = stream.respond(reply, data)
                 else:
                     break
-                if wire:
-                    safe = False
                 stop = read_frames(wire, frames) or stop
-        except StreamRefusal as exc:
-            if not safe or exc.output:
-                raise
-            logger.debug("jq_eval leaves the document to libjq: %s", exc)
-            await self._cancel()
-            ending.declined = True
-            return
         except GeneratorExit:
             await self._cancel()
             raise
@@ -808,14 +790,6 @@ class MainLoop:
     to stderr in the order they were written, before the run's own
     report.
 
-    A program jq_eval refuses, and a document it cannot read, go to the
-    invocation's worker instead, even for a short run: libjq cannot be
-    interrupted, so no run there is known to end
-    (strukto-ai/mirage#1590). A run there of a program that calls `input`
-    or `inputs` reads what they take before the program runs (see
-    _evaluate_reading), and nothing past it, so the loop never reads
-    further ahead than jq's own.
-
     An input that cannot be opened or read is reported when the reader
     reaches it, and the reader goes on to the next. The loop checks for
     such a failure before each document it reads, so it stops after the
@@ -826,9 +800,10 @@ class MainLoop:
         sources (list[InputSource]): the inputs, in order, not yet opened.
         expr (str): jq program text.
         opts (JqOptions): resolved options.
-        reads (StreamReads): which stream builtins the program calls.
         args (str | None): the value of `$ARGS`, as text.
         env (str): the environment `$ENV` and `env` read, as text.
+        zone (str | None): the `TZ` local time reads (local_zone).
+        origin (str | None): the directory `get_prog_origin` answers.
         io (IOResult): the result to settle.
     """
 
@@ -837,21 +812,21 @@ class MainLoop:
         sources: list[InputSource],
         expr: str,
         opts: JqOptions,
-        reads: StreamReads,
         args: str | None,
         env: str,
+        zone: str | None,
+        origin: str | None,
         io: IOResult,
     ) -> None:
         self._engine: Engine | None = None
-        self._opened = False
-        self._worker: Worker | None = None
         self._reports: list[str] = []
         self._reader = InputReader(sources, opts, self._reports.append)
         self._expr = expr
         self._opts = opts
-        self._reads = reads
         self._args = args
         self._env = env
+        self._zone = zone
+        self._origin = origin
         self._io = io
         self._statuses: list[int] = []
         self._halted = False
@@ -889,8 +864,6 @@ class MainLoop:
                 self._io.stderr = "".join(self._reports).encode()
             if self._engine is not None:
                 await self._engine.close()
-            if self._worker is not None:
-                await self._worker.close()
             await self._reader.close()
 
     async def _run(self, doc: str) -> AsyncGenerator[bytes, None]:
@@ -923,86 +896,27 @@ class MainLoop:
     async def _values(
         self, doc: str, ending: Ending
     ) -> AsyncGenerator[str, None]:
-        """The run's outputs: from jq_eval as it makes them, or from libjq
-        for a program or a document jq_eval leaves to it.
+        """The run's outputs from jq_eval, as it makes them, the program
+        compiled for the invocation's first run.
 
         Args:
             doc (str): the run's own document, null under -n.
             ending (Ending): set once the run ends.
         """
-        if not self._opened:
-            self._opened = True
+        if self._engine is None:
             self._engine = Engine.open(
-                self._expr, self._opts, self._args, self._env
+                self._expr,
+                self._opts,
+                self._args,
+                self._env,
+                self._zone,
+                self._origin,
             )
-        if self._engine is not None:
-            async with aclosing(
-                self._engine.run(
-                    doc, self._reader, self._reports.append, ending
-                )
-            ) as values:
-                async for value in values:
-                    yield value
-            if not ending.declined:
-                return
-        run = await self._evaluate_reading(doc)
-        ending.stop = run.stop
-        for value in run.outputs:
-            yield value
-
-    async def _evaluate_reading(self, doc: str) -> JqRun[str]:
-        """Run the program on one document in libjq, reading first what
-        its `input` and `inputs` take, so the next run starts past it.
-
-        How much a run takes is a runtime fact libjq's Python binding does
-        not report, so mirage assumes what the idioms do: `inputs` drains
-        the rest (`[., inputs]`, `reduce inputs as $x`), and `input` alone
-        takes one (`[., input]` pairs the documents up). A program that
-        takes some other count (`first(inputs)`, an `input` in a branch
-        not taken) leaves real jq a different remainder for its next run
-        than here. A parse error stops the reading: the run raises it
-        where `input` or `inputs` would reach it, and the main loop reads
-        on past it. Only a program jq_eval refuses runs here.
-
-        Args:
-            doc (str): the run's own document, null under -n.
-        """
-        reads = self._reads
-        if not (reads.input or reads.inputs):
-            return await self._evaluate(doc, None)
-        docs: list[str] = []
-        failure: JqParseError | None = None
-        while True:
-            item = await self._reader.next_input()
-            if item is NO_VALUE:
-                break
-            if isinstance(item, JqParseError):
-                failure = item
-                break
-            docs.append(item)
-            if not reads.inputs:
-                break
-        return await self._evaluate(
-            doc, docs, None if failure is None else failure.message
-        )
-
-    async def _evaluate(
-        self, doc: str, docs: list[str] | None, failure: str | None = None
-    ) -> JqRun[str]:
-        # libjq in the invocation's worker, made for the first run jq_eval
-        # does not take.
-        if self._worker is None:
-            self._worker = Worker()
-        return await self._worker.call(
-            jq_run_texts,
-            doc,
-            self._expr,
-            self._opts.named_args,
-            docs,
-            self._args,
-            failure,
-            self._env,
-        )
+        async with aclosing(
+            self._engine.run(doc, self._reader, self._reports.append, ending)
+        ) as values:
+            async for value in values:
+                yield value
 
     def _settle(self, run: JqRun[str], position: str) -> bool:
         # Fold one run into the invocation: its answer toward the exit
@@ -1044,6 +958,7 @@ async def jq_generic(
         ctx.stdin,
         dispatch_of(ctx),
         ctx.env,
+        ctx.cwd,
     )
 
 
@@ -1057,7 +972,7 @@ async def jq(
 ) -> tuple[ByteSource | None, IOResult]:
     """jq over keyword flags, the historical shape; keywords keep no record
     of the order they were typed in (see jq_generic)."""
-    return await _jq(paths, texts, flags, stream, stdin, dispatch, None)
+    return await _jq(paths, texts, flags, stream, stdin, dispatch, None, None)
 
 
 async def _jq(
@@ -1068,6 +983,7 @@ async def _jq(
     stdin: ByteSource | None,
     dispatch: DispatchFn | None,
     env: Mapping[str, str] | None,
+    cwd: PathSpec | None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one jq invocation.
 
@@ -1082,7 +998,9 @@ async def _jq(
             through.
         env (Mapping[str, str] | None): the session's exported
             environment, which `$ENV` and `env` read in place of jq's
-            process environment.
+            process environment, and whose `TZ` local time reads.
+        cwd (PathSpec | None): the session's working directory, which
+            `get_prog_origin` answers without -f.
     """
     fl = FlagView(flags, spec=SPECS["jq"])
     read_input = stdin_stream(stream, stdin)
@@ -1119,26 +1037,25 @@ async def _jq(
                 stderr=b"jq: program file contains NUL bytes\n",
             )
         expression = data.decode(errors="replace")
+        origin: str | None = posixpath.dirname(program_file.virtual)
     else:
         # jq defaults the filter to "." when no expression is given.
         expression = texts[0] if texts else "."
+        origin = None if cwd is None else cwd.virtual
     expr = expression.strip()
     reads = stream_reads(expr)
     reads_stream = reads.input or reads.inputs
     args = args_text(opts) if references_args(expr) else None
     env_text = json.dumps(dict(env or {}))
+    zone = local_zone(env)
     try:
         # jq compiles its program before it opens a single input, so a
         # refusal is all it prints. jq_eval words jq's refusals itself,
-        # reading the program as typed, so its lines and columns are jq's;
-        # libjq checks only a program jq_eval leaves to it. The run
-        # compiles it again when it starts, so nothing is held open for a
-        # stream no one reads.
-        checked = Engine.open(expression, opts, args, env_text)
-        if checked is None:
-            jq_check(expr, opts.named_args, [] if reads_stream else None, args)
-        else:
-            await checked.close()
+        # reading the program as typed, so its lines and columns are jq's.
+        # The run compiles it again when it starts, so nothing is held
+        # open for a stream no one reads.
+        checked = Engine.open(expression, opts, args, env_text, zone, origin)
+        await checked.close()
     except JqCompileError as exc:
         return None, IOResult(
             exit_code=ERROR_COMPILE, stderr=f"{exc}\n".encode()
@@ -1161,7 +1078,7 @@ async def _jq(
                 )
             )
     io = IOResult()
-    loop = MainLoop(sources, expr, opts, reads, args, env_text, io)
+    loop = MainLoop(sources, expr, opts, args, env_text, zone, origin, io)
     return loop.outputs(), io
 
 

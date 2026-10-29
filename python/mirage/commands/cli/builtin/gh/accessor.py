@@ -25,7 +25,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from mirage.accessor.github import GitHubAccount
-from mirage.commands.builtin.generic.jq import Ending, Engine
+from mirage.commands.builtin.generic.jq import Ending, Engine, local_zone
 from mirage.commands.builtin.utils.http import DEFAULT_PORTS
 from mirage.commands.cli.builtin.gh.constants import (
     CONNECT_HINT,
@@ -37,10 +37,9 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.concurrency.worker import Worker
 from mirage.core.github.constants import API_BASE
 from mirage.core.github.repo import RepoRef, parse_repo, repo_host
-from mirage.core.jq import JqHalt, JqRun, jq_run_raised
+from mirage.core.jq import JqHalt, JqRun
 from mirage.core.jq.stream import InputReader
 from mirage.core.jq.types import JqOptions
 from mirage.core.render.json import compact_json_text
@@ -509,7 +508,6 @@ async def jq_lines(
 
     The program runs in mirage-rs's jq_eval, a bounded number of steps at
     a time, so one that never ends still yields and `timeout` stops it.
-    One jq_eval refuses runs in libjq in a worker, away from the loop.
     `input` finds no more input, `$ENV` is the command's environment, and
     what `debug` and `stderr` write is not printed.
 
@@ -523,38 +521,28 @@ async def jq_lines(
         JqCompileError: jq's refusal of the program.
     """
     env = json.dumps(dict(ctx.env or {}))
-    engine = Engine.open(program, JqOptions(), None, env)
+    zone = local_zone(ctx.env)
+    engine = Engine.open(program, JqOptions(), None, env, zone, None)
     reader = InputReader([], JqOptions())
-    worker: Worker | None = None
     lines: list[str] = []
     try:
         for value in values:
-            run: JqRun[JsonValue] | None = None
-            if engine is not None:
-                ending = Ending()
-                async with aclosing(
-                    engine.run(
-                        json.dumps(value), reader, lambda _line: None, ending
-                    )
-                ) as texts:
-                    outputs = [
-                        json.loads(text, parse_int=float)
-                        async for text in texts
-                    ]
-                if not ending.declined:
-                    run = JqRun(outputs, ending.stop)
-            if run is None:
-                worker = worker or Worker()
-                run = await worker.call(jq_run_raised, value, program, env)
+            ending = Ending()
+            async with aclosing(
+                engine.run(
+                    json.dumps(value), reader, lambda _line: None, ending
+                )
+            ) as texts:
+                outputs = [
+                    json.loads(text, parse_int=float) async for text in texts
+                ]
+            run = JqRun(outputs, ending.stop)
             lines.extend(f"{jq_line(item)}\n" for item in run.outputs)
             failure = _jq_failure(run)
             if failure is not None:
                 raise StreamRefusal(failure, "".join(lines).encode())
     finally:
-        if engine is not None:
-            await engine.close()
-        if worker is not None:
-            await worker.close()
+        await engine.close()
         await reader.close()
     return "".join(lines)
 
