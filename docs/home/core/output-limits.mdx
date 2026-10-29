@@ -107,7 +107,8 @@ while it runs, such as a `$( )` capture, a `read` value, a file read whole, a
 `jq -s` input or a `python3` run's heap. Such an object must fit in what the RAM
 files leave. It is 32 MB unless the workspace sets it, and `None` (`null` in
 TypeScript and YAML) lifts it. The read cache keeps its own
-[limit](/home/configuration#cache).
+[limit](/home/configuration#cache). Commands running at the same moment can
+each take close to what is left, so it bounds each object, not their sum.
 
 <CodeGroup>
 ```python Python
