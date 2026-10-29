@@ -83,7 +83,7 @@ async def tree(
     config = accessor.config
     loc = drive_loc(config, path.vfs_path)
     if limit is None and await _drive_type(accessor) == "personal":
-        found = await delta_tree(accessor, loc)
+        found = await delta_tree(accessor, loc, virtual_key(path))
         if found is not None:
             return found
     return await batch_tree(accessor, loc, virtual_key(path), limit)

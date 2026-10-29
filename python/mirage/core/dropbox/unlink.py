@@ -19,7 +19,7 @@ from mirage.cache.context import delete_condition, native_condition
 from mirage.core.dropbox.api import delete_path, get_metadata, refused
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.fingerprint import live_of
-from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
@@ -47,6 +47,7 @@ async def delete_resolved(
 
 
 async def unlink(accessor: DropboxAccessor, path: PathSpec) -> None:
+    await check_path(accessor, path)
     api_path = dropbox_path_of(accessor, path)
     try:
         entry = await get_metadata(accessor.token_manager, api_path)

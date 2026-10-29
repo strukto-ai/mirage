@@ -305,3 +305,6 @@ async def test_stat_size_matches_read_for_every_file():
                     assert info.size == len(body), child
     expected = sorted("/sp/Engineering/Documents" + p for p in contents)
     assert sorted(files) == expected
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

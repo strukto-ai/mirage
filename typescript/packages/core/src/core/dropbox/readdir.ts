@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { checkPath } from './paths.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { listingError } from '../../errors/fs.ts'
@@ -87,6 +88,7 @@ export async function readdir(
   path: PathSpec,
   limit?: number,
 ): Promise<FileStat[] | DirListing> {
+  await checkPath(accessor, path.pattern !== null ? path.dir : path)
   const key = (path.pattern !== null ? path.dir : path).vfsPath
   const dropboxPath = dropboxPathFromKey(accessor.rootPath, stripSlash(key))
   let files: DropboxEntry[]

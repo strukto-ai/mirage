@@ -34,7 +34,9 @@ async def test_readdir_root_lists_children():
 
 
 @pytest.mark.asyncio
-async def test_readdir_folder_records_file_and_folder_entries():
+async def test_readdir_folder_records_file_and_folder_entries(
+    exact_cloud_paths,
+):
     with aioresponses() as m:
         m.get(
             _BASE + "/root:/Docs:/children",
@@ -194,3 +196,6 @@ async def test_a_listing_is_in_code_point_order():
         )
         rows = await readdir(_accessor(), PathSpec.from_str_path("/"))
     assert _paths(rows) == ["/\ue000.txt", "/\U0001f600.txt"]
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

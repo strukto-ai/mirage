@@ -143,3 +143,5 @@ describe('SharePoint mkdir names a refusal', () => {
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 })
+
+vi.mock('../msgraph/paths.ts', () => ({ checkItem: vi.fn().mockResolvedValue(null) }))

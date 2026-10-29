@@ -233,3 +233,6 @@ async def test_mkdir_names_a_file_in_the_hidden_prefix_as_the_root(
                 PathSpec.from_str_path("/od/lt", "lt"),
                 parents=parents,
             )
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

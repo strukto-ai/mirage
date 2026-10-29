@@ -30,5 +30,7 @@ export async function rename(
     config,
     driveLoc(config, srcResolved, src.vfsPath),
     driveLoc(config, dstResolved, dst.vfsPath),
+    src.virtual,
+    dst.virtual,
   )
 }

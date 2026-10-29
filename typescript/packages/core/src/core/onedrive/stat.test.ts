@@ -178,3 +178,5 @@ describe('OneDrive tree', () => {
     expect([...(found?.keys() ?? [])]).toEqual(['report.docx'])
   })
 })
+
+vi.mock('../msgraph/paths.ts', () => ({ checkItem: vi.fn().mockResolvedValue(null) }))

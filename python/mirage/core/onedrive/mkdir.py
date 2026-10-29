@@ -16,7 +16,8 @@ import posixpath
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.core.msgraph.drive import FolderTarget, create_child_folder
-from mirage.core.onedrive.client import full_item_url, item_url
+from mirage.core.msgraph.paths import check_item
+from mirage.core.onedrive.client import drive_loc, full_item_url, item_url
 from mirage.errors.fs import enotdir
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -89,6 +90,9 @@ async def _create_dir(
 async def mkdir(
     accessor: OneDriveAccessor, path: PathSpec, parents: bool = False
 ) -> None:
+    await check_item(
+        accessor, drive_loc(accessor.config, path.vfs_path), path.virtual
+    )
     key = path.vfs_path
     if not key:
         return

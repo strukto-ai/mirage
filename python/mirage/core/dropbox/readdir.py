@@ -20,6 +20,7 @@ from mirage.core.dropbox.api import get_metadata, list_folder
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.constants import CONTENT_HASH
 from mirage.core.dropbox.fingerprint import token_of
+from mirage.core.dropbox.paths import check_path
 from mirage.errors.fs import listing_error
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
@@ -94,6 +95,9 @@ async def readdir(
         path_spec (PathSpec): the folder.
         limit (int | None): the most entries a walk can still keep.
     """
+    await check_path(
+        accessor, path_spec.dir if path_spec.pattern else path_spec
+    )
     path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
     key = path.strip("/")
     dropbox_path = dropbox_path_from_key(accessor.root_path, key)

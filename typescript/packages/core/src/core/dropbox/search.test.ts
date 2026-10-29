@@ -14,6 +14,7 @@
 
 // Mirror of python/tests/core/dropbox/test_search.py.
 
+import type * as PathsModule from './paths.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ApiModule from './api.ts'
 
@@ -99,3 +100,8 @@ describe('filesContaining', () => {
     expect(await filesContaining(makeAccessor(), 'needle', [mountRoot()])).toBeNull()
   })
 })
+
+vi.mock('./paths.ts', async (original) => ({
+  ...(await original<typeof PathsModule>()),
+  checkPath: vi.fn().mockResolvedValue(null),
+}))

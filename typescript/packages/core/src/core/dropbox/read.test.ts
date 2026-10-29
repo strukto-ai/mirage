@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type * as PathsModule from './paths.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
@@ -198,20 +199,18 @@ describe('dropbox read stamps content_hash', () => {
     await expect(read(makeAccessor(), spec, undefined, NOTE)).rejects.toMatchObject(raised)
   })
 
-  // Dropbox matches a path without case: with N stored and no row for n,
-  // truncate reads N's bytes and cuts them, where calling it absent would
-  // upload zeros over N.
-  it('keeps the file Dropbox resolves for a truncate with no row', async () => {
+  // A truncate without a listing reads the exact existing file before rewriting.
+  it('rewrites an exactly spelled file for a truncate with no row', async () => {
     const result = JSON.stringify({ '.tag': 'file', name: 'N', content_hash: 'h' })
     vi.mocked(client.dropboxDownload).mockResolvedValue([
       new TextEncoder().encode('abcdef'),
       result,
     ])
     const vfs = new DropboxVFS({ clientId: 'c', clientSecret: 's', refreshToken: 'r' })
-    await vfs.truncate(new PathSpec({ virtual: '/n', directory: '/', vfsPath: 'n' }), 4)
+    await vfs.truncate(new PathSpec({ virtual: '/N', directory: '/', vfsPath: 'N' }), 4)
     expect(client.dropboxUpload).toHaveBeenCalledWith(
       vfs.accessor.tokenManager,
-      '/n',
+      '/N',
       new TextEncoder().encode('abcd'),
       null,
     )
@@ -244,3 +243,8 @@ describe('dropbox read publishes its token on a conditional mount', () => {
     expect(tokens).toEqual(published)
   })
 })
+
+vi.mock('./paths.ts', async (original) => ({
+  ...(await original<typeof PathsModule>()),
+  checkPath: vi.fn().mockResolvedValue(null),
+}))

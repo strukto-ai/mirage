@@ -66,3 +66,6 @@ async def test_unlink_missing_raises_enoent():
     ):
         with pytest.raises(FileNotFoundError):
             await unlink(make_accessor(), PathSpec.from_str_path("/ghost"))
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

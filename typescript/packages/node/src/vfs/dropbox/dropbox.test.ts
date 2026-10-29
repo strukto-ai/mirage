@@ -66,14 +66,30 @@ describe('dropbox listing miss', () => {
   // asks once by path.
   it.each([
     ['cold', '', 'cat /dbx/missing', 1, ['get_metadata', 'list_folder']],
-    ['glob-in-this-command', '', 'cat /dbx/f* /dbx/missing', 1, ['list_folder', 'download']],
+    [
+      'glob-in-this-command',
+      '',
+      'cat /dbx/f* /dbx/missing',
+      1,
+      ['list_folder', 'get_metadata', 'download'],
+    ],
     ['earlier-line', 'ls /dbx', 'cat /dbx/missing', 1, ['get_metadata']],
     [
       'bulk-create',
       '',
       'touch /dbx/a /dbx/b /dbx/c',
       0,
-      ['get_metadata', 'upload', 'get_metadata', 'upload', 'get_metadata', 'upload'],
+      [
+        'get_metadata',
+        'get_metadata',
+        'upload',
+        'get_metadata',
+        'get_metadata',
+        'upload',
+        'get_metadata',
+        'get_metadata',
+        'upload',
+      ],
     ],
   ])('asks Dropbox only past an earlier listing (%s)', async (_id, setup, line, code, routes) => {
     if (setup !== '') await ws.shell(setup)
@@ -92,7 +108,9 @@ describe('dropbox listing miss', () => {
     expect(dbx.log.filter((route) => route !== 'token')).toEqual([
       'list_folder',
       'list_folder',
+      'get_metadata',
       'download',
+      'get_metadata',
       'upload',
     ])
   })
@@ -105,4 +123,49 @@ describe('dropbox listing miss', () => {
     await expect(ws.vfs.stat('/dbx/.DS_Store')).rejects.toMatchObject({ code: 'ENOENT' })
     expect(dbx.log.slice(start).filter((route) => route !== 'token')).toEqual(['get_metadata'])
   })
+})
+
+it('refuses hidden case aliases over a folding service', async () => {
+  dbx.write('secret.txt', ENC.encode('secret'))
+  dbx.write('vault/private.txt', ENC.encode('private'))
+  vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    const request = new Request(input, init)
+    const headers = new Headers(request.headers)
+    let bytes = new Uint8Array(await request.arrayBuffer())
+    const arg = headers.get('Dropbox-API-Arg')
+    if (arg !== null) {
+      const parsed = JSON.parse(arg) as { path: string }
+      parsed.path = parsed.path.toLowerCase()
+      headers.set('Dropbox-API-Arg', JSON.stringify(parsed))
+    } else if (!request.url.endsWith('/oauth2/token')) {
+      const parsed = JSON.parse(DEC.decode(bytes)) as Record<string, unknown>
+      for (const key of ['path', 'from_path', 'to_path']) {
+        if (typeof parsed[key] === 'string') parsed[key] = parsed[key].toLowerCase()
+      }
+      bytes = ENC.encode(JSON.stringify(parsed))
+    }
+    return dbx.fetch(request.url, { method: request.method, headers, body: bytes })
+  })
+  expect((await ws.shell('cat /dbx/secret.txt /dbx/vault/private.txt')).exitCode).toBe(0)
+  ws.createSession('hidden', { profile: { paths: { hide: ['/dbx/secret.txt', '/dbx/vault'] } } })
+  dbx.log.length = 0
+  for (const command of [
+    'cat /dbx/SECRET.txt',
+    'cat /dbx/Vault/private.txt',
+    'ls /dbx/Vault',
+    'echo changed > /dbx/SECRET.txt',
+    'echo changed > /dbx/Vault/new.txt',
+    'cp /dbx/f /dbx/SECRET.txt',
+    'mv /dbx/f /dbx/SECRET.txt',
+  ]) {
+    const result = await ws.shell(command, { sessionId: 'hidden' })
+    expect(result.exitCode, command).not.toBe(0)
+    expect(DEC.decode(result.stdout), command).not.toContain('secret')
+  }
+  expect(DEC.decode(dbx.read('secret.txt'))).toBe('secret')
+  expect(DEC.decode(dbx.read('vault/private.txt'))).toBe('private')
+  expect(DEC.decode(dbx.read('f'))).toBe('one\n')
+  expect(dbx.log.filter((route) => ['upload', 'delete', 'move', 'copy'].includes(route))).toEqual(
+    [],
+  )
 })

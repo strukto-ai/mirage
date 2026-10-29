@@ -306,7 +306,9 @@ _FEED = [
 
 
 @pytest.mark.asyncio
-async def test_tree_of_a_personal_drive_root_is_one_feed_read():
+async def test_tree_of_a_personal_drive_root_is_one_feed_read(
+    exact_cloud_paths,
+):
     with aioresponses() as m:
         m.get(f"{_ME}?$select=driveType", payload={"driveType": "personal"})
         m.get(
@@ -320,7 +322,9 @@ async def test_tree_of_a_personal_drive_root_is_one_feed_read():
 
 
 @pytest.mark.asyncio
-async def test_tree_below_the_root_reads_the_feed_of_a_personal_drive():
+async def test_tree_below_the_root_reads_the_feed_of_a_personal_drive(
+    exact_cloud_paths,
+):
     accessor = _accessor()
     with aioresponses() as m:
         m.get(f"{_ME}?$select=driveType", payload={"driveType": "personal"})
@@ -338,7 +342,9 @@ _BATCH = "https://graph.microsoft.com/v1.0/$batch"
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["business", "documentLibrary"])
-async def test_tree_of_a_business_drive_batches_its_folders(kind):
+async def test_tree_of_a_business_drive_batches_its_folders(
+    exact_cloud_paths, kind
+):
     accessor = _accessor()
     with aioresponses() as m:
         m.get(f"{_ME}?$select=driveType", payload={"driveType": kind})
@@ -378,7 +384,9 @@ async def test_tree_batches_while_the_drive_type_is_refused():
 
 
 @pytest.mark.asyncio
-async def test_tree_of_a_personal_drive_batches_when_the_feed_is_refused():
+async def test_tree_of_a_personal_drive_batches_when_the_feed_is_refused(
+    exact_cloud_paths,
+):
     accessor = _accessor()
     with aioresponses() as m:
         m.get(f"{_ME}?$select=driveType", payload={"driveType": "personal"})
@@ -389,3 +397,6 @@ async def test_tree_of_a_personal_drive_batches_when_the_feed_is_refused():
         m.get(f"{_DIR_URL}:/children", payload={"value": [_FEED[2]]})
         found = await tree(accessor, PathSpec.from_str_path("/Docs"))
     assert list(found) == ["report.docx"]
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

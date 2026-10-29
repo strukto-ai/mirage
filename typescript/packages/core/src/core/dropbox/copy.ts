@@ -31,7 +31,7 @@ import {
 } from './api.ts'
 import { MISSING_SOURCE, TAKEN, TAKEN_BY_FOLDER } from './constants.ts'
 import { liveOf } from './fingerprint.ts'
-import { dropboxPathOf } from './paths.ts'
+import { checkPath, dropboxPathOf } from './paths.ts'
 
 /**
  * The refusal for a copy or move whose cleared destination came back. The held
@@ -109,6 +109,8 @@ export async function replaceOnto<T>(
  * destination FILE is replaced, as cp does (see `replaceOnto`).
  */
 export async function copy(accessor: DropboxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
+  await checkPath(accessor, src)
+  await checkPath(accessor, dst)
   const from = dropboxPathOf(accessor, src)
   const to = dropboxPathOf(accessor, dst)
   const tm = accessor.tokenManager
@@ -129,6 +131,8 @@ export async function dirCopy(
   src: PathSpec,
   dst: PathSpec,
 ): Promise<void> {
+  await checkPath(accessor, src)
+  await checkPath(accessor, dst)
   const tm = accessor.tokenManager
   const upto = lostCount()
   const timer = startOp()

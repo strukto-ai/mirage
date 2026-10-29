@@ -180,7 +180,9 @@ def _sp(virtual: str) -> PathSpec:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("virtual", ["/sp/", "/sp/Engineering"])
-async def test_tree_above_the_libraries_is_left_to_the_walk(virtual):
+async def test_tree_above_the_libraries_is_left_to_the_walk(
+    exact_cloud_paths, virtual
+):
     with aioresponses() as m:
         assert await tree(_accessor(), _sp(virtual)) is None
         assert not m.requests
@@ -225,3 +227,6 @@ async def test_tree_of_a_library_batches_its_folders():
     assert sent["requests"][0]["url"] == (
         f"/drives/{_DRIVE_ID}/root:/src:/children"
     )
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

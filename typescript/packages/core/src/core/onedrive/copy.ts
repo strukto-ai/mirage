@@ -31,5 +31,11 @@ export async function copy(
   dst: PathSpec,
 ): Promise<void> {
   const config = accessor.config
-  await copyTree(config, driveLoc(config, src.vfsPath), driveLoc(config, dst.vfsPath))
+  await copyTree(
+    config,
+    driveLoc(config, src.vfsPath),
+    driveLoc(config, dst.vfsPath),
+    src.virtual,
+    dst.virtual,
+  )
 }

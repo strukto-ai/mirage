@@ -26,7 +26,7 @@ from mirage.core.dropbox.api import delete_path, list_folder, lookup
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.constants import GONE_SUMMARIES, LOST_SUMMARIES
 from mirage.core.dropbox.fingerprint import live_of
-from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.core.dropbox.unlink import delete_resolved
 from mirage.errors.fs import enoent, enotempty
 from mirage.observe.context import lift_lost, lost_count, record, start_op
@@ -125,6 +125,7 @@ async def rm_r(accessor: DropboxAccessor, path: PathSpec) -> None:
         accessor (DropboxAccessor): Dropbox accessor.
         path (PathSpec): the operand.
     """
+    await check_path(accessor, path)
     api_path = dropbox_path_of(accessor, path)
     timer = start_op()
     if not conditioned(path, "delete"):

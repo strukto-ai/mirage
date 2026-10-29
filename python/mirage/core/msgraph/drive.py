@@ -43,6 +43,7 @@ from mirage.core.msgraph.client import (
     upload_chunk,
 )
 from mirage.core.msgraph.constants import BATCH_LIMIT
+from mirage.core.msgraph.paths import check_item
 from mirage.errors.fs import eexist, enoent, enotdir, enotsup, listing_error
 from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource
@@ -142,6 +143,8 @@ async def copy_once(
     accessor: OneDriveAccessor | SharePointAccessor,
     src: DriveLoc,
     dst: DriveLoc,
+    src_virtual: str | None = None,
+    dst_virtual: str | None = None,
 ) -> tuple[str, str] | None:
     """One Graph copy attempt, surfacing a conflict instead of raising.
 
@@ -155,11 +158,15 @@ async def copy_once(
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         src (DriveLoc): source item.
         dst (DriveLoc): destination item.
+        src_virtual (str | None): full source operand for errors.
+        dst_virtual (str | None): full destination operand for errors.
 
     Returns:
         tuple[str, str] | None: ``(code, message)`` of a failed copy, or
         None when the copy completed.
     """
+    await check_item(accessor, src, src_virtual)
+    await check_item(accessor, dst, dst_virtual)
     body = {
         "name": posixpath.basename(dst.path),
         "parentReference": _parent_reference(src, dst),
@@ -189,8 +196,10 @@ async def copy_tree(
     accessor: OneDriveAccessor | SharePointAccessor,
     src: DriveLoc,
     dst: DriveLoc,
+    src_virtual: str | None = None,
+    dst_virtual: str | None = None,
 ) -> None:
-    err = await copy_once(accessor, src, dst)
+    err = await copy_once(accessor, src, dst, src_virtual, dst_virtual)
     if err is None:
         return
     code, message = err
@@ -204,12 +213,22 @@ async def copy_tree(
         children = await graph_list(accessor, src.item("/children"))
         for child in children:
             name = child.get("name", "")
-            await copy_tree(accessor, src.child(name), dst.child(name))
+            await copy_tree(
+                accessor,
+                src.child(name),
+                dst.child(name),
+                posixpath.join(src_virtual, name)
+                if src_virtual is not None
+                else None,
+                posixpath.join(dst_virtual, name)
+                if dst_virtual is not None
+                else None,
+            )
         return
     if "folder" in src_item or "folder" in dst_item:
         raise GraphError(409, code, message)
     await graph_delete(accessor, dst.item())
-    err = await copy_once(accessor, src, dst)
+    err = await copy_once(accessor, src, dst, src_virtual, dst_virtual)
     if err is not None:
         raise GraphError(500, err[0], err[1])
 
@@ -233,6 +252,8 @@ async def rename_replace(
     accessor: OneDriveAccessor | SharePointAccessor,
     src: DriveLoc,
     dst: DriveLoc,
+    src_virtual: str | None = None,
+    dst_virtual: str | None = None,
 ) -> MovedItem:
     """Move ``src`` to ``dst``, replacing a file or an empty folder there.
 
@@ -240,11 +261,15 @@ async def rename_replace(
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         src (DriveLoc): the item to move.
         dst (DriveLoc): where it lands.
+        src_virtual (str | None): full source operand for errors.
+        dst_virtual (str | None): full destination operand for errors.
 
     Returns:
         MovedItem: the moved driveItem and whether the move replaced
         something at ``dst`` that was not positively a file.
     """
+    await check_item(accessor, src, src_virtual)
+    await check_item(accessor, dst, dst_virtual)
     body = _move_body(src, dst)
     replaced_non_file = False
     try:
@@ -389,6 +414,7 @@ async def write_item(
     accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     data: ByteSource,
+    virtual: str | None = None,
 ) -> int:
     """Replace a drive item's content, creating it and its parents.
 
@@ -400,10 +426,12 @@ async def write_item(
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the item to write.
         data (ByteSource): its new content, consumed once.
+        virtual (str | None): full operand for spelling errors.
 
     Returns:
         int: how many bytes were written.
     """
+    await check_item(accessor, loc, virtual)
     if not isinstance(data, bytes):
         async with ByteSpool() as spool:
             await spool.fill(data)
@@ -480,6 +508,7 @@ def current_version_id(versions: list[dict[str, Any]]) -> str | None:
 async def capture_item_metadata(
     accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
+    virtual: str,
     versions: bool = True,
 ) -> tuple[str | None, str | None, str | None]:
     """The item's cTag, current version and download URL, in one GET.
@@ -493,13 +522,16 @@ async def capture_item_metadata(
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the drive item.
+        virtual (str): full operand retained for spelling errors.
         versions (bool): also expand the version history for the current
             revision, which only a snapshot needs; without it the revision
             is None. Every shell line records, so only reads outside one
             (FUSE, a runtime's guest, ``ws.vfs``) skip it.
     """
     params = {"$expand": "versions"} if versions else None
-    item = await graph_get(accessor, loc.item(), params=params)
+    item = await check_item(accessor, loc, virtual, params=params)
+    if item is None:
+        item = await graph_get(accessor, loc.item(), params=params)
     fingerprint = item.get("cTag")
     revision = current_version_id(item.get("versions", []))
     download_url = item.get("@microsoft.graph.downloadUrl")
@@ -521,12 +553,14 @@ async def read_item(
     revision = pinned
     try:
         if pinned:
+            await check_item(accessor, loc, virtual)
             action = f"/versions/{id_segment(pinned)}/content"
             data = await graph_get_bytes(accessor, loc.item(action), window)
         else:
             fingerprint, revision, download_url = await capture_item_metadata(
                 accessor,
                 loc,
+                virtual,
                 versions=active_recorder() is not None,
             )
             if download_url:
@@ -566,6 +600,7 @@ async def stream_item(
     auth = True
     try:
         if pinned is not None:
+            await check_item(accessor, loc, virtual)
             url = loc.item(f"/versions/{id_segment(pinned)}/content")
             if rec is not None:
                 rec.revision = pinned
@@ -574,10 +609,14 @@ async def stream_item(
                 rec.fingerprint,
                 rec.revision,
                 download_url,
-            ) = await capture_item_metadata(accessor, loc, versions=True)
+            ) = await capture_item_metadata(
+                accessor, loc, virtual, versions=True
+            )
             if download_url:
                 url = download_url
                 auth = False
+        if pinned is None and rec is None:
+            await check_item(accessor, loc, virtual)
         async for chunk in graph_stream(accessor, url, chunk_size, auth=auth):
             if rec is not None:
                 rec.bytes += len(chunk)
@@ -589,8 +628,24 @@ async def stream_item(
 
 
 async def iter_tree(
+    accessor: OneDriveAccessor | SharePointAccessor,
+    loc: DriveLoc,
+    virtual: str | None = None,
+) -> AsyncIterator[tuple[str, dict[str, Any], bool]]:
+    await check_item(accessor, loc, virtual)
+    async for entry in walk_tree(accessor, loc):
+        yield entry
+
+
+async def walk_tree(
     accessor: OneDriveAccessor | SharePointAccessor, loc: DriveLoc
 ) -> AsyncIterator[tuple[str, dict[str, Any], bool]]:
+    """Walk an already checked scope using names returned by Graph.
+
+    Args:
+        accessor (OneDriveAccessor | SharePointAccessor): backend accessor.
+        loc (DriveLoc): checked root or canonical child from its listing.
+    """
     children = await graph_list(accessor, loc.item("/children"))
     for child in children:
         cname = child.get("name", "")
@@ -598,7 +653,7 @@ async def iter_tree(
         is_dir = "folder" in child
         yield child_loc.virt, child, is_dir
         if is_dir:
-            async for entry in iter_tree(accessor, child_loc):
+            async for entry in walk_tree(accessor, child_loc):
                 yield entry
 
 
@@ -613,7 +668,9 @@ def parent_id(item: dict[str, Any]) -> str:
 
 
 async def delta_tree(
-    accessor: OneDriveAccessor | SharePointAccessor, loc: DriveLoc
+    accessor: OneDriveAccessor | SharePointAccessor,
+    loc: DriveLoc,
+    virtual: str | None = None,
 ) -> dict[str, FileStat] | None:
     """Every item under a folder, each as a listing's stat renders it, from
     one read of Graph's ``/delta`` feed started at that folder.
@@ -637,9 +694,14 @@ async def delta_tree(
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the folder.
+        virtual (str | None): full operand for spelling errors.
     """
     try:
-        top = await graph_get(accessor, loc.item(), {"$select": "id,folder"})
+        top = await check_item(accessor, loc, virtual)
+        if top is None:
+            top = await graph_get(
+                accessor, loc.item(), {"$select": "id,folder"}
+            )
     except GraphError as exc:
         if exc.status != 404:
             raise
@@ -883,7 +945,9 @@ def _placed(
 
 
 async def drive_root_empty(
-    accessor: OneDriveAccessor | SharePointAccessor, loc: DriveLoc
+    accessor: OneDriveAccessor | SharePointAccessor,
+    loc: DriveLoc,
+    virtual: str | None = None,
 ) -> bool:
     """Whether a drive item has no children, in one request.
 
@@ -898,7 +962,9 @@ async def drive_root_empty(
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the folder to probe.
+        virtual (str | None): full operand for spelling errors.
     """
+    await check_item(accessor, loc, virtual)
     page = await graph_get(
         accessor, loc.item("/children"), {"$top": 1, "$select": "id"}
     )
@@ -953,6 +1019,7 @@ async def readdir_items(
         virtual_key (str): its mount-absolute path, which an error names.
         limit (int | None): the most entries a walk can still keep.
     """
+    await check_item(accessor, loc, virtual_key)
     try:
         children = await (
             graph_list(accessor, loc.item("/children"))
@@ -992,7 +1059,9 @@ async def stat_item(
         virtual (str): its virtual path, which an error names.
     """
     try:
-        item = await graph_get(accessor, loc.item())
+        item = await check_item(accessor, loc, virtual)
+        if item is None:
+            item = await graph_get(accessor, loc.item())
     except GraphError as exc:
         if exc.status == 404:
             raise enoent(virtual)

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { checkItem } from '../msgraph/paths.ts'
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
 
 import type { PathSpec } from '../../types.ts'
@@ -21,6 +22,7 @@ import { driveLoc, resolveItem } from './resolve.ts'
 
 export async function unlink(accessor: SharePointAccessor, path: PathSpec): Promise<void> {
   const resolved = await resolveItem(accessor, path)
+  await checkItem(accessor.config, driveLoc(accessor.config, resolved, path.vfsPath), path.virtual)
   try {
     await graphDelete(accessor.config, driveLoc(accessor.config, resolved, path.vfsPath).item())
   } catch (error) {

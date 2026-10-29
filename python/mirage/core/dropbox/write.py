@@ -24,7 +24,7 @@ from mirage.core.dropbox.api import lookup, refused
 from mirage.core.dropbox.client import DropboxApiError, dropbox_upload
 from mirage.core.dropbox.constants import CONDITION_SUPPORT
 from mirage.core.dropbox.fingerprint import live_of
-from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.core.dropbox.readdir import stat_from_entry
 from mirage.io.spool import ByteSpool
 from mirage.io.stream import close_quietly
@@ -57,6 +57,7 @@ async def write(
             await spool.fill(data)
             return await write(accessor, path, spool)
     cond = await write_condition(path, "put")
+    await check_path(accessor, path)
     require_supported(CONDITION_SUPPORT, "dropbox", path, "put", cond)
     return await upload_prepared(accessor, path, data, cond)
 
@@ -65,6 +66,7 @@ async def replace(
     accessor: DropboxAccessor, request: ReplaceRequest
 ) -> FileStat | None:
     try:
+        await check_path(accessor, request.path)
         require_supported(
             CONDITION_SUPPORT,
             "dropbox",

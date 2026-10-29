@@ -15,7 +15,7 @@
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.api import move_path
 from mirage.core.dropbox.copy import replace_onto
-from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
 
@@ -36,6 +36,8 @@ async def rename(
         src (PathSpec): source path.
         dst (PathSpec): destination path.
     """
+    await check_path(accessor, src)
+    await check_path(accessor, dst)
     from_path = dropbox_path_of(accessor, src)
     to_path = dropbox_path_of(accessor, dst)
     tm = accessor.token_manager

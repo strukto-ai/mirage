@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type * as PathsModule from './paths.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
 
@@ -56,3 +57,8 @@ describe('dropbox rename conflict probe', () => {
     expect(fake.deleted).toEqual([])
   })
 })
+
+vi.mock('./paths.ts', async (original) => ({
+  ...(await original<typeof PathsModule>()),
+  checkPath: vi.fn().mockResolvedValue(null),
+}))

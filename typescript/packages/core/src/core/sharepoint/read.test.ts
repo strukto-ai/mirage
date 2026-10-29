@@ -132,3 +132,5 @@ describe('a recorded SharePoint read', () => {
     expect(records).toMatchObject([{ op: 'read', path: '/m/m/k.txt', source: 'sharepoint' }])
   })
 })
+
+vi.mock('../msgraph/paths.ts', () => ({ checkItem: vi.fn().mockResolvedValue(null) }))

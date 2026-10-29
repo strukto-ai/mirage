@@ -47,7 +47,7 @@ class SharePointAccessor(SessionAccessor):
         # must carry the site id.
         #
         #   site_cache["Engineering"] = "contoso.sharepoint.com,<site>,<web>"
-        #   site_cache["eng"] = <same id>  (internal name, from site_entries)
+        #   site_cache["eng"] = <same id>  (internal name, scoped mounts only)
         #   drive_cache[(<that site id>, "Documents")] = "b!driveXYZ"
         #
         # Entries live until the mount drops its caches (forget): a site or

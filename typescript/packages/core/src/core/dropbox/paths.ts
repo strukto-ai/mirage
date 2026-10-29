@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { lookup, type DropboxEntry } from './api.ts'
+import { enoent } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { rawPathOf } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -38,4 +40,21 @@ export function spelledOtherwise(
   const key = stripSlash(path.vfsPath)
   const named = entry?.name
   return typeof named === 'string' && named !== key.slice(key.lastIndexOf('/') + 1)
+}
+
+/** Validate existing components below the configured root, never accepting case aliases. */
+export async function checkPath(
+  accessor: DropboxAccessor,
+  path: PathSpec,
+): Promise<DropboxEntry | null> {
+  const key = stripSlash(rawPathOf(path))
+  let at = accessor.rootPath
+  let entry: DropboxEntry | null = null
+  for (const part of key === '' ? [] : key.split('/')) {
+    at = `${at}/${part}`
+    entry = await lookup(accessor.tokenManager, at)
+    if (entry == null) return null
+    if (typeof entry.name === 'string' && entry.name !== part) throw enoent(path.virtual)
+  }
+  return entry
 }

@@ -26,8 +26,15 @@ import {
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
-import { afterEach, describe, expect, it } from 'vitest'
-import { FakeGraph, ME, serveGraph } from '../../../tests/core/msgraph/_test_util.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  DRIVE_ID,
+  DRIVE_NAME,
+  SITE_NAME,
+  FakeGraph,
+  ME,
+  serveGraph,
+} from '../../../tests/core/msgraph/_test_util.ts'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
 
@@ -157,7 +164,7 @@ describe('onedrive under read: fresh', () => {
     } finally {
       await vfs.close()
     }
-    expect(graph.log.map(([route]) => route)).toEqual(['version_content'])
+    expect(graph.log.map(([route]) => route)).toEqual(['item', 'version_content'])
   })
 
   it('a ranged read stamps the whole item cTag', async () => {
@@ -309,3 +316,61 @@ it('re-lists on the next command under fresh and cleans up', async () => {
     await w.close()
   }
 })
+
+it.each(['onedrive', 'sharepoint'])(
+  'refuses hidden %s aliases over a folding service',
+  async (provider) => {
+    const drive = provider === 'onedrive' ? ME : DRIVE_ID
+    const graph = await serveGraph(
+      new FakeGraph({
+        [drive]: {
+          'secret.txt': ENC.encode('secret'),
+          'vault/private.txt': ENC.encode('private'),
+        },
+      }),
+    )
+    graphs.push(graph)
+    const nativeFetch = globalThis.fetch
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      const index = url.pathname.indexOf('/root:/')
+      if (index >= 0)
+        url.pathname =
+          url.pathname.slice(0, index + 7) + url.pathname.slice(index + 7).toLowerCase()
+      return nativeFetch(url, init)
+    })
+    const config = {
+      access_token: 't',
+      graph_base_url: graph.url,
+      ...(provider === 'sharepoint' ? { site: SITE_NAME, drive: DRIVE_NAME } : {}),
+    }
+    const vfs = await buildVfs(provider, config)
+    const w = new Workspace({ '/m': [vfs, MountMode.WRITE] })
+    try {
+      expect((await w.shell('cat /m/secret.txt /m/vault/private.txt')).exitCode).toBe(0)
+      w.createSession('hidden', { profile: { paths: { hide: ['/m/secret.txt', '/m/vault'] } } })
+      const token = graph.ctag(drive, 'secret.txt')
+      graph.log.length = 0
+      for (const command of [
+        'cat /m/SECRET.txt',
+        'cat /m/Vault/private.txt',
+        'ls /m/Vault',
+        'echo changed > /m/SECRET.txt',
+        'echo changed > /m/Vault/new.txt',
+      ]) {
+        const result = await w.shell(command, { sessionId: 'hidden' })
+        expect(result.exitCode, command).not.toBe(0)
+        expect(DEC.decode(result.stdout), command).not.toContain('secret')
+      }
+      expect(graph.ctag(drive, 'secret.txt')).toBe(token)
+      expect(
+        graph.log.filter(([route]) =>
+          ['upload', 'download', 'content', 'version_content'].includes(route),
+        ),
+      ).toEqual([])
+    } finally {
+      await w.close()
+      vi.unstubAllGlobals()
+    }
+  },
+)

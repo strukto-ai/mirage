@@ -80,7 +80,9 @@ def test_move_body_new_parent_includes_reference():
 
 
 @pytest.mark.asyncio
-async def test_iter_tree_emits_virtual_not_backend_path(monkeypatch):
+async def test_iter_tree_emits_virtual_not_backend_path(
+    exact_cloud_paths, monkeypatch
+):
     monkeypatch.setattr(drive_ops, "graph_list", _list_one_file)
     loc = DriveLoc(
         drive="d1", path="team/reports", virt="reports", url=_url, ref=_ref
@@ -118,7 +120,9 @@ async def test_copy_polls_the_monitor_the_202_pointed_at():
 
 
 @pytest.mark.asyncio
-async def test_copy_raises_the_provider_code_when_the_monitor_fails():
+async def test_copy_raises_the_provider_code_when_the_monitor_fails(
+    exact_cloud_paths,
+):
     monitor = "https://monitor.example/op/2"
     with aioresponses() as m:
         m.post(
@@ -140,7 +144,9 @@ async def test_copy_raises_the_provider_code_when_the_monitor_fails():
 
 
 @pytest.mark.asyncio
-async def test_copy_deletes_a_conflicting_file_destination_and_retries():
+async def test_copy_deletes_a_conflicting_file_destination_and_retries(
+    exact_cloud_paths,
+):
     monitor = "https://monitor.example/op/3"
     retry = "https://monitor.example/op/3-retry"
     with aioresponses() as m:
@@ -167,7 +173,9 @@ async def test_copy_deletes_a_conflicting_file_destination_and_retries():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("transport", ["monitor", "http"])
-async def test_copy_normalizes_a_failed_replacement_retry(transport):
+async def test_copy_normalizes_a_failed_replacement_retry(
+    exact_cloud_paths, transport
+):
     retry = "https://monitor.example/op/retry-failed"
     with aioresponses() as m:
         m.post(_url("a.txt", "/copy"), status=409, payload=_CONFLICT)
@@ -195,7 +203,9 @@ async def test_copy_normalizes_a_failed_replacement_retry(transport):
 
 
 @pytest.mark.asyncio
-async def test_copy_merges_two_folders_per_child_and_deletes_nothing():
+async def test_copy_merges_two_folders_per_child_and_deletes_nothing(
+    exact_cloud_paths,
+):
     monitor = "https://monitor.example/op/4"
     child_monitor = "https://monitor.example/op/4-child"
     with aioresponses() as m:
@@ -222,7 +232,9 @@ async def test_copy_merges_two_folders_per_child_and_deletes_nothing():
 
 
 @pytest.mark.asyncio
-async def test_copy_refuses_a_file_onto_folder_conflict_as_409():
+async def test_copy_refuses_a_file_onto_folder_conflict_as_409(
+    exact_cloud_paths,
+):
     """The mixed file/folder refusal is a conflict, not a server error.
 
     TypeScript re-raised the conflict as `copy_once` had produced it, so
@@ -251,7 +263,9 @@ async def test_copy_refuses_a_file_onto_folder_conflict_as_409():
 
 
 @pytest.mark.asyncio
-async def test_rename_keeps_the_conflict_for_a_non_empty_folder():
+async def test_rename_keeps_the_conflict_for_a_non_empty_folder(
+    exact_cloud_paths,
+):
     with aioresponses() as m:
         m.patch(_url("src"), status=409, payload=_CONFLICT)
         m.get(_url("dst"), payload={"id": "2", "name": "dst", "folder": {}})
@@ -276,7 +290,9 @@ _OD_SPEC = PathSpec(
 
 
 @pytest.mark.asyncio
-async def test_read_item_records_the_virtual_path_on_a_pinned_read():
+async def test_read_item_records_the_virtual_path_on_a_pinned_read(
+    exact_cloud_paths,
+):
     # A pinned read must record the full virtual path, or the pin a
     # snapshot restores is never found again. Reached through the onedrive
     # reader; the pinned branch is the one the onedrive read test skips.
@@ -296,7 +312,9 @@ async def test_read_item_records_the_virtual_path_on_a_pinned_read():
 
 
 @pytest.mark.asyncio
-async def test_stream_item_records_the_virtual_path_on_a_pinned_read():
+async def test_stream_item_records_the_virtual_path_on_a_pinned_read(
+    exact_cloud_paths,
+):
     # The stream twin of the above, through the onedrive streamer.
     revisions = push_revisions({"/m/m/k.txt": "3.0"})
     scope = RecordingScope()
@@ -339,7 +357,9 @@ def _row(item_id: str, name: str, parent: str, **facets) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_delta_tree_places_every_item_by_its_parents(monkeypatch):
+async def test_delta_tree_places_every_item_by_its_parents(
+    exact_cloud_paths, monkeypatch
+):
     rows = [
         _row("T", "reports", "OUT", folder={"childCount": 2}),
         _row("a", "a.txt", "A", size=3, file={}, cTag="c1"),
@@ -365,7 +385,9 @@ async def test_delta_tree_places_every_item_by_its_parents(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_delta_tree_ignores_a_parent_loop(monkeypatch):
+async def test_delta_tree_ignores_a_parent_loop(
+    exact_cloud_paths, monkeypatch
+):
     rows = [
         _row("T", "", "", root={}, folder={}),
         _row("X", "x", "Y", folder={}),
@@ -386,7 +408,7 @@ async def test_delta_tree_ignores_a_parent_loop(monkeypatch):
     [GraphError(404, "itemNotFound", "gone"), {"id": "F", "file": {}}],
 )
 async def test_delta_tree_leaves_a_file_or_nothing_to_the_walk(
-    monkeypatch, top
+    exact_cloud_paths, monkeypatch, top
 ):
     get, listing, asked = _feed(top, [])
     monkeypatch.setattr(drive_ops, "graph_get", get)
@@ -397,7 +419,9 @@ async def test_delta_tree_leaves_a_file_or_nothing_to_the_walk(
 
 
 @pytest.mark.asyncio
-async def test_delta_tree_raises_what_graph_refuses(monkeypatch):
+async def test_delta_tree_raises_what_graph_refuses(
+    exact_cloud_paths, monkeypatch
+):
     get, listing, _ = _feed(GraphError(403, "accessDenied", "no"), [])
     monkeypatch.setattr(drive_ops, "graph_get", get)
     monkeypatch.setattr(drive_ops, "graph_list", listing)
@@ -407,6 +431,7 @@ async def test_delta_tree_raises_what_graph_refuses(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_delta_tree_leaves_a_folder_from_another_drive_to_the_walk(
+    exact_cloud_paths,
     monkeypatch,
 ):
     rows = [
@@ -426,7 +451,9 @@ async def _refused(accessor, url, params=None):
 
 
 @pytest.mark.asyncio
-async def test_delta_tree_leaves_a_refused_feed_to_the_walk(monkeypatch):
+async def test_delta_tree_leaves_a_refused_feed_to_the_walk(
+    exact_cloud_paths, monkeypatch
+):
     get, _, _ = _feed({"id": "T", "folder": {}}, [])
     monkeypatch.setattr(drive_ops, "graph_get", get)
     monkeypatch.setattr(drive_ops, "graph_list", _refused)
@@ -436,6 +463,7 @@ async def test_delta_tree_leaves_a_refused_feed_to_the_walk(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_delta_tree_leaves_a_feed_without_ctags_to_the_walk(
+    exact_cloud_paths,
     monkeypatch,
 ):
     rows = [
@@ -452,6 +480,7 @@ async def test_delta_tree_leaves_a_feed_without_ctags_to_the_walk(
 
 @pytest.mark.asyncio
 async def test_delta_tree_leaves_a_feed_of_another_folder_to_the_walk(
+    exact_cloud_paths,
     monkeypatch,
 ):
     rows = [
@@ -534,7 +563,9 @@ def _graph_tree() -> dict[str, list[dict]]:
 
 
 @pytest.mark.asyncio
-async def test_batch_tree_lists_a_level_per_batch(monkeypatch):
+async def test_batch_tree_lists_a_level_per_batch(
+    exact_cloud_paths, monkeypatch
+):
     listing, batch, asked = _listings(_graph_tree())
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     monkeypatch.setattr(drive_ops, "graph_batch", batch)
@@ -561,6 +592,7 @@ async def test_batch_tree_lists_a_level_per_batch(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_batch_tree_pages_a_listing_no_further_than_a_walks_limit(
+    exact_cloud_paths,
     monkeypatch,
 ):
     rest = _children("top/a") + "?page=2"
@@ -604,6 +636,7 @@ async def test_batch_tree_splits_a_wide_level(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_unanswered_listings_wait_once_for_the_longest_retry(
+    exact_cloud_paths,
     monkeypatch,
 ):
     slept: list[float] = []
@@ -634,7 +667,9 @@ async def test_unanswered_listings_wait_once_for_the_longest_retry(
 
 
 @pytest.mark.asyncio
-async def test_a_folder_the_account_may_not_open_leaves_the_walk(monkeypatch):
+async def test_a_folder_the_account_may_not_open_leaves_the_walk(
+    exact_cloud_paths, monkeypatch
+):
     listing, batch, _ = _listings(
         _graph_tree(), refused=frozenset({_children("top/b")})
     )
@@ -662,7 +697,9 @@ async def test_a_listing_reads_its_later_pages(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_folder_gone_below_leaves_the_walk(monkeypatch):
+async def test_a_folder_gone_below_leaves_the_walk(
+    exact_cloud_paths, monkeypatch
+):
     tree = _graph_tree()
     del tree[_children("top/b")]
     listing, batch, _ = _listings(tree)
@@ -686,7 +723,9 @@ async def test_a_refused_batch_leaves_the_walk(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_missing_top_raises_what_its_listing_raises(monkeypatch):
+async def test_a_missing_top_raises_what_its_listing_raises(
+    exact_cloud_paths, monkeypatch
+):
     listing, batch, _ = _listings({})
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     monkeypatch.setattr(drive_ops, "graph_batch", batch)
@@ -704,7 +743,7 @@ async def _streamed(data: bytes) -> AsyncIterator[bytes]:
 @pytest.mark.parametrize("streamed", [False, True])
 @pytest.mark.parametrize("fail", [False, True])
 async def test_an_upload_has_bounded_parts_and_cancels_failed_session(
-    fail, streamed
+    exact_cloud_paths, fail, streamed
 ):
     upload = "https://upload.example/session"
     total = 5 * 1024 * 1024
@@ -746,7 +785,9 @@ async def test_an_upload_has_bounded_parts_and_cancels_failed_session(
 
 
 @pytest.mark.asyncio
-async def test_stream_upload_source_failure_never_starts_upload():
+async def test_stream_upload_source_failure_never_starts_upload(
+    exact_cloud_paths,
+):
     async def broken():
         yield b"first"
         raise OSError("source failed")
@@ -755,3 +796,6 @@ async def test_stream_upload_source_failure_never_starts_upload():
         with pytest.raises(OSError, match="source failed"):
             await write_item(_accessor(), _loc("d1", "file"), broken())
         assert not m.requests
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

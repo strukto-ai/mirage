@@ -43,3 +43,5 @@ describe('OneDrive write', () => {
     ])
   })
 })
+
+vi.mock('../msgraph/paths.ts', () => ({ checkItem: vi.fn().mockResolvedValue(null) }))

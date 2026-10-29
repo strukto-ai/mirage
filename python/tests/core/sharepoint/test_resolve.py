@@ -121,7 +121,7 @@ async def test_a_reply_after_the_mount_dropped_its_caches_is_not_kept():
 
 
 @pytest.mark.asyncio
-async def test_site_entries_caches_display_name_and_name():
+async def test_site_entries_caches_only_the_listed_name():
     accessor = _accessor()
     with aioresponses() as m:
         m.get(
@@ -139,7 +139,121 @@ async def test_site_entries_caches_display_name_and_name():
         entries = await site_entries(accessor)
     assert entries == [("Engineering", _SITE_ID)]
     assert accessor.site_cache["Engineering"] == _SITE_ID
-    assert accessor.site_cache["eng"] == _SITE_ID
+    assert "eng" not in accessor.site_cache
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("internal", ["engineering", "eng"])
+@pytest.mark.parametrize("warm", [False, True])
+@pytest.mark.parametrize("scope", ["none", "site", "drive"])
+async def test_unscoped_paths_refuse_internal_site_aliases(
+    internal, warm, scope
+):
+    config = {"access_token": "tok"}
+    if scope == "site":
+        config["site"] = internal
+    elif scope == "drive":
+        config["drive"] = "Documents"
+    accessor = SharePointAccessor(SharePointConfig(**config))
+    with aioresponses() as m:
+        m.get(
+            _SITES_RE,
+            payload={
+                "value": [
+                    {
+                        "id": _SITE_ID,
+                        "displayName": "Engineering",
+                        "name": internal,
+                    }
+                ]
+            },
+            repeat=True,
+        )
+        if warm:
+            await site_entries(accessor)
+        result = await resolve(
+            accessor, _spec(f"/sp/{internal}/Documents/secret.txt")
+        )
+    assert (result.level, result.site_id) == ("site", None)
+
+
+@pytest.mark.asyncio
+async def test_an_internal_name_cannot_replace_another_listed_site():
+    accessor = _accessor()
+    with aioresponses() as m:
+        m.get(
+            _SITES_RE,
+            payload={
+                "value": [
+                    {
+                        "id": "other-site",
+                        "displayName": "engineering",
+                        "name": "other",
+                    },
+                    {
+                        "id": _SITE_ID,
+                        "displayName": "Engineering",
+                        "name": "engineering",
+                    },
+                ]
+            },
+        )
+        result = await resolve(accessor, _spec("/sp/engineering"))
+    assert result.site_id == "other-site"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key_prefix", [None, "team/reports"])
+async def test_scoped_mount_accepts_its_configured_internal_site_name(
+    key_prefix,
+):
+    accessor = SharePointAccessor(
+        SharePointConfig(
+            access_token="tok",
+            site="engineering",
+            drive="Documents",
+            key_prefix=key_prefix,
+        )
+    )
+    with aioresponses() as m:
+        m.get(
+            _SITES_RE,
+            payload={
+                "value": [
+                    {
+                        "id": _SITE_ID,
+                        "displayName": "Engineering",
+                        "name": "engineering",
+                    }
+                ]
+            },
+        )
+        m.get(
+            re.compile(r".*/sites/.*/drives.*"),
+            payload={"value": [{"id": _DRIVE_ID, "name": "Documents"}]},
+        )
+        first = await resolve(accessor, _spec("/sp/a.txt"))
+        second = await resolve(accessor, _spec("/sp/b.txt"))
+    assert first.item_path == (
+        f"{key_prefix}/a.txt" if key_prefix else "a.txt"
+    )
+    assert (second.drive_id, second.item_path) == (
+        _DRIVE_ID,
+        f"{key_prefix}/b.txt" if key_prefix else "b.txt",
+    )
+
+
+@pytest.mark.asyncio
+async def test_site_without_display_name_is_addressed_by_its_listed_internal_name():
+    accessor = _accessor()
+    with aioresponses() as m:
+        m.get(
+            _SITES_RE,
+            payload={"value": [{"id": _SITE_ID, "name": "engineering"}]},
+        )
+        assert await site_entries(accessor) == [("engineering", _SITE_ID)]
+        result = await resolve(accessor, _spec("/sp/engineering"))
+    assert result.site_id == _SITE_ID
 
 
 _TEAM = {

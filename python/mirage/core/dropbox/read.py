@@ -27,7 +27,7 @@ from mirage.core.dropbox.constants import (
     RESULT_HEADER,
 )
 from mirage.core.dropbox.fingerprint import result_of, result_token
-from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.core.hierarchy.probe import file_entry
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, record_stream, start_op
@@ -81,11 +81,10 @@ async def read_by_path(
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
-    """Download whatever file Dropbox resolves ``path`` to, in any case.
+    """Read an exactly spelled path without requiring a listing entry.
 
-    A rewrite (``truncate``) reads this way where no listing names the
-    file: its upload lands on that same file, so calling a file stored
-    as ``N`` absent for ``n`` would zero it.
+    Rewrites use the same spelling guard as uploads, so treating an alias
+    as absent cannot turn a truncate into an overwrite of another name.
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
@@ -93,6 +92,7 @@ async def read_by_path(
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
     """
+    await check_path(accessor, path)
     window = window_for(offset, size)
     timer = start_op()
     try:
@@ -125,6 +125,7 @@ async def read_stream(
         path (PathSpec): the path to read.
         entry (FileStat | None): what is at the path.
     """
+    await check_path(accessor, path)
     file_entry(path, entry)
     rec = record_stream("read", path.virtual, "dropbox")
 

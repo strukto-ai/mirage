@@ -98,3 +98,5 @@ describe('OneDrive readdir', () => {
     expect(rows.map((row) => row.name)).toEqual(['\uE000.txt', '\u{1F600}.txt'])
   })
 })
+
+vi.mock('../msgraph/paths.ts', () => ({ checkItem: vi.fn().mockResolvedValue(null) }))

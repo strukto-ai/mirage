@@ -69,3 +69,6 @@ async def test_rmdir_refuses_a_folder_holding_a_subfolder():
         with pytest.raises(OSError) as excinfo:
             await rmdir(_accessor(), _spec("dir"))
     assert excinfo.value.errno == errno.ENOTEMPTY
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

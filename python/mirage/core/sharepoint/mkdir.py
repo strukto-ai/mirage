@@ -16,8 +16,9 @@ import posixpath
 
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.msgraph.drive import FolderTarget, create_child_folder
+from mirage.core.msgraph.paths import check_item
 from mirage.core.sharepoint.client import item_url
-from mirage.core.sharepoint.resolve import resolve_item
+from mirage.core.sharepoint.resolve import drive_loc, resolve_item
 from mirage.errors.fs import enotdir
 from mirage.types import PathSpec
 
@@ -107,6 +108,11 @@ async def mkdir(
     if not path.vfs_path:
         return
     resolved = await resolve_item(accessor, path)
+    await check_item(
+        accessor,
+        drive_loc(accessor.config, resolved, path.vfs_path),
+        path.virtual,
+    )
     drive_id = resolved.drive_id or ""
     item_path = resolved.item_path or ""
     if parents:

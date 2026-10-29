@@ -47,7 +47,9 @@ async def test_read_returns_current_content():
 
 
 @pytest.mark.asyncio
-async def test_an_unrecorded_read_fetches_the_item_then_its_download_url():
+async def test_an_unrecorded_read_fetches_the_item_then_its_download_url(
+    exact_cloud_paths,
+):
     seen: list[tuple[str, str | None]] = []
 
     def item(url, **kwargs):
@@ -70,7 +72,9 @@ async def test_an_unrecorded_read_fetches_the_item_then_its_download_url():
 
 
 @pytest.mark.asyncio
-async def test_a_read_falls_back_to_content_when_graph_omits_the_download_url():
+async def test_a_read_falls_back_to_content_when_graph_omits_the_download_url(
+    exact_cloud_paths,
+):
     seen: list[str | None] = []
 
     def content(url, **kwargs):
@@ -123,7 +127,9 @@ async def test_read_range_sends_range_header():
 
 
 @pytest.mark.asyncio
-async def test_a_200_answer_to_a_range_request_is_sliced_locally():
+async def test_a_200_answer_to_a_range_request_is_sliced_locally(
+    exact_cloud_paths,
+):
     """Graph redirects content downloads to a pre-authenticated URL,
     which may answer 200 with the whole item. Before this was handled
     the caller got every byte for what it asked to be a window."""
@@ -156,7 +162,9 @@ def _meta_payload():
 
 
 @pytest.mark.asyncio
-async def test_read_captures_fingerprint_and_revision_when_recording():
+async def test_read_captures_fingerprint_and_revision_when_recording(
+    exact_cloud_paths,
+):
     scope = RecordingScope()
     sink = scope.records
     try:
@@ -175,7 +183,9 @@ async def test_read_captures_fingerprint_and_revision_when_recording():
 
 
 @pytest.mark.asyncio
-async def test_capture_reads_pinned_download_url_not_live_content():
+async def test_capture_reads_pinned_download_url_not_live_content(
+    exact_cloud_paths,
+):
     scope = RecordingScope()
     sink = scope.records
     try:
@@ -230,3 +240,6 @@ async def test_recorded_read_names_the_virtual_path():
         scope.close()
     assert data == b"bytes"
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

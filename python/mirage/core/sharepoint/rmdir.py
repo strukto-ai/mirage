@@ -44,6 +44,6 @@ async def rmdir(
     if resolved.drive_id is None or resolved.item_path is None:
         return
     loc = drive_loc(accessor.config, resolved, path.vfs_path)
-    if not await drive_root_empty(accessor, loc):
+    if not await drive_root_empty(accessor, loc, path.virtual):
         raise enotempty(path)
     await graph_delete(accessor, loc.item())

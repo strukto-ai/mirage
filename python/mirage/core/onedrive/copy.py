@@ -33,4 +33,6 @@ async def copy(
         accessor,
         drive_loc(config, src.vfs_path),
         drive_loc(config, dst.vfs_path),
+        src.virtual,
+        dst.virtual,
     )

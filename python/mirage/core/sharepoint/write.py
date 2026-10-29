@@ -26,6 +26,9 @@ async def write(
     resolved = await resolve_item(accessor, path)
     timer = start_op()
     size = await write_item(
-        accessor, drive_loc(accessor.config, resolved, path.vfs_path), data
+        accessor,
+        drive_loc(accessor.config, resolved, path.vfs_path),
+        data,
+        path.virtual,
     )
     record("write", path.virtual, "sharepoint", size, timer)

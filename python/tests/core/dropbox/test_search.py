@@ -90,7 +90,9 @@ async def test_hits_outside_the_scope_are_dropped():
     [([("/x.txt", "/x.txt")], True), ([], False)],
     ids=["truncated", "no-hit"],
 )
-async def test_an_answer_that_may_miss_a_match_is_none(results, truncated):
+async def test_an_answer_that_may_miss_a_match_is_none(
+    exact_cloud_paths, results, truncated
+):
     # No hit is distrusted too: Dropbox indexes a write after it lands.
     out, _ = await _search(results, mount_root(), truncated=truncated)
     assert out is None
@@ -105,3 +107,6 @@ async def test_an_api_error_is_none():
     ):
         out = await files_containing(make_accessor(), "needle", [mount_root()])
     assert out is None
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

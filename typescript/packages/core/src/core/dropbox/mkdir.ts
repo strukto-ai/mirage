@@ -20,7 +20,7 @@ import { eexist, enoent } from '../../errors/fs.ts'
 import { DropboxApiError } from './client.ts'
 import { createFolder, getMetadata } from './api.ts'
 
-import { dropboxPathOf } from './paths.ts'
+import { checkPath, dropboxPathOf } from './paths.ts'
 
 async function metadataTag(
   accessor: DropboxAccessor,
@@ -48,6 +48,7 @@ export async function mkdir(
   path: PathSpec,
   parents = false,
 ): Promise<void> {
+  await checkPath(accessor, path)
   const apiPath = dropboxPathOf(accessor, path)
   // The mount root always exists (the API rejects the empty path).
   if (apiPath === accessor.rootPath) {

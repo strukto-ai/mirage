@@ -33,6 +33,7 @@ export async function write(
     driveLoc(accessor.config, resolved, path.vfsPath),
     data,
     signal,
+    path.virtual,
   )
   record('write', path.virtual, 'sharepoint', size, timer)
 }

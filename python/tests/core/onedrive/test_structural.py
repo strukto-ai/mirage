@@ -144,3 +144,6 @@ async def test_exists_true_and_false():
             await exists(_accessor(), PathSpec.from_str_path("/missing.txt"))
             is False
         )
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

@@ -27,7 +27,7 @@ import { uploadStat } from '../../utils/upload.ts'
 import { lookup, refused, type DropboxEntry } from './api.ts'
 import { liveOf } from './fingerprint.ts'
 import { dropboxUpload } from './client.ts'
-import { dropboxPathOf } from './paths.ts'
+import { checkPath, dropboxPathOf } from './paths.ts'
 import { statFromEntry } from './readdir.ts'
 
 // Large spooled inputs use upload sessions, and a stream is spooled first, as
@@ -50,6 +50,7 @@ export async function write(
     }
   }
   const condition = await writeCondition(path, 'put')
+  await checkPath(accessor, path)
   return uploadPrepared(accessor, path, data, condition)
 }
 
@@ -59,6 +60,7 @@ export async function replace(
   signal?: AbortSignal,
 ): Promise<FileStat | null> {
   try {
+    await checkPath(accessor, request.path)
     requireSupported(CONDITION_SUPPORT, 'dropbox', request.path, 'put', request.condition)
   } catch (error) {
     await closeQuietly(request.body)

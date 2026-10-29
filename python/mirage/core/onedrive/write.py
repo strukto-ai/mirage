@@ -25,6 +25,6 @@ async def write(
 ) -> None:
     timer = start_op()
     size = await write_item(
-        accessor, drive_loc(accessor.config, path.vfs_path), data
+        accessor, drive_loc(accessor.config, path.vfs_path), data, path.virtual
     )
     record("write", path.virtual, "onedrive", size, timer)

@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.core.dropbox.api import list_folder, lookup
+from mirage.core.dropbox.api import list_folder
 from mirage.core.dropbox.client import DropboxApiError
-from mirage.core.dropbox.paths import dropbox_path_of, spelled_otherwise
+from mirage.core.dropbox.paths import check_path, spelled_otherwise
 from mirage.core.dropbox.readdir import dropbox_path_from_key, stat_from_entry
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
@@ -24,11 +24,8 @@ from mirage.types import FileStat, FileType, PathSpec
 async def _stat_from_api(
     accessor: DropboxAccessor, path: PathSpec
 ) -> FileStat:
-    # One get_metadata, which matches names case-insensitively where a
-    # listing is exact.
-    entry = await lookup(
-        accessor.token_manager, dropbox_path_of(accessor, path)
-    )
+    # Each existing component must agree with the exact names of a listing.
+    entry = await check_path(accessor, path)
     if entry is None or spelled_otherwise(path, entry):
         raise enoent(path.virtual)
     return stat_from_entry(entry)
@@ -61,6 +58,7 @@ async def tree(
         accessor (DropboxAccessor): backend handle.
         path (PathSpec): the folder.
     """
+    await check_path(accessor, path)
     folder = dropbox_path_from_key(
         accessor.root_path, path.mount_path.strip("/")
     )

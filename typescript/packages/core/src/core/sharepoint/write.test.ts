@@ -54,3 +54,5 @@ describe('SharePoint write', () => {
     ])
   })
 })
+
+vi.mock('../msgraph/paths.ts', () => ({ checkItem: vi.fn().mockResolvedValue(null) }))

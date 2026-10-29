@@ -15,7 +15,7 @@
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.api import delete_path, get_metadata, list_folder
 from mirage.core.dropbox.client import DropboxApiError
-from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -32,6 +32,7 @@ async def rmdir(accessor: DropboxAccessor, path: PathSpec) -> None:
         accessor (DropboxAccessor): Dropbox accessor.
         path (PathSpec): folder to remove.
     """
+    await check_path(accessor, path)
     api_path = dropbox_path_of(accessor, path)
     try:
         entry = await get_metadata(accessor.token_manager, api_path)

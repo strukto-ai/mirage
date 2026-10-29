@@ -14,12 +14,16 @@
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.core.msgraph.client import GraphError, graph_delete
-from mirage.core.onedrive.client import item_url
+from mirage.core.msgraph.paths import check_item
+from mirage.core.onedrive.client import drive_loc, item_url
 from mirage.errors.fs import enoent
 from mirage.types import PathSpec
 
 
 async def unlink(accessor: OneDriveAccessor, path: PathSpec) -> None:
+    await check_item(
+        accessor, drive_loc(accessor.config, path.vfs_path), path.virtual
+    )
     try:
         await graph_delete(accessor, item_url(accessor.config, path.vfs_path))
     except GraphError as exc:

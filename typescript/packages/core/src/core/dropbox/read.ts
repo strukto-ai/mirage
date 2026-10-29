@@ -20,7 +20,7 @@ import { type FileStat, type PathSpec } from '../../types.ts'
 import { DropboxApiError, dropboxDownload, dropboxDownloadStream } from './client.ts'
 import { MISS_SUMMARIES, NOT_FILE_SUMMARY, RESULT_HEADER } from './constants.ts'
 import { resultOf, resultToken } from './fingerprint.ts'
-import { dropboxPathOf } from './paths.ts'
+import { checkPath, dropboxPathOf } from './paths.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
 import { windowFor } from '../../utils/ranges.ts'
 
@@ -57,16 +57,16 @@ export async function read(
 }
 
 /**
- * Download whatever file Dropbox resolves `path` to, in any case. A rewrite
- * (`truncate`) reads this way where no listing names the file: its upload
- * lands on that same file, so calling a file stored as `N` absent for `n`
- * would zero it. Mirrors Python's `read_by_path`.
+ * Read an exactly spelled path without requiring a listing entry. Rewrites
+ * use the same spelling guard as uploads, so an absent alias cannot turn
+ * a truncate into an overwrite of another name. Mirrors Python's `read_by_path`.
  */
 export async function readByPath(
   accessor: DropboxAccessor,
   path: PathSpec,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
+  await checkPath(accessor, path)
   const window = windowFor(options?.offset ?? 0, options?.size ?? null)
   const timer = startOp()
   let download: [Uint8Array, string | null]
@@ -88,6 +88,7 @@ export async function* readStream(
   path: PathSpec,
   entry?: FileStat | null,
 ): AsyncIterable<Uint8Array> {
+  await checkPath(accessor, path)
   fileEntry(path, entry)
   const rec = recordStream('read', path.virtual, 'dropbox')
   const stamp = (headers: Record<string, string>): void => {

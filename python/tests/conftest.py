@@ -13,8 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import importlib
 import resource
 import uuid
+from unittest.mock import AsyncMock
 
 import aiohttp
 import pytest
@@ -89,3 +91,36 @@ def write_ws():
     )
     ws.get_session(ws.default_session_id).cwd = "/"
     return ws
+
+
+@pytest.fixture
+def exact_cloud_paths(monkeypatch):
+    """Isolate protocol unit tests from the separately tested spelling resolver."""
+    drive = importlib.import_module("mirage.core.msgraph.drive")
+    modules = [
+        importlib.import_module("mirage.core.dropbox." + name)
+        for name in (
+            "copy",
+            "mkdir",
+            "read",
+            "readdir",
+            "rename",
+            "rm",
+            "rmdir",
+            "search",
+            "unlink",
+            "write",
+        )
+    ]
+
+    monkeypatch.setattr(drive, "check_item", AsyncMock(return_value=None))
+    for provider in ("onedrive", "sharepoint"):
+        for name in ("mkdir", "unlink", "rm"):
+            module = importlib.import_module(
+                "mirage.core." + provider + "." + name
+            )
+            monkeypatch.setattr(
+                module, "check_item", AsyncMock(return_value=None)
+            )
+    for module in modules:
+        monkeypatch.setattr(module, "check_path", AsyncMock(return_value=None))

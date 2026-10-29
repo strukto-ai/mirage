@@ -34,7 +34,9 @@ def make_accessor() -> DropboxAccessor:
 
 
 @pytest.mark.asyncio
-async def test_rmdir_nonempty_raises_enotempty_without_deleting():
+async def test_rmdir_nonempty_raises_enotempty_without_deleting(
+    exact_cloud_paths,
+):
     with patch(
         "mirage.core.dropbox.rmdir.get_metadata",
         new_callable=AsyncMock,
@@ -87,7 +89,9 @@ async def test_rmdir_file_raises_enotdir():
 
 
 @pytest.mark.asyncio
-async def test_rmdir_probe_is_bounded_to_one_entry(dropbox_accessor):
+async def test_rmdir_probe_is_bounded_to_one_entry(
+    exact_cloud_paths, dropbox_accessor
+):
     # The emptiness probe is bounded, not a full listing: `list_folder`
     # follows every continuation cursor, so asking it with a small page
     # size made one request per child to answer a yes/no.
@@ -99,3 +103,6 @@ async def test_rmdir_probe_is_bounded_to_one_entry(dropbox_accessor):
     assert rpc.list_limits == [1]
     assert rpc.list_requests == 1
     assert rpc.deleted == []
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

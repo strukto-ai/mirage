@@ -113,7 +113,9 @@ async def test_a_ranged_read_asks_dropbox_for_the_range():
 
 
 @pytest.mark.asyncio
-async def test_a_ranged_read_of_a_handed_row_carries_the_range():
+async def test_a_ranged_read_of_a_handed_row_carries_the_range(
+    exact_cloud_paths,
+):
     # Dropbox downloads by path: the row only says a file is there.
     with patch(
         "mirage.core.dropbox.read.dropbox_download",
@@ -221,7 +223,7 @@ def served_accessor(url: str) -> DropboxAccessor:
     ids=["full", "ranged"],
 )
 async def test_every_byte_read_records_the_content_hash(
-    offset, size, expected
+    exact_cloud_paths, offset, size, expected
 ):
     # A ranged read is answered 206 and still carries Dropbox-API-Result.
     with serve(FakeDropbox(files={"/a.txt": DATA}, listed=LAGGING)) as fake:
@@ -274,7 +276,7 @@ async def test_a_stream_records_the_content_hash(recorded):
     ids=["missing", "folder", "restricted", "server-error"],
 )
 async def test_a_listed_read_maps_only_a_miss_to_enoent(
-    status, summary, raised
+    exact_cloud_paths, status, summary, raised
 ):
     # A miss says the listed file is no longer there, which the mount reads
     # as a stale row and lists again; anything else is a failure.
@@ -310,7 +312,7 @@ async def _ignore(*_args: PathSpec | str) -> None:
     ids=["whole", "ranged", "unconditional"],
 )
 async def test_a_whole_read_publishes_its_token_on_a_conditional_mount(
-    conditional, offset, size, published
+    exact_cloud_paths, conditional, offset, size, published
 ):
     context = WriteContext(
         vfs="dropbox",
@@ -338,3 +340,6 @@ async def test_a_whole_read_publishes_its_token_on_a_conditional_mount(
             reset_caller(prev)
             await accessor.close()
     assert tokens == published
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

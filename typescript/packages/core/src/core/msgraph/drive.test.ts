@@ -699,3 +699,5 @@ it('stream source failure never starts an upload', async () => {
   await expect(writeItem(config, loc('file'), broken())).rejects.toThrow('source failed')
   expect(fetching).not.toHaveBeenCalled()
 })
+
+vi.mock('./paths.ts', () => ({ checkItem: vi.fn().mockResolvedValue(null) }))

@@ -40,7 +40,7 @@ export async function filesContaining(
   try {
     for (const [directory, loc] of scopes) {
       const files = new Map<string, PathSpec[]>()
-      for await (const [virtual, item, folder] of iterTree(config, loc)) {
+      for await (const [virtual, item, folder] of iterTree(config, loc, directory.virtual)) {
         if (folder) continue
         const id = item.id
         if (typeof id !== 'string' || id === '') return null

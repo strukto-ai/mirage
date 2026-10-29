@@ -79,8 +79,9 @@ async function driveItems(
 /**
  * Every accessible site as `[display name, id]`, sorted by name.
  *
- * A site with no id or no name is skipped: nothing could address it. Both
- * the display name and the internal name are cached for resolution.
+ * A site with no id or no name is skipped: nothing could address it.
+ * Unscoped paths use only the listed name. Internal names also resolve a
+ * configured site when the mount is scoped to one document library.
  *
  * Args:
  *   accessor: the mount's accessor.
@@ -95,7 +96,8 @@ export async function siteEntries(accessor: SharePointAccessor): Promise<[string
     if (id === '' || display === '') continue
     entries.push([display, id])
     cache.set(display, id)
-    if (name !== '') cache.set(name, id)
+    if (name !== '' && accessor.config.site !== null && accessor.config.drive !== null)
+      cache.set(name, id)
   }
   return entries.sort((left, right) => compareCodePoints(left[0], right[0]))
 }

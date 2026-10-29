@@ -24,5 +24,11 @@ export async function rename(
   dst: PathSpec,
 ): Promise<void> {
   const config = accessor.config
-  await renameReplace(config, driveLoc(config, src.vfsPath), driveLoc(config, dst.vfsPath))
+  await renameReplace(
+    config,
+    driveLoc(config, src.vfsPath),
+    driveLoc(config, dst.vfsPath),
+    src.virtual,
+    dst.virtual,
+  )
 }

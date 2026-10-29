@@ -37,5 +37,7 @@ export async function copy(
     config,
     driveLoc(config, srcResolved, src.vfsPath),
     driveLoc(config, dstResolved, dst.vfsPath),
+    src.virtual,
+    dst.virtual,
   )
 }
