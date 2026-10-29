@@ -20,6 +20,7 @@ import pytest
 from mirage import Mount, MountMode, PathSpec, Workspace
 from mirage.vfs.dropbox import DropboxConfig, DropboxVFS
 from mirage.vfs.registry import build_vfs
+from tests.fixtures import dropbox_api
 from tests.fixtures.dropbox_api import FakeDropbox, serve
 
 
@@ -108,13 +109,18 @@ async def test_a_file_created_after_the_listing_is_found(line, after):
     "setup, line, code, routes",
     [
         ("", "cat /dbx/missing", 1, ["get_metadata", "list_folder"]),
-        ("", "cat /dbx/f* /dbx/missing", 1, ["list_folder", "download"]),
+        (
+            "",
+            "cat /dbx/f* /dbx/missing",
+            1,
+            ["list_folder", "get_metadata", "download"],
+        ),
         ("ls /dbx", "cat /dbx/missing", 1, ["get_metadata"]),
         (
             "",
             "touch /dbx/a /dbx/b /dbx/c",
             0,
-            ["get_metadata", "upload"] * 3,
+            ["get_metadata", "get_metadata", "upload"] * 3,
         ),
     ],
     ids=[
@@ -162,7 +168,9 @@ async def test_glob_append_preserves_existing_target_and_sibling():
     assert [route for route, _ in dbx.log if route != "token"] == [
         "list_folder",
         "list_folder",
+        "get_metadata",
         "download",
+        "get_metadata",
         "upload",
     ]
 
@@ -184,23 +192,80 @@ async def test_a_miss_outside_a_command_always_asks_dropbox():
 
 
 @pytest.mark.asyncio
-async def test_truncate_with_no_row_keeps_the_file_dropbox_resolves():
-    # Dropbox matches a path without case: with N stored and no row for n,
-    # truncate reads N's bytes and cuts them, where calling it absent
-    # would upload zeros over N.
+async def test_truncate_with_no_row_refuses_a_case_alias():
     vfs = make_vfs()
-    result = json.dumps({".tag": "file", "name": "N", "content_hash": "h"})
-    write = AsyncMock()
+    upload = AsyncMock()
+    download = AsyncMock()
     with (
         patch(
-            "mirage.core.dropbox.read.dropbox_download",
-            new_callable=AsyncMock,
-            return_value=(b"abcdef", result),
+            "mirage.core.dropbox.paths.lookup",
+            new=AsyncMock(return_value={".tag": "file", "name": "N"}),
         ),
-        patch("mirage.core.dropbox.write.dropbox_upload", write),
+        patch("mirage.core.dropbox.read.dropbox_download", download),
+        patch("mirage.core.dropbox.write.dropbox_upload", upload),
     ):
-        await vfs.truncate(
-            PathSpec(virtual="/n", directory="/", vfs_path="n"), 4
+        with pytest.raises(FileNotFoundError):
+            await vfs.truncate(
+                PathSpec(virtual="/n", directory="/", vfs_path="n"), 4
+            )
+    upload.assert_not_awaited()
+    download.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_hidden_case_aliases_are_refused_over_a_folding_service(
+    monkeypatch,
+):
+    original = dropbox_api._norm
+
+    def folded(path):
+        return original(path).lower()
+
+    monkeypatch.setattr(dropbox_api, "_norm", folded)
+    with serve(
+        FakeDropbox(
+            files={
+                "secret.txt": b"secret",
+                "vault/private.txt": b"private",
+                "f": b"public",
+            }
         )
-    assert write.await_args is not None
-    assert write.await_args.args[2] == b"abcd"
+    ) as dbx:
+        ws = _workspace(dbx)
+        try:
+            assert (
+                await ws.shell("cat /dbx/secret.txt /dbx/vault/private.txt")
+            ).exit_code == 0
+            ws.create_session(
+                "hidden",
+                profile={"paths": {"hide": ["/dbx/secret.txt", "/dbx/vault"]}},
+            )
+            dbx.log.clear()
+            for command in [
+                "cat /dbx/SECRET.txt",
+                "cat /dbx/Vault/private.txt",
+                "ls /dbx/Vault",
+                "echo changed > /dbx/SECRET.txt",
+                "echo changed > /dbx/Vault/new.txt",
+                "cp /dbx/f /dbx/SECRET.txt",
+                "mv /dbx/f /dbx/SECRET.txt",
+            ]:
+                result = await ws.shell(command, session_id="hidden")
+                assert result.exit_code != 0, command
+                assert b"secret" not in await result.materialize_stdout(), (
+                    command
+                )
+            assert dbx.read("secret.txt") == b"secret"
+            assert dbx.read("vault/private.txt") == b"private"
+            assert dbx.read("f") == b"public"
+            assert not any(
+                route in ("upload", "delete", "move", "copy")
+                for route, _ in dbx.log
+            )
+            assert not any(
+                route == "download"
+                and path in ("/secret.txt", "/vault/private.txt")
+                for route, path in dbx.log
+            )
+        finally:
+            await ws.close()

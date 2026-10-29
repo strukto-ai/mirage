@@ -64,3 +64,6 @@ async def test_rmdir_sends_no_delete_when_it_refuses():
             await rmdir(_accessor(), PathSpec.from_str_path("/dir"))
         sent = [key[0] for key in m.requests]
     assert "DELETE" not in sent
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

@@ -35,7 +35,9 @@ async def test_write_small_file_puts_content():
 
 
 @pytest.mark.asyncio
-async def test_write_large_file_uses_upload_session(monkeypatch):
+async def test_write_large_file_uses_upload_session(
+    exact_cloud_paths, monkeypatch
+):
     monkeypatch.setattr(drive_ops, "SIMPLE_UPLOAD_MAX", 4)
     monkeypatch.setattr(drive_ops, "UPLOAD_CHUNK", 4)
     ranges = []
@@ -81,7 +83,9 @@ async def test_upload_session_requests_replace(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_upload_resumes_from_next_expected_ranges(monkeypatch):
+async def test_upload_resumes_from_next_expected_ranges(
+    exact_cloud_paths, monkeypatch
+):
     monkeypatch.setattr(drive_ops, "SIMPLE_UPLOAD_MAX", 4)
     monkeypatch.setattr(drive_ops, "UPLOAD_CHUNK", 4)
     ranges = []
@@ -125,3 +129,6 @@ async def test_write_records_the_virtual_path():
     finally:
         scope.close()
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

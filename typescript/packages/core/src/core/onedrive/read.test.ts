@@ -127,3 +127,5 @@ describe('a recorded OneDrive read', () => {
     ])
   })
 })
+
+vi.mock('../msgraph/paths.ts', () => ({ checkItem: vi.fn().mockResolvedValue(null) }))

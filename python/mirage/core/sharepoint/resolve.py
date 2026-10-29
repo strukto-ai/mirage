@@ -89,8 +89,8 @@ async def site_entries(accessor: SharePointAccessor) -> list[tuple[str, str]]:
     """Every accessible site as (display name, id), sorted by name.
 
     A site with no id or no name is skipped: nothing could address it.
-    Both the display name and the internal name are cached for
-    resolution.
+    Unscoped paths use only the listed name. Internal names also resolve
+    a configured site when the mount is scoped to one document library.
 
     Args:
         accessor (SharePointAccessor): the mount's accessor.
@@ -105,7 +105,11 @@ async def site_entries(accessor: SharePointAccessor) -> list[tuple[str, str]]:
             continue
         entries.append((display, site_id))
         cache[display] = site_id
-        if name:
+        if (
+            name
+            and accessor.config.site is not None
+            and accessor.config.drive is not None
+        ):
             cache[name] = site_id
     return sorted(entries, key=lambda entry: entry[0])
 

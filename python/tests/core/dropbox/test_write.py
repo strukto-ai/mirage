@@ -62,7 +62,9 @@ def _file_metadata() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_create_only_write_refuses_without_native_support():
+async def test_create_only_write_refuses_without_native_support(
+    exact_cloud_paths,
+):
     accessor = make_accessor()
     path = PathSpec.from_str_path("/new.txt")
     with (
@@ -78,7 +80,9 @@ async def test_create_only_write_refuses_without_native_support():
 
 
 @pytest.mark.asyncio
-async def test_explicit_replacement_uses_its_condition_after_preparing_stream():
+async def test_explicit_replacement_uses_its_condition_after_preparing_stream(
+    exact_cloud_paths,
+):
     accessor = make_accessor()
     path = PathSpec.from_str_path("/note.txt")
     metadata = {
@@ -198,3 +202,6 @@ async def test_write_records_the_reply_token(reply, token):
     # "h5" is a token no local hash produces.
     rows = await _write_recorded(reply)
     assert rows == [("write", "/note.txt", 5, token, None)]
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

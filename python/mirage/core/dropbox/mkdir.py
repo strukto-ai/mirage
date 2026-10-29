@@ -15,7 +15,7 @@
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.api import create_folder, get_metadata
 from mirage.core.dropbox.client import DropboxApiError
-from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.errors.fs import eexist, enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -48,6 +48,7 @@ async def mkdir(
         path (PathSpec): folder to create.
         parents (bool): mkdir -p semantics.
     """
+    await check_path(accessor, path)
     api_path = dropbox_path_of(accessor, path)
     # The mount root always exists (the API rejects the empty path).
     if api_path == accessor.root_path:

@@ -48,7 +48,9 @@ async def test_mkdir_creates_when_parent_exists():
 
 
 @pytest.mark.asyncio
-async def test_mkdir_reads_a_conflict_on_the_create_as_eexist():
+async def test_mkdir_reads_a_conflict_on_the_create_as_eexist(
+    exact_cloud_paths,
+):
     conflict = DropboxApiError("conflict", 409, "path/conflict/folder/...")
     with patch(
         "mirage.core.dropbox.mkdir.get_metadata", new_callable=AsyncMock
@@ -92,3 +94,6 @@ async def test_mkdir_missing_parent_raises_enoent():
             with pytest.raises(FileNotFoundError):
                 await mkdir(make_accessor(), PathSpec.from_str_path("/a/b"))
     created.assert_not_awaited()
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

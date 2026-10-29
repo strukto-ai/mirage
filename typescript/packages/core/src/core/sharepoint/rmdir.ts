@@ -39,6 +39,6 @@ export async function rmdir(accessor: SharePointAccessor, path: PathSpec): Promi
   const resolved = await resolve(accessor, path)
   if (resolved.driveId === null || resolved.itemPath === null) return
   const loc = driveLoc(accessor.config, resolved, path.vfsPath)
-  if (!(await driveRootEmpty(accessor.config, loc))) throw enotempty(path)
+  if (!(await driveRootEmpty(accessor.config, loc, path.virtual))) throw enotempty(path)
   await graphDelete(accessor.config, loc.item())
 }

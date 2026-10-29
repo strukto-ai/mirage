@@ -18,7 +18,7 @@ import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { movePath } from './api.ts'
 import { replaceOnto } from './copy.ts'
-import { dropboxPathOf } from './paths.ts'
+import { checkPath, dropboxPathOf } from './paths.ts'
 
 // move_v2 rejects an existing destination, but rename(2) replaces one:
 // a file outright, and a directory when it is empty. So a conflict
@@ -31,6 +31,8 @@ export async function rename(
   src: PathSpec,
   dst: PathSpec,
 ): Promise<void> {
+  await checkPath(accessor, src)
+  await checkPath(accessor, dst)
   const from = dropboxPathOf(accessor, src)
   const to = dropboxPathOf(accessor, dst)
   const tm = accessor.tokenManager

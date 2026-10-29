@@ -38,7 +38,7 @@ from mirage.core.dropbox.constants import (
     TAKEN_BY_FOLDER,
 )
 from mirage.core.dropbox.fingerprint import live_of
-from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.errors.fs import enoent
 from mirage.errors.types import StaleWriteError
 from mirage.observe.context import lift_lost, lost_count, record, start_op
@@ -136,6 +136,8 @@ async def copy(
         src (PathSpec): source path.
         dst (PathSpec): destination path.
     """
+    await check_path(accessor, src)
+    await check_path(accessor, dst)
     from_path = dropbox_path_of(accessor, src)
     to_path = dropbox_path_of(accessor, dst)
     tm = accessor.token_manager
@@ -166,6 +168,8 @@ async def dir_copy(
         src (PathSpec): the folder.
         dst (PathSpec): the copy.
     """
+    await check_path(accessor, src)
+    await check_path(accessor, dst)
     tm = accessor.token_manager
     upto = lost_count()
     timer = start_op()

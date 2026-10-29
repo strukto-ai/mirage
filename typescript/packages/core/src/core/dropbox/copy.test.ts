@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type * as PathsModule from './paths.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ApiModule from './api.ts'
 
@@ -37,3 +38,8 @@ describe('dropbox dirCopy', () => {
     expect(vi.mocked(api.copyPath).mock.calls.at(-1)?.slice(1)).toEqual(['/src', '/dst'])
   })
 })
+
+vi.mock('./paths.ts', async (original) => ({
+  ...(await original<typeof PathsModule>()),
+  checkPath: vi.fn().mockResolvedValue(null),
+}))

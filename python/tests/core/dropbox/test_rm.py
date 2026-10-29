@@ -51,3 +51,6 @@ async def test_rm_r_missing_raises_enoent():
     ):
         with pytest.raises(FileNotFoundError):
             await rm_r(make_accessor(), PathSpec.from_str_path("/ghost"))
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

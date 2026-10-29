@@ -139,7 +139,9 @@ async def test_copy_rejects_non_object_monitor_response():
 
 
 @pytest.mark.asyncio
-async def test_copy_file_conflict_deletes_destination_and_retries():
+async def test_copy_file_conflict_deletes_destination_and_retries(
+    exact_cloud_paths,
+):
     monitor = "https://monitor.example/op/789"
     retry_monitor = "https://monitor.example/op/789-retry"
     with aioresponses() as m:
@@ -299,3 +301,6 @@ async def test_truncate_shrinks_content():
     # the old bytes have to come from the item's own download.
     assert calls == [("GET", item), ("GET", download), ("PUT", content)]
     assert captured["body"] == b"hel"
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

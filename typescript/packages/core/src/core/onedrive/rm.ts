@@ -12,13 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { checkItem } from '../msgraph/paths.ts'
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 
 import type { PathSpec } from '../../types.ts'
 import { graphDelete } from '../msgraph/client.ts'
-import { itemUrl } from './client.ts'
+import { driveLoc, itemUrl } from './client.ts'
 
 export async function rmR(accessor: OneDriveAccessor, path: PathSpec): Promise<void> {
+  await checkItem(accessor.config, driveLoc(accessor.config, path.vfsPath), path.virtual)
   if (path.vfsPath === '') return
   await graphDelete(accessor.config, itemUrl(accessor.config, path.vfsPath))
 }

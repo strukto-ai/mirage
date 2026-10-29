@@ -61,7 +61,9 @@ async def test_rename_same_parent_omits_parent_reference():
 
 
 @pytest.mark.asyncio
-async def test_rename_conflict_deletes_file_destination_and_retries():
+async def test_rename_conflict_deletes_file_destination_and_retries(
+    exact_cloud_paths,
+):
     with aioresponses() as m:
         m.patch(_DRIVE + "/root:/a.txt", status=409, payload=_CONFLICT)
         m.get(
@@ -109,7 +111,9 @@ async def test_rename_conflict_keeps_error_for_nonempty_dir():
         ),
     ],
 )
-async def test_rename_names_the_side_that_does_not_resolve(src, dst, named):
+async def test_rename_names_the_side_that_does_not_resolve(
+    exact_cloud_paths, src, dst, named
+):
     with aioresponses() as m:
         m.get(
             re.compile(r".*/sites\?.*"),
@@ -129,3 +133,6 @@ async def test_rename_names_the_side_that_does_not_resolve(src, dst, named):
                 ),
             )
     assert exc.value.filename == named
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

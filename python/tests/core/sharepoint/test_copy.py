@@ -75,7 +75,9 @@ async def test_copy_raises_when_monitor_reports_failed():
 
 
 @pytest.mark.asyncio
-async def test_copy_file_conflict_deletes_destination_and_retries():
+async def test_copy_file_conflict_deletes_destination_and_retries(
+    exact_cloud_paths,
+):
     monitor = "https://monitor.example/sp/1"
     with aioresponses() as m:
         m.post(
@@ -162,7 +164,9 @@ async def test_copy_dir_conflict_merges_per_child():
         ),
     ],
 )
-async def test_copy_names_the_side_that_does_not_resolve(src, dst, named):
+async def test_copy_names_the_side_that_does_not_resolve(
+    exact_cloud_paths, src, dst, named
+):
     with aioresponses() as m:
         m.get(
             re.compile(r".*/sites\?.*"),
@@ -182,3 +186,6 @@ async def test_copy_names_the_side_that_does_not_resolve(src, dst, named):
                 ),
             )
     assert exc.value.filename == named
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

@@ -92,3 +92,6 @@ async def test_recorded_stream_names_the_virtual_path():
         scope.close()
     assert b"".join(chunks) == b"bytes"
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

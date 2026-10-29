@@ -134,3 +134,5 @@ describe('OneDrive mkdir names a refusal', () => {
     })
   })
 })
+
+vi.mock('../msgraph/paths.ts', () => ({ checkItem: vi.fn().mockResolvedValue(null) }))

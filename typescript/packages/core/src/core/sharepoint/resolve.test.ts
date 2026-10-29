@@ -45,12 +45,13 @@ describe('SharePoint resolution', () => {
   it.each([
     ['', {}, { level: 'root' }],
     ['Team', {}, { level: 'site', siteId: 'site-id' }],
-    ['team', {}, { level: 'site', siteId: 'site-id' }],
+    ['team', {}, { level: 'site', siteId: null }],
     ['Team/Documents', {}, { level: 'drive', driveId: 'drive-id', itemPath: null }],
     ['Team/Documents/a/b.txt', {}, { level: 'item', itemPath: 'a/b.txt' }],
     ['Nope/Documents', {}, { level: 'site', siteId: null }],
     ['Team/Nope', {}, { level: 'drive', siteId: 'site-id', driveId: null }],
     ['', { site: 'Team', drive: 'Documents' }, { level: 'drive', driveId: 'drive-id' }],
+    ['', { site: 'team', drive: 'Documents' }, { level: 'drive', driveId: 'drive-id' }],
     [
       '2026/q1.txt',
       { site: 'Team', drive: 'Documents' },
@@ -85,9 +86,59 @@ describe('SharePoint resolution', () => {
     const fetchMock = graph([TEAM])
     const sp = accessor()
     await resolve(sp, PathSpec.fromStrPath('/sp/Team/Documents/a', 'Team/Documents/a'))
-    await resolve(sp, PathSpec.fromStrPath('/sp/team/Documents/b', 'team/Documents/b'))
+    await resolve(sp, PathSpec.fromStrPath('/sp/Team/Documents/b', 'Team/Documents/b'))
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
+})
+
+it.each(['team', 'internal'])(
+  'refuses unlisted site name %s for fresh and warmed unscoped accessors',
+  async (internal) => {
+    for (const config of [{}, { site: internal }, { drive: 'Documents' }]) {
+      for (const warm of [false, true]) {
+        graph([{ ...TEAM, name: internal }])
+        const sp = accessor(config)
+        if (warm) await siteEntries(sp)
+        expect(
+          await resolve(
+            sp,
+            PathSpec.fromStrPath(
+              `/sp/${internal}/Documents/secret.txt`,
+              `${internal}/Documents/secret.txt`,
+            ),
+          ),
+        ).toMatchObject({ level: 'site', siteId: null })
+      }
+    }
+  },
+)
+
+it('keeps internal names from replacing another listed site', async () => {
+  graph([{ id: 'other-site', displayName: 'team', name: 'other' }, TEAM])
+  expect(await resolve(accessor(), PathSpec.fromStrPath('/sp/team', 'team'))).toMatchObject({
+    siteId: 'other-site',
+  })
+})
+
+it('uses the internal name when that is the listed name', async () => {
+  graph([{ id: 'site-id', name: 'team' }])
+  const sp = accessor()
+  expect(await siteEntries(sp)).toEqual([['team', 'site-id']])
+  expect(await resolve(sp, PathSpec.fromStrPath('/sp/team', 'team'))).toMatchObject({
+    siteId: 'site-id',
+  })
+})
+
+it('keeps configured internal-name scope with a folder prefix cached', async () => {
+  const fetchMock = graph([TEAM])
+  const sp = accessor({ site: 'team', drive: 'Documents', keyPrefix: 'Reports' })
+  for (const name of ['a', 'b']) {
+    expect(await resolve(sp, PathSpec.fromStrPath(`/sp/${name}`, name))).toMatchObject({
+      driveId: 'drive-id',
+      itemPath: `Reports/${name}`,
+    })
+  }
+  expect(fetchMock).toHaveBeenCalledTimes(2)
 })
 
 describe('SharePoint site entries', () => {

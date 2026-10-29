@@ -18,7 +18,7 @@ import { mountedPath } from '../../utils/key_prefix.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { searchFiles } from './api.ts'
 import { DropboxApiError } from './client.ts'
-import { dropboxPathOf } from './paths.ts'
+import { checkPath, dropboxPathOf } from './paths.ts'
 
 /**
  * The files under `under` Dropbox search returns. Hits are
@@ -42,6 +42,7 @@ export async function filesContaining(
   const root = accessor.rootPath
   const found: PathSpec[] = []
   for (const p of under) {
+    await checkPath(accessor, p)
     const scopeApi = dropboxPathOf(accessor, p)
     let results: [string, string][]
     try {

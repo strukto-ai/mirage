@@ -87,6 +87,35 @@ const ROWS: [string, boolean, string][] = [
 ]
 
 describe('sharepoint under read: fresh', () => {
+  it.each([false, true])(
+    'keeps hidden sites inaccessible by internal name (warm=%s)',
+    async (warm) => {
+      const graph = await graphOf(OLD)
+      const w = ws(await vfsOf(graph, false))
+      try {
+        if (warm) expect(await out(w, `cat ${UNSCOPED}`)).toBe(DEC.decode(OLD))
+        w.createSession('hidden', { profile: { paths: { hide: [`/m/${SITE_NAME}`] } } })
+        const token = graph.ctag(DRIVE_ID, 'a.txt')
+        graph.log.length = 0
+        const alias = `/m/${SITE_NAME.toLowerCase()}/${DRIVE_NAME}`
+        for (const command of [`cat ${alias}/a.txt`, `echo changed > ${alias}/a.txt`]) {
+          const result = await w.shell(command, { sessionId: 'hidden' })
+          expect(result.exitCode, command).not.toBe(0)
+          expect(DEC.decode(result.stdout), command).not.toContain(DEC.decode(OLD))
+        }
+        const listing = await w.shell(`ls ${alias}`, { sessionId: 'hidden' })
+        expect(DEC.decode(listing.stdout)).toBe('')
+        expect(graph.ctag(DRIVE_ID, 'a.txt')).toBe(token)
+        expect(graph.fetches()).toBe(0)
+        expect(graph.count('children')).toBe(0)
+        expect(graph.count('drives')).toBe(0)
+        expect(await out(w, `cat ${UNSCOPED}`)).toBe(DEC.decode(OLD))
+      } finally {
+        await w.close()
+      }
+    },
+  )
+
   it.each(ROWS)(
     'refetches a write between the token and the bytes (%s)',
     async (_id, scoped, template) => {

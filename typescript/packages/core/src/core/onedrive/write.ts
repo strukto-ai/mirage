@@ -32,6 +32,7 @@ export async function write(
     driveLoc(accessor.config, path.vfsPath),
     data,
     signal,
+    path.virtual,
   )
   record('write', path.virtual, 'onedrive', size, timer)
 }

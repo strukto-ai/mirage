@@ -185,6 +185,117 @@
         "stdout": "/data/sessvis/pub.txt /data/sessvis/*/*\n/data/sessvis/pub.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "vis_case_alias_hidden_leaf",
+      "seq": 921018,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "narrowed",
+      "command": "cat /data/sessvis/NOTE.KEY",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /data/sessvis/NOTE.KEY: No such file or directory\n"
+      }
+    },
+    {
+      "id": "vis_case_alias_hidden_parent",
+      "seq": 921019,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "narrowed",
+      "command": "cat /data/sessvis/Vault/token.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /data/sessvis/Vault/token.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "vis_case_alias_list_parent",
+      "seq": 921020,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "narrowed",
+      "command": "ls /data/sessvis/Vault",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/data/sessvis/Vault': No such file or directory\n"
+      }
+    },
+    {
+      "id": "vis_case_alias_new_child",
+      "seq": 921021,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "narrowed",
+      "command": "echo changed > /data/sessvis/Vault/new.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/data/sessvis/Vault/new.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "vis_case_alias_copy_destination",
+      "seq": 921022,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "narrowed",
+      "command": "cp /data/sessvis/pub.txt /data/sessvis/Vault/token.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot create regular file '/data/sessvis/Vault/token.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "vis_case_alias_redirect_does_not_overwrite",
+      "seq": 921023,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "session": "narrowed",
+      "command": "echo changed 2>/dev/null > /data/sessvis/NOTE.KEY; :",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vis_case_alias_preserves_hidden_content",
+      "seq": 921024,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "cat /data/sessvis/note.key /data/sessvis/vault/token.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "keyval\ntop-secret\n",
+        "stderr": ""
+      }
     }
   ]
 }

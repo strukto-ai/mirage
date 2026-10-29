@@ -12,8 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Dirent } from 'node:fs'
-import { constants, lstat, open, realpath, readdir, type FileHandle } from 'node:fs/promises'
+import type { Dirent, Stats } from 'node:fs'
+import {
+  constants,
+  lstat,
+  open,
+  opendir,
+  readdir,
+  realpath,
+  type FileHandle,
+} from 'node:fs/promises'
 import path from 'node:path'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
@@ -35,15 +43,38 @@ export function resolveSafe(root: string, virtual: string): string {
   return resolved
 }
 
-// Null when realpath fails. That happens alike for a missing component, a
-// dangling link and a loop, so resolveInside's walk, which tells them apart,
-// is what answers.
-async function realOrNull(p: string): Promise<string | null> {
-  try {
-    return await realpath(p)
-  } catch {
-    return null
+async function nativeRealpath(file: string): Promise<string> {
+  return realpath(file)
+}
+
+/** Prove a fresh native name or inspect the parent's actual names; no name cache. */
+async function exactName(parent: string, part: string, info: Stats): Promise<boolean> {
+  const index = part.search(/[A-Za-z]/)
+  if (['darwin', 'win32'].includes(process.platform) && index !== -1) {
+    const char = part[index] ?? ''
+    const flipped = char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase()
+    const alternate = path.join(parent, part.slice(0, index) + flipped + part.slice(index + 1))
+    try {
+      const alias = await lstat(alternate)
+      if (!alias.isSymbolicLink() && alias.dev === info.dev && alias.ino === info.ino) {
+        const canonical = await nativeRealpath(path.join(parent, part))
+        if (path.basename(canonical) === part && (await nativeRealpath(alternate)) === canonical) {
+          const listing = await opendir(parent, { bufferSize: 1 })
+          try {
+            await listing.read()
+          } finally {
+            await listing.close()
+          }
+          return true
+        }
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'EACCES')
+        console.debug('Native disk spelling proof unavailable:', code)
+    }
   }
+  return (await readdir(parent)).includes(part)
 }
 
 /**
@@ -53,6 +84,8 @@ async function realOrNull(p: string): Promise<string | null> {
  * spelled-wise read or write wherever the link points on the host, and
  * `readdir` leaves it out so every walk agrees. Components past the first
  * absent one are left to the op, which answers its own ENOENT or creates.
+ * Fresh native proofs avoid sibling scans where supported; other names require
+ * listing. Parents remain readable on both paths for uniform permissions.
  * Mirrors Python's resolve_inside.
  *
  * It answers for the tree as it stands when called. The mount's own writers
@@ -73,28 +106,22 @@ export async function resolveInside(
   const full = resolveSafe(root, virtual)
   const base = path.resolve(root)
   if (full === base) return full
-  // A realpath or two instead of an lstat per component: a path that is its
-  // own real location crosses no link at all, and one whose real location is
-  // the root's plus the same relative path crosses none below the root.
-  // Anything else (a link, a missing component, a case the filesystem folds)
-  // is decided by the walk below, which reports its own errors.
-  const real = await realOrNull(full)
-  if (real === full) return full
-  const realBase = await realOrNull(base)
-  if (realBase !== null && real === path.join(realBase, path.relative(base, full))) return full
   let at = base
   for (const part of path.relative(at, full).split(path.sep)) {
     if (part === '') break
-    at = path.join(at, part)
+    const parent = at
+    at = path.join(parent, part)
     let info
+    let exact
     try {
       info = await lstat(at)
+      exact = info.isSymbolicLink() ? false : await exactName(parent, part, info)
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code
       if (code === 'ENOENT' || code === 'ENOTDIR') return full
       throw diskError(err, spec)
     }
-    if (info.isSymbolicLink()) throw enoent(spec)
+    if (!exact || info.isSymbolicLink()) throw enoent(spec)
   }
   return full
 }

@@ -16,15 +16,14 @@ import { stripSlash } from '../../utils/slash.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { DropboxApiError } from './client.ts'
-import { listFolder, lookup, type DropboxEntry } from './api.ts'
-import { dropboxPathOf, spelledOtherwise } from './paths.ts'
+import { listFolder, type DropboxEntry } from './api.ts'
+import { checkPath, spelledOtherwise } from './paths.ts'
 import { dropboxPathFromKey, statFromEntry } from './readdir.ts'
 import { enoent } from '../../errors/fs.ts'
 
-// One get_metadata, which matches names case-insensitively where a listing is
-// exact.
+// Each existing component must agree with the exact names of a listing.
 async function statFromApi(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat> {
-  const entry = await lookup(accessor.tokenManager, dropboxPathOf(accessor, path))
+  const entry = await checkPath(accessor, path)
   if (entry === null || spelledOtherwise(path, entry)) throw enoent(path.virtual)
   return statFromEntry(entry)
 }
@@ -47,6 +46,7 @@ export async function tree(
   accessor: DropboxAccessor,
   path: PathSpec,
 ): Promise<Map<string, FileStat> | null> {
+  await checkPath(accessor, path)
   const folder = dropboxPathFromKey(accessor.rootPath, stripSlash(path.mountPath))
   let entries: DropboxEntry[]
   try {

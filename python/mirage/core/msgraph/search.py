@@ -54,7 +54,9 @@ async def files_containing(
     try:
         for directory, loc in scopes:
             files: dict[str, list[PathSpec]] = {}
-            async for virt, item, is_dir in iter_tree(accessor, loc):
+            async for virt, item, is_dir in iter_tree(
+                accessor, loc, directory.virtual
+            ):
                 if is_dir:
                     continue
                 if not item.get("id"):

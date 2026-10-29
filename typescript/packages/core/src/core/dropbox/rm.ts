@@ -22,7 +22,7 @@ import { DropboxApiError } from './client.ts'
 import { deletePath, listFolder, lookup, type DropboxEntry } from './api.ts'
 import { GONE_SUMMARIES, LOST_SUMMARIES } from './constants.ts'
 import { liveOf } from './fingerprint.ts'
-import { dropboxPathOf } from './paths.ts'
+import { checkPath, dropboxPathOf } from './paths.ts'
 import { deleteResolved } from './unlink.ts'
 
 /**
@@ -89,6 +89,7 @@ async function remove(
  * Python's `rm_r`.
  */
 export async function rmR(accessor: DropboxAccessor, path: PathSpec): Promise<void> {
+  await checkPath(accessor, path)
   const apiPath = dropboxPathOf(accessor, path)
   const timer = startOp()
   if (!conditioned(path, 'delete')) {

@@ -131,3 +131,35 @@ async def test_a_metadata_edit_does_not_refetch():
             assert graph.fetches() - before == 0
         finally:
             await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("warm", [False, True])
+async def test_hidden_unscoped_site_has_no_internal_name_alias(warm):
+    with serve(FakeGraph(drives={DRIVE_ID: {"a.txt": OLD}})) as graph:
+        ws = _ws(_vfs(graph, scoped=False))
+        try:
+            if warm:
+                assert await _out(ws, f"cat {UNSCOPED}") == OLD
+            ws.create_session(
+                "hidden", profile={"paths": {"hide": [f"/m/{SITE_NAME}"]}}
+            )
+            token = graph.ctag(DRIVE_ID, "a.txt")
+            graph.log.clear()
+            alias = f"/m/{SITE_NAME.lower()}/{DRIVE_NAME}"
+            for command in [
+                f"cat {alias}/a.txt",
+                f"echo changed > {alias}/a.txt",
+            ]:
+                result = await ws.shell(command, session_id="hidden")
+                assert result.exit_code != 0, command
+                assert OLD not in await result.materialize_stdout(), command
+            listing = await ws.shell(f"ls {alias}", session_id="hidden")
+            assert await listing.materialize_stdout() == b""
+            assert graph.ctag(DRIVE_ID, "a.txt") == token
+            assert graph.fetches() == 0
+            assert graph.count("children") == 0
+            assert graph.count("drives") == 0
+            assert await _out(ws, f"cat {UNSCOPED}") == OLD
+        finally:
+            await ws.close()

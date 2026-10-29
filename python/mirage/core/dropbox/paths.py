@@ -16,6 +16,8 @@ import posixpath
 from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
+from mirage.core.dropbox.api import lookup
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import raw_path_of
 
@@ -48,3 +50,26 @@ def spelled_otherwise(path: PathSpec, entry: dict[str, Any] | None) -> bool:
     return isinstance(named, str) and named != posixpath.basename(
         path.vfs_path.strip("/")
     )
+
+
+async def check_path(
+    accessor: DropboxAccessor, path: PathSpec
+) -> dict[str, Any] | None:
+    """Validate each existing component without accepting service case aliases.
+
+    Args:
+        accessor (DropboxAccessor): backend and configured root.
+        path (PathSpec): operand whose virtual spelling a refusal names.
+    """
+    key = raw_path_of(path).strip("/")
+    at = accessor.root_path
+    entry = None
+    for part in key.split("/") if key else ():
+        at = f"{at}/{part}"
+        entry = await lookup(accessor.token_manager, at)
+        if entry is None:
+            return None
+        named = entry.get("name")
+        if isinstance(named, str) and named != part:
+            raise enoent(path)
+    return entry

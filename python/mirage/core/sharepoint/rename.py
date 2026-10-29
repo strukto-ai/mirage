@@ -28,4 +28,6 @@ async def rename(
         accessor,
         drive_loc(config, src_resolved, src.vfs_path),
         drive_loc(config, dst_resolved, dst.vfs_path),
+        src.virtual,
+        dst.virtual,
     )

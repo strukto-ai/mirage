@@ -83,3 +83,6 @@ async def test_dir_copy_copies_the_tree_in_one_request():
         )
     assert copied.await_count == 1
     assert copied.await_args.args[1:] == ("/Team/src", "/Team/dst")
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

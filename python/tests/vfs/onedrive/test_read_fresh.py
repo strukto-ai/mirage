@@ -26,7 +26,14 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
-from tests.fixtures.msgraph_api import ME, FakeGraph, serve
+from tests.fixtures.msgraph_api import (
+    DRIVE_ID,
+    DRIVE_NAME,
+    ME,
+    SITE_NAME,
+    FakeGraph,
+    serve,
+)
 
 OLD = b"version one\n"
 NEW = b"version two, longer\n"
@@ -150,7 +157,7 @@ async def test_a_pinned_read_gets_that_versions_bytes(pin, expected):
     # A snapshot pin reads the version it names, straight from its content
     # route, even after a rewrite; a version the item never had is absent.
     assert data == expected
-    assert [route for route, _, _ in graph.log] == ["version_content"]
+    assert [route for route, _, _ in graph.log] == ["item", "version_content"]
 
 
 # Measured on the first green run, then pinned. The listing makes every
@@ -312,5 +319,69 @@ async def test_under_fresh_the_next_command_relists_and_cleans_up():
             assert await _out(ws, "ls /m") == b"b.txt\n"
             assert ws.namespace.meta_for("/m/a.txt") is None
             assert not await ws.cache.exists("/m/a.txt")
+        finally:
+            await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["onedrive", "sharepoint"])
+async def test_hidden_case_aliases_are_refused_over_a_folding_service(
+    monkeypatch, provider
+):
+    original = FakeGraph.handle
+
+    async def folded(graph, request):
+        tail = request.match_info["tail"]
+        if "root:/" in tail:
+            base, relative = tail.split("root:/", 1)
+            path, colon, action = relative.partition(":")
+            request.match_info["tail"] = (
+                base + "root:/" + path.lower() + colon + action
+            )
+        return await original(graph, request)
+
+    monkeypatch.setattr(FakeGraph, "handle", folded)
+    drive = ME if provider == "onedrive" else DRIVE_ID
+    with serve(
+        FakeGraph(
+            drives={
+                drive: {
+                    "secret.txt": b"secret",
+                    "vault/private.txt": b"private",
+                }
+            }
+        )
+    ) as graph:
+        config = {"access_token": "t", "graph_base_url": graph.url}
+        if provider == "sharepoint":
+            config.update(site=SITE_NAME, drive=DRIVE_NAME)
+        ws = Workspace({"/m": (build_vfs(provider, config), MountMode.WRITE)})
+        try:
+            assert (
+                await ws.shell("cat /m/secret.txt /m/vault/private.txt")
+            ).exit_code == 0
+            ws.create_session(
+                "hidden",
+                profile={"paths": {"hide": ["/m/secret.txt", "/m/vault"]}},
+            )
+            token = graph.ctag(drive, "secret.txt")
+            graph.log.clear()
+            for command in [
+                "cat /m/SECRET.txt",
+                "cat /m/Vault/private.txt",
+                "ls /m/Vault",
+                "echo changed > /m/SECRET.txt",
+                "echo changed > /m/Vault/new.txt",
+            ]:
+                result = await ws.shell(command, session_id="hidden")
+                assert result.exit_code != 0, command
+                assert b"secret" not in await result.materialize_stdout(), (
+                    command
+                )
+            assert graph.ctag(drive, "secret.txt") == token
+            assert not any(
+                route in ("upload", "download", "content", "version_content")
+                for route, _, _ in graph.log
+            )
         finally:
             await ws.close()

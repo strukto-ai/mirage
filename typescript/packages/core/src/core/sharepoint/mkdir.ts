@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { checkItem } from '../msgraph/paths.ts'
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
 import type { PathSpec } from '../../types.ts'
 import { enotdir, isEexist, isEnoent } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { baseName, createChildFolder, parentPath } from '../msgraph/drive.ts'
 import { itemUrl } from './client.ts'
-import { resolveItem } from './resolve.ts'
+import { driveLoc, resolveItem } from './resolve.ts'
 
 async function createDir(
   accessor: SharePointAccessor,
@@ -107,6 +108,7 @@ export async function mkdir(
 ): Promise<void> {
   if (path.vfsPath === '') return
   const resolved = await resolveItem(accessor, path)
+  await checkItem(accessor.config, driveLoc(accessor.config, resolved, path.vfsPath), path.virtual)
   const driveId = resolved.driveId ?? ''
   const itemPath = resolved.itemPath ?? ''
   if (parents) {

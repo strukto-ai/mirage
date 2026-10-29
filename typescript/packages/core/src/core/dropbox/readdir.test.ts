@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type * as PathsModule from './paths.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ApiModule from './api.ts'
@@ -196,3 +197,8 @@ describe('dropbox readdir', () => {
     expect(out.map((row) => [row.name, row.size])).toEqual([['empty.txt', 0]])
   })
 })
+
+vi.mock('./paths.ts', async (original) => ({
+  ...(await original<typeof PathsModule>()),
+  checkPath: vi.fn().mockResolvedValue(null),
+}))

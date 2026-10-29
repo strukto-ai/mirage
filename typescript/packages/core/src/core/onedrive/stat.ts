@@ -16,7 +16,14 @@ import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { GraphError, graphGet } from '../msgraph/client.ts'
-import { asNumber, batchTree, deltaTree, folderChildCount, statItem } from '../msgraph/drive.ts'
+import {
+  asNumber,
+  batchTree,
+  deltaTree,
+  folderChildCount,
+  statItem,
+  virtualKey,
+} from '../msgraph/drive.ts'
 import { driveBase, driveLoc } from './client.ts'
 
 export async function stat(accessor: OneDriveAccessor, path: PathSpec): Promise<FileStat> {
@@ -62,7 +69,7 @@ export async function tree(
   const config = accessor.config
   const loc = driveLoc(config, path.vfsPath)
   if (limit === undefined && (await driveType(accessor)) === 'personal') {
-    const found = await deltaTree(config, loc)
+    const found = await deltaTree(config, loc, virtualKey(path))
     if (found !== null) return found
   }
   return batchTree(config, loc, path, limit)

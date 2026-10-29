@@ -36,6 +36,8 @@ export async function create(accessor: SharePointAccessor, path: PathSpec): Prom
     accessor.config,
     driveLoc(accessor.config, resolved, path.vfsPath),
     new Uint8Array(),
+    undefined,
+    path.virtual,
   )
   record('create', path.virtual, 'sharepoint', 0, timer)
 }

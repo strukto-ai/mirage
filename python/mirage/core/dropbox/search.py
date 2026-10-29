@@ -17,7 +17,7 @@ import logging
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.api import search_files
 from mirage.core.dropbox.client import DropboxApiError
-from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
 
@@ -47,6 +47,7 @@ async def files_containing(
     root = accessor.root_path
     found: list[PathSpec] = []
     for p in under:
+        await check_path(accessor, p)
         scope_api = dropbox_path_of(accessor, p)
         try:
             results, truncated = await search_files(

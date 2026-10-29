@@ -59,7 +59,9 @@ async def test_hits_are_the_walked_files_graph_names():
 
 
 @pytest.mark.asyncio
-async def test_the_text_is_quoted_and_searched_from_the_scope():
+async def test_the_text_is_quoted_and_searched_from_the_scope(
+    exact_cloud_paths,
+):
     with aioresponses() as m:
         m.get(_BASE + "/root:/Docs:/children", payload=DOCS)
         m.get(_SEARCH, payload={"value": [{"id": "3"}]})
@@ -92,8 +94,13 @@ async def test_a_file_listed_without_an_id_answers_none():
         ({"exception": TimeoutError()}, {"payload": {"value": [{"id": "3"}]}}),
     ],
 )
-async def test_a_search_that_cannot_answer_answers_none(listing, search):
+async def test_a_search_that_cannot_answer_answers_none(
+    exact_cloud_paths, listing, search
+):
     with aioresponses() as m:
         m.get(_BASE + "/root:/Docs:/children", **listing)
         m.get(_SEARCH, **search)
         assert await ask("wombat", "Docs") is None
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

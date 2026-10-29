@@ -69,3 +69,6 @@ def test_drift_raises_when_file_missing():
             asyncio.run(
                 check_drift(_mount_for(), "/od/a.txt", "snapshot-ctag")
             )
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

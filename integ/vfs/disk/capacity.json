@@ -11,22 +11,22 @@
       "id": "disk_capacity_refused_copy_keeps_existing_destination",
       "seq": 2,
       "targets": ["disk-capacity-permissions"],
-      "command": "cp /data/source/known /data/destination; echo $?; cat /data/destination; echo; cat /data/source/known; echo",
+      "command": "cp /data/source/known /data/destination; echo $?; cat /data/destination; echo",
       "expect": {
         "exit": 0,
-        "stdout": "1\nZ\nabcde\n",
-        "stderr": "cp: cannot create regular file '/data/destination': Disk quota exceeded\n"
+        "stdout": "1\nZ\n",
+        "stderr": "cp: cannot stat '/data/source/known': Permission denied\n"
       }
     },
     {
       "id": "disk_capacity_refused_move_keeps_unlisted_source",
       "seq": 3,
       "targets": ["disk-capacity-permissions"],
-      "command": "mv /data/source/known /data/moved; echo $?; cat /data/source/known; echo",
+      "command": "mv /data/source/known /data/moved; echo $?; chmod 755 /data/source; cat /data/source/known; echo; rm /data/source/known",
       "expect": {
         "exit": 0,
         "stdout": "1\nabcde\n",
-        "stderr": "mv: cannot move '/data/source/known' to '/data/moved': Disk quota exceeded\n"
+        "stderr": "mv: cannot stat '/data/source/known': Permission denied\n"
       }
     },
     {

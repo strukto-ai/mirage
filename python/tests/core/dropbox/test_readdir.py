@@ -217,3 +217,6 @@ async def test_readdir_on_a_file_is_enotdir_without_walking():
                     ),
                 )
     assert seen == ["/docs/a.txt"]
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

@@ -14,6 +14,7 @@
 
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.msgraph.client import GraphError, graph_delete
+from mirage.core.msgraph.paths import check_item
 from mirage.core.sharepoint.resolve import drive_loc, resolve_item
 from mirage.errors.fs import enoent
 from mirage.types import PathSpec
@@ -21,6 +22,11 @@ from mirage.types import PathSpec
 
 async def unlink(accessor: SharePointAccessor, path: PathSpec) -> None:
     resolved = await resolve_item(accessor, path)
+    await check_item(
+        accessor,
+        drive_loc(accessor.config, resolved, path.vfs_path),
+        path.virtual,
+    )
     try:
         await graph_delete(
             accessor,

@@ -20,12 +20,13 @@ import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { DropboxApiError } from './client.ts'
 import { deletePath, getMetadata, listFolder } from './api.ts'
 
-import { dropboxPathOf } from './paths.ts'
+import { checkPath, dropboxPathOf } from './paths.ts'
 
 // delete_v2 removes a folder RECURSIVELY; kernel/GNU rmdir must fail
 // ENOTEMPTY on a non-empty dir instead of nuking the subtree (the s3
 // backend once had this exact data-loss hazard — do not regress it).
 export async function rmdir(accessor: DropboxAccessor, path: PathSpec): Promise<void> {
+  await checkPath(accessor, path)
   const apiPath = dropboxPathOf(accessor, path)
   let tag: string
   try {

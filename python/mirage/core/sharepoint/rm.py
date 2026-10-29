@@ -14,6 +14,7 @@
 
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.msgraph.client import graph_delete
+from mirage.core.msgraph.paths import check_item
 from mirage.core.sharepoint.resolve import drive_loc, resolve
 from mirage.types import PathSpec
 
@@ -24,6 +25,11 @@ async def rm_r(accessor: SharePointAccessor, path: PathSpec) -> None:
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None or resolved.item_path is None:
         return
+    await check_item(
+        accessor,
+        drive_loc(accessor.config, resolved, path.vfs_path),
+        path.virtual,
+    )
     await graph_delete(
         accessor, drive_loc(accessor.config, resolved, path.vfs_path).item()
     )

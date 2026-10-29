@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { checkItem } from '../msgraph/paths.ts'
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import type { PathSpec } from '../../types.ts'
 import { enotdir, isEexist, isEnoent } from '../../errors/fs.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { baseName, createChildFolder, parentPath } from '../msgraph/drive.ts'
-import { fullItemUrl, itemUrl } from './client.ts'
+import { driveLoc, fullItemUrl, itemUrl } from './client.ts'
 
 /**
  * Create the mount's `keyPrefix` folders, one level at a time.
@@ -88,6 +89,7 @@ export async function mkdir(
   path: PathSpec,
   parents = false,
 ): Promise<void> {
+  await checkItem(accessor.config, driveLoc(accessor.config, path.vfsPath), path.virtual)
   const key = path.vfsPath
   if (key === '') return
   if (parents) {

@@ -37,6 +37,6 @@ import { driveLoc } from './client.ts'
 export async function rmdir(accessor: OneDriveAccessor, path: PathSpec): Promise<void> {
   if (path.vfsPath === '') return
   const loc = driveLoc(accessor.config, path.vfsPath)
-  if (!(await driveRootEmpty(accessor.config, loc))) throw enotempty(path)
+  if (!(await driveRootEmpty(accessor.config, loc, path.virtual))) throw enotempty(path)
   await graphDelete(accessor.config, loc.item())
 }

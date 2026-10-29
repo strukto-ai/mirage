@@ -890,7 +890,10 @@ describe('conditional writes only Dropbox has', () => {
       routes.push(drive.dropbox.log.slice(before).filter((r) => r !== 'token'))
       drive.put('f', SEED.f ?? '')
     }
-    expect(routes).toEqual([['upload'], ['get_metadata', 'upload']])
+    expect(routes).toEqual([
+      ['get_metadata', 'upload'],
+      ['get_metadata', 'get_metadata', 'upload'],
+    ])
   })
 
   it.each([

@@ -31,6 +31,12 @@ import { driveLoc } from './client.ts'
  */
 export async function create(accessor: OneDriveAccessor, path: PathSpec): Promise<void> {
   const timer = startOp()
-  await writeItem(accessor.config, driveLoc(accessor.config, path.vfsPath), new Uint8Array())
+  await writeItem(
+    accessor.config,
+    driveLoc(accessor.config, path.vfsPath),
+    new Uint8Array(),
+    undefined,
+    path.virtual,
+  )
   record('create', path.virtual, 'onedrive', 0, timer)
 }

@@ -31,6 +31,7 @@ import { windowFor } from '../../utils/ranges.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import type { MsGraphConfigResolved } from './config.ts'
 import { BATCH_LIMIT } from './constants.ts'
+import { checkItem } from './paths.ts'
 import {
   GraphError,
   graphBatch,
@@ -160,7 +161,11 @@ async function copyOnce(
   config: MsGraphConfigResolved,
   src: DriveLoc,
   dst: DriveLoc,
+  srcVirtual?: string,
+  dstVirtual?: string,
 ): Promise<GraphError | null> {
+  await checkItem(config, src, srcVirtual)
+  await checkItem(config, dst, dstVirtual)
   try {
     const monitor = await graphPostMonitor(config, src.item('/copy'), {
       name: baseName(dst.path),
@@ -195,8 +200,10 @@ export async function copyTree(
   config: MsGraphConfigResolved,
   src: DriveLoc,
   dst: DriveLoc,
+  srcVirtual?: string,
+  dstVirtual?: string,
 ): Promise<void> {
-  const conflict = await copyOnce(config, src, dst)
+  const conflict = await copyOnce(config, src, dst, srcVirtual, dstVirtual)
   if (conflict === null) return
   // Status, not just code: `copyOnce` reports a monitor-reported failure
   // as 500 and a thrown conflict as 409, so re-raising `conflict` as it
@@ -214,7 +221,13 @@ export async function copyTree(
     // folders, so recurse per child instead.
     for (const child of await graphList(config, src.item('/children'))) {
       const name = asString(child.name) ?? ''
-      await copyTree(config, src.child(name), dst.child(name))
+      await copyTree(
+        config,
+        src.child(name),
+        dst.child(name),
+        srcVirtual === undefined ? undefined : `${rstripSlash(srcVirtual)}/${name}`,
+        dstVirtual === undefined ? undefined : `${rstripSlash(dstVirtual)}/${name}`,
+      )
     }
     return
   }
@@ -222,7 +235,7 @@ export async function copyTree(
     throw new GraphError(409, conflict.code, conflict.message)
   }
   await graphDelete(config, dst.item())
-  const secondConflict = await copyOnce(config, src, dst)
+  const secondConflict = await copyOnce(config, src, dst, srcVirtual, dstVirtual)
   if (secondConflict !== null) {
     throw new GraphError(500, secondConflict.code, secondConflict.message)
   }
@@ -243,7 +256,11 @@ export async function renameReplace(
   config: MsGraphConfigResolved,
   src: DriveLoc,
   dst: DriveLoc,
+  srcVirtual?: string,
+  dstVirtual?: string,
 ): Promise<MovedItem> {
+  await checkItem(config, src, srcVirtual)
+  await checkItem(config, dst, dstVirtual)
   const body: Record<string, unknown> = { name: baseName(dst.path) }
   if (src.parent() !== dst.parent() || src.drive !== dst.drive) {
     body.parentReference = { path: dst.reference(dst.parent()) }
@@ -376,7 +393,9 @@ export async function writeItem(
   loc: DriveLoc,
   data: ByteSource,
   signal?: AbortSignal,
+  virtual?: string,
 ): Promise<number> {
+  await checkItem(config, loc, virtual)
   let body: Uint8Array
   if (data instanceof Uint8Array) body = data
   else {
@@ -450,9 +469,12 @@ function currentVersionId(versions: Record<string, unknown>[]): string | null {
 async function captureItemMetadata(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
+  virtual: string,
   versions: boolean,
 ): Promise<[string | null, string | null, string | null]> {
-  const item = await graphGet(config, loc.item(), versions ? { $expand: 'versions' } : undefined)
+  const params = versions ? { $expand: 'versions' } : undefined
+  const item =
+    (await checkItem(config, loc, virtual, params)) ?? (await graphGet(config, loc.item(), params))
   const history = Array.isArray(item.versions)
     ? item.versions.filter(
         (value): value is Record<string, unknown> =>
@@ -482,6 +504,7 @@ export async function readItem(
   try {
     let data: Uint8Array
     if (pinned !== null) {
+      await checkItem(config, loc, virtual)
       data = await graphGetBytes(
         config,
         loc.item(`/versions/${encodeURIComponent(pinned)}/content`),
@@ -492,6 +515,7 @@ export async function readItem(
       ;[fingerprint, revision, downloadUrl] = await captureItemMetadata(
         config,
         loc,
+        virtual,
         recordingActive(),
       )
       data =
@@ -519,16 +543,23 @@ export async function* streamItem(
   let auth = true
   try {
     if (pinned !== null) {
+      await checkItem(config, loc, virtual)
       url = loc.item(`/versions/${encodeURIComponent(pinned)}/content`)
       if (rec !== null) rec.revision = pinned
     } else if (rec !== null) {
       let downloadUrl: string | null
-      ;[rec.fingerprint, rec.revision, downloadUrl] = await captureItemMetadata(config, loc, true)
+      ;[rec.fingerprint, rec.revision, downloadUrl] = await captureItemMetadata(
+        config,
+        loc,
+        virtual,
+        true,
+      )
       if (downloadUrl !== null) {
         url = downloadUrl
         auth = false
       }
     }
+    if (pinned === null && rec === null) await checkItem(config, loc, virtual)
     for await (const chunk of graphStream(config, url, auth)) {
       if (rec !== null) rec.bytes += chunk.length
       yield chunk
@@ -544,12 +575,22 @@ export async function* streamItem(
 export async function* iterTree(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
+  virtual?: string,
+): AsyncIterable<[string, Record<string, unknown>, boolean]> {
+  await checkItem(config, loc, virtual)
+  yield* walkTree(config, loc)
+}
+
+/** Walk a checked scope using canonical names returned by Graph. */
+async function* walkTree(
+  config: MsGraphConfigResolved,
+  loc: DriveLoc,
 ): AsyncIterable<[string, Record<string, unknown>, boolean]> {
   for (const child of await graphList(config, loc.item('/children'))) {
     const childLoc = loc.child(asString(child.name) ?? '')
     const folder = isFolder(child)
     yield [childLoc.virtual, child, folder]
-    if (folder) yield* iterTree(config, childLoc)
+    if (folder) yield* walkTree(config, childLoc)
   }
 }
 
@@ -586,10 +627,13 @@ export function parentId(item: { parentReference?: unknown }): string {
 export async function deltaTree(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
+  virtual?: string,
 ): Promise<Map<string, FileStat> | null> {
   let top: Record<string, unknown>
   try {
-    top = await graphGet(config, loc.item(), { $select: 'id,folder' })
+    top =
+      (await checkItem(config, loc, virtual)) ??
+      (await graphGet(config, loc.item(), { $select: 'id,folder' }))
   } catch (err) {
     if (!(err instanceof GraphError) || err.status !== 404) throw err
     console.debug(`graph tree of ${loc.path} left to the walk: ${err.message}`)
@@ -806,7 +850,9 @@ function placed(
 export async function driveRootEmpty(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
+  virtual?: string,
 ): Promise<boolean> {
+  await checkItem(config, loc, virtual)
   const page = await graphGet(config, loc.item('/children'), { $top: 1, $select: 'id' })
   return !(Array.isArray(page.value) && page.value.length > 0)
 }
@@ -849,6 +895,7 @@ export async function readdirItems(
   path: PathSpec,
   limit?: number,
 ): Promise<FileStat[] | DirListing> {
+  await checkItem(config, loc, path.virtual)
   let children: Record<string, unknown>[]
   try {
     children = await graphList(config, loc.item('/children'), undefined, limit)
@@ -879,7 +926,9 @@ export async function statItem(
   path: PathSpec,
 ): Promise<FileStat> {
   try {
-    return entryStat(await graphGet(config, loc.item()))
+    return entryStat(
+      (await checkItem(config, loc, path.virtual)) ?? (await graphGet(config, loc.item())),
+    )
   } catch (error) {
     if (error instanceof GraphError && error.status === 404) throw enoent(path)
     throw error

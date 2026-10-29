@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import ctypes
 import logging
 import os
 import stat
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import BinaryIO
@@ -39,10 +41,76 @@ def open_flags(flags: int, path: str, _mode: int) -> int:
     return os.open(path, flags, 0o666)
 
 
+def native_realpath(path: str) -> str:
+    """Ask the host for a canonical path without Python's POSIX emulation.
+
+    Args:
+        path (str): an existing host path.
+    """
+    if sys.platform != "darwin":
+        return os.path.realpath(path, strict=True)
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.realpath.argtypes = [ctypes.c_char_p, ctypes.c_void_p]
+    libc.realpath.restype = ctypes.c_void_p
+    libc.free.argtypes = [ctypes.c_void_p]
+    libc.free.restype = None
+    resolved = libc.realpath(os.fsencode(path), None)
+    if not resolved:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), path)
+    try:
+        return os.fsdecode(ctypes.string_at(resolved))
+    finally:
+        libc.free(resolved)
+
+
+def exact_name(parent: str, part: str, info: os.stat_result) -> bool:
+    """Prove a fresh native spelling or inspect the parent's actual names.
+
+    Native realpath may preserve its input on some filesystems. Trust it
+    only when a different-case, non-link spelling of the same entry resolves
+    to the identical full path whose leaf has exactly the requested name.
+    No path names or directory versions are cached.
+
+    Args:
+        parent (str): already checked host parent.
+        part (str): requested component.
+        info (os.stat_result): fresh lstat of that component.
+    """
+    index = next(
+        (i for i, c in enumerate(part) if c.isascii() and c.isalpha()), None
+    )
+    if sys.platform in ("darwin", "win32") and index is not None:
+        other = part[:index] + part[index].swapcase() + part[index + 1 :]
+        alternate = os.path.join(parent, other)
+        try:
+            alias = os.lstat(alternate)
+            if not stat.S_ISLNK(alias.st_mode) and os.path.samestat(
+                info, alias
+            ):
+                canonical = native_realpath(os.path.join(parent, part))
+                if (
+                    os.path.basename(canonical) == part
+                    and native_realpath(alternate) == canonical
+                ):
+                    with os.scandir(parent) as entries:
+                        next(entries, None)
+                    return True
+        except OSError:
+            logger.debug(
+                "Native disk spelling proof unavailable", exc_info=True
+            )
+    return part in os.listdir(parent)
+
+
 def resolve_inside_sync(
     root: Path, spec: PathSpec, path: str | None = None
 ) -> Path:
     """Resolve an exact host operand without following links below the root.
+
+    Fresh native spelling proofs avoid scanning siblings where supported.
+    Other names require listing existing parents. Parents must be readable,
+    including on the native fast path, so permission semantics stay uniform.
 
     Missing components are left to the operation, allowing creates. The root
     itself may be an infrastructure symlink. This check is not atomic with
@@ -67,14 +135,20 @@ def resolve_inside_sync(
     for part in full[len(base) :].split(os.sep):
         if not part:
             continue
-        at = os.path.join(at, part)
+        parent = at
+        at = os.path.join(parent, part)
         try:
             info = os.lstat(at)
+            exact = (
+                False
+                if stat.S_ISLNK(info.st_mode)
+                else exact_name(parent, part, info)
+            )
         except (FileNotFoundError, NotADirectoryError):
             return Path(full)
         except OSError as exc:
             raise disk_error(exc, spec.virtual) from exc
-        if stat.S_ISLNK(info.st_mode):
+        if not exact or stat.S_ISLNK(info.st_mode):
             raise enoent(spec)
     return Path(full)
 

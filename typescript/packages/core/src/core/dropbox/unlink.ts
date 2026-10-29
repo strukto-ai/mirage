@@ -20,7 +20,7 @@ import { eisdir, enoent } from '../../errors/fs.ts'
 import { DropboxApiError } from './client.ts'
 import { deletePath, getMetadata, refused, type DropboxEntry } from './api.ts'
 import { liveOf } from './fingerprint.ts'
-import { dropboxPathOf } from './paths.ts'
+import { checkPath, dropboxPathOf } from './paths.ts'
 
 /**
  * Delete a looked-up file, held to the version read, else the one found.
@@ -42,6 +42,7 @@ export async function deleteResolved(
 }
 
 export async function unlink(accessor: DropboxAccessor, path: PathSpec): Promise<void> {
+  await checkPath(accessor, path)
   const apiPath = dropboxPathOf(accessor, path)
   let entry: DropboxEntry
   try {

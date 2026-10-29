@@ -56,7 +56,9 @@ async def test_rename_replaces_existing_destination_file():
 
 
 @pytest.mark.asyncio
-async def test_rename_conflict_replaces_empty_dir_destination():
+async def test_rename_conflict_replaces_empty_dir_destination(
+    exact_cloud_paths,
+):
     conflict = DropboxApiError("conflict", 409, "to/conflict/folder/...")
     with patch(
         "mirage.core.dropbox.rename.move_path",
@@ -134,7 +136,9 @@ async def test_rename_missing_source_raises_enoent():
 
 
 @pytest.mark.asyncio
-async def test_rename_conflict_probe_is_bounded_to_one_entry(dropbox_accessor):
+async def test_rename_conflict_probe_is_bounded_to_one_entry(
+    exact_cloud_paths, dropbox_accessor
+):
     # The conflict probe is bounded, not a full listing: `list_folder`
     # follows every continuation cursor, so asking it with a small page
     # size made one request per child to answer a yes/no.
@@ -154,3 +158,6 @@ async def test_rename_conflict_probe_is_bounded_to_one_entry(dropbox_accessor):
     assert rpc.list_limits == [1]
     assert rpc.list_requests == 1
     assert rpc.deleted == []
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")

@@ -55,3 +55,6 @@ async def test_create_records_the_virtual_path():
     assert [(r.op, r.path) for r in scope.records] == [
         ("create", "/m/m/Documents/k.txt")
     ]
+
+
+pytestmark = pytest.mark.usefixtures("exact_cloud_paths")
