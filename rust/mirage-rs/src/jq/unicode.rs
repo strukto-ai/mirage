@@ -1,6 +1,6 @@
 // Adapted from jq 1.8.2 (MIT). See licenses/third_party/jq.txt.
 
-use std::collections::BTreeMap;
+use std::collections::VecDeque;
 
 use serde::Deserialize;
 
@@ -12,7 +12,8 @@ pub(super) const WORK: usize = 16 * 1024;
 
 #[derive(Default)]
 pub(super) struct Bytes {
-    blocks: BTreeMap<usize, Vec<u8>>,
+    blocks: VecDeque<Vec<u8>>,
+    first: usize,
     base: usize,
     len: usize,
     charge: Charge,
@@ -31,59 +32,98 @@ impl Bytes {
         if at < self.base || at >= self.len {
             return None;
         }
-        self.blocks.get(&(at / BLOCK))?.get(at % BLOCK).copied()
+        self.blocks
+            .get(at / BLOCK - self.first)?
+            .get(at % BLOCK)
+            .copied()
+    }
+
+    /// The bytes from `at` to the end of the block that holds it, empty
+    /// when `at` is not held.
+    pub(super) fn run_at(&self, at: usize) -> &[u8] {
+        if at < self.base || at >= self.len {
+            return &[];
+        }
+        self.blocks
+            .get(at / BLOCK - self.first)
+            .and_then(|block| block.get(at % BLOCK..))
+            .unwrap_or(&[])
     }
 
     pub(super) fn push(&mut self, byte: u8) {
-        self.blocks
-            .entry(self.len / BLOCK)
-            .or_insert_with(|| Vec::with_capacity(BLOCK))
-            .push(byte);
-        self.len += 1;
-        self.charge.set(self.blocks.len() * (BLOCK + 64));
+        self.extend(&[byte]);
     }
 
-    pub(super) fn extend(&mut self, bytes: &[u8]) {
-        for &byte in bytes {
-            self.push(byte);
+    pub(super) fn extend(&mut self, mut bytes: &[u8]) {
+        while !bytes.is_empty() {
+            if self.blocks.is_empty() {
+                self.first = self.len / BLOCK;
+            }
+            if self.len / BLOCK - self.first == self.blocks.len() {
+                self.blocks.push_back(Vec::new());
+                self.recharge();
+            }
+            let block = self.blocks.back_mut().expect("a block to write");
+            let taken = bytes.len().min(BLOCK - self.len % BLOCK);
+            block.extend_from_slice(&bytes[..taken]);
+            self.len += taken;
+            bytes = &bytes[taken..];
         }
     }
 
     pub(super) fn pop(&mut self) -> Option<u8> {
-        let block = self.len.checked_sub(1)? / BLOCK;
-        let value = self.blocks.get_mut(&block)?.pop()?;
+        let value = self.blocks.back_mut()?.pop()?;
         self.len -= 1;
-        if self.blocks.get(&block).is_some_and(Vec::is_empty) {
-            self.blocks.remove(&block);
+        if self.blocks.back().is_some_and(Vec::is_empty) {
+            self.blocks.pop_back();
+            self.recharge();
         }
-        self.charge.set(self.blocks.len() * (BLOCK + 64));
         Some(value)
     }
 
     pub(super) fn release_before(&mut self, at: usize) {
-        while self.base + BLOCK <= at
-            && self
-                .blocks
-                .get(&(self.base / BLOCK))
-                .is_some_and(|b| b.len() == BLOCK)
-        {
-            self.blocks.remove(&(self.base / BLOCK));
+        while self.base + BLOCK <= at && self.blocks.front().is_some_and(|b| b.len() == BLOCK) {
+            self.blocks.pop_front();
+            self.first += 1;
             self.base += BLOCK;
-            self.charge.set(self.blocks.len() * (BLOCK + 64));
+            self.recharge();
         }
     }
 
+    /// Free the first block; whether none is left.
     pub(super) fn discard_block(&mut self) -> bool {
-        if let Some((id, _)) = self.blocks.pop_first() {
-            self.base = ((id + 1) * BLOCK).min(self.len);
+        if self.blocks.pop_front().is_some() {
+            self.base = ((self.first + 1) * BLOCK).min(self.len);
+            self.first += 1;
         }
-        self.charge.set(self.blocks.len() * (BLOCK + 64));
+        self.recharge();
         self.blocks.is_empty()
     }
 
+    /// Empty it for the next token, keeping its one block's allocation;
+    /// false, leaving it as it is, when it holds more than one block.
+    pub(super) fn clear_one(&mut self) -> bool {
+        if self.blocks.len() > 1 {
+            return false;
+        }
+        if let Some(block) = self.blocks.front_mut() {
+            block.clear();
+        }
+        self.first = 0;
+        self.base = 0;
+        self.len = 0;
+        true
+    }
+
+    fn recharge(&mut self) {
+        self.charge.set(self.blocks.len() * (BLOCK + 64));
+    }
+
+    /// The blocks that hold bytes; an emptied buffer kept for reuse holds
+    /// none.
     #[cfg(test)]
     pub(super) fn block_count(&self) -> usize {
-        self.blocks.len()
+        self.blocks.iter().filter(|block| !block.is_empty()).count()
     }
 }
 
