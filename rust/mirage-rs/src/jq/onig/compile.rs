@@ -264,6 +264,11 @@ fn mark_calls(node: &mut Node, groups: usize) -> Result<(Vec<bool>, Vec<bool>), 
             shared: &shared,
             cache: (0..=groups).map(|_| [None, None]).collect(),
             reads: Vec::new(),
+            paths: vec![Active {
+                group: g,
+                parent: None,
+            }],
+            path: 0,
         };
         let found = walk.infinite(body, true);
         on_path[g] = false;
@@ -400,12 +405,25 @@ struct Walk<'a, 'm> {
     on_path: &'m mut [bool],
     shared: &'a [bool],
     cache: Vec<[Option<Checked>; 2]>,
-    reads: Vec<usize>,
+    reads: Vec<Consulted>,
+    paths: Vec<Active>,
+    path: usize,
+}
+
+struct Active {
+    group: usize,
+    parent: Option<usize>,
+}
+
+enum Consulted {
+    Group(usize),
+    Cached(Range<usize>),
 }
 
 struct Checked {
     found: Found,
-    incoming: Vec<(usize, bool)>,
+    reads: Range<usize>,
+    path: usize,
 }
 
 /// A step of the recursion check: a node to check with whether nothing
@@ -435,6 +453,7 @@ enum Visit<'a> {
         index: usize,
         head: bool,
         start: usize,
+        path: usize,
     },
     Cond {
         cond: &'a Node,
@@ -447,6 +466,35 @@ enum Visit<'a> {
 }
 
 impl<'a> Walk<'a, '_> {
+    fn matches(&self, checked: &Checked, own: usize) -> bool {
+        let mut incoming = vec![false; self.on_path.len()];
+        let mut path = Some(checked.path);
+        while let Some(index) = path {
+            let active = &self.paths[index];
+            incoming[active.group] = true;
+            path = active.parent;
+        }
+        let mut seen = vec![false; self.reads.len()];
+        let mut stack = vec![checked.reads.clone()];
+        while let Some(range) = stack.pop() {
+            for at in range {
+                if seen[at] {
+                    continue;
+                }
+                seen[at] = true;
+                match &self.reads[at] {
+                    Consulted::Group(group) => {
+                        if *group != own && incoming[*group] != self.on_path[*group] {
+                            return false;
+                        }
+                    }
+                    Consulted::Cached(range) => stack.push(range.clone()),
+                }
+            }
+        }
+        true
+    }
+
     /// infinite_recursive_call_check: `head` while nothing has been
     /// consumed on the way from the group's start. It walks an explicit
     /// stack, since a chain of calls runs as deep as the groups it
@@ -513,28 +561,28 @@ impl<'a> Walk<'a, '_> {
                     _ => ret = Found::default(),
                 },
                 Visit::Group(index, head) => {
-                    self.reads.push(index);
+                    self.reads.push(Consulted::Group(index));
                     if self.on_path[index] {
                         ret = Found::default();
                     } else if let Some(checked) = self.cache[index][usize::from(head)]
                         .as_ref()
-                        .filter(|checked| {
-                            checked
-                                .incoming
-                                .iter()
-                                .all(|&(group, active)| self.on_path[group] == active)
-                        })
+                        .filter(|checked| self.matches(checked, index))
                     {
                         ret = checked.found;
-                        self.reads
-                            .extend(checked.incoming.iter().map(|&(group, _)| group));
+                        self.reads.push(Consulted::Cached(checked.reads.clone()));
                     } else if let Some(body) = self.bodies[index] {
                         self.on_path[index] = true;
                         stack.push(Visit::Leave {
                             index,
                             head,
                             start: self.reads.len(),
+                            path: self.path,
                         });
+                        self.paths.push(Active {
+                            group: index,
+                            parent: Some(self.path),
+                        });
+                        self.path = self.paths.len() - 1;
                         stack.push(Visit::Node(body, head));
                     } else {
                         ret = Found::default();
@@ -597,20 +645,19 @@ impl<'a> Walk<'a, '_> {
                         ret.must = false;
                     }
                 }
-                Visit::Leave { index, head, start } => {
+                Visit::Leave {
+                    index,
+                    head,
+                    start,
+                    path,
+                } => {
                     self.on_path[index] = false;
+                    self.path = path;
                     if self.shared[index] {
-                        let mut groups = self.reads[start..].to_vec();
-                        groups.sort_unstable();
-                        groups.dedup();
-                        groups.retain(|&group| group != index);
-                        let incoming = groups
-                            .into_iter()
-                            .map(|group| (group, self.on_path[group]))
-                            .collect();
                         self.cache[index][usize::from(head)] = Some(Checked {
                             found: ret,
-                            incoming,
+                            reads: start..self.reads.len(),
+                            path,
                         });
                     }
                 }

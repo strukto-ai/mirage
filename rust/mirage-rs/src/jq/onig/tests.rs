@@ -332,7 +332,7 @@ fn extended_patterns_match_the_jq_oracle() {
         .spawn(|| {
             let cases: Vec<serde_json::Value> =
                 serde_json::from_str(include_str!("corpus.json")).unwrap();
-            assert_eq!(cases.len(), 425);
+            assert_eq!(cases.len(), 426);
             for case in cases {
                 let pattern = case["p"].as_str().unwrap();
                 let flags = case["f"].as_str().unwrap();
@@ -463,4 +463,20 @@ fn lexical_groups_and_calls_share_the_recursion_check() {
     }
     pattern.push_str("{0}(?<r>\\g<g40>?)");
     Regex::new(&pattern, Options::default()).expect("shared lexical entries compile");
+}
+
+#[test]
+fn a_wrapped_call_cycle_compiles_on_a_small_stack() {
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(|| {
+            let n = 3000;
+            let pattern: String = (0..n)
+                .map(|i| format!("(?<w{i}>(?<g{i}>a\\g<g{}>?))", (i + 1) % n))
+                .collect();
+            assert_eq!(sheet_answer(&pattern, "g", "aaaa"), "[]");
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }

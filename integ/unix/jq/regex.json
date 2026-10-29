@@ -415,6 +415,22 @@
         "stdout": "true\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "jq_regex_wrapped_recursive_call_cycle",
+      "seq": 18610027,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc 'def pattern: [range(0;32) | \"(?<w\\(.)>(?<g\\(.)>a\\\\g<g\\((. + 1) % 32)>?))\"] | join(\"\"); \"aaaa\" | test(pattern)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "false\n",
+        "stderr": ""
+      }
     }
   ]
 }
