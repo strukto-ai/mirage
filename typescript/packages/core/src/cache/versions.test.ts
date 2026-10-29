@@ -110,12 +110,14 @@ it.each(['v1', null])('unstarted reads preserve the previous observation %s', (i
   }
   pending.complete = true
   pending.fingerprint = 'empty-file-token'
+  history.observe(scope, '/f', pending)
   expect(history.read(scope, '/f')).toBe('empty-file-token')
   pending = record('read', null)
   pending.bytes = 0
   pending.complete = false
   history.observe(scope, '/f', pending)
   pending.bytes = 1
+  history.observe(scope, '/f', pending)
   expect(history.read(scope, '/f')).toBeNull()
 })
 
@@ -132,6 +134,7 @@ it.each([false, true])(
     if (streamed) {
       expect(history.read(scope, '/f')).toBe('old')
       rec.complete = true
+      history.observe(scope, '/f', rec)
     }
     expect(history.read(scope, '/f')).toBeNull()
   },
@@ -147,5 +150,6 @@ it('response headers do not advance a read before bytes arrive', () => {
   history.observe(scope, '/f', rec)
   expect(history.read(scope, '/f')).toBe('old')
   rec.complete = true
+  history.observe(scope, '/f', rec)
   expect(history.read(scope, '/f')).toBe('new')
 })

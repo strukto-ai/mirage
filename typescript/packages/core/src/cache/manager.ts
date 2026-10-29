@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VersionScope, type VersionHistory } from './versions.ts'
-import { currentCaller, liveCallers } from '../context/session_context.ts'
+import { type Caller, currentCaller, liveCallers } from '../context/session_context.ts'
 import { enotsup } from '../errors/fs.ts'
 import { captureRead } from './context.ts'
 import { activeRecords, lineVersion, lostPaths, recordIndex } from '../observe/context.ts'
@@ -475,8 +475,8 @@ export class CacheManager {
   }
 
   /** Record this session's exact result, never a peer's cached token. */
-  observe(rec: OpRecord): void {
-    const caller = currentCaller()
+  observe(rec: OpRecord, owner?: Caller): void {
+    const caller = owner ?? currentCaller()
     if (
       !this.conditional ||
       caller.session === null ||
@@ -484,11 +484,8 @@ export class CacheManager {
       !this.ownsPath(rec.path)
     )
       return
-    this.sessionHistory(rec.path)?.observe(
-      this.versionScope,
-      '/' + mountKey(rec.path, this.prefix),
-      rec,
-    )
+    const history = owner === undefined ? this.sessionHistory(rec.path) : caller.session.versions
+    history?.observe(this.versionScope, '/' + mountKey(rec.path, this.prefix), rec)
   }
 
   /** Retain the refused token in its session, or in the cache without a session. */

@@ -36,7 +36,7 @@ from mirage.cache.index.scope import (
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
 from mirage.cache.versions import VersionScope
-from mirage.context.session_context import current_caller
+from mirage.context.session_context import Caller, current_caller
 from mirage.io.stream import close_quietly
 from mirage.observe.context import active_recorder, line_version
 from mirage.observe.record import OpRecord
@@ -557,13 +557,15 @@ class CacheManager:
                 version,
             )
 
-    def observe(self, rec: OpRecord) -> None:
+    def observe(self, rec: OpRecord, caller: Caller | None = None) -> None:
         """Record this session's result, never another session's cache entry.
 
         Args:
             rec (OpRecord): result stamped by the backend or cache read.
+            caller (Caller | None): owner of an admitted read, including
+                late stream pulls.
         """
-        caller = current_caller()
+        caller = caller if caller is not None else current_caller()
         if (
             not self._conditional
             or caller.session is None

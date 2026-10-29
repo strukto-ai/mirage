@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { OpRecord } from '../observe/record.ts'
+import { OpRecord } from '../observe/record.ts'
 import {
   CONTENT_CHANGING_OPS,
   RETRACT_FINGERPRINT_OPS,
@@ -28,48 +28,38 @@ export class VersionScope {
 
 /** A live session's observations, independent of shared cache eviction. */
 export class VersionHistory {
-  private readonly scopes = new WeakMap<
-    VersionScope,
-    Map<string, [OpRecord, string | null] | string | null>
-  >()
+  private readonly scopes = new WeakMap<VersionScope, Map<string, OpRecord | string | null>>()
 
   /** Return the token observed for this mount-relative key. */
   read(scope: VersionScope, key: string): string | null {
     const entries = this.scopes.get(scope)
     const held = entries?.has(key) === true ? entries.get(key) : scope.pins.get(key)
-    if (!Array.isArray(held)) return held ?? null
-    const [rec, previous] = held
-    if (rec.op === 'read' && !rec.complete && rec.bytes === 0) return previous
-    return rec.fingerprint
+    return held instanceof OpRecord ? held.fingerprint : (held ?? null)
   }
 
   /** Retain a refused condition until this session reads again. */
   keep(scope: VersionScope, key: string, version: string | null): void {
-    const held =
-      this.scopes.get(scope) ?? new Map<string, [OpRecord, string | null] | string | null>()
+    const held = this.scopes.get(scope) ?? new Map<string, OpRecord | string | null>()
     held.set(key, version)
     this.scopes.set(scope, held)
   }
 
   /** Keep the exact record, including a stream's later token stamp. */
   observe(scope: VersionScope, key: string, rec: OpRecord): void {
+    if (rec.op === 'read' && !rec.complete && rec.bytes === 0) return
     if (
       !STAMP_FINGERPRINT_OPS.has(rec.op) &&
       !RETRACT_FINGERPRINT_OPS.has(rec.op) &&
       !CONTENT_CHANGING_OPS.has(rec.op)
     )
       return
-    const held =
-      this.scopes.get(scope) ?? new Map<string, [OpRecord, string | null] | string | null>()
+    const held = this.scopes.get(scope) ?? new Map<string, OpRecord | string | null>()
     if (SUBTREE_RETRACT_OPS.has(rec.op)) {
       for (const name of new Set([...held.keys(), ...scope.pins.keys()]))
         if (underPath(name, key)) held.set(name, null)
     }
-    if (STAMP_FINGERPRINT_OPS.has(rec.op)) {
-      // Headers alone are no observation: retain the prior condition until
-      // bytes arrive or the stream ends normally.
-      held.set(key, [rec, this.read(scope, key)])
-    } else held.set(key, null)
+    if (STAMP_FINGERPRINT_OPS.has(rec.op)) held.set(key, rec)
+    else held.set(key, null)
     this.scopes.set(scope, held)
   }
 }

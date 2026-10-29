@@ -531,6 +531,8 @@ function followOrLoop(
  * Python's `_Call`.
  */
 interface Call {
+  readonly caller: Caller
+  readRecords: OpRecord[]
   readonly name: string
   /** The op's path: walked, then followed. */
   path: PathSpec
@@ -1082,9 +1084,17 @@ export class Dispatcher {
         : []
     let ran: Awaited<ReturnType<typeof this.callBackend>>
     try {
-      ran = call.fresh
-        ? await this.freshCall(call, mount, vfs, scope, mode)
-        : await this.callBackend(call, mount, vfs, scope, mode)
+      const [answer, records] = await commandRecords(
+        async (mine) =>
+          [
+            await (call.fresh
+              ? this.freshCall(call, mount, vfs, scope, mode)
+              : this.callBackend(call, mount, vfs, scope, mode)),
+            mine,
+          ] as const,
+      )
+      ran = answer
+      if (call.readRecords.length === 0) call.readRecords = records
     } catch (err) {
       if (settles) {
         await this.evictFailedWrite(
@@ -1119,10 +1129,46 @@ export class Dispatcher {
     // The transfer already happened, so a limit changes what the caller
     // receives, not what the backend moved; the report above already
     // carries the moved count.
-    return [
-      await boundary.complete(mark, call.path, call.write, result, call.issuer),
-      new IOResult(),
-    ]
+    result = await boundary.complete(mark, call.path, call.write, result, call.issuer)
+    if (DISPATCH_READ_OPS.has(name)) {
+      this.observeReads(call, mount)
+      if (
+        result !== null &&
+        typeof result === 'object' &&
+        Symbol.asyncIterator in result &&
+        !(result instanceof PipeStream)
+      ) {
+        const observed = this.observeStream(call, mount, result as AsyncIterable<Uint8Array>)
+        await observed.next()
+        result = observed
+      }
+    }
+    return [result, new IOResult()]
+  }
+
+  /** Publish only this admitted read's records for its captured caller. */
+  private observeReads(call: Call, mount: MountEntry): void {
+    for (const rec of call.readRecords)
+      if (rec.op === 'read' && rec.path === call.path.virtual)
+        mount.cacheManager?.observe(rec, call.caller)
+  }
+
+  /** Publish delivered chunks and normal empty completion, retaining stream cleanup. */
+  private async *observeStream(
+    call: Call,
+    mount: MountEntry,
+    source: AsyncIterable<Uint8Array>,
+  ): AsyncGenerator<Uint8Array> {
+    try {
+      yield new Uint8Array()
+      for await (const chunk of source) {
+        this.observeReads(call, mount)
+        yield chunk
+      }
+      this.observeReads(call, mount)
+    } finally {
+      await closeQuietly(source)
+    }
   }
 
   /**
@@ -1575,6 +1621,8 @@ export class Dispatcher {
       warm: false,
       fresh: false,
       walked: null,
+      caller: currentCaller(),
+      readRecords: [],
     }
   }
 
@@ -1933,6 +1981,7 @@ export class Dispatcher {
     const [source, records] = await commandRecords((mine) =>
       Promise.resolve([mount.readStream(scope, this.access), mine] as const),
     )
+    call.readRecords = records
     const pipe = mount.livePipe(scope.virtual, this.access)
     if (pipe !== null) {
       const live = new PipeStream(await primed(source, call.report, false), call.path, pipe)
@@ -2030,6 +2079,7 @@ export class Dispatcher {
         finishRecord('read', call.path.virtual, 'ram', window.byteLength, startOp(), {
           fingerprint: held?.[1] ?? null,
         }),
+        call.caller,
       )
     return result
   }

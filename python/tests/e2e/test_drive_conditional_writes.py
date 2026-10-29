@@ -12,14 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 
 import pytest
 import pytest_asyncio
 
+import mirage.core.box.read as box_read
 from mirage import Mount, MountMode, Workspace, WritePolicy
 from mirage.errors.types import StaleWriteError
+from mirage.policy import Deny, Policy
+from mirage.policy.types import VfsResultContext
 from mirage.types import ReadPolicy, ReadSpec
 from mirage.vfs.registry import build_vfs
 from tests.fixtures.box_api import FakeBox
@@ -781,3 +785,99 @@ async def test_completed_empty_box_reread_without_sha1_releases_old_version(
     assert content == b""
     await a.vfs.write(path, b"mine\n")
     assert drive.fake.read("f") == b"mine\n"
+
+
+@pytest.mark.asyncio
+@BOX
+async def test_a_pending_parallel_read_cannot_hide_a_completed_observation(
+    drive, workspace, monkeypatch
+):
+    ws = workspace(read=ReadSpec(policy=ReadPolicy.FRESH))
+    a, b = await ws.session("a"), await ws.session("b")
+    real = box_read.download_file_stream
+    ready = [asyncio.Event(), asyncio.Event()]
+    release = [asyncio.Event(), asyncio.Event()]
+    started = 0
+
+    async def delayed(*args, **kwargs):
+        nonlocal started
+        index = started
+        started += 1
+        ready[index].set()
+        await release[index].wait()
+        async for chunk in real(*args, **kwargs):
+            yield chunk
+
+    monkeypatch.setattr(box_read, "download_file_stream", delayed)
+    first = asyncio.create_task(a.vfs.read("/box/f", stream=True))
+    await ready[0].wait()
+    second = asyncio.create_task(a.vfs.read("/box/f", stream=True))
+    await ready[1].wait()
+    try:
+        release[0].set()
+        assert b"".join([chunk async for chunk in await first]) == SEED["f"]
+        await b.vfs.write("/box/f", b"peer\n")
+        with pytest.raises(StaleWriteError):
+            await a.vfs.write("/box/f", b"mine\n")
+        assert drive.fake.read("f") == b"peer\n"
+    finally:
+        for event in release:
+            event.set()
+        for task in (first, second):
+            stream = await task
+            async for _ in stream:
+                pass
+
+
+class _DenyResult(Policy):
+    def __init__(self, operation="read"):
+        self.enabled = True
+        self.operation = operation
+
+    async def post_vfs(self, ctx: VfsResultContext):
+        return (
+            Deny("read blocked")
+            if self.enabled and ctx.call.name == self.operation
+            else None
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_a_denied_reread_cannot_advance_the_session_version(
+    drive, workspace, streamed
+):
+    ws = workspace(read=ReadSpec(policy=ReadPolicy.FRESH))
+    a, b = await ws.session("a"), await ws.session("b")
+    path = f"{drive.root}/f"
+    await a.vfs.read(path)
+    await b.vfs.write(path, b"peer\n")
+    await ws.cache.clear()
+    policy = _DenyResult()
+    ws.policies.add(policy)
+    with pytest.raises(PermissionError):
+        await a.vfs.read(path, stream=streamed)
+    with pytest.raises(StaleWriteError):
+        await a.vfs.write(path, b"mine\n")
+    assert drive.fake.read("f") == b"peer\n"
+    policy.enabled = False
+    assert await a.vfs.read(path) == b"peer\n"
+    await a.vfs.write(path, b"mine\n")
+
+
+@pytest.mark.asyncio
+async def test_a_completed_write_keeps_its_version_when_its_result_is_denied(
+    drive, workspace
+):
+    ws = workspace()
+    a = await ws.session("a")
+    path = f"{drive.root}/f"
+    await a.vfs.read(path)
+    policy = _DenyResult("write")
+    ws.policies.add(policy)
+    with pytest.raises(PermissionError):
+        await a.vfs.write(path, b"first\n")
+    assert drive.fake.read("f") == b"first\n"
+    policy.enabled = False
+    await a.vfs.write(path, b"second\n")
+    assert drive.fake.read("f") == b"second\n"

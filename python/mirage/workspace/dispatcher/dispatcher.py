@@ -771,6 +771,8 @@ class _Call:
         walked (PathSpec | None): the path before a link at its final
             name was followed, the one a listing's names are spelled
             under; None when nothing was followed.
+        read_records (list[OpRecord]): this read's records, published after
+            its result gate.
     """
 
     name: str
@@ -789,6 +791,7 @@ class _Call:
     warm: bool = False
     fresh: bool = False
     walked: PathSpec | None = None
+    read_records: list[OpRecord] = dataclasses.field(default_factory=list)
 
     @property
     def window(self) -> tuple[int, int | None]:
@@ -1394,11 +1397,14 @@ class Dispatcher:
             else []
         )
         try:
-            ran = await (
-                self._fresh_call(call, mount)
-                if call.fresh
-                else self._call(call, mount, self._filler(call, mount))
-            )
+            with command_records() as records:
+                ran = await (
+                    self._fresh_call(call, mount)
+                    if call.fresh
+                    else self._call(call, mount, self._filler(call, mount))
+                )
+            if not call.read_records:
+                call.read_records = records
         except BaseException:
             if settles:
                 await self._evict_failed_write(mount, name, call.path, kwargs)
@@ -1416,7 +1422,47 @@ class Dispatcher:
         if name not in CALLS:
             result = self._custom_answer(call, mount, result)
         result = await boundary.complete(mark, call.path, call.write, result)
+        if name in DISPATCH_READ_OPS:
+            self._observe_reads(call, mount)
+            if hasattr(result, "__aiter__") and not isinstance(
+                result, PipeStream
+            ):
+                observed = self._observe_stream(call, mount, result)
+                await anext(observed)
+                result = observed
         return result, IOResult()
+
+    def _observe_reads(self, call: _Call, mount: MountEntry) -> None:
+        """Publish an admitted read's own records for its captured caller.
+
+        Args:
+            call (_Call): the read that passed its result gate.
+            mount (MountEntry): the mount that supplied its records.
+        """
+        manager = mount.cache_manager
+        if manager is not None:
+            for rec in call.read_records:
+                if rec.op == "read" and rec.path == call.path.virtual:
+                    manager.observe(rec, call.caller)
+
+    async def _observe_stream(
+        self, call: _Call, mount: MountEntry, source: AsyncIterator[bytes]
+    ) -> AsyncIterator[bytes]:
+        """Publish a read when its stream supplies bytes or completes empty.
+
+        Args:
+            call (_Call): the admitted read.
+            mount (MountEntry): the supplying mount.
+            source (AsyncIterator[bytes]): its owned stream.
+        """
+        try:
+            yield b""
+            async for chunk in source:
+                self._observe_reads(call, mount)
+                yield chunk
+            self._observe_reads(call, mount)
+        finally:
+            await close_quietly(source)
 
     async def _search_together(
         self,
@@ -2226,7 +2272,8 @@ class Dispatcher:
                     len(served),
                     start_op(),
                     fingerprint=held[1] if held is not None else None,
-                )
+                ),
+                call.caller,
             )
         return result
 
@@ -2620,6 +2667,7 @@ class Dispatcher:
         """
         with command_records() as records:
             stream = mount.read_stream(call.path.virtual)
+        call.read_records = records
         pipe = mount.live_pipe(call.path.virtual)
         if pipe is not None:
             live = PipeStream(

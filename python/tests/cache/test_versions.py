@@ -95,12 +95,14 @@ def test_unstarted_reads_preserve_the_previous_observation(initial):
         assert history.read(scope, "/f") == initial
     pending.complete = True
     pending.fingerprint = "empty-file-token"
+    history.observe(scope, "/f", pending)
     assert history.read(scope, "/f") == "empty-file-token"
     pending = record(version=None)
     pending.bytes = 0
     pending.complete = False
     history.observe(scope, "/f", pending)
     pending.bytes = 1
+    history.observe(scope, "/f", pending)
     assert history.read(scope, "/f") is None
 
 
@@ -115,6 +117,7 @@ def test_completed_empty_reads_can_clear_an_unknown_version(streamed):
     if streamed:
         assert history.read(scope, "/f") == "old"
         rec.complete = True
+        history.observe(scope, "/f", rec)
     assert history.read(scope, "/f") is None
 
 
@@ -127,4 +130,5 @@ def test_response_headers_do_not_advance_a_read_before_bytes_arrive():
     history.observe(scope, "/f", rec)
     assert history.read(scope, "/f") == "old"
     rec.complete = True
+    history.observe(scope, "/f", rec)
     assert history.read(scope, "/f") == "new"

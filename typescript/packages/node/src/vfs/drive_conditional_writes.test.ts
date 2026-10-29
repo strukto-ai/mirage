@@ -19,6 +19,7 @@ import {
   type ReadSpec,
   WritePolicy,
 } from '@struktoai/mirage-core/types'
+import type { Deny, VfsResultContext } from '@struktoai/mirage-core/policy/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
@@ -127,6 +128,14 @@ function refusal(verb: string): string {
   return `mv: cannot move '${r}/f' to '${r}/g': '${r}/g' ${STALE}\n`
 }
 
+function readGate(): { promise: Promise<void>; resolve: () => void } {
+  let release!: () => void
+  const promise = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return { promise, resolve: release }
+}
+
 function fail(): never {
   throw new Error('injected server error')
 }
@@ -230,6 +239,54 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
       expect(drive.text('f')).toBe('mine\n')
     },
   )
+
+  it.each([false, true])(
+    'a denied reread cannot advance its session version (stream: %s)',
+    async (streamed) => {
+      const ws = await workspace(WritePolicy.CONDITIONAL, {
+        policy: ReadPolicy.FRESH,
+        ttl: DEFAULT_READ_TTL,
+      })
+      const a = await ws.session('a'),
+        b = await ws.session('b')
+      const path = `${drive.root}/f`
+      await a.vfs.read(path)
+      await b.vfs.write(path, ENC.encode('peer\n'))
+      await ws.cache.clear()
+      let enabled = true
+      ws.policies.add({
+        postVfs: (ctx: VfsResultContext) =>
+          enabled && ctx.call.name === 'read'
+            ? ({ kind: 'deny', reason: 'read blocked' } as Deny)
+            : null,
+      })
+      await expect(a.vfs.read(path, { stream: streamed })).rejects.toMatchObject({ code: 'EACCES' })
+      await expect(a.vfs.write(path, ENC.encode('mine\n'))).rejects.toMatchObject({
+        code: 'STALE_WRITE',
+      })
+      expect(drive.text('f')).toBe('peer\n')
+      enabled = false
+      expect(await a.vfs.read(path)).toEqual(ENC.encode('peer\n'))
+      await a.vfs.write(path, ENC.encode('mine\n'))
+    },
+  )
+
+  it('a completed write keeps its version when its result is denied', async () => {
+    const ws = await workspace()
+    const a = await ws.session('a')
+    const path = `${drive.root}/f`
+    await a.vfs.read(path)
+    let enabled = true
+    ws.policies.add({
+      postVfs: (ctx: VfsResultContext): Deny | null =>
+        enabled && ctx.call.name === 'write' ? { kind: 'deny', reason: 'result blocked' } : null,
+    })
+    await expect(a.vfs.write(path, ENC.encode('first\n'))).rejects.toMatchObject({ code: 'EACCES' })
+    expect(drive.text('f')).toBe('first\n')
+    enabled = false
+    await a.vfs.write(path, ENC.encode('second\n'))
+    expect(drive.text('f')).toBe('second\n')
+  })
 
   it('pins rm of an unread file to its lookup', async () => {
     const r = drive.root
@@ -466,6 +523,53 @@ describe('conditional writes only Box has', () => {
       expect(drive.text('f')).toBe('mine\n')
     },
   )
+
+  it('a pending parallel read cannot hide a completed observation', async () => {
+    const ws = await workspace(WritePolicy.CONDITIONAL, {
+      policy: ReadPolicy.FRESH,
+      ttl: DEFAULT_READ_TTL,
+    })
+    const a = await ws.session('a'),
+      b = await ws.session('b')
+    const ready = [readGate(), readGate()] as const
+    const release = [readGate(), readGate()] as const
+    const fetch = drive.fake.fetch
+    let started = 0
+    vi.stubGlobal('fetch', async (...args: Parameters<typeof globalThis.fetch>) => {
+      const url = args[0] instanceof Request ? args[0].url : String(args[0])
+      const method = args[0] instanceof Request ? args[0].method : (args[1]?.method ?? 'GET')
+      if (method === 'GET' && new URL(url).pathname.endsWith('/content')) {
+        const index = started++
+        if (index !== 0 && index !== 1) throw new Error('unexpected extra download')
+        ready[index].resolve()
+        await release[index].promise
+      }
+      return fetch(...args)
+    })
+    const first = a.vfs.read('/box/f', { stream: true })
+    await ready[0].promise
+    const second = a.vfs.read('/box/f', { stream: true })
+    await ready[1].promise
+    try {
+      release[0].resolve()
+      const chunks: Uint8Array[] = []
+      for await (const chunk of await first) chunks.push(chunk)
+      expect(chunks.map((c) => DEC.decode(c)).join('')).toBe(SEED.f)
+      await b.vfs.write('/box/f', ENC.encode('peer\n'))
+      await expect(a.vfs.write('/box/f', ENC.encode('mine\n'))).rejects.toMatchObject({
+        code: 'STALE_WRITE',
+      })
+      expect(drive.text('f')).toBe('peer\n')
+    } finally {
+      release.forEach((gate) => {
+        gate.resolve()
+      })
+      for (const task of [first, second]) {
+        const source = await task
+        await source[Symbol.asyncIterator]().return?.()
+      }
+    }
+  })
 
   it('resizing a file Box keeps no sha1 for goes out plain', async () => {
     drive.box.unhashed.add(drive.box.idOf('f'))

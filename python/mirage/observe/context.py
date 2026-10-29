@@ -383,7 +383,11 @@ def finish_record(
 
 def _charge(op_rec: OpRecord) -> None:
     context = current_caller().write_context
-    if context is not None and context.observe is not None:
+    if (
+        op_rec.op != "read"
+        and context is not None
+        and context.observe is not None
+    ):
         context.observe(op_rec)
     held = current_caller().command_sink
     if held is not None:

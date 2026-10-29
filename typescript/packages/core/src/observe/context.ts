@@ -289,7 +289,7 @@ export function finishRecord(
 }
 
 function charge(rec: OpRecord): void {
-  currentCaller().write?.context?.observe?.(rec)
+  if (rec.op !== 'read') currentCaller().write?.context?.observe?.(rec)
   const held = currentCaller().commandSink
   if (held !== null) {
     held[1].push(rec)
