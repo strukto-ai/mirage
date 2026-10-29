@@ -14,10 +14,11 @@
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 
 import { IOConfig } from '@struktoai/mirage-core/io/config'
+import { NetworkRule, networkLayer, type NetworkSetting } from '@struktoai/mirage-core/io/network'
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { parseLimit } from '@struktoai/mirage-core/utils/size'
 import { readFileSync } from 'node:fs'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { parseYaml } from './utils/yaml.ts'
 import type { CacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import type { IndexConfig, RedisIndexConfig } from '@struktoai/mirage-core/cache/index/config'
@@ -48,11 +49,18 @@ import {
 import { coerceWritePolicy } from '@struktoai/mirage-core/workspace/mount/write_policy'
 import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
 import {
+  compileProgram,
   parseProgram,
   parseSessionProfile,
   type ProfilePolicySpec,
   type SessionProfile,
 } from '@struktoai/mirage-core/policy/profile'
+import { METHODS } from '@struktoai/mirage-core/policy/constants'
+import type {
+  PolicyMethod,
+  ProfileScript,
+  ProfileScripts,
+} from '@struktoai/mirage-core/policy/types'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
@@ -183,6 +191,7 @@ const TOP_LEVEL_KEYS = [
   'io',
   'command_limits',
   'max_memory',
+  'network',
   'clis',
   'runtimes',
   'route_policy',
@@ -414,6 +423,10 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   if (raw.max_memory !== undefined && raw.max_memory !== null) {
     parseLimit(raw.max_memory as string | number, 'max_memory')
   }
+  if (raw.network !== undefined) {
+    const layer = networkLayer(raw.network)
+    new NetworkRule(layer === null ? [] : [layer])
+  }
   // At the sync entry point, as Python's WorkspaceConfig validator is, so the CLI
   // refuses a bad value before it POSTs the document to the daemon.
   if (raw.read !== undefined && raw.read !== null) resolveReadSpec(raw.read, undefined)
@@ -623,6 +636,38 @@ export function loadProfilePolicy(profile: SessionProfile): SessionProfile {
       }
 }
 
+/**
+ * Load a server's policy file: a profile's `policy` block, a mapping of
+ * method to programs, plus `pre_workspace`, which a server asks before it
+ * builds a workspace. A relative `script` path is read next to the file,
+ * after `${VAR}` interpolation. Mirrors Python's `load_policy_file`.
+ */
+export function loadPolicyFile(path: string, env?: Record<string, string>): ProfileScripts {
+  const raw = interpolateEnv(parseYaml(readFileSync(path, 'utf8')), env ?? readProcessEnv())
+  const methods: readonly string[] = [...Object.values(METHODS), 'pre_workspace']
+  if (!isPlainObject(raw)) {
+    throw new Error(`${path}: a policy file is a mapping of method to programs`)
+  }
+  const unknown = Object.keys(raw).filter((key) => !methods.includes(key))
+  if (unknown.length > 0) {
+    throw new Error(
+      `${path}: names ${unknown.sort(compareCodePoints).join(', ')}; a program answers at ` +
+        methods.join(', '),
+    )
+  }
+  const base = dirname(resolve(path))
+  const scripts: Partial<Record<PolicyMethod, readonly ProfileScript[]>> = {}
+  for (const [method, programs] of Object.entries(raw)) {
+    if (!Array.isArray(programs)) throw new Error(`${path}: ${method} is a list of programs`)
+    scripts[snakeToCamel(method) as PolicyMethod] = programs.map((program: unknown, i) => {
+      if (isPlainObject(program)) absolutizeScriptKey(program, base)
+      const parsed = parseProgram(program, `${path}: ${method}[${String(i)}]`)
+      return compileProgram(loadProgram(parsed), basename(path))
+    })
+  }
+  return scripts
+}
+
 const VAR_RE = /\$\{([A-Z_][A-Z0-9_]*)\}/g
 
 function walkInterpolate(v: unknown, env: Record<string, string>, missing: string[]): unknown {
@@ -769,6 +814,8 @@ export interface WorkspaceConfigRaw {
   commandLimits?: unknown
   /** What the RAM mounts store and a command builds may hold; null for no cap. */
   maxMemory?: string | number | null
+  /** Where the workspace's connections may go; validated by networkLayer. */
+  network?: NetworkSetting
   mounts: Record<string, MountBlock>
   clis?: Record<string, CLIBlock> | null
   runtimes?: (string | Record<string, unknown>)[] | null
@@ -1107,6 +1154,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       mode: wsMode,
       commandLimits: parseCommandLimits(cfg.commandLimits),
       ...(cfg.maxMemory !== undefined ? { maxMemory: cfg.maxMemory } : {}),
+      ...(cfg.network !== undefined ? { network: cfg.network } : {}),
       io: new IOConfig(cfg.io),
       read: defaultRead,
       write: defaultWrite,

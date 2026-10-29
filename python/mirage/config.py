@@ -31,7 +31,14 @@ from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
 from mirage.io.config import IOConfig
-from mirage.policy.profile import ProfilePolicy, SessionProfile
+from mirage.io.network import NetworkRule, NetworkSetting, network_layer
+from mirage.policy.constants import METHODS
+from mirage.policy.profile import (
+    ProfilePolicy,
+    SessionProfile,
+    compile_program,
+)
+from mirage.policy.types import ProfileScript, ProfileScripts
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import Language, ScriptSource
@@ -692,6 +699,9 @@ class WorkspaceConfig(BaseModel):
     # What the RAM mounts store and what a command builds may hold
     # together; null runs uncapped. Unset = the Workspace default.
     max_memory: str | int | None = None
+    # Where the workspace's connections may go: true for anywhere, false
+    # for nowhere, or {allow: [hosts and ranges]}.
+    network: bool | dict[str, list[str]] = True
     # Installed CLIs, fully separate from mounts: key = installed head
     # word, value names a registered CLI plus its own config.
     clis: dict[str, CLIBlock] | None = None
@@ -757,6 +767,13 @@ class WorkspaceConfig(BaseModel):
     def _v_max_memory(cls, v: Any) -> int | None:
         return v if v is None else parse_limit(v, "max_memory")
 
+    @field_validator("network", mode="before")
+    @classmethod
+    def _v_network(cls, v: Any) -> NetworkSetting:
+        layer = network_layer(v)
+        NetworkRule([layer] if layer is not None else [])
+        return bool(v) if isinstance(v, bool) else {"allow": list(v["allow"])}
+
     @model_validator(mode="after")
     def _v_profile(self) -> "WorkspaceConfig":
         # The workspace's default profile must be one it defines; the
@@ -820,6 +837,8 @@ class WorkspaceConfig(BaseModel):
         }
         if "max_memory" in self.model_fields_set:
             kwargs["max_memory"] = self.max_memory
+        if "network" in self.model_fields_set:
+            kwargs["network"] = self.network
         if self.cache is not None:
             kwargs["cache"] = _build_cache_config(self.cache)
         if self.index is not None:
@@ -1053,3 +1072,54 @@ def load_config(
     if base is not None:
         _absolutize_scripts(interpolated, base)
     return WorkspaceConfig.model_validate(interpolated)
+
+
+def load_policy_file(
+    path: str | Path, env: dict[str, str] | None = None
+) -> ProfileScripts:
+    """Load a server's policy file: a profile's ``policy`` block, a
+    mapping of method to programs, plus ``pre_workspace``, which a
+    server asks before it builds a workspace. A relative ``script``
+    path is read next to the file, after ``${VAR}`` interpolation.
+
+    Args:
+        path (str | Path): the YAML or JSON file.
+        env (dict[str, str] | None): environment mapping to read for
+            interpolation. Defaults to ``os.environ``.
+
+    Raises:
+        ValueError: the file is not a mapping of method to programs.
+        FileNotFoundError: the file or a script it names is missing.
+    """
+    source = Path(path)
+    raw = _interpolate_env(
+        parse_yaml(source.read_text(encoding="utf-8")),
+        env if env is not None else dict(os.environ),
+    )
+    methods = (*METHODS, "pre_workspace")
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"{source}: a policy file is a mapping of method to programs"
+        )
+    unknown = sorted(str(key) for key in raw if key not in methods)
+    if unknown:
+        raise ValueError(
+            f"{source}: names {', '.join(unknown)}; a program answers at "
+            f"{', '.join(methods)}"
+        )
+    scripts: dict[str, tuple[ProfileScript, ...]] = {}
+    for method, programs in raw.items():
+        if not isinstance(programs, list):
+            raise ValueError(f"{source}: {method} is a list of programs")
+        loaded = []
+        for program in programs:
+            if isinstance(program, dict):
+                _absolutize_script_key(program, source.resolve().parent)
+            loaded.append(
+                compile_program(
+                    _load_program(ProfilePolicy.model_validate(program)),
+                    source.name,
+                )
+            )
+        scripts[method] = tuple(loaded)
+    return scripts

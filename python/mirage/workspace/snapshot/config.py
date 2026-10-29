@@ -20,6 +20,7 @@ from mirage.cache.index.config import IndexConfig, IndexType, RedisIndexConfig
 from mirage.commands.cli.types import CLI
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_MEMORY
+from mirage.io.network import NetworkSetting
 from mirage.policy.profile import SessionProfile
 from mirage.types import Limit, WritePolicy
 from mirage.vfs.secrets import REDACTED_SECRET, has_redacted_secret
@@ -46,6 +47,8 @@ class MountArgs:
     profile: str | None = None
     # The workspace's max_memory in bytes, None for no cap.
     max_memory: int | None = MAX_MEMORY
+    # The workspace's network setting, as written.
+    network: NetworkSetting = True
 
 
 def index_config_dump(

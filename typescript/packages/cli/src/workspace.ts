@@ -115,6 +115,19 @@ interface WorkspaceDetail {
   internals?: Internals | null
 }
 
+/** What the server's policies make of a config: the verdict, then each policy's answer. */
+function formatWorkspaceExplanation(said: {
+  outcome: string
+  reason: string
+  answers: { kind: string; reason: string; policy: string }[]
+}): string {
+  const verdict = said.reason === '' ? said.outcome : `${said.outcome}: ${said.reason}`
+  return [
+    `[${verdict}]`,
+    ...said.answers.map((answer) => `  ${answer.policy}: ${answer.kind}: ${answer.reason}`),
+  ].join('\n')
+}
+
 function formatWorkspaceList(items: WorkspaceBrief[]): string {
   if (items.length === 0) return 'No active workspaces.'
   const rows = items.map((w) => [
@@ -215,7 +228,8 @@ export function registerWorkspaceCommands(program: Command): void {
     .description('Create a workspace; daemon auto-spawns if not running.')
     .argument('<config>', 'YAML/JSON workspace config')
     .option('--id <id>', 'Explicit workspace id')
-    .action(async (configPath: string, opts: { id?: string }) => {
+    .option('--explain', "Say what the server's policies make of it; create nothing")
+    .action(async (configPath: string, opts: { id?: string; explain?: boolean }) => {
       // Checked and env-interpolated here (the user's shell env is the
       // source of truth, and a missing var must fail before the round
       // trip), but sent in the file's own spelling: the daemon runs the
@@ -231,7 +245,21 @@ export function registerWorkspaceCommands(program: Command): void {
       if (opts.id !== undefined) body.id = opts.id
       const c = buildClient()
       await c.ensureRunning({ allowSpawn: true })
-      const r = await c.request('POST', '/v1/workspaces', { body: JSON.stringify(body) })
+      const explain = opts.explain === true
+      const r = await c.request(
+        'POST',
+        explain ? '/v1/workspaces?explain=true' : '/v1/workspaces',
+        {
+          body: JSON.stringify(body),
+        },
+      )
+      if (explain) {
+        emit(
+          (await handleResponse(r)) as Parameters<typeof formatWorkspaceExplanation>[0],
+          formatWorkspaceExplanation,
+        )
+        return
+      }
       emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
     })
 

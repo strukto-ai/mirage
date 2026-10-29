@@ -68,6 +68,7 @@ from mirage.policy.types import (
     VfsContext,
     VfsExplanation,
     VfsResultContext,
+    WorkspaceContext,
     policy_caller,
 )
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
@@ -88,6 +89,7 @@ MethodContext = (
     | VfsResultContext
     | ExecuteResultContext
     | SessionContext
+    | WorkspaceContext
 )
 
 
@@ -951,7 +953,10 @@ class Policies:
             pending: tuple[Any, ...] = ()
             cursor = 0
             while effect := composition.request():
-                if composition.respond_effect(effect, ctx):
+                if composition.respond_effect(
+                    effect,
+                    None if isinstance(ctx, WorkspaceContext) else ctx,
+                ):
                     continue
                 requested_slot = effect["slot"]
                 assert isinstance(requested_slot, int)
@@ -962,11 +967,13 @@ class Policies:
                         self.views(ctx.session_id, None)
                         if not rules_only
                         and self.views is not None
+                        and not isinstance(ctx, WorkspaceContext)
                         and ctx.session is None
                         else None
                     )
                     if handles is not None:
                         session, vfs, caller = handles
+                        assert not isinstance(ctx, WorkspaceContext)
                         ctx = replace(
                             ctx, session=session, vfs=vfs, caller=caller
                         )
@@ -1110,6 +1117,15 @@ class Policies:
         """
         action, _, _ = await self._fire("pre_session", ctx)
         return action
+
+    async def pre_workspace(self, ctx: WorkspaceContext) -> Deny | None:
+        """Fire pre_workspace across the policies; the first Deny wins.
+
+        Args:
+            ctx (WorkspaceContext): the workspace about to be built.
+        """
+        action, _, _ = await self._fire("pre_workspace", ctx)
+        return action if isinstance(action, Deny) else None
 
     async def post_session(
         self, ctx: SessionResultContext

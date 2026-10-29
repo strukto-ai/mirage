@@ -164,6 +164,24 @@ def _format_workspace_detail(detail: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_workspace_explanation(data: dict[str, Any]) -> str:
+    """What the server's policies make of a config: the verdict, then
+    each policy's answer.
+
+    Args:
+        data (dict[str, Any]): the explained create.
+    """
+    verdict = data["outcome"]
+    if data["reason"]:
+        verdict += f": {data['reason']}"
+    out = [f"[{verdict}]"]
+    out.extend(
+        f"  {said['policy']}: {said['kind']}: {said['reason']}"
+        for said in data["answers"]
+    )
+    return "\n".join(out)
+
+
 def _format_asks(items: list[dict[str, Any]]) -> str:
     if not items:
         return "No asks."
@@ -188,15 +206,34 @@ def create_cmd(
     workspace_id: str | None = typer.Option(
         None, "--id", help="Explicit workspace id."
     ),
+    explain: bool = typer.Option(
+        False,
+        "--explain",
+        help="Say what the server's policies make of it; create nothing.",
+    ),
 ) -> None:
-    """Create a workspace; daemon auto-spawns if not running."""
+    """Create a workspace; daemon auto-spawns if not running.
+
+    ``--explain`` asks the server's policies about the config without
+    creating anything.
+    """
     body: dict[str, Any] = {"config": resolve_config(config_path)}
     if workspace_id:
         body["id"] = workspace_id
     with make_client() as client:
         client.ensure_running()
-        r = client.request("POST", "/v1/workspaces", json=body)
-    emit(handle_response(r), human=_format_workspace_detail)
+        r = client.request(
+            "POST",
+            "/v1/workspaces",
+            json=body,
+            params={"explain": "true"} if explain else None,
+        )
+    emit(
+        handle_response(r),
+        human=_format_workspace_explanation
+        if explain
+        else _format_workspace_detail,
+    )
 
 
 @app.command("list")

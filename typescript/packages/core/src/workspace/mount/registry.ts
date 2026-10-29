@@ -16,6 +16,7 @@ import type { DiffComputer } from '../../rs/diff_types.ts'
 import type { SessionAccess } from '../../view/types.ts'
 import { IOConfig } from '../../io/config.ts'
 import type { MemoryBudget } from '../../io/memory.ts'
+import type { NetworkRule } from '../../io/network.ts'
 import { backendCommands } from './backends.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { ProcessView } from '../../process/view.ts'
@@ -157,6 +158,8 @@ export class MountRegistry {
   // The workspace's max_memory, over the bytes its RAM mounts hold; null
   // for no cap.
   memory: MemoryBudget | null = null
+  // The rule the workspace's connections are judged by; null for no limit.
+  network: NetworkRule | null = null
   // Command admission policies. Policies itself is a bare mechanism;
   // the registry seeds the POSIX mount-root rule (mount-root semantics
   // are mount semantics) and the document's deny rules, then user

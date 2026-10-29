@@ -56,6 +56,7 @@ import {
   type Route,
   type SessionContext,
   type SessionResultContext,
+  type WorkspaceContext,
   type VfsExplanation,
 } from './types.ts'
 import { abortable, hasAborted, makeAbortError } from '../utils/abort.ts'
@@ -707,7 +708,8 @@ export class Policies {
       | VfsContext
       | VfsResultContext
       | ExecuteResultContext
-      | SessionContext,
+      | SessionContext
+      | WorkspaceContext,
     every: boolean,
     placed = false,
     rulesOnly = false,
@@ -747,7 +749,7 @@ export class Policies {
       let pending: unknown[] = []
       let cursor = 0
       for (let effect = composition.request(); effect !== null; effect = composition.request()) {
-        if (composition.respondEffect(effect, seen)) continue
+        if (composition.respondEffect(effect, 'config' in seen ? undefined : seen)) continue
         if (effect.op !== 'run_policy' && effect.op !== 'read_action')
           throw new Error('invalid evaluation effect')
         const policy = policies[effect.slot]
@@ -760,7 +762,7 @@ export class Policies {
             continue
           }
           const handles =
-            !rulesOnly && this.views !== null && seen.session === undefined
+            !rulesOnly && this.views !== null && !('config' in seen) && seen.session === undefined
               ? this.views(seen.sessionId ?? '', undefined)
               : null
           if (handles !== null) seen = { ...seen, ...handles }
@@ -774,7 +776,8 @@ export class Policies {
                   RouteContext &
                   VfsResultContext &
                   ExecuteResultContext &
-                  SessionResultContext,
+                  SessionResultContext &
+                  WorkspaceContext,
               )
             answered = await abortable(
               asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, ask) : ask(),
@@ -809,7 +812,8 @@ export class Policies {
       | VfsContext
       | VfsResultContext
       | ExecuteResultContext
-      | SessionContext,
+      | SessionContext
+      | WorkspaceContext,
     placed = false,
     rulesOnly = false,
   ): Promise<[Deny | Ask | null, Limit | null, Route | null]> {
@@ -836,7 +840,8 @@ export class Policies {
       | VfsContext
       | VfsResultContext
       | ExecuteResultContext
-      | SessionContext,
+      | SessionContext
+      | WorkspaceContext,
     every = true,
     rulesOnly = false,
   ): Promise<(Deny | Ask | Route)[]> {
@@ -899,6 +904,12 @@ export class Policies {
   async preSession(ctx: SessionContext): Promise<Deny | Ask | null> {
     const [action] = await this.fire('preSession', ctx)
     return action
+  }
+
+  /** Fire preWorkspace across the policies; the first Deny wins. */
+  async preWorkspace(ctx: WorkspaceContext): Promise<Deny | null> {
+    const [action] = await this.fire('preWorkspace', ctx)
+    return action?.kind === 'deny' ? action : null
   }
 
   /** Fire postSession across the policies; the first Deny wins, else the first Ask. */

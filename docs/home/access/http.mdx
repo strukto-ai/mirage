@@ -175,10 +175,14 @@ Routes that return a workspace yield this object:
 
 <ParamField body="config" type="object" required>The workspace YAML as JSON.</ParamField>
 <ParamField body="id" type="string">The workspace id. A fresh one when absent.</ParamField>
+<ParamField query="explain" type="boolean">Return what the [server policies](#server-policies) say of the config instead, and create nothing.</ParamField>
 
 Returns HTTP 201 Created with the workspace object. Re-submitting the same ID and
 config returns HTTP 200 OK with the existing workspace; submitting a different
-config under an already taken ID returns HTTP 409 Conflict.
+config under an already taken ID returns HTTP 409 Conflict. A config a server
+policy refuses returns HTTP 403 Forbidden with its reason. With
+`?explain=true` the answer is `{"outcome", "reason", "source", "refusal",
+"answers"}`, as on [Explain](/home/policy/explain).
 
 ### List workspaces
 
@@ -666,7 +670,60 @@ joins an account with its `mirage-account` option.
 
 <Warning>
   Accounts keep workspaces apart, not the host: a workspace config can still
-  mount a host directory or run the `local` runtime. In `local` and `token`
-  mode, any accepted token can use every route and every workspace, including
+  mount a host directory or run the `local` runtime, unless a
+  [server policy](#server-policies) refuses it. In `local` and `token` mode,
+  any accepted token can use every route and every workspace, including
   `POST /v1/shutdown`.
 </Warning>
+
+## Server policies
+
+A server can hold every workspace it builds to its own rules. Its
+policies answer [`pre_workspace`](/home/policy/policies#pre_workspace)
+before a create, clone or load builds anything, and are registered on
+every workspace it builds, so a workspace's own config cannot lift them.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import uvicorn
+
+    from mirage.server.app import build_app
+
+    app = build_app(policies=[NoHostFiles()], network={"allow": ["*.github.com"]})
+    uvicorn.run(app, host="127.0.0.1", port=8765)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { buildApp } from '@struktoai/mirage-server'
+
+    const app = buildApp({ policies: [noHostFiles], network: { allow: ['*.github.com'] } })
+    await app.listen({ host: '127.0.0.1', port: 8765 })
+    ```
+  </Tab>
+</Tabs>
+
+The same rules can be [policy programs](/home/policy/scripts) in a file,
+named in `~/.mirage/config.toml` or by `MIRAGE_POLICY_FILE`. The file holds
+a profile's `policy` block, plus `pre_workspace`:
+
+```yaml policy.yaml
+pre_workspace:
+  - script: no_host_files.py
+pre_command:
+  - script: audit.py
+```
+
+```toml ~/.mirage/config.toml
+[daemon]
+policy_file = "policy.yaml"
+network = { allow = ["*.github.com", "10.0.0.0/8"] }
+```
+
+`network` is what every workspace's connections are held to besides its
+own [`network`](/home/configuration#network): a workspace may narrow it,
+never widen it. In `jwt` mode the server also refuses the addresses clouds
+serve machine credentials at (`169.254.169.254` and the rest of
+`169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254`).
+

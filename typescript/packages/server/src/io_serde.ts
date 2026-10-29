@@ -21,6 +21,7 @@ import type {
   Ask,
   CommandExplanation,
   Deny,
+  Explanation,
   Route,
   ShellExplanation,
   ShellNode,
@@ -112,7 +113,7 @@ function answerToDict(action: Deny | Ask | Route): Record<string, JsonValue> {
  * `explanation_to_dict`.
  */
 export function explanationToDict(
-  expl: ShellExplanation | VfsExplanation | CommandExplanation,
+  expl: ShellExplanation | VfsExplanation | CommandExplanation | Explanation,
 ): Record<string, JsonValue> {
   const verdict: Record<string, JsonValue> = {
     outcome: expl.outcome,
@@ -133,6 +134,7 @@ export function explanationToDict(
   if ('call' in expl) {
     return { call: expl.call, paths: [...expl.paths], ...verdict, error: expl.error }
   }
+  if (!('command' in expl)) return verdict
   return {
     type: expl.type,
     text: expl.text,

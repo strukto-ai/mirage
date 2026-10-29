@@ -16,6 +16,7 @@ import { CommandTimeoutError } from '../../errors/types.ts'
 import { LINE_NAME, lineTimeout } from '../../policy/builtin/output_cap.ts'
 import { MemoryExhausted } from '../../io/errors.ts'
 import { runWithMemory } from '../../io/memory.ts'
+import { runWithNetwork } from '../../io/network.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
@@ -1059,19 +1060,21 @@ async function runParsedLine(
         ? env.router.context(command, effectiveSession, await judged())
         : null
       const runLine = (): ReturnType<typeof runWholeLine> =>
-        runWithMemory(env.registry.memory, () =>
-          runWholeLine(
-            lineRuntime,
-            command,
-            stdin,
-            effectiveSession,
-            env.registry,
-            killed,
-            claimantFor(rootNode, handed),
-            route,
-            options.sink,
-            deadline?.seconds ?? null,
-            deadline?.start,
+        runWithNetwork(env.registry.network, () =>
+          runWithMemory(env.registry.memory, () =>
+            runWholeLine(
+              lineRuntime,
+              command,
+              stdin,
+              effectiveSession,
+              env.registry,
+              killed,
+              claimantFor(rootNode, handed),
+              route,
+              options.sink,
+              deadline?.seconds ?? null,
+              deadline?.start,
+            ),
           ),
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
@@ -1204,18 +1207,21 @@ async function runParsedLine(
         // stop side effects and free producers, not to release the caller.
         const release = deps.parser instanceof ParseScope ? deps.parser.retain() : undefined
         // Every object a line builds must fit in what the workspace's
-        // max_memory has left, a nested line's too.
-        const running = runWithMemory(env.registry.memory, async () =>
-          runCommandTree(
-            deadline === null ? deps : { ...deps, signal: deadline.signal },
-            rootNode,
-            context,
-            stdin,
-            false,
-            options.callStack ?? null,
-            (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
-              ? env.router.context(command, context.session, await judged())
-              : null,
+        // max_memory has left, a nested line's too, and every connection it
+        // opens must clear the workspace's network.
+        const running = runWithNetwork(env.registry.network, () =>
+          runWithMemory(env.registry.memory, async () =>
+            runCommandTree(
+              deadline === null ? deps : { ...deps, signal: deadline.signal },
+              rootNode,
+              context,
+              stdin,
+              false,
+              options.callStack ?? null,
+              (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
+                ? env.router.context(command, context.session, await judged())
+                : null,
+            ),
           ),
         ).finally(release)
         // A `kill` names a signal, and what the line started gets the stop

@@ -17,7 +17,7 @@ import importlib
 import logging
 import os
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import cast
@@ -25,6 +25,8 @@ from typing import cast
 from fastapi import FastAPI
 
 from mirage.concurrency.limiter import run_blocking
+from mirage.io.network import NetworkSetting, limit_network
+from mirage.policy.base import Policy
 from mirage.server.auth import (
     AuthConfig,
     AuthMiddleware,
@@ -49,6 +51,8 @@ from mirage.server.registry import (
     OWNERS_PREFIX,
     WorkspaceRegistry,
     resolve_max_workspaces,
+    resolve_network,
+    resolve_policy_file,
 )
 from mirage.server.routers import (
     asks,
@@ -178,6 +182,9 @@ def build_app(
     pid_file: str | Path | None = None,
     ssh_config: SSHConfig | None = None,
     max_workspaces: int | None = None,
+    policies: Sequence[Policy] = (),
+    policy_file: str | Path | None = None,
+    network: NetworkSetting | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -224,6 +231,19 @@ def build_app(
             at once; past it a create, clone or load answers 503.
             ``None`` (default) reads ``$MIRAGE_MAX_WORKSPACES`` or the
             ``max_workspaces`` config key, else sets no cap.
+        policies (Sequence[Policy]): the server's own policies: each
+            answers ``pre_workspace`` before a create, clone or load
+            builds anything, and is registered on every workspace the
+            app builds, so a tenant cannot lift it.
+        policy_file (str | Path | None): a file of policy programs that
+            answer the same way. ``None`` (default) reads
+            ``$MIRAGE_POLICY_FILE`` or the ``policy_file`` config key,
+            else runs none.
+        network (NetworkSetting | None): what every workspace's
+            connections are held to besides its own ``network``.
+            ``None`` (default) reads the ``network`` config key, else
+            sets no limit. In jwt mode the cloud metadata addresses are
+            refused too.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -253,7 +273,10 @@ def build_app(
         accounts_required=auth.mode == AuthMode.JWT,
         owners=DiskRecordClient(str(app.state.state_root), OWNERS_PREFIX),
         max_workspaces=resolve_max_workspaces(max_workspaces),
+        policies=policies,
+        programs=resolve_policy_file(policy_file),
     )
+    limit_network(resolve_network(network), metadata=auth.mode == AuthMode.JWT)
     app.state.jobs = app.state.registry.jobs
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None

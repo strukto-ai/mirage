@@ -22,6 +22,7 @@ import type {
   VfsResultContext,
   SessionContext,
   SessionResultContext,
+  WorkspaceContext,
 } from './types.ts'
 
 /**
@@ -40,7 +41,9 @@ import type {
  * each `ws.vfs` / `session.vfs` call (`preVfs` / `postVfs`) and each
  * session write (`preSession` / `postSession`). Every method may answer
  * Deny or Ask; a Limit only at `postExecute`, where a line's output comes
- * back to cap, a Route only at `preExecute`. A post method sees what
+ * back to cap, a Route only at `preExecute`. One more, `preWorkspace`,
+ * answers on a server before a workspace is built, with a Deny only. A
+ * post method sees what
  * its pre method saw, plus what came back, and never undoes a side effect:
  * it holds back what came back. Hides, mount modes and path rules are
  * not methods: they apply to every caller at the dispatcher. Every method's
@@ -115,4 +118,12 @@ export interface Policy {
   postExecute?(
     ctx: ExecuteResultContext,
   ): Action | Action[] | null | Promise<Action | Action[] | null>
+  /**
+   * Refuse a workspace a server is about to build: on a create, clone or
+   * load, before any mount is built or any secret the config names is
+   * read, for the policies the server was started with; a workspace's
+   * own policies cannot answer, as it does not exist yet. A Deny refuses
+   * the request with 403 and its reason; nothing else may be answered.
+   */
+  preWorkspace?(ctx: WorkspaceContext): Action | Action[] | null | Promise<Action | Action[] | null>
 }

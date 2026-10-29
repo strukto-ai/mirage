@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IOConfig } from '../../io/config.ts'
+import type { NetworkSetting } from '../../io/network.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { ExecutionScope } from '../execution.ts'
@@ -87,6 +88,12 @@ export interface WorkspaceOptions {
    * `MAX_MEMORY`.
    */
   maxMemory?: string | number | null
+  /**
+   * Where the workspace's connections may go: true for anywhere, false for
+   * nowhere, or `{ allow: [...] }` hosts, `*.` suffixes, addresses and CIDR
+   * ranges. Defaults to true.
+   */
+  network?: NetworkSetting
   /**
    * The workspace's byte cache, described the way `index` is: the
    * config to build one from. A store core cannot build reaches

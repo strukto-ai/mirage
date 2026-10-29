@@ -266,6 +266,7 @@ export {
   checkWorkspaceConfigFile,
   configToWorkspaceArgs,
   interpolateEnv,
+  loadPolicyFile,
   loadProfilePolicy,
   loadWorkspaceConfig,
   loadWorkspaceConfigFile,

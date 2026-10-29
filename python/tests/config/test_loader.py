@@ -160,6 +160,41 @@ def test_max_memory_must_be_a_size():
         )
 
 
+@pytest.mark.parametrize(
+    ("block", "expected"),
+    [
+        ({}, True),
+        ({"network": False}, False),
+        (
+            {"network": {"allow": ["*.github.com", "10.0.0.0/8"]}},
+            {"allow": ["*.github.com", "10.0.0.0/8"]},
+        ),
+    ],
+)
+def test_network_reaches_the_workspace(block, expected):
+    cfg = WorkspaceConfig.model_validate(
+        {"mounts": {"/": {"vfs": "ram"}}, **block}
+    )
+    ws = Workspace(**cfg.to_workspace_kwargs())
+    assert ws.network == expected
+    assert (ws.registry.network is None) == (expected is True)
+
+
+@pytest.mark.parametrize(
+    ("network", "message"),
+    [
+        ("off", "network is true, false or"),
+        ({"deny": ["10.0.0.0/8"]}, "network is true, false or"),
+        ({"allow": ["10.0.0.0/33"]}, "is not an address, a range"),
+    ],
+)
+def test_network_must_be_a_setting(network, message):
+    with pytest.raises(ValueError, match=message):
+        WorkspaceConfig.model_validate(
+            {"mounts": {"/": {"vfs": "ram"}}, "network": network}
+        )
+
+
 @pytest.mark.asyncio
 async def test_to_workspace_kwargs_emits_redis_cache_config():
     cfg = load_config(FIXTURES / "redis_cache.yaml")

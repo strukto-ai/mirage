@@ -37,6 +37,7 @@ import { encodeText } from '../../../shell/bytes.ts'
 import { getCurrentSession } from '../../../context/session_context.ts'
 import type { SessionState } from '../../session/session.ts'
 import type { MemoryBudget } from '../../../io/memory.ts'
+import type { NetworkRule } from '../../../io/network.ts'
 
 export type ResolveFn = (path: string) => Promise<[BaseVFS, PathSpec, MountMode]>
 
@@ -559,6 +560,11 @@ export class Namespace {
   /** The workspace's max_memory, null for no cap. */
   get memory(): MemoryBudget | null {
     return this.registry.memory
+  }
+
+  /** The rule the workspace's connections are judged by, null for no limit. */
+  get network(): NetworkRule | null {
+    return this.registry.network
   }
 
   /**

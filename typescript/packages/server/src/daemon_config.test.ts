@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  parseNetwork,
   ALLOWED_KEYS,
   DaemonConfigError,
   parseDaemonTable,
@@ -107,5 +108,22 @@ describe('parseDaemonTable unclosed section header', () => {
     expect(() => {
       parseDaemonTable('[daemon\nnot toml\n')
     }).toThrow(/malformed/)
+  })
+})
+
+describe('parseNetwork', () => {
+  it.each([
+    ['true', true],
+    ['false', false],
+    ['{ allow = ["*.github.com", "10.0.0.0/8"] }', { allow: ['*.github.com', '10.0.0.0/8'] }],
+  ])('reads %s', (raw, setting) => {
+    expect(parseNetwork(raw)).toEqual(setting)
+    expect(() => {
+      validateDaemonTable({ network: raw, policy_file: 'policy.yaml' })
+    }).not.toThrow()
+  })
+
+  it.each(['off', '{ deny = ["10.0.0.0/8"] }', '{ allow = "a.com" }'])('refuses %s', (raw) => {
+    expect(() => parseNetwork(raw)).toThrow(/network is true, false or/)
   })
 })

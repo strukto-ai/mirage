@@ -30,6 +30,7 @@ import { narrow, narrowingOf, stricterModes } from '../session/resolve.ts'
 import { profileFromDict, profileToDict, type SessionProfile } from '../../policy/profile.ts'
 import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { MAX_MEMORY } from '../../io/memory.ts'
+import type { NetworkSetting } from '../../io/network.ts'
 import { IOConfig } from '../../io/config.ts'
 import { setCwd } from '../session/shell_dirs.ts'
 import { gateRestoredVars } from '../session/state.ts'
@@ -118,6 +119,7 @@ export interface WorkspaceLike {
   readonly defaultSessionId: string
   readonly profiles: Readonly<Record<string, SessionProfile>>
   readonly defaultProfileName: string | null
+  readonly network: NetworkSetting
   adoptDefaultSession(sessionId: string): Promise<void>
   forgetReads(): void
   quiesced<T>(capture: () => Promise<T>): Promise<T>
@@ -263,6 +265,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
     profile: ws.defaultProfileName,
     command_limits: commandLimitsToJSON(ws.registry.commandLimits),
     max_memory: ws.registry.memory?.limit ?? null,
+    network: ws.network,
   }
 }
 
@@ -507,6 +510,7 @@ export function buildMountArgs(
     ),
     profile: state.profile ?? null,
     maxMemory: state.max_memory === undefined ? MAX_MEMORY : state.max_memory,
+    network: state.network ?? true,
   }
 }
 

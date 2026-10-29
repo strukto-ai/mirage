@@ -198,6 +198,7 @@ a `workspace_id`.
 | Command | Does |
 | --- | --- |
 | `mirage workspace create CONFIG [--id ID]` | Create a workspace from a YAML or JSON config. |
+| `mirage workspace create CONFIG --explain` | Show what the [server policies](/home/access/http#server-policies) say of the config, and create nothing. |
 | `mirage workspace list` | List workspaces. |
 | `mirage workspace get ID [--verbose]` | Show mounts and sessions. |
 | `mirage workspace delete ID` | Close a workspace and delete its state. |
@@ -318,6 +319,8 @@ mirage login
 | `allowed_hosts` | `MIRAGE_ALLOWED_HOSTS` | `127.0.0.1,localhost,::1` |
 | `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
 | `max_workspaces` | `MIRAGE_MAX_WORKSPACES` | no cap; past it a new workspace answers 503 |
+| `policy_file` | `MIRAGE_POLICY_FILE` | none; see [Server policies](/home/access/http#server-policies) |
+| `network` | | `true`; `false` or `{ allow = ["host", "10.0.0.0/8"] }` holds every workspace to it |
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |
 | `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Log in](#log-in) |

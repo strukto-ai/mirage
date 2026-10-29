@@ -349,10 +349,13 @@ def test_a_context_reads_as_its_fields_with_the_session_as_data():
 def test_a_caller_reads_as_its_sessions_id_and_working_directory():
     state = SessionState(session_id="s", cwd="/data")
     data = script_context(_ctx(caller=policy_caller(state)))
-    assert data["caller"] == {"session": {"session_id": "s", "cwd": "/data"}}
-    assert script_context(_ctx(caller=PolicyCaller()))["caller"] == {
-        "session": None
+    assert data["caller"] == {
+        "session": {"session_id": "s", "cwd": "/data"},
+        "account": None,
     }
+    assert script_context(_ctx(caller=PolicyCaller(account="acme")))[
+        "caller"
+    ] == {"session": None, "account": "acme"}
     assert script_context(_ctx())["caller"] is None
     json.dumps(data)
 

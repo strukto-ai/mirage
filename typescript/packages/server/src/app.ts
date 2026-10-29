@@ -15,7 +15,15 @@
 import Fastify from 'fastify'
 import rateLimit from '@fastify/rate-limit'
 import { DiskRecordClient } from '@struktoai/mirage-node'
-import { OWNERS_PREFIX, resolveMaxWorkspaces, WorkspaceRegistry } from './registry.ts'
+import { limitNetwork, type NetworkSetting } from '@struktoai/mirage-core/io/network'
+import type { Policy } from '@struktoai/mirage-core/policy/base'
+import {
+  OWNERS_PREFIX,
+  resolveMaxWorkspaces,
+  resolveNetwork,
+  resolvePolicyFile,
+  WorkspaceRegistry,
+} from './registry.ts'
 import type { AuthConfig } from './auth/index.ts'
 import { AuthMode, registerAuth, resolveAuthConfig } from './auth/index.ts'
 import { isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
@@ -65,6 +73,23 @@ export interface BuildAppOptions {
    * `max_workspaces` config key, else sets no cap.
    */
   maxWorkspaces?: number
+  /**
+   * The server's own policies: each answers `preWorkspace` before a
+   * create, clone or load builds anything, and is registered on every
+   * workspace the app builds, so a tenant cannot lift it.
+   */
+  policies?: readonly Policy[]
+  /**
+   * A file of policy programs that answer the same way. Undefined reads
+   * `$MIRAGE_POLICY_FILE` or the `policy_file` config key, else runs none.
+   */
+  policyFile?: string
+  /**
+   * What every workspace's connections are held to besides its own
+   * `network`. Undefined reads the `network` config key, else sets no
+   * limit. In jwt mode the cloud metadata addresses are refused too.
+   */
+  network?: NetworkSetting
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -87,7 +112,10 @@ export function buildApp(options: BuildAppOptions = {}) {
     accountsRequired: authConfig.mode === AuthMode.Jwt,
     owners: new DiskRecordClient(stateRoot, OWNERS_PREFIX),
     maxWorkspaces: resolveMaxWorkspaces(options.maxWorkspaces),
+    policies: options.policies ?? [],
+    programs: resolvePolicyFile(options.policyFile),
   })
+  limitNetwork(resolveNetwork(options.network), authConfig.mode === AuthMode.Jwt)
   const jobs = registry.jobs
   const pidFile = pidFilePath(options.pidFile)
   const app = Fastify({ logger: false })

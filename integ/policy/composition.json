@@ -2504,6 +2504,127 @@
         "limit": null,
         "invalid": null
       }
+    },
+    {
+      "name": "pre_workspace deny wins",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "pre_workspace deny wins",
+        "hook": "pre_workspace",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_workspace"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_workspace"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": []
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 0
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "pre_workspace refuses an ask",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "pre_workspace refuses an ask",
+        "hook": "pre_workspace",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_workspace"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_workspace"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": {
+          "action": 0,
+          "slot": 0,
+          "legal": [
+            "deny"
+          ]
+        }
+      }
     }
   ]
 }

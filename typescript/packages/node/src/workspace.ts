@@ -27,6 +27,7 @@ import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 import { reapHostRun } from './runtime/sandbox/program.ts'
+import { watchNetwork } from './io/network.ts'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import './commands/builtin/utils/http.ts'
@@ -66,6 +67,7 @@ export class Workspace extends CoreWorkspace {
       }
     }
     super(mounts, options)
+    if (this.registry.network !== null) watchNetwork()
     if (mountTargets.length > 0) {
       // Kick off mounts eagerly; await inside fuseReady() / execute() / close()
       // so callers don't need to await the constructor (Python mirrors this).

@@ -23,6 +23,7 @@ from typing import Any, TypeVar
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from mirage import Workspace
 from mirage.concurrency.limiter import run_blocking
@@ -39,6 +40,7 @@ from mirage.server.clone import (
     clone_workspace_with_override,
 )
 from mirage.server.constants import MAX_SNAPSHOT_BYTES
+from mirage.server.io_serde import explanation_to_dict
 from mirage.server.multipart import (
     MAX_REQUEST_PART,
     MAX_SNAPSHOT_PART,
@@ -202,6 +204,24 @@ def _refuse_dot_id(workspace_id: str | None) -> None:
         )
 
 
+async def _admit(request: Request, config: dict[str, Any]) -> None:
+    """Refuse a workspace the server's policies refuse, before any of it
+    is built or any secret it names is read.
+
+    Args:
+        request (Request): the request, for the registry and its account.
+        config (dict[str, Any]): the config as the caller wrote it.
+
+    Raises:
+        HTTPException: 403 with the refusal's reason.
+    """
+    refused = await request.app.state.registry.refusal(
+        config, request.state.account
+    )
+    if refused is not None:
+        raise HTTPException(status_code=403, detail=refused.reason)
+
+
 def config_digest(config: WorkspaceConfig) -> str:
     """A stable fingerprint of the config a workspace was created from.
 
@@ -217,24 +237,36 @@ def config_digest(config: WorkspaceConfig) -> str:
 
 @router.post("", response_model=WorkspaceDetail, status_code=201)
 async def create_workspace(
-    req: CreateWorkspaceRequest, request: Request, response: Response
-) -> WorkspaceDetail:
+    req: CreateWorkspaceRequest,
+    request: Request,
+    response: Response,
+    explain: bool = Query(False),
+) -> WorkspaceDetail | Response:
     """Create a workspace, or answer the live one created from this config.
 
     Creating is idempotent for one config: an id already held by a
     workspace created from an identical config answers that workspace
     with 200, so a client that names its workspace can run again and
-    reach it; an id held by anything else is refused with 409.
+    reach it; an id held by anything else is refused with 409. The
+    server's policies judge the config as written (``pre_workspace``)
+    before any of it is built: a refusal is 403 with its reason, and
+    ``explain`` answers what they say without creating anything.
 
     Args:
         req (CreateWorkspaceRequest): the config and an optional id.
         request (Request): the HTTP request, for the app's registry.
         response (Response): the response, whose status a held id sets.
+        explain (bool): answer what the server's policies say instead.
 
     Returns:
-        WorkspaceDetail: the created or the matching live workspace.
+        WorkspaceDetail | Response: the created or the matching live
+            workspace, or the explanation.
     """
     registry = request.app.state.registry
+    written = (await request.json())["config"]
+    if explain:
+        said = await registry.explanation(written, request.state.account)
+        return JSONResponse(content=explanation_to_dict(said))
     digest = config_digest(req.config)
     # The registry id and the state-store scope must be the same identity,
     # so resolve it before construction: explicit REST id, then the
@@ -269,6 +301,7 @@ async def create_workspace(
                 )
             response.status_code = 200
             return await make_detail(held)
+        await _admit(request, written)
         async with _claimed(request, wid):
             try:
                 # Map runtime entries construct their instances here, so a bad
@@ -441,6 +474,7 @@ async def clone_workspace(
             status_code=409, detail=f"workspace id already exists: {req.id!r}"
         )
     wid = req.id or new_workspace_id()
+    await _admit(request, req.override or {})
     async with _building(request, wid):
         try:
             new_ws = await run_capture(
@@ -505,6 +539,7 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
         raise HTTPException(
             status_code=409, detail=f"workspace id already exists: {req.id!r}"
         )
+    await _admit(request, req.override or {})
     store: S3Config | None = None
     source: Any = tar
     if tar is None and req.key is not None:

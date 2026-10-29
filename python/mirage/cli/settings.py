@@ -28,6 +28,7 @@ from mirage.server.daemon_config import (
     NUMERIC_KEYS,
     DaemonConfigError,
     read_daemon_table,
+    validate_daemon_table,
 )
 from mirage.server.env import (
     ENV_ALLOWED_HOSTS,
@@ -202,7 +203,7 @@ def _check_key(key: str) -> None:
 
 
 def _format_value(key: str, value: str) -> str:
-    if key in NUMERIC_KEYS:
+    if key in NUMERIC_KEYS or key == "network":
         return value
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
@@ -264,6 +265,14 @@ def set_config(key: str, value: str, path: Path | None = None) -> None:
         path (Path | None): config file. Defaults to ``config_path()``.
     """
     _check_key(key)
+    if key == "network":
+        try:
+            validate_daemon_table(tomllib.loads(f"network = {value}"))
+        except tomllib.TOMLDecodeError as exc:
+            raise DaemonConfigError(
+                "config.toml: [daemon] network is true, false or "
+                "{allow = [hosts and ranges]}"
+            ) from exc
     use_path = path or config_path()
     lines = _config_lines(use_path)
     rendered = f"{key} = {_format_value(key, value)}"

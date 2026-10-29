@@ -20,7 +20,10 @@ import pytest
 from typer.testing import CliRunner
 
 from mirage.cli import workspace as workspace_cli
-from mirage.cli.workspace import _resolve_config_arg
+from mirage.cli.workspace import (
+    _format_workspace_explanation,
+    _resolve_config_arg,
+)
 
 OVERRIDE = """
 mounts:
@@ -184,3 +187,18 @@ def test_set_profile_refuses_a_file_that_is_not_a_mapping(
     assert result.exit_code == 2
     assert message in result.output
     assert fake.calls == []
+
+
+def test_an_explained_create_reads_as_its_verdict_and_answers():
+    said = {
+        "outcome": "deny",
+        "reason": "no disk mounts",
+        "answers": [
+            {"kind": "deny", "reason": "no disk mounts", "policy": "NoDisk"}
+        ],
+    }
+    assert _format_workspace_explanation(said) == (
+        "[deny: no disk mounts]\n  NoDisk: deny: no disk mounts"
+    )
+    allowed = {"outcome": "allow", "reason": "", "answers": []}
+    assert _format_workspace_explanation(allowed) == "[allow]"

@@ -19,6 +19,7 @@ mod iconv;
 mod join;
 mod jq;
 mod look;
+mod network;
 pub mod nfs;
 mod nl;
 mod numfmt;
@@ -352,6 +353,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "jq_decode" => jq::open_decode(config),
         "jq_eval" => jq::open_eval(config),
         "look" => look::open(config),
+        "network" => network::open(config),
         "nl" => nl::open(config),
         "numfmt" => numfmt::open(config),
         "od" => od::open(config),

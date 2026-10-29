@@ -98,6 +98,7 @@ if TYPE_CHECKING:
         VfsContext,
         VfsExplanation,
         VfsResultContext,
+        WorkspaceContext,
     )
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
@@ -185,6 +186,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "VfsContext",
         "VfsExplanation",
         "VfsResultContext",
+        "WorkspaceContext",
     ),
 }
 
@@ -260,6 +262,7 @@ __all__ = [
     "VALIDITY",
     "VarsBlock",
     "VfsExplanation",
+    "WorkspaceContext",
 ]
 
 __getattr__ = lazy_exports(__name__, _EXPORTS)

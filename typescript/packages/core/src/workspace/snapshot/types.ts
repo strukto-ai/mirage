@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexConfigSnapshot } from './config.ts'
+import type { NetworkSetting } from '../../io/network.ts'
 import type { EventDict } from '../../observe/observer.ts'
 import type { VFSStateBase } from '../../vfs/base.ts'
 import type { RAMVFSState } from '../../vfs/ram/ram.ts'
@@ -162,4 +163,6 @@ export interface WorkspaceStateDict {
   command_limits?: Record<string, unknown>
   /** The workspace's max_memory in bytes, null for no cap. */
   max_memory?: number | null
+  /** The workspace's network setting, as written. */
+  network?: NetworkSetting
 }

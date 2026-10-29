@@ -68,6 +68,7 @@ from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_MEMORY, MemoryBudget
+from mirage.io.network import NetworkSetting, network_rule
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
@@ -258,6 +259,7 @@ class Workspace:
         mounts: dict[str, VFSMount],
         cache_limit: str | int = "32MB",
         max_memory: str | int | None = MAX_MEMORY,
+        network: NetworkSetting = True,
         cache: CacheConfig | None = None,
         index: IndexConfig | None = None,
         mode: MountMode = MountMode.READ,
@@ -324,6 +326,10 @@ class Workspace:
                 self._registry.held_in_memory,
             )
         )
+        # Every connection a line or an op opens must clear the
+        # workspace's network setting and the process's ceiling.
+        self._network = network
+        self._registry.network = network_rule(network)
         # One provider scopes every control-plane store by workspace id;
         # the per-plane params (observe / namespace_store / session_store)
         # remain as direct overrides that win over the provider.
@@ -1559,6 +1565,11 @@ class Workspace:
         return self._registry.io
 
     @property
+    def network(self) -> NetworkSetting:
+        """The workspace's ``network`` setting, as it was written."""
+        return self._network
+
+    @property
     def registry(self) -> MountRegistry:
         """Mount table; consumed by the event runtime."""
         return self._registry
@@ -2088,6 +2099,7 @@ class Workspace:
             args.mount_args,
             io=args.io,
             max_memory=args.max_memory,
+            network=args.network,
             mode=MountMode.READ,
             write=args.write_default,
             session_id=args.default_session_id,

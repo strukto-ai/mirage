@@ -30,6 +30,7 @@ from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import open_regular
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_MEMORY
+from mirage.io.network import NetworkSetting
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.observe.observer import Observer
 from mirage.policy.builtin.output_cap import command_limits_to_json
@@ -136,6 +137,9 @@ class WorkspaceLike(Protocol):
 
     @property
     def registry(self) -> MountRegistry: ...
+
+    @property
+    def network(self) -> NetworkSetting: ...
 
     @property
     def cache(self) -> FileCacheMixin: ...
@@ -393,6 +397,9 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
         StateKey.MAX_MEMORY: (
             None if ws.registry.memory is None else ws.registry.memory.limit
         ),
+        StateKey.NETWORK: (
+            ws.network if isinstance(ws.network, bool) else dict(ws.network)
+        ),
     }
 
 
@@ -610,6 +617,7 @@ def build_mount_args(
         },
         profile=state.get(StateKey.PROFILE),
         max_memory=state.get(StateKey.MAX_MEMORY, MAX_MEMORY),
+        network=state.get(StateKey.NETWORK, True),
     )
 
 

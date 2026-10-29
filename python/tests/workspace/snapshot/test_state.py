@@ -1336,6 +1336,27 @@ async def test_a_rebuilt_workspace_keeps_its_max_memory(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["copy", "load"])
+@pytest.mark.parametrize("network", [False, {"allow": ["10.0.0.0/8"]}])
+async def test_a_rebuilt_workspace_keeps_its_network(tmp_path, route, network):
+    ws = Workspace({"/d": RAMVFS()}, network=network)
+    try:
+        if route == "copy":
+            rebuilt = await ws.copy()
+        else:
+            snap = tmp_path / "ws.tar"
+            await ws.snapshot(snap)
+            rebuilt = await Workspace.load(snap)
+        try:
+            assert rebuilt.network == network
+            assert rebuilt.registry.network is not None
+        finally:
+            await rebuilt.close()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("named", [None, {}])
 async def test_an_override_naming_no_limits_keeps_the_saved_ones(named):
     saved = {"cat": Limit(max_bytes=2)}

@@ -33,6 +33,8 @@ ALLOWED_KEYS = frozenset(
         "login_client_id",
         "idle_grace_seconds",
         "max_workspaces",
+        "network",
+        "policy_file",
         "port",
         "ssh_port",
         "ssh_host",
@@ -73,13 +75,27 @@ def validate_daemon_table(table: dict[str, Any]) -> None:
     bad_types = sorted(
         k
         for k, v in table.items()
-        if (k in NUMERIC_KEYS and not isinstance(v, (int, float)))
-        or (k not in NUMERIC_KEYS and not isinstance(v, str))
+        if k != "network"
+        and (
+            (k in NUMERIC_KEYS and not isinstance(v, (int, float)))
+            or (k not in NUMERIC_KEYS and not isinstance(v, str))
+        )
     )
     if bad_types:
         raise DaemonConfigError(
             "config.toml: the following [daemon] keys have the wrong "
             f"type: {', '.join(bad_types)}"
+        )
+    network = table.get("network", True)
+    if not isinstance(network, bool) and not (
+        isinstance(network, dict)
+        and set(network) == {"allow"}
+        and isinstance(network["allow"], list)
+        and all(isinstance(entry, str) for entry in network["allow"])
+    ):
+        raise DaemonConfigError(
+            "config.toml: [daemon] network is true, false or "
+            "{allow = [hosts and ranges]}"
         )
 
 

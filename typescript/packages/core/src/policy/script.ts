@@ -56,6 +56,7 @@ import {
   type SessionScriptsQuery,
   type VfsContext,
   type VfsResultContext,
+  type WorkspaceContext,
 } from './types.ts'
 
 const DECODER = new TextDecoder()
@@ -74,7 +75,10 @@ const LIVE = new Set(['session', 'vfs'])
 function callerData(caller: PolicyCaller | undefined): JsonValue {
   if (caller === undefined) return null
   const session = caller.session
-  return { session: session === null ? null : { session_id: session.sessionId, cwd: session.cwd } }
+  return {
+    session: session === null ? null : { session_id: session.sessionId, cwd: session.cwd },
+    account: caller.account,
+  }
 }
 
 /**
@@ -136,9 +140,10 @@ function plain(value: unknown, data = false): JsonValue {
  * Python `script_context`.
  */
 export function scriptContext(
-  ctx: CommandContext | RouteContext | VfsContext | SessionContext,
+  ctx: CommandContext | RouteContext | VfsContext | SessionContext | WorkspaceContext,
 ): Record<string, JsonValue> {
   const data = plain(ctx) as Record<string, JsonValue>
+  if ('config' in ctx) return data
   if ('commands' in ctx) {
     const commands = data.commands as Record<string, JsonValue>[]
     data.commands = ctx.commands.map((command, at) => ({
@@ -173,7 +178,7 @@ export function scriptContext(
  * caller to prefix with whose policy it is. Mirrors the Python
  * `script_action`.
  */
-export function scriptAction(output: Uint8Array, method: ScriptMethod): Deny | Ask | Route | null {
+export function scriptAction(output: Uint8Array, method: PolicyMethod): Deny | Ask | Route | null {
   const text = DECODER.decode(output).trim()
   if (text === '' || text === 'null') return null
   let parsed: unknown
@@ -183,7 +188,7 @@ export function scriptAction(output: Uint8Array, method: ScriptMethod): Deny | A
     parsed = undefined
   }
   const answer = Answer.safeParse(parsed)
-  const name = METHODS[method]
+  const name = method.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
   if (!answer.success) {
     throw new Error(
       `script must print a JSON answer at ${name}, ` + '{"kind": "deny" | "ask" | "route", ...}',
@@ -329,6 +334,10 @@ export class ScriptPolicy implements Policy, SessionScoped {
     return this.judge('preSession', ctx)
   }
 
+  async preWorkspace(ctx: WorkspaceContext): Promise<(Deny | Ask | Route)[] | null> {
+    return this.judge('preWorkspace', ctx)
+  }
+
   async postExecute(ctx: ExecuteResultContext): Promise<(Deny | Ask | Route)[] | null> {
     return this.judge('postExecute', ctx)
   }
@@ -390,10 +399,11 @@ export class ScriptPolicy implements Policy, SessionScoped {
    * in order, up to the first deny.
    */
   private async judge(
-    method: ScriptMethod,
-    ctx: CommandContext | RouteContext | VfsContext | SessionContext,
+    method: PolicyMethod,
+    ctx: CommandContext | RouteContext | VfsContext | SessionContext | WorkspaceContext,
   ): Promise<(Deny | Ask | Route)[] | null> {
-    const programs = this.sessions.scriptsOf(ctx.sessionId ?? '')[method] ?? []
+    const programs =
+      this.sessions.scriptsOf('config' in ctx ? '' : (ctx.sessionId ?? ''))[method] ?? []
     if (programs.length === 0) return null
     const payload = JSON.stringify(scriptContext(ctx))
     const cwd = await this.cwd(ctx)
@@ -417,8 +427,9 @@ export class ScriptPolicy implements Policy, SessionScoped {
    * in a directory that is not there.
    */
   private async cwd(
-    ctx: CommandContext | RouteContext | VfsContext | SessionContext,
+    ctx: CommandContext | RouteContext | VfsContext | SessionContext | WorkspaceContext,
   ): Promise<string> {
+    if ('config' in ctx) return '/'
     const cwd = ctx.session?.cwd() ?? '/'
     if (cwd !== '/' && ctx.vfs !== undefined && !(await ctx.vfs.exists(cwd))) return '/'
     return cwd
@@ -427,7 +438,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
   /** One program at one method; throws a clause about "script" when it fails. */
   private async answer(
     entry: ProfileScript,
-    method: ScriptMethod,
+    method: PolicyMethod,
     payload: string,
     cwd: string,
   ): Promise<Deny | Ask | Route | null> {

@@ -32,6 +32,7 @@ export const StateKey = Object.freeze({
   PROFILE: 'profile',
   COMMAND_LIMITS: 'command_limits',
   MAX_MEMORY: 'max_memory',
+  NETWORK: 'network',
 } as const)
 
 export const MountKey = Object.freeze({

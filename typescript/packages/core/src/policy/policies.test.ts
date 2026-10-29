@@ -1594,7 +1594,7 @@ describe('what a method sees', () => {
       await ws.shell('cd /data', { sessionId: 'agent' })
       await ws.shell('cat /data/owner.txt', { sessionId: 'agent' })
       expect(toucher.refused).toEqual(['cwd'])
-      expect(toucher.keys).toEqual(['session'])
+      expect(toucher.keys).toEqual(['session', 'account'])
       expect((await ws.shell('pwd', { sessionId: 'agent' })).stdoutText).toBe('/data\n')
     } finally {
       await ws.close()

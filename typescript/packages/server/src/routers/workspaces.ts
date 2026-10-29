@@ -45,6 +45,9 @@ import type {
 import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from '../multipart.ts'
 import { SharedStorageError, WritePolicyError } from '@struktoai/mirage-core/workspace/mount/errors'
 import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
+import { explanationToDict } from '../io_serde.ts'
+import { queryFlag } from './vfs.ts'
+import type { JsonValue } from '@struktoai/mirage-core/types'
 
 export interface WorkspaceRoutesDeps {
   registry: WorkspaceRegistry
@@ -171,6 +174,22 @@ async function hasState(stateRoot: string, id: string): Promise<boolean> {
  * answers this way, so the route sends only once the id is released and a
  * client that read the answer finds the id free.
  */
+/**
+ * The server's refusal of a workspace about to be built, as the 403 its
+ * route answers with the reason; null when its policies let it, before
+ * any of it is built or any secret it names is read. Mirrors Python's
+ * `_admit`.
+ */
+async function admit(
+  deps: WorkspaceRoutesDeps,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  config: unknown,
+): Promise<{ detail: string } | null> {
+  const deny = await deps.registry.refusal((config ?? {}) as Record<string, JsonValue>, req.account)
+  return deny === null ? null : answer(reply, 403, { detail: deny.reason })
+}
+
 function answer<T>(reply: FastifyReply, status: number, body: T): T {
   void reply.status(status)
   return body
@@ -250,9 +269,12 @@ function configDigest(config: unknown): string {
 }
 
 export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRoutesDeps): void {
-  app.post<{ Body: CreateWorkspaceRequest }>(
+  app.post<{ Body: CreateWorkspaceRequest; Querystring: { explain?: string } }>(
     '/v1/workspaces',
-    async (req: FastifyRequest<{ Body: CreateWorkspaceRequest }>, reply: FastifyReply) => {
+    async (
+      req: FastifyRequest<{ Body: CreateWorkspaceRequest; Querystring: { explain?: string } }>,
+      reply: FastifyReply,
+    ) => {
       const body = req.body
       const config: unknown = body.config
       if (config === null || typeof config !== 'object' || Array.isArray(config)) {
@@ -274,6 +296,18 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         }
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })
+      }
+      // The server's policies judge the config as written before any of it
+      // is built; explain answers what they say without creating anything.
+      let explain: boolean
+      try {
+        explain = queryFlag(req.query.explain, 'explain')
+      } catch (e) {
+        return reply.status(400).send({ detail: (e as Error).message })
+      }
+      if (explain) {
+        const written = config as Record<string, JsonValue>
+        return explanationToDict(await deps.registry.explanation(written, req.account))
       }
       // The registry id and the state-store scope must be the same identity,
       // so resolve it before construction: explicit REST id, then the
@@ -299,6 +333,8 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           }
           return answer(reply, 200, await makeDetail(held))
         }
+        const refusal = await admit(deps, req, reply, config)
+        if (refusal !== null) return refusal
         return claimed(deps, req, reply, wid, async () => {
           let args: WorkspaceArgs
           try {
@@ -394,6 +430,8 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     ) {
       return reply.status(409).send({ detail: `workspace id already exists: ${workspaceId}` })
     }
+    const refusal = await admit(deps, req, reply, override)
+    if (refusal !== null) return refusal
     const store = typeof source === 'string' ? deps.snapshotStore : undefined
     if (typeof source === 'string' && store === undefined) return noStore(reply)
     const wid = workspaceId ?? newWorkspaceId()
@@ -526,6 +564,8 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         return reply.status(409).send({ detail: `workspace id already exists: ${body.id}` })
       }
       const wid = body.id ?? newWorkspaceId()
+      const refusal = await admit(deps, req, reply, body.override)
+      if (refusal !== null) return refusal
       return building(deps, req, reply, wid, async () => {
         const src = source.runner.ws
         let newWs

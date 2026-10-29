@@ -39,6 +39,7 @@ from mirage.errors.fs import no_mount
 from mirage.errors.types import NoMountError
 from mirage.io.config import IOConfig
 from mirage.io.memory import MemoryBudget
+from mirage.io.network import NetworkRule
 from mirage.observe.observer import Observer
 from mirage.policy import Decisions, MountRootPolicy, Policies
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
@@ -177,6 +178,9 @@ class MountRegistry:
         # The workspace's max_memory, over the bytes its RAM mounts hold;
         # None for no cap.
         self.memory: MemoryBudget | None = None
+        # The rule the workspace's connections are judged by; None for no
+        # limit.
+        self.network: NetworkRule | None = None
         # Why a command that SOME runtime class captures has no live
         # binding: default-world entries that failed to build (missing
         # extra) record their construction error per captured command,

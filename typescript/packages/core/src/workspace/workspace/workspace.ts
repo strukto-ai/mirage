@@ -15,6 +15,7 @@ import { DiffPool } from '../../rs/diff_pool.ts'
 
 import { IOConfig } from '../../io/config.ts'
 import { MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
+import { networkRule, type NetworkSetting } from '../../io/network.ts'
 import { parseLimit } from '../../utils/size.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { ShellExecution } from '../shell_execution.ts'
@@ -189,6 +190,7 @@ export class Workspace {
   readonly io: IOConfig
   private readonly runtimeBinding: WorkspaceBinding
   readonly registry: MountRegistry
+  private readonly networkSetting: NetworkSetting
   readonly sessionManager: SessionManager
   private readonly wsId: string
   private readonly stateStoreInternal: WorkspaceStateStore
@@ -543,6 +545,10 @@ export class Workspace {
       maxMemory === null
         ? null
         : new MemoryBudget(parseLimit(maxMemory, 'max_memory'), () => this.registry.heldInMemory())
+    // Every connection a line or an op opens must clear the workspace's
+    // network setting and the process's ceiling.
+    this.networkSetting = options.network ?? true
+    this.registry.network = networkRule(this.networkSetting)
     for (const [prefix, limits] of Object.entries(normalized.commandLimits)) {
       const mount = this.registry.mountForPrefix(prefix)
       for (const [name, limit] of Object.entries(limits)) mount.commandLimits.set(name, limit)
@@ -1117,6 +1123,11 @@ export class Workspace {
 
   getSession(sessionId: string): SessionState {
     return this.sessionManager.get(sessionId)
+  }
+
+  /** The workspace's `network` setting, as it was written. */
+  get network(): NetworkSetting {
+    return this.networkSetting
   }
 
   /** The profile table every session here runs under. */
@@ -2226,6 +2237,7 @@ export class Workspace {
     const mergedOptions: WorkspaceOptions = {
       io: args.io,
       maxMemory: args.maxMemory,
+      network: args.network,
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
       commandLimits: args.commandLimits,
