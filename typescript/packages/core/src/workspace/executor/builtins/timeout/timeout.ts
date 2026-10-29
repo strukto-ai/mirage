@@ -368,15 +368,14 @@ export async function handleTimeout(
   // A reader that stops early, or never starts, closes the pipe, so the
   // line's next write fails as a write to a closed pipe does and the run is
   // let go. The line ran under the command's prefix assignments, which end
-  // as this settles.
-  const close = (): Promise<void> => {
+  // once it has unwound, or its grace to unwind has passed.
+  const close = async (): Promise<void> => {
     sink.closeReader()
     abort.abort()
-    watch.catch((err: unknown) => {
+    await joinOrAbort(watch, abort.signal, STOP_WAIT_SECONDS * 1000).catch((err: unknown) => {
       console.debug(`timeout: the run ended: ${String(err)}`)
     })
     state.finish()
-    return Promise.resolve()
   }
   return [new OutputStream(streamed(sink, watch, io, node), close), io, node]
 }

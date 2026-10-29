@@ -3009,7 +3009,17 @@ describe('handleTimeout', () => {
     ): Promise<IOResult> => {
       seen = opts.signal
       await opts.sink?.emit(Channel.STDOUT, new TextEncoder().encode('first\n'))
-      await new Promise((resolve) => setTimeout(resolve, 10_000))
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 10_000)
+        opts.signal?.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(timer)
+            resolve()
+          },
+          { once: true },
+        )
+      })
       return new IOResult()
     }
     const [stdout] = await handleTimeout(forever, ['5', 'tail', '-f'], session)
