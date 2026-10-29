@@ -15,18 +15,16 @@
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const QingStorConfigSchema = browserAliasSchema({})
+export const QingStorConfigSchema = browserAliasSchema({})
 
 export type QingStorConfig = ConfigOf<typeof QingStorConfigSchema>
 
 export type QingStorConfigRedacted = RedactedConfig<QingStorConfig, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<QingStorConfig, QingStorConfigRedacted>({
+export const ALIAS = makeBrowserS3Alias<QingStorConfig, QingStorConfigRedacted>({
   schema: QingStorConfigSchema,
   endpointFor: derivedEndpoint('region', (region) => `https://s3.${region}.qingstor.com`),
 })
 
-export const resolvedQingStorEndpoint = alias.resolvedEndpoint
-export const qingStorToS3Config = alias.toS3Config
-export const redactQingStorConfig = alias.redact
-export const normalizeQingStorConfig = alias.normalize
+export const resolvedQingStorEndpoint = ALIAS.resolvedEndpoint
+export const qingStorToS3Config = ALIAS.toS3Config

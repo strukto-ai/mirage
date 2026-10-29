@@ -15,7 +15,6 @@
 import { z } from 'zod'
 import {
   type ConfigOf,
-  parseConfigWithSchema,
   REDACTED_SECRET,
   type RedactedConfig,
   secretSchema,
@@ -28,7 +27,7 @@ import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 // the text in, its embedding out, in the space the collection was built in.
 export type EmbedFn = (text: string) => Promise<number[]>
 
-const QdrantConfigSchema = z.object({
+export const QdrantConfigSchema = z.object({
   ...timeoutShape,
   url: z
     .string()
@@ -126,10 +125,6 @@ const QdrantConfigSchema = z.object({
 })
 
 export type QdrantConfig = ConfigOf<typeof QdrantConfigSchema>
-
-export function normalizeQdrantConfig(input: Record<string, unknown>): QdrantConfig {
-  return parseConfigWithSchema(QdrantConfigSchema, input)
-}
 
 export interface QdrantConfigResolved {
   timeout: number

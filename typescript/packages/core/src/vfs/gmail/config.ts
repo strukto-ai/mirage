@@ -13,14 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GoogleConfigSchema } from '../../core/google/config.ts'
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  type ConfigOf,
-  type RedactedConfig,
-} from '../secrets.ts'
+import { type ConfigOf, type RedactedConfig } from '../secrets.ts'
 
-const GmailConfigSchema = GoogleConfigSchema
+export const GmailConfigSchema = GoogleConfigSchema
 
 export type GmailConfig = ConfigOf<typeof GmailConfigSchema>
 
@@ -28,11 +23,3 @@ export type GmailConfigRedacted = RedactedConfig<
   GmailConfig,
   'accessToken' | 'clientSecret' | 'refreshToken' | 'refreshFn'
 >
-
-export function redactGmailConfig(config: GmailConfig): GmailConfigRedacted {
-  return redactConfigWithSchema(GmailConfigSchema, config) as unknown as GmailConfigRedacted
-}
-
-export function normalizeGmailConfig(input: Record<string, unknown>): GmailConfig {
-  return parseConfigWithSchema(GmailConfigSchema, input)
-}

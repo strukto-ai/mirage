@@ -20,7 +20,7 @@ import { HttpTrelloTransport } from '../../core/trello/client.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
 import {
-  redactTrelloConfig,
+  TrelloConfigSchema,
   type TrelloConfig,
   type TrelloConfigRedacted,
 } from '../../core/trello/config.ts'
@@ -29,6 +29,7 @@ import { readdir as trelloReaddir } from '../../core/trello/readdir.ts'
 import { read as trelloRead } from '../../core/trello/read.ts'
 import { stat as trelloStat } from '../../core/trello/stat.ts'
 import { filesContaining as trelloFilesContaining } from '../../core/trello/search.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   workspaces/
@@ -135,7 +136,7 @@ export class TrelloVFS extends BaseVFS {
   override getState(): Promise<TrelloVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactTrelloConfig(this.config),
+      config: redactConfigWithSchema(TrelloConfigSchema, this.config) as TrelloConfigRedacted,
     })
   }
 }

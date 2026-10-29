@@ -13,13 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  type ConfigOf,
-  type RedactedConfig,
-  secretStr,
-} from '../../vfs/secrets.ts'
+import { type ConfigOf, type RedactedConfig, secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
 export const LinearConfigSchema = z.object({
@@ -40,11 +34,3 @@ export const LinearConfigSchema = z.object({
 export type LinearConfig = ConfigOf<typeof LinearConfigSchema>
 
 export type LinearConfigRedacted = RedactedConfig<LinearConfig, 'apiKey'>
-
-export function redactLinearConfig(config: LinearConfig): LinearConfigRedacted {
-  return redactConfigWithSchema(LinearConfigSchema, config) as unknown as LinearConfigRedacted
-}
-
-export function normalizeLinearConfig(input: Record<string, unknown>): LinearConfig {
-  return parseConfigWithSchema(LinearConfigSchema, input)
-}

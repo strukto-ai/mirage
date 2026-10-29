@@ -13,13 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  type ConfigOf,
-  type RedactedConfig,
-  secretStr,
-} from '../secrets.ts'
+import { type ConfigOf, type RedactedConfig, secretStr } from '../secrets.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 
@@ -32,7 +26,7 @@ function normalizeRootPath(value: string): string {
   return '/' + parts.join('/')
 }
 
-const TiDBFilesystemConfigSchema = z.object({
+export const TiDBFilesystemConfigSchema = z.object({
   ...timeoutShape,
   host: z
     .string()
@@ -53,18 +47,3 @@ const TiDBFilesystemConfigSchema = z.object({
 export type TiDBFilesystemConfig = ConfigOf<typeof TiDBFilesystemConfigSchema>
 
 export type TiDBFilesystemConfigRedacted = RedactedConfig<TiDBFilesystemConfig, 'token'>
-
-export function redactTiDBFilesystemConfig(
-  config: TiDBFilesystemConfig,
-): TiDBFilesystemConfigRedacted {
-  return redactConfigWithSchema(
-    TiDBFilesystemConfigSchema,
-    config,
-  ) as unknown as TiDBFilesystemConfigRedacted
-}
-
-export function normalizeTiDBFilesystemConfig(
-  input: Record<string, unknown>,
-): TiDBFilesystemConfig {
-  return parseConfigWithSchema(TiDBFilesystemConfigSchema, input)
-}

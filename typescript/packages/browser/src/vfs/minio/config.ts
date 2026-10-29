@@ -15,16 +15,14 @@
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const MinIOConfigSchema = browserAliasSchema({})
+export const MinIOConfigSchema = browserAliasSchema({})
 
 export type MinIOConfig = ConfigOf<typeof MinIOConfigSchema>
 
 export type MinIOConfigRedacted = RedactedConfig<MinIOConfig, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<MinIOConfig, MinIOConfigRedacted>({
+export const ALIAS = makeBrowserS3Alias<MinIOConfig, MinIOConfigRedacted>({
   schema: MinIOConfigSchema,
 })
 
-export const minioToS3Config = alias.toS3Config
-export const redactMinIOConfig = alias.redact
-export const normalizeMinIOConfig = alias.normalize
+export const minioToS3Config = ALIAS.toS3Config

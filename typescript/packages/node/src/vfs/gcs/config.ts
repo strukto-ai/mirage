@@ -12,34 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  z,
-} from '@struktoai/mirage-core/vfs/secrets'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
-import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
-import { ALIAS_SHAPE } from '../s3_alias.ts'
-import type { S3Config } from '../s3/config.ts'
+import { aliasSchema, makeS3Alias, type S3AliasConfig } from '../s3_alias.ts'
 
 export const GCS_ENDPOINT = 'https://storage.googleapis.com'
 
-export interface GCSConfig {
-  bucket: string
-  accessKeyId?: string
-  secretAccessKey?: string
-  sessionToken?: string
-  profile?: string
-  endpoint?: string
-  region?: string
-  timeout?: number
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  proxy?: string
-}
+export type GCSConfig = S3AliasConfig
 
-const GCSConfigSchema = z.object({
-  ...ALIAS_SHAPE,
+export const GCSConfigSchema = aliasSchema({
   region: z.string().optional().meta({
     description: 'Region requests are signed for; GCS serves every region from one host.',
     default: 'auto',
@@ -57,30 +38,10 @@ export type GCSConfigRedacted = RedactedConfig<
   'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
 >
 
-export function gcsToS3Config(config: GCSConfig): S3Config {
-  return {
-    bucket: config.bucket,
-    region: config.region ?? 'auto',
-    endpoint: config.endpoint ?? GCS_ENDPOINT,
-    ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
-    ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
-    ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
-    ...(config.profile !== undefined ? { profile: config.profile } : {}),
-    ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
-    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
-    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-  }
-}
+export const ALIAS = makeS3Alias<GCSConfig, GCSConfigRedacted>({
+  schema: GCSConfigSchema,
+  endpointFor: (config) => config.endpoint ?? GCS_ENDPOINT,
+  regionDefault: 'auto',
+})
 
-export function redactGcsConfig(config: GCSConfig): GCSConfigRedacted {
-  return redactConfigWithSchema(GCSConfigSchema, {
-    ...config,
-    endpoint: config.endpoint ?? GCS_ENDPOINT,
-    region: config.region ?? 'auto',
-  }) as unknown as GCSConfigRedacted
-}
-
-export function normalizeGcsConfig(input: Record<string, unknown>): GCSConfig {
-  return parseConfigWithSchema(GCSConfigSchema, input, S3_FAMILY_NORMALIZER)
-}
+export const gcsToS3Config = ALIAS.toS3Config

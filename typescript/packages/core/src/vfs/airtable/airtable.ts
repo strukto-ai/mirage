@@ -14,7 +14,7 @@
 
 import { AirtableAccessor } from '../../accessor/airtable.ts'
 import {
-  redactAirtableConfig,
+  AirtableConfigSchema,
   type AirtableConfig,
   type AirtableConfigRedacted,
 } from '../../core/airtable/config.ts'
@@ -32,6 +32,7 @@ import { buildDeltaHook } from '../../core/airtable/events.ts'
 import type { DeltaHook } from '../../events/index.ts'
 import { linesContaining as airtableLinesContaining } from '../../core/airtable/search.ts'
 import type { ByteSource } from '../../io/types.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   bases/
@@ -127,6 +128,9 @@ export class AirtableVFS extends BaseVFS {
   }
 
   override getState(): AirtableVFSState {
-    return { type: this.name, config: redactAirtableConfig(this.config) }
+    return {
+      type: this.name,
+      config: redactConfigWithSchema(AirtableConfigSchema, this.config) as AirtableConfigRedacted,
+    }
   }
 }

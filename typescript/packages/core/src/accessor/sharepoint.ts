@@ -20,12 +20,7 @@ import {
   type MsGraphConfig,
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
-import {
-  type ConfigOf,
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  type RedactedConfig,
-} from '../vfs/secrets.ts'
+import { type ConfigOf, type RedactedConfig } from '../vfs/secrets.ts'
 import { stripSlash } from '../utils/slash.ts'
 
 export interface SharePointConfig extends MsGraphConfig {
@@ -35,7 +30,7 @@ export interface SharePointConfig extends MsGraphConfig {
   keyPrefix?: string
 }
 
-const SharePointConfigSchema = z.object({
+export const SharePointConfigSchema = z.object({
   ...MSGRAPH_CONFIG_SHAPE,
   siteFilter: z.string().optional().meta({
     description:
@@ -66,17 +61,6 @@ export type SharePointConfigRedacted = RedactedConfig<
   ConfigOf<typeof SharePointConfigSchema>,
   'accessToken'
 >
-
-export function redactSharePointConfig(config: SharePointConfig): SharePointConfigRedacted {
-  return redactConfigWithSchema(
-    SharePointConfigSchema,
-    config,
-  ) as unknown as SharePointConfigRedacted
-}
-
-export function normalizeSharePointConfig(input: Record<string, unknown>): SharePointConfig {
-  return parseConfigWithSchema(SharePointConfigSchema, input)
-}
 
 export interface SharePointConfigResolved extends MsGraphConfigResolved {
   siteFilter: string | null

@@ -15,16 +15,14 @@
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const SeaweedFSConfigSchema = browserAliasSchema({})
+export const SeaweedFSConfigSchema = browserAliasSchema({})
 
 export type SeaweedFSConfig = ConfigOf<typeof SeaweedFSConfigSchema>
 
 export type SeaweedFSConfigRedacted = RedactedConfig<SeaweedFSConfig, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<SeaweedFSConfig, SeaweedFSConfigRedacted>({
+export const ALIAS = makeBrowserS3Alias<SeaweedFSConfig, SeaweedFSConfigRedacted>({
   schema: SeaweedFSConfigSchema,
 })
 
-export const seaweedfsToS3Config = alias.toS3Config
-export const redactSeaweedFSConfig = alias.redact
-export const normalizeSeaweedFSConfig = alias.normalize
+export const seaweedfsToS3Config = ALIAS.toS3Config

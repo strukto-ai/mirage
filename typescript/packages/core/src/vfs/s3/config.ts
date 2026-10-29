@@ -13,13 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  type ConfigOf,
-  redactConfigWithSchema,
-  type RedactedConfig,
-  secretSchema,
-  secretStr,
-} from '../secrets.ts'
+import { type ConfigOf, type RedactedConfig, secretSchema, secretStr } from '../secrets.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 
@@ -138,7 +132,3 @@ export type S3ConfigRedacted = RedactedConfig<
   ConfigOf<typeof S3ConfigSchema>,
   'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'presignedUrlProvider' | 'httpAgentProvider'
 >
-
-export function redactConfig(config: S3Config): S3ConfigRedacted {
-  return redactConfigWithSchema(S3ConfigSchema, config) as unknown as S3ConfigRedacted
-}

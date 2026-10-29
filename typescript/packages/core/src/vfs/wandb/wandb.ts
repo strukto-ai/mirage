@@ -3,7 +3,7 @@ import { type ByteSource } from '../../io/types.ts'
 import type { Handed } from '../types.ts'
 import { WandbAccessor } from '../../accessor/wandb.ts'
 
-import { redactWandbConfig } from '../../core/wandb/config.ts'
+import { WandbConfigSchema } from '../../core/wandb/config.ts'
 import type { WandbConfig, WandbConfigRedacted } from '../../core/wandb/config.ts'
 
 import { type DirListing, VFSName } from '../../types.ts'
@@ -11,6 +11,7 @@ import type { PathSpec, FileStat } from '../../types.ts'
 import { readdir } from '../../core/wandb/readdir.ts'
 import { readStream } from '../../core/wandb/read.ts'
 import { stat } from '../../core/wandb/stat.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `Read-only W&B experiments: /<entity>/<project>/<run-id>/ contains
 run.json (identity, creator, sweep/group/job, tags, timestamps, notes, system metrics,
@@ -63,7 +64,7 @@ export class WandbVFS extends BaseVFS {
   override getState(): Promise<WandbVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactWandbConfig(this.config),
+      config: redactConfigWithSchema(WandbConfigSchema, this.config) as WandbConfigRedacted,
     })
   }
 }

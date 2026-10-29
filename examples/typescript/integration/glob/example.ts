@@ -23,7 +23,7 @@ import {
   MountMode,
   S3VFS,
   Workspace,
-  type GDriveConfig,
+  type GoogleDriveConfig,
   type S3Config,
 } from '@struktoai/mirage-node'
 
@@ -42,7 +42,7 @@ const s3Config: S3Config = {
   accessKeyId: env('AWS_ACCESS_KEY_ID'),
   secretAccessKey: env('AWS_SECRET_ACCESS_KEY'),
 }
-const gdriveConfig: GDriveConfig = {
+const gdriveConfig: GoogleDriveConfig = {
   clientId: env('GOOGLE_CLIENT_ID'),
   clientSecret: env('GOOGLE_CLIENT_SECRET'),
   refreshToken: env('GOOGLE_REFRESH_TOKEN'),

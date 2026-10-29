@@ -12,13 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  secretSchema,
-  secretStr,
-  z,
-} from '../secrets.ts'
+import { secretSchema, secretStr, z } from '../secrets.ts'
 import type { ConfigOf, RedactedConfig } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 
@@ -32,7 +26,7 @@ export interface DropboxConfig {
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
 }
 
-const DropboxConfigSchema = z.object({
+export const DropboxConfigSchema = z.object({
   ...timeoutShape,
   clientId: z.string().describe('Dropbox app key.'),
   clientSecret: secretStr()
@@ -67,11 +61,3 @@ export type DropboxConfigRedacted = RedactedConfig<
   ConfigOf<typeof DropboxConfigSchema>,
   'clientSecret' | 'refreshToken' | 'refreshFn'
 >
-
-export function redactDropboxConfig(config: DropboxConfig): DropboxConfigRedacted {
-  return redactConfigWithSchema(DropboxConfigSchema, config) as unknown as DropboxConfigRedacted
-}
-
-export function normalizeDropboxConfig(input: Record<string, unknown>): DropboxConfig {
-  return parseConfigWithSchema(DropboxConfigSchema, input)
-}

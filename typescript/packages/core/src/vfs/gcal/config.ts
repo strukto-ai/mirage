@@ -15,12 +15,7 @@
 import { z } from 'zod'
 import { timeRangeShape, orderedTimes, timeRangeOrderError } from '../../core/time_config.ts'
 import { GoogleConfigSchema } from '../../core/google/config.ts'
-import {
-  type ConfigOf,
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  type RedactedConfig,
-} from '../secrets.ts'
+import { type ConfigOf, type RedactedConfig } from '../secrets.ts'
 
 // Calendar-only knobs live here, not on the shared Google base, so a drive
 // or docs mount cannot be handed a time zone that means nothing to it.
@@ -66,11 +61,3 @@ export type GCalConfigRedacted = RedactedConfig<
   GCalConfig,
   'accessToken' | 'clientSecret' | 'refreshToken' | 'refreshFn'
 >
-
-export function redactGCalConfig(config: GCalConfig): GCalConfigRedacted {
-  return redactConfigWithSchema(GCalConfigSchema, config) as unknown as GCalConfigRedacted
-}
-
-export function normalizeGCalConfig(input: Record<string, unknown>): GCalConfig {
-  return parseConfigWithSchema(GCalConfigSchema, input)
-}

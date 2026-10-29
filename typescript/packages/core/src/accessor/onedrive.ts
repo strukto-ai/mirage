@@ -20,12 +20,7 @@ import {
   type MsGraphConfig,
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
-import {
-  type ConfigOf,
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  type RedactedConfig,
-} from '../vfs/secrets.ts'
+import { type ConfigOf, type RedactedConfig } from '../vfs/secrets.ts'
 import { stripSlash } from '../utils/slash.ts'
 
 export interface OneDriveConfig extends MsGraphConfig {
@@ -51,7 +46,7 @@ function driveTargetError(named: readonly string[]): string {
   )
 }
 
-const OneDriveConfigSchema = z
+export const OneDriveConfigSchema = z
   .object({
     ...MSGRAPH_CONFIG_SHAPE,
     driveId: z
@@ -89,14 +84,6 @@ export type OneDriveConfigRedacted = RedactedConfig<
   ConfigOf<typeof OneDriveConfigSchema>,
   'accessToken'
 >
-
-export function redactOneDriveConfig(config: OneDriveConfig): OneDriveConfigRedacted {
-  return redactConfigWithSchema(OneDriveConfigSchema, config) as unknown as OneDriveConfigRedacted
-}
-
-export function normalizeOneDriveConfig(input: Record<string, unknown>): OneDriveConfig {
-  return parseConfigWithSchema(OneDriveConfigSchema, input)
-}
 
 export interface OneDriveConfigResolved extends MsGraphConfigResolved {
   driveId: string | null

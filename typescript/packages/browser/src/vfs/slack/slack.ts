@@ -20,7 +20,8 @@ import { BrowserSlackTransport } from '@struktoai/mirage-core/core/slack/client_
 import { VFS_MD } from '@struktoai/mirage-core/vfs/slack/slack'
 import { VFSName } from '@struktoai/mirage-core/types'
 
-import { redactSlackConfig, type SlackConfig, type SlackConfigRedacted } from './config.ts'
+import { SlackConfigSchema, type SlackConfig, type SlackConfigRedacted } from './config.ts'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 export interface SlackVFSState {
   type: string
@@ -56,7 +57,7 @@ export class SlackVFS extends SlackVFSBase {
   override getState(): Promise<SlackVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactSlackConfig(this.config),
+      config: redactConfigWithSchema(SlackConfigSchema, this.config) as SlackConfigRedacted,
     })
   }
 }

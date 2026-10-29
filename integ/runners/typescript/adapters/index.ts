@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeSlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
-import { normalizeDiscordConfig } from '@struktoai/mirage-core/vfs/discord/config'
-import { normalizeGCalConfig } from '@struktoai/mirage-core/vfs/gcal/config'
+import { SlackConfigSchema } from '@struktoai/mirage-core/vfs/slack/config'
+import { DiscordConfigSchema } from '@struktoai/mirage-core/vfs/discord/config'
+import { GCalConfigSchema } from '@struktoai/mirage-core/vfs/gcal/config'
 import { randomBytes, randomUUID } from 'node:crypto'
 import {
   chmodSync,
@@ -114,10 +114,11 @@ import {
   Workspace,
 } from '@struktoai/mirage-node'
 import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
-import { normalizePostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
-import { normalizeMongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/config'
-import { normalizeTiDBFilesystemConfig } from '@struktoai/mirage-core/vfs/tidb_filesystem/config'
-import { normalizeTrelloConfig } from '@struktoai/mirage-core/core/trello/config'
+import { PostgresConfigSchema } from '@struktoai/mirage-core/vfs/postgres/config'
+import { MongoDBConfigSchema } from '@struktoai/mirage-core/vfs/mongodb/config'
+import { TiDBFilesystemConfigSchema } from '@struktoai/mirage-core/vfs/tidb_filesystem/config'
+import { TrelloConfigSchema } from '@struktoai/mirage-core/core/trello/config'
+import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { ManualClock } from '@struktoai/mirage-core/utils/clock'
@@ -1570,7 +1571,7 @@ async function openMongodb(target: Target): Promise<Open> {
   const mounts: Record<string, MongoDBVFS | [MongoDBVFS, MountMode]> = {}
   for (const mount of target.mounts) {
     const vfs = new MongoDBVFS(
-      normalizeMongoDBConfig({ uri, databases: [MONGODB_DB], ...mount.config }),
+      parseConfigWithSchema(MongoDBConfigSchema, { uri, databases: [MONGODB_DB], ...mount.config }),
     )
     created.push(vfs)
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
@@ -1702,7 +1703,7 @@ async function openPostgres(target: Target): Promise<Open> {
   const mounts: Record<string, PostgresVFS | [PostgresVFS, MountMode]> = {}
   for (const mount of target.mounts) {
     const vfs = new PostgresVFS(
-      normalizePostgresConfig({ dsn, max_read_rows: 200, ...mount.config }),
+      parseConfigWithSchema(PostgresConfigSchema, { dsn, max_read_rows: 200, ...mount.config }),
     )
     created.push(vfs)
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
@@ -1810,7 +1811,11 @@ async function openTiDBFilesystem(target: Target): Promise<Open> {
   }
   const base = `/mirage-integ-${runId()}`
   const admin = new Workspace(
-    { '/admin': await TiDBFilesystemVFS.create(normalizeTiDBFilesystemConfig({ host, token })) },
+    {
+      '/admin': await TiDBFilesystemVFS.create(
+        parseConfigWithSchema(TiDBFilesystemConfigSchema, { host, token }),
+      ),
+    },
     { mode: MountMode.WRITE },
   )
   const paths = target.mounts.map((m) => `/admin${base}/${String(m.root)}`).join(' ')
@@ -1818,7 +1823,11 @@ async function openTiDBFilesystem(target: Target): Promise<Open> {
   const mounts: Record<string, TiDBFilesystemVFS> = {}
   for (const m of target.mounts) {
     mounts[m.path] = await TiDBFilesystemVFS.create(
-      normalizeTiDBFilesystemConfig({ host, token, root_path: `${base}/${String(m.root)}` }),
+      parseConfigWithSchema(TiDBFilesystemConfigSchema, {
+        host,
+        token,
+        root_path: `${base}/${String(m.root)}`,
+      }),
     )
   }
   const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
@@ -1989,7 +1998,9 @@ function gwsNativeVfs(
   // today is pinned so the rolling window is the same on both hosts and
   // lands on the seeded events.
   if (vfs === 'gcal')
-    return new GCalVFS(normalizeGCalConfig({ ...config, today: '2026-02-11', ...mountConfig }))
+    return new GCalVFS(
+      parseConfigWithSchema(GCalConfigSchema, { ...config, today: '2026-02-11', ...mountConfig }),
+    )
   return new GSlidesVFS(config)
 }
 
@@ -2128,7 +2139,7 @@ async function openSlack(target: Target): Promise<Open> {
       continue
     }
     mounts[m.path] = new SlackVFS(
-      normalizeSlackConfig({
+      parseConfigWithSchema(SlackConfigSchema, {
         ...m.config,
         token: `xoxb-${workspace}`,
         searchToken: `xoxp-${workspace}`,
@@ -2310,7 +2321,7 @@ async function openTrello(target: Target): Promise<Open> {
       continue
     }
     const vfs = new TrelloVFS(
-      normalizeTrelloConfig({
+      parseConfigWithSchema(TrelloConfigSchema, {
         apiKey: 'integ-key',
         apiToken: 'integ-token',
         baseUrl: endpoint,
@@ -2352,7 +2363,7 @@ async function openDiscord(target: Target): Promise<Open> {
       continue
     }
     mounts[m.path] = new DiscordVFS(
-      normalizeDiscordConfig({
+      parseConfigWithSchema(DiscordConfigSchema, {
         ...m.config,
         token: 'integ-bot-token',
         baseUrl: `${endpoint}/api/v10`,

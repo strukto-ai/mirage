@@ -27,7 +27,7 @@ import { COMMIT_SHA, WALK_LIMIT } from '../../core/github/constants.ts'
 import { ListingVersion, VFSName } from '../../types.ts'
 
 import {
-  redactGitHubConfig,
+  GitHubConfigSchema,
   type GitHubConfig,
   type GitHubConfigRedacted,
 } from '../../core/github/config.ts'
@@ -37,6 +37,7 @@ import { readdir as githubReaddir } from '../../core/github/readdir.ts'
 import { readMany as githubReadMany, readStream as githubStream } from '../../core/github/read.ts'
 import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
 import { filesContaining as githubFilesContaining } from '../../core/github/search.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export interface GitHubVFSState {
   type: string
@@ -169,7 +170,7 @@ export class GitHubVFS extends BaseVFS {
   override getState(): Promise<GitHubVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactGitHubConfig(this.config),
+      config: redactConfigWithSchema(GitHubConfigSchema, this.config) as GitHubConfigRedacted,
       defaultBranch: this.accessor.defaultBranch,
       truncated: this.accessor.truncated,
     })

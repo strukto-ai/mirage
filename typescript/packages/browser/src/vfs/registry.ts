@@ -16,7 +16,7 @@ import { resolveConfigSecrets } from '@struktoai/mirage-core/secrets/sources'
 import type { RAMVFSOptions } from '@struktoai/mirage-core/vfs/ram/ram'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import { refuseUnknownKeys, z } from '@struktoai/mirage-core/vfs/secrets'
+import { parseConfigWithSchema, refuseUnknownKeys, z } from '@struktoai/mirage-core/vfs/secrets'
 import { errorSummary } from '@struktoai/mirage-core/secrets/summary'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import type { OPFSVFSOptions } from './opfs/opfs.ts'
@@ -67,128 +67,128 @@ const REGISTRY: Record<string, VFSFactory> = {
   },
   s3: async (config) => {
     const { S3VFS } = await import('./s3/s3.ts')
-    const { normalizeS3Config } = await import('./s3/config.ts')
-    return new S3VFS(normalizeS3Config(config))
+    const { S3ConfigSchema } = await import('./s3/config.ts')
+    return new S3VFS(parseConfigWithSchema(S3ConfigSchema, config))
   },
   gcs: async (config) => {
     const { GCSVFS } = await import('./gcs/gcs.ts')
-    const { normalizeGCSConfig } = await import('./gcs/config.ts')
-    return new GCSVFS(normalizeGCSConfig(config))
+    const { GCSConfigSchema } = await import('./gcs/config.ts')
+    return new GCSVFS(parseConfigWithSchema(GCSConfigSchema, config))
   },
   r2: async (config) => {
     const { R2VFS } = await import('./r2/r2.ts')
-    const { normalizeR2Config } = await import('./r2/config.ts')
-    return new R2VFS(normalizeR2Config(config))
+    const { R2ConfigSchema } = await import('./r2/config.ts')
+    return new R2VFS(parseConfigWithSchema(R2ConfigSchema, config))
   },
   oci: async (config) => {
     const { OCIVFS } = await import('./oci/oci.ts')
-    const { normalizeOCIConfig } = await import('./oci/config.ts')
-    return new OCIVFS(normalizeOCIConfig(config))
+    const { OCIConfigSchema } = await import('./oci/config.ts')
+    return new OCIVFS(parseConfigWithSchema(OCIConfigSchema, config))
   },
   supabase: async (config) => {
     const { SupabaseVFS } = await import('./supabase/supabase.ts')
-    const { normalizeSupabaseConfig } = await import('./supabase/config.ts')
-    return new SupabaseVFS(normalizeSupabaseConfig(config))
+    const { SupabaseConfigSchema } = await import('./supabase/config.ts')
+    return new SupabaseVFS(parseConfigWithSchema(SupabaseConfigSchema, config))
   },
   minio: async (config) => {
     const { MinIOVFS } = await import('./minio/minio.ts')
-    const { normalizeMinIOConfig } = await import('./minio/config.ts')
-    return new MinIOVFS(normalizeMinIOConfig(config))
+    const { MinIOConfigSchema } = await import('./minio/config.ts')
+    return new MinIOVFS(parseConfigWithSchema(MinIOConfigSchema, config))
   },
   ceph: async (config) => {
     const { CephVFS } = await import('./ceph/ceph.ts')
-    const { normalizeCephConfig } = await import('./ceph/config.ts')
-    return new CephVFS(normalizeCephConfig(config))
+    const { CephConfigSchema } = await import('./ceph/config.ts')
+    return new CephVFS(parseConfigWithSchema(CephConfigSchema, config))
   },
   seaweedfs: async (config) => {
     const { SeaweedFSVFS } = await import('./seaweedfs/seaweedfs.ts')
-    const { normalizeSeaweedFSConfig } = await import('./seaweedfs/config.ts')
-    return new SeaweedFSVFS(normalizeSeaweedFSConfig(config))
+    const { SeaweedFSConfigSchema } = await import('./seaweedfs/config.ts')
+    return new SeaweedFSVFS(parseConfigWithSchema(SeaweedFSConfigSchema, config))
   },
   wasabi: async (config) => {
     const { WasabiVFS } = await import('./wasabi/wasabi.ts')
-    const { normalizeWasabiConfig } = await import('./wasabi/config.ts')
-    return new WasabiVFS(normalizeWasabiConfig(config))
+    const { WasabiConfigSchema } = await import('./wasabi/config.ts')
+    return new WasabiVFS(parseConfigWithSchema(WasabiConfigSchema, config))
   },
   backblaze: async (config) => {
     const { BackblazeVFS } = await import('./backblaze/backblaze.ts')
-    const { normalizeBackblazeConfig } = await import('./backblaze/config.ts')
-    return new BackblazeVFS(normalizeBackblazeConfig(config))
+    const { BackblazeConfigSchema } = await import('./backblaze/config.ts')
+    return new BackblazeVFS(parseConfigWithSchema(BackblazeConfigSchema, config))
   },
   digitalocean: async (config) => {
     const { DigitalOceanVFS } = await import('./digitalocean/digitalocean.ts')
-    const { normalizeDigitalOceanConfig } = await import('./digitalocean/config.ts')
-    return new DigitalOceanVFS(normalizeDigitalOceanConfig(config))
+    const { DigitalOceanConfigSchema } = await import('./digitalocean/config.ts')
+    return new DigitalOceanVFS(parseConfigWithSchema(DigitalOceanConfigSchema, config))
   },
   tencent: async (config) => {
     const { TencentVFS } = await import('./tencent/tencent.ts')
-    const { normalizeTencentConfig } = await import('./tencent/config.ts')
-    return new TencentVFS(normalizeTencentConfig(config))
+    const { TencentConfigSchema } = await import('./tencent/config.ts')
+    return new TencentVFS(parseConfigWithSchema(TencentConfigSchema, config))
   },
   aliyun: async (config) => {
     const { AliyunVFS } = await import('./aliyun/aliyun.ts')
-    const { normalizeAliyunConfig } = await import('./aliyun/config.ts')
-    return new AliyunVFS(normalizeAliyunConfig(config))
+    const { AliyunConfigSchema } = await import('./aliyun/config.ts')
+    return new AliyunVFS(parseConfigWithSchema(AliyunConfigSchema, config))
   },
   scaleway: async (config) => {
     const { ScalewayVFS } = await import('./scaleway/scaleway.ts')
-    const { normalizeScalewayConfig } = await import('./scaleway/config.ts')
-    return new ScalewayVFS(normalizeScalewayConfig(config))
+    const { ScalewayConfigSchema } = await import('./scaleway/config.ts')
+    return new ScalewayVFS(parseConfigWithSchema(ScalewayConfigSchema, config))
   },
   qingstor: async (config) => {
     const { QingStorVFS } = await import('./qingstor/qingstor.ts')
-    const { normalizeQingStorConfig } = await import('./qingstor/config.ts')
-    return new QingStorVFS(normalizeQingStorConfig(config))
+    const { QingStorConfigSchema } = await import('./qingstor/config.ts')
+    return new QingStorVFS(parseConfigWithSchema(QingStorConfigSchema, config))
   },
   slack: async (config) => {
     const { SlackVFS } = await import('./slack/slack.ts')
-    const { normalizeSlackConfig } = await import('./slack/config.ts')
-    return new SlackVFS(normalizeSlackConfig(config))
+    const { SlackConfigSchema } = await import('./slack/config.ts')
+    return new SlackVFS(parseConfigWithSchema(SlackConfigSchema, config))
   },
   discord: async (config) => {
     const { DiscordVFS } = await import('./discord/discord.ts')
-    const { normalizeDiscordConfig } = await import('./discord/config.ts')
-    return new DiscordVFS(normalizeDiscordConfig(config))
+    const { DiscordConfigSchema } = await import('./discord/config.ts')
+    return new DiscordVFS(parseConfigWithSchema(DiscordConfigSchema, config))
   },
   trello: async (config) => {
     const { TrelloVFS } = await import('@struktoai/mirage-core/vfs/trello/trello')
-    const { normalizeTrelloConfig } = await import('@struktoai/mirage-core/core/trello/config')
-    return new TrelloVFS(normalizeTrelloConfig(config))
+    const { TrelloConfigSchema } = await import('@struktoai/mirage-core/core/trello/config')
+    return new TrelloVFS(parseConfigWithSchema(TrelloConfigSchema, config))
   },
   wandb: async (config) => {
     const { WandbVFS } = await import('@struktoai/mirage-core/vfs/wandb/wandb')
-    const { normalizeWandbConfig } = await import('@struktoai/mirage-core/core/wandb/config')
-    return new WandbVFS(normalizeWandbConfig(config))
+    const { WandbConfigSchema } = await import('@struktoai/mirage-core/core/wandb/config')
+    return new WandbVFS(parseConfigWithSchema(WandbConfigSchema, config))
   },
   linear: async (config) => {
     const { LinearVFS } = await import('@struktoai/mirage-core/vfs/linear/linear')
-    const { normalizeLinearConfig } = await import('@struktoai/mirage-core/core/linear/config')
-    return new LinearVFS(normalizeLinearConfig(config))
+    const { LinearConfigSchema } = await import('@struktoai/mirage-core/core/linear/config')
+    return new LinearVFS(parseConfigWithSchema(LinearConfigSchema, config))
   },
   postgres: async (config) => {
     const { PostgresVFS } = await import('./postgres/postgres.ts')
-    const { normalizePostgresConfig } = await import('@struktoai/mirage-core/vfs/postgres/config')
-    return new PostgresVFS(normalizePostgresConfig(config))
+    const { PostgresConfigSchema } = await import('@struktoai/mirage-core/vfs/postgres/config')
+    return new PostgresVFS(parseConfigWithSchema(PostgresConfigSchema, config))
   },
   mongodb: async (config) => {
     const { MongoDBVFS } = await import('./mongodb/mongodb.ts')
-    const { normalizeMongoDBConfig } = await import('@struktoai/mirage-core/vfs/mongodb/config')
-    return new MongoDBVFS(normalizeMongoDBConfig(config))
+    const { MongoDBConfigSchema } = await import('@struktoai/mirage-core/vfs/mongodb/config')
+    return new MongoDBVFS(parseConfigWithSchema(MongoDBConfigSchema, config))
   },
   chroma: async (config) => {
     const { ChromaVFS } = await import('@struktoai/mirage-core/vfs/chroma/chroma')
-    const { normalizeChromaConfig } = await import('@struktoai/mirage-core/vfs/chroma/config')
-    return new ChromaVFS(normalizeChromaConfig(config))
+    const { ChromaConfigSchema } = await import('@struktoai/mirage-core/vfs/chroma/config')
+    return new ChromaVFS(parseConfigWithSchema(ChromaConfigSchema, config))
   },
   dify: async (config) => {
     const { DifyVFS } = await import('@struktoai/mirage-core/vfs/dify/dify')
-    const { normalizeDifyConfig } = await import('@struktoai/mirage-core/vfs/dify/config')
-    return new DifyVFS(normalizeDifyConfig(config))
+    const { DifyConfigSchema } = await import('@struktoai/mirage-core/vfs/dify/config')
+    return new DifyVFS(parseConfigWithSchema(DifyConfigSchema, config))
   },
   qdrant: async (config) => {
     const { QdrantVFS } = await import('@struktoai/mirage-core/vfs/qdrant/qdrant')
-    const { normalizeQdrantConfig } = await import('@struktoai/mirage-core/vfs/qdrant/config')
-    return new QdrantVFS(normalizeQdrantConfig(config))
+    const { QdrantConfigSchema } = await import('@struktoai/mirage-core/vfs/qdrant/config')
+    return new QdrantVFS(parseConfigWithSchema(QdrantConfigSchema, config))
   },
   redis: async (config) => {
     refuseUnknownKeys(config, REDIS_OPTIONS)
@@ -205,78 +205,78 @@ const REGISTRY: Record<string, VFSFactory> = {
   },
   notion: async (config) => {
     const { NotionVFS } = await import('./notion/notion.ts')
-    const { normalizeNotionConfig } = await import('./notion/config.ts')
-    return new NotionVFS(normalizeNotionConfig(config))
+    const { NotionConfigSchema } = await import('./notion/config.ts')
+    return new NotionVFS(parseConfigWithSchema(NotionConfigSchema, config))
   },
   langfuse: async (config) => {
     const { LangfuseVFS } = await import('@struktoai/mirage-core/vfs/langfuse/langfuse')
-    const { normalizeLangfuseConfig } = await import('@struktoai/mirage-core/vfs/langfuse/config')
-    return new LangfuseVFS(normalizeLangfuseConfig(config))
+    const { LangfuseConfigSchema } = await import('@struktoai/mirage-core/vfs/langfuse/config')
+    return new LangfuseVFS(parseConfigWithSchema(LangfuseConfigSchema, config))
   },
   github: async (config) => {
     const { GitHubVFS } = await import('@struktoai/mirage-core/vfs/github/github')
-    const { normalizeGitHubConfig } = await import('@struktoai/mirage-core/core/github/config')
-    return GitHubVFS.create(normalizeGitHubConfig(config))
+    const { GitHubConfigSchema } = await import('@struktoai/mirage-core/core/github/config')
+    return GitHubVFS.create(parseConfigWithSchema(GitHubConfigSchema, config))
   },
   gcal: async (config) => {
     const { GCalVFS } = await import('@struktoai/mirage-core/vfs/gcal/gcal')
-    const { normalizeGCalConfig } = await import('@struktoai/mirage-core/vfs/gcal/config')
-    return new GCalVFS(normalizeGCalConfig(config))
+    const { GCalConfigSchema } = await import('@struktoai/mirage-core/vfs/gcal/config')
+    return new GCalVFS(parseConfigWithSchema(GCalConfigSchema, config))
   },
   gdocs: async (config) => {
     const { GDocsVFS } = await import('@struktoai/mirage-core/vfs/gdocs/gdocs')
-    const { normalizeGDocsConfig } = await import('@struktoai/mirage-core/vfs/gdocs/config')
-    return new GDocsVFS(normalizeGDocsConfig(config))
+    const { GDocsConfigSchema } = await import('@struktoai/mirage-core/vfs/gdocs/config')
+    return new GDocsVFS(parseConfigWithSchema(GDocsConfigSchema, config))
   },
   gsheets: async (config) => {
     const { GSheetsVFS } = await import('@struktoai/mirage-core/vfs/gsheets/gsheets')
-    const { normalizeGSheetsConfig } = await import('@struktoai/mirage-core/vfs/gsheets/config')
-    return new GSheetsVFS(normalizeGSheetsConfig(config))
+    const { GSheetsConfigSchema } = await import('@struktoai/mirage-core/vfs/gsheets/config')
+    return new GSheetsVFS(parseConfigWithSchema(GSheetsConfigSchema, config))
   },
   gslides: async (config) => {
     const { GSlidesVFS } = await import('@struktoai/mirage-core/vfs/gslides/gslides')
-    const { normalizeGSlidesConfig } = await import('@struktoai/mirage-core/vfs/gslides/config')
-    return new GSlidesVFS(normalizeGSlidesConfig(config))
+    const { GSlidesConfigSchema } = await import('@struktoai/mirage-core/vfs/gslides/config')
+    return new GSlidesVFS(parseConfigWithSchema(GSlidesConfigSchema, config))
   },
   gdrive: async (config) => {
     const { GoogleDriveVFS } = await import('@struktoai/mirage-core/vfs/gdrive/gdrive')
-    const { normalizeGDriveConfig } = await import('@struktoai/mirage-core/vfs/gdrive/config')
-    return new GoogleDriveVFS(normalizeGDriveConfig(config))
+    const { GoogleDriveConfigSchema } = await import('@struktoai/mirage-core/vfs/gdrive/config')
+    return new GoogleDriveVFS(parseConfigWithSchema(GoogleDriveConfigSchema, config))
   },
   onedrive: async (config) => {
-    const { normalizeOneDriveConfig } = await import('@struktoai/mirage-core/accessor/onedrive')
+    const { OneDriveConfigSchema } = await import('@struktoai/mirage-core/accessor/onedrive')
     const { OneDriveVFS } = await import('@struktoai/mirage-core/vfs/onedrive/onedrive')
-    return new OneDriveVFS(normalizeOneDriveConfig(config))
+    return new OneDriveVFS(parseConfigWithSchema(OneDriveConfigSchema, config))
   },
   sharepoint: async (config) => {
-    const { normalizeSharePointConfig } = await import('@struktoai/mirage-core/accessor/sharepoint')
+    const { SharePointConfigSchema } = await import('@struktoai/mirage-core/accessor/sharepoint')
     const { SharePointVFS } = await import('@struktoai/mirage-core/vfs/sharepoint/sharepoint')
-    return new SharePointVFS(normalizeSharePointConfig(config))
+    return new SharePointVFS(parseConfigWithSchema(SharePointConfigSchema, config))
   },
   airtable: async (config) => {
-    const { normalizeAirtableConfig } = await import('@struktoai/mirage-core/core/airtable/config')
+    const { AirtableConfigSchema } = await import('@struktoai/mirage-core/core/airtable/config')
     const { AirtableVFS } = await import('@struktoai/mirage-core/vfs/airtable/airtable')
-    return new AirtableVFS(normalizeAirtableConfig(config))
+    return new AirtableVFS(parseConfigWithSchema(AirtableConfigSchema, config))
   },
   mem0: async (config) => {
-    const { normalizeMem0Config } = await import('@struktoai/mirage-core/vfs/mem0/config')
+    const { Mem0ConfigSchema } = await import('@struktoai/mirage-core/vfs/mem0/config')
     const { Mem0VFS } = await import('@struktoai/mirage-core/vfs/mem0/mem0')
-    return new Mem0VFS(normalizeMem0Config(config))
+    return new Mem0VFS(parseConfigWithSchema(Mem0ConfigSchema, config))
   },
   dropbox: async (config) => {
     const { DropboxVFS } = await import('@struktoai/mirage-core/vfs/dropbox/dropbox')
-    const { normalizeDropboxConfig } = await import('@struktoai/mirage-core/vfs/dropbox/config')
-    return new DropboxVFS(normalizeDropboxConfig(config))
+    const { DropboxConfigSchema } = await import('@struktoai/mirage-core/vfs/dropbox/config')
+    return new DropboxVFS(parseConfigWithSchema(DropboxConfigSchema, config))
   },
   box: async (config) => {
     const { BoxVFS } = await import('@struktoai/mirage-core/vfs/box/box')
-    const { normalizeBoxConfig } = await import('@struktoai/mirage-core/vfs/box/config')
-    return new BoxVFS(normalizeBoxConfig(config))
+    const { BoxConfigSchema } = await import('@struktoai/mirage-core/vfs/box/config')
+    return new BoxVFS(parseConfigWithSchema(BoxConfigSchema, config))
   },
   gmail: async (config) => {
     const { GmailVFS } = await import('@struktoai/mirage-core/vfs/gmail/gmail')
-    const { normalizeGmailConfig } = await import('@struktoai/mirage-core/vfs/gmail/config')
-    return new GmailVFS(normalizeGmailConfig(config))
+    const { GmailConfigSchema } = await import('@struktoai/mirage-core/vfs/gmail/config')
+    return new GmailVFS(parseConfigWithSchema(GmailConfigSchema, config))
   },
   email: (_config) => {
     return Promise.reject(

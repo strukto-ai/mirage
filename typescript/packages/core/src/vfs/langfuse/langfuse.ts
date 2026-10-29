@@ -19,11 +19,12 @@ import { LangfuseAccessor } from '../../accessor/langfuse.ts'
 import { HttpLangfuseTransport } from '../../core/langfuse/client.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
-import { redactLangfuseConfig, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
+import { LangfuseConfigSchema, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import { readdir as langfuseReaddir } from '../../core/langfuse/readdir.ts'
 import { read as langfuseRead } from '../../core/langfuse/read.ts'
 import { stat as langfuseStat } from '../../core/langfuse/stat.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   traces/
@@ -94,7 +95,7 @@ export class LangfuseVFS extends BaseVFS {
   override getState(): Promise<LangfuseVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactLangfuseConfig(this.config),
+      config: redactConfigWithSchema(LangfuseConfigSchema, this.config) as LangfuseConfigRedacted,
     })
   }
 }

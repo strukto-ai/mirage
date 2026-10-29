@@ -15,18 +15,16 @@
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const DigitalOceanConfigSchema = browserAliasSchema({})
+export const DigitalOceanConfigSchema = browserAliasSchema({})
 
 export type DigitalOceanConfig = ConfigOf<typeof DigitalOceanConfigSchema>
 
 export type DigitalOceanConfigRedacted = RedactedConfig<DigitalOceanConfig, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<DigitalOceanConfig, DigitalOceanConfigRedacted>({
+export const ALIAS = makeBrowserS3Alias<DigitalOceanConfig, DigitalOceanConfigRedacted>({
   schema: DigitalOceanConfigSchema,
   endpointFor: derivedEndpoint('region', (region) => `https://${region}.digitaloceanspaces.com`),
 })
 
-export const resolvedDigitalOceanEndpoint = alias.resolvedEndpoint
-export const digitalOceanToS3Config = alias.toS3Config
-export const redactDigitalOceanConfig = alias.redact
-export const normalizeDigitalOceanConfig = alias.normalize
+export const resolvedDigitalOceanEndpoint = ALIAS.resolvedEndpoint
+export const digitalOceanToS3Config = ALIAS.toS3Config

@@ -15,12 +15,12 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GoogleDriveVFS, MountMode, Workspace, type GDriveConfig } from '@struktoai/mirage-node'
+import { GoogleDriveVFS, MountMode, Workspace, type GoogleDriveConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
 
-function buildConfig(): GDriveConfig {
+function buildConfig(): GoogleDriveConfig {
   const clientId = process.env.GOOGLE_CLIENT_ID ?? ''
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET ?? ''
   const refreshToken = process.env.GOOGLE_REFRESH_TOKEN ?? ''

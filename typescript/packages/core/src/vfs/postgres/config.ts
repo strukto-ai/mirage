@@ -13,19 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  type ConfigOf,
-  parseConfigWithSchema,
-  REDACTED_SECRET,
-  type RedactedConfig,
-  secretStr,
-} from '../secrets.ts'
+import { type ConfigOf, REDACTED_SECRET, type RedactedConfig, secretStr } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 
 // `dsn` is the credential, so it carries the secret marker the redactor
 // reads; the rest are the knobs python's `PostgresConfig` declares.
-const PostgresConfigSchema = z.object({
+export const PostgresConfigSchema = z.object({
   ...timeoutShape,
   dsn: secretStr().describe(
     "Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string.",
@@ -66,10 +60,6 @@ export interface PostgresConfigResolved {
   defaultRowLimit: number
   maxReadRows: number
   maxReadBytes: number
-}
-
-export function normalizePostgresConfig(input: Record<string, unknown>): PostgresConfig {
-  return parseConfigWithSchema(PostgresConfigSchema, input)
 }
 
 export function resolvePostgresConfig(config: PostgresConfig): PostgresConfigResolved {

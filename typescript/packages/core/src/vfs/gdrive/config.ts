@@ -13,26 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GoogleConfigSchema } from '../../core/google/config.ts'
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  type ConfigOf,
-  type RedactedConfig,
-} from '../secrets.ts'
+import { type ConfigOf, type RedactedConfig } from '../secrets.ts'
 
-const GDriveConfigSchema = GoogleConfigSchema
+export const GoogleDriveConfigSchema = GoogleConfigSchema
 
-export type GDriveConfig = ConfigOf<typeof GDriveConfigSchema>
+export type GoogleDriveConfig = ConfigOf<typeof GoogleDriveConfigSchema>
 
-export type GDriveConfigRedacted = RedactedConfig<
-  GDriveConfig,
+export type GoogleDriveConfigRedacted = RedactedConfig<
+  GoogleDriveConfig,
   'accessToken' | 'clientSecret' | 'refreshToken' | 'refreshFn'
 >
-
-export function redactGDriveConfig(config: GDriveConfig): GDriveConfigRedacted {
-  return redactConfigWithSchema(GDriveConfigSchema, config) as unknown as GDriveConfigRedacted
-}
-
-export function normalizeGDriveConfig(input: Record<string, unknown>): GDriveConfig {
-  return parseConfigWithSchema(GDriveConfigSchema, input)
-}

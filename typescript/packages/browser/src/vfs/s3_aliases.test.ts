@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { S3BrowserPresignedUrlProvider, S3Config } from './s3/config.ts'
-import { aliyunToS3Config, redactAliyunConfig, resolvedAliyunEndpoint } from './aliyun/config.ts'
+import { aliyunToS3Config, AliyunConfigSchema, resolvedAliyunEndpoint } from './aliyun/config.ts'
 import { backblazeToS3Config, resolvedBackblazeEndpoint } from './backblaze/config.ts'
 import { cephToS3Config } from './ceph/config.ts'
 import { digitalOceanToS3Config, resolvedDigitalOceanEndpoint } from './digitalocean/config.ts'
@@ -28,6 +28,7 @@ import { seaweedfsToS3Config } from './seaweedfs/config.ts'
 import { resolvedSupabaseEndpoint, supabaseToS3Config } from './supabase/config.ts'
 import { resolvedTencentEndpoint, tencentToS3Config } from './tencent/config.ts'
 import { resolvedWasabiEndpoint, wasabiToS3Config } from './wasabi/config.ts'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 const provider: S3BrowserPresignedUrlProvider = () => Promise.resolve('https://signed.example.com')
 
@@ -217,10 +218,10 @@ describe('browser S3 aliases with their own rule', () => {
 
 describe('browser S3 alias redaction', () => {
   it('hides the presigned-url provider', () => {
-    const redacted = redactAliyunConfig({ ...BASE, region: 'cn-hangzhou' }) as unknown as Record<
-      string,
-      unknown
-    >
+    const redacted = redactConfigWithSchema(AliyunConfigSchema, {
+      ...BASE,
+      region: 'cn-hangzhou',
+    }) as unknown as Record<string, unknown>
     expect(redacted.bucket).toBe('b')
     expect(redacted.presignedUrlProvider).not.toBe(provider)
     expect(JSON.stringify(redacted).includes('<REDACTED>')).toBe(true)

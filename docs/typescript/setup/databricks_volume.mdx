@@ -21,23 +21,16 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import {
-  DatabricksVolumeVFS,
-  MountMode,
-  Workspace,
-  normalizeDatabricksVolumeConfig,
-} from '@struktoai/mirage-node'
+import { buildVfs, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const vfs = await DatabricksVolumeVFS.create(
-  normalizeDatabricksVolumeConfig({
-    catalog: 'main',
-    schema: 'default',
-    volume: 'agent_files',
-    root_path: '/reports',
-    host: process.env.DATABRICKS_HOST,
-    token: process.env.DATABRICKS_TOKEN,
-  }),
-)
+const vfs = await buildVfs('databricks_volume', {
+  catalog: 'main',
+  schema: 'default',
+  volume: 'agent_files',
+  root_path: '/reports',
+  host: process.env.DATABRICKS_HOST,
+  token: process.env.DATABRICKS_TOKEN,
+})
 const ws = new Workspace({ '/dbx/': vfs }, { mode: MountMode.READ })
 const res = await ws.shell('ls /dbx/')
 console.log(res.stdoutText)
@@ -68,15 +61,13 @@ provider owns token caching, refresh, and concurrent refresh coordination.
 Authentication failures propagate without a fallback or automatic replay.
 
 ```ts
-const rotating = await DatabricksVolumeVFS.create(
-  normalizeDatabricksVolumeConfig({
-    catalog: 'main',
-    schema: 'default',
-    volume: 'agent_files',
-    host: process.env.DATABRICKS_HOST,
-    token: async () => broker.getAccessToken(),
-  }),
-)
+const rotating = await buildVfs('databricks_volume', {
+  catalog: 'main',
+  schema: 'default',
+  volume: 'agent_files',
+  host: process.env.DATABRICKS_HOST,
+  token: async () => broker.getAccessToken(),
+})
 ```
 
 Keep the principal and permission scope fixed for a VFS and its workspace.

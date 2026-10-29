@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, normalizeNonEmpty, parseConfigWithSchema } from '../secrets.ts'
+import { type ConfigOf, normalizeNonEmpty } from '../secrets.ts'
 
-const ChromaConfigSchema = z.object({
+export const ChromaConfigSchema = z.object({
   host: z
     .string()
     .optional()
@@ -42,10 +42,6 @@ const ChromaConfigSchema = z.object({
 })
 
 export type ChromaConfig = ConfigOf<typeof ChromaConfigSchema>
-
-export function normalizeChromaConfig(input: Record<string, unknown>): ChromaConfig {
-  return parseConfigWithSchema(ChromaConfigSchema, input)
-}
 
 export interface ChromaConfigResolved {
   host: string

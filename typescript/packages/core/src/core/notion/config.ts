@@ -13,13 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  type ConfigOf,
-  type RedactedConfig,
-  secretStr,
-} from '../../vfs/secrets.ts'
+import { type ConfigOf, type RedactedConfig, secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
 export const NotionConfigSchema = z.object({
@@ -39,11 +33,3 @@ export const NotionConfigSchema = z.object({
 export type NotionConfig = ConfigOf<typeof NotionConfigSchema>
 
 export type NotionConfigRedacted = RedactedConfig<NotionConfig, 'apiKey'>
-
-export function redactNotionConfig(config: NotionConfig): NotionConfigRedacted {
-  return redactConfigWithSchema(NotionConfigSchema, config) as unknown as NotionConfigRedacted
-}
-
-export function normalizeNotionConfig(input: Record<string, unknown>): NotionConfig {
-  return parseConfigWithSchema(NotionConfigSchema, input)
-}

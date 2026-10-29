@@ -17,16 +17,16 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
-import { normalizeOneDriveConfig } from '@struktoai/mirage-core/accessor/onedrive'
+import { OneDriveConfigSchema } from '@struktoai/mirage-core/accessor/onedrive'
 import { tokenUrl } from '@struktoai/mirage-core/core/google/client'
 import type { TokenManager } from '@struktoai/mirage-core/core/google/client'
-import { normalizeMem0Config } from '@struktoai/mirage-core/vfs/mem0/config'
+import { Mem0ConfigSchema } from '@struktoai/mirage-core/vfs/mem0/config'
 import { Mem0VFS } from '@struktoai/mirage-core/vfs/mem0/mem0'
 import { OneDriveVFS } from '@struktoai/mirage-core/vfs/onedrive/onedrive'
-import { vfsStateRequiresOverride } from '@struktoai/mirage-core/vfs/secrets'
+import { vfsStateRequiresOverride, parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { Workspace } from '../workspace.ts'
-import { normalizeS3Config } from './s3/config.ts'
+import { S3ConfigSchema } from './s3/config.ts'
 import { buildVfs, knownVfsNames, registerVfs } from './registry.ts'
 
 // Captured before any test calls register(), which is the public hook for
@@ -222,10 +222,18 @@ describe('node VFS registry', () => {
   // schema-driven now, so the config shape is the single source of truth.
   it('redacts Graph and Mem0 secrets in state and keeps every other field', () => {
     const oneDrive = new OneDriveVFS(
-      normalizeOneDriveConfig({ access_token: 'token', drive_id: 'drive', key_prefix: 'sub' }),
+      parseConfigWithSchema(OneDriveConfigSchema, {
+        access_token: 'token',
+        drive_id: 'drive',
+        key_prefix: 'sub',
+      }),
     )
     const mem0 = new Mem0VFS(
-      normalizeMem0Config({ api_key: 'key', user_id: 'user', default_page_size: 5 }),
+      parseConfigWithSchema(Mem0ConfigSchema, {
+        api_key: 'key',
+        user_id: 'user',
+        default_page_size: 5,
+      }),
     )
 
     expect(oneDrive.getState()).toEqual({
@@ -362,9 +370,9 @@ describe('node VFS registry', () => {
     expect(config).toMatchObject({ username: 'alice', verifySsl: false })
   })
 
-  it('normalizeS3Config standalone', () => {
+  it('S3ConfigSchema parses standalone', () => {
     expect(
-      normalizeS3Config({
+      parseConfigWithSchema(S3ConfigSchema, {
         bucket: 'b',
         aws_access_key_id: 'A',
         endpoint_url: 'https://x',

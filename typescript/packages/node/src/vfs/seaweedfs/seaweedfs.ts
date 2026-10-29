@@ -14,17 +14,12 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import {
-  redactSeaweedFSConfig,
-  seaweedfsToS3Config,
-  type SeaweedFSConfig,
-  type SeaweedFSConfigRedacted,
-} from './config.ts'
+import { ALIAS, type SeaweedFSConfig, type SeaweedFSConfigRedacted } from './config.ts'
 
 export type SeaweedFSVFSState = S3AliasVFSState<SeaweedFSConfigRedacted>
 
 export class SeaweedFSVFS extends S3AliasVFS<SeaweedFSConfig, SeaweedFSConfigRedacted> {
   constructor(config: SeaweedFSConfig) {
-    super(VFSName.SEAWEEDFS, config, seaweedfsToS3Config(config), redactSeaweedFSConfig)
+    super(VFSName.SEAWEEDFS, config, ALIAS)
   }
 }

@@ -18,7 +18,7 @@ import { BaseVFS } from '../base.ts'
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { DropboxTokenManager } from '../../core/dropbox/client.ts'
 import { VFSName } from '../../types.ts'
-import { redactDropboxConfig, type DropboxConfig, type DropboxConfigRedacted } from './config.ts'
+import { DropboxConfigSchema, type DropboxConfig, type DropboxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/dropbox/events.ts'
 import { type DeltaHook } from '../../events/index.ts'
 import type { CapacityResult, DirListing, PathSpec, FileStat } from '../../types.ts'
@@ -43,6 +43,7 @@ import { rmR as dropboxRmR } from '../../core/dropbox/rm.ts'
 import { rename as dropboxRename } from '../../core/dropbox/rename.ts'
 import { copy as dropboxCopy, dirCopy as dropboxDirCopy } from '../../core/dropbox/copy.ts'
 import { filesContaining as dropboxFilesContaining } from '../../core/dropbox/search.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 const mkdirOp = (accessor: DropboxAccessor, path: PathSpec, parents?: boolean): Promise<void> =>
   dropboxMkdir(accessor, path, parents)
@@ -205,7 +206,7 @@ export class DropboxVFS extends BaseVFS {
   override getState(): Promise<DropboxVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactDropboxConfig(this.config),
+      config: redactConfigWithSchema(DropboxConfigSchema, this.config) as DropboxConfigRedacted,
     })
   }
 }

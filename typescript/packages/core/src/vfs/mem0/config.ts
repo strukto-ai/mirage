@@ -1,12 +1,6 @@
 import { z } from 'zod'
 import { rstripSlash } from '../../utils/slash.ts'
-import {
-  type ConfigOf,
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  type RedactedConfig,
-  secretStr,
-} from '../secrets.ts'
+import { type ConfigOf, type RedactedConfig, secretStr } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 
@@ -22,7 +16,7 @@ export interface Mem0ConfigResolved {
   scopeFilter: Record<string, string>
 }
 
-const Mem0ConfigSchema = z.object({
+export const Mem0ConfigSchema = z.object({
   ...timeoutShape,
   apiKey: secretStr().describe('Mem0 Platform API key.'),
   host: z
@@ -54,14 +48,6 @@ const Mem0ConfigSchema = z.object({
 export type Mem0Config = ConfigOf<typeof Mem0ConfigSchema>
 
 export type Mem0ConfigRedacted = RedactedConfig<Mem0Config, 'apiKey'>
-
-export function redactMem0Config(config: Mem0Config): Mem0ConfigRedacted {
-  return redactConfigWithSchema(Mem0ConfigSchema, config) as unknown as Mem0ConfigRedacted
-}
-
-export function normalizeMem0Config(input: Record<string, unknown>): Mem0Config {
-  return parseConfigWithSchema(Mem0ConfigSchema, input)
-}
 
 function positive(value: number | undefined, fallback: number, name: string): number {
   const resolved = value ?? fallback

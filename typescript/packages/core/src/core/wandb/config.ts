@@ -1,11 +1,5 @@
 import { z } from 'zod'
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  secretStr,
-  type ConfigOf,
-  type RedactedConfig,
-} from '../../vfs/secrets.ts'
+import { secretStr, type ConfigOf, type RedactedConfig } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
 export const WandbConfigSchema = z
@@ -51,9 +45,3 @@ export const WandbConfigSchema = z
   .strict()
 export type WandbConfig = ConfigOf<typeof WandbConfigSchema>
 export type WandbConfigRedacted = RedactedConfig<WandbConfig, 'apiKey'>
-export function normalizeWandbConfig(input: Record<string, unknown>): WandbConfig {
-  return parseConfigWithSchema(WandbConfigSchema, input)
-}
-export function redactWandbConfig(config: WandbConfig): WandbConfigRedacted {
-  return redactConfigWithSchema(WandbConfigSchema, config) as WandbConfigRedacted
-}

@@ -19,20 +19,13 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import {
-  MountMode,
-  TiDBFilesystemVFS,
-  Workspace,
-  normalizeTiDBFilesystemConfig,
-} from '@struktoai/mirage-node'
+import { buildVfs, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const vfs = await TiDBFilesystemVFS.create(
-  normalizeTiDBFilesystemConfig({
-    host: process.env.TIDB_FILESYSTEM_HOST,
-    token: process.env.TIDB_FILESYSTEM_TOKEN,
-    root_path: '/workspace',
-  }),
-)
+const vfs = await buildVfs('tidb_filesystem', {
+  host: process.env.TIDB_FILESYSTEM_HOST,
+  token: process.env.TIDB_FILESYSTEM_TOKEN,
+  root_path: '/workspace',
+})
 const ws = new Workspace({ '/fs': vfs }, { mode: MountMode.WRITE })
 const res = await ws.shell('mkdir -p /fs/notes && echo hello > /fs/notes/a.txt && ls /fs/notes')
 console.log(res.stdoutText)

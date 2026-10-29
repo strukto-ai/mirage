@@ -23,7 +23,14 @@ import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { INTRO } from '@struktoai/mirage-core/workspace/documentation/constants'
 import { MountMode, Workspace, buildVfs, knownVfsNames } from '@struktoai/mirage-node'
 
-import { type ConfigShape, configShapes, fieldDoc, moduleFile, parse } from './vfs_facts.ts'
+import {
+  type ConfigShape,
+  configShapes,
+  factsOfSchema,
+  fieldDoc,
+  moduleFile,
+  parse,
+} from './vfs_facts.ts'
 
 const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
 const PACKAGES = resolve(ROOT, 'typescript', 'packages')
@@ -559,6 +566,19 @@ function selftest(): void {
   const document = '---\nname: x\n---\n\n# T\n\n```text\n# kept\n```\n\n## S'
   assert.equal(rendered(document), '### T\n\n```text\n# kept\n```\n\n#### S')
   assert.equal(tabs(document).split('    # kept').length, 3)
+  const schema = ts.createSourceFile(
+    'schema.ts',
+    "z.object({ a: z.string() }).register(FIELD_NORMALIZERS, { rename: { b: 'a' } })" +
+      ".register(OTHER, { rename: { c: 'a' } })",
+    ts.ScriptTarget.ESNext,
+    true,
+  )
+  const [statement] = schema.statements
+  assert.ok(statement !== undefined && ts.isExpressionStatement(statement))
+  assert.deepEqual(
+    factsOfSchema(statement.expression, schema, new Map(), PACKAGES, 'selftest').rename,
+    { b: 'a' },
+  )
   console.log('gen-doc-tables selftest: ok')
 }
 

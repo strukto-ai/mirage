@@ -18,10 +18,11 @@ import { DatabricksVolumeAccessor } from '@struktoai/mirage-core/accessor/databr
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import {
-  redactDatabricksVolumeConfig,
+  DatabricksVolumeConfigSchema,
   type DatabricksVolumeConfig,
   type DatabricksVolumeConfigRedacted,
 } from './config.ts'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 export interface DatabricksVolumeVFSState {
   type: string
@@ -52,7 +53,10 @@ export class DatabricksVolumeVFS extends DatabricksVolumeVFSBase {
   override getState(): Promise<DatabricksVolumeVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactDatabricksVolumeConfig(this.config),
+      config: redactConfigWithSchema(
+        DatabricksVolumeConfigSchema,
+        this.config,
+      ) as DatabricksVolumeConfigRedacted,
     })
   }
 }

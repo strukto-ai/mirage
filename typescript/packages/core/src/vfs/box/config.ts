@@ -12,13 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  secretSchema,
-  secretStr,
-  z,
-} from '../secrets.ts'
+import { FIELD_NORMALIZERS, secretSchema, secretStr, z } from '../secrets.ts'
 import type { ConfigOf, RedactedConfig } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 
@@ -48,65 +42,67 @@ export interface BoxConfig {
   onRefreshTokenRotated?: (newRefreshToken: string) => void | Promise<void>
 }
 
-const BoxConfigSchema = z.object({
-  ...timeoutShape,
-  endpoint: z
-    .string()
-    .optional()
-    .describe(
-      "Base URL that replaces Box's API, upload and OAuth token hosts, such as a test server. Unset uses Box's hosts.",
-    ),
-  rootFolderId: z.string().optional().meta({
-    description:
-      "Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. `0` is the account root.",
-    default: '0',
-  }),
-  clientId: z
-    .string()
-    .optional()
-    .describe(
-      'Box app client ID. Required with `refreshToken` (OAuth) or with `clientSecret` and `enterpriseId` (client credentials).',
-    ),
-  clientSecret: secretStr()
-    .optional()
-    .describe(
-      'Box app client secret. Required for client credentials; the OAuth refresh sends it when set, so a PKCE client can omit it.',
-    ),
-  refreshToken: secretStr()
-    .optional()
-    .describe(
-      'OAuth refresh token; needs `clientId`. Box rotates it on every refresh, so persist the new one with `onRefreshTokenRotated`.',
-    ),
-  enterpriseId: z
-    .string()
-    .optional()
-    .describe(
-      "Box enterprise ID for the client-credentials grant. With `clientId` and `clientSecret`, tokens are minted for the app's service account and no refresh token is involved.",
-    ),
-  accessToken: secretStr()
-    .optional()
-    .describe(
-      'Box developer token, used as is with no refresh flow; it expires after about 60 minutes. It wins over every other credential. Also accepted as `developer_token`.',
-    ),
-  // The callbacks are declared so parse keeps them, and marked secret so
-  // no snapshot carries them.
-  refreshFn: secretSchema(
-    z.custom<NonNullable<BoxConfig['refreshFn']>>((value) => typeof value === 'function'),
-  )
-    .optional()
-    .describe(
-      "Function that takes the current refresh token and returns `{ accessToken, refreshToken, expiresIn }`, called instead of Box's token endpoint. Needs `clientId` and `refreshToken`.",
-    ),
-  onRefreshTokenRotated: secretSchema(
-    z.custom<NonNullable<BoxConfig['onRefreshTokenRotated']>>(
-      (value) => typeof value === 'function',
-    ),
-  )
-    .optional()
-    .describe(
-      'Function (sync or async) given the new refresh token whenever a refresh rotates it, to persist it; the token it replaces stops working after its first use.',
-    ),
-})
+export const BoxConfigSchema = z
+  .object({
+    ...timeoutShape,
+    endpoint: z
+      .string()
+      .optional()
+      .describe(
+        "Base URL that replaces Box's API, upload and OAuth token hosts, such as a test server. Unset uses Box's hosts.",
+      ),
+    rootFolderId: z.string().optional().meta({
+      description:
+        "Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. `0` is the account root.",
+      default: '0',
+    }),
+    clientId: z
+      .string()
+      .optional()
+      .describe(
+        'Box app client ID. Required with `refreshToken` (OAuth) or with `clientSecret` and `enterpriseId` (client credentials).',
+      ),
+    clientSecret: secretStr()
+      .optional()
+      .describe(
+        'Box app client secret. Required for client credentials; the OAuth refresh sends it when set, so a PKCE client can omit it.',
+      ),
+    refreshToken: secretStr()
+      .optional()
+      .describe(
+        'OAuth refresh token; needs `clientId`. Box rotates it on every refresh, so persist the new one with `onRefreshTokenRotated`.',
+      ),
+    enterpriseId: z
+      .string()
+      .optional()
+      .describe(
+        "Box enterprise ID for the client-credentials grant. With `clientId` and `clientSecret`, tokens are minted for the app's service account and no refresh token is involved.",
+      ),
+    accessToken: secretStr()
+      .optional()
+      .describe(
+        'Box developer token, used as is with no refresh flow; it expires after about 60 minutes. It wins over every other credential. Also accepted as `developer_token`.',
+      ),
+    // The callbacks are declared so parse keeps them, and marked secret so
+    // no snapshot carries them.
+    refreshFn: secretSchema(
+      z.custom<NonNullable<BoxConfig['refreshFn']>>((value) => typeof value === 'function'),
+    )
+      .optional()
+      .describe(
+        "Function that takes the current refresh token and returns `{ accessToken, refreshToken, expiresIn }`, called instead of Box's token endpoint. Needs `clientId` and `refreshToken`.",
+      ),
+    onRefreshTokenRotated: secretSchema(
+      z.custom<NonNullable<BoxConfig['onRefreshTokenRotated']>>(
+        (value) => typeof value === 'function',
+      ),
+    )
+      .optional()
+      .describe(
+        'Function (sync or async) given the new refresh token whenever a refresh rotates it, to persist it; the token it replaces stops working after its first use.',
+      ),
+  })
+  .register(FIELD_NORMALIZERS, { rename: { developer_token: 'accessToken' } })
 
 // Only the redacted twin derives; the interface above stays the readable
 // statement of the callback signatures.
@@ -114,15 +110,3 @@ export type BoxConfigRedacted = RedactedConfig<
   ConfigOf<typeof BoxConfigSchema>,
   'clientSecret' | 'refreshToken' | 'accessToken' | 'refreshFn' | 'onRefreshTokenRotated'
 >
-
-export function redactBoxConfig(config: BoxConfig): BoxConfigRedacted {
-  return redactConfigWithSchema(BoxConfigSchema, config) as unknown as BoxConfigRedacted
-}
-
-export function normalizeBoxConfig(input: Record<string, unknown>): BoxConfig {
-  return parseConfigWithSchema(BoxConfigSchema, input, {
-    rename: {
-      developer_token: 'accessToken',
-    },
-  })
-}

@@ -18,7 +18,7 @@ import { GmailAccessor } from '../../accessor/gmail.ts'
 import { TokenManager } from '../../core/google/client.ts'
 import { VFSName } from '../../types.ts'
 
-import { redactGmailConfig, type GmailConfig, type GmailConfigRedacted } from './config.ts'
+import { GmailConfigSchema, type GmailConfig, type GmailConfigRedacted } from './config.ts'
 import type { DirListing, PathSpec, FileStat } from '../../types.ts'
 import type { Handed } from '../types.ts'
 import { readdir as gmailReaddir } from '../../core/gmail/readdir.ts'
@@ -27,6 +27,7 @@ import type { DeltaHook } from '../../events/base.ts'
 import { filesContaining as gmailFilesContaining } from '../../core/gmail/search.ts'
 import { read as gmailRead } from '../../core/gmail/read.ts'
 import { stat as gmailStat } from '../../core/gmail/stat.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   <label>/
@@ -159,7 +160,7 @@ export class GmailVFS extends BaseVFS {
   override getState(): Promise<GmailVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactGmailConfig(this.config),
+      config: redactConfigWithSchema(GmailConfigSchema, this.config) as GmailConfigRedacted,
     })
   }
 }

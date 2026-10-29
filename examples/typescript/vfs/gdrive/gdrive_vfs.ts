@@ -21,7 +21,7 @@ import {
   MountMode,
   patchNodeFs,
   Workspace,
-  type GDriveConfig,
+  type GoogleDriveConfig,
 } from '@struktoai/mirage-node'
 
 const require = createRequire(import.meta.url)
@@ -30,7 +30,7 @@ const fs = require('fs') as typeof import('fs')
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
 
-function buildConfig(): GDriveConfig {
+function buildConfig(): GoogleDriveConfig {
   const clientId = process.env.GOOGLE_CLIENT_ID ?? ''
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET ?? ''
   const refreshToken = process.env.GOOGLE_REFRESH_TOKEN ?? ''

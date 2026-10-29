@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { normalizeSshConfig, redactSshConfig } from './config.ts'
+import { SSHConfigSchema } from './config.ts'
+import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 describe('SSHConfig', () => {
   it('normalizes snake_case from YAML', () => {
-    const c = normalizeSshConfig({
+    const c = parseConfigWithSchema(SSHConfigSchema, {
       host: 'example.com',
       identity_file: '~/.ssh/id_ed25519',
       known_hosts: '~/.ssh/known_hosts',
@@ -30,7 +31,7 @@ describe('SSHConfig', () => {
   })
 
   it('redacts password but not identityFile path', () => {
-    const c = redactSshConfig({
+    const c = redactConfigWithSchema(SSHConfigSchema, {
       host: 'example.com',
       password: 'secret',
       identityFile: '~/.ssh/id_ed25519',
@@ -40,11 +41,13 @@ describe('SSHConfig', () => {
   })
 
   it('refuses a wrong-typed field instead of casting it through', () => {
-    expect(() => normalizeSshConfig({ host: 'example.com', port: '2222' })).toThrow(/port/)
+    expect(() =>
+      parseConfigWithSchema(SSHConfigSchema, { host: 'example.com', port: '2222' }),
+    ).toThrow(/port/)
   })
 
   it('redacts passphrase too', () => {
-    const c = redactSshConfig({
+    const c = redactConfigWithSchema(SSHConfigSchema, {
       host: 'example.com',
       passphrase: 'mypass',
     })

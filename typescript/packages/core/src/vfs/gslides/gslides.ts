@@ -19,7 +19,7 @@ import { GSlidesAccessor } from '../../accessor/gslides.ts'
 import { TokenManager } from '../../core/google/client.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
-import { redactGSlidesConfig, type GSlidesConfig, type GSlidesConfigRedacted } from './config.ts'
+import { GSlidesConfigSchema, type GSlidesConfig, type GSlidesConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { SLIDES_WORDS } from '../../utils/generated/google_vocabulary.ts'
@@ -33,6 +33,7 @@ import { makeFilename } from './slide_entry.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { unlink as gslidesUnlink } from '../../core/gslides/unlink.ts'
 import { rename as gslidesRename } from '../../core/gslides/rename.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   owned/
@@ -181,7 +182,7 @@ export class GSlidesVFS extends BaseVFS {
   override getState(): Promise<GSlidesVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactGSlidesConfig(this.config),
+      config: redactConfigWithSchema(GSlidesConfigSchema, this.config) as GSlidesConfigRedacted,
     })
   }
 }

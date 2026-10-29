@@ -15,18 +15,16 @@
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const ScalewayConfigSchema = browserAliasSchema({})
+export const ScalewayConfigSchema = browserAliasSchema({})
 
 export type ScalewayConfig = ConfigOf<typeof ScalewayConfigSchema>
 
 export type ScalewayConfigRedacted = RedactedConfig<ScalewayConfig, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<ScalewayConfig, ScalewayConfigRedacted>({
+export const ALIAS = makeBrowserS3Alias<ScalewayConfig, ScalewayConfigRedacted>({
   schema: ScalewayConfigSchema,
   endpointFor: derivedEndpoint('region', (region) => `https://s3.${region}.scw.cloud`),
 })
 
-export const resolvedScalewayEndpoint = alias.resolvedEndpoint
-export const scalewayToS3Config = alias.toS3Config
-export const redactScalewayConfig = alias.redact
-export const normalizeScalewayConfig = alias.normalize
+export const resolvedScalewayEndpoint = ALIAS.resolvedEndpoint
+export const scalewayToS3Config = ALIAS.toS3Config

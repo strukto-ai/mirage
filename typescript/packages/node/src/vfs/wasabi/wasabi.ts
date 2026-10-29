@@ -14,17 +14,12 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import {
-  redactWasabiConfig,
-  type WasabiConfig,
-  type WasabiConfigRedacted,
-  wasabiToS3Config,
-} from './config.ts'
+import { ALIAS, type WasabiConfig, type WasabiConfigRedacted } from './config.ts'
 
 export type WasabiVFSState = S3AliasVFSState<WasabiConfigRedacted>
 
 export class WasabiVFS extends S3AliasVFS<WasabiConfig, WasabiConfigRedacted> {
   constructor(config: WasabiConfig) {
-    super(VFSName.WASABI, config, wasabiToS3Config(config), redactWasabiConfig)
+    super(VFSName.WASABI, config, ALIAS)
   }
 }

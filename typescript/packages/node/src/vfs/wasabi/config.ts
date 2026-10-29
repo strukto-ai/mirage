@@ -12,32 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  z,
-} from '@struktoai/mirage-core/vfs/secrets'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
-import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
-import { ALIAS_SHAPE } from '../s3_alias.ts'
-import type { S3Config } from '../s3/config.ts'
+import { aliasSchema, makeS3Alias, type S3AliasConfig } from '../s3_alias.ts'
 
-export interface WasabiConfig {
-  bucket: string
-  accessKeyId?: string
-  secretAccessKey?: string
-  sessionToken?: string
-  profile?: string
-  region?: string
-  endpoint?: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeout?: number
-  proxy?: string
-}
+export type WasabiConfig = S3AliasConfig
 
-const WasabiConfigSchema = z.object({
-  ...ALIAS_SHAPE,
+export const WasabiConfigSchema = aliasSchema({
   region: z.string().optional().meta({
     description:
       'Wasabi region. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set, and signs every request.',
@@ -56,36 +37,16 @@ export type WasabiConfigRedacted = RedactedConfig<
   'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
 >
 
-export function resolvedWasabiEndpoint(config: WasabiConfig): string {
-  if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
-  const region = config.region ?? 'us-east-1'
-  return region === 'us-east-1' ? 'https://s3.wasabisys.com' : `https://s3.${region}.wasabisys.com`
-}
+export const ALIAS = makeS3Alias<WasabiConfig, WasabiConfigRedacted>({
+  schema: WasabiConfigSchema,
+  endpointFor: (config) => {
+    const region = config.region ?? 'us-east-1'
+    return region === 'us-east-1'
+      ? 'https://s3.wasabisys.com'
+      : `https://s3.${region}.wasabisys.com`
+  },
+  regionDefault: 'us-east-1',
+})
 
-export function wasabiToS3Config(config: WasabiConfig): S3Config {
-  return {
-    bucket: config.bucket,
-    region: config.region ?? 'us-east-1',
-    endpoint: resolvedWasabiEndpoint(config),
-    ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
-    ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
-    ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
-    ...(config.profile !== undefined ? { profile: config.profile } : {}),
-    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
-    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
-    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-  }
-}
-
-export function redactWasabiConfig(config: WasabiConfig): WasabiConfigRedacted {
-  return redactConfigWithSchema(WasabiConfigSchema, {
-    ...config,
-    region: config.region ?? 'us-east-1',
-    endpoint: resolvedWasabiEndpoint(config),
-  }) as unknown as WasabiConfigRedacted
-}
-
-export function normalizeWasabiConfig(input: Record<string, unknown>): WasabiConfig {
-  return parseConfigWithSchema(WasabiConfigSchema, input, S3_FAMILY_NORMALIZER)
-}
+export const resolvedWasabiEndpoint = ALIAS.resolvedEndpoint
+export const wasabiToS3Config = ALIAS.toS3Config

@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { normalizeMongoDBConfig, resolveMongoDBConfig } from './config.ts'
+import { MongoDBConfigSchema, resolveMongoDBConfig } from './config.ts'
+import { parseConfigWithSchema } from '../secrets.ts'
 
 describe('MongoDBConfig', () => {
   it('applies Python-parity defaults', () => {
@@ -34,9 +35,9 @@ describe('MongoDBConfig', () => {
   })
 })
 
-describe('normalizeMongoDBConfig', () => {
+describe('MongoDBConfigSchema parsing', () => {
   it('translates snake_case YAML keys to camelCase', () => {
-    const out = normalizeMongoDBConfig({
+    const out = parseConfigWithSchema(MongoDBConfigSchema, {
       uri: 'mongodb://h',
       max_doc_limit: 200,
     })
@@ -47,7 +48,7 @@ describe('normalizeMongoDBConfig', () => {
   })
 
   it('preserves the databases array', () => {
-    const out = normalizeMongoDBConfig({
+    const out = parseConfigWithSchema(MongoDBConfigSchema, {
       uri: 'mongodb://h',
       databases: ['app', 'analytics'],
     })

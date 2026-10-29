@@ -15,16 +15,14 @@
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const CephConfigSchema = browserAliasSchema({})
+export const CephConfigSchema = browserAliasSchema({})
 
 export type CephConfig = ConfigOf<typeof CephConfigSchema>
 
 export type CephConfigRedacted = RedactedConfig<CephConfig, 'presignedUrlProvider'>
 
-const alias = makeBrowserS3Alias<CephConfig, CephConfigRedacted>({
+export const ALIAS = makeBrowserS3Alias<CephConfig, CephConfigRedacted>({
   schema: CephConfigSchema,
 })
 
-export const cephToS3Config = alias.toS3Config
-export const redactCephConfig = alias.redact
-export const normalizeCephConfig = alias.normalize
+export const cephToS3Config = ALIAS.toS3Config

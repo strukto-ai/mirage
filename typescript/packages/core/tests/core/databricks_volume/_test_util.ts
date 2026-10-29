@@ -14,13 +14,14 @@
 
 import { mountKey } from '../../../src/utils/key_prefix.ts'
 import { DatabricksVolumeAccessor } from '../../../src/accessor/databricks_volume.ts'
-import { normalizeDatabricksVolumeConfig } from '../../../src/vfs/databricks_volume/config.ts'
+import { DatabricksVolumeConfigSchema } from '../../../src/vfs/databricks_volume/config.ts'
 import { PathSpec } from '../../../src/types.ts'
+import { parseConfigWithSchema } from '../../../src/vfs/secrets.ts'
 
 export const TEST_ROOT = '/Volumes/main/default/agent_files/root'
 
 export function makeAccessor(rootPath = '/root'): DatabricksVolumeAccessor {
-  const config = normalizeDatabricksVolumeConfig({
+  const config = parseConfigWithSchema(DatabricksVolumeConfigSchema, {
     catalog: 'main',
     schema: 'default',
     volume: 'agent_files',

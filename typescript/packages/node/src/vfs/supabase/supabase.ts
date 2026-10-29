@@ -14,17 +14,12 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import {
-  redactSupabaseConfig,
-  supabaseToS3Config,
-  type SupabaseConfig,
-  type SupabaseConfigRedacted,
-} from './config.ts'
+import { ALIAS, type SupabaseConfig, type SupabaseConfigRedacted } from './config.ts'
 
 export type SupabaseVFSState = S3AliasVFSState<SupabaseConfigRedacted>
 
 export class SupabaseVFS extends S3AliasVFS<SupabaseConfig, SupabaseConfigRedacted> {
   constructor(config: SupabaseConfig) {
-    super(VFSName.SUPABASE, config, supabaseToS3Config(config), redactSupabaseConfig)
+    super(VFSName.SUPABASE, config, ALIAS)
   }
 }

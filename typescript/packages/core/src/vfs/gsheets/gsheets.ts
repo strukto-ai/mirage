@@ -19,7 +19,7 @@ import { GSheetsAccessor } from '../../accessor/gsheets.ts'
 import { TokenManager } from '../../core/google/client.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
-import { redactGSheetsConfig, type GSheetsConfig, type GSheetsConfigRedacted } from './config.ts'
+import { GSheetsConfigSchema, type GSheetsConfig, type GSheetsConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { SHEETS_WORDS } from '../../utils/generated/google_vocabulary.ts'
@@ -33,6 +33,7 @@ import { makeFilename } from './sheet_entry.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { unlink as gsheetsUnlink } from '../../core/gsheets/unlink.ts'
 import { rename as gsheetsRename } from '../../core/gsheets/rename.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   owned/
@@ -178,7 +179,7 @@ export class GSheetsVFS extends BaseVFS {
   override getState(): Promise<GSheetsVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactGSheetsConfig(this.config),
+      config: redactConfigWithSchema(GSheetsConfigSchema, this.config) as GSheetsConfigRedacted,
     })
   }
 }

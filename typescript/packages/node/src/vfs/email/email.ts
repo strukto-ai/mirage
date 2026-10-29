@@ -19,7 +19,7 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import { EmailAccessor } from '../../accessor/email.ts'
 
 import {
-  redactEmailConfig,
+  EmailConfigSchema,
   type EmailConfig,
   type EmailConfigRedacted,
 } from '../../core/email/config.ts'
@@ -29,6 +29,7 @@ import { readdir as emailReaddir } from '../../core/email/readdir.ts'
 import { read as emailRead, readMany as emailReadMany } from '../../core/email/read.ts'
 import { stat as emailStat } from '../../core/email/stat.ts'
 import { filesContaining as emailFilesContaining } from '../../core/email/search.ts'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 export const VFS_MD = `{prefix}
   <folder>/
@@ -120,7 +121,7 @@ export class EmailVFS extends BaseVFS {
   override getState(): Promise<EmailVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactEmailConfig(this.config),
+      config: redactConfigWithSchema(EmailConfigSchema, this.config) as EmailConfigRedacted,
     })
   }
 }

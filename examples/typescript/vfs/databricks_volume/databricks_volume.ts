@@ -15,13 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import {
-  DatabricksVolumeVFS,
-  MountMode,
-  Workspace,
-  type FileStat,
-  normalizeDatabricksVolumeConfig,
-} from '@struktoai/mirage-node'
+import { buildVfs, MountMode, Workspace, type FileStat } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
@@ -56,7 +50,7 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const config = normalizeDatabricksVolumeConfig({
+  const vfs = await buildVfs('databricks_volume', {
     catalog: process.env.DATABRICKS_VOLUME_CATALOG!,
     schema: process.env.DATABRICKS_VOLUME_SCHEMA!,
     volume: process.env.DATABRICKS_VOLUME_NAME!,
@@ -64,7 +58,6 @@ async function main(): Promise<void> {
     host: process.env.DATABRICKS_HOST!,
     token: () => process.env.DATABRICKS_TOKEN!,
   })
-  const vfs = await DatabricksVolumeVFS.create(config)
   const ws = new Workspace({ '/dbx/': vfs }, { mode: MountMode.READ })
   try {
     console.log('=== not-found errors show the full virtual path ===')

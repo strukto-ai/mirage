@@ -12,33 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  z,
-} from '@struktoai/mirage-core/vfs/secrets'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
-import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
-import { ALIAS_SHAPE } from '../s3_alias.ts'
-import type { S3Config } from '../s3/config.ts'
+import { aliasSchema, makeS3Alias, type S3AliasConfig } from '../s3_alias.ts'
 
-export interface SupabaseConfig {
-  bucket: string
+export interface SupabaseConfig extends S3AliasConfig {
   region: string
-  accessKeyId?: string
-  secretAccessKey?: string
   projectRef?: string
-  endpoint?: string
-  sessionToken?: string
-  profile?: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeout?: number
-  proxy?: string
 }
 
-const SupabaseConfigSchema = z.object({
-  ...ALIAS_SHAPE,
+export const SupabaseConfigSchema = aliasSchema({
   forcePathStyle: z.boolean().optional().meta({ default: true }),
   region: z
     .string()
@@ -64,38 +47,16 @@ export type SupabaseConfigRedacted = RedactedConfig<
   'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
 >
 
-export function resolvedSupabaseEndpoint(config: SupabaseConfig): string {
-  if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
-  if (config.projectRef !== undefined && config.projectRef !== '') {
-    return `https://${config.projectRef}.storage.supabase.co/storage/v1/s3`
-  }
-  throw new Error('SupabaseConfig requires projectRef or endpoint')
-}
+export const ALIAS = makeS3Alias<SupabaseConfig, SupabaseConfigRedacted>({
+  schema: SupabaseConfigSchema,
+  endpointFor: (config) => {
+    if (config.projectRef !== undefined && config.projectRef !== '') {
+      return `https://${config.projectRef}.storage.supabase.co/storage/v1/s3`
+    }
+    throw new Error('SupabaseConfig requires projectRef or endpoint')
+  },
+  forcePathStyle: true,
+})
 
-export function supabaseToS3Config(config: SupabaseConfig): S3Config {
-  return {
-    bucket: config.bucket,
-    region: config.region,
-    endpoint: resolvedSupabaseEndpoint(config),
-    ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
-    ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
-    ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
-    ...(config.profile !== undefined ? { profile: config.profile } : {}),
-    forcePathStyle: config.forcePathStyle ?? true,
-    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
-    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-  }
-}
-
-export function redactSupabaseConfig(config: SupabaseConfig): SupabaseConfigRedacted {
-  return redactConfigWithSchema(SupabaseConfigSchema, {
-    ...config,
-    endpoint: resolvedSupabaseEndpoint(config),
-    forcePathStyle: config.forcePathStyle ?? true,
-  }) as unknown as SupabaseConfigRedacted
-}
-
-export function normalizeSupabaseConfig(input: Record<string, unknown>): SupabaseConfig {
-  return parseConfigWithSchema(SupabaseConfigSchema, input, S3_FAMILY_NORMALIZER)
-}
+export const resolvedSupabaseEndpoint = ALIAS.resolvedEndpoint
+export const supabaseToS3Config = ALIAS.toS3Config

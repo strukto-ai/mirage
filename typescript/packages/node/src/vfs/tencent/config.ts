@@ -12,7 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeRegionAlias, type S3AliasConfig, type S3AliasConfigRedacted } from '../s3_alias.ts'
+import {
+  makeS3Alias,
+  REGION_ALIAS_SCHEMA,
+  type S3AliasConfig,
+  type S3AliasConfigRedacted,
+} from '../s3_alias.ts'
 
 export interface TencentConfig extends S3AliasConfig {
   region: string
@@ -20,11 +25,12 @@ export interface TencentConfig extends S3AliasConfig {
 
 export type TencentConfigRedacted = S3AliasConfigRedacted
 
-const alias = makeRegionAlias<TencentConfig, TencentConfigRedacted>(
-  (config) => `https://cos.${config.region}.myqcloud.com`,
-)
+export const TencentConfigSchema = REGION_ALIAS_SCHEMA
 
-export const resolvedTencentEndpoint = alias.resolvedEndpoint
-export const tencentToS3Config = alias.toS3Config
-export const redactTencentConfig = alias.redact
-export const normalizeTencentConfig = alias.normalize
+export const ALIAS = makeS3Alias<TencentConfig, TencentConfigRedacted>({
+  schema: TencentConfigSchema,
+  endpointFor: (config) => `https://cos.${config.region}.myqcloud.com`,
+})
+
+export const resolvedTencentEndpoint = ALIAS.resolvedEndpoint
+export const tencentToS3Config = ALIAS.toS3Config

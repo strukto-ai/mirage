@@ -2,10 +2,7 @@ import { createServer, type RequestListener } from 'node:http'
 import { materialize } from '../../io/types.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import {
-  normalizeDatabricksVolumeConfig,
-  redactDatabricksVolumeConfig,
-} from '../../vfs/databricks_volume/config.ts'
+import { DatabricksVolumeConfigSchema } from '../../vfs/databricks_volume/config.ts'
 import {
   deleteFile,
   download,
@@ -20,6 +17,7 @@ import { DatabricksVolumeVFSBase } from '../../vfs/databricks_volume/databricks_
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { jsonResponse, spec } from '../../../tests/core/databricks_volume/_test_util.ts'
+import { parseConfigWithSchema, redactConfigWithSchema } from '../../vfs/secrets.ts'
 
 const BASE = {
   catalog: 'main',
@@ -29,7 +27,9 @@ const BASE = {
   token: 'tok-123',
 }
 const accessor = (overrides: Record<string, unknown> = {}) =>
-  new DatabricksVolumeAccessor(normalizeDatabricksVolumeConfig({ ...BASE, ...overrides }))
+  new DatabricksVolumeAccessor(
+    parseConfigWithSchema(DatabricksVolumeConfigSchema, { ...BASE, ...overrides }),
+  )
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -66,7 +66,7 @@ describe('Files client', () => {
     let current = 'old'
     const token = vi.fn(() => current)
     const a = accessor({ token })
-    expect(redactDatabricksVolumeConfig(a.config).token).toBe('<REDACTED>')
+    expect(redactConfigWithSchema(DatabricksVolumeConfigSchema, a.config).token).toBe('<REDACTED>')
     const stream = downloadStream(a, '/Volumes/x/a')
     await read(a, spec('/volume/a'), { size: 0 })
     expect(token).not.toHaveBeenCalled()
@@ -281,7 +281,11 @@ describe('explicit configuration', () => {
   )
   it('requires both host and token and rejects profile', () => {
     expect(() =>
-      normalizeDatabricksVolumeConfig({ catalog: 'a', schema: 'b', volume: 'c' }),
+      parseConfigWithSchema(DatabricksVolumeConfigSchema, {
+        catalog: 'a',
+        schema: 'b',
+        volume: 'c',
+      }),
     ).toThrow()
     expect(() => accessor({ profile: 'DEFAULT' })).toThrow()
     expect(accessor({ host: 'http://localhost:8080/' }).host).toBe('http://localhost:8080')

@@ -13,11 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { normalizeTiDBFilesystemConfig } from '../../vfs/tidb_filesystem/config.ts'
+import {
+  TiDBFilesystemConfigSchema,
+  type TiDBFilesystemConfig,
+} from '../../vfs/tidb_filesystem/config.ts'
 import { backendPath } from './path.ts'
+import { parseConfigWithSchema } from '../../vfs/secrets.ts'
 
-function config(root: string): ReturnType<typeof normalizeTiDBFilesystemConfig> {
-  return normalizeTiDBFilesystemConfig({ host: 'http://drive9', token: 't', root_path: root })
+function config(root: string): TiDBFilesystemConfig {
+  return parseConfigWithSchema(TiDBFilesystemConfigSchema, {
+    host: 'http://drive9',
+    token: 't',
+    root_path: root,
+  })
 }
 
 describe('backendPath', () => {

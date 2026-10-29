@@ -21,7 +21,8 @@ import type { MCPNotionTransportOptions } from '@struktoai/mirage-core/core/noti
 import { VFS_MD } from '@struktoai/mirage-core/vfs/notion/notion'
 import { VFSName } from '@struktoai/mirage-core/types'
 
-import { redactNotionConfig, type NotionConfig, type NotionConfigRedacted } from './config.ts'
+import { NotionConfigSchema, type NotionConfig, type NotionConfigRedacted } from './config.ts'
+import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 export interface NotionVFSState {
   type: string
@@ -46,7 +47,7 @@ export class NotionVFS extends NotionVFSBase {
   override getState(): Promise<NotionVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactNotionConfig(this.config),
+      config: redactConfigWithSchema(NotionConfigSchema, this.config) as NotionConfigRedacted,
     })
   }
 }

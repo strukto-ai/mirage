@@ -15,9 +15,9 @@
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { accountOf, HfModelsAccessor } from '../../accessor/hf_hub.ts'
-import { assertHfRepoRef } from '../hf_buckets/config.ts'
+import { assertHfRepoRef, redactHfRepoConfig } from '../hf_buckets/config.ts'
 import { HfHubVFS } from '../hf_hub/base.ts'
-import { type HfModelsConfig, type HfModelsConfigRedacted, redactHfModelsConfig } from './config.ts'
+import { type HfModelsConfig, type HfModelsConfigRedacted } from './config.ts'
 
 export interface HfModelsVFSState {
   type: string
@@ -46,7 +46,7 @@ export class HfModelsVFS extends HfHubVFS {
   getState(): Promise<HfModelsVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactHfModelsConfig(this.config),
+      config: redactHfRepoConfig(this.config),
     })
   }
 }

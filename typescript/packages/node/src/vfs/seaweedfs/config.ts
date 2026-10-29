@@ -12,7 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeFixedAlias, type S3AliasConfig, type S3AliasConfigRedacted } from '../s3_alias.ts'
+import {
+  makeS3Alias,
+  FIXED_ALIAS_SCHEMA,
+  type S3AliasConfig,
+  type S3AliasConfigRedacted,
+} from '../s3_alias.ts'
 
 export interface SeaweedFSConfig extends S3AliasConfig {
   endpoint: string
@@ -20,8 +25,13 @@ export interface SeaweedFSConfig extends S3AliasConfig {
 
 export type SeaweedFSConfigRedacted = S3AliasConfigRedacted
 
-const alias = makeFixedAlias<SeaweedFSConfig, SeaweedFSConfigRedacted>()
+export const SeaweedFSConfigSchema = FIXED_ALIAS_SCHEMA
 
-export const seaweedfsToS3Config = alias.toS3Config
-export const redactSeaweedFSConfig = alias.redact
-export const normalizeSeaweedFSConfig = alias.normalize
+export const ALIAS = makeS3Alias<SeaweedFSConfig, SeaweedFSConfigRedacted>({
+  schema: SeaweedFSConfigSchema,
+  endpointFor: (config) => config.endpoint,
+  regionDefault: 'us-east-1',
+  forcePathStyle: true,
+})
+
+export const seaweedfsToS3Config = ALIAS.toS3Config

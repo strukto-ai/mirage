@@ -16,7 +16,11 @@ import { BaseVFS } from '../base.ts'
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { TokenManager } from '../../core/google/client.ts'
 import { VFSName } from '../../types.ts'
-import { redactGDriveConfig, type GDriveConfig, type GDriveConfigRedacted } from './config.ts'
+import {
+  GoogleDriveConfigSchema,
+  type GoogleDriveConfig,
+  type GoogleDriveConfigRedacted,
+} from './config.ts'
 import { buildDeltaHook } from '../../core/gdrive/events.ts'
 import { type DeltaHook } from '../../events/index.ts'
 import type { CapacityResult, DirListing, FileStat, PathSpec, SetAttrFields } from '../../types.ts'
@@ -40,6 +44,7 @@ import { copy as gdriveCopy } from '../../core/gdrive/copy.ts'
 import { truncate as gdriveTruncate } from '../../core/gdrive/truncate.ts'
 import { filesContaining as gdriveFilesContaining } from '../../core/gdrive/search.ts'
 import { tree as gdriveTree } from '../../core/gdrive/tree.ts'
+import { redactConfigWithSchema } from '../secrets.ts'
 
 export const VFS_MD = `{prefix}
   Mirrors Google Drive folder hierarchy. May contain:
@@ -60,7 +65,7 @@ export const VFS_MD = `{prefix}
 
 export interface GDriveVFSState {
   type: string
-  config: GDriveConfigRedacted
+  config: GoogleDriveConfigRedacted
 }
 
 export class GoogleDriveVFS extends BaseVFS {
@@ -91,10 +96,10 @@ export class GoogleDriveVFS extends BaseVFS {
   } as const
   override vfsMd: string = VFS_MD
   override readonly wholeWordSearch: boolean = true
-  readonly config: GDriveConfig
+  readonly config: GoogleDriveConfig
   override readonly accessor: GDriveAccessor
 
-  constructor(config: GDriveConfig) {
+  constructor(config: GoogleDriveConfig) {
     super()
     this.config = config
     const tm = new TokenManager(config)
@@ -233,7 +238,10 @@ export class GoogleDriveVFS extends BaseVFS {
   override getState(): Promise<GDriveVFSState> {
     return Promise.resolve({
       type: this.name,
-      config: redactGDriveConfig(this.config),
+      config: redactConfigWithSchema(
+        GoogleDriveConfigSchema,
+        this.config,
+      ) as GoogleDriveConfigRedacted,
     })
   }
 }
