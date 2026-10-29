@@ -147,6 +147,8 @@ class InputReader:
         while True:
             value = await parser.next()
             if isinstance(value, JqParseError):
+                # The scanner drops the value it failed on.
+                self._held = 0
                 return value
             if value is not NO_VALUE:
                 held, self._held = self._held, 0

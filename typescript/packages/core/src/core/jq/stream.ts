@@ -199,7 +199,11 @@ export class InputReader {
     if (parser === null) return this.nextLine()
     for (;;) {
       const value = await parser.next()
-      if (value instanceof JqParseError) return value
+      if (value instanceof JqParseError) {
+        // The scanner drops the value it failed on.
+        this.held = 0
+        return value
+      }
       if (value !== NO_VALUE) {
         const held = this.held
         this.held = 0

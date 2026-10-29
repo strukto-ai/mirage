@@ -1513,6 +1513,14 @@
             "stdout": "n=800\n",
             "stderr": ""
           }
+        },
+        {
+          "command": "{ printf '\\036]\\n'; for i in 1 2 3; do seq 1 1000 | tr '0-9' ' '; done; printf '\\0362\\n'; } | jq -c --seq .; echo \"jq=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\u001e2\njq=0\n",
+            "stderr": "jq: ignoring parse error: Unmatched ']' at line 1, column 2 (need RS to resync)\n"
+          }
         }
       ]
     },
