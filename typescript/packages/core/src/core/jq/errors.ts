@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
- * libjq's refusal of a program, which jq reports on stderr and exits 3
- * for. The message is libjq's text, numbered by the program's own lines.
+ * jq's refusal of a program, which jq reports on stderr and exits 3
+ * for. The message is jq's report, numbered by the program's own lines.
  */
 export class JqCompileError extends Error {}

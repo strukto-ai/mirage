@@ -18,7 +18,6 @@ from typing import Any
 
 import pytest
 
-from mirage.core.jq import jq_eval
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from tests.fixtures.answers import Answers, run_generic
 
@@ -27,6 +26,7 @@ from .conftest import (
     eval_one,
     jq,
     jq_all,
+    jq_eval,
     mem_ws,
     run_raw,
     write_to_backend,
@@ -592,10 +592,9 @@ class TestJqParensAndArrayConstruction:
         }
 
 
-class TestJqRealLibjqExpressions:
-    """Expressions that broke the homegrown parser before the libjq swap.
-    Each is a real-world query an agent might run; if any of these fail
-    again it means the engine regressed."""
+class TestJqRealWorldExpressions:
+    """Real-world queries an agent might run, which broke an earlier
+    parser; if any of these fail again it means the engine regressed."""
 
     def _slides_doc(self) -> dict:
         return {

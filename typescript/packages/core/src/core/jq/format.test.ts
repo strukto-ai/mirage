@@ -13,14 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { jqRunTexts } from './eval.ts'
 import { errorReport, formatOne, haltReport, loadFailure } from './format.ts'
 import { jqOptions, type JqOptions } from './types.ts'
 import { eacces, eisdir, enoent } from '../../errors/fs.ts'
 
 const DEC = new TextDecoder()
 const PRETTY = jqOptions()
-const COMPACT = jqOptions({ compact: true })
 const RAW = jqOptions({ rawOutput: true, compact: true })
 
 // jq's compact dump of one document, and what jq 1.8.2 (debian:testing-slim)
@@ -139,16 +137,6 @@ describe('formatOne', () => {
       )
     },
   )
-
-  it('keeps the spelling jq gives each output', async () => {
-    const run = await jqRunTexts(
-      '{"b":1.000,"1":2}',
-      '., .b, (.b + 0), (1e17 * 1), -0, keys_unsorted',
-    )
-    expect(await rendered(run.outputs, COMPACT)).toBe(
-      '{"b":1.000,"1":2}\n1.000\n1\n1e+17\n0\n["b","1"]\n',
-    )
-  })
 })
 
 describe('jq output flags', () => {

@@ -1228,10 +1228,10 @@ async def test_api_jq_finds_no_more_input():
     assert (str(caught.value), caught.value.output) == ("break", b"x\n")
 
 
-# A program jq_eval leaves to libjq runs in a worker, away from the loop,
-# and the program's own errors still read as gojq words them.
+# A math builtin runs in jq_eval too, and the program's own errors after it
+# still read as gojq words them.
 @pytest.mark.asyncio
-async def test_api_jq_runs_a_program_jq_eval_refuses_in_a_worker():
+async def test_api_jq_runs_math_builtins_and_keeps_the_programs_errors():
     _reset({"a": "x"})
     with pytest.raises(StreamRefusal) as caught:
         await api(*_args(["repos/o/r"], {"jq": '[1 | lgamma], error("boom")'}))

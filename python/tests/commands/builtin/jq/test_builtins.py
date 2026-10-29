@@ -14,9 +14,7 @@
 
 import pytest
 
-from mirage.core.jq import jq_eval
-
-from .conftest import eval_one
+from .conftest import eval_one, jq_eval
 
 
 class TestJqType:

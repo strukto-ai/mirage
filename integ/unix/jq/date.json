@@ -307,7 +307,7 @@
       "command": "jq -n '1425599507 | strftime(\"%u %U %V %v %w %W %x %X %y %Y %z %Z %% %+\")'",
       "expect": {
         "exit": 0,
-        "stdout": "\"4 09 10  5-Mar-2015 4 09 03/05/15 23:51:47 15 2015 +0000 UTC % Thu Mar  5 23:51:47 UTC 2015\"\n",
+        "stdout": "\"4 09 10 %v 4 09 03/05/15 23:51:47 15 2015 +0000 GMT % %+\"\n",
         "stderr": ""
       },
       "flags": [
@@ -353,7 +353,7 @@
       ]
     },
     {
-      "id": "jq_strftime_prints_an_unknown_conversion_as_its_letter",
+      "id": "jq_strftime_prints_an_unknown_conversion_as_written",
       "seq": 18710018,
       "targets": [
         "ram",
@@ -364,7 +364,7 @@
       "command": "jq -n '[1970,0,3,4,5,6] | strftime(\"%f%q|%3d|%^a|%-|%\")'",
       "expect": {
         "exit": 0,
-        "stdout": "\"fq|3d|^a||%\"\n",
+        "stdout": "\"%f%q|003|SAT|%-|%\"\n",
         "stderr": ""
       },
       "flags": [
@@ -469,7 +469,7 @@
       ]
     },
     {
-      "id": "jq_strptime_without_a_date_counts_from_year_1900",
+      "id": "jq_strptime_without_a_date_leaves_the_weekday_and_day_of_year_unset",
       "seq": 18710024,
       "targets": [
         "ram",
@@ -480,7 +480,7 @@
       "command": "printf %s '\"10:20\"' | jq -c 'strptime(\"%H:%M\")'",
       "expect": {
         "exit": 0,
-        "stdout": "[1900,0,0,10,20,0,6,-1]\n",
+        "stdout": "[1900,0,0,10,20,0,8,367]\n",
         "stderr": ""
       },
       "flags": [
@@ -547,7 +547,7 @@
       ]
     },
     {
-      "id": "jq_strptime_applies_a_numeric_zone_offset",
+      "id": "jq_strptime_reads_a_numeric_zone_offset_without_applying_it",
       "seq": 18710028,
       "targets": [
         "ram",
@@ -558,7 +558,7 @@
       "command": "printf %s '\"2015-03-05T23:51:47-0530\"' | jq -c 'strptime(\"%Y-%m-%dT%H:%M:%S%z\")'",
       "expect": {
         "exit": 0,
-        "stdout": "[2015,2,6,5,21,47,5,64]\n",
+        "stdout": "[2015,2,5,23,51,47,4,63]\n",
         "stderr": ""
       },
       "flags": [
@@ -756,6 +756,86 @@
       "expect": {
         "exit": 0,
         "stdout": "[0,36000,72000,108000,144000,180000,216000,252000]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_local_time_reads_the_tz_the_command_is_given",
+      "seq": 18710040,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "TZ=Europe/Paris jq -nc '1690000000 | [strflocaltime(\"%H:%M %Z %z\"), (localtime | .[3]), (localtime | mktime), (gmtime | strftime(\"%H:%M %Z\"))]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"06:26 CEST +0200\",6,1690007200,\"04:26 GMT\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_local_time_names_a_half_hour_zone",
+      "seq": 18710041,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "TZ=Asia/Kolkata jq -nc '1690000000 | [strflocaltime(\"%H:%M %Z %z\"), (localtime | .[3])]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"09:56 IST +0530\",9]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strflocaltime_reads_a_doubled_hour_as_jq_does",
+      "seq": 18710042,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "TZ=America/New_York jq -nc '[1699165800, 1699169400] | map(strflocaltime(\"%F %T %Z\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"2023-11-05 01:30:00 EDT\",\"2023-11-05 02:30:00 EST\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
+    },
+    {
+      "id": "jq_strptime_stops_a_field_before_a_digit_it_cannot_take",
+      "seq": 18710043,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "TZ=Europe/Paris jq -nc '[\"2023228\", \"20231335\"] | map(try (strptime(\"%Y%m%d\") | mktime) catch \"no\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1677542400,\"no\"]\n",
         "stderr": ""
       },
       "flags": [

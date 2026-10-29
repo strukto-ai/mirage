@@ -21,7 +21,6 @@ from mirage.core.jq import (
     error_report,
     format_one,
     halt_report,
-    jq_run_texts,
     load_failure,
 )
 from mirage.rs.errors import StreamRefusal
@@ -201,16 +200,6 @@ async def test_raw_output0_refuses_a_string_holding_a_nul():
         )
         == b'"a\\u0000b"\0'
     )
-
-
-@pytest.mark.asyncio
-async def test_outputs_keep_the_spelling_jq_gives_them():
-    run = jq_run_texts(
-        '{"b":1.000,"1":2}', "., .b, (.b + 0), (1e17 * 1), -0, keys_unsorted"
-    )
-    assert b"".join(
-        [(await format_one(text, COMPACT)) for text in run.outputs]
-    ) == (b'{"b":1.000,"1":2}\n1.000\n1\n1e+17\n0\n["b","1"]\n')
 
 
 def test_error_report_words_an_error_the_way_jq_does():

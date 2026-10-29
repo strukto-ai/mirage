@@ -1,5 +1,5 @@
 {
- "baseline": 2727,
+ "baseline": 2701,
  "modules": {
   "core/slack/client": {
    "python_only": {

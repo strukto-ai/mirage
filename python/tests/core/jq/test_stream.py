@@ -13,9 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import json
 
-import jq as libjq
 import pytest
 
 from mirage.core.jq.stream import (
@@ -26,6 +24,7 @@ from mirage.core.jq.stream import (
 from mirage.core.jq.types import NO_VALUE, InputSource, JqOptions, JqParseError
 from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import MemoryBudget, run_with_memory
+from tests.commands.builtin.jq.conftest import jq_texts
 
 
 async def _chunks(data: bytes, size: int):
@@ -41,14 +40,9 @@ def _sources(*inputs: bytes, size: int = 1 << 20) -> list[InputSource]:
 
 
 def _parsed(text):
-    # The value jq's parser reads the text as, which is what libjq runs on.
+    # The value jq's parser reads the text as, which is what a run gets.
     assert isinstance(text, str)
-    if "\\ud" not in text.lower():
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            return libjq.compile(".").input_text(text).first()
-    return libjq.compile(".").input_text(text).first()
+    return jq_texts(text, ".")[0]
 
 
 async def _read(
@@ -199,7 +193,7 @@ async def test_a_document_not_pretty_printed_goes_to_jqs_parser(size):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("size", [1, 5, 1 << 20])
 async def test_a_value_is_handed_over_as_the_text_it_was_read_from(size):
-    # jq keeps a number's literal and an object's key order, so libjq is
+    # jq keeps a number's literal and an object's key order, so a run is
     # handed the bytes, not a value built from them.
     data = (
         b'{"b":1.000,"1":2}\n{\n  "n": 100000000000000000001,\n'

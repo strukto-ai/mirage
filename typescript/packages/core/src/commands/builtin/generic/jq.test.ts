@@ -53,6 +53,8 @@ const FILES: Record<string, string> = {
   '/d/one-two.json': '1 2',
   '/d/two.json': ' 2\n',
   '/d/-': '42\n',
+  '/d/spelled.json': '{"b":1.000,"1":2}',
+  '/d/origin.jq': '[get_prog_origin, get_jq_origin]',
 }
 
 async function* read(path: PathSpec): AsyncIterable<Uint8Array> {
@@ -827,9 +829,17 @@ describe('jq_eval', () => {
     expect((await ran('/d/one.json', '. + 1')).stdout).toBe('2\n')
   })
 
-  it('runs a program jq_eval refuses in the worker', async () => {
-    const result = await ranOver([], '5 | tgamma', { null_input: true })
-    expect(result).toEqual({ stdout: '24\n', stderr: '', exitCode: 0 })
+  it('runs math builtins in jq_eval', async () => {
+    const result = await ranOver([], '5 | tgamma, (4 | lgamma_r)', { null_input: true })
+    expect(result).toEqual({ stdout: '24\n[1.791759469228055,1]\n', stderr: '', exitCode: 0 })
+  })
+
+  it('keeps the spelling jq gives each output', async () => {
+    expect(await ran('/d/spelled.json', '., .b, (.b + 0), (1e17 * 1), -0, keys_unsorted')).toEqual({
+      stdout: '{"b":1.000,"1":2}\n1.000\n1\n1e+17\n0\n["b","1"]\n',
+      stderr: '',
+      exitCode: 0,
+    })
   })
 
   it('runs dates, the clock and a rule zone in jq_eval', async () => {
@@ -850,16 +860,48 @@ describe('jq_eval', () => {
     }
   })
 
-  it('reads the zone from the process TZ or the runtime', () => {
+  it("reads the zone from the session's TZ, else the process's, else the runtime's", () => {
     const saved = process.env.TZ
     process.env.TZ = 'EST5EDT'
     try {
-      expect(localZone()).toBe('EST5EDT')
+      expect(localZone({ TZ: ':Asia/Tokyo' })).toBe(':Asia/Tokyo')
+      expect(localZone({ TZ: '' })).toBe('')
+      expect(localZone({})).toBe('EST5EDT')
       delete process.env.TZ
-      expect(typeof localZone()).toBe('string')
+      expect(localZone(undefined)).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
     } finally {
-      if (saved !== undefined) process.env.TZ = saved
+      if (saved === undefined) delete process.env.TZ
+      else process.env.TZ = saved
     }
+  })
+
+  it("refuses a program with jq's report", async () => {
+    await expect(Engine.open('if', jqOptions(), null, '{}', 'UTC', null)).rejects.toThrow(
+      /\njq: 1 compile error$/,
+    )
+    await expect(
+      Engine.open('import "a" as a; .', jqOptions(), null, '{}', 'UTC', null),
+    ).rejects.toThrow(/^jq: error: module not found: a\n\njq: 1 compile error$/)
+  })
+
+  it("answers get_prog_origin with the program file's directory, else the cwd", async () => {
+    const program = '[get_prog_origin, get_jq_origin]'
+    const ctx = {
+      stdin: null,
+      flags: parsedFlags('-c', '-n', program),
+      cwd: PathSpec.fromStrPath('/d/dir'),
+    } as Context
+    const result = await jqGeneric([], [program], ctx, read)
+    if (result === null) throw new Error('jq returned no result')
+    expect(DEC.decode(await materialize(result[0]))).toBe('["/d/dir","."]\n')
+    const fromFile = {
+      stdin: null,
+      flags: parsedFlags('-c', '-n', '-f', '/d/origin.jq'),
+      cwd: PathSpec.fromStrPath('/'),
+    } as Context
+    const ranFile = await jqGeneric([], [], fromFile, read)
+    if (ranFile === null) throw new Error('jq returned no result')
+    expect(DEC.decode(await materialize(ranFile[0]))).toBe('["/d","."]\n')
   })
 
   it('reports a program jq refuses as jq does', async () => {
@@ -893,134 +935,36 @@ describe('jq_eval clock', () => {
   })
 })
 
-describe('local timezone fallback', () => {
-  it.each(['Europe/Paris', 'America/New_York'])(
-    'defers host-zone time calls before debug under %s',
-    async (zone) => {
-      const saved = process.env.TZ
-      process.env.TZ = zone
-      const open = rs.openStream
-      const refused: string[] = []
-      const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
-        try {
-          return await open(kind, config)
-        } catch (error) {
-          if (kind === 'jq_eval' && error instanceof StreamRefusal) refused.push(error.message)
-          throw error
-        }
-      })
-      try {
-        for (const program of [
-          '1 | debug | (0 | localtime) | 42',
-          '1 | debug | (try (0 | strflocaltime("%Z")) catch .) | 42',
-          '1 | debug | (try ("0" | strptime("%s")) catch .) | 42',
-          '"%Z" as $format | 1 | debug | (try (0 | strflocaltime($format)) catch .) | 42',
-        ]) {
-          expect(await ranOver([], program, { null_input: true })).toEqual({
-            stdout: '42\n',
-            stderr: '',
-            exitCode: 0,
-          })
-        }
-        expect(refused.length).toBeGreaterThan(0)
-        expect(refused.every((message) => message === 'jq_eval: no time zone for local time')).toBe(
-          true,
-        )
-        refused.length = 0
-        expect(await ranOver([], '0 | strftime("%Z")', { null_input: true })).toEqual({
-          stdout: '"UTC"\n',
-          stderr: '',
-          exitCode: 0,
-        })
-        expect(refused).toEqual([])
-      } finally {
-        patched.mockRestore()
-        if (saved === undefined) delete process.env.TZ
-        else process.env.TZ = saved
-      }
-    },
-  )
-
-  it.each([
-    '/usr/share/zoneinfo/Europe/Paris',
-    ':/usr/share/zoneinfo/Europe/Paris',
-    'posix/Europe/Paris',
-    ':posix/Europe/Paris',
-    'right/Europe/Paris',
-    ':right/Europe/Paris',
-  ])('falls back before debug for timezone file %s and leaves UTC native', async (zone) => {
+describe('local time', () => {
+  it("reads the session's zone from the tz database", async () => {
     const saved = process.env.TZ
-    process.env.TZ = zone
-    const open = rs.openStream
-    const refused: string[] = []
-    const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
-      try {
-        return await open(kind, config)
-      } catch (error) {
-        if (kind === 'jq_eval' && error instanceof StreamRefusal) refused.push(error.message)
-        throw error
-      }
-    })
+    process.env.TZ = '/usr/share/zoneinfo/Europe/Paris'
+    const program =
+      '1690000000 | strflocaltime("%H:%M %Z %z"), strftime("%Z"), ' +
+      '(1 | debug | (0 | localtime) | .[3])'
     try {
-      expect(await ranOver([], '1 | debug | (0 | localtime) | 42', { null_input: true })).toEqual({
-        stdout: '42\n',
-        stderr: '',
+      expect(await ranOver([], program, { null_input: true })).toEqual({
+        stdout: '"06:26 CEST +0200"\n"GMT"\n1\n',
+        stderr: '["DEBUG:",1]\n',
         exitCode: 0,
       })
-      expect(refused.length).toBeGreaterThan(0)
-      expect(refused.every((message) => message === 'jq_eval: no time zone for local time')).toBe(
-        true,
-      )
-      refused.length = 0
-      expect(await ranOver([], '0 | gmtime | .[3]', { null_input: true })).toEqual({
-        stdout: '0\n',
-        stderr: '',
-        exitCode: 0,
-      })
-      expect(await ranOver([], '41+1', { null_input: true })).toEqual({
-        stdout: '42\n',
-        stderr: '',
-        exitCode: 0,
-      })
-      expect(refused).toEqual([])
+      const ctx = {
+        stdin: null,
+        flags: { compact_output: true, null_input: true },
+        cwd: PathSpec.fromStrPath('/'),
+        env: { TZ: 'Asia/Kolkata' },
+      } as Context
+      const result = await jqGeneric([], [program], ctx, read)
+      if (result === null) throw new Error('jq returned no result')
+      expect(DEC.decode(await materialize(result[0]))).toBe('"09:56 IST +0530"\n"GMT"\n5\n')
     } finally {
-      patched.mockRestore()
       if (saved === undefined) delete process.env.TZ
       else process.env.TZ = saved
     }
   })
 })
 
-describe('deferred evaluator refusal boundaries', () => {
-  it('falls back for an initial drain refusal before output or requests', async () => {
-    const open = rs.openStream
-    let refused = false
-    const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
-      const stream = await open(kind, config)
-      if (kind === 'jq_eval') {
-        const drain = stream.drain.bind(stream)
-        vi.spyOn(stream, 'drain').mockImplementation(() => {
-          if (!refused) {
-            refused = true
-            throw new StreamRefusal('initial fixture', new Uint8Array())
-          }
-          return drain()
-        })
-      }
-      return stream
-    })
-    try {
-      expect(await ranOver([], '41+1', { null_input: true })).toEqual({
-        stdout: '42\n',
-        stderr: '',
-        exitCode: 0,
-      })
-      expect(refused).toBe(true)
-    } finally {
-      patched.mockRestore()
-    }
-  })
-
+describe('jq_eval refusals', () => {
   it('does not replay after an input request', async () => {
     const open = rs.openStream
     const message = 'reply fixture'
@@ -1119,12 +1063,13 @@ describe('outputs as a run makes them', () => {
       jqOptions(),
       null,
       '{}',
+      'UTC',
+      null,
     )
-    if (engine === null) throw new Error('jq_eval declined the program')
     const seen: string[] = []
     try {
       const reader = new InputReader([], jqOptions())
-      const ending = { stop: null, declined: false }
+      const ending = { stop: null }
       for await (const value of engine.run('null', reader, (line) => seen.push(line), ending)) {
         seen.push(value)
       }

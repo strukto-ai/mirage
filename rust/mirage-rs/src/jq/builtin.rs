@@ -753,6 +753,20 @@ cfuncs! {
     Fma = "fma" / 3,
     NextAfter = "nextafter" / 2,
     NextToward = "nexttoward" / 2,
+    Erf = "erf" / 0,
+    Erfc = "erfc" / 0,
+    Gamma = "gamma" / 0,
+    Lgamma = "lgamma" / 0,
+    LgammaR = "lgamma_r" / 0,
+    Tgamma = "tgamma" / 0,
+    J0 = "j0" / 0,
+    J1 = "j1" / 0,
+    Jn = "jn" / 2,
+    Y0 = "y0" / 0,
+    Y1 = "y1" / 0,
+    Yn = "yn" / 2,
+    Remainder = "remainder" / 2,
+    Drem = "drem" / 2,
     Builtins = "builtins" / 0,
     ModuleMeta = "modulemeta" / 0,
     GetSearchList = "get_search_list" / 0,
@@ -791,6 +805,16 @@ fn math1(input: &Value, f: fn(f64) -> f64) -> Answer {
 
 fn math2(a: &Value, b: &Value, f: fn(f64, f64) -> f64) -> Answer {
     Ok(Value::number(f(num(a)?, num(b)?)))
+}
+
+/// The order `jn` and `yn` take, as C's `(int)` converts a double on
+/// x86-64: toward zero, and INT_MIN outside int's range or for NaN.
+fn c_int(n: f64) -> i32 {
+    if n > -2147483649.0 && n < 2147483648.0 {
+        n as i32
+    } else {
+        i32::MIN
+    }
 }
 
 pub(super) fn string_too_long(limits: Limits) -> Fault {
@@ -992,7 +1016,8 @@ pub(crate) fn call(f: Cfunc, args: &mut [Value], limits: Limits) -> Answer {
         | Cfunc::Input
         | Cfunc::Debug
         | Cfunc::Stderr
-        | Cfunc::Env => unreachable!("the VM answers its host builtins"),
+        | Cfunc::Env
+        | Cfunc::GetProgOrigin => unreachable!("the VM answers its host builtins"),
         Cfunc::HaveDecnum => Ok(Value::True),
         Cfunc::HaveLiteralNumbers => Ok(Value::True),
         Cfunc::Floor => math1(input, f64::floor),
@@ -1070,6 +1095,30 @@ pub(crate) fn call(f: Cfunc, args: &mut [Value], limits: Limits) -> Answer {
             Ok(Value::number(num(a)?.mul_add(num(b)?, num(c)?)))
         }
         Cfunc::NextAfter | Cfunc::NextToward => math2(a, b, nextafter),
+        Cfunc::Erf => math1(input, libm::erf),
+        Cfunc::Erfc => math1(input, libm::erfc),
+        Cfunc::Gamma | Cfunc::Lgamma => math1(input, libm::lgamma),
+        Cfunc::LgammaR => {
+            let x = num(input)?;
+            let (value, sign) = libm::lgamma_r(x);
+            let sign = if x < 0.0 && x.fract() == 0.0 {
+                -1
+            } else {
+                sign
+            };
+            Ok(Value::array(vec![
+                Value::number(value),
+                Value::number(f64::from(sign)),
+            ]))
+        }
+        Cfunc::Tgamma => math1(input, libm::tgamma),
+        Cfunc::J0 => math1(input, libm::j0),
+        Cfunc::J1 => math1(input, libm::j1),
+        Cfunc::Jn => Ok(Value::number(libm::jn(c_int(num(a)?), num(b)?))),
+        Cfunc::Y0 => math1(input, libm::y0),
+        Cfunc::Y1 => math1(input, libm::y1),
+        Cfunc::Yn => Ok(Value::number(libm::yn(c_int(num(a)?), num(b)?))),
+        Cfunc::Remainder | Cfunc::Drem => math2(a, b, libm::remainder),
         Cfunc::Builtins => Ok(builtins()),
         Cfunc::ModuleMeta => match input {
             Value::String(name) => Err(fail(module_error(name))),
@@ -1081,7 +1130,7 @@ pub(crate) fn call(f: Cfunc, args: &mut [Value], limits: Limits) -> Answer {
                 .map(Value::string)
                 .collect(),
         )),
-        Cfunc::GetJqOrigin | Cfunc::GetProgOrigin => Ok(Value::Null),
+        Cfunc::GetJqOrigin => Ok(Value::string(".")),
         Cfunc::Now
         | Cfunc::Mktime
         | Cfunc::Gmtime

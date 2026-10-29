@@ -3,19 +3,18 @@ use std::sync::Arc;
 
 use crate::{Stream, StreamError};
 
-use super::builtin::Cfunc;
-use super::compile::{self, Refusal};
+use super::compile;
 use super::host::{Host, Message, Reply, Request};
 use super::meter::{self, Charge, Meter};
 use super::time::{Clock, Zone};
 use super::value::{Dumping, Object, Parsing, Value, parse_json};
-use super::vm::{Halt, Limits, Next, Op, Program, Raise, Vm};
+use super::vm::{Halt, Limits, Next, Program, Raise, Vm};
 
-const STEPS: u64 = 1 << 16;
-const BLOCKS: usize = 1 << 20;
-const ITEMS: usize = 1 << 24;
-const BYTES: usize = 1 << 28;
-const MEMORY: usize = 1 << 30;
+pub(super) const STEPS: u64 = 1 << 16;
+pub(super) const BLOCKS: usize = 1 << 20;
+pub(super) const ITEMS: usize = 1 << 24;
+pub(super) const BYTES: usize = 1 << 28;
+pub(super) const MEMORY: usize = 1 << 30;
 const RETIRE: usize = 1 << 14;
 
 pub(crate) const OUTPUT: u8 = 1;
@@ -46,6 +45,10 @@ struct Config {
     memory: usize,
     #[serde(default)]
     zone: Option<String>,
+    /// The directory of the program's file, else the working directory,
+    /// which `get_prog_origin` answers.
+    #[serde(default)]
+    prog_origin: Option<String>,
 }
 
 fn steps() -> u64 {
@@ -195,11 +198,12 @@ impl Printing {
 /// of the stream, or the reader's parse error, as jq's input callback
 /// answers it, and the reader's position after it.
 struct Eval {
-    program: Option<Arc<Program>>,
+    program: Arc<Program>,
     limits: Limits,
     meter: Arc<Meter>,
     steps: u64,
     env: Value,
+    origin: Value,
     position: Position,
     asking: Asking,
     clock: Clock,
@@ -235,31 +239,11 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     };
     // jq binds `$ENV` to the environment over an `--arg ENV` (compile.c).
     globals.insert("ENV".to_string(), env.clone());
-    let program = match compile::compile(&config.program, &globals) {
-        Ok(program) => Some(Arc::new(program)),
-        Err(Refusal::Unsupported(_)) if meter.exceeded() => None,
-        Err(Refusal::Invalid(report)) => return Err(StreamError::new(report)),
-        Err(Refusal::Unsupported(why)) => {
-            return Err(StreamError::new(format!("jq_eval: {why}")));
-        }
-    };
+    let program = Arc::new(compile::compile(&config.program, &globals).map_err(StreamError::new)?);
     let clock = Clock {
-        zone: config.zone.as_deref().and_then(Zone::parse).map(Arc::new),
+        zone: Arc::new(Zone::parse(config.zone.as_deref().unwrap_or("UTC"))),
     };
     let compile_limited = meter.exceeded();
-    if !compile_limited
-        && clock.zone.is_none()
-        && program.as_ref().is_some_and(|program| {
-            program.bytecodes.iter().flat_map(|bc| &bc.ops).any(|op| {
-                matches!(
-                    op,
-                    Op::CallBuiltin(Cfunc::Localtime | Cfunc::StrfLocaltime | Cfunc::Strptime, _)
-                )
-            })
-        })
-    {
-        return Err(StreamError::new("jq_eval: no time zone for local time"));
-    }
     Ok(Box::new(Eval {
         program,
         limits: Limits {
@@ -271,6 +255,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         meter,
         steps: config.steps.max(1),
         env,
+        origin: config.prog_origin.map_or(Value::Null, Value::string),
         position: Position::default(),
         asking: Asking::No,
         clock,
@@ -669,16 +654,13 @@ impl Drop for Eval {
 
 impl Eval {
     fn compiled(&self) -> Arc<Program> {
-        Arc::clone(
-            self.program
-                .as_ref()
-                .expect("a runnable stream has compiled bytecode"),
-        )
+        Arc::clone(&self.program)
     }
 
     fn start_vm(&mut self, input: Value) -> Box<Vm> {
         let mut vm = Vm::start(self.compiled(), input, self.limits, Arc::clone(&self.meter));
         vm.host.env = self.env.clone();
+        vm.host.origin = self.origin.clone();
         place(&mut vm.host, std::mem::take(&mut self.position));
         vm.set_clock(self.clock.clone());
         Box::new(vm)

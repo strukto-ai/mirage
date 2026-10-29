@@ -72,11 +72,7 @@ interface DrawOwner {
   report: (name: string) => string
 }
 
-const KEPT_ON_PROCESS_RANDOMNESS: Record<string, string> = {
-  'core/jq/eval.ts crypto.getRandomValues':
-    "the prelude's key token is drawn once per process and never reaches output; " +
-    'it only has to be one no program can spell',
-}
+const KEPT_ON_PROCESS_RANDOMNESS: Record<string, string> = {}
 
 function stampOf(value: string): number {
   return parseInt(value.slice(0, 8) + value.slice(9, 13), 16)

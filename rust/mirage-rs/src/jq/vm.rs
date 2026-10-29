@@ -251,7 +251,7 @@ impl Pending {
         }
     }
 
-    fn begin(f: Cfunc, args: &mut [Value]) -> Option<Result<Pending, Fault>> {
+    pub(crate) fn begin(f: Cfunc, args: &mut [Value]) -> Option<Result<Pending, Fault>> {
         if let (Cfunc::DelPaths, [root, paths, ..]) = (f, &mut *args) {
             let root = std::mem::replace(root, Value::Null);
             return Some(Deleting::begin(root, paths).map(|d| Pending::Delete(Box::new(d))));
@@ -300,7 +300,7 @@ impl Pending {
         })
     }
 
-    fn run(&mut self, budget: &mut u64, limits: Limits) -> Option<Result<Value, Fault>> {
+    pub(crate) fn run(&mut self, budget: &mut u64, limits: Limits) -> Option<Result<Value, Fault>> {
         if *budget == 0 {
             *budget = 1;
         }
@@ -467,6 +467,7 @@ impl Vm {
                         std::mem::replace(&mut self.path, Value::Null),
                         std::mem::replace(&mut self.value_at_path, Value::Null),
                         std::mem::replace(&mut self.host.env, Value::Null),
+                        std::mem::replace(&mut self.host.origin, Value::Null),
                         std::mem::replace(&mut self.host.filename, Value::Null),
                     ]
                 }

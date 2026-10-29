@@ -14,11 +14,11 @@
 
 
 class JqCompileError(ValueError):
-    """libjq's refusal of a program, which jq reports on stderr and exits
-    3 for.
+    """jq's refusal of a program, which jq reports on stderr and exits 3
+    for.
 
     Args:
-        message (str): libjq's text, numbered by the program's own lines.
+        message (str): jq's report, numbered by the program's own lines.
     """
 
 

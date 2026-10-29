@@ -15,7 +15,6 @@
 // The option loop, main loop and exit statuses follow jq 1.8.2's
 // src/main.c (MIT; see licenses/third_party/jq.txt).
 
-import { Worker } from '../../../concurrency/worker.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { OPERAND, REFUSED } from '../../spec/constants.ts'
@@ -32,7 +31,6 @@ import {
   errorReport,
   formatOne,
   haltReport,
-  jqCheck,
   jqOptions,
   loadFailure,
   readTexts,
@@ -45,7 +43,6 @@ import {
   type JqHalt,
   type JqOptions,
   type JqRun,
-  type StreamReads,
 } from '../../../core/jq/index.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { closeStream, openStream, type OpenStream } from '../../../rs/stream.ts'
@@ -55,6 +52,8 @@ import { yieldBytes } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec, type JsonValue } from '../../../types.ts'
 import { isFsError } from '../../../errors/fs.ts'
+import { parent } from '../../../utils/path.ts'
+import { TZ_VAR } from '../../../utils/timezone.ts'
 import { type CommandFnResult, type Context } from '../../config.ts'
 import { helpPage, versionLine } from '../../spec/standard.ts'
 import { UsageError } from '../../errors.ts'
@@ -161,11 +160,17 @@ export function optionRefusal(word: string): UsageError {
   return new UsageError(`jq: ${line}\n${USAGE_HINT}`, 2)
 }
 
-export function localZone(): string | undefined {
+/**
+ * The time zone jq's local time reads, as a `TZ` value: the command
+ * environment's, else the process's, else the host's tz database zone.
+ */
+export function localZone(env: Record<string, string> | undefined): string {
   const host = globalThis as {
     process?: { env?: Record<string, string | undefined> }
   }
-  return host.process?.env?.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  return (
+    env?.[TZ_VAR] ?? host.process?.env?.[TZ_VAR] ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  )
 }
 
 function pairArgs(values: readonly string[]): [string, string][] {
@@ -493,12 +498,10 @@ export async function inputReply(
 
 /**
  * How a run whose outputs went out as it made them ended: the error or halt
- * that stopped it, if one did, and whether jq_eval left its document to
- * jq-wasm, which it says only before any output.
+ * that stopped it, if one did.
  */
 export interface Ending {
   stop: JqError | JqHalt | null
-  declined: boolean
 }
 
 /**
@@ -534,17 +537,20 @@ export class Engine {
 
   /**
    * Compile `expr`, as typed, with the options' named bindings, `args` as
-   * `$ARGS` and `env` (JSON text) as `$ENV` and `env`, or null when jq_eval
-   * leaves a builtin or syntax it uses to jq-wasm. Throws JqCompileError,
-   * with jq's report, for a program jq itself refuses.
+   * `$ARGS`, `env` (JSON text) as `$ENV` and `env`, `zone` (localZone) as
+   * the `TZ` local time reads and `origin` as the directory
+   * `get_prog_origin` answers. Throws JqCompileError, with jq's report, for
+   * a program jq itself refuses.
    */
   static async open(
     expr: string,
     opts: JqOptions,
     args: string | null,
     env: string,
+    zone: string,
+    origin: string | null,
     signal?: AbortSignal,
-  ): Promise<Engine | null> {
+  ): Promise<Engine> {
     let stream: OpenStream
     const limit = memoryRoom()
     try {
@@ -553,22 +559,22 @@ export class Engine {
         named: Object.fromEntries(opts.namedArgs),
         args,
         env,
-        zone: localZone() ?? null,
+        zone,
+        prog_origin: origin,
         ...(limit === null ? {} : { memory: limit }),
       })
     } catch (error) {
-      if (!(error instanceof StreamRefusal)) throw error
-      if (COMPILE_REPORT.test(error.message)) throw new JqCompileError(error.message)
-      console.debug(`jq: jq_eval leaves the program to jq-wasm: ${error.message}`)
-      return null
+      if (error instanceof StreamRefusal && COMPILE_REPORT.test(error.message)) {
+        throw new JqCompileError(error.message)
+      }
+      throw error
     }
     return new Engine(stream, opts, limit, signal)
   }
 
   /**
    * Run the program on one document's JSON text, yielding each output as a
-   * drain decodes it, and leave on `ending` how the run stopped, or that
-   * jq_eval cannot read the document, which the caller then runs elsewhere.
+   * drain decodes it, and leave on `ending` how the run stopped.
    *
    * Each `input` the program calls takes the reader's next document then and
    * there, as jq's input callback does, so the run consumes exactly what it
@@ -586,13 +592,11 @@ export class Engine {
     stream.begin(readerPosition(reader))
     const frames: [number, string][] = []
     let stop: JqError | JqHalt | null
-    let safe = true
     // Whether the caller stopped reading while the run was still going.
     let abandoned = true
     try {
       stop = readFrames(stream.feed(ENC.encode(doc)), frames)
       stop = readFrames(stream.finish(), frames) ?? stop
-      safe = frames.length === 0 && stop === null
       for (;;) {
         for (const [tag, text] of frames) {
           if (tag === FRAME_OUTPUT) yield text
@@ -607,7 +611,6 @@ export class Engine {
         } else {
           const asked = stream.request()
           if (asked === null) break
-          safe = false
           let reply: Record<string, JsonValue>
           let data: Uint8Array = new Uint8Array()
           if (asked[0].op === 'now') {
@@ -619,17 +622,12 @@ export class Engine {
           }
           wire = stream.respond(reply, data)
         }
-        if (wire.byteLength > 0) safe = false
         stop = readFrames(wire, frames) ?? stop
       }
       abandoned = false
     } catch (error) {
       abandoned = false
-      if (!(error instanceof StreamRefusal) || !safe || error.output.byteLength > 0) throw error
-      console.debug(`jq: jq_eval leaves the document to jq-wasm: ${error.message}`)
-      await this.cancel()
-      ending.declined = true
-      return
+      throw error
     } finally {
       if (abandoned) await this.cancel()
     }
@@ -712,14 +710,9 @@ export function parseReport(failure: JqParseError, opts: JqOptions): string {
  * reader when they ask for it, as jq's input callback does, so the next run
  * starts after the documents the program consumed, and `debug` and `stderr`
  * lines go to stderr in the order they were written, before the run's own
- * report. `env` (JSON text) is what `$ENV` and `env` read.
- *
- * A program jq_eval refuses, and a document it cannot read, go to the
- * invocation's worker instead, even for a short run: jq-wasm cannot be
- * interrupted, so no run there is known to end (strukto-ai/mirage#1590). A
- * run there of a program that calls `input` or `inputs` reads what they take
- * before the program runs (see evaluateReading), and nothing past it, so the
- * loop never reads further ahead than jq's own.
+ * report. `env` (JSON text) is what `$ENV` and `env` read, `zone`
+ * (localZone) the `TZ` local time reads and `origin` the directory
+ * `get_prog_origin` answers.
  *
  * An input that cannot be opened or read is reported when the reader reaches
  * it, and the reader goes on to the next. The loop checks for such a failure
@@ -728,10 +721,8 @@ export function parseReport(failure: JqParseError, opts: JqOptions): string {
  * answered. `sources` are the inputs, in order, not yet opened.
  */
 export class MainLoop {
-  private worker: Worker | null = null
-  // The compiled program: undefined until the first run asks for it, null
-  // once jq_eval refused it.
-  private engine: Engine | null | undefined
+  // The compiled program, once the first run asks for it.
+  private engine: Engine | null = null
   private readonly statuses: number[] = []
   private readonly reports: string[] = []
   private readonly reader: InputReader
@@ -742,9 +733,10 @@ export class MainLoop {
     sources: readonly InputSource[],
     private readonly expr: string,
     private readonly opts: JqOptions,
-    private readonly reads: StreamReads,
     private readonly args: string | null,
     private readonly env: string,
+    private readonly zone: string,
+    private readonly origin: string | null,
     private readonly io: IOResult,
     private readonly signal?: AbortSignal,
   ) {
@@ -775,14 +767,8 @@ export class MainLoop {
         this.reader.failures() > 0 ? ERROR_SYSTEM : exitCode(this.statuses, this.opts)
       if (this.reports.length > 0) this.io.stderr = ENC.encode(this.reports.join(''))
       await this.engine?.close()
-      await this.worker?.close()
       await this.reader.close()
     }
-  }
-
-  private evaluate(args: readonly unknown[]): Promise<JqRun<string>> {
-    this.worker ??= new Worker()
-    return this.worker.call('jqRunTexts', args, this.signal)
   }
 
   /**
@@ -792,7 +778,7 @@ export class MainLoop {
    * cannot print stops the run with that error, as it does jq's.
    */
   private async *run(doc: string): AsyncGenerator<Uint8Array, void, undefined> {
-    const ending: Ending = { stop: null, declined: false }
+    const ending: Ending = { stop: null }
     let last: string | null = null
     for await (const value of this.values(doc, ending)) {
       const pending = this.budget.run()
@@ -813,61 +799,20 @@ export class MainLoop {
   }
 
   /**
-   * The run's outputs: from jq_eval as it makes them, or from jq-wasm for a
-   * program or a document jq_eval leaves to it.
+   * The run's outputs from jq_eval, as it makes them, the program compiled
+   * for the invocation's first run.
    */
   private async *values(doc: string, ending: Ending): AsyncGenerator<string, void, undefined> {
-    if (this.engine === undefined) {
-      this.engine = await Engine.open(this.expr, this.opts, this.args, this.env, this.signal)
-    }
-    if (this.engine !== null) {
-      yield* this.engine.run(doc, this.reader, (line) => this.reports.push(line), ending)
-      if (!ending.declined) return
-    }
-    const run = await this.evaluateReading(doc)
-    ending.stop = run.stop
-    yield* run.outputs
-  }
-
-  /**
-   * Run the program on one document in jq-wasm, reading first what its
-   * `input` and `inputs` take, so the next run starts past it.
-   *
-   * How much a run takes is a runtime fact jq-wasm does not report, so mirage
-   * assumes what the idioms do: `inputs` drains the rest (`[., inputs]`,
-   * `reduce inputs as $x`), and `input` alone takes one (`[., input]` pairs
-   * the documents up). A program that takes some other count
-   * (`first(inputs)`, an `input` in a branch not taken) leaves real jq a
-   * different remainder for its next run than here. A parse error stops the
-   * reading: the run raises it where `input` or `inputs` would reach it, and
-   * the main loop reads on past it. Only a program jq_eval refuses runs here.
-   */
-  private async evaluateReading(doc: string): Promise<JqRun<string>> {
-    const reads = this.reads
-    if (!reads.input && !reads.inputs) {
-      return this.evaluate([doc, this.expr, this.opts.namedArgs, null, this.args, null, this.env])
-    }
-    const docs: string[] = []
-    let failure: JqParseError | null = null
-    for (;;) {
-      const item = await this.reader.nextInput()
-      if (item === NO_VALUE) break
-      if (item instanceof JqParseError) {
-        failure = item
-        break
-      }
-      docs.push(item)
-      if (!reads.inputs) break
-    }
-    return this.evaluate([
-      doc,
+    this.engine ??= await Engine.open(
       this.expr,
-      this.opts.namedArgs,
-      docs,
+      this.opts,
       this.args,
-      failure === null ? null : failure.message,
       this.env,
-    ])
+      this.zone,
+      this.origin,
+      this.signal,
+    )
+    yield* this.engine.run(doc, this.reader, (line) => this.reports.push(line), ending)
   }
 
   // Fold one run into the invocation: its answer toward the exit status,
@@ -946,22 +891,23 @@ export async function jqGeneric(
     }
     expression = DEC.decode(data)
   }
+  const origin = programFile === null ? ctx.cwd.virtual : parent(programFile.virtual)
   const expr = expression.trim()
   const reads = streamReads(expr)
   const readsStream = reads.input || reads.inputs
   const args = referencesArgs(expr) ? argsText(jq) : null
   // `$ENV` and `env` read the session's exported environment in place of
-  // jq's process environment.
+  // jq's process environment, and local time its `TZ`.
   const env = JSON.stringify(ctx.env ?? {})
+  const zone = localZone(ctx.env)
   try {
     // jq compiles its program before it opens a single input, so a
     // refusal is all it prints. jq_eval words jq's refusals itself, reading
-    // the program as typed, so its lines and columns are jq's; jq-wasm
-    // checks only a program jq_eval leaves to it. The run compiles it again
-    // when it starts, so nothing is held open for a stream no one reads.
-    const checked = await Engine.open(expression, jq, args, env, ctx.signal)
-    if (checked === null) await jqCheck(expr, jq.namedArgs, readsStream ? [] : null, args)
-    else await checked.close()
+    // the program as typed, so its lines and columns are jq's. The run
+    // compiles it again when it starts, so nothing is held open for a
+    // stream no one reads.
+    const checked = await Engine.open(expression, jq, args, env, zone, origin, ctx.signal)
+    await checked.close()
   } catch (error) {
     if (!(error instanceof JqCompileError)) throw error
     return [
@@ -991,6 +937,6 @@ export async function jqGeneric(
     }
   }
   const io = new IOResult()
-  const loop = new MainLoop(sources, expr, jq, reads, args, env, io, ctx.signal)
+  const loop = new MainLoop(sources, expr, jq, args, env, zone, origin, io, ctx.signal)
   return [loop.outputs(), io]
 }

@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use super::builtin::{self, Fault};
+use super::eval::{BLOCKS, BYTES, ITEMS, MEMORY, STEPS};
 use super::lalr::{self, Action, Assoc, Tables};
 use super::parse::parse_value;
 use super::value::{Number, Object, Value};
-use super::vm::Limits;
+use super::vm::{Limits, Pending};
 
 /// Bison's YYMAXDEPTH: the parser stack jq's parser grows up to.
 const STACK: usize = 10000;
@@ -722,16 +723,12 @@ pub(crate) enum Parsed {
     Program(Ast, Vec<Import>),
     /// jq refuses it: each message as jq reports it.
     Invalid(Vec<String>),
-    Unsupported(&'static str),
 }
 
 /// Parse a whole program, as jq_compile_args parses its text.
 pub(crate) fn parse(source: &str) -> Parsed {
     let mut parser = Parser::new(source);
     let top = parser.run();
-    if let Some(why) = parser.unsupported {
-        return Parsed::Unsupported(why);
-    }
     if !parser.errors.is_empty() {
         return Parsed::Invalid(parser.errors);
     }
@@ -1224,7 +1221,6 @@ struct Parser<'a> {
     lexer: Lexer<'a>,
     errors: Vec<String>,
     imports: Vec<Import>,
-    unsupported: Option<&'static str>,
 }
 
 impl<'a> Parser<'a> {
@@ -1240,7 +1236,6 @@ impl<'a> Parser<'a> {
             },
             errors: Vec::new(),
             imports: Vec::new(),
-            unsupported: None,
         }
     }
 
@@ -1407,10 +1402,6 @@ impl<'a> Parser<'a> {
     }
 
     fn metadata(&mut self, meta: &Ast, loc: Loc) -> Option<Value> {
-        if metadata_needs_runtime(meta) {
-            self.unsupported = Some("module metadata requires run-time limits");
-            return None;
-        }
         match metadata_constant(meta) {
             Some(value @ Value::Object(_)) => Some(value),
             Some(_) => {
@@ -1731,38 +1722,10 @@ fn loc_object(source: &str, loc: Loc) -> Ast {
     Ast::Literal(Value::object(object))
 }
 
-fn metadata_needs_runtime(ast: &Ast) -> bool {
-    let mut pending = vec![ast];
-    while let Some(ast) = pending.pop() {
-        match ast {
-            Ast::Binop(op, a, b) => {
-                if matches!(
-                    (&**a, &**b),
-                    (Ast::Literal(Value::Array(_) | Value::Object(_)), _)
-                        | (_, Ast::Literal(Value::Array(_) | Value::Object(_)))
-                ) || (*op == BinOp::Multiply
-                    && matches!(
-                        (&**a, &**b),
-                        (Ast::Literal(Value::String(_)), _) | (_, Ast::Literal(Value::String(_)))
-                    ))
-                {
-                    return true;
-                }
-                pending.extend([&**a, &**b]);
-            }
-            Ast::Comma(a, b) => pending.extend([&**a, &**b]),
-            Ast::Collect(Some(inner)) => pending.push(inner),
-            Ast::Object(pairs) => {
-                for (key, value) in pairs {
-                    pending.extend([key, value]);
-                }
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
+/// The constant a module's metadata folds to, as jq folds it while it
+/// parses, or None when it is not one. Its binops run as the VM runs
+/// them, and all of them share one slice of steps, so metadata that would
+/// hold the loop longer than a slice of a run is not a constant.
 fn metadata_constant(ast: &Ast) -> Option<Value> {
     enum Step<'a> {
         Visit(&'a Ast),
@@ -1770,6 +1733,13 @@ fn metadata_constant(ast: &Ast) -> Option<Value> {
         Array(usize),
         Object(usize),
     }
+    let limits = Limits {
+        blocks: BLOCKS,
+        items: ITEMS,
+        bytes: BYTES,
+        memory: MEMORY,
+    };
+    let mut budget = STEPS;
     let mut steps = vec![Step::Visit(ast)];
     let mut values = Vec::new();
     while let Some(step) = steps.pop() {
@@ -1802,13 +1772,15 @@ fn metadata_constant(ast: &Ast) -> Option<Value> {
                 let right = values.pop()?;
                 let left = values.pop()?;
                 let f = builtin::lookup(op.function(), 2).expect("binop builtin");
-                let limits = Limits {
-                    blocks: usize::MAX,
-                    items: usize::MAX,
-                    bytes: usize::MAX,
-                    memory: usize::MAX,
+                let mut args = [Value::Null, left, right];
+                budget = budget.checked_sub(builtin::cost(&args))?;
+                let value = match Pending::begin(f, &mut args) {
+                    Some(Ok(mut task)) if budget > 0 => task.run(&mut budget, limits)?,
+                    Some(Ok(_)) => return None,
+                    Some(Err(fault)) => Err(fault),
+                    None => builtin::call(f, &mut args, limits),
                 };
-                values.push(builtin::call(f, &mut [Value::Null, left, right], limits).ok()?);
+                values.push(value.ok()?);
             }
             Step::Array(len) => {
                 let items = values.split_off(values.len() - len);

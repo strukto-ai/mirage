@@ -13,16 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { JqCompileError } from './errors.ts'
-export {
-  argsText,
-  jqCheck,
-  jqEval,
-  jqRaised,
-  jqRun,
-  jqRunTexts,
-  referencesArgs,
-  streamReads,
-} from './eval.ts'
+export { argsText, referencesArgs, streamReads } from './eval.ts'
 export { errorReport, formatOne, haltReport, loadFailure } from './format.ts'
 export { JqParser, decodeUtf8, stringText } from './parse.ts'
 export { InputReader, readTexts, valueText } from './stream.ts'

@@ -16,6 +16,8 @@ encoding_rs = "0.8.35"
 fancy-regex = { version = "0.20.0", default-features = false, features = ["std", "unicode", "perf", "variable-lookbehinds"] }
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
 grep-regex.workspace = true
+jiff-tzdb = "0.1.9"
+libm = "0.2.16"
 lzma-rust2 = { version = "0.23.0", default-features = false, features = ["std", "encoder", "xz"] }
 md5.workspace = true
 memchr.workspace = true

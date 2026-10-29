@@ -93,10 +93,6 @@ DRAW_HINT = re.compile(
 )
 
 KEPT_ON_PROCESS_RANDOMNESS = {
-    ("core/jq/eval.py", "uuid.uuid4"): (
-        "the prelude's key token is drawn once per process and never "
-        "reaches output; it only has to be one no program can spell"
-    ),
     ("core/ssh/write.py", "uuid.uuid4"): (
         "the atomic upload's temp name lives on the remote host, so a "
         "seeded name would collide with an earlier run's leftover"

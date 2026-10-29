@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { jqRunTexts } from './eval.ts'
+import { Engine } from '../../commands/builtin/generic/jq.ts'
 import { InputReader, readTexts, valueText } from './stream.ts'
 import { JqParseError, NO_VALUE, jqOptions, type InputSource, type JqOptions } from './types.ts'
 import { eacces, eisdir, enoent } from '../../errors/fs.ts'
@@ -22,18 +22,21 @@ import { MemoryBudget, runWithMemory } from '../../io/memory.ts'
 
 const ENC = new TextEncoder()
 
-/** The value jq's parser reads a text as, which is what libjq runs on. */
+/** The value jq's parser reads a text as, which is what a run gets. */
 async function parsed(text: unknown): Promise<unknown> {
   if (typeof text !== 'string') throw new Error('expected input text')
-  if (!/\\u[dD][89a-fA-F]/.test(text)) {
-    try {
-      return JSON.parse(text)
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error
+  const engine = await Engine.open('.', jqOptions(), null, '{}', 'UTC', null)
+  const reader = new InputReader([], jqOptions())
+  const outputs: string[] = []
+  try {
+    for await (const dump of engine.run(text, reader, () => undefined, { stop: null })) {
+      outputs.push(dump)
     }
+  } finally {
+    await engine.close()
+    await reader.close()
   }
-  const run = await jqRunTexts(text, '.')
-  const [dump] = run.outputs
+  const [dump] = outputs
   if (dump === undefined) throw new Error('expected one reference output')
   return JSON.parse(dump)
 }
@@ -354,7 +357,7 @@ describe('InputReader', () => {
   it.each([1, 5, 1 << 20])(
     'hands a value over as the text it was read from (chunks of %i)',
     async (size) => {
-      // jq keeps a number's literal and an object's key order, so libjq is
+      // jq keeps a number's literal and an object's key order, so a run is
       // handed the bytes, not a value built from them.
       const data = bytes(
         '{"b":1.000,"1":2}\n{\n  "n": 100000000000000000001,\n  "e": 1e2\n}\n' +
