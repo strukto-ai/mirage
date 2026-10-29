@@ -18,7 +18,7 @@ import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import { type StorageUsage, storageUsage } from '../capacity.ts'
 import { LOCAL_WALK_LIMIT } from '../constants.ts'
-import { RAMStore, type RAMAttrs } from './store.ts'
+import { RAMFiles, RAMStore, type RAMAttrs } from './store.ts'
 import type { CapacityResult, PathSpec, FileStat, SetAttrFields } from '../../types.ts'
 import type { Handed } from '../types.ts'
 import { readdir as ramReaddir } from '../../core/ram/readdir.ts'
@@ -74,6 +74,16 @@ export class RAMVFS extends BaseVFS {
     this.usage = storageUsage(this.name, options.capacity, 0)
     this.store = new RAMStore(this.usage)
     this.accessor = new RAMAccessor(this.store)
+  }
+
+  /**
+   * The bytes the store's files hold, which count against the `max_memory`
+   * of each workspace the store is mounted in; 0 for a table that keeps none,
+   * as `/dev`'s devices and pipes. Mirrors Python's `held`.
+   */
+  get held(): number {
+    const files = this.store.files
+    return files instanceof RAMFiles ? files.held : 0
   }
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {

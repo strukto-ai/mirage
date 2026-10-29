@@ -7,7 +7,7 @@ icon: gauge
 
 Mirage keeps large results from flooding an agent. `cat`, `grep`, `rg`, `head`,
 and `tail` return at most 2,000 lines by default, a line stops after 600
-seconds, no object a line holds grows past 32 MB, and a walk stops at its
+seconds, a workspace holds at most 32 MB in memory, and a walk stops at its
 mount's `walk_limit`.
 
 ## Set Limits
@@ -30,7 +30,7 @@ ws = Workspace(
     mode=MountMode.WRITE,
     command_limits={
         "head": Limit(max_lines=500),
-        "@line": Limit(timeout_seconds=30, max_memory="64MB"),
+        "@line": Limit(timeout_seconds=30),
     },
     profiles={
         "researcher": {"command_limits": {"head": Limit(max_lines=5000)}},
@@ -54,7 +54,7 @@ const ws = new Workspace(
     mode: MountMode.WRITE,
     commandLimits: {
       head: new Limit({ maxLines: 500 }),
-      '@line': new Limit({ timeoutSeconds: 30, maxMemory: '64MB' }),
+      '@line': new Limit({ timeoutSeconds: 30 }),
     },
     profiles: { researcher: { commandLimits: { head: new Limit({ maxLines: 5000 }) } } },
   },
@@ -91,28 +91,42 @@ start. The line that started it can end or time out and leave it running; past
 its own limit the job ends with status 124 and the same message. `kill` stops it
 sooner.
 
-## Limit a Line's Memory
-
-A line has one memory limit: the `@line` entry's `max_memory`, a
-[size](/home/configuration#sizes), on the workspace or a profile (the profile's
-over the workspace's). It caps each object the line holds while it runs: a
-`$( )` capture, a `read` value, a file read whole, a `jq -s` input, a
-`python3` run's heap. It is 32 MB unless an entry sets it; `0` or `None` lifts
-it.
-
-A command whose own object passes it fails with `<command>: memory exhausted`
-and the line goes on, as with any failed command. When the shell's own object
-passes it, a capture or a `read`, the line ends with `line: memory exhausted`
-and exit 1. A file a mount stores is bounded by the mount's `capacity`, not by
-this limit.
-
-No other entry takes `timeout_seconds` or `max_memory`, an `@line` entry takes
-nothing else, and a mount has no `@line` entry, since a line spans mounts; each
-is refused when the workspace, mount or profile is built. To bound one command
-inside a line, use `timeout`, as in bash: `timeout 5 grep -r TODO /data`.
+No other entry takes `timeout_seconds`, an `@line` entry takes nothing else, and
+a mount has no `@line` entry, since a line spans mounts; each is refused when the
+workspace, mount or profile is built. To bound one command inside a line, use
+`timeout`, as in bash: `timeout 5 grep -r TODO /data`.
 
 For commands spanning multiple mounts, Mirage applies the tightest resolved
 limit from those mounts.
+
+## Limit a Workspace's Memory
+
+A workspace's `max_memory`, a [size](/home/configuration#sizes), bounds what it
+holds in memory: the files in its RAM mounts, and each object a command builds
+while it runs, such as a `$( )` capture, a `read` value, a file read whole, a
+`jq -s` input or a `python3` run's heap. Such an object must fit in what the RAM
+files leave. It is 32 MB unless the workspace sets it, and `None` (`null` in
+TypeScript and YAML) lifts it. The read cache keeps its own
+[limit](/home/configuration#cache).
+
+<CodeGroup>
+```python Python
+ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, max_memory="64MB")
+```
+
+```ts TypeScript
+const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, maxMemory: '64MB' })
+```
+
+```yaml YAML
+max_memory: 64MB
+```
+</CodeGroup>
+
+A write that would pass it fails with `Disk quota exceeded`. A command whose own
+object passes it fails with `<command>: memory exhausted` and the line goes on;
+when a capture or a `read` passes it, the line ends with `line: memory
+exhausted` and exit 1. A `python3` run raises `MemoryError`.
 
 ## Handle a Reached Limit
 
@@ -120,7 +134,6 @@ limit from those mounts.
   TypeScript for no cap.
 - `timeout_seconds`, on the `@line` entry only, sets the deadline of a line and
   of each background job. A line or job that passes it exits 124.
-- `max_memory`, on the `@line` entry only, caps each object a line holds.
 - `walk_limit` caps the entries one walk lists on a mount, `-1` for no cap; see
   [walks](/home/integration/walks).
 - `on_exceed=TRUNCATE`, the default, returns the capped output, writes a notice
@@ -128,7 +141,7 @@ limit from those mounts.
 - `on_exceed=ERROR` drops the output and exits 1, so `&&` and `||` see a failure.
 
 In TypeScript, use the camel-case forms `maxLines`, `maxBytes`, `timeoutSeconds`,
-`maxMemory`, `walkLimit`, and `onExceed`.
+`walkLimit`, and `onExceed`.
 
 Caps apply to each command's printed output. `cat big.txt; echo end` still prints
 `end`. Input to a pipe, redirect, or command substitution is not cut, so

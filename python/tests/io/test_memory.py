@@ -16,32 +16,37 @@ import pytest
 
 from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import (
+    MemoryBudget,
     check_memory,
-    line_memory_limit,
-    run_with_memory_limit,
+    memory_room,
+    run_with_memory,
 )
 
 
-def test_outside_a_line_nothing_is_capped():
-    assert line_memory_limit() is None
+def test_outside_a_workspace_nothing_is_capped():
+    assert memory_room() is None
     check_memory(1 << 40)
 
 
 @pytest.mark.asyncio
-async def test_an_object_past_the_line_limit_is_refused():
-    async def hold() -> int | None:
-        check_memory(10)
-        with pytest.raises(MemoryExhausted, match="memory exhausted"):
-            check_memory(11)
-        return line_memory_limit()
+async def test_an_object_past_what_is_left_is_refused():
+    stored = [4]
+    budget = MemoryBudget(10, lambda: stored[0])
 
-    assert await run_with_memory_limit(10, hold()) == 10
-    assert line_memory_limit() is None
+    async def hold() -> int | None:
+        check_memory(6)
+        with pytest.raises(MemoryExhausted, match="memory exhausted"):
+            check_memory(7)
+        stored[0] = 12
+        return memory_room()
+
+    assert await run_with_memory(budget, hold()) == 0
+    assert memory_room() is None
 
 
 @pytest.mark.asyncio
-async def test_a_lifted_limit_caps_nothing():
+async def test_no_budget_caps_nothing():
     async def hold() -> None:
         check_memory(1 << 40)
 
-    await run_with_memory_limit(None, hold())
+    await run_with_memory(None, hold())

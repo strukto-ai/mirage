@@ -20,10 +20,8 @@ from pydantic import ValidationError
 from mirage.policy.builtin.output_cap import (
     ALL_COMMANDS,
     DEFAULT_COMMAND_LIMITS,
-    LINE_MAX_MEMORY,
     LINE_TIMEOUT_SECONDS,
     check_command_limits,
-    line_memory,
     line_timeout,
     resolve_limit,
     resolve_producer,
@@ -143,28 +141,6 @@ def test_a_line_entry_of_none_or_zero_lifts_the_deadline(seconds):
     assert line_timeout({"@line": Limit(timeout_seconds=30)}, lifted) is None
 
 
-def test_the_line_memory_defaults_to_32_mb():
-    assert LINE_MAX_MEMORY == 32 * 1024 * 1024
-    assert line_memory() == LINE_MAX_MEMORY
-    assert line_memory({"@line": Limit(timeout_seconds=5)}) == LINE_MAX_MEMORY
-
-
-def test_a_profile_line_memory_overrides_the_workspaces():
-    workspace = {"@line": Limit(max_memory="64MB")}
-    assert line_memory(workspace) == 64 << 20
-    assert line_memory(workspace, {"@line": Limit(max_memory=1024)}) == 1024
-    assert line_memory(workspace, {"@line": Limit(timeout_seconds=1)}) == (
-        64 << 20
-    )
-
-
-@pytest.mark.parametrize("size", [None, 0])
-def test_a_line_memory_of_none_or_zero_lifts_it(size):
-    lifted = {"@line": Limit(max_memory=size)}
-    assert line_memory(lifted) is None
-    assert line_memory({"@line": Limit(max_memory="1MB")}, lifted) is None
-
-
 @pytest.mark.parametrize(
     "limits,where,refusal",
     [
@@ -177,14 +153,8 @@ def test_a_line_memory_of_none_or_zero_lifts_it(size):
         (
             {"@line": Limit(timeout_seconds=1, max_lines=3)},
             "profile",
-            "profile: command_limits['@line'] takes only timeout_seconds"
-            " and max_memory, not max_lines",
-        ),
-        (
-            {"jq": Limit(max_memory="1GB")},
-            "profile",
-            "profile: command_limits['jq'].max_memory: a line has one"
-            " memory limit, set it on '@line'",
+            "profile: command_limits['@line'] takes only timeout_seconds,"
+            " not max_lines",
         ),
         (
             {"@line": Limit(timeout_seconds=1)},

@@ -15,6 +15,7 @@ from mirage.core.ram.stat import stat
 from mirage.core.ram.unlink import unlink
 from mirage.core.ram.write import write
 from mirage.errors.types import QuotaExceededError
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.types import PathSpec
 from mirage.vfs.capacity import StorageUsage
 from mirage.vfs.ram.store import RAMFiles, RAMStore
@@ -112,3 +113,36 @@ def test_appends_from_two_threads_never_pass_the_cap(monkeypatch):
     second.join(5)
     assert len(refused) == 1
     assert (store.files["/a"], usage.used) == (b"12345678", 8)
+
+
+async def _pieces(*parts: bytes):
+    for part in parts:
+        yield part
+
+
+@pytest.mark.asyncio
+async def test_a_write_past_what_the_workspace_has_left_is_refused():
+    store = RAMStore()
+    accessor = RAMAccessor(store)
+
+    async def writes() -> None:
+        await write(accessor, _spec("/a"), b"1234")
+        with pytest.raises(QuotaExceededError):
+            await write(accessor, _spec("/b"), b"12345")
+        with pytest.raises(QuotaExceededError):
+            await write(accessor, _spec("/c"), _pieces(b"123", b"45"))
+        await write(accessor, _spec("/a"), b"5678")
+
+    await run_with_memory(MemoryBudget(8, lambda: 4), writes())
+    assert store.files["/a"] == b"5678"
+
+
+def test_ram_files_count_what_they_hold():
+    files = RAMFiles()
+    files["/a"] = b"1234"
+    files["/b"] = b"12"
+    files["/a"] = b"1"
+    del files["/b"]
+    assert files.held == 1
+    files.clear()
+    assert files.held == 0

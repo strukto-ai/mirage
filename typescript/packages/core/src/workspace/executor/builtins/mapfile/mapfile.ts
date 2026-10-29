@@ -14,6 +14,7 @@
 
 import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
 import { lineBuffer } from '../../../../io/async_line_iterator.ts'
+import { checkMemory } from '../../../../io/memory.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
@@ -101,6 +102,7 @@ export async function handleMapfile(
   let index = origin
   let stored = 0
   let seen = 0
+  let held = 0
   const outputs: Uint8Array[] = []
   const errs: Uint8Array[] = []
   while (buffer !== null && (limit === 0 || stored < limit)) {
@@ -108,6 +110,8 @@ export async function handleMapfile(
     if (!found && data.byteLength === 0) break
     seen++
     if (seen <= skip) continue
+    held += data.byteLength + 1
+    checkMemory(held)
     const text = decodeText(found && !strip ? concat([data, Uint8Array.of(delim)]) : data)
     arraySet(arr, index, text)
     stored++

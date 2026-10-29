@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Refusal } from '../types.ts'
 import { MemoryExhausted } from './errors.ts'
-import { runWithMemoryLimit } from './memory.ts'
+import { MemoryBudget, runWithMemory } from './memory.ts'
 import { type ByteSource, IOResult, materialize, type StreamName } from './types.ts'
 
 async function* toAsync(chunks: Uint8Array[]): AsyncIterable<Uint8Array> {
@@ -24,7 +24,7 @@ async function* toAsync(chunks: Uint8Array[]): AsyncIterable<Uint8Array> {
 }
 
 describe('materialize', () => {
-  it('stops a stream past the line limit', async () => {
+  it('stops a stream past the memory budget', async () => {
     const pulled: number[] = []
     let closed = false
     async function* source(): AsyncIterable<Uint8Array> {
@@ -38,12 +38,14 @@ describe('materialize', () => {
         closed = true
       }
     }
-    await expect(runWithMemoryLimit(10, () => materialize(source()))).rejects.toThrow(
-      MemoryExhausted,
-    )
+    await expect(
+      runWithMemory(new MemoryBudget(10, () => 0), () => materialize(source())),
+    ).rejects.toThrow(MemoryExhausted)
     expect(pulled).toEqual([0, 1, 2])
     expect(closed).toBe(true)
-    expect((await runWithMemoryLimit(40, () => materialize(source()))).byteLength).toBe(40)
+    expect(
+      (await runWithMemory(new MemoryBudget(40, () => 0), () => materialize(source()))).byteLength,
+    ).toBe(40)
   })
 
   it('returns empty Uint8Array for null/undefined', async () => {

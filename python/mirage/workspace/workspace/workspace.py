@@ -67,6 +67,7 @@ from mirage.events.base import EventRuntime
 from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
+from mirage.io.memory import MAX_MEMORY, MemoryBudget
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
@@ -139,6 +140,7 @@ from mirage.utils.abort import MirageAbortError, run_cancellable
 from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.hidden import path_visible
 from mirage.utils.ids import IdSource, SystemIdSource
+from mirage.utils.size import parse_limit
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.history import HISTORY_PREFIX, HistoryViewVFS
@@ -255,6 +257,7 @@ class Workspace:
         self,
         mounts: dict[str, VFSMount],
         cache_limit: str | int = "32MB",
+        max_memory: str | int | None = MAX_MEMORY,
         cache: CacheConfig | None = None,
         index: IndexConfig | None = None,
         mode: MountMode = MountMode.READ,
@@ -311,6 +314,16 @@ class Workspace:
             command_limits or {}, "workspace", takes_line=True
         )
         self._registry.command_limits = dict(command_limits or {})
+        # What the RAM mounts store and what a command builds share the
+        # workspace's max_memory; None runs uncapped.
+        self._registry.memory = (
+            None
+            if max_memory is None
+            else MemoryBudget(
+                parse_limit(max_memory, "max_memory"),
+                self._registry.held_in_memory,
+            )
+        )
         # One provider scopes every control-plane store by workspace id;
         # the per-plane params (observe / namespace_store / session_store)
         # remain as direct overrides that win over the provider.
@@ -2074,6 +2087,7 @@ class Workspace:
         ws = cls(
             args.mount_args,
             io=args.io,
+            max_memory=args.max_memory,
             mode=MountMode.READ,
             write=args.write_default,
             session_id=args.default_session_id,
@@ -2844,6 +2858,7 @@ class Workspace:
         session.tty = Terminal()
         if not self._session_mgr.line_lock_for(source.session_id).locked():
             session.tty.chunks, source.tty.chunks = source.tty.chunks, deque()
+            session.tty.held, source.tty.held = source.tty.held, 0
         token = set_current_session(session, self._session_mgr)
         try:
             return await run(tty=session.tty), source

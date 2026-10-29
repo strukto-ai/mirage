@@ -15,30 +15,62 @@
 import { createAsyncContext } from '../utils/async_context.ts'
 import { MemoryExhausted } from './errors.ts'
 
-// The running line's `max_memory`, null outside a line or once lifted.
-const limit = createAsyncContext<number | null>()
+/**
+ * The max_memory a workspace runs under when it names none: with the 32 MB
+ * read cache, 64 MB a workspace, 32 of them on a 2 GiB machine. Mirrors
+ * Python's MAX_MEMORY.
+ */
+export const MAX_MEMORY = 32 * 1024 * 1024
 
 /**
- * `fn` run under a line's `max_memory`, which every object it holds is
- * checked against. Mirrors Python's `run_with_memory_limit`.
+ * A workspace's `max_memory` and the bytes its stores hold.
+ *
+ * What the workspace stores is counted exactly, by the stores themselves,
+ * and `held` sums it when asked, so nothing is charged or released here and
+ * the count cannot drift. An object a command builds while it runs must fit
+ * in what is left (`room`). Mirrors Python's `MemoryBudget`.
  */
-export function runWithMemoryLimit<T>(bytes: number | null, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(limit.run(bytes, fn))
+export class MemoryBudget {
+  constructor(
+    readonly limit: number,
+    readonly held: () => number,
+  ) {}
+
+  /** The bytes left under the limit, never below 0. */
+  room(): number {
+    return Math.max(this.limit - this.held(), 0)
+  }
+}
+
+// The budget of the workspace a line or an op runs in, null for no cap.
+const budget = createAsyncContext<MemoryBudget | null>()
+
+/**
+ * `fn` run under a workspace's memory budget, which what it stores and every
+ * object it builds are checked against. Mirrors Python's `run_with_memory`.
+ */
+export function runWithMemory<T>(memory: MemoryBudget | null, fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(budget.run(memory, fn))
 }
 
 /**
- * The bytes one object the running line holds may reach, null for no cap.
- * Mirrors Python's `line_memory_limit`.
+ * The bytes left in the running workspace's budget, null for no cap. A
+ * browser cannot tell one task's binding from another's, so there it is the
+ * least any live budget has left. Mirrors Python's `memory_room`.
  */
-export function lineMemoryLimit(): number | null {
-  return limit.getStore() ?? null
+export function memoryRoom(): number | null {
+  let room: number | null = null
+  for (const live of budget.liveStores()) {
+    if (live !== null) room = Math.min(room ?? Infinity, live.room())
+  }
+  return room
 }
 
 /**
- * Refuse an object that grew to `size` bytes past the running line's
- * `max_memory`. Mirrors Python's `check_memory`.
+ * Refuse an object that grew to `size` bytes past what the running
+ * workspace's budget has left. Mirrors Python's `check_memory`.
  */
 export function checkMemory(size: number): void {
-  const bytes = lineMemoryLimit()
-  if (bytes !== null && size > bytes) throw new MemoryExhausted()
+  const room = memoryRoom()
+  if (room !== null && size > room) throw new MemoryExhausted()
 }

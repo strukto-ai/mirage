@@ -149,13 +149,14 @@ class InputReader:
                 return value
             if value is not NO_VALUE:
                 if not isinstance(self._slurped, list):
+                    self._held = 0
                     return value
-                self._slurp(self._slurped, value)
+                self._slurped.append(value)
                 continue
             if self._json_eof:
                 break
             piece, self._json_eof = await self._read_more()
-            parser.feed(piece, not self._json_eof)
+            parser.feed(self._take(piece), not self._json_eof)
         return self._take_slurped()
 
     async def _next_line(self) -> "str | NoValue":
@@ -163,9 +164,11 @@ class InputReader:
         while True:
             piece, is_last = await self._read_more()
             if piece:
+                self._take(piece)
                 if isinstance(self._slurped, list):
-                    self._slurp(self._slurped, await decode_utf8(piece))
+                    self._slurped.append(await decode_utf8(piece))
                 elif piece.endswith(b"\n"):
+                    self._held = 0
                     tail = await decode_utf8(piece[:-1])
                     return string_text("".join(parts or ()) + tail)
                 else:
@@ -177,17 +180,17 @@ class InputReader:
             return self._take_slurped()
         return NO_VALUE if parts is None else string_text("".join(parts))
 
-    def _slurp(self, slurped: list[str], text: str) -> None:
-        """Keep one value or piece of a slurped stream, which grows to
-        the whole input and so counts against the line's memory limit.
+    def _take(self, piece: bytes) -> bytes:
+        """Count a piece read into memory, which must fit in what the
+        workspace's ``max_memory`` has left: a value or a line holds the
+        pieces read of it, and a slurp the whole input.
 
         Args:
-            slurped (list[str]): what the stream slurped so far.
-            text (str): the value's JSON text, or a piece of raw input.
+            piece (bytes): the bytes jq's reader read.
         """
-        self._held += len(text)
+        self._held += len(piece)
         check_memory(self._held)
-        slurped.append(text)
+        return piece
 
     def _take_slurped(self) -> "str | NoValue":
         slurped = self._slurped

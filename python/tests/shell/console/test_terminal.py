@@ -18,7 +18,7 @@ import pytest
 
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.errors import MemoryExhausted
-from mirage.io.memory import run_with_memory_limit
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.shell.console import Channel, JobConsole, Tee, Terminal
 from mirage.shell.descriptors import Recorder
 
@@ -240,18 +240,18 @@ async def test_tee_keeps_the_console_and_copies_the_bytes():
 
 
 @pytest.mark.asyncio
-async def test_what_a_terminal_keeps_counts_against_the_line_memory_limit():
+async def test_what_a_terminal_keeps_must_fit_in_the_memory_budget():
     tty = Terminal()
 
     async def write(data: bytes) -> None:
         await tty.emit(Channel.STDOUT, data)
 
-    await run_with_memory_limit(8, write(b"abcd"))
-    await run_with_memory_limit(8, write(b"efgh"))
+    await run_with_memory(MemoryBudget(8, lambda: 0), write(b"abcd"))
+    await run_with_memory(MemoryBudget(8, lambda: 0), write(b"efgh"))
     with pytest.raises(MemoryExhausted):
-        await run_with_memory_limit(8, write(b"i"))
+        await run_with_memory(MemoryBudget(8, lambda: 0), write(b"i"))
     assert tty.take() == (b"abcdefgh", b"")
-    await run_with_memory_limit(8, write(b"12345678"))
+    await run_with_memory(MemoryBudget(8, lambda: 0), write(b"12345678"))
     assert tty.held == 8
 
 
@@ -264,5 +264,5 @@ async def test_a_terminal_counts_nothing_it_hands_to_its_reader():
     async def write() -> None:
         await tty.emit(Channel.STDOUT, b"x" * 16)
 
-    await run_with_memory_limit(8, write())
+    await run_with_memory(MemoryBudget(8, lambda: 0), write())
     assert tty.held == 0

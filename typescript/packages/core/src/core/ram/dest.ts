@@ -15,8 +15,9 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { ancestors } from '../../utils/path.ts'
-import { eexist, einval, eisdir, enoent, enotdir, enotempty } from '../../errors/fs.ts'
+import { edquot, eexist, einval, eisdir, enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { type FsError } from '../../errors/types.ts'
+import { memoryRoom } from '../../io/memory.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
@@ -127,8 +128,9 @@ export function checkMkdirTarget(
 }
 
 /**
- * Throw EDQUOT for a key growing to `size` bytes past its store's capacity;
- * an uncapped store takes any size. Called just before the change, with no
+ * Throw EDQUOT for a key growing to `size` bytes past its store's capacity,
+ * or past what its workspace's `max_memory` has left; an uncapped store in an
+ * uncapped workspace takes any size. Called just before the change, with no
  * await between, so the check and the change run as one step. Mirrors
  * Python's `check_capacity`.
  */
@@ -138,6 +140,18 @@ export function checkCapacity(
   key: string,
   size: number,
 ): void {
+  const growth = size - (accessor.store.files.get(key)?.byteLength ?? 0)
+  checkRoom(spec, growth)
   const usage = accessor.store.usage
-  if (usage !== null) usage.admit(spec, size - (accessor.store.files.get(key)?.byteLength ?? 0))
+  if (usage !== null) usage.admit(spec, growth)
+}
+
+/**
+ * Throw EDQUOT for `growth` more bytes past what the running workspace's
+ * `max_memory` has left; zero or less always passes. Mirrors Python's
+ * `check_room`.
+ */
+export function checkRoom(spec: PathSpec, growth: number): void {
+  const room = memoryRoom()
+  if (growth > 0 && room !== null && growth > room) throw edquot(spec)
 }

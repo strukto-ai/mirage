@@ -193,10 +193,12 @@ class WorkspaceRegistry:
     def has_room(self) -> bool:
         """Whether a workspace being built fits under ``max_workspaces``,
         counting those registered and every build in flight, its own
-        among them, so builds racing each other cannot pass it."""
+        among them, so builds racing each other cannot pass it. A build
+        that registered and still answers its request counts once."""
         return (
             self.max_workspaces is None
-            or len(self._entries) + len(self._creates) <= self.max_workspaces
+            or len(self._entries.keys() | self._creates.keys())
+            <= self.max_workspaces
         )
 
     def removing(self, workspace_id: str) -> bool:

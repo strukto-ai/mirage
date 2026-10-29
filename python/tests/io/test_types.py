@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.io.errors import MemoryExhausted
-from mirage.io.memory import run_with_memory_limit
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.types import IOResult, OpReport, materialize
 
 
@@ -191,7 +191,7 @@ def test_merge_materializes_async_stderr():
 
 
 @pytest.mark.asyncio
-async def test_materialize_stops_a_stream_past_the_line_limit():
+async def test_materialize_stops_a_stream_past_the_memory_budget():
     pulled: list[int] = []
     closed = asyncio.Event()
 
@@ -204,7 +204,14 @@ async def test_materialize_stops_a_stream_past_the_line_limit():
             closed.set()
 
     with pytest.raises(MemoryExhausted):
-        await run_with_memory_limit(10, materialize(source()))
+        await run_with_memory(
+            MemoryBudget(10, lambda: 0), materialize(source())
+        )
     assert pulled == [0, 1, 2]
     assert closed.is_set()
-    assert await run_with_memory_limit(40, materialize(source())) == b"x" * 40
+    assert (
+        await run_with_memory(
+            MemoryBudget(40, lambda: 0), materialize(source())
+        )
+        == b"x" * 40
+    )

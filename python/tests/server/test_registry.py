@@ -172,12 +172,15 @@ async def test_a_workspace_reaches_only_records_made_since_its_creation():
 
 @pytest.mark.asyncio
 async def test_builds_in_flight_count_against_max_workspaces():
-    registry = WorkspaceRegistry(max_workspaces=2)
+    registry = WorkspaceRegistry(max_workspaces=3)
     registry.add(_ws(), "a")
     async with registry.creating("b", "one"):
         assert registry.has_room()
+        registry.add(_ws(), "b")
         async with registry.creating("c", "two"):
-            assert not registry.has_room()
+            assert registry.has_room()
+            async with registry.creating("d", "three"):
+                assert not registry.has_room()
     assert WorkspaceRegistry().has_room()
     await registry.close_all()
 

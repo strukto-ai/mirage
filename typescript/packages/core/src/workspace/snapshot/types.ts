@@ -160,4 +160,6 @@ export interface WorkspaceStateDict {
   profiles?: Record<string, Record<string, unknown>>
   profile?: string | null
   command_limits?: Record<string, unknown>
+  /** The workspace's max_memory in bytes, null for no cap. */
+  max_memory?: number | null
 }

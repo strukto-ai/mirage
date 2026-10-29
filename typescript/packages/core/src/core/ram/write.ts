@@ -23,7 +23,7 @@ import { VFSName, type PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
-import { checkCapacity, checkDestParents, checkWriteTarget } from './dest.ts'
+import { checkCapacity, checkDestParents, checkRoom, checkWriteTarget } from './dest.ts'
 
 /**
  * Replace a file's bytes, or add them to its end. Bytes land at once, as does
@@ -93,6 +93,7 @@ export async function write(
   let later: ReturnType<typeof setTimeout> | null = null
   const usage = accessor.store.usage
   let held = 0
+  let queued = 0
   // What this write last published: a view of a buffer it grows, so a
   // publish copies only the bytes that arrived since. A file another writer
   // changed in between is copied instead, so no view a reader holds changes.
@@ -127,6 +128,7 @@ export async function write(
       modified.set(p, nowIso())
     } finally {
       pending = []
+      queued = 0
       usage?.land(held, 0)
       held = 0
     }
@@ -143,12 +145,14 @@ export async function write(
   try {
     for await (const chunk of chunks(data)) {
       if (failed.error !== undefined) throw failed.error
+      checkRoom(path, queued + chunk.byteLength)
       if (usage !== null) {
         // The whole chunk: bytes another writer put in its way count.
         usage.hold(path, chunk.byteLength)
         held += chunk.byteLength
       }
       pending.push(chunk)
+      queued += chunk.byteLength
       size += chunk.byteLength
       const wait = STREAM_PUBLISH_SECONDS * 1000 - (performance.now() - last)
       if (wait <= 0) publish()

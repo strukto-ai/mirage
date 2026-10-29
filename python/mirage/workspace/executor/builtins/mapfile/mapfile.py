@@ -19,6 +19,7 @@ from typing import Any
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import line_buffer
+from mirage.io.memory import check_memory
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
@@ -151,6 +152,7 @@ async def handle_mapfile(
     index = origin
     stored = 0
     seen = 0
+    held = 0
     outputs: list[bytes] = []
     errors: list[bytes] = []
     while buffer is not None and (limit == 0 or stored < limit):
@@ -160,6 +162,8 @@ async def handle_mapfile(
         seen += 1
         if seen <= skip:
             continue
+        held += len(data) + len(delim)
+        check_memory(held)
         text = decode_text(data + delim if found and not strip else data)
         array_set(arr, index, text)
         stored += 1

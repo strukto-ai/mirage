@@ -16,7 +16,8 @@ import asyncio
 from collections.abc import AsyncGenerator
 
 from mirage.io.cooperative import chunks
-from mirage.io.memory import check_memory
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import check_memory, memory_room
 from mirage.io.types import ByteSource, DeviceInput, PipeEnd, PipeStream
 from mirage.io.yield_budget import YieldBudget
 from mirage.types import PathSpec
@@ -422,6 +423,7 @@ class AsyncLineIterator:
             seen) rather than at EOF.
         """
         out = bytearray()
+        room = memory_room()
         try:
             taken = 0
             need = max(len(delim) if delim is not None else 1, 4)
@@ -443,6 +445,8 @@ class AsyncLineIterator:
                     self._buf = self._buf[len(delim) :]
                     return bytes(out), True
                 width = char_width(self._buf)
+                if room is not None and len(out) + width > room:
+                    raise MemoryExhausted()
                 out += self._buf[:width]
                 self._buf = self._buf[width:]
                 taken += 1

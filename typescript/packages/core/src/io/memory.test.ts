@@ -14,29 +14,32 @@
 
 import { describe, expect, it } from 'vitest'
 import { MemoryExhausted } from './errors.ts'
-import { checkMemory, lineMemoryLimit, runWithMemoryLimit } from './memory.ts'
+import { MemoryBudget, checkMemory, memoryRoom, runWithMemory } from './memory.ts'
 
-describe('line memory limit', () => {
-  it('caps nothing outside a line', () => {
-    expect(lineMemoryLimit()).toBeNull()
+describe('memory budget', () => {
+  it('caps nothing outside a workspace', () => {
+    expect(memoryRoom()).toBeNull()
     checkMemory(2 ** 40)
   })
 
-  it('refuses an object past the line limit', async () => {
-    const seen = await runWithMemoryLimit(10, async () => {
+  it('refuses an object past what is left', async () => {
+    let stored = 4
+    const budget = new MemoryBudget(10, () => stored)
+    const seen = await runWithMemory(budget, async () => {
       await Promise.resolve()
-      checkMemory(10)
+      checkMemory(6)
       expect(() => {
-        checkMemory(11)
+        checkMemory(7)
       }).toThrow(MemoryExhausted)
-      return lineMemoryLimit()
+      stored = 12
+      return memoryRoom()
     })
-    expect(seen).toBe(10)
-    expect(lineMemoryLimit()).toBeNull()
+    expect(seen).toBe(0)
+    expect(memoryRoom()).toBeNull()
   })
 
-  it('caps nothing once lifted', async () => {
-    await runWithMemoryLimit(null, () => {
+  it('caps nothing without a budget', async () => {
+    await runWithMemory(null, () => {
       checkMemory(2 ** 40)
       return Promise.resolve()
     })

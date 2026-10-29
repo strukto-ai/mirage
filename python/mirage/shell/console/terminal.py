@@ -33,8 +33,8 @@ class Terminal(JobConsole):
     while no line runs waits here for the next one, as bash's job prints
     to the terminal whenever it likes. With a reader attached (a caller
     streaming the line), every chunk goes straight on to it; what it
-    keeps counts against the writer's ``max_memory``. A session has one
-    (``tty``), shared by every fork of it.
+    keeps must fit in what the workspace's ``max_memory`` has left. A
+    session has one (``tty``), shared by every fork of it.
     """
 
     def __init__(self) -> None:

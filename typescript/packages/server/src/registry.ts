@@ -125,12 +125,13 @@ export class WorkspaceRegistry {
   /**
    * Whether a workspace being built fits under `maxWorkspaces`, counting
    * those registered and every build in flight, its own among them, so
-   * builds racing each other cannot pass it. Mirrors Python's `has_room`.
+   * builds racing each other cannot pass it. A build that registered and
+   * still answers its request counts once. Mirrors Python's `has_room`.
    */
   hasRoom(): boolean {
-    return (
-      this.maxWorkspaces === null || this.entries.size + this.creates.size <= this.maxWorkspaces
-    )
+    if (this.maxWorkspaces === null) return true
+    const ids = new Set([...this.entries.keys(), ...this.creates.keys()])
+    return ids.size <= this.maxWorkspaces
   }
 
   /**

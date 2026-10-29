@@ -15,6 +15,7 @@ import type { DiffComputer } from '../../rs/diff_types.ts'
 
 import type { SessionAccess } from '../../view/types.ts'
 import { IOConfig } from '../../io/config.ts'
+import type { MemoryBudget } from '../../io/memory.ts'
 import { backendCommands } from './backends.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { ProcessView } from '../../process/view.ts'
@@ -36,6 +37,7 @@ import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { DocumentVFS } from '../../vfs/document/document.ts'
 import { HistoryViewVFS } from '../../vfs/history/history.ts'
 import { DevIndex, DevVFS } from '../../vfs/dev/dev.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type Decisions, MountRootPolicy, Policies } from '../../policy/index.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import {
@@ -152,6 +154,9 @@ export class MountRegistry {
   // capturer never binds a command.
   runtimeEntries: readonly Runtime[] = []
   commandLimits: Readonly<Record<string, Limit>> = {}
+  // The workspace's max_memory, over the bytes its RAM mounts hold; null
+  // for no cap.
+  memory: MemoryBudget | null = null
   // Command admission policies. Policies itself is a bare mechanism;
   // the registry seeds the POSIX mount-root rule (mount-root semantics
   // are mount semantics) and the document's deny rules, then user
@@ -733,6 +738,19 @@ export class MountRegistry {
 
   allMounts(): readonly MountEntry[] {
     return this.mountList
+  }
+
+  /**
+   * The bytes the workspace's RAM mounts hold, each store counted once, as a
+   * remount's retiring entry shares its store. Mirrors Python's
+   * `held_in_memory`.
+   */
+  heldInMemory(): number {
+    const stores = new Set<RAMVFS>()
+    for (const m of this.mountList) if (m.vfs instanceof RAMVFS) stores.add(m.vfs)
+    let held = 0
+    for (const store of stores) held += store.held
+    return held
   }
 
   isExecAllowed(access?: SessionAccess): boolean {

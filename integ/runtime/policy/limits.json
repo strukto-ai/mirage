@@ -1383,17 +1383,13 @@
       ]
     },
     {
-      "id": "a_line_holds_no_object_past_its_memory_limit",
+      "id": "a_workspace_holds_no_more_than_its_max_memory",
       "world": {
+        "max_memory": "4KB",
         "mounts": {
           "/ram": {
             "vfs": "ram",
             "files": {}
-          }
-        },
-        "command_limits": {
-          "@line": {
-            "max_memory": "4KB"
           }
         }
       },
@@ -1423,6 +1419,14 @@
           }
         },
         {
+          "command": "jq -n '[range(100000)] | length'; echo \"jq=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "jq=1\n",
+            "stderr": "jq: memory exhausted\n"
+          }
+        },
+        {
           "command": "seq 1 2000 | wc -c",
           "expect": {
             "exit": 0,
@@ -1431,7 +1435,47 @@
           }
         },
         {
-          "command": "seq 1 2000 > /ram/n; read -r -d '' x < /ram/n; echo \"read=$?\"",
+          "command": "seq 1 2000 > /ram/n; echo \"rc=$?\"; wc -c < /ram/n",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=1\n0\n",
+            "stderr": "/ram/n: Disk quota exceeded\n"
+          }
+        },
+        {
+          "command": "rm -f /ram/n; seq 1 500 > /ram/a; x=$(seq 1 600); echo \"len=${#x}\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        },
+        {
+          "command": "rm /ram/a; x=$(seq 1 600); echo \"len=${#x}\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "len=2291\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "seq 1 2000 | { read -r -d '' x; echo \"read=$?\"; }",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        },
+        {
+          "command": "seq 1 2000 | { read -r -N 6000 x; echo \"read=$?\"; }",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        },
+        {
+          "command": "seq 1 2000 | { mapfile -t a; echo \"lines=${#a[@]}\"; }",
           "expect": {
             "exit": 1,
             "stdout": "",
@@ -1441,29 +1485,15 @@
       ]
     },
     {
-      "id": "a_profile_raises_the_line_memory_limit",
+      "id": "a_workspace_without_max_memory_holds_any_object",
       "world": {
+        "max_memory": null,
         "mounts": {
           "/ram": {
             "vfs": "ram",
             "files": {}
           }
-        },
-        "command_limits": {
-          "@line": {
-            "max_memory": "4KB"
-          }
-        },
-        "profiles": {
-          "big": {
-            "command_limits": {
-              "@line": {
-                "max_memory": "1MB"
-              }
-            }
-          }
-        },
-        "profile": "big"
+        }
       },
       "steps": [
         {
@@ -1471,6 +1501,14 @@
           "expect": {
             "exit": 0,
             "stdout": "len=8892\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "seq 1 2000 > /ram/n; wc -c < /ram/n",
+          "expect": {
+            "exit": 0,
+            "stdout": "8893\n",
             "stderr": ""
           }
         }

@@ -16,7 +16,8 @@ import { concat, findBytes } from '../utils/bytes.ts'
 import { abortable } from '../utils/abort.ts'
 import { YieldBudget } from './yield_budget.ts'
 import { chunks } from './cooperative.ts'
-import { checkMemory } from './memory.ts'
+import { MemoryExhausted } from './errors.ts'
+import { checkMemory, memoryRoom } from './memory.ts'
 import { type ByteSource, DeviceInput, type PipeEnd, PipeStream } from './types.ts'
 import type { PathSpec } from '../types.ts'
 
@@ -458,6 +459,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
     let out: Uint8Array<ArrayBuffer> = new Uint8Array(0)
+    const room = memoryRoom()
     try {
       let taken = 0
       while (taken < count) {
@@ -477,6 +479,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
           return [copyOf(out), true]
         }
         const width = charWidth(this.buf)
+        if (room !== null && out.byteLength + width > room) throw new MemoryExhausted()
         out = concat([out, this.buf.subarray(0, width)])
         this.buf = this.buf.subarray(width)
         taken++

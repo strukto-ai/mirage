@@ -32,6 +32,8 @@ export interface MountArgs {
   // The profile table every session ran under, and its default.
   profiles: Record<string, SessionProfile>
   profile: string | null
+  // The workspace's max_memory in bytes, null for no cap.
+  maxMemory: number | null
 }
 
 export interface IndexConfigSnapshot {

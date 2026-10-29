@@ -34,6 +34,7 @@ class StateKey(StrEnum):
     PROFILES = "profiles"
     PROFILE = "profile"
     COMMAND_LIMITS = "command_limits"
+    MAX_MEMORY = "max_memory"
 
 
 class MountKey(StrEnum):

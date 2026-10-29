@@ -36,6 +36,7 @@ import { NamespaceReader } from '../../dispatcher/reader.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { getCurrentSession } from '../../../context/session_context.ts'
 import type { SessionState } from '../../session/session.ts'
+import type { MemoryBudget } from '../../../io/memory.ts'
 
 export type ResolveFn = (path: string) => Promise<[BaseVFS, PathSpec, MountMode]>
 
@@ -553,6 +554,11 @@ export class Namespace {
   /** The workspace's command limits, the layer under each mount's. */
   get commandLimits(): Readonly<Record<string, Limit>> {
     return this.registry.commandLimits
+  }
+
+  /** The workspace's max_memory, null for no cap. */
+  get memory(): MemoryBudget | null {
+    return this.registry.memory
   }
 
   /**

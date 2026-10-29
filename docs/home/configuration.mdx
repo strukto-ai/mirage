@@ -43,6 +43,7 @@ constructors default to `read`.
 | `route_policy` | Choose runtimes with a [routing policy](/home/policy/route-runtime). |
 | `profiles`, `profile` | Define [agent profiles](/home/profiles) and select the default. |
 | `command_limits` | Set [output and execution limits](/home/core/output-limits). |
+| `max_memory` | Bound what the workspace holds in memory, its RAM files and what a command builds, as a [size](#sizes); `32MB` by default, `null` for no cap. See [memory](/home/core/output-limits#limit-a-workspaces-memory). |
 | `env` | Seed literal or managed environment variables, described below. |
 | `secrets` | Declare named [credential sources](/home/authentication). |
 | `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#cache-index-and-store). |
@@ -97,7 +98,8 @@ it when it syncs or closes the file. Stored data stays readable and
 removable, and `df` shows the capacity as the store's size.
 
 Two workspaces on one disk folder, Redis key prefix or OPFS directory each
-count only their own writes.
+count only their own writes. A RAM store's files also count against its
+workspace's `max_memory`, which refuses a write the same way.
 
 ## Read and write policies
 

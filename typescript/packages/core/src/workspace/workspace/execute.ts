@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CommandTimeoutError } from '../../errors/types.ts'
-import { LINE_NAME, lineMemory, lineTimeout } from '../../policy/builtin/output_cap.ts'
+import { LINE_NAME, lineTimeout } from '../../policy/builtin/output_cap.ts'
 import { MemoryExhausted } from '../../io/errors.ts'
-import { runWithMemoryLimit } from '../../io/memory.ts'
+import { runWithMemory } from '../../io/memory.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
@@ -1059,22 +1059,20 @@ async function runParsedLine(
         ? env.router.context(command, effectiveSession, await judged())
         : null
       const runLine = (): ReturnType<typeof runWholeLine> =>
-        runWithMemoryLimit(
-          lineMemory(env.registry.commandLimits, effectiveSession.commandLimits),
-          () =>
-            runWholeLine(
-              lineRuntime,
-              command,
-              stdin,
-              effectiveSession,
-              env.registry,
-              killed,
-              claimantFor(rootNode, handed),
-              route,
-              options.sink,
-              deadline?.seconds ?? null,
-              deadline?.start,
-            ),
+        runWithMemory(env.registry.memory, () =>
+          runWholeLine(
+            lineRuntime,
+            command,
+            stdin,
+            effectiveSession,
+            env.registry,
+            killed,
+            claimantFor(rootNode, handed),
+            route,
+            options.sink,
+            deadline?.seconds ?? null,
+            deadline?.start,
+          ),
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
@@ -1205,22 +1203,20 @@ async function runParsedLine(
         // caller is released here. Leaf checks below this point exist to
         // stop side effects and free producers, not to release the caller.
         const release = deps.parser instanceof ParseScope ? deps.parser.retain() : undefined
-        // Every object a line holds is checked against its `@line` memory
-        // limit, a nested line's against the same.
-        const running = runWithMemoryLimit(
-          lineMemory(env.registry.commandLimits, effectiveSession.commandLimits),
-          async () =>
-            runCommandTree(
-              deadline === null ? deps : { ...deps, signal: deadline.signal },
-              rootNode,
-              context,
-              stdin,
-              false,
-              options.callStack ?? null,
-              (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
-                ? env.router.context(command, context.session, await judged())
-                : null,
-            ),
+        // Every object a line builds must fit in what the workspace's
+        // max_memory has left, a nested line's too.
+        const running = runWithMemory(env.registry.memory, async () =>
+          runCommandTree(
+            deadline === null ? deps : { ...deps, signal: deadline.signal },
+            rootNode,
+            context,
+            stdin,
+            false,
+            options.callStack ?? null,
+            (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
+              ? env.router.context(command, context.session, await judged())
+              : null,
+          ),
         ).finally(release)
         // A `kill` names a signal, and what the line started gets the stop
         // bound to answer it, as Python joins the cancelled line whole.
@@ -1280,8 +1276,8 @@ async function runParsedLine(
       // the caller.
       if (isControlFlowError(err) || (options.callStack !== undefined && isUnwinding(err)))
         throw err
-      // The shell's own object past the line's memory limit ends the line,
-      // as its deadline does, from a nested one too.
+      // A shell object that does not fit in the workspace's max_memory ends
+      // the line, as its deadline does, from a nested one too.
       if (err instanceof MemoryExhausted && !topLevel) throw err
       const failed = failureResult(err)
       recordStatus(targetSession, failed.exitCode)

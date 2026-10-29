@@ -33,9 +33,6 @@ export const DEFAULT_COMMAND_LIMITS: Record<string, Limit> = Object.assign(
 /** The line's time limit when no `@line` entry names one. Mirrors Python's LINE_TIMEOUT_SECONDS. */
 export const LINE_TIMEOUT_SECONDS = 600
 
-/** The line's memory limit when no `@line` entry names one. Mirrors Python's LINE_MAX_MEMORY. */
-export const LINE_MAX_MEMORY = 32 * 1024 * 1024
-
 /**
  * The entry naming every command in a limit table, a group spelled with the
  * `@` a runtime's captures use for theirs, so no command name can clash.
@@ -48,12 +45,6 @@ export const LINE = '@line'
 
 /** What a line past its time limit is called: `line: timed out after Ns`. Mirrors Python's LINE_NAME. */
 export const LINE_NAME = 'line'
-
-/** The bounds only `@line` takes, as config spells them, to what each is. Mirrors Python's LINE_BOUNDS. */
-export const LINE_BOUNDS: Readonly<Record<string, string>> = {
-  timeout_seconds: 'time limit',
-  max_memory: 'memory limit',
-}
 
 interface LimitMount {
   commandLimits: Map<string, Limit>
@@ -168,7 +159,6 @@ const WIRE_FIELDS: readonly (readonly [string, keyof LimitInit])[] = [
   ['max_lines', 'maxLines'],
   ['max_bytes', 'maxBytes'],
   ['timeout_seconds', 'timeoutSeconds'],
-  ['max_memory', 'maxMemory'],
   ['walk_limit', 'walkLimit'],
   ['on_exceed', 'onExceed'],
 ]
@@ -184,7 +174,7 @@ export function parseCommandLimits(raw: unknown): Record<string, Limit> {
       throw new Error(`command_limits.${name} must be a mapping`)
     const block = value as Record<string, unknown>
     for (const key of Object.keys(block)) {
-      if (!WIRE_FIELDS.some(([wire]) => wire === key))
+      if (!['max_lines', 'max_bytes', 'timeout_seconds', 'walk_limit', 'on_exceed'].includes(key))
         throw new Error(`command_limits.${name}: unknown field ${key}`)
     }
     for (const key of ['max_lines', 'max_bytes', 'timeout_seconds', 'walk_limit']) {
@@ -192,9 +182,6 @@ export function parseCommandLimits(raw: unknown): Record<string, Limit> {
       if (v != null && typeof v !== 'number')
         throw new Error(`command_limits.${name}.${key} must be a number or null`)
     }
-    const memory = block.max_memory
-    if (memory != null && typeof memory !== 'number' && typeof memory !== 'string')
-      throw new Error(`command_limits.${name}.max_memory must be a size or null`)
     if (
       block.on_exceed !== undefined &&
       block.on_exceed !== OnExceed.ERROR &&
@@ -247,27 +234,11 @@ export function lineTimeout(
 }
 
 /**
- * The bytes any one object a line holds may reach, the one memory limit a
- * line runs under: the `@line` entry's `maxMemory`, the profile's over the
- * workspace's, else `LINE_MAX_MEMORY`. An entry naming it as null or 0 lifts
- * it. Mirrors Python's line_memory.
- */
-export function lineMemory(
-  workspaceLimits: Readonly<Record<string, Limit>> = {},
-  profileLimits: Readonly<Record<string, Limit>> = {},
-): number | null {
-  const found = Limit.layered([ownLimit(profileLimits, LINE), ownLimit(workspaceLimits, LINE)])
-  if (!found?.fieldsSet.has('maxMemory')) return LINE_MAX_MEMORY
-  return found.maxMemory !== null && found.maxMemory > 0 ? found.maxMemory : null
-}
-
-/**
- * Refuse a table that names a line's bound where none applies. A line runs
- * under one time limit and one memory limit, the `@line` entry's
- * `timeoutSeconds` and `maxMemory`; no command or op entry takes either, and
- * the `@line` entry takes nothing else. A mount names no line, since a line
- * spans mounts. A key is a command or one of the two groups, `@all` and
- * `@line`. Mirrors Python's check_command_limits.
+ * Refuse a table that names time where no time limit applies. A line runs
+ * under one time limit, the `@line` entry's `timeoutSeconds`; no command or
+ * op entry takes one, and the `@line` entry takes nothing else. A mount
+ * names no line, since a line spans mounts. A key is a command or one of the
+ * two groups, `@all` and `@line`. Mirrors Python's check_command_limits.
  */
 export function checkCommandLimits(
   limits: Readonly<Record<string, Limit>>,
@@ -280,16 +251,11 @@ export function checkCommandLimits(
         `${where}: command_limits['${name}']: not a command or a group; the groups are '${ALL_COMMANDS}' and '${LINE}'`,
       )
     }
-    const named = [...limit.fieldsSet].map((field) =>
-      field.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`),
-    )
     if (name !== LINE) {
-      for (const [field, bound] of Object.entries(LINE_BOUNDS)) {
-        if (named.includes(field)) {
-          throw new Error(
-            `${where}: command_limits['${name}'].${field}: a line has one ${bound}, set it on '${LINE}'`,
-          )
-        }
+      if (limit.fieldsSet.has('timeoutSeconds')) {
+        throw new Error(
+          `${where}: command_limits['${name}'].timeout_seconds: a line has one time limit, set it on '${LINE}'`,
+        )
       }
       continue
     }
@@ -298,10 +264,11 @@ export function checkCommandLimits(
         `${where}: command_limits['${LINE}']: a line spans mounts, set it on the workspace or a profile`,
       )
     }
-    const extra = named.filter((field) => !Object.hasOwn(LINE_BOUNDS, field))
+    const extra = [...limit.fieldsSet].filter((field) => field !== 'timeoutSeconds')
     if (extra.length > 0) {
+      const named = extra.map((field) => field.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`))
       throw new Error(
-        `${where}: command_limits['${LINE}'] takes only timeout_seconds and max_memory, not ${extra.sort(compareCodePoints).join(', ')}`,
+        `${where}: command_limits['${LINE}'] takes only timeout_seconds, not ${named.sort(compareCodePoints).join(', ')}`,
       )
     }
   }

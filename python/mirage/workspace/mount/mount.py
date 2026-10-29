@@ -101,7 +101,6 @@ from mirage.core.generic.rewrite import (
     truncate_by_rewrite,
 )
 from mirage.errors.fs import ebusy, enotdir, enotsup
-from mirage.io.memory import check_memory
 from mirage.io.spool import MEMORY_LIMIT, ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, rechunk
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -443,7 +442,6 @@ async def _collected(
     """
     found = await answer if inspect.isawaitable(answer) else answer
     if isinstance(found, bytes):
-        check_memory(len(found))
         return found
     if not whole:
         return await materialize(found)

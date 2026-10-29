@@ -689,6 +689,9 @@ class WorkspaceConfig(BaseModel):
     mounts: dict[str, MountBlock]
     io: IOConfig = Field(default_factory=IOConfig)
     command_limits: dict[str, Limit] | None = None
+    # What the RAM mounts store and what a command builds may hold
+    # together; null runs uncapped. Unset = the Workspace default.
+    max_memory: str | int | None = None
     # Installed CLIs, fully separate from mounts: key = installed head
     # word, value names a registered CLI plus its own config.
     clis: dict[str, CLIBlock] | None = None
@@ -748,6 +751,11 @@ class WorkspaceConfig(BaseModel):
         if v is None:
             return v
         return coerce_write_policy(v)
+
+    @field_validator("max_memory", mode="before")
+    @classmethod
+    def _v_max_memory(cls, v: Any) -> int | None:
+        return v if v is None else parse_limit(v, "max_memory")
 
     @model_validator(mode="after")
     def _v_profile(self) -> "WorkspaceConfig":
@@ -810,6 +818,8 @@ class WorkspaceConfig(BaseModel):
             "write": self.write,
             "session_id": self.default_session_id,
         }
+        if "max_memory" in self.model_fields_set:
+            kwargs["max_memory"] = self.max_memory
         if self.cache is not None:
             kwargs["cache"] = _build_cache_config(self.cache)
         if self.index is not None:

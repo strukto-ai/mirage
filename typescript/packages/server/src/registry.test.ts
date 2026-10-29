@@ -201,17 +201,22 @@ describe('WorkspaceRegistry accounts', () => {
 
 describe('max_workspaces', () => {
   it('counts builds in flight against the cap', async () => {
-    const r = new WorkspaceRegistry({ maxWorkspaces: 2 })
+    const r = new WorkspaceRegistry({ maxWorkspaces: 3 })
     r.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }), 'a')
     await r.creating('b', 'one', async () => {
       expect(r.hasRoom()).toBe(true)
-      await r.creating('c', 'two', () => {
-        expect(r.hasRoom()).toBe(false)
-        return Promise.resolve()
+      r.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }), 'b')
+      await r.creating('c', 'two', async () => {
+        expect(r.hasRoom()).toBe(true)
+        await r.creating('d', 'three', () => {
+          expect(r.hasRoom()).toBe(false)
+          return Promise.resolve()
+        })
       })
     })
     expect(new WorkspaceRegistry().hasRoom()).toBe(true)
     await r.remove('a')
+    await r.remove('b')
   })
 
   it('reads the env, then the config file', async () => {

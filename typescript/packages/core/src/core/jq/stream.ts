@@ -196,14 +196,17 @@ export class InputReader {
       const value = await parser.next()
       if (value instanceof JqParseError) return value
       if (value !== NO_VALUE) {
-        if (!Array.isArray(this.slurped)) return value
-        this.slurp(this.slurped, value)
+        if (!Array.isArray(this.slurped)) {
+          this.held = 0
+          return value
+        }
+        this.slurped.push(value)
         continue
       }
       if (this.jsonEof) break
       const [piece, last] = await this.readMore()
       this.jsonEof = last
-      parser.feed(piece, !last)
+      parser.feed(this.take(piece), !last)
     }
     return this.takeSlurped()
   }
@@ -213,9 +216,11 @@ export class InputReader {
     for (;;) {
       const [piece, isLast] = await this.readMore()
       if (piece.length > 0) {
+        this.take(piece)
         if (Array.isArray(this.slurped)) {
-          this.slurp(this.slurped, await decodeUtf8(piece, this.signal))
+          this.slurped.push(await decodeUtf8(piece, this.signal))
         } else if (piece[piece.length - 1] === NEWLINE) {
+          this.held = 0
           const tail = await decodeUtf8(piece.subarray(0, piece.length - 1), this.signal)
           return stringText((parts ?? []).join('') + tail)
         } else {
@@ -230,14 +235,14 @@ export class InputReader {
   }
 
   /**
-   * Keep one value or piece of a slurped stream, which grows to the whole
-   * input and so counts against the line's memory limit. Mirrors Python's
-   * `_slurp`.
+   * Count a piece read into memory, which must fit in what the workspace's
+   * `max_memory` has left: a value or a line holds the pieces read of it, and
+   * a slurp the whole input. Mirrors Python's `_take`.
    */
-  private slurp(slurped: string[], text: string): void {
-    this.held += text.length
+  private take(piece: Uint8Array): Uint8Array {
+    this.held += piece.byteLength
     checkMemory(this.held)
-    slurped.push(text)
+    return piece
   }
 
   private takeSlurped(): string | NoValue {
