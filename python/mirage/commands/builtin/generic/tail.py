@@ -37,7 +37,6 @@ from mirage.commands.spec.usage import word_refusal_error
 from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import enoent, fs_strerror
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cooperative import chunks
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -240,18 +239,35 @@ async def tail(
         if target == 0:
             return
 
-        recent: deque[bytes] = deque(maxlen=target)
-        reader = AsyncLineIterator(source)
-        try:
-            while True:
-                line, ended = await reader.read_until(b"\n")
-                if not line and not ended:
-                    break
-                recent.append(line + (b"\n" if ended else b""))
-            for line in recent:
-                yield line
-        finally:
-            await reader.discard()
+        # The bounded chunks that may hold the last lines, each with its
+        # newlines: the first goes once the others hold a newline more
+        # than the target, which covers a last line that lacks its own.
+        kept: deque[tuple[bytes, int]] = deque()
+        held = 0
+        async for chunk in source:
+            if not chunk:
+                continue
+            count = chunk.count(b"\n")
+            kept.append((chunk, count))
+            held += count
+            while held - kept[0][1] > target:
+                held -= kept.popleft()[1]
+        if not kept:
+            return
+        wanted = target + kept[-1][0].endswith(b"\n")
+        pieces: list[bytes] = []
+        while kept:
+            chunk, count = kept.pop()
+            if count < wanted:
+                wanted -= count
+                pieces.append(chunk)
+                continue
+            at = len(chunk)
+            for _ in range(wanted):
+                at = chunk.rfind(b"\n", 0, at)
+            pieces.append(chunk[at + 1 :])
+            break
+        yield b"".join(reversed(pieces))
 
 
 async def tail_multi(
@@ -716,8 +732,7 @@ async def _follow(
                         f"tail: '{p.raw_path}' has become inaccessible: "
                         f"{fs_strerror(exc)}\n"
                         if flags.retry
-                        else f"tail: {shell_quote(p.raw_path)}: "
-                        f"{fs_strerror(exc)}\n",
+                        else f"tail: {shell_quote(p.raw_path)}: {fs_strerror(exc)}\n",
                     )
                     active.remove((slot, p))
                     if flags.retry:
@@ -726,10 +741,7 @@ async def _follow(
             if grown is None:
                 if not flags.follow_name:
                     continue
-                line = (
-                    f"tail: '{p.raw_path}' has been replaced with an "
-                    "untailable file"
-                )
+                line = f"tail: '{p.raw_path}' has been replaced with an untailable file"
                 _note(
                     io,
                     line

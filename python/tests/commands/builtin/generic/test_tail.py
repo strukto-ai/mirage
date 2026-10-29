@@ -86,6 +86,13 @@ async def test_tail_reads_one_byte_chunks(body, kwargs, expected):
 
 
 @pytest.mark.asyncio
+async def test_tail_writes_the_last_lines_in_one_piece():
+    # A piece per line costs a pipe a turn of the loop per line.
+    parts = [b"1\n", b"2\n", b"3\n", b"4\n", b"5"]
+    assert [c async for c in tail(_stream(parts), n=2)] == [b"4\n5"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "parts,kwargs,expected",
     [

@@ -114,6 +114,31 @@ const firstLinesOrFail = (p: PathSpec): Promise<Uint8Array> => {
 }
 
 // Mirrors the head_generic cases in test_head.py.
+describe('headGeneric writes what it keeps of a chunk in one piece', () => {
+  // A piece per line costs a pipe a turn of the loop per line.
+  it.each(['3', '-2'])('-n %s', async (lines) => {
+    const encoder = new TextEncoder()
+    async function* source(): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield encoder.encode('1\n2\n')
+      yield encoder.encode('3\n4\n5\n')
+    }
+    const ctx = { stdin: source(), flags: { lines }, cwd: PathSpec.fromStrPath('/') }
+    const result = await headGeneric(
+      [],
+      [],
+      ctx as Context,
+      () => Promise.reject(new Error('stdin only')),
+      () => resolveSource(null),
+    )
+    const [stdout] = result ?? [null]
+    const pieces: string[] = []
+    for await (const piece of stdout as AsyncIterable<Uint8Array>)
+      pieces.push(new TextDecoder().decode(piece))
+    expect(pieces).toEqual(['1\n2\n', '3\n'])
+  })
+})
+
 describe('head asks the mount for the first lines', () => {
   it.each([
     [{}, 10],

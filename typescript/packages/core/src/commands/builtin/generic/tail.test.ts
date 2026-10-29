@@ -132,6 +132,33 @@ function followOpts(abort: AbortController, extra: Record<string, string | boole
   return ctx({ follow: true, sleep_interval: '0.02', ...extra }, abort.signal)
 }
 
+describe('tail -n', () => {
+  // A piece per line costs a pipe a turn of the loop per line.
+  it('writes the last lines in one piece', async () => {
+    const encoder = new TextEncoder()
+    async function* source(): AsyncIterable<Uint8Array> {
+      for (const line of ['1\n', '2\n', '3\n', '4\n', '5']) {
+        await Promise.resolve()
+        yield encoder.encode(line)
+      }
+    }
+    const ctx = { stdin: source(), flags: { n: '2' }, cwd: PathSpec.fromStrPath('/') }
+    const result = await tailGeneric(
+      [],
+      [],
+      ctx as Context,
+      () => {
+        throw new Error('stdin only')
+      },
+      () => Promise.reject(new Error('stdin only')),
+    )
+    const [stdout] = result as [AsyncIterable<Uint8Array>, IOResult]
+    const pieces: string[] = []
+    for await (const piece of stdout) pieces.push(new TextDecoder().decode(piece))
+    expect(pieces).toEqual(['4\n5'])
+  })
+})
+
 describe('tail -f -s inf', () => {
   // GNU accepts `-s inf` (xstrtod passes and `0 <= inf`), so the value is
   // legal and the wait has to be genuinely indefinite. `setTimeout` holds a
