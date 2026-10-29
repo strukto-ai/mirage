@@ -15,7 +15,7 @@ import { DiffPool } from '../../rs/diff_pool.ts'
 
 import { IOConfig } from '../../io/config.ts'
 import { MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
-import { networkRule, runWithNetwork, type NetworkSetting } from '../../io/network.ts'
+import { networkRule, runWithNetwork, sameNetwork, type NetworkSetting } from '../../io/network.ts'
 import { parseLimit } from '../../utils/size.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { ShellExecution } from '../shell_execution.ts'
@@ -2321,6 +2321,19 @@ export class Workspace {
           overrides[mount.prefix] = new Mount(mount.vfs, { read: mount.read, vfsRef: mount.vfsRef })
         }
       }
+    }
+    // A shared mount keeps the client it connected under this workspace's
+    // network, so a copy held to another rule cannot share it.
+    const shared = Object.keys(overrides)
+    if (
+      shared.length > 0 &&
+      options.network !== undefined &&
+      !sameNetwork(options.network, this.networkSetting)
+    ) {
+      throw new Error(
+        `copy: ${shared.join(', ')} keep this workspace's connections; ` +
+          'a copy under another network cannot share them',
+      )
     }
     // A same-process copy reinstalls every CLI from its live install
     // (spec + validated config), the way remote mounts share their live

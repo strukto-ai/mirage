@@ -284,7 +284,9 @@ for `from`, `ref` and `key` examples.
 the config loads. `NAME` is uppercase letters, digits and underscores, not
 starting with a digit; any other `${...}` is left as written. A missing
 variable is an error. Use a credential pointer when the value should be
-fetched through a source instead.
+fetched through a source instead. A config posted to a server is taken as
+written: `mirage workspace create` substitutes from your shell first, and the
+server never substitutes from its own environment.
 
 Relative script paths and file-based code references resolve from the config
 file's directory. Relative dotenv paths resolve from the Mirage process's

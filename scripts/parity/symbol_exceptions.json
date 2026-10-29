@@ -27,7 +27,8 @@
     "pools": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
     "refusal": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
     "releaseNetwork": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
-    "rulePool": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these."
+    "rulePool": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "sameNetwork": "TypeScript's Workspace.copy takes a network and refuses another rule over a shared live mount; Python's copy() takes no options, so it never compares two settings."
    }
   },
   "commands/builtin/utils/http": {

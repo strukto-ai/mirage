@@ -16,6 +16,7 @@ import { StreamRefusal } from '../rs/errors.ts'
 import { MovableStream } from '../rs/stream.ts'
 import type { JsonValue } from '../types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 
 const ENC = new TextEncoder()
 
@@ -71,6 +72,22 @@ export function networkLayer(setting: unknown): Record<string, JsonValue> | null
   throw new Error(
     `network is true, false or {allow: [hosts and ranges]}, not ${JSON.stringify(setting)}`,
   )
+}
+
+/**
+ * Whether two settings hold the same rule: their allow lists name the same
+ * entries as written, in any order, `false` being the empty list. An entry
+ * is compared as written, since one spelling can be an address and
+ * another a host name.
+ */
+export function sameNetwork(a: NetworkSetting, b: NetworkSetting): boolean {
+  const [left, right] = [a, b].map((setting) => {
+    const layer = networkLayer(setting)
+    return layer === null
+      ? null
+      : JSON.stringify([...new Set(layer.allow as string[])].sort(compareCodePoints))
+  })
+  return left === right
 }
 
 /**

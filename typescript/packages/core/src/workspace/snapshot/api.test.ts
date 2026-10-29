@@ -14,6 +14,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MountMode } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -149,6 +150,46 @@ describe('Workspace.snapshot', () => {
       }
     },
   )
+
+  it('refuses a copy under another network that would share a live mount', async () => {
+    class Live extends BaseVFS {
+      override readonly name = 'live'
+    }
+    const src = new Workspace({ '/m': new RAMVFS(), '/live': new Live() })
+    const addressed = new Workspace(
+      { '/m': new RAMVFS(), '/live': new Live() },
+      { network: { allow: ['10.0.0.5'] } },
+    )
+    try {
+      await expect(src.copy({ network: false })).rejects.toThrow(
+        "copy: /live/ keep this workspace's connections",
+      )
+      await expect(addressed.copy({ network: { allow: ['10.0.0.5.'] } })).rejects.toThrow(
+        "copy: /live/ keep this workspace's connections",
+      )
+      const same = await src.copy({ network: true })
+      await same.close()
+    } finally {
+      await src.close()
+      await addressed.close()
+    }
+  })
+
+  it.each([
+    [{ allow: ['a.example', 'b.example'] }, { allow: ['b.example', 'a.example', 'a.example'] }],
+    [false, { allow: [] }],
+  ])('copies over a live mount under an equal network: %o', async (held, asked) => {
+    class Live extends BaseVFS {
+      override readonly name = 'live'
+    }
+    const src = new Workspace({ '/m': new RAMVFS(), '/live': new Live() }, { network: held })
+    try {
+      const copy = await src.copy({ network: asked })
+      await copy.close()
+    } finally {
+      await src.close()
+    }
+  })
 
   it('narrows network on a copy that asks it', async () => {
     const src = new Workspace({ '/m': new RAMVFS() })

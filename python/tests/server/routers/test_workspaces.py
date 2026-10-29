@@ -477,6 +477,24 @@ async def test_the_server_network_holds_every_workspace(listening):
     assert await _curl_from(held, listening) == 7
 
 
+@pytest.mark.asyncio
+async def test_a_posted_config_keeps_its_variables_as_written():
+    app = build_app(idle_grace_seconds=10.0)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        body = _minimal_config()
+        body["config"]["env"] = {"GREETING": "${HOME}"}
+        r = await client.post("/v1/workspaces", json=body)
+        assert r.status_code == 201, r.text
+        wid = r.json()["id"]
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            json={"command": 'echo "$GREETING"'},
+        )
+        assert r.json()["stdout"] == "${HOME}\n"
+
+
 class NoSecretVar(Policy):
     async def pre_session(self, ctx: SessionContext) -> Deny | None:
         return Deny("SECRET is the server's") if ctx.key == "SECRET" else None

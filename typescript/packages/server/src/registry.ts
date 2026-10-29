@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { join } from 'node:path'
+import { resolve } from 'node:path'
 import {
   networkRule,
   type NetworkRule,
@@ -148,7 +148,7 @@ export function resolvePolicyFile(
   if (path === undefined || path === '') {
     const named = readDaemonTable(mirageHome(env)).policy_file
     if (named === undefined || named === '') return {}
-    path = join(mirageHome(env), named)
+    path = resolve(mirageHome(env), named)
   }
   return loadPolicyFile(path)
 }

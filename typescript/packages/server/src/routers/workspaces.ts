@@ -285,7 +285,11 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       }
       let cfg: WorkspaceConfigRaw
       try {
-        cfg = loadWorkspaceConfig(config as Record<string, unknown>)
+        // Taken as written, as the Python server takes it: the caller's
+        // CLI expanded its `${VAR}` in the caller's env, and the server's
+        // env is not a tenant's to read. The policies judge, and the build
+        // uses, the same document.
+        cfg = loadWorkspaceConfig(config as Record<string, unknown>, null)
         for (const entry of cfg.runtimes ?? []) {
           if (typeof entry === 'string') continue
           const runtimeConfig = entry.config

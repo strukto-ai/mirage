@@ -22,7 +22,7 @@ import { DiskRecordClient, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { DaemonConfigError } from './daemon_config.ts'
 import { ENV_HOME, ENV_MAX_WORKSPACES } from './env.ts'
-import { Claim, resolveMaxWorkspaces, WorkspaceRegistry } from './registry.ts'
+import { Claim, resolveMaxWorkspaces, resolvePolicyFile, WorkspaceRegistry } from './registry.ts'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import type { CommandContext, VfsContext } from '@struktoai/mirage-core/policy/types'
 
@@ -30,6 +30,28 @@ describe('newWorkspaceId', () => {
   it('mints canonical UUIDv7 ids', () => {
     const id = newWorkspaceId()
     expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  })
+})
+
+describe('resolvePolicyFile', () => {
+  it('reads an absolute policy_file as written, a relative one next to config.toml', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'mirage-home-'))
+    const elsewhere = await mkdtemp(join(tmpdir(), 'mirage-policy-'))
+    try {
+      await writeFile(join(elsewhere, 'policy.yaml'), 'pre_command: []\n')
+      await writeFile(join(home, 'near.yaml'), 'post_command: []\n')
+      const env = { [ENV_HOME]: home }
+      await writeFile(
+        join(home, 'config.toml'),
+        `[daemon]\npolicy_file = "${join(elsewhere, 'policy.yaml')}"\n`,
+      )
+      expect(Object.keys(resolvePolicyFile(undefined, env))).toEqual(['preCommand'])
+      await writeFile(join(home, 'config.toml'), '[daemon]\npolicy_file = "near.yaml"\n')
+      expect(Object.keys(resolvePolicyFile(undefined, env))).toEqual(['postCommand'])
+    } finally {
+      await rm(home, { recursive: true, force: true })
+      await rm(elsewhere, { recursive: true, force: true })
+    }
   })
 })
 
