@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::compile::compile;
-use super::eval::{DEBUG, ERROR, HALT, OUTPUT, STDERR};
+use super::eval::{DEBUG, ERROR, HALT, OUTPUT, PRINT, STDERR};
 use super::meter::{self, Meter};
 use super::value::{Value, parse_json};
 use super::vm::{Limits, Next, Vm};
@@ -20,6 +20,8 @@ enum Frame {
     Out(String),
     Err(String),
     Halt(String),
+    /// A printed output: its null-or-false byte as a char, then the text.
+    Print(String),
 }
 
 fn frames(mut wire: &[u8]) -> Vec<Frame> {
@@ -36,6 +38,7 @@ fn frames(mut wire: &[u8]) -> Vec<Frame> {
             OUTPUT => Frame::Out(payload),
             ERROR => Frame::Err(payload[1..].to_string()),
             HALT => Frame::Halt(payload),
+            PRINT => Frame::Print(payload),
             _ => panic!("unknown frame {tag}"),
         });
         wire = &wire[5 + len..];
@@ -89,8 +92,119 @@ fn outputs(program: &str, input: &str) -> Vec<String> {
             Frame::Out(text) => text,
             Frame::Err(text) => format!("error: {text}"),
             Frame::Halt(text) => format!("halt: {text}"),
+            Frame::Print(text) => format!("print: {text}"),
         })
         .collect()
+}
+
+/// Run `program` over `input`, printing its outputs by jq_format's
+/// `options`, with `steps` VM steps per drain; and how many drains it took.
+fn printed(
+    program: &str,
+    input: &str,
+    options: serde_json::Value,
+    steps: u64,
+) -> (usize, Vec<Frame>) {
+    let config = serde_json::json!({ "program": program, "steps": steps, "print": options });
+    let mut stream = super::eval::open(config.to_string().as_bytes()).expect("compiles");
+    let mut wire = Vec::new();
+    stream.feed(input.as_bytes(), &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    let mut drains = 0;
+    while stream.busy() {
+        stream.drain(&mut wire).unwrap();
+        drains += 1;
+    }
+    (drains, frames(&wire))
+}
+
+#[test]
+fn printed_outputs_are_formatted_and_flag_null_and_false() {
+    let input = r#"[1,"a",null,false,{"b":[1,2]}]"#;
+    let (_, got) = printed(".[]", input, serde_json::json!({}), 1 << 16);
+    let want = [
+        "\u{0}1\n",
+        "\u{0}\"a\"\n",
+        "\u{1}null\n",
+        "\u{1}false\n",
+        "\u{0}{\n  \"b\": [\n    1,\n    2\n  ]\n}\n",
+    ];
+    assert_eq!(got, want.map(|text| Frame::Print(text.into())));
+    let raw = serde_json::json!({ "raw_output": true, "compact": true, "seq": true });
+    let (_, got) = printed(".[]", input, raw, 1 << 16);
+    let want = [
+        "\u{0}\u{1e}1\n",
+        "\u{0}a\n",
+        "\u{1}\u{1e}null\n",
+        "\u{1}\u{1e}false\n",
+    ];
+    assert_eq!(got[..4], want.map(|text| Frame::Print(text.into())));
+}
+
+/// What a run printed, its print frames joined, and whether the last
+/// output was null or false.
+fn stdout(frames: &[Frame]) -> (String, bool) {
+    let mut text = String::new();
+    let mut falsy = false;
+    for frame in frames {
+        if let Frame::Print(payload) = frame {
+            falsy = payload.starts_with('\u{1}');
+            text.push_str(&payload[1..]);
+        }
+    }
+    (text, falsy)
+}
+
+#[test]
+fn printing_prints_the_same_at_every_budget() {
+    let ascending: Vec<String> = (0..20000).map(|n| n.to_string()).collect();
+    let ascending = format!("[{}]", ascending.join(","));
+    for (program, options) in [
+        (".", serde_json::json!({})),
+        (".[]", serde_json::json!({ "compact": true })),
+        (
+            "{a: .}",
+            serde_json::json!({ "sort_keys": true, "tab": true }),
+        ),
+    ] {
+        let (_, whole) = printed(program, &ascending, options.clone(), 1 << 16);
+        for steps in [1, 7, 128, 1000] {
+            let (_, got) = printed(program, &ascending, options.clone(), steps);
+            assert_eq!(stdout(&got), stdout(&whole), "{program} at {steps} steps");
+        }
+    }
+    let (count, got) = printed(".", &ascending, serde_json::json!({}), 1000);
+    assert!(count > 10, "{count} drains");
+    assert!(got.len() > 10, "{} frames", got.len());
+}
+
+/// Every output ends with a print frame, even one that prints nothing.
+#[test]
+fn an_output_that_prints_nothing_still_sends_a_frame() {
+    let options = serde_json::json!({ "join_output": true, "raw_output": true });
+    let (_, got) = printed(r#""", null"#, "null", options, 1);
+    assert_eq!(
+        got,
+        vec![
+            Frame::Print("\u{0}".into()),
+            Frame::Print("\u{1}null".into())
+        ]
+    );
+}
+
+/// An output `--raw-output0` cannot print ends the run with jq's error,
+/// after the outputs before it.
+#[test]
+fn a_nul_raw_output0_cannot_print_ends_the_run() {
+    let options = serde_json::json!({ "raw_output": true, "nul_output": true });
+    let (_, got) = printed(r#""a", "b\u0000c", "d""#, "null", options, 1 << 16);
+    assert_eq!(
+        got,
+        vec![
+            Frame::Print("\u{0}a\u{0}".into()),
+            Frame::Err("Cannot dump a string containing NUL with --raw-output0 option".into()),
+        ]
+    );
 }
 
 /// Outputs jq 1.8.2 printed for each, `jq -c`.
@@ -1289,7 +1403,7 @@ fn run_corpus(corpus: &str) -> (usize, usize, usize, usize) {
             match f {
                 Frame::Out(text) => got.push(text),
                 Frame::Err(text) => error = Some(text),
-                Frame::Halt(_) => {}
+                Frame::Halt(_) | Frame::Print(_) => {}
             }
         }
         let want: Vec<String> = case["outputs"]
@@ -2710,7 +2824,7 @@ fn date_builtins_print_what_jq_prints() {
             match frame {
                 Frame::Out(text) => got.push(text),
                 Frame::Err(text) => got = vec![format!("!{text}")],
-                Frame::Halt(_) => {}
+                Frame::Halt(_) | Frame::Print(_) => {}
             }
         }
         if got.join("\n") != *want {

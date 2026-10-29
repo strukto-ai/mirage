@@ -24,7 +24,7 @@ from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
-from mirage.core.jq import InputReader, JqError, JqHalt, JqOptions, JqRun
+from mirage.core.jq import InputReader, JqError, JqHalt, JqOptions
 from mirage.core.jq.errors import JqCompileError
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult, materialize
@@ -115,14 +115,15 @@ async def _bound(**flags: FlagValue) -> dict[str, str]:
 
 
 def _printed(*outputs: str) -> int:
-    return run_status(JqRun(list(outputs)))
+    falsy = bool(outputs) and outputs[-1] in ("null", "false")
+    return run_status(Ending(printed=bool(outputs), falsy=falsy))
 
 
 def _halted(code: float | None) -> int:
-    return run_status(JqRun([False], JqHalt(None, False, code)))
+    return run_status(Ending(JqHalt(None, False, code), True, True))
 
 
-_FAILED = run_status(JqRun(["1"], JqError("x", True)))
+_FAILED = run_status(Ending(JqError("x", True), True))
 
 
 async def _run(paths: list[str], *texts: str, **flags: FlagValue) -> tuple:
@@ -752,17 +753,22 @@ def _frame(tag: int, payload: bytes) -> bytes:
 
 
 def test_frames_fold_in_order_with_the_stop_that_ended_the_run():
-    frames: list[tuple[int, str]] = []
+    frames: list[tuple[int, bytes]] = []
     wire = (
         _frame(1, b"1")
         + _frame(4, b'["DEBUG:",1]')
-        + _frame(1, b"[2]")
+        + _frame(6, b"\x01null\n")
         + _frame(5, b"x")
         + _frame(2, b"\x00{}")
     )
     assert read_frames(wire, frames) == JqError("{}", False)
     assert read_frames(_frame(2, b"\x03x"), []) == JqError("x", True, True)
-    assert frames == [(1, "1"), (4, '["DEBUG:",1]'), (1, "[2]"), (5, "x")]
+    assert frames == [
+        (1, b"1"),
+        (4, b'["DEBUG:",1]'),
+        (6, b"\x01null\n"),
+        (5, b"x"),
+    ]
     halt = b'{"message":"bye","string":true,"code":3.0}'
     assert read_frames(_frame(3, halt), []) == JqHalt("bye", True, 3.0)
     with pytest.raises(ValueError):

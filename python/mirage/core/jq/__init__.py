@@ -19,6 +19,7 @@ from mirage.core.jq.format import (
     format_one,
     halt_report,
     load_failure,
+    print_config,
 )
 from mirage.core.jq.parse import JqParser, decode_utf8, string_text
 from mirage.core.jq.stream import InputReader, read_texts, value_text
@@ -59,6 +60,7 @@ __all__ = [
     "format_one",
     "halt_report",
     "load_failure",
+    "print_config",
     "read_texts",
     "references_args",
     "stream_reads",

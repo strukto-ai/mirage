@@ -40,6 +40,14 @@ function config(
   }
 }
 
+/**
+ * The options jq prints each output by, separator included, as jq_format and
+ * jq_eval's `print` take them.
+ */
+export function printConfig(opts: JqOptions): Readonly<Record<string, JsonValue>> {
+  return config(opts, true, false)
+}
+
 /** Render one evaluator dump with its separator in bounded Rust steps. */
 export async function formatOne(
   text: string,
@@ -47,12 +55,7 @@ export async function formatOne(
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const parts: Uint8Array[] = []
-  for await (const part of runCodec(
-    'jq_format',
-    config(opts, true, false),
-    ENC.encode(text),
-    signal,
-  ))
+  for await (const part of runCodec('jq_format', printConfig(opts), ENC.encode(text), signal))
     parts.push(part)
   return concat(parts)
 }

@@ -39,6 +39,7 @@ from mirage.core.jq import (
     format_one,
     halt_report,
     load_failure,
+    print_config,
     read_texts,
     references_args,
     stream_reads,
@@ -56,7 +57,6 @@ from mirage.core.jq.types import (
     JqHalt,
     JqOptions,
     JqParseError,
-    JqRun,
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.errors import MemoryExhausted
@@ -95,14 +95,12 @@ OK_NULL_KIND = -1
 OK_NO_OUTPUT = -4
 ERROR_UNKNOWN = 5
 
-# The outputs -e counts as null-kind, as jq dumps them.
-NULL_KIND = frozenset(("null", "false"))
-
 FRAME_OUTPUT = 1
 FRAME_ERROR = 2
 FRAME_HALT = 3
 FRAME_DEBUG = 4
 FRAME_STDERR = 5
+FRAME_PRINT = 6
 
 # jq's exit status when it refuses the program itself, and when it could
 # not read one of its inputs, whatever the runs answered.
@@ -486,19 +484,30 @@ def flag_file_name(path: PathSpec) -> str:
     return path.raw_path or path.virtual
 
 
-def run_status(run: JqRun[str]) -> int:
+@dataclasses.dataclass
+class Ending:
+    """How a run whose outputs went out as it made them ended: the error
+    or halt that stopped it, if one did, and for a printed run whether it
+    printed an output and whether the last was null or false."""
+
+    stop: JqError | JqHalt | None = None
+    printed: bool = False
+    falsy: bool = False
+
+
+def run_status(ending: Ending) -> int:
     """What jq's process() answers for one run.
 
     Args:
-        run (JqRun[str]): the run, its outputs jq's compact dumps.
+        ending (Ending): how the run ended.
     """
-    if isinstance(run.stop, JqHalt):
-        return OK if run.stop.code is None else int(run.stop.code)
-    if isinstance(run.stop, JqError):
+    if isinstance(ending.stop, JqHalt):
+        return OK if ending.stop.code is None else int(ending.stop.code)
+    if isinstance(ending.stop, JqError):
         return ERROR_UNKNOWN
-    if not run.outputs:
+    if not ending.printed:
         return OK_NO_OUTPUT
-    return OK_NULL_KIND if run.outputs[-1] in NULL_KIND else OK
+    return OK_NULL_KIND if ending.falsy else OK
 
 
 def exit_code(statuses: Sequence[int], opts: JqOptions) -> int:
@@ -541,20 +550,21 @@ def parse_report(failure: JqParseError, opts: JqOptions) -> str:
 
 
 def read_frames(
-    wire: bytes, frames: list[tuple[int, str]]
+    wire: bytes, frames: list[tuple[int, bytes]]
 ) -> JqError | JqHalt | None:
     """Fold one drain of mirage-rs's jq_eval into a run: each output frame
-    is a compact dump and a debug or stderr frame a message for stderr,
-    both kept in the order the run wrote them, and an error or a halt
-    frame is what stopped the run. An error's flag byte says whether it
-    is a string (bit 0) and whether the program raised it with `error`
-    itself (bit 1).
+    is a compact dump, each print frame an output printed (a byte set
+    when it was null or false, then its bytes), and a debug or stderr
+    frame a message for stderr, all kept in the order the run wrote them,
+    and an error or a halt frame is what stopped the run. An error's flag
+    byte says whether it is a string (bit 0) and whether the program
+    raised it with `error` itself (bit 1).
 
     Args:
         wire (bytes): the frames, a tag byte and a little-endian u32
             length before each payload.
-        frames (list[tuple[int, str]]): the run's outputs and messages so
-            far, each its tag and text, appended to.
+        frames (list[tuple[int, bytes]]): the run's outputs and messages
+            so far, each its tag and payload, appended to.
     """
     stop: JqError | JqHalt | None = None
     at = 0
@@ -563,8 +573,8 @@ def read_frames(
         size = int.from_bytes(wire[at + 1 : at + 5], "little")
         payload = wire[at + 5 : at + 5 + size]
         at += 5 + size
-        if tag in (FRAME_OUTPUT, FRAME_DEBUG, FRAME_STDERR):
-            frames.append((tag, payload.decode()))
+        if tag in (FRAME_OUTPUT, FRAME_PRINT, FRAME_DEBUG, FRAME_STDERR):
+            frames.append((tag, payload))
         elif tag == FRAME_ERROR:
             flags = payload[0]
             stop = JqError(
@@ -608,14 +618,6 @@ async def input_reply(
     return {"kind": "value", **position}, item.encode()
 
 
-@dataclasses.dataclass
-class Ending:
-    """How a run whose outputs went out as it made them ended: the error
-    or halt that stopped it, if one did."""
-
-    stop: JqError | JqHalt | None = None
-
-
 class Engine:
     """A program compiled once by mirage-rs's jq_eval and run on the
     loop's own thread, a bounded number of VM steps per drain, so a
@@ -655,6 +657,7 @@ class Engine:
         env: str,
         zone: str | None,
         origin: str | None,
+        printing: bool = False,
     ) -> "Engine":
         """Compile `expr`.
 
@@ -665,6 +668,8 @@ class Engine:
             env (str): the environment `$ENV` and `env` read, as text.
             zone (str | None): the `TZ` local time reads (local_zone).
             origin (str | None): the directory `get_prog_origin` answers.
+            printing (bool): whether jq_eval prints the outputs by the
+                options, for `print`, or dumps them, for `run`.
 
         Raises:
             JqCompileError: a program jq itself refuses, with jq's report.
@@ -681,6 +686,7 @@ class Engine:
                     "zone": zone,
                     "prog_origin": origin,
                     **({} if limit is None else {"memory": limit}),
+                    **({"print": print_config(opts)} if printing else {}),
                 },
             )
         except StreamRefusal as exc:
@@ -696,8 +702,61 @@ class Engine:
         report: Callable[[str], None],
         ending: Ending,
     ) -> AsyncGenerator[str, None]:
-        """Run the program on one document, yielding each output as a
-        drain decodes it, and leave on `ending` how the run stopped.
+        """Run the program on one document, yielding each output's compact
+        dump as a drain decodes it, and leave on `ending` how the run
+        stopped (see `_drains`).
+
+        Args:
+            doc (str): the document's JSON text.
+            reader (InputReader): the invocation's reader.
+            report (Callable[[str], None]): takes each line `debug` and
+                `stderr` write, in order.
+            ending (Ending): set once the run ends.
+        """
+        async with aclosing(
+            self._drains(doc, reader, report, ending)
+        ) as drains:
+            async for outputs in drains:
+                for output in outputs:
+                    yield output.decode()
+
+    async def print(
+        self,
+        doc: str,
+        reader: InputReader,
+        report: Callable[[str], None],
+        ending: Ending,
+    ) -> AsyncGenerator[bytes, None]:
+        """Run a program opened for printing on one document, yielding
+        what each drain printed as one chunk, and leave on `ending` how the
+        run stopped and what it printed last (see `_drains`).
+
+        Args:
+            doc (str): the document's JSON text.
+            reader (InputReader): the invocation's reader.
+            report (Callable[[str], None]): takes each line `debug` and
+                `stderr` write, in order.
+            ending (Ending): set once the run ends.
+        """
+        async with aclosing(
+            self._drains(doc, reader, report, ending)
+        ) as drains:
+            async for outputs in drains:
+                ending.printed = True
+                ending.falsy = outputs[-1][0] == 1
+                yield b"".join(memoryview(output)[1:] for output in outputs)
+
+    async def _drains(
+        self,
+        doc: str,
+        reader: InputReader,
+        report: Callable[[str], None],
+        ending: Ending,
+    ) -> AsyncGenerator[list[bytes], None]:
+        """Run the program on one document, yielding each drain's outputs,
+        those between two `debug` or `stderr` lines together, so the lines
+        go to `report` in the order the run wrote them, and leave on
+        `ending` how the run stopped.
 
         Each `input` the program calls takes the reader's next document
         then and there, as jq's input callback does, so the run consumes
@@ -713,17 +772,23 @@ class Engine:
         """
         stream = self._stream
         stream.begin(reader_position(reader))
-        frames: list[tuple[int, str]] = []
+        frames: list[tuple[int, bytes]] = []
         try:
             stop = read_frames(stream.feed(doc.encode()), frames)
             stop = read_frames(stream.finish(), frames) or stop
             while True:
-                for tag, text in frames:
-                    if tag == FRAME_OUTPUT:
-                        yield text
-                    else:
-                        report(await self._message(tag, text))
+                outputs: list[bytes] = []
+                for tag, payload in frames:
+                    if tag in (FRAME_OUTPUT, FRAME_PRINT):
+                        outputs.append(payload)
+                        continue
+                    if outputs:
+                        yield outputs
+                        outputs = []
+                    report(await self._message(tag, payload.decode()))
                 frames.clear()
+                if outputs:
+                    yield outputs
                 if stream.busy():
                     await self._budget.run()
                     wire = stream.drain()
@@ -830,10 +895,10 @@ class MainLoop:
         self._io = io
         self._statuses: list[int] = []
         self._halted = False
-        self._budget = YieldBudget()
 
     async def outputs(self) -> AsyncIterator[bytes]:
-        """The invocation's stdout, each output as its run makes it."""
+        """The invocation's stdout, each drain's outputs as its run prints
+        them."""
         try:
             if self._opts.null_input:
                 async with aclosing(self._run("null")) as chunks:
@@ -867,42 +932,16 @@ class MainLoop:
             await self._reader.close()
 
     async def _run(self, doc: str) -> AsyncGenerator[bytes, None]:
-        """Run the program on one document, printing each output as the
-        run makes it, then fold the run into the invocation, its error
-        reported where the reader stands after it. An output
-        --raw-output0 cannot print stops the run with that error, as it
-        does jq's.
+        """Run the program on one document, printing its outputs as the
+        run makes them, a chunk a drain, then fold the run into the
+        invocation, its error reported where the reader stands after it.
+        jq_eval prints them by the options, so an output --raw-output0
+        cannot print stops the run with that error, as it does jq's.
 
         Args:
             doc (str): the run's own document, null under -n.
         """
         ending = Ending()
-        last: str | None = None
-        async with aclosing(self._values(doc, ending)) as values:
-            async for value in values:
-                await self._budget.run()
-                try:
-                    chunk = await format_one(value, self._opts)
-                except StreamRefusal as exc:
-                    if not self._opts.nul_output:
-                        raise
-                    ending.stop = JqError(exc.message, True)
-                    break
-                last = value
-                yield chunk
-        run = JqRun([] if last is None else [last], ending.stop)
-        self._halted = self._settle(run, self._reader.position())
-
-    async def _values(
-        self, doc: str, ending: Ending
-    ) -> AsyncGenerator[str, None]:
-        """The run's outputs from jq_eval, as it makes them, the program
-        compiled for the invocation's first run.
-
-        Args:
-            doc (str): the run's own document, null under -n.
-            ending (Ending): set once the run ends.
-        """
         if self._engine is None:
             self._engine = Engine.open(
                 self._expr,
@@ -911,22 +950,24 @@ class MainLoop:
                 self._env,
                 self._zone,
                 self._origin,
+                printing=True,
             )
         async with aclosing(
-            self._engine.run(doc, self._reader, self._reports.append, ending)
-        ) as values:
-            async for value in values:
-                yield value
+            self._engine.print(doc, self._reader, self._reports.append, ending)
+        ) as chunks:
+            async for chunk in chunks:
+                yield chunk
+        self._halted = self._settle(ending, self._reader.position())
 
-    def _settle(self, run: JqRun[str], position: str) -> bool:
+    def _settle(self, ending: Ending, position: str) -> bool:
         # Fold one run into the invocation: its answer toward the exit
         # status, and its report when it stopped early. A halt ends the
         # invocation, which is what this answers.
-        self._statuses.append(run_status(run))
-        if isinstance(run.stop, JqError):
-            self._reports.append(error_report(position, run.stop))
-        elif isinstance(run.stop, JqHalt):
-            self._reports.append(halt_report(run.stop))
+        self._statuses.append(run_status(ending))
+        if isinstance(ending.stop, JqError):
+            self._reports.append(error_report(position, ending.stop))
+        elif isinstance(ending.stop, JqHalt):
+            self._reports.append(halt_report(ending.stop))
             return True
         return False
 

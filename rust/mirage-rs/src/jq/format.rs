@@ -5,14 +5,14 @@ use serde::Deserialize;
 
 use crate::{Stream, StreamError};
 
-const LIMIT: usize = 16 * 1024;
+pub(super) const LIMIT: usize = 16 * 1024;
 const STEP: usize = 64;
 const BLOCK: usize = 4096;
 const NUL_REFUSAL: &str = "Cannot dump a string containing NUL with --raw-output0 option";
 
 #[derive(Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct Config {
+pub(super) struct Config {
     compact: bool,
     raw_output: bool,
     join_output: bool,
@@ -808,7 +808,7 @@ enum State {
     Finished,
 }
 
-struct Formatter {
+pub(super) struct Formatter {
     options: Config,
     source: Source,
     arena: Arena,
@@ -816,7 +816,7 @@ struct Formatter {
 }
 
 impl Formatter {
-    fn new(options: Config) -> Self {
+    pub(super) fn new(options: Config) -> Self {
         Self {
             options,
             source: Source::default(),

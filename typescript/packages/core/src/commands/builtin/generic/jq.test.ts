@@ -313,11 +313,23 @@ describe('readOptions', () => {
 
 /** Inputs named the way jq names files, one per text. */
 describe('exitCode', () => {
-  const printed = (...outputs: string[]): number => runStatus({ outputs, stop: null })
-  const failed = runStatus({ outputs: ['1'], stop: { kind: 'error', text: 'x', string: true } })
+  const printed = (...outputs: string[]): number =>
+    runStatus({
+      stop: null,
+      printed: outputs.length > 0,
+      falsy: ['null', 'false'].includes(outputs[outputs.length - 1] ?? ''),
+    })
+  const failed = runStatus({
+    stop: { kind: 'error', text: 'x', string: true },
+    printed: true,
+  })
 
   const halted = (code: number | null): number =>
-    runStatus({ outputs: ['false'], stop: { kind: 'halt', message: null, string: false, code } })
+    runStatus({
+      stop: { kind: 'halt', message: null, string: false, code },
+      printed: true,
+      falsy: true,
+    })
 
   it.each([
     [[printed('1', 'false')], true, 1],
@@ -724,11 +736,11 @@ function joined(...parts: Uint8Array[]): Uint8Array {
 
 describe('jq_eval', () => {
   it('folds frames in order with the stop that ended the run', () => {
-    const frames: [number, string][] = []
+    const frames: [number, Uint8Array][] = []
     const wire = joined(
       frame(1, '1'),
       frame(4, '["DEBUG:",1]'),
-      frame(1, '[2]'),
+      frame(6, '\u0001null\n'),
       frame(5, 'x'),
       frame(2, joined(Uint8Array.of(0), ENC.encode('{}'))),
     )
@@ -745,10 +757,10 @@ describe('jq_eval', () => {
       own: true,
     })
     expect(frames).toEqual([
-      [1, '1'],
-      [4, '["DEBUG:",1]'],
-      [1, '[2]'],
-      [5, 'x'],
+      [1, ENC.encode('1')],
+      [4, ENC.encode('["DEBUG:",1]')],
+      [6, ENC.encode('\u0001null\n')],
+      [5, ENC.encode('x')],
     ])
     expect(readFrames(frame(3, '{"message":"bye","string":true,"code":3.0}'), [])).toEqual({
       kind: 'halt',
