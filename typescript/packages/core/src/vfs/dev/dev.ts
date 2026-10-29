@@ -43,6 +43,9 @@ export class DevIndex extends RAMIndexCacheStore {
   override setDir(): Promise<Evicted[]> {
     return Promise.resolve([])
   }
+  override refillDir(): Promise<Evicted[]> {
+    return Promise.resolve([])
+  }
   override setPartialDir(): Promise<void> {
     return Promise.resolve()
   }

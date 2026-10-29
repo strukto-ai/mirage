@@ -403,6 +403,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   // Forgetting what is cached is not evidence that anything went away, so an
   // existing tombstone survives for the next complete listing.
   invalidatePrefix(vfsPath: string, excluded: readonly string[] = []): Promise<void> {
+    this.observation += 1
     this.dropPrefix(vfsPath, true, excluded)
     return Promise.resolve()
   }

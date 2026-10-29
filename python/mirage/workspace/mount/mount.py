@@ -117,6 +117,7 @@ from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.types import (
+    DirListing,
     FileChangeKind,
     FileStat,
     FileType,
@@ -2062,13 +2063,14 @@ class MountEntry:
             if probed is not None:
                 return probed
         listed: list[str] = []
+        fetched: dict[str, FileStat | None] = {key: None}
 
         async def warm() -> list[str]:
-            names = await self._listed(self._folder(scope), index)
+            names = await self._listed(self._folder(scope), index, fetched)
             listed.append(key)
             return names
 
-        row = await entry_at(index, key, warm)
+        row = await entry_at(index, key, warm) or fetched[key]
         if (
             row is None
             and listed
@@ -2076,7 +2078,7 @@ class MountEntry:
             and (await index.list_dir(folder_of(key), key)).status
             is LookupStatus.NOT_FOUND
         ):
-            row = await entry_at(index, key, warm)
+            row = await entry_at(index, key, warm) or fetched[key]
         if row is not None:
             return row
         if await beyond_window(index, key):
@@ -2086,7 +2088,7 @@ class MountEntry:
         if self._asks_by_path:
             return await self._beyond(scope, index)
         await index.invalidate_dir(folder_of(key))
-        return await entry_at(index, key, warm)
+        return await entry_at(index, key, warm) or fetched[key]
 
     async def _observe(
         self, index: IndexCacheStore, scopes: Sequence[PathSpec]
@@ -2161,18 +2163,23 @@ class MountEntry:
         handed: dict[str, FileStat | None] = {}
         if "parent" in _wants(stat):
             handed["parent"] = await self._entry(self._folder(scope), index)
+        generation = (
+            None if self.cache_manager is None else self.cache_manager.generation
+        )
         try:
             row = await stat(scope, **_handed_on(stat, index, **handed))
             await self._observe(index, [scope])
-            if self.cache_manager is not None:
-                self.cache_manager.note_probed(scope, row)
+            self._note_live(scope, index, stat, row, generation)
             return row
         except FileNotFoundError as exc:
             logger.debug("nothing unlisted at %s: %s", scope, exc)
             return None
 
     async def _listed(
-        self, path: PathSpec, index: IndexCacheStore
+        self,
+        path: PathSpec,
+        index: IndexCacheStore,
+        fetched: dict[str, FileStat | None] | None = None,
     ) -> list[str]:
         """A directory's children, from its stored listing or listed
         through the backend and kept. Finding the rows a listing is
@@ -2182,6 +2189,8 @@ class MountEntry:
         Args:
             path (PathSpec): the directory, keyed below the mount.
             index (IndexCacheStore): the mount's index.
+            fetched (dict[str, FileStat | None] | None): requested rows
+                returned to the lookup even if cache publication is rejected.
         """
         key = index_key(self.prefix, path)
         glob = path.pattern is not None
@@ -2195,6 +2204,13 @@ class MountEntry:
             return stored
         refill = await index.refill_token()
         listed = await readdir(path, **_handed_on(readdir, index, **handed))
+        if fetched is not None:
+            stem = "" if key == "/" else key
+            rows = listed.entries if isinstance(listed, DirListing) else listed
+            for row in rows:
+                child = f"{stem}/{row.name}"
+                if child in fetched:
+                    fetched[child] = row
         return await keep_listing(index, key, listed, refill)
 
     async def _level(
@@ -2361,8 +2377,9 @@ class MountEntry:
         index: IndexCacheStore,
         fn: Callable[..., Any],
         result: Any,
+        generation: int | None,
     ) -> None:
-        """Under ``fresh``, keep a stat the backend answered as the
+        """Keep a current stat the backend answered as the
         running command's probe answer: the cache gate would ask the
         backend the same question again. Only a stat that asked the
         backend counts: one that takes neither an index of its own nor a
@@ -2374,11 +2391,12 @@ class MountEntry:
                 probe's own store records through the probe.
             fn (Callable[..., Any]): the function that answered.
             result (Any): what the backend answered.
+            generation (int | None): cache generation before the backend call.
         """
         manager = self.cache_manager
         if (
             manager is not None
-            and self.read.policy is ReadPolicy.FRESH
+            and manager.generation == generation
             and isinstance(result, FileStat)
             and not isinstance(index, ListingCheckStore)
             and self._lists
@@ -2656,6 +2674,10 @@ class MountEntry:
                                 and self._lists
                                 else None
                             )
+                            generation = (
+                                None if self.cache_manager is None
+                                else self.cache_manager.generation
+                            )
                             result = await self._run(
                                 name,
                                 fn,
@@ -2676,11 +2698,7 @@ class MountEntry:
                                     self._backend_fn(fn)
                                 ):
                                     await self._observe(index, [scope])
-                                    if self.cache_manager is not None:
-                                        self.cache_manager.note_probed(
-                                            scope, result
-                                        )
-                                self._note_live(scope, index, fn, result)
+                                self._note_live(scope, index, fn, result, generation)
                             elif (
                                 name == "read"
                                 and self._backend_fn(fn) == self.vfs.read

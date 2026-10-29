@@ -105,6 +105,7 @@ import {
   type WalkProbe,
   DEFAULT_READ_SPEC,
   FileChangeKind,
+  DirListing,
   FileStat,
   WritePolicy,
   FileType,
@@ -1287,25 +1288,26 @@ export class MountEntry {
       if (probed !== null) return probed
     }
     const listed: string[] = []
+    const fetched = new Map<string, FileStat | null>([[key, null]])
     const warm = async (): Promise<string[]> => {
-      const names = await this.listed(this.folder(scope), index)
+      const names = await this.listed(this.folder(scope), index, fetched)
       listed.push(key)
       return names
     }
-    let row = await entryAt(index, key, warm)
+    let row = (await entryAt(index, key, warm)) ?? fetched.get(key) ?? null
     if (
       row === null &&
       listed.length > 0 &&
       (await index.listDir(folderOf(key), key)).status === LookupStatus.NOT_FOUND
     ) {
-      row = await entryAt(index, key, warm)
+      row = (await entryAt(index, key, warm)) ?? fetched.get(key) ?? null
     }
     if (row !== null) return row
     if (await beyondWindow(index, key)) return this.beyond(scope, index)
     if (!(await this.unproven(index, key))) return null
     if (this.asksByPath) return this.beyond(scope, index)
     await index.invalidateDir(folderOf(key))
-    return entryAt(index, key, warm)
+    return (await entryAt(index, key, warm)) ?? fetched.get(key) ?? null
   }
 
   /**
@@ -1396,10 +1398,11 @@ export class MountEntry {
     if (this.wants('stat').includes('parent')) {
       handed.parent = await this.entry(this.folder(scope), index)
     }
+    const generation = this.cacheManager?.generation
     try {
       const row = await this.vfs.stat(scope, handed)
       await this.observe(index, [scope])
-      this.cacheManager?.noteProbed(scope, row)
+      this.noteLive(scope, index, row, generation)
       return row
     } catch (err) {
       if (!isEnoent(err)) throw err
@@ -1414,7 +1417,7 @@ export class MountEntry {
    * whose fetch may have proved this listing too (a seed). Mirrors Python's
    * `_listed`.
    */
-  private async listed(path: PathSpec, index: IndexCacheStore): Promise<string[]> {
+  private async listed(path: PathSpec, index: IndexCacheStore, fetched?: Map<string, FileStat | null>): Promise<string[]> {
     const key = indexKey(this.prefix, path)
     const glob = path.pattern !== null
     const stored = await storedListing(index, key, glob)
@@ -1424,6 +1427,13 @@ export class MountEntry {
     if (seeded !== null) return seeded
     const refill = await index.refillToken()
     const listed = await this.vfs.readdir(path, handed)
+    if (fetched !== undefined) {
+      const stem = key === '/' ? '' : key
+      for (const row of listed instanceof DirListing ? listed.entries : listed) {
+        const child = `${stem}/${row.name}`
+        if (fetched.has(child)) fetched.set(child, row)
+      }
+    }
     return keepListing(index, key, listed, refill)
   }
 
@@ -1665,6 +1675,7 @@ export class MountEntry {
           this.lists && (name === 'readdir' || name === 'read_tree')
             ? await index.refillToken()
             : null
+        const generation = this.cacheManager?.generation
         const result = await this.run(name, call, scope, args, kwargs, index, found)
         found = null
         if (result === null || result === undefined) continue
@@ -1672,9 +1683,8 @@ export class MountEntry {
         if (name === 'stat') {
           if (kept instanceof FileStat && this.wants('stat').length === 0) {
             await this.observe(index, [scope])
-            this.cacheManager?.noteProbed(scope, kept)
           }
-          this.noteLive(scope, index, kept)
+          this.noteLive(scope, index, kept, generation)
         }
         return kept
       }
@@ -1689,18 +1699,18 @@ export class MountEntry {
   }
 
   /**
-   * Under `fresh`, keep a stat the backend answered as the running command's
+   * Keep a current stat the backend answered as the running command's
    * probe answer: the cache gate would ask the backend the same question
    * again. Only a stat that asked the backend counts: one that takes neither
    * an index of its own nor a row the mount hands it, either of which a
    * listing filled. A probe's own store records through the probe. Mirrors
    * Python's `_note_live`.
    */
-  private noteLive(scope: PathSpec, index: IndexCacheStore, result: unknown): void {
+  private noteLive(scope: PathSpec, index: IndexCacheStore, result: unknown, generation: number | undefined): void {
     const manager = this.cacheManager
     if (
       manager !== null &&
-      this.read.policy === ReadPolicy.FRESH &&
+      manager.generation === generation &&
       result instanceof FileStat &&
       !(index instanceof ListingCheckStore) &&
       this.lists &&

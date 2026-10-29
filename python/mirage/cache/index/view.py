@@ -367,6 +367,11 @@ class IndexView(IndexCacheStore):
 
     async def refill_token(self) -> str:
         async with self._fence():
+            if self._unverified and self._owns(self._prefix):
+                await self._store.invalidate_prefix(
+                    self._prefix, excluded=self._excluded_prefixes()
+                )
+                self._unverified = False
             return await self._store.refill_token()
 
     async def invalidate_missing(self, paths: Sequence[str]) -> bool:
@@ -399,7 +404,7 @@ class IndexView(IndexCacheStore):
         version: str | None = None,
     ) -> list[Evicted] | None:
         async with self._fence():
-            if not self._owns(vfs_path):
+            if self._unverified or not self._owns(vfs_path):
                 return None
             prefix = vfs_path.rstrip("/") + "/"
             owned = [

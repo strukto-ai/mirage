@@ -61,7 +61,9 @@ for i = 3, #ARGV do
     elseif not found then
       listing.expires_at = 0
       listing.version = cjson.null
-      redis.call('SET', key, cjson.encode(listing))
+      local encoded = string.gsub(string.gsub(cjson.encode(listing),
+        '"entries":{}', '"entries":[]'), '"folders":{}', '"folders":[]')
+      redis.call('SET', key, encoded)
       changed = true
     end
   else unknown = true end
@@ -1256,6 +1258,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   invalidatePrefix(vfsPath: string, excluded: readonly string[] = []): Promise<void> {
     return this.listings.writing(async () => {
       await this.flushSeed()
+      await (await this.client()).set(`${this.generationKey}-observation`, this.ids.uuid7())
       // Tombstones survive until the next complete listing proves removals.
       await this.deletePaths([this.entryPrefix], vfsPath, excluded)
       await this.deletePaths([this.childrenPrefix, `${this.generationKey}:`], vfsPath, excluded)

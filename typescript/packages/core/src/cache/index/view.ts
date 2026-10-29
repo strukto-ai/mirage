@@ -299,7 +299,13 @@ export class IndexView extends IndexCacheStore {
   }
 
   override refillToken(): Promise<string> {
-    return this.fence(() => this.inner.refillToken())
+    return this.fence(async () => {
+      if (this.unverified && this.owns(this.prefix)) {
+        await this.inner.invalidatePrefix(this.prefix, this.excludedPrefixes())
+        this.unverified = false
+      }
+      return this.inner.refillToken()
+    })
   }
 
   override invalidateMissing(paths: readonly string[]): Promise<boolean> {
@@ -326,7 +332,7 @@ export class IndexView extends IndexCacheStore {
     options: SetDirOptions & { partial?: boolean } = {},
   ): Promise<Evicted[] | null> {
     const gone = await this.fence(async () => {
-      if (!this.owns(path)) return null
+      if (this.unverified || !this.owns(path)) return null
       const prefix = rstripSlash(path) + '/'
       const owned = entries.filter(([name]) => this.owns(prefix + name))
       const result = await this.inner.refillDir(path, owned, token, this.deadline(expiredAt), {

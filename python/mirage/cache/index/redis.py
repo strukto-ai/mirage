@@ -610,7 +610,9 @@ for i = 3, #ARGV do
     elseif not found then
       listing.expires_at = 0
       listing.version = cjson.null
-      redis.call('SET', key, cjson.encode(listing))
+      local encoded = string.gsub(string.gsub(cjson.encode(listing),
+        '"entries":{}', '"entries":[]'), '"folders":{}', '"folders":[]')
+      redis.call('SET', key, encoded)
       changed = true
     end
   else unknown = true end
@@ -1408,6 +1410,9 @@ class RedisIndexCacheStore(IndexCacheStore):
         self, vfs_path: str, *, excluded: tuple[str, ...] = ()
     ) -> None:
         await self._flush_seed()
+        await self._client.set(
+            self._generation_key + "-observation", self._ids.uuid7()
+        )
         # Tombstones survive until the next complete listing proves removals.
         await self._delete_paths([self._entry_prefix], vfs_path, excluded)
         await self._delete_paths(
