@@ -62,10 +62,6 @@ enum Request {
     HeadAllowed {
         name: Text,
     },
-    LineAllowed {
-        tokens: Vec<Text>,
-        tool: bool,
-    },
     HasRules,
     ReadsArgs {
         name: Text,
@@ -175,7 +171,6 @@ impl Policy {
                 cap,
             } => reply(out, vis.readonly_below(&path, &prefix, configured, cap)),
             Request::HeadAllowed { name } => reply(out, rules.head_allowed(&name)),
-            Request::LineAllowed { tokens, tool } => reply(out, rules.line_allowed(&tokens, tool)),
             Request::HasRules => reply(out, rules.has_rules()),
             Request::ReadsArgs { name } => reply(out, rules.reads_args(&name)),
             Request::ScopesPaths { name } => reply(out, rules.scopes_paths(&name)),

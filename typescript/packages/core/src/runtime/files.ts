@@ -157,31 +157,6 @@ export class Descriptor {
     }
   }
 
-  /**
-   * One line from the position, its newline included, advancing past it;
-   * null at the end of the file. It reads ahead 4 KiB at a time, so a
-   * short line costs one read.
-   */
-  async readLine(): Promise<Uint8Array | null> {
-    const parts: Uint8Array[] = []
-    let at = this.pos
-    for (;;) {
-      const chunk = await this.pread(at, 4096)
-      const newline = chunk.indexOf(0x0a)
-      if (newline >= 0) {
-        parts.push(chunk.subarray(0, newline + 1))
-        this.pos = at + newline + 1
-        return concat(parts)
-      }
-      if (chunk.byteLength === 0) {
-        this.pos = at
-        return parts.length === 0 ? null : concat(parts)
-      }
-      parts.push(chunk)
-      at += chunk.byteLength
-    }
-  }
-
   /** Write at an explicit offset without moving the position; an appending handle writes at its end. */
   async pwrite(offset: number, data: Uint8Array): Promise<void> {
     if (data.byteLength > 0) await this.files.pwrite(this.fd, offset, data)

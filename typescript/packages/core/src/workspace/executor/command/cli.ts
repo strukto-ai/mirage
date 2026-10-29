@@ -37,7 +37,7 @@ import type { FollowOperands, SessionView } from '../../../view/types.ts'
 import type { Files } from '../../files.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle, Argument, type FlagValue } from '../../../commands/spec/types.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource, type CommandOutput } from '../../../io/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
@@ -191,7 +191,7 @@ function scriptOutput(
   runtime: LanguageRuntime,
   prog: string,
   settle: ((runtime: Runtime) => Promise<void>) | undefined,
-): [ByteSource | null, IOResult] {
+): CommandOutput {
   const env: Record<string, string> = { ...ctx.env }
   if (config !== null && config !== undefined) {
     env[CLI_CONFIG_ENV] = JSON.stringify(config)
@@ -560,7 +560,7 @@ async function runCli(
     session.commandLimits,
   )
   const script = install.cli.script
-  let start: (ctx: Context) => Promise<[ByteSource | null, IOResult]>
+  let start: (ctx: Context) => Promise<CommandOutput>
   if (script !== null) {
     const [runtime, refused] = selectRuntime(
       prog,

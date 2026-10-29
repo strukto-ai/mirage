@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { crc32 } from 'node:zlib'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { GitHubAccount } from '../../../../accessor/github.ts'
 import { GitHubApiError, type GitHubTransport } from '../../../../core/github/client.ts'
@@ -19,7 +20,6 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { crc32 } from '../../../../utils/compress.ts'
 import { runViewCmd, workflowViewCmd } from './actions.ts'
 import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 

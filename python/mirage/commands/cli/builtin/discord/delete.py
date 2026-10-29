@@ -21,7 +21,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def delete(
+async def delete_verb(
     accessor: DiscordAccessor,
     paths: list[PathSpec],
     texts: list[str],

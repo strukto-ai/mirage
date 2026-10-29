@@ -36,7 +36,6 @@ export {
   handleDeclarePrint,
   handleExport,
   handleLocal,
-  handleReadonly,
   noteLocalArray,
 } from './declare/index.ts'
 export { handleEnv } from './env/index.ts'

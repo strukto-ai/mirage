@@ -36,8 +36,6 @@ import { parent, posixNormpath } from '../utils/path.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import {
-  DIR_MODE,
-  DIR_SIZE,
   atimeMs,
   contentSize,
   deviceRdev,
@@ -182,20 +180,6 @@ export class MountCore {
   resolve(path: string): string {
     if (this.root === '') return path
     return path === '/' ? this.root : this.root + path
-  }
-
-  dirStat(): MountAttrs {
-    return {
-      mtime: this.now,
-      atime: this.now,
-      ctime: this.now,
-      nlink: 2,
-      size: DIR_SIZE,
-      mode: DIR_MODE,
-      uid: this.uid,
-      gid: this.gid,
-      rdev: 0,
-    }
   }
 
   /**

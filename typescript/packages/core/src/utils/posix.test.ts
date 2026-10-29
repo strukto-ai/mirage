@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compilePosixRegex, skipRawBytes, translateBracket } from './posix.ts'
-
-function bracket(pattern: string): string {
-  const out: string[] = []
-  const end = translateBracket(pattern, 0, out)
-  expect(end).toBe(pattern.length)
-  return out.join('')
-}
+import { compilePosixRegex, POSIX_CLASSES, skipRawBytes } from './posix.ts'
 
 describe('POSIX character classes', () => {
   it.each([
@@ -23,21 +16,13 @@ describe('POSIX character classes', () => {
     ['upper', 'AZ', 'az0'],
     ['xdigit', '09aAfF', 'gG_'],
   ])('%s membership', (name, yes, no) => {
-    const compiled = new RegExp(`^${bracket(`[[:${name}:]]`)}$`)
+    const compiled = new RegExp(`^[${POSIX_CLASSES[name] ?? ''}]$`)
     for (const char of yes) {
       expect(compiled.test(char)).toBe(true)
     }
     for (const char of no) {
       expect(compiled.test(char)).toBe(false)
     }
-  })
-  it.each(['[[:bogus:]]', '[[:constructor:]]', '[[:digit:]'])('rejects %s', (pattern) => {
-    expect(() => bracket(pattern)).toThrow(SyntaxError)
-  })
-  it('reads a leading ] and a class together', () => {
-    const compiled = new RegExp(`^${bracket('[][:digit:]_]')}+$`)
-    expect(compiled.test(']_123')).toBe(true)
-    expect(compiled.test('abc')).toBe(false)
   })
 })
 

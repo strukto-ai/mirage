@@ -15,7 +15,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 
-def _epoch(day: date) -> int:
+def _epoch_seconds(day: date) -> int:
     return int(
         datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp()
     )
@@ -39,7 +39,7 @@ def span_to_gmail_query(start: date, end: date) -> str:
         start (date): first UTC day, inclusive.
         end (date): last UTC day, exclusive.
     """
-    return f"after:{_epoch(start) - 1} before:{_epoch(end)}"
+    return f"after:{_epoch_seconds(start) - 1} before:{_epoch_seconds(end)}"
 
 
 def date_dir_to_gmail_query(name: str) -> str | None:

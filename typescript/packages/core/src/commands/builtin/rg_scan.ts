@@ -23,6 +23,7 @@ import type { FileTypes } from './rg_filetypes.ts'
 import { IgnoreRules, type Overrides, Verdict, walkCandidate } from './rg_glob.ts'
 import type { LinkResolver } from './utils/links.ts'
 import type { AsyncReaddirFn } from './utils/types.ts'
+import type { MountRoot } from '../../view/types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 /**
@@ -146,11 +147,7 @@ function byName(a: string, b: string): number {
  * crosses by being a mount root and a link by leading onto another mount.
  * `path` has every link resolved. Mirrors Python's on_other_mount.
  */
-export function onOtherMount(
-  rootOf: (path: string) => string,
-  home: string,
-  path: string,
-): boolean {
+export function onOtherMount(rootOf: MountRoot, home: string, path: string): boolean {
   return rootOf(path) !== home
 }
 

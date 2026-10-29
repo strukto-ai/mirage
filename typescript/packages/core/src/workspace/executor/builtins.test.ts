@@ -24,6 +24,7 @@ import { renderHelp } from '../../commands/spec/help.ts'
 import { makeVar } from '../../shell/variable.ts'
 import { envSnapshot, seedVar, sessionView, setAttr } from '../../workspace/session/state.ts'
 import { VarAttr } from '../../shell/variable.ts'
+import { markNames } from './builtins/declare/declare.ts'
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { CLI } from '../../commands/cli/types.ts'
@@ -51,7 +52,6 @@ import {
   handleEval,
   handleExport,
   handleLocal,
-  handleReadonly,
   handleMan,
   handlePrintenv,
   handlePrintf,
@@ -166,7 +166,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     setAttr(s, 'ONLY', VarAttr.Readonly)
     seedVar(s, 'AR', ['a', 'b c'])
     setAttr(s, 'AR', VarAttr.Readonly)
-    const [out, io] = await handleReadonly(['-p'], s)
+    const [out, io] = await markNames(['-p'], s, null, VarAttr.Readonly)
     expect(io.exitCode).toBe(0)
     const text = decode(out as Uint8Array)
     expect(text).toContain('declare -ar AR=([0]="a" [1]="b c")\n')
@@ -213,7 +213,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ VAL: 'x' }) })
     setAttr(s, 'VAL', VarAttr.Readonly)
     for (const flag of ['-f', '-A']) {
-      const [out, io] = await handleReadonly([flag], s)
+      const [out, io] = await markNames([flag], s, null, VarAttr.Readonly)
       expect(io.exitCode).toBe(0)
       expect(decode(out as Uint8Array)).toBe('')
     }

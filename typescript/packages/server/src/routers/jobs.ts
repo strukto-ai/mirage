@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FastifyInstance } from 'fastify'
-import { toBriefDict, type JobBriefDict, type ExecutionTable } from '../jobs.ts'
-import type { ExecutionRecord } from '@struktoai/mirage-core/execution/types'
+import type { ExecutionTable } from '../jobs.ts'
+import type { ExecutionRecord, ExecutionStatus } from '@struktoai/mirage-core/execution/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { WorkspaceRegistry } from '../registry.ts'
 
@@ -31,17 +31,43 @@ interface JobsListQuery {
   workspace_id?: string
 }
 
-interface WaitBody {
+interface WaitRequest {
   timeout_s?: number
 }
 
-interface JobDetailDict extends JobBriefDict {
+interface JobBrief {
+  job_id: string
+  workspace_id: string
+  session_id: string
+  command: string
+  status: ExecutionStatus
+  cancel_requested: boolean
+  submitted_at: number
+  started_at: number | null
+  finished_at: number | null
+}
+
+function toBrief(entry: ExecutionRecord): JobBrief {
+  return {
+    job_id: entry.id,
+    workspace_id: entry.workspaceId,
+    session_id: entry.sessionId,
+    command: entry.command,
+    status: entry.status,
+    cancel_requested: entry.cancelRequested,
+    submitted_at: entry.submittedAt,
+    started_at: entry.startedAt,
+    finished_at: entry.finishedAt,
+  }
+}
+
+interface JobDetail extends JobBrief {
   result: JsonValue
   error: string | null
 }
 
-function toDetail(entry: ExecutionRecord): JobDetailDict {
-  const brief = toBriefDict(entry)
+function toDetail(entry: ExecutionRecord): JobDetail {
+  const brief = toBrief(entry)
   return { ...brief, result: entry.result, error: entry.error }
 }
 
@@ -67,7 +93,7 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
     return deps.jobs
       .list(req.query.workspace_id)
       .filter((job) => allowed.has(job.id))
-      .map(toBriefDict)
+      .map(toBrief)
   })
 
   app.get<{ Params: JobIdParams }>('/v1/jobs/:id', async (req, reply) => {
@@ -76,7 +102,7 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
     return toDetail(entry)
   })
 
-  app.post<{ Params: JobIdParams; Body: WaitBody | null }>(
+  app.post<{ Params: JobIdParams; Body: WaitRequest | null }>(
     '/v1/jobs/:id/wait',
     async (req, reply) => {
       const { id } = req.params

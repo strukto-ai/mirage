@@ -21,7 +21,7 @@ from mirage.shell.bytes import SURROGATE_BASE
 _BYTE_SENTINEL = re.compile("[\udc80-\udcff]")
 
 
-def _quote(token: str) -> str:
+def _quote_token(token: str) -> str:
     return _BYTE_SENTINEL.sub(
         lambda m: f"'$'\\x{ord(m.group()) - SURROGATE_BASE:02x}''",
         shlex.quote(token),
@@ -41,4 +41,4 @@ def shell_join(tokens: Iterable[str]) -> str:
     Args:
         tokens (Iterable[str]): the words, each one argument.
     """
-    return " ".join(_quote(token) for token in tokens)
+    return " ".join(_quote_token(token) for token in tokens)

@@ -50,8 +50,8 @@ def scopes_for(config: QdrantConfig) -> tuple[Scope, ...]:
     return row_scopes(bool(config.collection), groups, leaves)
 
 
-def _detect(accessor: QdrantAccessor) -> DetectFn:
+def _build_detect(accessor: QdrantAccessor) -> DetectFn:
     return make_detect_scope(scopes_for(accessor.config))
 
 
-detect_for = per_accessor(_detect)
+detect_for = per_accessor(_build_detect)

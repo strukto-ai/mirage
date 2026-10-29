@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DiscordAccessor, type DiscordResourceLike } from '../../../src/accessor/discord.ts'
+import { DiscordAccessor } from '../../../src/accessor/discord.ts'
 import type { IndexCacheStore } from '../../../src/cache/index/store.ts'
 import type {
   DiscordMethod,
@@ -54,7 +54,7 @@ export class FakeDiscordTransport implements DiscordTransport {
   }
 }
 
-class FakeDiscordVFS extends DiscordVFSBase implements DiscordResourceLike {
+class FakeDiscordVFS extends DiscordVFSBase {
   override readonly name = 'discord'
   constructor(override readonly accessor: DiscordAccessor) {
     super()

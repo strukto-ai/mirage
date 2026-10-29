@@ -14,7 +14,6 @@
 
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Mapping
 from contextlib import aclosing
-from typing import Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict
 
@@ -79,11 +78,6 @@ class GzipDataError(ValueError):
         return "".join(
             f"{reason.replace('{}', label)}\n" for reason in self.reasons
         )
-
-
-GZIP_MAGIC = b"\x1f\x8b"
-
-Codec: TypeAlias = Literal["bzip2", "xz"]
 
 
 class GzipFailure(BaseModel):
@@ -195,77 +189,6 @@ async def gunzip_stream(
             "passthrough": passthrough,
         },
     )
-    try:
-        async with aclosing(result):
-            async for part in result:
-                yield part
-    finally:
-        await close_quietly(source)
-
-
-async def deflate_raw_stream(
-    source: AsyncIterator[bytes],
-) -> AsyncIterator[bytes]:
-    """Encode a raw deflate stream.
-
-    Args:
-        source (AsyncIterator[bytes]): uncompressed chunks.
-    """
-    async with aclosing(chunks(source)) as bounded:
-        result = _codec_stream(
-            bounded, {"operation": "encode", "format": "raw"}
-        )
-        async with aclosing(result):
-            async for part in result:
-                yield part
-
-
-async def inflate_raw_stream(
-    source: AsyncIterator[bytes],
-) -> AsyncIterator[bytes]:
-    """Decode a raw deflate stream with bounded output.
-
-    Args:
-        source (AsyncIterator[bytes]): compressed chunks.
-    """
-    async with aclosing(chunks(source)) as bounded:
-        result = _codec_stream(
-            bounded, {"operation": "decode", "format": "raw"}
-        )
-        async with aclosing(result):
-            async for part in result:
-                yield part
-
-
-async def compress_stream(
-    source: AsyncIterator[bytes], codec: Codec
-) -> AsyncGenerator[bytes, None]:
-    """Encode one bzip2 or xz stream at its program's default level.
-
-    Args:
-        source (AsyncIterator[bytes]): uncompressed chunks.
-        codec (Codec): the format to write.
-    """
-    async with aclosing(chunks(source)) as bounded:
-        result = _codec_stream(
-            bounded, {"operation": "encode", "format": codec}
-        )
-        async with aclosing(result):
-            async for part in result:
-                yield part
-
-
-async def decompress_stream(
-    source: AsyncIterator[bytes], codec: Codec
-) -> AsyncGenerator[bytes, None]:
-    """Decode concatenated bzip2 or xz streams, failing in that program's
-    words as ``gunzip_stream`` fails in gzip's.
-
-    Args:
-        source (AsyncIterator[bytes]): compressed chunks.
-        codec (Codec): the format to read.
-    """
-    result = _codec_stream(source, {"operation": "decode", "format": codec})
     try:
         async with aclosing(result):
             async for part in result:

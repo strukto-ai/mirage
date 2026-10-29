@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.cli.builtin.discord import (
     DISCORD,
-    delete,
+    delete_verb,
     edit,
     members,
     poll,
@@ -115,7 +115,7 @@ async def test_edit_and_delete(monkeypatch):
         return None
 
     monkeypatch.setitem(edit.__globals__, "edit_message", fake_edit)
-    monkeypatch.setitem(delete.__globals__, "delete_message", fake_delete)
+    monkeypatch.setitem(delete_verb.__globals__, "delete_message", fake_delete)
     out, _io = await edit(
         ACCESSOR,
         [],
@@ -123,7 +123,7 @@ async def test_edit_and_delete(monkeypatch):
         _ctx("edit", channel="C1", message="M1", text="new"),
     )
     assert (await _json(out))["content"] == "new"
-    out, _io = await delete(
+    out, _io = await delete_verb(
         ACCESSOR, [], [], _ctx("delete", channel="C1", message="M1")
     )
     assert (await _json(out))["ok"] is True

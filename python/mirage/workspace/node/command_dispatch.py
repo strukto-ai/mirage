@@ -486,7 +486,7 @@ async def execute_command(
         refused = b""
     settling: OutputState | None = None
     try:
-        stdout, io, exec_node = await _dispatch_command_body(
+        stdout, io, exec_node = await _run_command_body(
             recurse,
             dispatch,
             registry,
@@ -612,7 +612,7 @@ def _write_refused(
     )
 
 
-async def _dispatch_command_body(
+async def _run_command_body(
     recurse: Callable[..., Awaitable[RedirectResult]],
     dispatch: DispatchFn,
     registry: MountRegistry,

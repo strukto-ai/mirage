@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.utils.generated.width_data import WHITESPACE, WIDE, ZERO_WIDTH
-
-TAB_WIDTH = 8
+from mirage.utils.generated.width_data import WIDE, ZERO_WIDTH
 
 _CONTROL = ((0x00, 0x1F), (0x7F, 0x9F))
 
@@ -70,41 +68,3 @@ def text_width(text: str) -> int:
         int: The summed column width.
     """
     return sum(char_width(ch) for ch in text)
-
-
-def is_space(ch: str) -> bool:
-    """Whether *ch* is a space to glibc's ``iswspace``.
-
-    That is Unicode White_Space minus U+0085. ``str.isspace`` is not that
-    set: it also reports True for U+001C-U+001F and U+0085. The generated
-    table is the pinned set.
-
-    Args:
-        ch (str): A single character.
-
-    Returns:
-        bool: True for an ``iswspace`` character.
-    """
-    return _in_ranges(ord(ch), WHITESPACE)
-
-
-def advance_column(column: int, ch: str) -> int:
-    """Move *column* past *ch*, as a terminal moves its cursor.
-
-    A tab jumps to the next multiple of ``TAB_WIDTH``, so a tab in column 0
-    lands on 8. Carriage return and form feed return the cursor to column 0
-    rather than ending the line. Callers handle the newline, which ends the
-    line outright.
-
-    Args:
-        column (int): The current column.
-        ch (str): The next character, never a newline.
-
-    Returns:
-        int: The column after *ch*.
-    """
-    if ch in ("\r", "\f"):
-        return 0
-    if ch == "\t":
-        return column + TAB_WIDTH - (column % TAB_WIDTH)
-    return column + char_width(ch)

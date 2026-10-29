@@ -13,18 +13,3 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export type AsyncReaddirFn = (path: string) => Promise<string[]>
-
-/**
- * A pattern translated from its dialect into this host's. `ignoreCase` says
- * the host engine must fold case itself: a translator folds each literal and
- * class in the source when case sensitivity changes inside the pattern, and
- * leaves it to the host when the whole pattern is caseless, which keeps the
- * source plain enough for the grep prefilter to read.
- */
-export interface HostRegex {
-  readonly source: string
-  readonly ignoreCase: boolean
-  // The pattern holds a literal newline, or a class of nothing else, which
-  // ripgrep refuses outside multiline mode.
-  readonly newline?: boolean
-}

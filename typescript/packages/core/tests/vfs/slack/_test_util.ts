@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SlackAccessor, type SlackResourceLike } from '../../../src/accessor/slack.ts'
+import { SlackAccessor } from '../../../src/accessor/slack.ts'
 import type { IndexCacheStore } from '../../../src/cache/index/store.ts'
 import type { SlackResponse, SlackTransport } from '../../../src/core/slack/client.ts'
 import { FileStat, FileType } from '../../../src/types.ts'
@@ -39,7 +39,7 @@ export class FakeSlackTransport implements SlackTransport {
   }
 }
 
-class FakeSlackVFS extends SlackVFSBase implements SlackResourceLike {
+class FakeSlackVFS extends SlackVFSBase {
   override readonly name = 'slack'
   constructor(override readonly accessor: SlackAccessor) {
     super()

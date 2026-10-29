@@ -41,25 +41,3 @@ def line_tokens(ctx: CommandContext) -> tuple[str, ...]:
         ctx (CommandContext): the classified command.
     """
     return ctx.tokens or (ctx.command, *ctx.argv)
-
-
-def line_allowed(ctx: CommandContext, rules: AdmissionRules | None) -> bool:
-    """Whether the profile's allow list has a pattern for the line.
-
-    A profile that states no list installs everything. A word that is not
-    a tool (``ctx.tool`` cleared by the entry point: the agent's own function,
-    an executed path) is always allowed here; a deny rule is the only
-    thing that can refuse it.
-
-    Args:
-        ctx (CommandContext): the classified command.
-        rules (AdmissionRules | None): the session's admission rules.
-    """
-    return (
-        admission_matcher(rules).ask(
-            "line_allowed",
-            tokens=[units(v) for v in line_tokens(ctx)],
-            tool=ctx.tool,
-        )
-        is True
-    )

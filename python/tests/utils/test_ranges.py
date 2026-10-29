@@ -21,8 +21,6 @@ from mirage.utils.ranges import (
     slice_window,
     splice_window,
     window_for,
-    window_if_unranged,
-    window_of,
 )
 
 DATA = b"0123456789"
@@ -143,25 +141,6 @@ def test_an_ordinary_seek_error_is_not_unsatisfiable():
     assert not is_unsatisfiable_range(OSError("invalid seek: bad whence"))
 
 
-def test_a_206_is_trusted_as_already_the_window():
-    assert window_if_unranged(b"234", 206, 2, 3) == b"234"
-
-
-def test_a_200_is_sliced_because_the_server_ignored_the_range():
-    """RFC 9110 lets a server answer the whole representation to a Range
-    request, and a CDN in front of one may. Without this the caller gets
-    the entire file for what it asked to be a window."""
-    assert window_if_unranged(b"0123456789", 200, 2, 3) == b"234"
-
-
-def test_a_200_to_eof_is_sliced_from_the_offset():
-    assert window_if_unranged(b"0123456789", 200, 7, None) == b"789"
-
-
-def test_a_200_past_eof_is_empty():
-    assert window_if_unranged(b"abc", 200, 500, 10) == b""
-
-
 SABRE_416 = (
     "Unexpected (permanent) at read, context: { uri: http://h/x, "
     "response: Parts { status: 416 } } <d:error><s:exception>"
@@ -185,20 +164,6 @@ def test_a_whole_file_read_has_no_window():
 def test_a_window_carries_both_numbers():
     assert window_for(2, 3) == ByteWindow(2, 3)
     assert window_for(7, None) == ByteWindow(7, None)
-
-
-def test_window_of_trusts_a_206_body():
-    assert window_of(b"234", 206, ByteWindow(2, 3)) == b"234"
-
-
-def test_window_of_slices_a_200_body():
-    assert window_of(b"0123456789", 200, ByteWindow(2, 3)) == b"234"
-
-
-def test_window_of_leaves_a_whole_file_read_alone():
-    """A reader with no window passes None, and the offset a slice would
-    otherwise apply is not zero by accident but absent."""
-    assert window_of(b"0123456789", 200, None) == b"0123456789"
 
 
 HF_INVALID_CONTENT_RANGE = (

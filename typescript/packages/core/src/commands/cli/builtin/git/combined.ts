@@ -1,5 +1,4 @@
 import { getOpcodes } from '../../../builtin/diff_format.ts'
-import { DiffOpTag } from '../../../builtin/diff_types.ts'
 import { FUNCNAME_START, GIT_SPACE } from './constants.ts'
 
 // Measured against git 2.47.3 and 2.50.1. Both print a -U0 hunk that reaches
@@ -110,7 +109,7 @@ function compareSides(parents: string[][], result: string[]): Layout {
   parents.forEach((lines, index) => {
     const bit = 2 ** index
     for (const [tag, lo, hi, start, stop] of getOpcodes(lines, result)) {
-      if (tag === DiffOpTag.EQUAL) continue
+      if (tag === 'equal') continue
       for (let row = start; row < stop; row++) newcomers[row] = (newcomers[row] ?? 0) | bit
       if (hi > lo) gaps[start] = coalesce(gaps[start] ?? [], lines.slice(lo, hi), bit)
     }

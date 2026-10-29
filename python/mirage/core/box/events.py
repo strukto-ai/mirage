@@ -59,7 +59,7 @@ def _rebase(key: str, old: str, new: str) -> str:
     return new + key[len(old) :] if under_path(key, old) else key
 
 
-def _source(value: JsonValue) -> dict[str, Any] | None:
+def _source_of(value: JsonValue) -> dict[str, Any] | None:
     """The file or folder an event is about, or None.
 
     User events carry the full item as ``source``, with the
@@ -322,7 +322,7 @@ class BoxEventHook:
             event_type (str): The event's ``event_type``.
             payload (JsonValue): The event object from ``/events``.
         """
-        source = _source(field(payload, "source"))
+        source = _source_of(field(payload, "source"))
         if source is None:
             return ()
         is_dir = source.get("type") == "folder"

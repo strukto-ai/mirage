@@ -2,61 +2,11 @@ import re
 
 import pytest
 
-from mirage.utils.posix import (
-    compile_posix_regex,
-    skip_raw_bytes,
-    translate_bracket,
-)
+from mirage.utils.posix import compile_posix_regex, skip_raw_bytes
 
 
 def _consumes(pattern: re.Pattern[str], text: str) -> bool:
     return any(m.start() != m.end() for m in pattern.finditer(text))
-
-
-def _bracket(pattern: str) -> str:
-    out: list[str] = []
-    end = translate_bracket(pattern, 0, out)
-    assert end == len(pattern)
-    return "".join(out)
-
-
-@pytest.mark.parametrize(
-    "name,yes,no",
-    [
-        ("alnum", "aZ09", "_! "),
-        ("alpha", "aZ", "09_"),
-        ("blank", " \t", "\nA"),
-        ("cntrl", "\x00\x1f\x7f", " A"),
-        ("digit", "09", "aF_"),
-        ("graph", "!AZ09~", " \t"),
-        ("lower", "az", "AZ0"),
-        ("print", " AZ09~", "\t\n"),
-        ("punct", "![]-_", "aZ0 "),
-        ("space", " \t\n\r\f\v", "a0"),
-        ("upper", "AZ", "az0"),
-        ("xdigit", "09aAfF", "gG_"),
-    ],
-)
-def test_class_membership(name, yes, no):
-    compiled = re.compile(_bracket(f"[[:{name}:]]"))
-    for char in yes:
-        assert compiled.fullmatch(char)
-    for char in no:
-        assert not compiled.fullmatch(char)
-
-
-@pytest.mark.parametrize(
-    "pattern", ["[[:bogus:]]", "[[:constructor:]]", "[[:digit:]"]
-)
-def test_invalid_classes_refused(pattern):
-    with pytest.raises(re.error):
-        _bracket(pattern)
-
-
-def test_mixed_brackets():
-    compiled = re.compile(_bracket("[][:digit:]_]") + "+")
-    assert compiled.fullmatch("]_123")
-    assert not compiled.fullmatch("abc")
 
 
 @pytest.mark.parametrize(

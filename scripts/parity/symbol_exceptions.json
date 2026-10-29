@@ -1,14 +1,14 @@
 {
-  "baseline": 2809,
+ "baseline": 2727,
  "modules": {
   "core/slack/client": {
    "python_only": {
-    "upload_bytes": "Python sends an upload' + chr(39) + 's bytes with a module function over the accessor' + chr(39) + 's pool; TypeScript keeps the same request on the transport as uploadBytes, beside downloadFile, so a browser transport can leave it out."
+    "upload_bytes": "Python sends an upload's bytes with a module function over the accessor's pool; TypeScript keeps the same request on the transport as uploadBytes, beside downloadFile, so a browser transport can leave it out."
    }
   },
   "core/discord/client": {
    "python_only": {
-    "discord_post_files": "Python posts a multipart message with a module function over the accessor' + chr(39) + 's pool; TypeScript keeps the same request on the transport as postFiles, beside call."
+    "discord_post_files": "Python posts a multipart message with a module function over the accessor's pool; TypeScript keeps the same request on the transport as postFiles, beside call."
    },
    "typescript_only": {
     "DiscordFile": "The shape postFiles takes for one attachment; Python passes a (name, bytes) tuple."
@@ -359,7 +359,7 @@
   "server/routers/shell": {
    "python_only": {
     "_finish_upload": "TypeScript keeps it as ShellUpload.finish.",
-    "_parse_json_body": "TypeScript parses a JSON body inline with ShellBodySchema.",
+    "_parse_json_body": "TypeScript parses a JSON body inline with ShellRequestSchema.",
     "_read_all": "TypeScript reads a background upload whole through readPart."
    },
    "typescript_only": {
@@ -767,7 +767,8 @@
   },
   "types": {
    "python_only": {
-    "CheckFn": "Python names the PrimitiveMove.check_unlink callable type beside MoveFn, as a forward reference to PathSpec; TypeScript types the field inline."
+    "CheckFn": "Python names the PrimitiveMove.check_unlink callable type beside MoveFn, as a forward reference to PathSpec; TypeScript types the field inline.",
+    "ReadBytesFn": "The reader Python's materialized_read (commands/builtin/utils/operands) hands a generic body; TypeScript has no polymorphic reader to normalize, so nothing names the type there."
    },
    "typescript_only": {
     "DirListingInit": "A TypeScript DirListing takes its fields as one object; the Python dataclass takes them as keywords.",
@@ -794,9 +795,6 @@
    }
   },
   "vfs/types": {
-   "python_only": {
-    "EndpointVFS": "Python asks an S3 mount for its endpoint through this runtime-checkable protocol, since importing the S3 VFS would load its optional extra; TypeScript asks `vfs instanceof S3VFSBase`, which core always carries."
-   },
    "typescript_only": {
     "Handed": "Python hands the stats as keyword arguments a backend function declares; TypeScript has no keyword arguments, so they ride in one object."
    }
@@ -1083,6 +1081,11 @@
   "vfs/registry": {
    "typescript_only": {
     "RAM_OPTIONS": "The TypeScript registry refuses unknown config keys against a per-backend key list, as DISK_OPTIONS does; Python's build_vfs reads the constructor's keywords."
+   }
+  },
+  "utils/posix": {
+   "typescript_only": {
+    "POSIX_CLASSES": "git's -P patterns name POSIX classes ([[:alpha:]]); JavaScript's RegExp has none, so git/history expands them from this table, where Python hands -P to the regex module, which reads them itself."
    }
   }
  }
