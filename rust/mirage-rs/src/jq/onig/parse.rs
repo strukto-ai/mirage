@@ -170,11 +170,13 @@ pub(super) enum Node {
     },
     Anchor(Anchor),
     /// The groups a reference may match, the last tried first, whether it
-    /// ignores case and its recursion level (`\k<n+l>`).
+    /// ignores case, its recursion level (`\k<n+l>`) and whether it sits
+    /// inside a group it names (Oniguruma's ND_ST_RECURSION).
     Backref {
         groups: Vec<usize>,
         fold: bool,
         level: Option<i64>,
+        inside: bool,
     },
     /// `(?(n)...)`'s test: whether a group is set, at a level.
     Check {
@@ -305,6 +307,8 @@ struct Parser {
     depth: usize,
     /// The highest group a backreference or condition names.
     referenced: usize,
+    /// The capture groups whose bodies are being read.
+    open: Vec<usize>,
     /// Whether `\g<0>` or `(?0)` calls the whole pattern.
     calls_zero: bool,
     callouts: Vec<Callout>,
@@ -323,6 +327,7 @@ pub(super) fn parse(pattern: &str, flags: Flags) -> Result<Parsed, String> {
         names: Vec::new(),
         depth: 0,
         referenced: 0,
+        open: Vec::new(),
         calls_zero: false,
         callouts: Vec::new(),
         tags: Vec::new(),
@@ -543,7 +548,10 @@ impl Parser {
         Ok(Atom::Node(match kind {
             Body::Root => unreachable!("the root is returned directly"),
             Body::Plain => alt(branches),
-            Body::Group(index) => Node::Group(index, Box::new(alt(branches))),
+            Body::Group(index) => {
+                self.open.pop();
+                Node::Group(index, Box::new(alt(branches)))
+            }
             Body::Look(behind, negate) => Node::Look {
                 behind,
                 negate,
@@ -969,6 +977,7 @@ impl Parser {
                 if !overflow && number <= MAX_BACKREF && (number <= self.groups || number <= 9) {
                     self.referenced = self.referenced.max(number);
                     Node::Backref {
+                        inside: self.open.contains(&number),
                         groups: vec![number],
                         fold: self.flags.ignore_case,
                         level: None,
@@ -993,6 +1002,7 @@ impl Parser {
                 let open = self.next().unwrap_or('<');
                 let (groups, level) = self.reference(open)?;
                 Node::Backref {
+                    inside: groups.iter().any(|group| self.open.contains(group)),
                     groups,
                     fold: self.flags.ignore_case,
                     level,
@@ -1301,6 +1311,7 @@ impl Parser {
 
     fn open_group(&mut self) -> usize {
         self.groups += 1;
+        self.open.push(self.groups);
         self.groups
     }
 

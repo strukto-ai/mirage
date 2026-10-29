@@ -447,7 +447,9 @@ impl Walk<'_> {
     }
 }
 
-/// node_min_byte_len in characters: a recursive call counts nothing.
+/// node_min_byte_len in characters: a recursive call counts nothing, nor
+/// does a backreference inside a group it names; any other counts the
+/// shortest of its groups.
 fn min_len(node: &Node, bodies: &[Option<&Node>], path: &mut Vec<usize>) -> usize {
     match node {
         Node::Char(_)
@@ -479,6 +481,23 @@ fn min_len(node: &Node, bodies: &[Option<&Node>], path: &mut Vec<usize>) -> usiz
             path.pop();
             len
         }
+        Node::Backref {
+            groups,
+            inside: false,
+            ..
+        } => groups
+            .iter()
+            .map(|&group| match bodies[group] {
+                Some(body) if !path.contains(&group) => {
+                    path.push(group);
+                    let len = min_len(body, bodies, path);
+                    path.pop();
+                    len
+                }
+                _ => 0,
+            })
+            .min()
+            .unwrap_or(0),
         Node::Cond {
             cond,
             then,
@@ -1145,6 +1164,7 @@ impl<'a> Compiler<'a> {
                         groups,
                         fold,
                         level,
+                        ..
                     } => {
                         self.emit(Inst::Backref {
                             groups: groups.clone().into_boxed_slice(),
