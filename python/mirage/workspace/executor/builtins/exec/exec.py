@@ -59,7 +59,6 @@ from mirage.types import PathSpec
 from mirage.workspace.executor.builtins.exec.constants import (
     CLOSED,
     EXEC_STREAM_FIELDS,
-    EXEC_USAGE,
     OPEN_FOR_READ_WRITE,
     OPEN_FOR_READING,
     TO_STDERR,
@@ -68,7 +67,10 @@ from mirage.workspace.executor.builtins.exec.constants import (
 )
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.scope import _to_scope
-from mirage.workspace.executor.builtins.shared import builtin_error
+from mirage.workspace.executor.builtins.shared import (
+    builtin_error,
+    builtin_usage,
+)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.create import create_file, write_description
 from mirage.workspace.executor.find_action_dispatch import program_head
@@ -121,7 +123,7 @@ async def handle_exec_command(
     if scan.bad is not None or refused is not None:
         err = (
             builtin_error("exec", f"{scan.bad}: invalid option")
-            + encode_text(EXEC_USAGE)
+            + encode_text(builtin_usage("exec"))
             if scan.bad is not None
             else encode_text(f"mirage: exec: -{refused}: not supported\n")
         )

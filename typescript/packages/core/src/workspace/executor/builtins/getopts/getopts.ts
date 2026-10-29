@@ -19,7 +19,7 @@ import { ReadonlyVariableError } from '../../../../shell/errors.ts'
 import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { isValidName, requireView } from '../shared.ts'
+import { builtinUsage, isValidName, requireView } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { positionalParams, sessionView } from '../../../session/state.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -82,7 +82,7 @@ export async function handleGetopts(
   state: SessionView | null = null,
 ): Promise<Result> {
   if (args.length < 2) {
-    const err = encodeText('getopts: usage: getopts optstring name [arg ...]\n')
+    const err = encodeText(builtinUsage('getopts'))
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),

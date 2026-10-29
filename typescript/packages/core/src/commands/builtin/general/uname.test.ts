@@ -15,9 +15,11 @@
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { VERSION } from '../../../version.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
-const ALL = 'Linux mirage mirage #1 Mirage x86_64 GNU/Linux\n'
+const KERNEL_VERSION = `#1 Mirage ${VERSION}`
+const ALL = `Linux mirage mirage ${KERNEL_VERSION} x86_64 GNU/Linux\n`
 
 function makeWs(): Workspace {
   const ram = new RAMVFS()
@@ -35,7 +37,7 @@ describe('uname', () => {
     ['uname --kernel-name', 'Linux\n'],
     ['uname -n', 'mirage\n'],
     ['uname -r', 'mirage\n'],
-    ['uname -v', '#1 Mirage\n'],
+    ['uname -v', `${KERNEL_VERSION}\n`],
     ['uname -m', 'x86_64\n'],
     ['uname -p', 'unknown\n'],
     ['uname -i', 'unknown\n'],
@@ -43,7 +45,7 @@ describe('uname', () => {
     ['uname -a', ALL],
     ['uname --all', ALL],
     ['uname -a -p', ALL],
-    ['uname -snrvmpio', 'Linux mirage mirage #1 Mirage x86_64 unknown unknown GNU/Linux\n'],
+    ['uname -snrvmpio', `Linux mirage mirage ${KERNEL_VERSION} x86_64 unknown unknown GNU/Linux\n`],
     ['uname -ms', 'Linux x86_64\n'],
     ['uname -o -n', 'mirage GNU/Linux\n'],
     ['uname -s -s', 'Linux\n'],

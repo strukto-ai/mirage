@@ -24,10 +24,10 @@ import { positionalParams, setPositionalParams } from '../../../session/state.ts
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { scopePath } from '../scope.ts'
-import { SOURCE_USAGE } from './constants.ts'
 import { readScriptText, scriptError } from './script.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { wordText } from '../../../../types.ts'
+import { builtinUsage } from '../shared.ts'
 
 /**
  * Read a script file and execute it in the calling shell, `name` (`source`
@@ -103,7 +103,12 @@ export async function sourceBuiltin(call: BuiltinCall): Promise<Result> {
   const target = operands[0]
   const name = call.argv.name
   if (target === undefined) {
-    return scriptError(`bash: ${name}`, SOURCE_USAGE.replaceAll('{name}', name), 2, name)
+    return scriptError(
+      `bash: ${name}`,
+      `filename argument required\n${builtinUsage(name).trimEnd()}`,
+      2,
+      name,
+    )
   }
   const sourceArgs = operands.slice(1).map((o) => wordText(o))
   return handleSource(

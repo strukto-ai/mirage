@@ -16,7 +16,8 @@ import type { ExecuteFn } from '../expand/types.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { IOResult } from '../../io/types.ts'
-import { fail } from '../executor/builtins/shared.ts'
+import { flagHelp } from '../executor/builtins/help/index.ts'
+import { builtinUsage, fail } from '../executor/builtins/shared.ts'
 import type { Result } from '../executor/builtins/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { DiscardSignal } from '../../shell/errors.ts'
@@ -84,8 +85,6 @@ function mergeConversionErrors(result: Result, errors: readonly string[]): Resul
 // /`-I` are modes the handlers read. `-n` stores the reference and every
 // reader and writer resolves through it (`deref` in `session/state`).
 const DECLARE_LETTERS: ReadonlySet<string> = new Set('aAfFgiIlnprtux')
-const DECLARE_USAGE =
-  'declare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]'
 // The attributes that shape a value as it stores.
 const SHAPING: ReadonlySet<VarAttr> = new Set([VarAttr.Integer, VarAttr.Lower, VarAttr.Upper])
 // `-l` displaces `-u` and vice versa; the record keeps one.
@@ -111,7 +110,7 @@ function declareOptionRefusal(
     .find((c) => !DECLARE_LETTERS.has(c))
   if (bad === undefined) return null
   const sign = flagChars.has(bad) ? '-' : '+'
-  return fail(cmd, `bash: ${cmd}: ${sign}${bad}: invalid option\n${DECLARE_USAGE}\n`, 2)
+  return fail(cmd, `bash: ${cmd}: ${sign}${bad}: invalid option\n${builtinUsage(cmd)}`, 2)
 }
 
 /**
@@ -270,6 +269,12 @@ export async function executeDeclaration(
         traceCommand([cmdWord, ...traced]),
       ]),
     )
+  }
+  if (traced[0] === '--help') {
+    // bash answers `--help` as the first word with the builtin's help,
+    // before it reads a single option.
+    const answered = flagHelp(cmdWord)
+    if (answered !== null) return answered
   }
   if (VISIBLE_SCOPE_BUILTINS.has(keyword)) {
     // Array literals travel as data: the handler stores them through

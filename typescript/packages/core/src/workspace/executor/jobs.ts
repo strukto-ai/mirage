@@ -67,6 +67,7 @@ import { ExecutionNode } from '../types.ts'
 import { inheritTraps } from './traps.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { ExecuteNodeOpts, ExecuteNodeFn } from './command/types.ts'
+import { builtinUsage } from './builtins/shared.ts'
 
 export type JobHandlerResult = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -533,8 +534,6 @@ export function runStatement(
   )
 }
 
-const WAIT_USAGE = 'wait: usage: wait [-fn] [-p var] [id ...]'
-const DISOWN_USAGE = 'disown: usage: disown [-h] [-ar] [jobspec ... | pid ...]'
 const JOB_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 function jobResult(cmdStr: string, msg: string, code: number): JobHandlerResult {
@@ -684,7 +683,7 @@ export async function handleWait(
         } else {
           return jobResult(
             cmdStr,
-            `bash: wait: -p: option requires an argument\n${WAIT_USAGE}\n`,
+            `bash: wait: -p: option requires an argument\n${builtinUsage('wait')}`,
             2,
           )
         }
@@ -696,7 +695,7 @@ export async function handleWait(
       j++
     }
     if (bad !== null) {
-      return jobResult(cmdStr, `bash: wait: -${bad}: invalid option\n${WAIT_USAGE}\n`, 2)
+      return jobResult(cmdStr, `bash: wait: -${bad}: invalid option\n${builtinUsage('wait')}`, 2)
     }
     i++
   }
@@ -788,7 +787,11 @@ export async function handleDisown(
   const sid = sessionOf(session)
   const scan = scanOptions(parts.slice(1), 'arh')
   if (scan.bad !== null) {
-    return jobResult(cmdStr, `bash: disown: ${scan.bad}: invalid option\n${DISOWN_USAGE}\n`, 2)
+    return jobResult(
+      cmdStr,
+      `bash: disown: ${scan.bad}: invalid option\n${builtinUsage('disown')}`,
+      2,
+    )
   }
   const allJobs = scan.letters.includes('a')
   const runningOnly = scan.letters.includes('r')
@@ -889,9 +892,6 @@ export async function handleFg(
   ]
 }
 
-const KILL_USAGE =
-  'kill: usage: kill [-s sigspec | -n signum | -sigspec] pid | jobspec ... or kill -l [sigspec]'
-
 // The signals a managed runner answers besides the probe (0). Each one ends
 // the runner through its cancellation channel, carrying the signal: a
 // native program the runner started receives it, KILL a second later if
@@ -985,7 +985,7 @@ export async function handleKill(
       words = words.slice(1)
       break
     } else if (word === '-?') {
-      return jobResult(cmdStr, `${KILL_USAGE}\n`, 2)
+      return jobResult(cmdStr, builtinUsage('kill'), 2)
     } else if (word.startsWith('-') && word.length > 1 && !sawSignal) {
       spec = word.slice(1)
       words = words.slice(1)
@@ -996,7 +996,7 @@ export async function handleKill(
       return jobResult(cmdStr, `${voice}kill: ${spec}: invalid signal specification\n`, 1)
     signal = number
   }
-  if (words.length === 0) return jobResult(cmdStr, `${KILL_USAGE}\n`, 2)
+  if (words.length === 0) return jobResult(cmdStr, builtinUsage('kill'), 2)
   const processes = processView(jobTable, session)
   const errors: string[] = []
   let signalled = false
@@ -1079,7 +1079,6 @@ export async function handleKill(
 }
 
 const JOBS_FLAGS: ReadonlySet<string> = new Set('lnprs')
-const JOBS_USAGE = 'jobs: usage: jobs [-lnprs] [jobspec ...] or jobs -x command [args]'
 
 /** One `jobs` line; `-l` includes the managed PID. */
 function jobRow(job: Job, long: boolean): string {
@@ -1115,7 +1114,7 @@ export async function handleJobs(
       if (word === '--') continue
       const bad = Array.from(word.slice(1)).find((c) => !JOBS_FLAGS.has(c))
       if (bad !== undefined) {
-        const err = encodeText(`bash: jobs: -${bad}: invalid option\n${JOBS_USAGE}\n`)
+        const err = encodeText(`bash: jobs: -${bad}: invalid option\n${builtinUsage('jobs')}`)
         return [
           null,
           new IOResult({ exitCode: 2, stderr: err }),

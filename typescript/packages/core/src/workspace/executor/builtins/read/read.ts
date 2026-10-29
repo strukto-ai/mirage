@@ -25,6 +25,7 @@ import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import {
+  builtinUsage,
   countOperand,
   isValidName,
   readonlyRefusal,
@@ -33,7 +34,7 @@ import {
   requireView,
 } from '../shared.ts'
 import { TARGET_RE } from '../constants.ts'
-import { READ_USAGE, READ_VALUE_LETTERS } from './constants.ts'
+import { READ_VALUE_LETTERS } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
@@ -210,7 +211,7 @@ export async function handleRead(
   const parse = parseShellOptions(SHELL_SPECS.read, args)
   if (parse.invalid !== null) {
     const token = parse.invalid.startsWith('--') ? parse.invalid : `-${parse.invalid}`
-    const err = encodeText(`bash: read: ${token}: invalid option\n${READ_USAGE}`)
+    const err = encodeText(`bash: read: ${token}: invalid option\n${builtinUsage('read')}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -219,7 +220,7 @@ export async function handleRead(
   }
   if (parse.needsValue !== null) {
     const err = encodeText(
-      `bash: read: -${parse.needsValue}: option requires an argument\n${READ_USAGE}`,
+      `bash: read: -${parse.needsValue}: option requires an argument\n${builtinUsage('read')}`,
     )
     return [
       null,

@@ -63,12 +63,7 @@ if TYPE_CHECKING:
         handle_type,
         handle_which,
     )
-    from mirage.workspace.executor.builtins.man import (
-        _command_entry,
-        _render_man_index,
-        _render_page,
-        handle_man,
-    )
+    from mirage.workspace.executor.builtins.man import handle_man
     from mirage.workspace.executor.builtins.mapfile import handle_mapfile
     from mirage.workspace.executor.builtins.metadata import (
         handle_chgrp,
@@ -127,12 +122,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "handle_type",
         "handle_which",
     ),
-    "mirage.workspace.executor.builtins.man": (
-        "_command_entry",
-        "_render_man_index",
-        "_render_page",
-        "handle_man",
-    ),
+    "mirage.workspace.executor.builtins.man": ("handle_man",),
     "mirage.workspace.executor.builtins.mapfile": ("handle_mapfile",),
     "mirage.workspace.executor.builtins.metadata": (
         "handle_chgrp",
@@ -190,11 +180,8 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
 }
 
 __all__ = [
-    "_command_entry",
     "handle_alias",
     "handle_unalias",
-    "_render_man_index",
-    "_render_page",
     "_scope_path",
     "_to_scope",
     "handle_bash",

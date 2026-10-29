@@ -21,12 +21,11 @@ from mirage.workspace.executor.builtins.lookup.classify import (
 )
 from mirage.workspace.executor.builtins.lookup.constants import (
     TYPE_OPTIONS,
-    TYPE_USAGE,
     WHICH_OPTIONS,
     WHICH_USAGE,
 )
 from mirage.workspace.executor.builtins.lookup.types import NameKind
-from mirage.workspace.executor.builtins.shared import result
+from mirage.workspace.executor.builtins.shared import builtin_usage, result
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup import program
 from mirage.workspace.mount import MountRegistry
@@ -61,7 +60,7 @@ def handle_type(
         return result(
             "type",
             exit_code=2,
-            stderr=f"bash: type: {scan.bad}: invalid option\n{TYPE_USAGE}",
+            stderr=f"bash: type: {scan.bad}: invalid option\n{builtin_usage('type')}",
         )
     mode = last_of(scan.letters, "tpP")
     all_mode = "a" in scan.letters

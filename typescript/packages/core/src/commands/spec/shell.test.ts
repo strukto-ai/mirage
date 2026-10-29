@@ -147,4 +147,11 @@ describe('parseShellOptions', () => {
     expect(parse.flags).toEqual({ r: true })
     expect(parse.operands).toEqual(['v'])
   })
+
+  it('reads every short spelling of an option', () => {
+    for (const word of ['-?', '-h', '--help', '--he']) {
+      const parse = parseShellOptions(SHELL_SPECS.man, [word, 'ls'])
+      expect([parse.flags, parse.operands]).toEqual([{ '?': true }, ['ls']])
+    }
+  })
 })

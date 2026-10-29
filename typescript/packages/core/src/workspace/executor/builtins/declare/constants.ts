@@ -12,10 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const EXPORT_USAGE = 'export: usage: export [-fn] [name[=value] ...] or export -p\n'
-
-export const READONLY_USAGE = 'readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n'
-
 // bash takes `-a` / `-A` too, though its usage line names only `-fn`.
 export const EXPORT_FLAGS = new Set('aAfnp')
 

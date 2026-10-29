@@ -154,6 +154,28 @@ def check_cli_specs(trees: dict[str, dict[str, Any]]) -> list[str]:
     return failures
 
 
+def check_shell_specs(trees: dict[str, dict[str, Any]]) -> list[str]:
+    """Compare the shell's own specs and both synopsis tables: what
+    ``help``, ``NAME --help``, ``man`` and the usage lines print.
+
+    Args:
+        trees (dict[str, dict[str, Any]]): the generated host manifests.
+    """
+    failures = []
+    for key in ("shell_specs", "synopses"):
+        missing = [host for host, tree in trees.items() if key not in tree]
+        if missing:
+            failures.append(f"{key} missing for {missing}; regenerate them")
+            continue
+        for host in ("node", "browser"):
+            failures.extend(
+                cli_differences(
+                    trees["python"][key], trees[host][key], f"{key} ({host})"
+                )
+            )
+    return failures
+
+
 def merge_variants(
     loaded: dict[str, dict[str, Any]], key: str, language_only: set[str]
 ) -> dict[str, Any]:
@@ -707,6 +729,7 @@ def main() -> int:
 
     trees = load_vfs_trees()
     failures.extend(check_cli_specs(trees))
+    failures.extend(check_shell_specs(trees))
     failures.extend(compare_variants(ts_variants))
     failures.extend(
         check_vfs_names(trees, language_only, expansions, unconstructible)

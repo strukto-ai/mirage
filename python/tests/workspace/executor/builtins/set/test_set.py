@@ -74,3 +74,24 @@ async def test_set_refuses_an_unknown_option_name_with_2():
     session = SessionState(session_id="s1")
     out, io, _ = await handle_set(["-o", "nosuchoption"], session)
     assert out is None and io.exit_code == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("args", "named"), [(["-z"], "-z"), (["-xz"], "-z"), (["-e", "+%"], "+%")]
+)
+async def test_a_letter_set_lacks_refuses_the_whole_line(args, named):
+    session = SessionState(session_id="s1")
+    _, io, node = await handle_set([*args, "a"], session)
+    assert node.exit_code == 2
+    assert (
+        io.stderr
+        == (
+            f"bash: set: {named}: invalid option\n"
+            "set: usage: set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [-] "
+            "[arg ...]\n"
+        ).encode()
+    )
+    assert not session.shell_options.get("xtrace")
+    assert not session.shell_options.get("errexit")
+    assert session.positional_args == []

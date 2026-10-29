@@ -18,7 +18,9 @@ from mirage.shell.constants import FUNCNAME
 from mirage.shell.errors import ArithError
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
+from mirage.workspace.executor.builtins.help import flag_help
 from mirage.workspace.executor.builtins.shared import (
+    builtin_usage,
     fail,
     ok,
     refusal,
@@ -156,6 +158,10 @@ async def handle_unset(
         args (list[str]): option words followed by names to unset.
         session (SessionState): shell session state.
     """
+    if args[:1] == ["--help"]:
+        answered = flag_help("unset")
+        if answered is not None:
+            return answered
     mode = "auto"
     i = 0
     while i < len(args) and args[i].startswith("-") and args[i] != "-":
@@ -172,7 +178,11 @@ async def handle_unset(
                 mode = "v"
             i += 1
             continue
-        return fail("unset", f"bash: unset: {tok}: invalid option\n", 2)
+        return fail(
+            "unset",
+            f"bash: unset: {tok}: invalid option\n" + builtin_usage("unset"),
+            2,
+        )
     for name in args[i:]:
         if mode == "n":
             # `unset -n` drops the reference itself rather than what it

@@ -2211,12 +2211,12 @@ def test_man_bash_renders_spec():
     io = _exec(ws, "man bash")
     assert io.exit_code == 0
     out = _stdout(io)
-    assert b"# bash" in out
+    assert out.startswith(b"BASH(1) ")
     assert b"-c" in out
     assert b"RESOURCES" not in out
     io2 = _exec(ws, "man sh")
     assert io2.exit_code == 0
-    assert b"# sh" in _stdout(io2)
+    assert b"NAME\n       sh - " in _stdout(io2)
 
 
 def test_python_pipe_stdin():
@@ -3018,26 +3018,26 @@ def test_man_date_entry():
     io = _exec(ws, "man date")
     assert io.exit_code == 0
     text = _stdout(io).decode()
-    assert text.startswith("# date\n")
-    assert "## OPTIONS" in text
+    assert text.startswith("DATE(1) ")
+    assert "\nOPTIONS\n" in text
     assert "RESOURCES" not in text
 
 
 def test_man_no_entry():
     ws = _ws()
     io = _exec(ws, "man definitely-not-a-real-command")
-    assert io.exit_code == 1
-    assert io.stderr == b"man: no entry for definitely-not-a-real-command\n"
+    assert io.exit_code == 16
+    assert io.stderr == b"No manual entry for definitely-not-a-real-command\n"
 
 
-def test_man_index_lists_commands():
+def test_man_k_lists_commands():
     ws = _ws()
-    io = _exec(ws, "man")
+    io = _exec(ws, "man -k .")
     assert io.exit_code == 0
-    text = _stdout(io).decode()
-    assert text.startswith("# commands\n\n")
-    assert "- bc" in text
-    assert "# general" not in text
+    names = {
+        line.split(" ", 1)[0] for line in _stdout(io).decode().split("\n")
+    }
+    assert {"bc", "date", "help"} <= names
 
 
 @pytest.mark.asyncio

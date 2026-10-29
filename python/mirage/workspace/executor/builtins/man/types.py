@@ -14,22 +14,30 @@
 
 from dataclasses import dataclass
 
-from mirage.commands.spec.types import CommandSpec
+# A paragraph, or a tagged paragraph: a word set off at the margin
+# (an option, a subcommand) and the text that explains it.
+ManBlock = str | tuple[str, str]
+
+# A heading after NAME and the blocks under it.
+ManSection = tuple[str, tuple[ManBlock, ...]]
 
 
 @dataclass(frozen=True, slots=True)
-class ManEntry:
-    """One entry of the manual: a documented word and the spec its page
-    renders from.
+class ManPage:
+    """One page of the manual, before it is laid out to a width.
 
-    A name has one spec however many mounts register it, so the entry
-    carries no mount and no VFS; which backend serves the word is
-    dispatch's business, not the manual's.
+    Every page is in section 1, whatever documents it: a builtin's
+    help topic, a mounted command's spec, or a node of an installed CLI.
 
     Args:
-        name (str): the word as the manual lists it.
-        spec (CommandSpec): the spec the page renders from.
+        name (str): the page, as ``man`` and ``man -f`` name it
+            (``git-commit`` for a CLI's subcommand).
+        summary (str): the line after the name in NAME; empty when the
+            source carries none.
+        sections (tuple[ManSection, ...]): each heading after NAME and
+            the blocks under it.
     """
 
     name: str
-    spec: CommandSpec
+    summary: str
+    sections: tuple[ManSection, ...]

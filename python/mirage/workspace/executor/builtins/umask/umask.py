@@ -17,12 +17,10 @@ from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.utils.mode import parse_chmod
 from mirage.workspace.executor.builtins.getopt import scan_options
-from mirage.workspace.executor.builtins.shared import fail
+from mirage.workspace.executor.builtins.shared import builtin_usage, fail
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
-
-_USAGE = "umask: usage: umask [-p] [-S] [mode]"
 
 
 def symbolic_umask(mask: int) -> str:
@@ -109,7 +107,9 @@ async def handle_umask(
     scan = scan_options(args, "Sp")
     if scan.bad is not None:
         return fail(
-            "umask", f"bash: umask: {scan.bad}: invalid option\n{_USAGE}\n", 2
+            "umask",
+            f"bash: umask: {scan.bad}: invalid option\n{builtin_usage('umask')}",
+            2,
         )
     symbolic = "S" in scan.letters
     reusable = "p" in scan.letters

@@ -212,32 +212,39 @@ export const SPECS: Record<string, CommandSpec> = {
     arguments: [TEXTS_OPERAND],
   }),
   history: new CommandSpec({
-    description: 'Show command history for the session.',
+    description:
+      'Print or change the command history.\n\n' +
+      'With no options, prints the history with a number on each line, or only its last N lines.',
+    epilog: '0 unless an option or OFFSET is invalid.',
     arguments: [
-      new Argument('-c', { action: 'store_true', help: 'Clear the command history.' }),
+      new Argument('-c', { action: 'store_true', help: 'clear the history' }),
       new Argument('-d', {
-        help: 'Delete the entry at the given position; negative counts back from the end.',
+        metavar: 'offset',
+        help: 'delete the entry at OFFSET; below 0, from the end',
       }),
-      new Argument('-s', {
-        action: 'store_true',
-        help: 'Append the args to the history as a single entry without executing them.',
-      }),
-      new Argument('-p', { action: 'store_true', help: 'Print the args without storing them.' }),
       new Argument('-a', {
         action: 'store_true',
-        help: 'Append: no-op (file and store are the same).',
-      }),
-      new Argument('-r', {
-        action: 'store_true',
-        help: 'Read: no-op (file and store are the same).',
-      }),
-      new Argument('-w', {
-        action: 'store_true',
-        help: 'Write: no-op (file and store are the same).',
+        help: 'accepted, with no effect: the history file is the list',
       }),
       new Argument('-n', {
         action: 'store_true',
-        help: 'Read-new: no-op (file and store are the same).',
+        help: 'accepted, with no effect: the history file is the list',
+      }),
+      new Argument('-r', {
+        action: 'store_true',
+        help: 'accepted, with no effect: the history file is the list',
+      }),
+      new Argument('-w', {
+        action: 'store_true',
+        help: 'accepted, with no effect: the history file is the list',
+      }),
+      new Argument('-p', {
+        action: 'store_true',
+        help: 'print each ARG, with no history expansion',
+      }),
+      new Argument('-s', {
+        action: 'store_true',
+        help: 'add the ARGs to the history as one entry',
       }),
       TEXTS_OPERAND,
     ],

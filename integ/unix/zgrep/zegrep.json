@@ -60,10 +60,10 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "[ \"$(man zegrep | sed 1d)\" = \"$(man zgrep | sed 1d)\" ] && echo same; man zfgrep | head -1; man | grep -cE '^- (zegrep|zfgrep) '",
+      "command": "[ \"$(man zegrep | sed -n '/^SYNOPSIS/,$p' | sed '$d')\" = \"$(man zgrep | sed -n '/^SYNOPSIS/,$p' | sed '$d')\" ] && echo same; man zfgrep | head -1 | cut -d' ' -f1; man -k '^z[ef]grep$' | cut -d' ' -f1",
       "expect": {
         "exit": 0,
-        "stdout": "same\n# zfgrep\n2\n",
+        "stdout": "same\nZFGREP(1)\nzegrep\nzfgrep\n",
         "stderr": ""
       }
     }

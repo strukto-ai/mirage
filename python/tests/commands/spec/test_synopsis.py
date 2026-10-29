@@ -3,7 +3,8 @@ import pytest
 from mirage.commands.config import Context, _answer_standard_options
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.help import render_help
-from mirage.commands.spec.synopsis import SYNOPSES
+from mirage.commands.spec.shell import SHELL_SPECS
+from mirage.commands.spec.synopsis import SHELL_SYNOPSES, SYNOPSES
 from mirage.commands.spec.types import CommandSpec
 from mirage.io.types import materialize
 
@@ -21,9 +22,16 @@ async def _help_of(name, spec) -> str:
 
 def test_every_synopsis_names_a_builtin_and_starts_with_it():
     for name, line in SYNOPSES.items():
-        assert name in SPECS
+        assert name in SPECS or name in SHELL_SPECS
         assert line.split(" ", 1)[0] == name
         assert not line.startswith("Usage:")
+
+
+def test_every_shell_synopsis_has_a_spec_and_a_builtin_starts_with_it():
+    for name, line in SHELL_SYNOPSES.items():
+        assert name in SHELL_SPECS
+        if name.isidentifier():
+            assert line.split(" ", 1)[0] == name
 
 
 def test_a_synopsis_replaces_the_synthesized_line():

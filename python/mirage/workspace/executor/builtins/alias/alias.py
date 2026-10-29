@@ -20,13 +20,12 @@ from mirage.shell.helpers import alias_rewrite
 from mirage.shell.types import TSNodeLike
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.alias.constants import (
-    ALIAS_USAGE,
     BAD_NAME_CHARS,
-    UNALIAS_USAGE,
 )
 from mirage.workspace.executor.builtins.alias.types import AliasMark
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.shared import (
+    builtin_usage,
     fail,
     finish,
     ok,
@@ -60,7 +59,7 @@ async def handle_alias(
     if scan.bad is not None:
         return fail(
             "alias",
-            f"bash: alias: {scan.bad}: invalid option\n{ALIAS_USAGE}\n",
+            f"bash: alias: {scan.bad}: invalid option\n{builtin_usage('alias')}",
             2,
         )
     operands = scan.operands
@@ -120,7 +119,7 @@ async def handle_unalias(
     if scan.bad is not None:
         return fail(
             "unalias",
-            f"bash: unalias: {scan.bad}: invalid option\n{UNALIAS_USAGE}\n",
+            f"bash: unalias: {scan.bad}: invalid option\n{builtin_usage('unalias')}",
             2,
         )
     operands = scan.operands
@@ -130,7 +129,7 @@ async def handle_unalias(
         session.aliases.clear()
         return ok("unalias")
     if not operands:
-        return fail("unalias", f"{UNALIAS_USAGE}\n", 2)
+        return fail("unalias", builtin_usage("unalias"), 2)
     errors: list[str] = []
     for name in operands:
         if name in session.aliases:

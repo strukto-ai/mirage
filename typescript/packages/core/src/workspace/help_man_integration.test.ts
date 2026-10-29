@@ -136,34 +136,40 @@ describe('--help and man through the executor', () => {
     expect(out).toContain('cat')
   })
 
-  it('man with no args lists every command by kind of word', async () => {
-    const ws = makeWs()
-    const io = await ws.shell('man')
-    const out = stdoutStr(io)
+  it('man with no page asks for one', async () => {
+    const io = await makeWs().shell('man')
+    expect(io.exitCode).toBe(1)
+    expect(stderrStr(io)).toBe("What manual page do you want?\nFor example, try 'man man'.\n")
+  })
+
+  it('man -k lists every command', async () => {
+    const io = await makeWs().shell('man -k .')
     expect(io.exitCode).toBe(0)
-    expect(out.startsWith('# commands\n\n')).toBe(true)
-    expect(out).toContain('- cat')
-    expect(out).toContain('- ls')
-    expect(out).not.toContain('# ram')
-    expect(out).not.toContain('# general')
+    const names = new Set(
+      stdoutStr(io)
+        .split('\n')
+        .map((line) => line.split(' ', 1)[0]),
+    )
+    for (const name of ['cat', 'ls', 'cd', 'help']) expect(names.has(name)).toBe(true)
+    expect(stdoutStr(io)).not.toContain('RAM')
   })
 
   it('man documents a wrapper with the page of the program it runs', async () => {
     // Twin of test_a_wrapper_has_the_page_of_the_program_it_runs: Debian
     // links egrep's page to grep's.
     const ws = makeWs()
-    const grep = stdoutStr(await ws.shell('man grep'))
-    const io = await ws.shell('man egrep')
-    expect(io.exitCode).toBe(0)
-    expect(stdoutStr(io)).toBe(grep.replace('# grep\n', '# egrep\n'))
-    expect(stdoutStr(await ws.shell('man'))).toContain('- egrep ')
+    const body = async (name: string): Promise<string[]> =>
+      stdoutStr(await ws.shell(`man ${name}`))
+        .split('\n')
+        .slice(4, -2)
+    expect(await body('egrep')).toEqual(await body('grep'))
+    expect(stdoutStr(await ws.shell('man -k .'))).toContain('\negrep (1) ')
   })
 
-  it('man on an unknown command exits 1', async () => {
-    const ws = makeWs()
-    const io = await ws.shell('man definitely-not-a-real-command')
-    expect(io.exitCode).toBe(1)
-    expect(stderrStr(io)).toContain('no entry for')
+  it('man on an unknown command exits 16', async () => {
+    const io = await makeWs().shell('man definitely-not-a-real-command')
+    expect(io.exitCode).toBe(16)
+    expect(stderrStr(io)).toBe('No manual entry for definitely-not-a-real-command\n')
   })
 
   it('an installed CLI is discoverable from the shell', async () => {
@@ -172,8 +178,10 @@ describe('--help and man through the executor', () => {
     expect(stdoutStr(await ws.shell('type -t linear'))).toBe('file\n')
     expect(stdoutStr(await ws.shell('which linear'))).toBe('/usr/bin/linear\n')
     expect(stdoutStr(await ws.shell('cat /usr/bin/linear'))).toContain('command linear')
-    expect(stdoutStr(await ws.shell('man linear'))).toContain('usage: linear')
-    expect(stdoutStr(await ws.shell('man'))).toContain('# clis')
+    expect(stdoutStr(await ws.shell('man linear'))).toContain('SYNOPSIS\n       linear ')
+    expect(stdoutStr(await ws.shell('man -f linear'))).toBe(
+      'linear (1)           - Linear API client\n',
+    )
   })
 
   it('man lists every CLI verb whatever the profile', async () => {
@@ -204,11 +212,10 @@ describe('--help and man through the executor', () => {
     )
   })
 
-  it('workspace vfsMd mentions --help and man (with and without args)', async () => {
+  it('workspace vfsMd mentions --help and man', async () => {
     const ws = makeWs()
     const prompt = await ws.vfsMd()
     expect(prompt).toContain('--help')
     expect(prompt).toContain('man <cmd>')
-    expect(prompt).toContain('`man`')
   })
 })

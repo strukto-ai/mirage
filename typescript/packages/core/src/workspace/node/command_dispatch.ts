@@ -59,6 +59,7 @@ import { argumentListTooLong } from '../executor/command/handler.ts'
 import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/command.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
+import { flagHelp } from '../executor/builtins/help/index.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import { guardIO } from '../../commands/builtin/utils/limit.ts'
@@ -978,6 +979,15 @@ async function routeArgv(
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
     return runExternal(argv, stdin, session, registry, routing, signal, sink)
+  }
+
+  // `--help` as a builtin's first word: bash answers it with the builtin's
+  // help and status 2 before the builtin reads its options, the job
+  // builtins included. A program run (`find -exec printf --help`) is the
+  // program's own, not this.
+  if (argv.args[0] === '--help' && !isProgramInvocation(session)) {
+    const answered = flagHelp(name)
+    if (answered !== null) return answered
   }
 
   // Shell builtins. One lookup: every executor-run builtin word maps to

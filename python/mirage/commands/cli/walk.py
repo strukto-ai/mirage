@@ -314,16 +314,18 @@ def node_help(
             the leaf refusal follows.
     """
     if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA):
-        return argparse_help(name, listed_node(node, style), _rows(node))
+        return argparse_help(
+            name, listed_node(node, style), subcommand_rows(node)
+        )
     return render_help(
         name,
         listed_node(node, style),
-        subcommands=_rows(node),
+        subcommands=subcommand_rows(node),
         style=style,
     )
 
 
-def _rows(node: CommandSpec) -> list[tuple[str, str]]:
+def subcommand_rows(node: CommandSpec) -> list[tuple[str, str]]:
     """The node's child rows, as the renderer lists them.
 
     Args:
@@ -403,7 +405,7 @@ def _usage_error(
         )
         return WalkResult(
             output=clap_group_refusal(
-                name, listed_node(node, style), _rows(node), first
+                name, listed_node(node, style), subcommand_rows(node), first
             ),
             stream="stderr",
             exit_code=CLAP_EXIT,

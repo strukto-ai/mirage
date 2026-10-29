@@ -38,10 +38,8 @@ from mirage.workspace.executor.builtins.declare.constants import (
     ANSI_C_ESCAPES,
     BARE_KEY_RE,
     EXPORT_FLAGS,
-    EXPORT_USAGE,
     LISTED_ATTRIBUTES,
     READONLY_FLAGS,
-    READONLY_USAGE,
     SUBSCRIPT_RE,
     VISIBLE_SCOPE_BUILTINS,
 )
@@ -50,6 +48,7 @@ from mirage.workspace.executor.builtins.declare.types import (
     DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.shared import (
+    builtin_usage,
     fail,
     is_valid_name,
     ok,
@@ -948,7 +947,7 @@ async def mark_names(
         assignments, EXPORT_FLAGS if exporting else READONLY_FLAGS
     )
     if bad is not None:
-        usage = EXPORT_USAGE if exporting else READONLY_USAGE
+        usage = builtin_usage("export" if exporting else "readonly")
         return fail(cmd, f"bash: {cmd}: -{bad}: invalid option\n{usage}", 2)
     on = "n" not in flags
     kind = declared_kind(flags)

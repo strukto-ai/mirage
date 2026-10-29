@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { atoi } from '../../commands/builtin/utils/strtol.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { lineBuffer } from '../../io/async_line_iterator.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -574,7 +575,7 @@ export async function handleCase(
  * to an 8-wide stop, one entry per row when they all fit on one.
  */
 function selectMenu(words: readonly string[], columns: string): string {
-  const width = parseInt(/^\s*[+-]?\d+/.exec(columns)?.[0] ?? '0', 10)
+  const width = atoi(columns)
   const indexLen = String(words.length).length
   const cell = Math.max(...words.map((w) => Array.from(w).length)) + indexLen + 4
   let rows = Math.ceil(words.length / Math.max(Math.floor((width > 0 ? width : 80) / cell), 1))

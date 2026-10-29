@@ -106,6 +106,7 @@ from mirage.workspace.executor.builtins.alias import (
     alias_mark,
     expanding_aliases,
 )
+from mirage.workspace.executor.builtins.help import flag_help
 from mirage.workspace.executor.builtins.table import BUILTINS
 from mirage.workspace.executor.builtins.types import BuiltinCall
 from mirage.workspace.executor.command import handle_command
@@ -1072,6 +1073,15 @@ async def _route_argv(
         return await run_external(
             argv, stdin, session, registry, routing, sink
         )
+
+    # ── `--help` as a builtin's first word ─────
+    # bash answers it with the builtin's help and status 2 before the
+    # builtin reads its options, the job builtins included. A program
+    # run (`find -exec printf --help`) is the program's own, not this.
+    if argv.args[:1] == ("--help",) and not program_invocation(session):
+        answered = flag_help(name)
+        if answered is not None:
+            return answered
 
     # ── shell builtins ──────────────────────────
     # One lookup: every executor-run builtin word maps to a handler that

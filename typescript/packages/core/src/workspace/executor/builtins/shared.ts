@@ -14,6 +14,7 @@
 
 import { specOf } from '../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
+import { SHELL_SYNOPSES } from '../../../commands/spec/synopsis.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { SessionView } from '../../../view/types.ts'
 import type { PolicyDenied } from '../../../policy/errors.ts'
@@ -295,6 +296,17 @@ export function isCountWord(word: string): boolean {
 /** A shell builtin's diagnostic in bash's voice. Mirrors Python's builtin_error. */
 export function builtinError(name: string, message: string): Uint8Array {
   return encodeText(`bash: ${name}: ${message}\n`)
+}
+
+/**
+ * A builtin's usage line, which bash prints after refusing one of its
+ * options: the synopsis `help NAME` opens with. Mirrors Python's
+ * builtin_usage.
+ */
+export function builtinUsage(name: string): string {
+  const synopsis = SHELL_SYNOPSES[name]
+  if (synopsis === undefined) throw new Error(`no synopsis: ${name}`)
+  return `${name}: usage: ${synopsis}\n`
 }
 
 /**

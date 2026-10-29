@@ -280,7 +280,7 @@ class OptionWord:
         settings (tuple[tuple[str, bool], ...]): shell options the word
             turns on or off, in the order they were written.
         other (str): cluster letters that name no shell option. `set`
-            ignores them; shell startup reads its own startup letters
+            refuses them; shell startup reads its own startup letters
             out of them and refuses the rest.
         consumed (int): words the option took, 2 for the `-o NAME` form.
     """
@@ -423,6 +423,7 @@ class ShellBuiltin(StrEnum):
     # -- name lookup
     TYPE = "type"
     WHICH = "which"
+    HELP = "help"
     # -- status and control flow
     TRUE = "true"
     FALSE = "false"
@@ -483,8 +484,8 @@ class BuiltinGroup(StrEnum):
 
     Every group sits in exactly one tier (``GROUP_TIER``), so filing a
     word in a group also files its tier; ``BUILTIN_GROUP`` is the one
-    row per word. A listing (bare ``man``) or a rule can name a group
-    where it would otherwise have to spell out the words.
+    row per word. A rule can name a group where it would otherwise have
+    to spell out the words.
     """
 
     # grammar

@@ -208,46 +208,48 @@ SPECS: dict[str, CommandSpec] = {
         arguments=(TEXTS_OPERAND,),
     ),
     "history": CommandSpec(
-        description="Show command history for the session.",
+        description=(
+            "Print or change the command history.\n\n"
+            "With no options, prints the history with a number on each "
+            "line, or only its last N lines."
+        ),
+        epilog="0 unless an option or OFFSET is invalid.",
         arguments=(
-            Argument(
-                "-c", action="store_true", help="Clear the command history."
-            ),
+            Argument("-c", action="store_true", help="clear the history"),
             Argument(
                 "-d",
-                help="Delete the entry at the given position; "
-                "negative counts back from the end.",
-            ),
-            Argument(
-                "-s",
-                action="store_true",
-                help="Append the args to the history as a "
-                "single entry without executing them.",
-            ),
-            Argument(
-                "-p",
-                action="store_true",
-                help="Print the args without storing them.",
+                metavar="offset",
+                help="delete the entry at OFFSET; below 0, from the end",
             ),
             Argument(
                 "-a",
                 action="store_true",
-                help="Append: no-op (file and store are the same).",
-            ),
-            Argument(
-                "-r",
-                action="store_true",
-                help="Read: no-op (file and store are the same).",
-            ),
-            Argument(
-                "-w",
-                action="store_true",
-                help="Write: no-op (file and store are the same).",
+                help="accepted, with no effect: the history file is the list",
             ),
             Argument(
                 "-n",
                 action="store_true",
-                help="Read-new: no-op (file and store are the same).",
+                help="accepted, with no effect: the history file is the list",
+            ),
+            Argument(
+                "-r",
+                action="store_true",
+                help="accepted, with no effect: the history file is the list",
+            ),
+            Argument(
+                "-w",
+                action="store_true",
+                help="accepted, with no effect: the history file is the list",
+            ),
+            Argument(
+                "-p",
+                action="store_true",
+                help="print each ARG, with no history expansion",
+            ),
+            Argument(
+                "-s",
+                action="store_true",
+                help="add the ARGs to the history as one entry",
             ),
             TEXTS_OPERAND,
         ),

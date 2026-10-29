@@ -20,6 +20,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ReadonlyVariableError
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.shared import (
+    builtin_usage,
     is_valid_name,
     require_view,
 )
@@ -97,7 +98,7 @@ async def handle_getopts(
         state (SessionView | None): the gated session view.
     """
     if len(args) < 2:
-        err = b"getopts: usage: getopts optstring name [arg ...]\n"
+        err = builtin_usage("getopts").encode()
         return (
             None,
             IOResult(exit_code=2, stderr=err),

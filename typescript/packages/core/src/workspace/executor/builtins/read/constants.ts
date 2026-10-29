@@ -13,8 +13,3 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export const READ_VALUE_LETTERS = new Set(['a', 'd', 'n', 'N', 't', 'p', 'i', 'u'])
-
-// The usage line bash prints under an option error.
-export const READ_USAGE =
-  'read: usage: read [-ers] [-a array] [-d delim] [-i text] [-n nchars] ' +
-  '[-N nchars] [-p prompt] [-t timeout] [-u fd] [name ...]\n'

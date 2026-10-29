@@ -73,6 +73,7 @@ from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options
+from mirage.workspace.executor.builtins.shared import builtin_usage
 from mirage.workspace.executor.statement import (
     answer_closed,
     failed_read,
@@ -572,8 +573,6 @@ async def run_statement(
     )
 
 
-_WAIT_USAGE = "wait: usage: wait [-fn] [-p var] [id ...]"
-_DISOWN_USAGE = "disown: usage: disown [-h] [-ar] [jobspec ... | pid ...]"
 _JOB_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -775,14 +774,14 @@ async def handle_wait(
                     return _job_result(
                         cmd_str,
                         f"bash: wait: -p: option requires an "
-                        f"argument\n{_WAIT_USAGE}\n",
+                        f"argument\n{builtin_usage('wait')}",
                         2,
                     )
                 break
             else:
                 return _job_result(
                     cmd_str,
-                    f"bash: wait: -{ch}: invalid option\n{_WAIT_USAGE}\n",
+                    f"bash: wait: -{ch}: invalid option\n{builtin_usage('wait')}",
                     2,
                 )
             j += 1
@@ -890,7 +889,7 @@ async def handle_disown(
     if scan.bad is not None:
         return _job_result(
             cmd_str,
-            f"bash: disown: {scan.bad}: invalid option\n{_DISOWN_USAGE}\n",
+            f"bash: disown: {scan.bad}: invalid option\n{builtin_usage('disown')}",
             2,
         )
     all_jobs = "a" in scan.letters
@@ -1003,11 +1002,6 @@ async def handle_fg(
         ExecutionNode(command=cmd_str, exit_code=job.exit_code),
     )
 
-
-_KILL_USAGE = (
-    "kill: usage: kill [-s sigspec | -n signum | -sigspec] pid | "
-    "jobspec ... or kill -l [sigspec]"
-)
 
 # The signals a managed runner answers besides the probe (0). Each one ends
 # the runner through its cancellation channel, carrying the signal: a
@@ -1127,7 +1121,7 @@ async def handle_kill(
             words = words[1:]
             break
         elif word == "-?":
-            return _job_result(cmd_str, f"{_KILL_USAGE}\n", 2)
+            return _job_result(cmd_str, builtin_usage("kill"), 2)
         elif word.startswith("-") and len(word) > 1 and not saw_signal:
             spec, words, saw_signal = word[1:], words[1:], True
         else:
@@ -1141,7 +1135,7 @@ async def handle_kill(
             )
         signal = number
     if not words:
-        return _job_result(cmd_str, f"{_KILL_USAGE}\n", 2)
+        return _job_result(cmd_str, builtin_usage("kill"), 2)
     processes = _process_view(job_table, session)
     errors: list[str] = []
     signalled = False
@@ -1214,9 +1208,6 @@ async def handle_kill(
 
 
 _JOBS_FLAGS = frozenset("lnprs")
-_JOBS_USAGE = (
-    "jobs: usage: jobs [-lnprs] [jobspec ...] or jobs -x command [args]"
-)
 
 
 def _job_row(job: Job, long: bool) -> str:
@@ -1262,7 +1253,7 @@ async def handle_jobs(
             bad = next((c for c in word[1:] if c not in _JOBS_FLAGS), None)
             if bad is not None:
                 err = encode_text(
-                    f"bash: jobs: -{bad}: invalid option\n{_JOBS_USAGE}\n"
+                    f"bash: jobs: -{bad}: invalid option\n{builtin_usage('jobs')}"
                 )
                 return (
                     None,

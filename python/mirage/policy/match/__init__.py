@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.match.allow import head_allowed, line_tokens
+from mirage.policy.match.allow import head_allowed, line_tokens, runs
 from mirage.policy.match.decide import decide
 from mirage.policy.match.pattern import pattern_matches, split_pattern
 from mirage.policy.match.reads import has_rules, reads_args, scopes_paths
@@ -40,6 +40,7 @@ __all__ = [
     "operand_paths",
     "pattern_matches",
     "posix_level",
+    "runs",
     "reads_args",
     "scopes_paths",
     "skipped_at_dispatch",

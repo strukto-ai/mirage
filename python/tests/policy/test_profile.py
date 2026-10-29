@@ -1072,8 +1072,10 @@ async def test_allow_list_refuses_unlisted_tools_and_hides_nothing():
             "/usr/bin/sort\n0\n",
             "",
         )
-        code, out, _ = await _line(ws, "man")
-        assert code == 0 and "- cat" in out and "- sort" in out
+        code, out, _ = await _line(ws, "man -f cat sort")
+        assert (
+            code == 0 and out.startswith("cat (1) ") and "\nsort (1) " in out
+        )
         assert (await _line(ws, "man sort"))[0] == 0
         # Builtins are subjects like everything else: the listed cd and
         # [ run, the unlisted pwd and history are refused. Functions are

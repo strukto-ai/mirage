@@ -66,8 +66,24 @@ function flagDisplay(opt: Argument): string {
 }
 
 /** Display rows [flag spelling, description] for a spec's options. */
-function flagRows(spec: CommandSpec): [string, string][] {
+export function flagRows(spec: CommandSpec): [string, string][] {
   return compileSpec(spec).options.map((o) => [flagDisplay(o), o.help ?? ''])
+}
+
+/** An operand's name in help: the one its spec gives, else its type. */
+function operandLabel(operand: Argument): string {
+  return positionalName(operand) || (operand.type === 'path' ? 'PATH' : 'ARG')
+}
+
+/**
+ * Display rows [operand name, description] for the operands a spec explains,
+ * the ones with help of their own.
+ */
+export function operandRows(spec: CommandSpec): [string, string][] {
+  const cs = compileSpec(spec)
+  return [...cs.positional, ...(cs.rest === null ? [] : [cs.rest])]
+    .filter((operand) => Boolean(operand.help))
+    .map((operand) => [operandLabel(operand), operand.help ?? ''])
 }
 
 /**
@@ -90,7 +106,7 @@ function slot(operand: Argument): string {
  * group node; when given, the usage line reads `<command> [<args>]`
  * instead of the operand slots.
  */
-function usageLine(
+export function usageLine(
   name: string,
   spec: CommandSpec,
   subcommands: readonly [string, string][],
@@ -201,12 +217,15 @@ export function clapGroupRefusal(
   return `${message}\n\n${usage}\n\nFor more information, try '--help'.\n`
 }
 
-/** Render the declared CLI grammar without serializing internal spec objects. */
-export function argparseHelp(
+/**
+ * The usage line and the operand and option rows of a CLI's argparse-shaped
+ * help, before they are laid out.
+ */
+export function argparseParts(
   name: string,
   spec: CommandSpec,
   subcommands: readonly [string, string][] = [],
-): string {
+): [string, [string, string][], [string, string][]] {
   const cs = compileSpec(spec)
   const usage = [name]
   const rows: [string, string][] = []
@@ -229,13 +248,23 @@ export function argparseHelp(
   }
   const operands: [string, string][] = []
   for (const operand of [...cs.positional, ...(cs.rest === null ? [] : [cs.rest])]) {
-    const label = positionalName(operand) || (operand.type === 'path' ? 'PATH' : 'ARG')
+    const label = operandLabel(operand)
     const slot = label + (operand === cs.rest ? ' ...' : '')
     usage.push(positionalRequired(operand) ? slot : `[${slot}]`)
     operands.push([label, operand.help ?? (operand.type === 'path' ? 'Virtual path' : '')])
   }
   if (subcommands.length > 0) usage.push(`{${subcommands.map(([sub]) => sub).join(',')}} ...`)
-  const lines = [`usage: ${usage.join(' ')}`]
+  return [`usage: ${usage.join(' ')}`, operands, rows]
+}
+
+/** Render the declared CLI grammar without serializing internal spec objects. */
+export function argparseHelp(
+  name: string,
+  spec: CommandSpec,
+  subcommands: readonly [string, string][] = [],
+): string {
+  const [usage, operands, rows] = argparseParts(name, spec, subcommands)
+  const lines = [usage]
   if (spec.description) lines.push('', spec.description)
   for (const [title, table] of [
     ['positional arguments:', operands],

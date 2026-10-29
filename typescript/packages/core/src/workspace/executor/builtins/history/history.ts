@@ -23,10 +23,8 @@ import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import { builtinUsage } from '../shared.ts'
 
-const USAGE =
-  'history: usage: history [-c] [-d offset] [n] or ' +
-  'history -anrw [filename] or history -ps arg [arg...]\n'
 const OPTION_CHARS = 'cdanrwsp'
 
 /** The builtin's output, status and execution-tree node. */
@@ -118,7 +116,7 @@ export async function handleHistory(
   session: SessionState,
 ): Promise<Result> {
   const { flags, texts, error } = parseArgs(args)
-  if (error !== null) return result(null, 2, encodeText(error + USAGE))
+  if (error !== null) return result(null, 2, encodeText(error + builtinUsage('history')))
   // bash abandons everything still to run, as `exit 1 2` does; `-p` and
   // `-s` take any number of words.
   if (Object.keys(flags).length === 0 && texts.length > 1) {

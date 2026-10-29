@@ -18,6 +18,7 @@ import { STRTOD, strtodDouble } from '../../../../commands/builtin/utils/strtod.
 import { INT_MAX, boundedDecimal } from '../../../../commands/builtin/utils/strtol.ts'
 import { renderHelp } from '../../../../commands/spec/help.ts'
 import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
+import { SYNOPSES } from '../../../../commands/spec/synopsis.ts'
 import {
   ambiguousOptionError,
   missingValueError,
@@ -55,8 +56,6 @@ import {
 import { concat } from '../../../../utils/bytes.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { NOT_FOUND_STATUS, TIMEOUT_STATUS } from '../../../../shell/constants.ts'
-
-const SYNOPSIS = 'timeout [OPTION] DURATION COMMAND [ARG]...'
 
 const UNIT_SECONDS: Readonly<Record<string, number>> = Object.freeze({
   '': 1,
@@ -283,7 +282,7 @@ export async function handleTimeout(
   let killAfter = 0
   for (const [name, value] of parse.given) {
     if (name === 'help') {
-      const text = renderHelp('timeout', SHELL_SPECS.timeout, [], undefined, SYNOPSIS)
+      const text = renderHelp('timeout', SHELL_SPECS.timeout, [], undefined, SYNOPSES.timeout)
       return [
         yieldBytes(encodeText(text)),
         new IOResult(),

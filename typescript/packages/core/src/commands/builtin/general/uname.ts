@@ -21,20 +21,21 @@ import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { HOSTNAME } from '../constants.ts'
+import { VERSION } from '../../../version.ts'
 
 const ENC = new TextEncoder()
 
 // What uname reports, in GNU's print order and keyed by each option's dest.
 // Mirage is no kernel: it answers as the GNU/Linux userland its commands
 // implement, the way gVisor and WSL1 answer `Linux` for the interface they
-// emulate, and names itself in the node, release and version fields. Fixed,
-// so every host (the browser included) prints the same line and no host
-// detail leaks.
+// emulate, and names itself in the node, release and version fields, the
+// version field carrying its own version. Fixed, so every host (the browser
+// included) prints the same line and no host detail leaks.
 const UNAME_FIELDS: readonly (readonly [string, string])[] = [
   ['kernel_name', 'Linux'],
   ['nodename', HOSTNAME],
   ['kernel_release', 'mirage'],
-  ['kernel_version', '#1 Mirage'],
+  ['kernel_version', `#1 Mirage ${VERSION}`],
   ['machine', 'x86_64'],
   ['processor', 'unknown'],
   ['hardware_platform', 'unknown'],

@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.commands.builtin.utils.strtol import (
+    atoi,
     bounded_decimal,
     c_int,
     signed_decimal,
@@ -108,3 +109,21 @@ def test_bounded_decimal_reads_past_the_int_digit_limit():
     assert bounded_decimal("0" * 5000 + "1", 2**64 - 1) == 1
     assert bounded_decimal("0" * 5000, 10) == 0
     assert bounded_decimal("9" * 5000, 2**64 - 1) is None
+
+
+@pytest.mark.parametrize(
+    "raw,value",
+    [
+        ("80", 80),
+        (" 100x", 100),
+        ("+7", 7),
+        ("-3", -3),
+        ("010", 10),
+        ("0x10", 0),
+        ("abc", 0),
+        ("", 0),
+        ("99999999999999999999", 2**63 - 1),
+    ],
+)
+def test_atoi_reads_the_leading_decimal_number(raw, value):
+    assert atoi(raw) == value

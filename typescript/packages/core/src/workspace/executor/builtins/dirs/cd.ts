@@ -27,9 +27,10 @@ import type { BuiltinCall, Result } from '../types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import { linkView } from '../../../../commands/builtin/utils/links.ts'
 import { Files } from '../../../files.ts'
-import { CD_OPTIONS, CD_USAGE } from './constants.ts'
+import { CD_OPTIONS } from './constants.ts'
 import { classifyBarePath } from '../../../expand/classify/index.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { builtinUsage } from '../shared.ts'
 
 function cdpathSearchable(target: string): boolean {
   if (target.startsWith('/') || target.startsWith('./') || target.startsWith('../')) {
@@ -231,7 +232,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
   const reader = namespace.sessionLinks(session)
   const isMount = (p: string): boolean => reader.isMount(p)
   if (bad !== null) {
-    const err = encodeText(`bash: cd: -${bad}: invalid option\n${CD_USAGE}`)
+    const err = encodeText(`bash: cd: -${bad}: invalid option\n${builtinUsage('cd')}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),

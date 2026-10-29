@@ -66,6 +66,22 @@ def signed_decimal(text: str) -> int | None:
     return -value if match.group(1) == "-" else value
 
 
+def atoi(text: str) -> int:
+    """C's ``atoi``: the decimal number ``text`` begins with, after C
+    blanks and one sign, 0 when it begins with none, saturated to the
+    ``long`` range as glibc's ``strtol`` underneath it is.
+
+    Args:
+        text (str): the text, as a variable holds it.
+    """
+    match = DECIMAL.match(text)
+    if match is None:
+        return 0
+    value = decimal_value(match.group(2))
+    signed = -value if match.group(1) == "-" else value
+    return max(LONG_MIN, min(LONG_MAX, signed))
+
+
 def strtol(text: str) -> tuple[int, str]:
     """C's ``strtol(text, &end, 0)``: the value and the text at ``end``.
 

@@ -24,10 +24,36 @@ from mirage.workspace.executor.builtins.declare.declare import (
     bash_declare_quote,
     is_control,
 )
+from mirage.workspace.executor.builtins.shared import (
+    builtin_error,
+    builtin_usage,
+)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import set_positional_params, visible_env
 from mirage.workspace.types import ExecutionNode
+
+
+def _unknown_letter(args: list[str]) -> str | None:
+    """The first option letter of a `set` line that names no option, with
+    the sign it was given under, None when there is none.
+
+    bash reads every option word before it acts on any, so one such letter
+    refuses the whole line and nothing it sets is set.
+
+    Args:
+        args (list[str]): the words after `set`.
+    """
+    i = 0
+    while i < len(args) and args[i] != "--":
+        nxt = args[i + 1] if i + 1 < len(args) else None
+        word = parse_option_word(args[i], nxt)
+        if word is None:
+            return None
+        if word.other:
+            return args[i][0] + word.other[0]
+        i += word.consumed
+    return None
 
 
 async def handle_set(
@@ -42,6 +68,16 @@ async def handle_set(
         ]
         out = encode_text("\n".join(lines) + "\n")
         return out, IOResult(), ExecutionNode(command="set", exit_code=0)
+    bad = _unknown_letter(args)
+    if bad is not None:
+        err = builtin_error("set", f"{bad}: invalid option") + encode_text(
+            builtin_usage("set")
+        )
+        return (
+            None,
+            IOResult(exit_code=2, stderr=err),
+            ExecutionNode(command="set", exit_code=2, stderr=err),
+        )
     i = 0
     while i < len(args):
         tok = args[i]
@@ -78,11 +114,10 @@ async def handle_set(
                     ExecutionNode(command="set", exit_code=2, stderr=err),
                 )
             session.shell_options[option] = enable
-        # A letter naming no option is ignored rather than refused: bash
-        # has options mirage does not implement (`-a`, `-B`, `-H`), and
-        # `set` is where a script turns those on without wanting to fail.
-        # A nested shell answers the same leftovers differently, which is
-        # why the grammar hands them back instead of deciding here.
+        # Every letter bash has names an option here, the ones mirage does
+        # not act on (`-a`, `-B`, `-H`) included, so a script can still
+        # turn those on. A nested shell answers a letter bash lacks
+        # differently, which is why the grammar hands it back.
         i += word.consumed
     return None, IOResult(), ExecutionNode(command="set", exit_code=0)
 

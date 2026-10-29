@@ -1,6 +1,11 @@
 {
  "baseline": 2701,
  "modules": {
+  "workspace/executor/builtins/help/help": {
+   "typescript_only": {
+    "specOf": "A topic's spec by name: Python indexes SHELL_SPECS and lets a missing name raise KeyError; TypeScript's index type carries undefined, so the lookup that throws lives in this helper."
+   }
+  },
   "core/slack/client": {
    "python_only": {
     "upload_bytes": "Python sends an upload's bytes with a module function over the accessor's pool; TypeScript keeps the same request on the transport as uploadBytes, beside downloadFile, so a browser transport can leave it out."

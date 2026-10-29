@@ -17,11 +17,9 @@ import { parseChmod } from '../../../../utils/mode.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { scanOptions } from '../getopt.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { fail } from '../shared.ts'
+import { builtinUsage, fail } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-
-const USAGE = 'umask: usage: umask [-p] [-S] [mode]'
 
 /** Render a mask the way `umask -S` does: the bits it leaves on. */
 export function symbolicUmask(mask: number): string {
@@ -83,7 +81,7 @@ export function parseUmask(text: string, current: number): number | string {
 export function handleUmask(args: string[], session: SessionState): Result {
   const scan = scanOptions(args, 'Sp')
   if (scan.bad !== null)
-    return fail('umask', `bash: umask: ${scan.bad}: invalid option\n${USAGE}\n`, 2)
+    return fail('umask', `bash: umask: ${scan.bad}: invalid option\n${builtinUsage('umask')}`, 2)
   const symbolic = scan.letters.includes('S')
   const reusable = scan.letters.includes('p')
   const operands = scan.operands

@@ -1459,10 +1459,10 @@ describe('command permissions end to end', () => {
     ])
     expect(await line(ws, 'type sort; echo $?')).toEqual([0, 'sort is /usr/bin/sort\n0\n', ''])
     expect(await line(ws, 'command -v sort; echo $?')).toEqual([0, '/usr/bin/sort\n0\n', ''])
-    const [code, out] = await line(ws, 'man')
+    const [code, out] = await line(ws, 'man -f cat sort')
     expect(code).toBe(0)
-    expect(out).toContain('- cat')
-    expect(out).toContain('- sort')
+    expect(out.startsWith('cat (1) ')).toBe(true)
+    expect(out).toContain('\nsort (1) ')
     expect((await line(ws, 'man sort'))[0]).toBe(0)
     // Builtins are subjects like everything else: the listed cd and [
     // run, the unlisted pwd and history are refused. Functions are the

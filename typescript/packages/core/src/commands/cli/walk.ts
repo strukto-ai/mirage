@@ -269,12 +269,12 @@ export function nodeHelp(
   style: UsageStyle = UsageStyle.ARGPARSE,
 ): string {
   if (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA)
-    return argparseHelp(name, listedNode(node, style), rows(node))
-  return renderHelp(name, listedNode(node, style), rows(node), style)
+    return argparseHelp(name, listedNode(node, style), subcommandRows(node))
+  return renderHelp(name, listedNode(node, style), subcommandRows(node), style)
 }
 
-// The node's child rows, as the renderer lists them.
-function rows(node: CommandSpec): [string, string][] {
+/** The node's child rows, as the renderer lists them. */
+export function subcommandRows(node: CommandSpec): [string, string][] {
   return node.subcommands.map((child) => [verbDisplay(child), child.description ?? ''])
 }
 
@@ -326,7 +326,9 @@ function usageError(
   if (style === UsageStyle.CLAP) {
     const first = token === undefined ? message : clapUnexpectedArgument(token)
     return new WalkResult({
-      output: encodeText(clapGroupRefusal(name, listedNode(node, style), rows(node), first)),
+      output: encodeText(
+        clapGroupRefusal(name, listedNode(node, style), subcommandRows(node), first),
+      ),
       stream: 'stderr',
       exitCode: CLAP_EXIT,
     })

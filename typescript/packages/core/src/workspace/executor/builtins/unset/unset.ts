@@ -26,7 +26,8 @@ import {
   visibleAssocs,
 } from '../../../session/state.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import { fail, ok, refusal, requireView } from '../shared.ts'
+import { flagHelp } from '../help/help.ts'
+import { builtinUsage, fail, ok, refusal, requireView } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { TARGET_RE } from '../constants.ts'
 
@@ -131,6 +132,10 @@ export async function handleUnset(
   session: SessionState,
   state: SessionView | null = null,
 ): Promise<Result> {
+  if (args[0] === '--help') {
+    const answered = flagHelp('unset')
+    if (answered !== null) return answered
+  }
   let mode: 'auto' | 'v' | 'f' | 'n' = 'auto'
   let i = 0
   while (i < args.length && (args[i] ?? '').startsWith('-') && args[i] !== '-') {
@@ -146,7 +151,7 @@ export async function handleUnset(
       i += 1
       continue
     }
-    return fail('unset', `bash: unset: ${tok}: invalid option\n`, 2)
+    return fail('unset', `bash: unset: ${tok}: invalid option\n${builtinUsage('unset')}`, 2)
   }
   for (const name of args.slice(i)) {
     if (mode === 'n') {

@@ -16,11 +16,12 @@ import { IOResult } from '../../../../io/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { logicalCwd } from '../../../session/shell_dirs.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { PWD_OPTIONS, PWD_USAGE } from './constants.ts'
+import { PWD_OPTIONS } from './constants.ts'
 import { type DirArgs, splitModeOptions } from './dirs.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { isProgramInvocation } from '../../../../context/session_context.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { builtinUsage } from '../shared.ts'
 
 // Print the working directory, logical by default and physical under -P
 // (or `set -P`). GNU ignores every operand: `pwd extra` still prints the
@@ -31,7 +32,7 @@ export function handlePwd(operands: DirArgs, session: SessionState): Result {
   if (bad !== null) {
     // The program (`env pwd`) keeps its bare voice.
     const voice = isProgramInvocation(session) ? '' : 'bash: '
-    const err = encodeText(`${voice}pwd: -${bad}: invalid option\n${PWD_USAGE}`)
+    const err = encodeText(`${voice}pwd: -${bad}: invalid option\n${builtinUsage('pwd')}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),

@@ -20,10 +20,11 @@ import { ExecutionNode } from '../../../types.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
 import { program } from '../../../lookup/lookup.ts'
 import { describe, locations, programFile } from './classify.ts'
-import { TYPE_OPTIONS, TYPE_USAGE, WHICH_OPTIONS, WHICH_USAGE } from './constants.ts'
+import { TYPE_OPTIONS, WHICH_OPTIONS, WHICH_USAGE } from './constants.ts'
 import { NameKind } from './types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { builtinUsage } from '../shared.ts'
 
 /**
  * The refusal shape both builtins use for an unknown option; `voice` is
@@ -59,7 +60,7 @@ export function handleType(
   parser?: ParseScope,
 ): Result {
   const scan = scanOptions(args, TYPE_OPTIONS)
-  if (scan.bad !== null) return optionError('type', scan.bad, TYPE_USAGE, 'bash: ')
+  if (scan.bad !== null) return optionError('type', scan.bad, builtinUsage('type'), 'bash: ')
   const mode = lastOf(scan.letters, 'tpP')
   const allMode = scan.letters.includes('a')
   const hidden = scan.letters.includes('f') ? NameKind.FUNCTION : null

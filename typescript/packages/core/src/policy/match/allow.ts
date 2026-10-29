@@ -14,6 +14,7 @@
 
 import { admissionMatcher, units } from '../../rs/policy.ts'
 import type { AdmissionRules, CommandContext } from '../types.ts'
+import { patternMatches } from './pattern.ts'
 
 /**
  * Whether a session's allow list has a pattern for a command name. A
@@ -31,4 +32,23 @@ export function headAllowed(name: string, rules: AdmissionRules | null): boolean
  */
 export function lineTokens(ctx: CommandContext): readonly string[] {
   return (ctx.tokens?.length ?? 0) > 0 ? (ctx.tokens ?? []) : [ctx.command, ...ctx.argv]
+}
+
+/**
+ * Whether a session can run a command at all: its allow list allows the
+ * name and no rule refuses the bare command everywhere. A rule written
+ * under one mount refuses it only on a line working inside that mount,
+ * which the shell judges line by line, so the command still runs; one
+ * written under `/` covers every line. Mirrors Python's `runs`.
+ */
+export function runs(name: string, rules: AdmissionRules | null): boolean {
+  if (!headAllowed(name, rules)) return false
+  if (rules === null) return true
+  return !rules.deny.some(
+    (rule) =>
+      (rule.paths ?? []).length === 0 &&
+      ['', '/'].includes(rule.mount ?? '') &&
+      ((rule.commands ?? []).length === 0 ||
+        (rule.commands ?? []).some((p) => patternMatches(p, [name]))),
+  )
 }

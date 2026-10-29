@@ -65,8 +65,7 @@ import type { ExecuteFn } from '../../../expand/types.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { programHead } from '../../find_action_dispatch.ts'
 import { clearTraps } from '../../traps.ts'
-import { builtinError } from '../shared.ts'
-import { EXEC_USAGE } from './constants.ts'
+import { builtinError, builtinUsage } from '../shared.ts'
 import { scanOptions } from '../getopt.ts'
 
 /**
@@ -94,7 +93,10 @@ export async function handleExecCommand(
   if (scan.bad !== null || refused !== undefined) {
     const err =
       scan.bad !== null
-        ? concat([builtinError('exec', `${scan.bad}: invalid option`), encodeText(EXEC_USAGE)])
+        ? concat([
+            builtinError('exec', `${scan.bad}: invalid option`),
+            encodeText(builtinUsage('exec')),
+          ])
         : encodeText(`mirage: exec: -${refused ?? ''}: not supported\n`)
     return [
       null,

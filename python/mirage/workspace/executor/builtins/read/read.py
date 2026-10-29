@@ -24,10 +24,10 @@ from mirage.shell.escapes import ends_escaped
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.read.constants import (
-    READ_USAGE,
     READ_VALUE_LETTERS,
 )
 from mirage.workspace.executor.builtins.shared import (
+    builtin_usage,
     count_operand,
     is_valid_name,
     readonly_refusal,
@@ -303,7 +303,9 @@ async def handle_read(
             if parse.invalid.startswith("--")
             else f"-{parse.invalid}"
         )
-        err = encode_text(f"bash: read: {token}: invalid option\n{READ_USAGE}")
+        err = encode_text(
+            f"bash: read: {token}: invalid option\n{builtin_usage('read')}"
+        )
         return (
             None,
             IOResult(exit_code=2, stderr=err),
@@ -312,7 +314,7 @@ async def handle_read(
     if parse.needs_value is not None:
         missing = encode_text(
             f"bash: read: -{parse.needs_value}: option requires an argument\n"
-            f"{READ_USAGE}"
+            f"{builtin_usage('read')}"
         )
         return (
             None,

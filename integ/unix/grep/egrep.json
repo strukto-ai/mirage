@@ -143,10 +143,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "[ \"$(man egrep | sed 1d)\" = \"$(man grep | sed 1d)\" ] && echo same; man fgrep | head -1; man | grep -cE '^- (egrep|fgrep) '",
+      "command": "[ \"$(man egrep | sed -n '/^SYNOPSIS/,$p' | sed '$d')\" = \"$(man grep | sed -n '/^SYNOPSIS/,$p' | sed '$d')\" ] && echo same; man fgrep | head -1 | cut -d' ' -f1; man -k '^[ef]grep$' | cut -d' ' -f1",
       "expect": {
         "exit": 0,
-        "stdout": "same\n# fgrep\n2\n",
+        "stdout": "same\nFGREP(1)\negrep\nfgrep\n",
         "stderr": ""
       }
     }

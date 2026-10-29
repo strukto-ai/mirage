@@ -12,5 +12,5 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { handleMan } from './man.ts'
-export type { ManEntry } from './types.ts'
+export { findPage, handleMan, pagesOf, renderPage } from './man.ts'
+export type { ManPage } from './types.ts'
