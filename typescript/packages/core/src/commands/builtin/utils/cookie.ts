@@ -318,11 +318,17 @@ export class CookieJar {
       } else if (key === 'max-age') {
         // curl drops a cookie whose Max-Age does not start with a digit or a
         // minus, and reads the digits that lead one that does; past twelve
-        // of them only the sign matters.
+        // significant ones only the sign matters.
         const digits = /^(-?)([0-9]+)/.exec(raw)
         if (digits === null) return
         const [, minus = '', count = ''] = digits
-        maxAge = count.length > 12 ? (minus === '' ? MAX_LIFETIME + 1 : -1) : Number(minus + count)
+        const significant = count.replace(/^0+(?=[0-9])/, '')
+        maxAge =
+          significant.length > 12
+            ? minus === ''
+              ? MAX_LIFETIME + 1
+              : -1
+            : Number(minus + significant)
       } else if (key === 'domain') {
         if (raw !== '') domainAttr = raw.replace(/^\./, '')
       } else if (key === 'path') {
@@ -376,6 +382,7 @@ export class CookieJar {
         this.cookies.some(
           (c) =>
             c.secure &&
+            (c.expires === 0 || c.expires > now) &&
             c.name === name &&
             (c.domain ?? '').toLowerCase() === key &&
             pathMatches(c.path, own),
@@ -423,8 +430,9 @@ export class CookieJar {
       const [domain = '', tail = '', path = '', secure = '', expiry = '', name = '', value = ''] =
         fields
       const digits = /^[0-9]+/.exec(expiry)
-      if (digits === null || digits[0].length > 19 || BigInt(digits[0]) > INT64_MAX) continue
-      const expires = Number(digits[0])
+      const count = digits?.[0].replace(/^0+(?=[0-9])/, '') ?? null
+      if (count === null || count.length > 19 || BigInt(count) > INT64_MAX) continue
+      const expires = Number(count)
       if (expires !== 0 && expires <= this.now()) continue
       this.keep(
         {

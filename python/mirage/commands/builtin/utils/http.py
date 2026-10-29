@@ -130,6 +130,9 @@ async def http_request(
         # build from its own cookies; httpx drops a Cookie header on every
         # redirect, so the one among `headers` is put back after the jar's
         # on the hops that stay on the first origin.
+        # httpx hands each hop's URL over with its host in Punycode, so the
+        # first URL goes through httpx too before the two are compared.
+        first = str(httpx.URL(url))
         typed = next(
             (v for k, v in (headers or {}).items() if k.lower() == "cookie"),
             None,
@@ -138,7 +141,7 @@ async def http_request(
         async def send_cookies(request: Any) -> None:
             hop = str(request.url)
             value = cookie_value(
-                cookies.header(hop), typed if same_origin(hop, url) else None
+                cookies.header(hop), typed if same_origin(hop, first) else None
             )
             request.headers.pop("Cookie", None)
             if value is not None:

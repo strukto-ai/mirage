@@ -220,6 +220,35 @@ def test_a_max_age_or_file_expiry_of_any_length_is_bounded():
     )
 
 
+def test_a_zero_padded_max_age_or_file_expiry_reads_by_its_value():
+    jar = _jar()
+    jar.load(
+        "127.0.0.1\tFALSE\t/\tFALSE\t0\tgone\t1\n"
+        f"127.0.0.1\tFALSE\t/\tFALSE\t{'0' * 20}\tsess\t1\n"
+    )
+    jar.store(
+        f"{HOST}/x",
+        [
+            "gone=; Max-Age=0000000000000; Path=/",
+            "pad=1; Max-Age=0000000000000; Path=/",
+            "one=1; Max-Age=0000000000001; Path=/",
+        ],
+    )
+    assert _lines(jar) == [
+        f"127.0.0.1\tFALSE\t/\tFALSE\t{NOW + 1}\tone\t1",
+        "127.0.0.1\tFALSE\t/\tFALSE\t0\tsess\t1",
+    ]
+
+
+def test_a_fresh_cookie_gets_past_a_secure_one_that_has_since_expired():
+    clock = [NOW]
+    jar = CookieJar(True, None, lambda: clock[0])
+    jar.load(f"s.example.com\tFALSE\t/\tTRUE\t{NOW + 10}\tsession\told\n")
+    clock[0] = NOW + 20
+    jar.store("http://s.example.com/x", ["session=fresh; Path=/"])
+    assert _lines(jar) == ["s.example.com\tFALSE\t/\tFALSE\t0\tsession\tfresh"]
+
+
 def test_plain_http_on_a_remote_host_leaves_secure_cookies_alone():
     jar = _jar()
     plain = "http://s.example.com/x"

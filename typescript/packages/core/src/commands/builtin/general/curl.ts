@@ -583,7 +583,7 @@ async function curl(
             const carries = sentAs === method
             const cookie = jar.sent[index] ?? null
             // A typed Cookie header goes to the first origin alone.
-            const tail = sameOrigin(target, url)
+            const tail = sameOrigin(hop.url, hops[0]?.url ?? url)
               ? traceTail
               : traceTail.filter(([name]) => name.toLowerCase() !== 'cookie')
             return (

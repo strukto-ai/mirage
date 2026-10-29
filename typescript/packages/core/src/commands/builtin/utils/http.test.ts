@@ -408,6 +408,17 @@ describe('cookies across hops', () => {
     expect([0, 1, 2].map((call) => cookieSent(mock, call))).toEqual(['x=1', undefined, 'x=1'])
   })
 
+  it('sends a typed Cookie to a Unicode host it was typed for', async () => {
+    const mock = hopThen('/next', [])
+    vi.stubGlobal('fetch', mock)
+    await httpRequest('http://bücher.test/hop', {
+      headers: { Cookie: 'x=1' },
+      followRedirects: true,
+      cookies: new CookieJar(false),
+    })
+    expect([cookieSent(mock, 0), cookieSent(mock, 1)]).toEqual(['x=1', 'x=1'])
+  })
+
   it('puts a typed Cookie after the jar on the first origin only', async () => {
     const same = hopThen('/next', [])
     vi.stubGlobal('fetch', same)

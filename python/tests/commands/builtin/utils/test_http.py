@@ -384,6 +384,25 @@ async def test_the_cookies_of_a_response_whose_body_fails_are_kept(httpx_mock):
 
 
 @pytest.mark.asyncio
+async def test_a_typed_cookie_reaches_a_unicode_host_it_was_typed_for(
+    httpx_mock,
+):
+    httpx_mock.add_response(
+        url="http://xn--bcher-kva.test/hop",
+        status_code=302,
+        headers=[("Location", "/next")],
+    )
+    httpx_mock.add_response(url="http://xn--bcher-kva.test/next")
+    await http_request(
+        "http://bücher.test/hop",
+        headers={"Cookie": "x=1"},
+        follow_redirects=True,
+        cookies=CookieJar(False),
+    )
+    assert _cookies_sent(httpx_mock) == ["x=1", "x=1"]
+
+
+@pytest.mark.asyncio
 async def test_a_typed_cookie_comes_back_with_the_first_origin(httpx_mock):
     httpx_mock.add_response(
         url="http://x.test/hop",

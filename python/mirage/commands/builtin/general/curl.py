@@ -698,7 +698,7 @@ async def curl(
             # A typed Cookie header goes to the first origin alone.
             tail = (
                 trace_tail
-                if same_origin(target, url)
+                if same_origin(hop.url, hops[0].url)
                 else [(k, v) for k, v in trace_tail if k.lower() != "cookie"]
             )
             dumped.append(

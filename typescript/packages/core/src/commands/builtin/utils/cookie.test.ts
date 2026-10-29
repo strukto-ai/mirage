@@ -194,6 +194,32 @@ describe('CookieJar', () => {
     expect(j.cookies.find((c) => c.name === 'big')?.expires).toBe(NOW + 34560000)
   })
 
+  it('reads a zero-padded Max-Age or file expiry by its value', () => {
+    const j = jar()
+    j.load(
+      '127.0.0.1\tFALSE\t/\tFALSE\t0\tgone\t1\n' +
+        `127.0.0.1\tFALSE\t/\tFALSE\t${'0'.repeat(20)}\tsess\t1\n`,
+    )
+    j.store(`${HOST}/x`, [
+      'gone=; Max-Age=0000000000000; Path=/',
+      'pad=1; Max-Age=0000000000000; Path=/',
+      'one=1; Max-Age=0000000000001; Path=/',
+    ])
+    expect(lines(j)).toEqual([
+      `127.0.0.1\tFALSE\t/\tFALSE\t${String(NOW + 1)}\tone\t1`,
+      '127.0.0.1\tFALSE\t/\tFALSE\t0\tsess\t1',
+    ])
+  })
+
+  it('lets a fresh cookie past a Secure one that has since expired', () => {
+    let now = NOW
+    const j = new CookieJar(true, null, () => now)
+    j.load(`s.example.com\tFALSE\t/\tTRUE\t${String(NOW + 10)}\tsession\told\n`)
+    now = NOW + 20
+    j.store('http://s.example.com/x', ['session=fresh; Path=/'])
+    expect(lines(j)).toEqual(['s.example.com\tFALSE\t/\tFALSE\t0\tsession\tfresh'])
+  })
+
   it('keeps a Secure cookie from plain http on a remote host', () => {
     const j = jar()
     const plain = 'http://s.example.com/x'

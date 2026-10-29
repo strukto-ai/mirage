@@ -406,15 +406,17 @@ class CookieJar:
             elif key == "max-age":
                 # curl drops a cookie whose Max-Age does not start with a
                 # digit or a minus, and reads the digits that lead one
-                # that does; past twelve of them only the sign matters.
+                # that does; past twelve significant ones only the sign
+                # matters.
                 digits = re.match(r"(-?)([0-9]+)", raw)
                 if digits is None:
                     return
                 minus, count = digits.groups()
-                if len(count) > 12:
+                significant = count.lstrip("0") or "0"
+                if len(significant) > 12:
                     max_age = -1 if minus else MAX_LIFETIME + 1
                 else:
-                    max_age = int(minus + count)
+                    max_age = int(minus + significant)
             elif key == "domain":
                 if raw:
                     domain_attr = raw.removeprefix(".")
@@ -471,6 +473,7 @@ class CookieJar:
             own = _path_key(path)
             if not secure_context and any(
                 c.secure
+                and (c.expires == 0 or c.expires > now)
                 and c.name == name
                 and (c.domain or "").lower() == key
                 and path_matches(c.path, own)
@@ -532,9 +535,10 @@ class CookieJar:
                 continue
             domain, tail, path, secure, expiry, name, value = fields
             digits = re.match(r"[0-9]+", expiry)
-            if digits is None or len(digits.group(0)) > 19:
+            count = None if digits is None else digits.group(0).lstrip("0")
+            if count is None or len(count) > 19:
                 continue
-            expires = int(digits.group(0))
+            expires = int(count or "0")
             if expires > INT64_MAX:
                 continue
             if expires != 0 and expires <= self.now():
