@@ -325,7 +325,10 @@ describe('workspaces router', () => {
       })
       expect(ran.json<{ exit_code: number }>().exit_code).toBe(0)
       const tar = await download(free, id)
+      const close = vi.spyOn(Workspace.prototype, 'close')
       expect((await upload(held, tar)).statusCode).toBe(403)
+      expect(close).toHaveBeenCalledTimes(1)
+      close.mockRestore()
       expect((await upload(free, tar)).statusCode).toBe(201)
     } finally {
       await free.close()

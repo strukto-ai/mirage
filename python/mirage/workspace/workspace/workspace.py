@@ -2025,7 +2025,10 @@ class Workspace:
                 drift_policy,
             )
         except BaseException:
-            ws._registry.release_clocks()
+            try:
+                await ws.close()
+            except Exception as exc:
+                logger.debug("restore not closed: %s", exc)
             raise
         live_only = state.get(StateKey.LIVE_ONLY_MOUNTS) or []
         if live_only:
@@ -2133,7 +2136,12 @@ class Workspace:
                 ws, state, built_for_state=built_for_state, shared=shared
             )
         except BaseException:
-            ws._registry.release_clocks()
+            # A refused restore closes what it started, a profile
+            # program's runtime among them, and lets go of the clocks.
+            try:
+                await ws.close()
+            except Exception as exc:
+                logger.debug("restore not closed: %s", exc)
             raise
         return ws
 

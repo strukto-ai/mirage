@@ -2186,7 +2186,9 @@ export class Workspace {
     try {
       await ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
     } catch (err) {
-      ws.registry.releaseClocks()
+      await ws.close().catch((closeError: unknown) => {
+        console.debug('restore not closed:', closeError)
+      })
       throw err
     }
     return ws
@@ -2265,7 +2267,11 @@ export class Workspace {
         shared,
       })
     } catch (err) {
-      ws.registry.releaseClocks()
+      // A refused restore closes what it started, a profile program's
+      // runtime among them, and lets go of the clocks.
+      await ws.close().catch((closeError: unknown) => {
+        console.debug('restore not closed:', closeError)
+      })
       throw err
     }
     return ws
