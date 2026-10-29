@@ -22,6 +22,7 @@ import {
   defaultPath,
   parseDate,
   pathMatches,
+  sameOrigin,
 } from './cookie.ts'
 
 const NOW = 1793237940
@@ -47,6 +48,14 @@ describe('parseDate', () => {
     ['Thu, 01 Jan 1970 00:00:00 GMT', 0],
     ['Fri, 01 Jan 70 00:00:00 GMT', 3155760000],
     ['Fri, 01 Jan 71 00:00:00 GMT', 31536000],
+    ['Fri, 01-Jan-2027 00:00:00 GMT', 1798761600],
+    ['Thu, 01-Jan-1970 00:00:00 GMT', 0],
+    ['Fri, 01 Jan 2027 00:00:00-0800', 1798790400],
+    ['Fri, 01 Jan 2027 00:00:00 +1400', 1798711200],
+    ['Fri, 01 Jan 2027 00:00:00 +0060', 1798758000],
+    ['Fri, 01 Jan 2027 00:00:00 GMT-0800', 1798761600],
+    ['Fri, 01 Jan-0800 2027', 1798790400],
+    ['Jan 01 2027 -1200', 1798804800],
   ])('reads %s', (text, epoch) => {
     expect(parseDate(text)).toBe(epoch)
   })
@@ -58,6 +67,8 @@ describe('parseDate', () => {
     'Wed, 31 Dec 1969 23:59:59 GMT',
     'Mon, 01 Jan 1601 00:00:00 GMT',
     'notadate',
+    'Fri, 01 Jan 2027 00:00:00 +1401',
+    'Fri, 01 Jan 2027 00:00:00 +12',
   ])('refuses %s', (text) => {
     expect(parseDate(text)).toBeNull()
   })
@@ -166,6 +177,51 @@ describe('CookieJar', () => {
       '127.0.0.1\tFALSE\t/\tFALSE\t0\tbad\t1',
       '127.0.0.1\tFALSE\t/\tFALSE\t0\tkept\told',
     ])
+  })
+
+  it('bounds a Max-Age or a file expiry of any length', () => {
+    const j = jar()
+    j.store(`${HOST}/x`, [
+      `big=1; Max-Age=${'9'.repeat(5000)}; Path=/`,
+      `neg=1; Max-Age=-${'9'.repeat(5000)}; Path=/`,
+    ])
+    j.load(
+      `127.0.0.1\tFALSE\t/\tFALSE\t${'9'.repeat(23)}\thuge\t1\n` +
+        '127.0.0.1\tFALSE\t/\tFALSE\t9223372036854775808\tover\t1\n' +
+        '127.0.0.1\tFALSE\t/\tFALSE\t9223372036854775807\tmax\t1\n',
+    )
+    expect(j.header(`${HOST}/x`)).toBe('max=1; big=1')
+    expect(j.cookies.find((c) => c.name === 'big')?.expires).toBe(NOW + 34560000)
+  })
+
+  it('keeps a Secure cookie from plain http on a remote host', () => {
+    const j = jar()
+    const plain = 'http://s.example.com/x'
+    j.load(
+      's.example.com\tFALSE\t/\tTRUE\t0\tsession\tgood\n' +
+        's.example.com\tFALSE\t/ab\tTRUE\t0\tdeep\tgood\n' +
+        '.example.com\tTRUE\t/\tTRUE\t0\twide\tgood\n',
+    )
+    j.store(plain, [
+      'session=attacker; Path=/',
+      'session=; Max-Age=0; Path=/',
+      'session=attacker; Path=/x',
+      'deep=a; Path=/a',
+      'wide=a; Path=/',
+    ])
+    expect(lines(j)).toEqual([
+      's.example.com\tFALSE\t/\tFALSE\t0\twide\ta',
+      's.example.com\tFALSE\t/a\tFALSE\t0\tdeep\ta',
+      '.example.com\tTRUE\t/\tTRUE\t0\twide\tgood',
+      's.example.com\tFALSE\t/ab\tTRUE\t0\tdeep\tgood',
+      's.example.com\tFALSE\t/\tTRUE\t0\tsession\tgood',
+    ])
+    j.store('https://s.example.com/x', ['session=new; Path=/'])
+    expect(j.header('https://s.example.com/')).toContain('session=new')
+    const local = jar()
+    local.load('127.0.0.1\tFALSE\t/\tTRUE\t0\tsession\tgood\n')
+    local.store(`${HOST}/x`, ['session=new; Path=/'])
+    expect(lines(local)).toEqual(['127.0.0.1\tFALSE\t/\tFALSE\t0\tsession\tnew'])
   })
 
   it('reads a name and value the way curl does', () => {
@@ -289,6 +345,16 @@ describe('CookieJar', () => {
     expect(off.cookies).toEqual([])
     expect(jar(false).header(`${HOST}/x`)).toBeNull()
     expect(off.sent).toEqual(['a=1;b=2', 'a=1;b=2'])
+  })
+})
+
+describe('sameOrigin', () => {
+  it('compares scheme, host and port', () => {
+    expect(sameOrigin('http://a.test/x', 'http://a.test:80/y')).toBe(true)
+    expect(sameOrigin('http://a.test/x', 'https://a.test/x')).toBe(false)
+    expect(sameOrigin('http://a.test/x', 'http://b.test/x')).toBe(false)
+    expect(sameOrigin('http://a.test:8080/x', 'http://a.test/x')).toBe(false)
+    expect(sameOrigin('not a url', 'http://a.test/')).toBe(false)
   })
 })
 

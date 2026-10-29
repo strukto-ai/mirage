@@ -361,6 +361,53 @@ describe('cookies across hops', () => {
     expect(cookieSent(mock, 1)).toBeUndefined()
   })
 
+  it('keeps the cookies of a response whose body then fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(() =>
+        Promise.resolve({
+          status: 200,
+          statusText: 'OK',
+          type: 'basic',
+          headers: new Headers([['Set-Cookie', 'f=1; Path=/']]),
+          arrayBuffer: () => Promise.reject(new DOMException('aborted', 'AbortError')),
+        } as unknown as Response),
+      ),
+    )
+    const jar = new CookieJar(true)
+    await expect(httpRequest('http://x.test/x', { cookies: jar })).rejects.toBeInstanceOf(
+      HttpTimeoutError,
+    )
+    expect(jar.cookies.map((c) => c.name)).toEqual(['f'])
+  })
+
+  it('sends a typed Cookie again once a redirect comes back to the first origin', async () => {
+    const mock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('', {
+          status: 302,
+          statusText: 'Found',
+          headers: { Location: 'http://other.test/back' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('', {
+          status: 302,
+          statusText: 'Found',
+          headers: { Location: 'http://x.test/end' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('ok', { status: 200, statusText: 'OK' }))
+    vi.stubGlobal('fetch', mock)
+    await httpRequest('http://x.test/hop', {
+      headers: { Cookie: 'x=1' },
+      followRedirects: true,
+      cookies: new CookieJar(false),
+    })
+    expect([0, 1, 2].map((call) => cookieSent(mock, call))).toEqual(['x=1', undefined, 'x=1'])
+  })
+
   it('puts a typed Cookie after the jar on the first origin only', async () => {
     const same = hopThen('/next', [])
     vi.stubGlobal('fetch', same)

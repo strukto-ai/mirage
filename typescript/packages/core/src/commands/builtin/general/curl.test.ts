@@ -797,6 +797,26 @@ describe('curl -b and -c', () => {
     ])
   })
 
+  it('-v shows a typed Cookie only on the hops it went to', async () => {
+    const sent = serve([
+      { status: 302, headers: [['Location', 'http://localhost:8080/jar/next']] },
+      { status: 302, headers: [['Location', 'http://127.0.0.1:8080/jar/end']] },
+      {},
+    ])
+    const r = await run({ location: true, verbose: true, header: ['Cookie: x=1'] })
+    const shown = r.err
+      .split('\r\n')
+      .filter((line) => line.startsWith('> GET') || line.startsWith('> Cookie'))
+    expect(shown).toEqual([
+      '> GET /jar/x HTTP/1.1',
+      '> Cookie: x=1',
+      '> GET /jar/next HTTP/1.1',
+      '> GET /jar/end HTTP/1.1',
+      '> Cookie: x=1',
+    ])
+    expect(sent).toEqual(['x=1', undefined, 'x=1'])
+  })
+
   it('saves the jar after a failed transfer and says nothing when it cannot', async () => {
     serve([{ status: 401, headers: [['Set-Cookie', 'f=1; Path=/']] }])
     const failed = await run({ fail: true, silent: true, cookie_jar: '/data/jar' })

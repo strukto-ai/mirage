@@ -357,3 +357,49 @@ async def test_a_typed_cookie_follows_the_jar_on_the_first_origin_only(
         cookies=CookieJar(False, "y=2"),
     )
     assert _cookies_sent(httpx_mock) == ["y=2; x=1", after]
+
+
+class _StalledBody(httpx.AsyncByteStream):
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        raise httpx.ReadTimeout("body stalled")
+
+
+@pytest.mark.asyncio
+async def test_the_cookies_of_a_response_whose_body_fails_are_kept(httpx_mock):
+    httpx_mock.add_callback(
+        lambda request: httpx.Response(
+            200,
+            headers=[("Set-Cookie", "f=1; Path=/")],
+            stream=_StalledBody(),
+        ),
+        url="http://x.test/x",
+    )
+    jar = CookieJar(True)
+    with pytest.raises(HttpTimeoutError):
+        await http_request("http://x.test/x", cookies=jar)
+    assert [c.name for c in jar.cookies] == ["f"]
+
+
+@pytest.mark.asyncio
+async def test_a_typed_cookie_comes_back_with_the_first_origin(httpx_mock):
+    httpx_mock.add_response(
+        url="http://x.test/hop",
+        status_code=302,
+        headers=[("Location", "http://other.test/back")],
+    )
+    httpx_mock.add_response(
+        url="http://other.test/back",
+        status_code=302,
+        headers=[("Location", "http://x.test/end")],
+    )
+    httpx_mock.add_response(url="http://x.test/end")
+    await http_request(
+        "http://x.test/hop",
+        headers={"Cookie": "x=1"},
+        follow_redirects=True,
+        cookies=CookieJar(False),
+    )
+    assert _cookies_sent(httpx_mock) == ["x=1", None, "x=1"]

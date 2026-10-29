@@ -23,6 +23,7 @@ from mirage.commands.builtin.utils.cookie import (
     default_path,
     parse_date,
     path_matches,
+    same_origin,
 )
 
 NOW = 1793237940
@@ -50,6 +51,14 @@ def _lines(jar: CookieJar) -> list[str]:
         ("Thu, 01 Jan 1970 00:00:00 GMT", 0),
         ("Fri, 01 Jan 70 00:00:00 GMT", 3155760000),
         ("Fri, 01 Jan 71 00:00:00 GMT", 31536000),
+        ("Fri, 01-Jan-2027 00:00:00 GMT", 1798761600),
+        ("Thu, 01-Jan-1970 00:00:00 GMT", 0),
+        ("Fri, 01 Jan 2027 00:00:00-0800", 1798790400),
+        ("Fri, 01 Jan 2027 00:00:00 +1400", 1798711200),
+        ("Fri, 01 Jan 2027 00:00:00 +0060", 1798758000),
+        ("Fri, 01 Jan 2027 00:00:00 GMT-0800", 1798761600),
+        ("Fri, 01 Jan-0800 2027", 1798790400),
+        ("Jan 01 2027 -1200", 1798804800),
     ],
 )
 def test_parse_date_reads(text, epoch):
@@ -65,6 +74,8 @@ def test_parse_date_reads(text, epoch):
         "Wed, 31 Dec 1969 23:59:59 GMT",
         "Mon, 01 Jan 1601 00:00:00 GMT",
         "notadate",
+        "Fri, 01 Jan 2027 00:00:00 +1401",
+        "Fri, 01 Jan 2027 00:00:00 +12",
     ],
 )
 def test_parse_date_refuses(text):
@@ -187,6 +198,59 @@ def test_an_expired_max_age_or_expires_deletes_and_a_bad_max_age_drops():
         "127.0.0.1\tFALSE\t/\tFALSE\t0\tbad\t1",
         "127.0.0.1\tFALSE\t/\tFALSE\t0\tkept\told",
     ]
+
+
+def test_a_max_age_or_file_expiry_of_any_length_is_bounded():
+    jar = _jar()
+    jar.store(
+        f"{HOST}/x",
+        [
+            f"big=1; Max-Age={'9' * 5000}; Path=/",
+            f"neg=1; Max-Age=-{'9' * 5000}; Path=/",
+        ],
+    )
+    jar.load(
+        f"127.0.0.1\tFALSE\t/\tFALSE\t{'9' * 23}\thuge\t1\n"
+        "127.0.0.1\tFALSE\t/\tFALSE\t9223372036854775808\tover\t1\n"
+        "127.0.0.1\tFALSE\t/\tFALSE\t9223372036854775807\tmax\t1\n"
+    )
+    assert jar.header(f"{HOST}/x") == "max=1; big=1"
+    assert next(c for c in jar.cookies if c.name == "big").expires == (
+        NOW + 34560000
+    )
+
+
+def test_plain_http_on_a_remote_host_leaves_secure_cookies_alone():
+    jar = _jar()
+    plain = "http://s.example.com/x"
+    jar.load(
+        "s.example.com\tFALSE\t/\tTRUE\t0\tsession\tgood\n"
+        "s.example.com\tFALSE\t/ab\tTRUE\t0\tdeep\tgood\n"
+        ".example.com\tTRUE\t/\tTRUE\t0\twide\tgood\n"
+    )
+    jar.store(
+        plain,
+        [
+            "session=attacker; Path=/",
+            "session=; Max-Age=0; Path=/",
+            "session=attacker; Path=/x",
+            "deep=a; Path=/a",
+            "wide=a; Path=/",
+        ],
+    )
+    assert _lines(jar) == [
+        "s.example.com\tFALSE\t/\tFALSE\t0\twide\ta",
+        "s.example.com\tFALSE\t/a\tFALSE\t0\tdeep\ta",
+        ".example.com\tTRUE\t/\tTRUE\t0\twide\tgood",
+        "s.example.com\tFALSE\t/ab\tTRUE\t0\tdeep\tgood",
+        "s.example.com\tFALSE\t/\tTRUE\t0\tsession\tgood",
+    ]
+    jar.store("https://s.example.com/x", ["session=new; Path=/"])
+    assert "session=new" in (jar.header("https://s.example.com/") or "")
+    local = _jar()
+    local.load("127.0.0.1\tFALSE\t/\tTRUE\t0\tsession\tgood\n")
+    local.store(f"{HOST}/x", ["session=new; Path=/"])
+    assert _lines(local) == ["127.0.0.1\tFALSE\t/\tFALSE\t0\tsession\tnew"]
 
 
 def test_a_name_and_value_read_the_way_curl_reads_them():
@@ -325,6 +389,14 @@ def test_literal_data_goes_after_the_jar_and_the_engine_off_keeps_nothing():
     assert off.cookies == []
     assert _jar(False).header(f"{HOST}/x") is None
     assert off.sent == ["a=1;b=2", "a=1;b=2"]
+
+
+def test_same_origin_compares_scheme_host_and_port():
+    assert same_origin("http://a.test/x", "http://a.test:80/y")
+    assert not same_origin("http://a.test/x", "https://a.test/x")
+    assert not same_origin("http://a.test/x", "http://b.test/x")
+    assert not same_origin("http://a.test:8080/x", "http://a.test/x")
+    assert not same_origin("not a url", "http://a.test/")
 
 
 def test_cookie_value_joins_the_jar_part_and_the_typed_header():

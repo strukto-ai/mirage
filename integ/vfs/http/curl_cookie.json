@@ -324,6 +324,19 @@
         "stdout": "cookie=new=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "curl_cookie_dashed_expires_deletes",
+      "seq": 330425,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "printf '127.0.0.1\\tFALSE\\t/\\tFALSE\\t0\\td\\t1\\n127.0.0.1\\tFALSE\\t/\\tFALSE\\t0\\tk\\t1\\n' > /data/jar_dash; curl -s -b /data/jar_dash -c /data/jar_dash '{http}/jar/x?c=d%3Dx%3B%20Expires%3DThu%2C%2001-Jan-1970%2000%3A00%3A00%20GMT%3B%20Path%3D%2F'; tail -n 1 /data/jar_dash | cut -f6",
+      "expect": {
+        "exit": 0,
+        "stdout": "cookie=k=1; d=1\nk\n",
+        "stderr": ""
+      }
     }
   ]
 }

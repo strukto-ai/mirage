@@ -26,7 +26,11 @@ from urllib.parse import urlsplit
 
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.utils.constants import HTTP_TIMEOUT_SECONDS
-from mirage.commands.builtin.utils.cookie import CookieJar, cookie_value
+from mirage.commands.builtin.utils.cookie import (
+    CookieJar,
+    cookie_value,
+    same_origin,
+)
 
 # httpx is the [http] extra, so it stays optional: top-level import guarded the
 # same way the databricks accessor guards its SDK.
@@ -126,18 +130,15 @@ async def http_request(
         # build from its own cookies; httpx drops a Cookie header on every
         # redirect, so the one among `headers` is put back after the jar's
         # on the hops that stay on the first origin.
-        origin = httpx.URL(url)
-        first = (origin.scheme, origin.host, origin.port)
         typed = next(
             (v for k, v in (headers or {}).items() if k.lower() == "cookie"),
             None,
         )
 
         async def send_cookies(request: Any) -> None:
-            hop = request.url
-            same = (hop.scheme, hop.host, hop.port) == first
+            hop = str(request.url)
             value = cookie_value(
-                cookies.header(str(hop)), typed if same else None
+                cookies.header(hop), typed if same_origin(hop, url) else None
             )
             request.headers.pop("Cookie", None)
             if value is not None:

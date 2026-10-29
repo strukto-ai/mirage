@@ -73,6 +73,8 @@ DATE_TOKEN = re.compile(
     r"|[A-Za-z]+|[0-9]+"
 )
 IPV4 = re.compile(r"^[0-9]{1,3}(?:\.[0-9]{1,3}){3}$")
+# The largest expiry a cookie file may give.
+INT64_MAX = 2**63 - 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,10 +119,12 @@ def parse_date(text: str) -> int | None:
 
     The forms curl reads: a day of the month, a month name and a year in
     any order, a time (midnight without one), and a zone, RFC 822's
-    names or a ``+hhmm`` offset (UTC without one). A two-digit year above
-    70 is in the 1900s, the rest in the 2000s, and a date before 1970
-    does not parse (curl 8.14.1). Zone names past RFC 822's are a
-    deliberate gap: curl knows more of them.
+    names or a ``+hhmm`` offset of at most 1400, the first one found (UTC
+    without one). A sign before a larger number only separates it
+    (``01-Jan-1970``), and a number with no field left to fill fails the
+    date. A two-digit year above 70 is in the 1900s, the rest in the
+    2000s, and a date before 1970 does not parse (curl 8.14.1). Zone
+    names past RFC 822's are a deliberate gap: curl knows more of them.
 
     Args:
         text (str): the attribute's value.
@@ -133,13 +137,19 @@ def parse_date(text: str) -> int | None:
     year: int | None = None
     clock: tuple[int, int, int] | None = None
     offset = 0
+    zoned = False
     for match in DATE_TOKEN.finditer(text):
         token = match.group(0)
         if token[0] in "+-":
             hhmm = int(token[1:])
-            sign = -1 if token[0] == "-" else 1
-            offset = sign * (hhmm // 100 * 3600 + hhmm % 100 * 60)
-        elif ":" in token:
+            if hhmm <= 1400:
+                if not zoned:
+                    sign = -1 if token[0] == "-" else 1
+                    offset = sign * (hhmm // 100 * 3600 + hhmm % 100 * 60)
+                    zoned = True
+                continue
+            token = token[1:]
+        if ":" in token:
             if clock is not None:
                 continue
             parts = [int(part) for part in token.split(":")]
@@ -151,17 +161,21 @@ def parse_date(text: str) -> int | None:
             lower = token.lower()
             if lower[:3] in MONTHS and month is None and len(lower) >= 3:
                 month = MONTHS.index(lower[:3])
-            elif lower in ZONES:
+            elif lower in ZONES and not zoned:
                 offset = ZONES[lower] * 3600
+                zoned = True
         elif len(token) == 4:
-            if year is None:
-                year = int(token)
+            if year is not None:
+                return None
+            year = int(token)
         elif len(token) <= 2:
             n = int(token)
             if day is None:
                 day = n
             elif year is None:
                 year = 2000 + n if n <= 70 else 1900 + n
+            else:
+                return None
         else:
             return None
     if day is None or month is None or year is None or not 1 <= day <= 31:
@@ -251,6 +265,32 @@ def _same_cookie(a: Cookie, b: Cookie) -> bool:
         and (a.domain or "").lower() == (b.domain or "").lower()
         and _path_key(a.path) == _path_key(b.path)
     )
+
+
+def same_origin(a: str, b: str) -> bool:
+    """Whether two URLs share an origin: scheme, host and port.
+
+    A Cookie header the line typed goes only to the first request's
+    origin (curl 8.14.1).
+
+    Args:
+        a (str): one URL.
+        b (str): the other.
+    """
+    ports = {"http": 80, "https": 443}
+    try:
+        one, two = urlsplit(a), urlsplit(b)
+        return (
+            one.scheme.lower(),
+            one.hostname,
+            one.port or ports.get(one.scheme.lower()),
+        ) == (
+            two.scheme.lower(),
+            two.hostname,
+            two.port or ports.get(two.scheme.lower()),
+        )
+    except ValueError:
+        return False
 
 
 def cookie_value(part: str | None, typed: str | None) -> str | None:
@@ -366,11 +406,15 @@ class CookieJar:
             elif key == "max-age":
                 # curl drops a cookie whose Max-Age does not start with a
                 # digit or a minus, and reads the digits that lead one
-                # that does.
-                digits = re.match(r"-?[0-9]+", raw)
+                # that does; past twelve of them only the sign matters.
+                digits = re.match(r"(-?)([0-9]+)", raw)
                 if digits is None:
                     return
-                max_age = int(digits.group(0))
+                minus, count = digits.groups()
+                if len(count) > 12:
+                    max_age = -1 if minus else MAX_LIFETIME + 1
+                else:
+                    max_age = int(minus + count)
             elif key == "domain":
                 if raw:
                     domain_attr = raw.removeprefix(".")
@@ -420,6 +464,19 @@ class CookieJar:
                 not secure or tailmatch or path != "/"
             ):
                 return
+            # Plain http may neither replace nor delete a Secure cookie of
+            # the same name and domain whose path covers this one's (RFC
+            # 6265bis, curl 8.14.1).
+            key = (domain or "").lower()
+            own = _path_key(path)
+            if not secure_context and any(
+                c.secure
+                and c.name == name
+                and (c.domain or "").lower() == key
+                and path_matches(c.path, own)
+                for c in self.cookies
+            ):
+                return
         self._keep(
             Cookie(
                 name=name,
@@ -450,8 +507,9 @@ class CookieJar:
         """Load a cookie file.
 
         curl's tab-separated lines, ``#HttpOnly_`` marking a domain, or
-        ``Set-Cookie:`` header lines. A line that does not parse, and a
-        cookie already expired, are skipped (curl 8.14.1).
+        ``Set-Cookie:`` header lines. A line that does not parse, one whose
+        expiry passes 64 bits, and a cookie already expired, are skipped
+        (curl 8.14.1).
 
         Args:
             text (str): the file's text.
@@ -474,9 +532,11 @@ class CookieJar:
                 continue
             domain, tail, path, secure, expiry, name, value = fields
             digits = re.match(r"[0-9]+", expiry)
-            if digits is None:
+            if digits is None or len(digits.group(0)) > 19:
                 continue
             expires = int(digits.group(0))
+            if expires > INT64_MAX:
+                continue
             if expires != 0 and expires <= self.now():
                 continue
             self._keep(

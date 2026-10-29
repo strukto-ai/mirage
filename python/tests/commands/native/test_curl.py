@@ -786,6 +786,34 @@ def test_v_shows_the_jar_cookie_line_after_accept_per_hop(httpx_mock):
     ]
 
 
+def test_v_shows_a_typed_cookie_only_on_the_hops_it_went_to(httpx_mock):
+    httpx_mock.add_response(
+        url=JAR_URL,
+        status_code=302,
+        headers=[("Location", "http://localhost:8080/jar/next")],
+    )
+    httpx_mock.add_response(
+        url="http://localhost:8080/jar/next",
+        status_code=302,
+        headers=[("Location", "http://127.0.0.1:8080/jar/end")],
+    )
+    httpx_mock.add_response(url="http://127.0.0.1:8080/jar/end")
+    _, io, _ = _run_jar(location=True, verbose=True, header=["Cookie: x=1"])
+    shown = [
+        line
+        for line in io.stderr.decode().split("\r\n")
+        if line.startswith(("> GET", "> Cookie"))
+    ]
+    assert shown == [
+        "> GET /jar/x HTTP/1.1",
+        "> Cookie: x=1",
+        "> GET /jar/next HTTP/1.1",
+        "> GET /jar/end HTTP/1.1",
+        "> Cookie: x=1",
+    ]
+    assert _cookies_sent(httpx_mock) == ["x=1", None, "x=1"]
+
+
 def test_the_jar_is_saved_after_a_failed_transfer_and_unsaved_quietly(
     httpx_mock,
 ):

@@ -49,6 +49,8 @@ export const ZONES: Readonly<Record<string, number>> = {
 
 const DATE_TOKEN = /[+-][0-9]{4}(?![0-9])|[0-9]{1,2}:[0-9]{1,2}(?::[0-9]{1,2})?|[A-Za-z]+|[0-9]+/g
 const IPV4 = /^[0-9]{1,3}(?:\.[0-9]{1,3}){3}$/
+// The largest expiry a cookie file may give.
+const INT64_MAX = 2n ** 63n - 1n
 
 export interface Cookie {
   name: string
@@ -100,10 +102,12 @@ function trimWs(text: string): string {
  *
  * The forms curl reads: a day of the month, a month name and a year in any
  * order, a time (midnight without one), and a zone, RFC 822's names or a
- * `+hhmm` offset (UTC without one). A two-digit year above 70 is in the
- * 1900s, the rest in the 2000s, and a date before 1970 does not parse
- * (curl 8.14.1). Zone names past RFC 822's are a deliberate gap: curl knows
- * more of them.
+ * `+hhmm` offset of at most 1400, the first one found (UTC without one). A
+ * sign before a larger number only separates it (`01-Jan-1970`), and a
+ * number with no field left to fill fails the date. A two-digit year above
+ * 70 is in the 1900s, the rest in the 2000s, and a date before 1970 does not
+ * parse (curl 8.14.1). Zone names past RFC 822's are a deliberate gap: curl
+ * knows more of them.
  */
 export function parseDate(text: string): number | null {
   let day: number | null = null
@@ -111,12 +115,22 @@ export function parseDate(text: string): number | null {
   let year: number | null = null
   let time: [number, number, number] | null = null
   let offset = 0
-  for (const [token] of text.matchAll(DATE_TOKEN)) {
+  let zoned = false
+  for (const match of text.matchAll(DATE_TOKEN)) {
+    let token = match[0]
     if (token.startsWith('+') || token.startsWith('-')) {
       const hhmm = Number(token.slice(1))
-      const sign = token.startsWith('-') ? -1 : 1
-      offset = sign * (Math.floor(hhmm / 100) * 3600 + (hhmm % 100) * 60)
-    } else if (token.includes(':')) {
+      if (hhmm <= 1400) {
+        if (!zoned) {
+          const sign = token.startsWith('-') ? -1 : 1
+          offset = sign * (Math.floor(hhmm / 100) * 3600 + (hhmm % 100) * 60)
+          zoned = true
+        }
+        continue
+      }
+      token = token.slice(1)
+    }
+    if (token.includes(':')) {
       if (time !== null) continue
       const [h = 0, m = 0, s = 0] = token.split(':').map(Number)
       if (h > 23 || m > 59 || s > 59) return null
@@ -124,14 +138,20 @@ export function parseDate(text: string): number | null {
     } else if (/^[A-Za-z]/.test(token)) {
       const lower = token.toLowerCase()
       const named = MONTHS.indexOf(lower.slice(0, 3))
-      if (named >= 0 && month === null && lower.length >= 3) month = named
-      else if (lower in ZONES) offset = (ZONES[lower] ?? 0) * 3600
+      if (named >= 0 && month === null && lower.length >= 3) {
+        month = named
+      } else if (lower in ZONES && !zoned) {
+        offset = (ZONES[lower] ?? 0) * 3600
+        zoned = true
+      }
     } else if (token.length === 4) {
-      year ??= Number(token)
+      if (year !== null) return null
+      year = Number(token)
     } else if (token.length <= 2) {
       const n = Number(token)
       if (day === null) day = n
-      else year ??= n <= 70 ? 2000 + n : 1900 + n
+      else if (year === null) year = n <= 70 ? 2000 + n : 1900 + n
+      else return null
     } else {
       return null
     }
@@ -202,6 +222,18 @@ function sameCookie(a: Cookie, b: Cookie): boolean {
     (a.domain ?? '').toLowerCase() === (b.domain ?? '').toLowerCase() &&
     pathKey(a.path) === pathKey(b.path)
   )
+}
+
+/**
+ * Whether two URLs share an origin: scheme, host and port. A Cookie header
+ * the line typed goes only to the first request's origin (curl 8.14.1).
+ */
+export function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -285,10 +317,12 @@ export class CookieJar {
         expiresAt = parseDate(raw) ?? expiresAt
       } else if (key === 'max-age') {
         // curl drops a cookie whose Max-Age does not start with a digit or a
-        // minus, and reads the digits that lead one that does.
-        const digits = /^-?[0-9]+/.exec(raw)
+        // minus, and reads the digits that lead one that does; past twelve
+        // of them only the sign matters.
+        const digits = /^(-?)([0-9]+)/.exec(raw)
         if (digits === null) return
-        maxAge = Number(digits[0])
+        const [, minus = '', count = ''] = digits
+        maxAge = count.length > 12 ? (minus === '' ? MAX_LIFETIME + 1 : -1) : Number(minus + count)
       } else if (key === 'domain') {
         if (raw !== '') domainAttr = raw.replace(/^\./, '')
       } else if (key === 'path') {
@@ -332,6 +366,23 @@ export class CookieJar {
       if (secure && !request.secure) return
       if (name.startsWith('__Secure-') && !secure) return
       if (name.startsWith('__Host-') && (!secure || tailmatch || path !== '/')) return
+      // Plain http may neither replace nor delete a Secure cookie of the
+      // same name and domain whose path covers this one's (RFC 6265bis,
+      // curl 8.14.1).
+      const key = (domain ?? '').toLowerCase()
+      const own = pathKey(path)
+      if (
+        !request.secure &&
+        this.cookies.some(
+          (c) =>
+            c.secure &&
+            c.name === name &&
+            (c.domain ?? '').toLowerCase() === key &&
+            pathMatches(c.path, own),
+        )
+      ) {
+        return
+      }
     }
     this.keep(
       { name, value, domain, tailmatch, path, secure, httpOnly, expires, created: 0 },
@@ -347,8 +398,10 @@ export class CookieJar {
 
   /**
    * Load a cookie file: curl's tab-separated lines, `#HttpOnly_` marking a
-   * domain, or `Set-Cookie:` header lines. A line that does not parse, and a
-   * cookie already expired, are skipped (curl 8.14.1).
+   * domain, or `Set-Cookie:` header lines. A line that does not parse, one
+   * whose expiry passes 64 bits, and a cookie already expired, are skipped
+   * (curl 8.14.1). An expiry past 2^53 loses its low digits here, which
+   * Python keeps: no date is that far out.
    */
   load(text: string): void {
     for (const raw of text.split('\n')) {
@@ -370,7 +423,7 @@ export class CookieJar {
       const [domain = '', tail = '', path = '', secure = '', expiry = '', name = '', value = ''] =
         fields
       const digits = /^[0-9]+/.exec(expiry)
-      if (digits === null) continue
+      if (digits === null || digits[0].length > 19 || BigInt(digits[0]) > INT64_MAX) continue
       const expires = Number(digits[0])
       if (expires !== 0 && expires <= this.now()) continue
       this.keep(

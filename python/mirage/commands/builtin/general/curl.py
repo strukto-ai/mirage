@@ -22,7 +22,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.general.curl_write_out import render_write_out
 from mirage.commands.builtin.utils.constants import HTTP_TIMEOUT_SECONDS
-from mirage.commands.builtin.utils.cookie import CookieJar
+from mirage.commands.builtin.utils.cookie import CookieJar, same_origin
 from mirage.commands.builtin.utils.http import (
     DEFAULT_USER_AGENT,
     HttpResponse,
@@ -695,6 +695,12 @@ async def curl(
         for index, ((target, sent_as), hop) in enumerate(zip(requests, hops)):
             carries = sent_as == method
             cookie = jar.sent[index] if index < len(jar.sent) else None
+            # A typed Cookie header goes to the first origin alone.
+            tail = (
+                trace_tail
+                if same_origin(target, url)
+                else [(k, v) for k, v in trace_tail if k.lower() != "cookie"]
+            )
             dumped.append(
                 _dump(
                     request_lines(
@@ -703,7 +709,7 @@ async def curl(
                         [
                             *trace_head,
                             *([("Cookie", cookie)] if cookie else []),
-                            *trace_tail,
+                            *tail,
                         ],
                         body_len if carries else None,
                         body_type if carries else None,

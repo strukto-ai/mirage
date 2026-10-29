@@ -26,7 +26,7 @@ import {
   isHttpError,
 } from '../utils/http.ts'
 import { HTTP_TIMEOUT_SECONDS } from '../utils/constants.ts'
-import { CookieJar } from '../utils/cookie.ts'
+import { CookieJar, sameOrigin } from '../utils/cookie.ts'
 import { resolveTarget } from '../utils/paths.ts'
 import { UsageError } from '../../errors.ts'
 import { fsStrerror, isFsError, isWalkError, enotsup } from '../../../errors/fs.ts'
@@ -582,6 +582,10 @@ async function curl(
             const [target, sentAs] = requests[index] ?? [hop.url, hop.method]
             const carries = sentAs === method
             const cookie = jar.sent[index] ?? null
+            // A typed Cookie header goes to the first origin alone.
+            const tail = sameOrigin(target, url)
+              ? traceTail
+              : traceTail.filter(([name]) => name.toLowerCase() !== 'cookie')
             return (
               dump(
                 requestLines(
@@ -590,7 +594,7 @@ async function curl(
                   [
                     ...traceHead,
                     ...(cookie === null ? [] : [['Cookie', cookie] as [string, string]]),
-                    ...traceTail,
+                    ...tail,
                   ],
                   carries ? bodyLen : null,
                   carries ? bodyType : null,

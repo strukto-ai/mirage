@@ -22,7 +22,7 @@ import { callerSignal } from '../../../context/session_context.ts'
 import { makeAbortError, mergeSignals } from '../../../utils/abort.ts'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import { HTTP_TIMEOUT_SECONDS } from './constants.ts'
-import { type CookieJar, cookieValue } from './cookie.ts'
+import { type CookieJar, cookieValue, sameOrigin } from './cookie.ts'
 
 export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; mirage/1.0)'
 const DEFAULT_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443 }
@@ -159,11 +159,14 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
     let current = url
     let method = options.method ?? 'GET'
     let body = options.body
+    const typed = Object.entries(headers).find(([name]) => name.toLowerCase() === 'cookie')?.[1]
     for (;;) {
       let sent = headers
       if (options.cookies !== undefined) {
-        const typed = Object.entries(headers).find(([name]) => name.toLowerCase() === 'cookie')
-        const value = cookieValue(options.cookies.header(current), typed?.[1] ?? null)
+        const value = cookieValue(
+          options.cookies.header(current),
+          sameOrigin(current, url) ? (typed ?? null) : null,
+        )
         sent = Object.fromEntries(
           Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'cookie'),
         )
@@ -189,6 +192,14 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
           // a deliberate divergence from curl, whose -iL shows every hop.
           resp = await send(current, { ...init, redirect: 'follow' })
         }
+        // The cookies count once the headers are in, as curl keeps them: a
+        // body that then fails still leaves them in the jar.
+        options.cookies?.store(
+          current,
+          [...resp.headers.entries()]
+            .filter(([name]) => name === 'set-cookie')
+            .map(([, value]) => value),
+        )
         // The deadline can fire while the body is still arriving, so the
         // body is read inside the same catch, as httpx reads it inside the
         // request the python twin wraps.
@@ -206,10 +217,6 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
         throw new HttpConnectError(host, port)
       }
       const hop = hopOf(resp, current, method, buf)
-      options.cookies?.store(
-        current,
-        hop.headers.filter(([name]) => name === 'set-cookie').map(([, value]) => value),
-      )
       const location = resp.headers.get('location')
       const next =
         follow && REDIRECT_STATUSES.has(resp.status) && location !== null
