@@ -24,6 +24,8 @@ from mirage.core.jq.stream import (
     value_text,
 )
 from mirage.core.jq.types import NO_VALUE, InputSource, JqOptions, JqParseError
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 
 
 async def _chunks(data: bytes, size: int):
@@ -543,3 +545,23 @@ async def test_value_text_takes_one_value_as_jv_parse_does():
     assert (await value_text(b"")) is NO_VALUE
     assert (await value_text(b"nope")) is NO_VALUE
     assert (await value_text(b"[1,")) is NO_VALUE
+
+
+@pytest.mark.asyncio
+async def test_a_slurp_counts_each_value_it_keeps():
+    # A failed record before each value clears what was read of it, so
+    # only the values' own bytes show the list growing.
+    record = b'\x1e]\x1e"' + b"a" * 20 + b'"'
+    reader = InputReader(
+        _sources(record * 400 + b"\n"), JqOptions(slurp=True, seq=True)
+    )
+
+    async def drain() -> None:
+        while await reader.next_input() is not NO_VALUE:
+            pass
+
+    try:
+        with pytest.raises(MemoryExhausted):
+            await run_with_memory(MemoryBudget(4096, lambda: 0), drain())
+    finally:
+        await reader.close()

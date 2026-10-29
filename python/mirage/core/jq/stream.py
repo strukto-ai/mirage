@@ -151,10 +151,11 @@ class InputReader:
                 self._held = 0
                 return value
             if value is not NO_VALUE:
-                held, self._held = self._held, 0
+                self._held = 0
                 if not isinstance(self._slurped, list):
                     return value
-                self._kept += held
+                self._kept += len(value.encode())
+                check_memory(self._kept)
                 self._slurped.append(value)
                 continue
             if self._json_eof:
@@ -189,10 +190,11 @@ class InputReader:
 
     def _count(self, size: int) -> None:
         """Count bytes read into memory, which must fit in what the
-        workspace's ``max_memory`` has left with what a slurp keeps: a
-        raw line holds the pieces read of it, a raw slurp the whole
-        input, and a JSON value what was read of it from its first byte,
-        whitespace before it left out, as the scanner discards it.
+        workspace's ``max_memory`` has left with the values a slurp keeps,
+        each counted by its own bytes: a raw line holds the pieces read
+        of it, a raw slurp the whole input, and a JSON value what was
+        read of it from its first byte, whitespace before it left out, as
+        the scanner discards it.
 
         Args:
             size (int): the bytes jq's reader read that are kept.

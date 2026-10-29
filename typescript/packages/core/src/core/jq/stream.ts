@@ -205,10 +205,10 @@ export class InputReader {
         return value
       }
       if (value !== NO_VALUE) {
-        const held = this.held
         this.held = 0
         if (!Array.isArray(this.slurped)) return value
-        this.kept += held
+        this.kept += new TextEncoder().encode(value).byteLength
+        checkMemory(this.kept)
         this.slurped.push(value)
         continue
       }
@@ -249,10 +249,11 @@ export class InputReader {
 
   /**
    * Count bytes read into memory, which must fit in what the workspace's
-   * `max_memory` has left with what a slurp keeps: a raw line holds the
-   * pieces read of it, a raw slurp the whole input, and a JSON value what was
-   * read of it from its first byte, whitespace before it left out, as the
-   * scanner discards it. Mirrors Python's `_count`.
+   * `max_memory` has left with the values a slurp keeps, each counted by its
+   * own bytes: a raw line holds the pieces read of it, a raw slurp the whole
+   * input, and a JSON value what was read of it from its first byte,
+   * whitespace before it left out, as the scanner discards it. Mirrors
+   * Python's `_count`.
    */
   private count(size: number): void {
     this.held += size
