@@ -103,7 +103,10 @@ def test_unstarted_reads_preserve_the_previous_observation(initial):
     history.observe(scope, "/f", pending)
     pending.bytes = 1
     history.observe(scope, "/f", pending)
-    assert history.read(scope, "/f") is None
+    assert history.read(scope, "/f") == "empty-file-token"
+    pending.fingerprint = "new-token"
+    history.observe(scope, "/f", pending)
+    assert history.read(scope, "/f") == "new-token"
 
 
 @pytest.mark.parametrize("streamed", [False, True])

@@ -499,9 +499,13 @@ describe('conditional writes only Box has', () => {
     expect(drive.text('f')).toBe('the')
   })
 
-  it.each([false, true])(
-    'completed empty Box reread without sha1 releases the old version (stream: %s)',
-    async (streamed) => {
+  it.each([
+    [false, false],
+    [true, false],
+    [true, true],
+  ] as const)(
+    'completed empty Box reread without sha1 releases the old version (stream %s, buffered %s)',
+    async (streamed, buffered) => {
       const ws = await workspace(WritePolicy.CONDITIONAL, {
         policy: ReadPolicy.FRESH,
         ttl: DEFAULT_READ_TTL,
@@ -514,6 +518,7 @@ describe('conditional writes only Box has', () => {
       await expect(a.vfs.write(path, ENC.encode('mine\n'))).rejects.toMatchObject({
         code: 'STALE_WRITE',
       })
+      if (buffered) ws.policies.add({ postVfs: () => Promise.resolve(null) })
       if (streamed) {
         const chunks: Uint8Array[] = []
         for await (const chunk of await a.vfs.read(path, { stream: true })) chunks.push(chunk)
@@ -521,6 +526,127 @@ describe('conditional writes only Box has', () => {
       } else expect(await a.vfs.read(path)).toEqual(new Uint8Array(0))
       await a.vfs.write(path, ENC.encode('mine\n'))
       expect(drive.text('f')).toBe('mine\n')
+    },
+  )
+
+  it.each(
+    [false, true].flatMap((warm) =>
+      (['unpulled', 'closed', 'drained'] as const).map((finish) => [warm, finish] as const),
+    ),
+  )('a partial Box stream keeps its previous basis (warm %s, %s)', async (warm, finish) => {
+    const ws = await workspace()
+    const a = await ws.session('a'),
+      b = await ws.session('b')
+    const path = '/box/f',
+      peer = 'prefix\nunread peer tail\n'
+    await a.vfs.read(path)
+    await b.vfs.write(path, ENC.encode(peer))
+    if (!warm) await ws.cache.clear()
+    const fetch = drive.fake.fetch
+    vi.stubGlobal('fetch', async (...args: Parameters<typeof globalThis.fetch>) => {
+      const response = await fetch(...args)
+      const url = args[0] instanceof Request ? args[0].url : String(args[0])
+      const method = args[0] instanceof Request ? args[0].method : (args[1]?.method ?? 'GET')
+      if (method !== 'GET' || !new URL(url).pathname.endsWith('/content')) return response
+      const data = new Uint8Array(await response.arrayBuffer())
+      let offset = 0
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (offset === data.byteLength) controller.close()
+            else {
+              const end = offset === 0 ? Math.min(7, data.byteLength) : data.byteLength
+              controller.enqueue(data.slice(offset, end))
+              offset = end
+            }
+          },
+        }),
+        { status: response.status, headers: response.headers },
+      )
+    })
+    const before = drive.fake.count(drive.download)
+    const source = await a.vfs.read(path, { stream: true })
+    expect(drive.fake.count(drive.download) - before).toBe(warm ? 0 : 1)
+    const iterator = source[Symbol.asyncIterator]()
+    try {
+      if (finish === 'drained' || (warm && finish === 'closed')) {
+        if (finish === 'drained') {
+          const chunks: Uint8Array[] = []
+          for await (const chunk of source) chunks.push(chunk)
+          expect(chunks.map((c) => DEC.decode(c)).join('')).toBe(peer)
+        } else {
+          expect(await iterator.next()).toMatchObject({ done: false, value: ENC.encode(peer) })
+          await iterator.return?.()
+        }
+        await a.vfs.write(path, ENC.encode('mine\n'))
+        expect(drive.text('f')).toBe('mine\n')
+      } else {
+        if (finish === 'closed')
+          expect(await iterator.next()).toMatchObject({
+            done: false,
+            value: ENC.encode('prefix\n'),
+          })
+        await iterator.return?.()
+        await expect(a.vfs.write(path, ENC.encode('mine\n'))).rejects.toMatchObject({
+          code: 'STALE_WRITE',
+        })
+        expect(drive.text('f')).toBe(peer)
+      }
+    } finally {
+      await iterator.return?.()
+    }
+  })
+
+  it.each(
+    [false, true].flatMap((warm) =>
+      [false, true].flatMap((known) =>
+        (
+          [
+            [0, 7],
+            [7, null],
+            [0, 0],
+            [999, null],
+          ] as const
+        )
+          .filter(([offset]) => warm || offset !== 999)
+          .map(([offset, size]) => [warm, known, offset, size] as const),
+      ),
+    ),
+  )(
+    'partial Box range observes a basis (warm %s, known %s, offset %s, size %s)',
+    async (warm, known, offset, size) => {
+      const ws = await workspace()
+      const a = await ws.session('a'),
+        b = await ws.session('b')
+      const path = '/box/f',
+        peer = 'prefix\nunread peer tail\n'
+      drive.box.unhashed.delete(drive.box.idOf('f'))
+      drive.put('f', SEED.f ?? '')
+      await a.vfs.read(path)
+      if (!known) drive.box.unhashed.add(drive.box.idOf('f'))
+      await b.vfs.write(path, ENC.encode(peer))
+      if (!warm) await ws.cache.clear()
+      const before = drive.fake.count(drive.download)
+      const got = await a.vfs.read(path, { offset, ...(size === null ? {} : { size }) })
+      expect(DEC.decode(got)).toBe(peer.slice(offset, size === null ? undefined : offset + size))
+      expect(drive.fake.count(drive.download) - before).toBe(warm || size === 0 ? 0 : 1)
+      if (warm && known && got.byteLength > 0) {
+        await a.vfs.write(path, ENC.encode('mine\n'))
+        await b.vfs.read(path)
+        await b.vfs.write(path, ENC.encode('new peer\n'))
+        await expect(a.vfs.write(path, ENC.encode('again\n'))).rejects.toMatchObject({
+          code: 'STALE_WRITE',
+        })
+        expect(drive.text('f')).toBe('new peer\n')
+      } else {
+        await expect(a.vfs.write(path, ENC.encode('mine\n'))).rejects.toMatchObject({
+          code: 'STALE_WRITE',
+        })
+        expect(drive.text('f')).toBe(peer)
+        expect(DEC.decode(await a.vfs.read(path))).toBe(peer)
+        await a.vfs.write(path, ENC.encode('mine\n'))
+        expect(drive.text('f')).toBe('mine\n')
+      }
     },
   )
 
@@ -832,4 +958,36 @@ describe('conditional writes only Dropbox has', () => {
     expect(await run(ws, `${verb} /dbx/f /dbx/g`)).toEqual([0, '', ''])
     expect(drive.text('g')).toBe('one\n')
   })
+})
+
+describe('partial Dropbox stream observations', () => {
+  use('dropbox')
+
+  it.each([false, true])(
+    'observes the response token only after delivering bytes (warm %s)',
+    async (warm) => {
+      const ws = await workspace()
+      const a = await ws.session('a'),
+        b = await ws.session('b')
+      const path = '/dbx/f',
+        peer = 'peer\n'
+      await a.vfs.read(path)
+      await b.vfs.write(path, ENC.encode(peer))
+      if (!warm) await ws.cache.clear()
+      const source = await a.vfs.read(path, { stream: true })
+      const iterator = source[Symbol.asyncIterator]()
+      try {
+        await expect(a.vfs.write(path, ENC.encode('not seen\n'))).rejects.toMatchObject({
+          code: 'STALE_WRITE',
+        })
+        expect(drive.text('f')).toBe(peer)
+        expect(await iterator.next()).toMatchObject({ done: false, value: ENC.encode(peer) })
+        await iterator.return?.()
+        await a.vfs.write(path, ENC.encode('mine\n'))
+        expect(drive.text('f')).toBe('mine\n')
+      } finally {
+        await iterator.return?.()
+      }
+    },
+  )
 })

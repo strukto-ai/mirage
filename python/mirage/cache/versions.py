@@ -67,7 +67,11 @@ class VersionHistory:
             key (str): resolved mount-relative file name.
             rec (OpRecord): the operation's own result.
         """
-        if rec.op == "read" and not rec.complete and rec.bytes == 0:
+        if (
+            rec.op == "read"
+            and not rec.complete
+            and (rec.bytes == 0 or rec.fingerprint is None)
+        ):
             return
         if rec.op not in (
             STAMP_FINGERPRINT_OPS

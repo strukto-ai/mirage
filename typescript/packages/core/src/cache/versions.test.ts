@@ -118,7 +118,10 @@ it.each(['v1', null])('unstarted reads preserve the previous observation %s', (i
   history.observe(scope, '/f', pending)
   pending.bytes = 1
   history.observe(scope, '/f', pending)
-  expect(history.read(scope, '/f')).toBeNull()
+  expect(history.read(scope, '/f')).toBe('empty-file-token')
+  pending.fingerprint = 'new-token'
+  history.observe(scope, '/f', pending)
+  expect(history.read(scope, '/f')).toBe('new-token')
 })
 
 it.each([false, true])(

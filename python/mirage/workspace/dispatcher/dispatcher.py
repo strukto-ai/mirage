@@ -72,8 +72,8 @@ from mirage.errors.fs import (
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
-from mirage.io.stream import close_quietly
-from mirage.io.types import PipeStream
+from mirage.io.stream import close_quietly, ensure_stream
+from mirage.io.types import ByteSource, PipeStream
 from mirage.io.yield_budget import task_turn
 from mirage.observe.context import (
     RecordingScope,
@@ -1423,28 +1423,49 @@ class Dispatcher:
             result = self._custom_answer(call, mount, result)
         result = await boundary.complete(mark, call.path, call.write, result)
         if name in DISPATCH_READ_OPS or name in READ_SHORTCUT_OPS:
-            self._observe_reads(call, mount)
             if (
                 name in DISPATCH_READ_OPS
-                and hasattr(result, "__aiter__")
-                and not isinstance(result, PipeStream)
+                and call.stream
+                and mount.write is WritePolicy.CONDITIONAL
+                and isinstance(result, bytes)
             ):
-                observed = self._observe_stream(call, mount, result)
-                await anext(observed)
-                result = observed
+                result = ensure_stream(result)
+            if hasattr(result, "__aiter__"):
+                if name in DISPATCH_READ_OPS and not isinstance(
+                    result, PipeStream
+                ):
+                    observed = self._observe_stream(call, mount, result)
+                    await anext(observed)
+                    result = observed
+            else:
+                self._observe_reads(
+                    call,
+                    mount,
+                    delivered=isinstance(result, bytes) and bool(result),
+                )
         return result, IOResult()
 
-    def _observe_reads(self, call: _Call, mount: MountEntry) -> None:
+    def _observe_reads(
+        self, call: _Call, mount: MountEntry, *, delivered: bool
+    ) -> None:
         """Publish an admitted read's own records for its captured caller.
 
         Args:
             call (_Call): the read that passed its result gate.
             mount (MountEntry): the mount that supplied its records.
+            delivered (bool): the caller received bytes from this read.
         """
         manager = mount.cache_manager
         if manager is not None:
             for rec in call.read_records:
-                if rec.op == "read" and rec.path == call.path.virtual:
+                if (
+                    rec.op == "read"
+                    and rec.path == call.path.virtual
+                    and (
+                        (call.window == (0, None) and rec.complete)
+                        or (delivered and rec.fingerprint is not None)
+                    )
+                ):
                     manager.observe(rec, call.caller)
 
     async def _observe_stream(
@@ -1457,12 +1478,14 @@ class Dispatcher:
             mount (MountEntry): the supplying mount.
             source (AsyncIterator[bytes]): its owned stream.
         """
+        delivered = False
         try:
             yield b""
             async for chunk in source:
-                self._observe_reads(call, mount)
+                delivered = delivered or bool(chunk)
+                self._observe_reads(call, mount, delivered=delivered)
                 yield chunk
-            self._observe_reads(call, mount)
+            self._observe_reads(call, mount, delivered=delivered)
         finally:
             await close_quietly(source)
 
@@ -2211,7 +2234,7 @@ class Dispatcher:
         mount: MountEntry,
         boundary: Boundary,
         mark: VfsCall,
-    ) -> bytes | None:
+    ) -> ByteSource | None:
         """Answer a read from the file cache, or None to read the backend.
 
         The file cache holds what commands read, keyed on the path alone:
@@ -2266,7 +2289,7 @@ class Dispatcher:
             mount.write is WritePolicy.CONDITIONAL
             and mount.cache_manager is not None
         ):
-            mount.cache_manager.observe(
+            call.read_records = [
                 finish_record(
                     "read",
                     call.path.virtual,
@@ -2274,9 +2297,15 @@ class Dispatcher:
                     len(served),
                     start_op(),
                     fingerprint=held[1] if held is not None else None,
-                ),
-                call.caller,
-            )
+                )
+            ]
+            if call.stream:
+                observed = self._observe_stream(
+                    call, mount, ensure_stream(result)
+                )
+                await anext(observed)
+                return observed
+            self._observe_reads(call, mount, delivered=bool(result))
         return result
 
     def _filler(self, call: _Call, mount: MountEntry) -> CacheManager | None:

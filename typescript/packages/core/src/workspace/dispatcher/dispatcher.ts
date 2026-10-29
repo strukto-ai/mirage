@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { closeQuietly } from '../../io/stream.ts'
+import { closeQuietly, ensureStream } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
@@ -1163,26 +1163,33 @@ export class Dispatcher {
     // carries the moved count.
     result = await boundary.complete(mark, call.path, call.write, result, call.issuer)
     if (DISPATCH_READ_OPS.has(name) || READ_SHORTCUT_OPS.has(name)) {
-      this.observeReads(call, mount)
       if (
         DISPATCH_READ_OPS.has(name) &&
-        result !== null &&
-        typeof result === 'object' &&
-        Symbol.asyncIterator in result &&
-        !(result instanceof PipeStream)
-      ) {
-        const observed = this.observeStream(call, mount, result as AsyncIterable<Uint8Array>)
-        await observed.next()
-        result = observed
-      }
+        call.stream &&
+        mount.write === WritePolicy.CONDITIONAL &&
+        result instanceof Uint8Array
+      )
+        result = ensureStream(result)
+      if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
+        if (DISPATCH_READ_OPS.has(name) && !(result instanceof PipeStream)) {
+          const observed = this.observeStream(call, mount, result as AsyncIterable<Uint8Array>)
+          await observed.next()
+          result = observed
+        }
+      } else this.observeReads(call, mount, result instanceof Uint8Array && result.byteLength > 0)
     }
     return [result, new IOResult()]
   }
 
   /** Publish only this admitted read's records for its captured caller. */
-  private observeReads(call: Call, mount: MountEntry): void {
+  private observeReads(call: Call, mount: MountEntry, delivered: boolean): void {
+    const [offset, size] = readWindow(call.kwargs)
     for (const rec of call.readRecords)
-      if (rec.op === 'read' && rec.path === call.path.virtual)
+      if (
+        rec.op === 'read' &&
+        rec.path === call.path.virtual &&
+        ((offset === 0 && size === null && rec.complete) || (delivered && rec.fingerprint !== null))
+      )
         mount.cacheManager?.observe(rec, call.caller)
   }
 
@@ -1192,13 +1199,15 @@ export class Dispatcher {
     mount: MountEntry,
     source: AsyncIterable<Uint8Array>,
   ): AsyncGenerator<Uint8Array> {
+    let delivered = false
     try {
       yield new Uint8Array()
       for await (const chunk of source) {
-        this.observeReads(call, mount)
+        delivered ||= chunk.byteLength > 0
+        this.observeReads(call, mount, delivered)
         yield chunk
       }
-      this.observeReads(call, mount)
+      this.observeReads(call, mount, delivered)
     } finally {
       await closeQuietly(source)
     }
@@ -2102,7 +2111,7 @@ export class Dispatcher {
     vfs: BaseVFS,
     boundary: Boundary,
     mark: VfsCall,
-  ): Promise<Uint8Array | null> {
+  ): Promise<ByteSource | null> {
     if (call.direct || !vfs.cachesReads || !DISPATCH_READ_OPS.has(call.name)) return null
     const held = await this.cache.getVersioned(call.path.virtual)
     const cached = held?.[0] ?? null
@@ -2131,13 +2140,19 @@ export class Dispatcher {
       window,
       call.issuer,
     )) as Uint8Array
-    if (mount.write === WritePolicy.CONDITIONAL)
-      mount.cacheManager?.observe(
+    if (mount.write === WritePolicy.CONDITIONAL) {
+      call.readRecords = [
         finishRecord('read', call.path.virtual, 'ram', window.byteLength, startOp(), {
           fingerprint: held?.[1] ?? null,
         }),
-        call.caller,
-      )
+      ]
+      if (call.stream) {
+        const observed = this.observeStream(call, mount, ensureStream(result))
+        await observed.next()
+        return observed
+      }
+      this.observeReads(call, mount, result.byteLength > 0)
+    }
     return result
   }
 
