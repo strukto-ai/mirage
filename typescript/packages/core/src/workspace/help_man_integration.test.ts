@@ -212,12 +212,10 @@ describe('--help and man through the executor', () => {
     )
   })
 
-  it('workspace vfsMd mentions --help, help and man', async () => {
+  it('workspace vfsMd mentions --help and man', async () => {
     const ws = makeWs()
     const prompt = await ws.vfsMd()
     expect(prompt).toContain('--help')
     expect(prompt).toContain('man <cmd>')
-    expect(prompt).toContain('`man -k .`')
-    expect(prompt).toContain('`help`')
   })
 })

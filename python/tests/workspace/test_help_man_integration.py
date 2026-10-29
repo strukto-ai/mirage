@@ -232,8 +232,6 @@ async def test_workspace_vfs_md_mentions_help_and_man():
     prompt = await ws.vfs_md()
     assert "--help" in prompt
     assert "man <cmd>" in prompt
-    assert "`man -k .`" in prompt
-    assert "`help`" in prompt
 
 
 async def _materialize(source):

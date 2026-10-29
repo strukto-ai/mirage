@@ -412,9 +412,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
       table(['Path', 'Limitations'], limits),
     )
   }
-  parts.push(
-    "Run `man -k .` to list every command, `help` for the shell's own, and `man <cmd>` or `<cmd> --help` for one command's usage.",
-  )
+  parts.push("Run `man <cmd>` or `<cmd> --help` for one command's usage.")
   return parts.join('\n\n') + '\n'
 }
 

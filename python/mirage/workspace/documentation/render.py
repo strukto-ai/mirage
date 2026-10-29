@@ -521,10 +521,7 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
                 table(("Path", "Limitations"), limits),
             ]
         )
-    parts.append(
-        "Run `man -k .` to list every command, `help` for the shell's "
-        "own, and `man <cmd>` or `<cmd> --help` for one command's usage."
-    )
+    parts.append("Run `man <cmd>` or `<cmd> --help` for one command's usage.")
     return "\n\n".join(parts) + "\n"
 
 
