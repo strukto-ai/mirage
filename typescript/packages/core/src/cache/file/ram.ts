@@ -42,7 +42,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
     options: { limit?: string | number; maxDrainBytes?: number | null; clock?: Clock } = {},
   ) {
     super()
-    this.limit = parseLimit(options.limit ?? '512MB', 'limit')
+    this.limit = parseLimit(options.limit ?? '32MB', 'limit')
     this.clock = options.clock ?? new SystemClock()
     this.maxDrainBytes = options.maxDrainBytes ?? null
   }

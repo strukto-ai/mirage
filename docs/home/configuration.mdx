@@ -172,7 +172,7 @@ defaults `url` to `redis://localhost:6379/0`.
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `limit` | `512MB` | Cache size, as a [size](#sizes). |
+| `limit` | `32MB`, `512MB` on Redis | Cache size, as a [size](#sizes). |
 | `max_drain_bytes` | 8 MiB or `limit`, whichever is smaller | Largest file a streamed read copies into the cache. Cannot exceed `limit`. |
 | `url`, `key_prefix` | the workspace's own keys | Redis only. Name one `key_prefix` in several workspaces to share their cache. |
 

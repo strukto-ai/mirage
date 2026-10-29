@@ -156,7 +156,7 @@ class RamCacheBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["ram"] = "ram"
-    limit: str | int = "512MB"
+    limit: str | int = "32MB"
     max_drain_bytes: int | None = None
 
     @field_validator("limit", mode="before")

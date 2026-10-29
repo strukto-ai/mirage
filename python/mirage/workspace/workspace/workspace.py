@@ -254,7 +254,7 @@ class Workspace:
     def __init__(
         self,
         mounts: dict[str, VFSMount],
-        cache_limit: str | int = "512MB",
+        cache_limit: str | int = "32MB",
         cache: CacheConfig | None = None,
         index: IndexConfig | None = None,
         mode: MountMode = MountMode.READ,
