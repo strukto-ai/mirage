@@ -1130,9 +1130,10 @@ export class Dispatcher {
     // receives, not what the backend moved; the report above already
     // carries the moved count.
     result = await boundary.complete(mark, call.path, call.write, result, call.issuer)
-    if (DISPATCH_READ_OPS.has(name)) {
+    if (DISPATCH_READ_OPS.has(name) || READ_SHORTCUT_OPS.has(name)) {
       this.observeReads(call, mount)
       if (
+        DISPATCH_READ_OPS.has(name) &&
         result !== null &&
         typeof result === 'object' &&
         Symbol.asyncIterator in result &&

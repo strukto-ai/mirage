@@ -114,6 +114,27 @@ describe('conditional writes on an S3 mount', () => {
     built.push(ws)
     return ws
   }
+  it.each(
+    ['md5sum', 'sha256sum'].flatMap((command) =>
+      [false, true].map((warm) => [command, warm] as const),
+    ),
+  )('live session checksum keeps its observed version: %s warm=%s', async (command, warm) => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    if (warm) await ws.shell('cat /s3/f', { sessionId: 'b' })
+    mock.ledger.length = 0
+    const read = await ws.shell(`${command} /s3/f`, { sessionId: 'a' })
+    expect(read.exitCode, DEC.decode(read.stderr)).toBe(0)
+    if (command === 'md5sum' && !warm)
+      expect(mock.ledger.some(([op]) => op === 'GetObject')).toBe(false)
+    expect((await ws.shell('echo peer > /s3/f', { sessionId: 'b' })).exitCode).toBe(0)
+    const refused = await ws.shell('echo mine > /s3/f', { sessionId: 'a' })
+    expect(refused.exitCode).toBe(1)
+    expect(DEC.decode(refused.stderr)).toContain(STALE)
+    expect(object('f')).toBe('peer\n')
+  })
+
   it('live session warm reads keep the exact sampled version', async () => {
     const ws = workspace()
     ws.createSession('a')

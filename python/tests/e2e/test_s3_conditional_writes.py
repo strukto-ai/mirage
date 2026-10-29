@@ -1615,3 +1615,26 @@ async def test_missing_rewrite_refuses_a_competing_creation(
     assert [headers for op, headers in fake.ledger if op == PUT] == [
         {"IfNoneMatch": "*"}
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["md5sum", "sha256sum"])
+@pytest.mark.parametrize("warm", [False, True])
+async def test_live_session_checksum_keeps_observed_version(
+    workspaces, fake, command, warm
+):
+    ws = workspaces()
+    ws.create_session("a")
+    ws.create_session("b")
+    if warm:
+        await ws.shell("cat /s3/f", session_id="b")
+    fake.ledger.clear()
+    read = await ws.shell(f"{command} /s3/f", session_id="a")
+    assert read.exit_code == 0, await read.stderr_str()
+    if command == "md5sum" and not warm:
+        assert not any(op == "get_object" for op, _ in fake.ledger)
+    assert (await ws.shell("echo peer > /s3/f", session_id="b")).exit_code == 0
+    refused = await ws.shell("echo mine > /s3/f", session_id="a")
+    assert refused.exit_code == 1
+    assert STALE in await refused.stderr_str()
+    assert fake.buckets["b"]["f"] == b"peer\n"

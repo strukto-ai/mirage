@@ -1422,10 +1422,12 @@ class Dispatcher:
         if name not in CALLS:
             result = self._custom_answer(call, mount, result)
         result = await boundary.complete(mark, call.path, call.write, result)
-        if name in DISPATCH_READ_OPS:
+        if name in DISPATCH_READ_OPS or name in READ_SHORTCUT_OPS:
             self._observe_reads(call, mount)
-            if hasattr(result, "__aiter__") and not isinstance(
-                result, PipeStream
+            if (
+                name in DISPATCH_READ_OPS
+                and hasattr(result, "__aiter__")
+                and not isinstance(result, PipeStream)
             ):
                 observed = self._observe_stream(call, mount, result)
                 await anext(observed)
