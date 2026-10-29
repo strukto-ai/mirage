@@ -189,27 +189,25 @@ impl Printing {
 }
 
 /// One output going through jq's printer a bounded slice at a time: its
-/// compact dump fed to the formatter, and what it printed since it last
-/// went out, after a byte that says whether the output was null or false,
-/// which `-e` reads.
+/// compact dump fed to the formatter a piece a slice, and what it printed
+/// since it last went out, after a byte that says whether the output was
+/// null or false, which `-e` reads.
 struct Formatting {
     formatter: Formatter,
+    text: String,
+    fed: usize,
     printed: Vec<u8>,
     finished: bool,
     refused: Option<StreamError>,
 }
 
 impl Formatting {
-    fn begin(options: &format::Config, text: &str) -> Self {
-        let mut formatter = Formatter::new(options.clone());
-        let mut printed = vec![u8::from(text == "null" || text == "false")];
-        for piece in text.as_bytes().chunks(format::LIMIT) {
-            formatter
-                .feed(piece, &mut printed)
-                .expect("a formatter takes a value's pieces");
-        }
+    fn begin(options: &format::Config, text: String) -> Self {
+        let printed = vec![u8::from(text == "null" || text == "false")];
         Self {
-            formatter,
+            formatter: Formatter::new(options.clone()),
+            text,
+            fed: 0,
             printed,
             finished: false,
             refused: None,
@@ -223,10 +221,18 @@ impl Formatting {
             if *budget == 0 {
                 return None;
             }
-            let printed = if self.finished {
+            let printed = if self.fed < self.text.len() {
+                let end = (self.fed + format::LIMIT).min(self.text.len());
+                self.formatter
+                    .feed(&self.text.as_bytes()[self.fed..end], &mut self.printed)
+                    .expect("a formatter takes a value's pieces");
+                self.fed = end;
+                Ok(())
+            } else if self.finished {
                 self.formatter.drain(&mut self.printed)
             } else {
                 self.finished = true;
+                self.text = String::new();
                 self.formatter.finish(&mut self.printed)
             };
             self.refused = printed.err();
@@ -239,6 +245,24 @@ impl Formatting {
     fn flush(&mut self, out: &mut Vec<u8>) {
         frame(PRINT, &self.printed, out);
         self.printed.truncate(1);
+    }
+
+    /// Give it up: the formatter frees what it holds through its own
+    /// bounded discard, which `discard` runs.
+    fn cancel(&mut self) {
+        self.text = String::new();
+        self.formatter
+            .begin(br#"{"discard":true}"#)
+            .expect("a formatter discards at any point");
+    }
+
+    /// Free one slice of what a cancelled output holds; whether it is all
+    /// gone.
+    fn discard(&mut self) -> bool {
+        self.formatter
+            .drain(&mut Vec::new())
+            .expect("a discarded output prints nothing");
+        !self.formatter.busy()
     }
 }
 
@@ -548,7 +572,7 @@ impl Stream for Eval {
                                 None => frame(OUTPUT, text.as_bytes(), out),
                                 Some(options) => {
                                     self.formatting =
-                                        Some(Box::new(Formatting::begin(options, &text)));
+                                        Some(Box::new(Formatting::begin(options, text)));
                                     continue;
                                 }
                             },
@@ -639,7 +663,9 @@ impl Stream for Eval {
         self.asking = Asking::No;
         self.pending = Vec::new();
         self.pending_charge.set(0);
-        self.formatting = None;
+        if let Some(formatting) = &mut self.formatting {
+            formatting.cancel();
+        }
         if let Some(dumping) = self.printing.take() {
             if let State::Retiring(vm) = &mut self.state {
                 vm.retire_output(dumping.dumping);
@@ -770,6 +796,12 @@ impl Eval {
     }
 
     fn retire(&mut self) {
+        if let Some(formatting) = &mut self.formatting {
+            if formatting.discard() {
+                self.formatting = None;
+            }
+            return;
+        }
         if let State::Retiring(vm) = &mut self.state {
             if vm.retire(RETIRE) {
                 self.state = State::Ended;

@@ -65,6 +65,10 @@ impl Bytes {
             }
             let block = self.blocks.back_mut().expect("a block to write");
             let taken = bytes.len().min(BLOCK - self.len % BLOCK);
+            if block.capacity() < block.len() + taken {
+                let room = (block.len() + taken).max(2 * block.capacity()).min(BLOCK);
+                block.reserve_exact(room - block.len());
+            }
             block.extend_from_slice(&bytes[..taken]);
             self.len += taken;
             bytes = &bytes[taken..];
@@ -495,6 +499,19 @@ mod tests {
         }
         assert_eq!(out, b"partial");
         assert_eq!(decoder.bytes.block_count(), 0);
+    }
+
+    #[test]
+    fn a_block_never_holds_more_than_it_is_charged_for() {
+        let mut bytes = Bytes::default();
+        bytes.extend(&[b'a'; 3000]);
+        bytes.extend(&[b'b'; 1096]);
+        for _ in 0..BLOCK {
+            bytes.push(b'c');
+        }
+        bytes.extend(&[b'd'; 2 * BLOCK + 5]);
+        assert_eq!(bytes.len(), 4 * BLOCK + 5);
+        assert!(bytes.blocks.iter().all(|block| block.capacity() <= BLOCK));
     }
 
     #[test]

@@ -20,8 +20,9 @@ enum Frame {
     Out(String),
     Err(String),
     Halt(String),
-    /// A printed output: its null-or-false byte as a char, then the text.
-    Print(String),
+    /// A printed output: its null-or-false byte, then the bytes, which a
+    /// frame may end inside a character.
+    Print(Vec<u8>),
 }
 
 fn frames(mut wire: &[u8]) -> Vec<Frame> {
@@ -29,7 +30,8 @@ fn frames(mut wire: &[u8]) -> Vec<Frame> {
     while !wire.is_empty() {
         let tag = wire[0];
         let len = u32::from_le_bytes(wire[1..5].try_into().unwrap()) as usize;
-        let payload = String::from_utf8_lossy(&wire[5..5 + len]).into_owned();
+        let bytes = &wire[5..5 + len];
+        let payload = String::from_utf8_lossy(bytes).into_owned();
         if matches!(tag, DEBUG | STDERR) {
             wire = &wire[5 + len..];
             continue;
@@ -38,7 +40,7 @@ fn frames(mut wire: &[u8]) -> Vec<Frame> {
             OUTPUT => Frame::Out(payload),
             ERROR => Frame::Err(payload[1..].to_string()),
             HALT => Frame::Halt(payload),
-            PRINT => Frame::Print(payload),
+            PRINT => Frame::Print(bytes.to_vec()),
             _ => panic!("unknown frame {tag}"),
         });
         wire = &wire[5 + len..];
@@ -92,7 +94,7 @@ fn outputs(program: &str, input: &str) -> Vec<String> {
             Frame::Out(text) => text,
             Frame::Err(text) => format!("error: {text}"),
             Frame::Halt(text) => format!("halt: {text}"),
-            Frame::Print(text) => format!("print: {text}"),
+            Frame::Print(bytes) => format!("print: {}", String::from_utf8_lossy(&bytes)),
         })
         .collect()
 }
@@ -144,32 +146,36 @@ fn printed_outputs_are_formatted_and_flag_null_and_false() {
 /// What a run printed, its print frames joined, and whether the last
 /// output was null or false.
 fn stdout(frames: &[Frame]) -> (String, bool) {
-    let mut text = String::new();
+    let mut bytes = Vec::new();
     let mut falsy = false;
     for frame in frames {
         if let Frame::Print(payload) = frame {
-            falsy = payload.starts_with('\u{1}');
-            text.push_str(&payload[1..]);
+            falsy = payload[0] == 1;
+            bytes.extend_from_slice(&payload[1..]);
         }
     }
-    (text, falsy)
+    (String::from_utf8(bytes).expect("printed UTF-8"), falsy)
 }
 
 #[test]
 fn printing_prints_the_same_at_every_budget() {
     let ascending: Vec<String> = (0..20000).map(|n| n.to_string()).collect();
     let ascending = format!("[{}]", ascending.join(","));
-    for (program, options) in [
-        (".", serde_json::json!({})),
-        (".[]", serde_json::json!({ "compact": true })),
+    let wide = serde_json::to_string(&vec!["é€😀".repeat(50); 400]).unwrap();
+    for (program, input, options) in [
+        (".", &ascending, serde_json::json!({})),
+        (".[]", &ascending, serde_json::json!({ "compact": true })),
         (
             "{a: .}",
+            &ascending,
             serde_json::json!({ "sort_keys": true, "tab": true }),
         ),
+        (".", &wide, serde_json::json!({})),
+        (".[]", &wide, serde_json::json!({ "raw_output": true })),
     ] {
-        let (_, whole) = printed(program, &ascending, options.clone(), 1 << 16);
+        let (_, whole) = printed(program, input, options.clone(), 1 << 16);
         for steps in [1, 7, 128, 1000] {
-            let (_, got) = printed(program, &ascending, options.clone(), steps);
+            let (_, got) = printed(program, input, options.clone(), steps);
             assert_eq!(stdout(&got), stdout(&whole), "{program} at {steps} steps");
         }
     }
@@ -205,6 +211,39 @@ fn a_nul_raw_output0_cannot_print_ends_the_run() {
             Frame::Err("Cannot dump a string containing NUL with --raw-output0 option".into()),
         ]
     );
+}
+
+/// A run cancelled at any point of printing a large output, while it is
+/// dumped, fed to the printer or printed, gives the printer up on later
+/// drains, and the next run prints as before.
+#[test]
+fn a_cancelled_print_is_discarded_before_the_next_run() {
+    let big = serde_json::to_string(&"é".repeat(1 << 16)).unwrap();
+    let (whole, _) = printed(".", &big, serde_json::json!({}), 1000);
+    let config = serde_json::json!({ "program": ".", "steps": 1000, "print": {} });
+    for after in 0..whole {
+        let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
+        let mut wire = Vec::new();
+        stream.feed(big.as_bytes(), &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        for _ in 0..after {
+            stream.drain(&mut wire).unwrap();
+        }
+        assert!(stream.cancel());
+        while stream.busy() {
+            stream.drain(&mut wire).unwrap();
+        }
+        let mut wire = Vec::new();
+        stream.begin(b"{}").unwrap();
+        stream.feed(b"[1]", &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        settle(&mut *stream, &mut wire);
+        assert_eq!(
+            frames(&wire),
+            vec![Frame::Print("\u{0}[\n  1\n]\n".into())],
+            "cancelled after {after} of {whole} drains"
+        );
+    }
 }
 
 /// Outputs jq 1.8.2 printed for each, `jq -c`.
