@@ -431,6 +431,22 @@
         "stdout": "false\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "jq_regex_repeated_recursive_call_cache",
+      "seq": 18610028,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"aaaa\" | test(\"(?<x>a\\\\g<r>?){0}(?<r>\" + (\"\\\\g<x>\" * 16384) + \")\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "false\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -269,6 +269,7 @@ fn mark_calls(node: &mut Node, groups: usize) -> Result<(Vec<bool>, Vec<bool>), 
                 parent: None,
             }],
             path: 0,
+            marks: Marks::default(),
         };
         let found = walk.infinite(body, true);
         on_path[g] = false;
@@ -408,6 +409,32 @@ struct Walk<'a, 'm> {
     reads: Vec<Consulted>,
     paths: Vec<Active>,
     path: usize,
+    marks: Marks,
+}
+
+#[derive(Default)]
+struct Marks {
+    epoch: u32,
+    incoming: Vec<u32>,
+    seen: Vec<u32>,
+}
+
+impl Marks {
+    fn begin(&mut self, groups: usize, reads: usize) {
+        if self.epoch == u32::MAX {
+            self.incoming.fill(0);
+            self.seen.fill(0);
+            self.epoch = 1;
+        } else {
+            self.epoch += 1;
+        }
+        if self.incoming.len() < groups {
+            self.incoming.resize(groups, 0);
+        }
+        if self.seen.len() < reads {
+            self.seen.resize(reads, 0);
+        }
+    }
 }
 
 struct Active {
@@ -420,6 +447,7 @@ enum Consulted {
     Cached(Range<usize>),
 }
 
+#[derive(Clone)]
 struct Checked {
     found: Found,
     reads: Range<usize>,
@@ -466,33 +494,39 @@ enum Visit<'a> {
 }
 
 impl<'a> Walk<'a, '_> {
-    fn matches(&self, checked: &Checked, own: usize) -> bool {
-        let mut incoming = vec![false; self.on_path.len()];
+    fn checked(&mut self, own: usize, head: bool) -> Option<Checked> {
+        let checked = self.cache[own][usize::from(head)].as_ref()?.clone();
+        if checked.path == self.path || checked.reads.is_empty() {
+            return Some(checked);
+        }
+        self.marks.begin(self.on_path.len(), checked.reads.end);
+        let epoch = self.marks.epoch;
         let mut path = Some(checked.path);
         while let Some(index) = path {
             let active = &self.paths[index];
-            incoming[active.group] = true;
+            self.marks.incoming[active.group] = epoch;
             path = active.parent;
         }
-        let mut seen = vec![false; self.reads.len()];
         let mut stack = vec![checked.reads.clone()];
         while let Some(range) = stack.pop() {
             for at in range {
-                if seen[at] {
+                if self.marks.seen[at] == epoch {
                     continue;
                 }
-                seen[at] = true;
+                self.marks.seen[at] = epoch;
                 match &self.reads[at] {
                     Consulted::Group(group) => {
-                        if *group != own && incoming[*group] != self.on_path[*group] {
-                            return false;
+                        if *group != own
+                            && (self.marks.incoming[*group] == epoch) != self.on_path[*group]
+                        {
+                            return None;
                         }
                     }
                     Consulted::Cached(range) => stack.push(range.clone()),
                 }
             }
         }
-        true
+        Some(checked)
     }
 
     /// infinite_recursive_call_check: `head` while nothing has been
@@ -564,12 +598,9 @@ impl<'a> Walk<'a, '_> {
                     self.reads.push(Consulted::Group(index));
                     if self.on_path[index] {
                         ret = Found::default();
-                    } else if let Some(checked) = self.cache[index][usize::from(head)]
-                        .as_ref()
-                        .filter(|checked| self.matches(checked, index))
-                    {
+                    } else if let Some(checked) = self.checked(index, head) {
                         ret = checked.found;
-                        self.reads.push(Consulted::Cached(checked.reads.clone()));
+                        self.reads.push(Consulted::Cached(checked.reads));
                     } else if let Some(body) = self.bodies[index] {
                         self.on_path[index] = true;
                         stack.push(Visit::Leave {
