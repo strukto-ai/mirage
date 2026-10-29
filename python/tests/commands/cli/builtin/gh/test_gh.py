@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import dataclasses
 import json
 from unittest.mock import AsyncMock
 
@@ -1077,6 +1079,8 @@ async def test_api_jq_prints_non_strings_as_compact_json():
             '["\\u2028","\\u2029","\x7f","é","\\u0001","\\b"]',
         ),
         ('[true, null, "x"]', '[true,null,"x"]'),
+        ("12345678901234567890", "12345678901234567168"),
+        ("[12345678901234567890]", "[12345678901234567000]"),
     ],
 )
 async def test_api_jq_prints_each_output_as_go_gh_does(program, line):
@@ -1085,14 +1089,15 @@ async def test_api_jq_prints_each_output_as_go_gh_does(program, line):
     assert await materialize(out) == f"{line}\n".encode()
 
 
-# gh prints a computed negative zero as -0, but jq.py hands it to Python as
-# the int 0, so both hosts print 0.
+# gh prints a computed negative zero as -0, but a whole number reads as an
+# int, so both hosts print 0.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "program, line",
     [
         (".n * 0 * -1", "0"),
         ("[.n * 0 * -1]", "[0]"),
+        ("-0.0", "0"),
     ],
 )
 async def test_api_jq_prints_negative_zero_as_zero(program, line):
@@ -1181,6 +1186,70 @@ async def test_api_jq_fails_the_way_gojq_reports_it(program, message):
     with pytest.raises(StreamRefusal) as caught:
         await api(*_args(["repos/o/r"], {"jq": program}))
     assert (str(caught.value), caught.value.output) == (message, b"")
+
+
+# `--jq` runs in mirage-rs a bounded number of steps at a time, so a
+# program that never ends leaves the loop free and its task can be cancelled.
+@pytest.mark.asyncio
+async def test_api_jq_that_never_ends_yields_and_is_cancelled():
+    _reset({"a": "x"})
+    task = asyncio.ensure_future(
+        api(*_args(["repos/o/r"], {"jq": "until(false; .)"}))
+    )
+    await asyncio.sleep(0.2)
+    assert not task.done()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_api_jq_reads_the_command_environment():
+    _reset({"a": "x"})
+    accessor, paths, texts, ctx = _args(
+        ["repos/o/r"], {"jq": "[$ENV.TOKEN, env.TOKEN, $ENV.PATH]"}
+    )
+    ctx = dataclasses.replace(ctx, env={"TOKEN": "t"})
+    out, _io = await api(accessor, paths, texts, ctx)
+    assert await materialize(out) == b'["t","t",null]\n'
+
+
+# The value is the program's whole input: `inputs` yields nothing and
+# `input` fails with `break`, as jq 1.8.2's does past the last input.
+@pytest.mark.asyncio
+async def test_api_jq_finds_no_more_input():
+    _reset({"a": "x"})
+    out, _io = await api(
+        *_args(["repos/o/r"], {"jq": "[inputs], (try input catch .)"})
+    )
+    assert await materialize(out) == b"[]\nbreak\n"
+    with pytest.raises(StreamRefusal) as caught:
+        await api(*_args(["repos/o/r"], {"jq": ".a, input"}))
+    assert (str(caught.value), caught.value.output) == ("break", b"x\n")
+
+
+# A program jq_eval leaves to libjq runs in a worker, away from the loop,
+# and the program's own errors still read as gojq words them.
+@pytest.mark.asyncio
+async def test_api_jq_runs_a_program_jq_eval_refuses_in_a_worker():
+    _reset({"a": "x"})
+    with pytest.raises(StreamRefusal) as caught:
+        await api(*_args(["repos/o/r"], {"jq": '[1 | lgamma], error("boom")'}))
+    assert (str(caught.value), caught.value.output) == (
+        "error: boom",
+        b"[0]\n",
+    )
+    accessor, paths, texts, ctx = _args(
+        ["repos/o/r"], {"jq": "[1 | lgamma], error($ENV.TOKEN)"}
+    )
+    with pytest.raises(StreamRefusal) as caught:
+        await api(
+            accessor,
+            paths,
+            texts,
+            dataclasses.replace(ctx, env={"TOKEN": "t"}),
+        )
+    assert (str(caught.value), caught.value.output) == ("error: t", b"[0]\n")
 
 
 @pytest.mark.asyncio

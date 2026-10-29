@@ -104,6 +104,8 @@ struct Builder {
     nlocals: usize,
     subfunctions: Vec<usize>,
     parent: Option<usize>,
+    /// Whether this is builtin.jq's code rather than the program's own.
+    library: bool,
 }
 
 #[derive(Clone)]
@@ -341,6 +343,7 @@ impl<'a> Compiler<'a> {
     fn function(&mut self, parent: usize) -> (usize, usize) {
         self.bcs.push(Builder {
             parent: Some(parent),
+            library: self.bcs[parent].library,
             ..Builder::default()
         });
         let bc = self.bcs.len() - 1;
@@ -774,7 +777,8 @@ impl<'a> Compiler<'a> {
     }
 
     /// The handler gen_label gives a `label`'s try: an error equal to the
-    /// label's value is the break and backtracks, any other is raised on.
+    /// label's value is the break and backtracks, any other is raised on,
+    /// still the program's own when it was.
     fn label_handler(&self, bc: usize, index: usize, env: &Env) -> Vec<Step<'a>> {
         let mut steps = vec![
             Step::Emit(Op::Dup),
@@ -782,10 +786,12 @@ impl<'a> Compiler<'a> {
             Step::Emit(Op::Pop),
         ];
         let iftrue = vec![Step::Emit(Op::Pop), Step::Emit(Op::Backtrack)];
-        let iffalse = vec![
-            Step::Emit(Op::Pop),
-            Step::Call("error", Vec::new(), env.clone()),
-        ];
+        let raise = if find_func(env, "error", 0).is_some() {
+            Step::Call("error", Vec::new(), env.clone())
+        } else {
+            Step::Emit(Op::Reraise)
+        };
+        let iffalse = vec![Step::Emit(Op::Pop), raise];
         steps.extend(condbranch(iftrue, iffalse));
         steps
     }
@@ -1056,6 +1062,7 @@ impl<'a> Compiler<'a> {
         let def = self.library.get(&key)?;
         self.referenced.extend(check::references(&def.body));
         let (fbc, index) = self.function(0);
+        self.bcs[fbc].library = true;
         self.linked.insert(key, index);
         self.body(fbc, def, &None);
         Some(index)
@@ -1096,6 +1103,14 @@ impl<'a> Compiler<'a> {
                 target,
             };
             return self.call_jq(bc, callee, args, env);
+        }
+        if matches!((name, arity), ("error", 0 | 1)) && !self.bcs[bc].library {
+            let mut steps: Vec<Step<'a>> = args
+                .iter()
+                .map(|msg| Step::Code(msg.clone(), env.clone()))
+                .collect();
+            steps.push(Step::Emit(Op::Raise));
+            return self.seq(bc, steps);
         }
         if matches!(
             name,

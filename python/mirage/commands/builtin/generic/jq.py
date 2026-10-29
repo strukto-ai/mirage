@@ -551,7 +551,9 @@ def read_frames(
     """Fold one drain of mirage-rs's jq_eval into a run: each output frame
     is a compact dump and a debug or stderr frame a message for stderr,
     both kept in the order the run wrote them, and an error or a halt
-    frame is what stopped the run.
+    frame is what stopped the run. An error's flag byte says whether it
+    is a string (bit 0) and whether the program raised it with `error`
+    itself (bit 1).
 
     Args:
         wire (bytes): the frames, a tag byte and a little-endian u32
@@ -569,7 +571,10 @@ def read_frames(
         if tag in (FRAME_OUTPUT, FRAME_DEBUG, FRAME_STDERR):
             frames.append((tag, payload.decode()))
         elif tag == FRAME_ERROR:
-            stop = JqError(payload[1:].decode(), payload[0] == 1)
+            flags = payload[0]
+            stop = JqError(
+                payload[1:].decode(), bool(flags & 1), bool(flags & 2)
+            )
         elif tag == FRAME_HALT:
             halt = json.loads(payload)
             stop = JqHalt(halt["message"], halt["string"], halt["code"])

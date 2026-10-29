@@ -89,7 +89,7 @@ export async function listCmd(
   ).map(release)
   const latest = rows.find((row) => !row.isDraft && !row.isPrerelease)
   if (latest !== undefined) latest.isLatest = true
-  return typedOut(rows, fl, listText(rows), RELEASE_FIELDS)
+  return typedOut(rows, fl, listText(rows), RELEASE_FIELDS, ctx)
 }
 
 export async function viewCmd(
@@ -110,7 +110,7 @@ export async function viewCmd(
     row.isLatest = latestRow.tagName === row.tagName
   }
   const human = `title:\t${textValue(row.name)}\ntag:\t${textValue(row.tagName)}\ndraft:\t${String(Boolean(row.isDraft))}\nprerelease:\t${String(Boolean(row.isPrerelease))}\n--\n${textValue(row.body)}\n`
-  return typedOut(row, fl, human, RELEASE_FIELDS)
+  return typedOut(row, fl, human, RELEASE_FIELDS, ctx)
 }
 
 export async function createCmd(

@@ -424,8 +424,9 @@ export function runStatus(run: JqRun<string>): number {
  * order the run wrote them, and the stop an error or halt frame names, or
  * null. A frame is a
  * tag, a little-endian u32 length and its payload: an output's dump, an
- * error's string flag byte then its text, a halt's JSON, a `debug` line's
- * dump, or the text `stderr` writes.
+ * error's flag byte (bit 0 for a string, bit 1 when the program raised it
+ * with `error` itself) then its text, a halt's JSON, a `debug` line's dump,
+ * or the text `stderr` writes.
  */
 export function readFrames(bytes: Uint8Array, frames: [number, string][]): JqError | JqHalt | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
@@ -441,7 +442,13 @@ export function readFrames(bytes: Uint8Array, frames: [number, string][]): JqErr
     if (tag === FRAME_OUTPUT || tag === FRAME_DEBUG || tag === FRAME_STDERR) {
       frames.push([tag, DEC.decode(payload)])
     } else if (tag === FRAME_ERROR) {
-      stop = { kind: 'error', text: DEC.decode(payload.subarray(1)), string: payload[0] === 1 }
+      const flags = payload[0] ?? 0
+      stop = {
+        kind: 'error',
+        text: DEC.decode(payload.subarray(1)),
+        string: (flags & 1) === 1,
+        own: (flags & 2) === 2,
+      }
     } else if (tag === FRAME_HALT) {
       const halt = JSON.parse(DEC.decode(payload)) as Omit<JqHalt, 'kind'>
       stop = { kind: 'halt', message: halt.message, string: halt.string, code: halt.code }

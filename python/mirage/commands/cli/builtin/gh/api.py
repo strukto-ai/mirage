@@ -298,9 +298,10 @@ async def api(
                 )
         except GitHubApiError as exc:
             head = _response_head(exc.status, exc.headers) if include else ""
-            return _failed(
+            return await _failed(
                 pages,
                 fl,
+                ctx,
                 _Failure(exc.body, head),
                 _server_error(exc.data, exc.status) or f"HTTP {exc.status}",
             )
@@ -318,7 +319,9 @@ async def api(
                     if isinstance(text, bytes)
                     else text
                 )
-                return _failed(pages, fl, _Failure(body, head), diagnostic)
+                return await _failed(
+                    pages, fl, ctx, _Failure(body, head), diagnostic
+                )
         pages.append(_Printed(response.data, head))
         first = False
         current = (
@@ -327,7 +330,7 @@ async def api(
             else None
         )
 
-    return _render_pages(pages, fl), IOResult()
+    return await _render_pages(pages, fl, ctx), IOResult()
 
 
 def _canonical(name: str) -> str:
@@ -402,10 +405,14 @@ def _server_error(data: JsonValue, status: int) -> str:
     return "\n".join(lines)
 
 
-def _failed(
-    pages: list[_Printed], fl: FlagView, failure: _Failure, diagnostic: str
+async def _failed(
+    pages: list[_Printed],
+    fl: FlagView,
+    ctx: Context,
+    failure: _Failure,
+    diagnostic: str,
 ) -> tuple[ByteSource | None, IOResult]:
-    return _render_pages(pages, fl, failure), IOResult(
+    return await _render_pages(pages, fl, ctx, failure), IOResult(
         exit_code=1, stderr=f"gh: {diagnostic}\n".encode()
     )
 
@@ -479,8 +486,11 @@ def _joined_pages(pages: list[Any], more: bool) -> list[str | bytes]:
     return texts
 
 
-def _render_pages(
-    pages: list[_Printed], fl: FlagView, failure: _Failure | None = None
+async def _render_pages(
+    pages: list[_Printed],
+    fl: FlagView,
+    ctx: Context,
+    failure: _Failure | None = None,
 ) -> bytes:
     """Render the completed pages, then a failing response's body.
 
@@ -498,6 +508,7 @@ def _render_pages(
     Args:
         pages (list[_Printed]): the pages that landed.
         fl (FlagView): the invocation's flags.
+        ctx (Context): the invocation's context, which ``--jq`` runs in.
         failure (_Failure | None): the failing response, if one failed.
     """
     include = gh_bool(fl, "include")
@@ -523,14 +534,16 @@ def _render_pages(
             return _bytes_of(
                 [
                     *_joined([[head] for head in heads], between),
-                    jq_lines([data] if slurp else data, program),
+                    await jq_lines([data] if slurp else data, program, ctx),
                     "" if failure is None else failure.body,
                 ]
             )
         parts: list[list[str | bytes]] = []
         for page in pages:
             try:
-                parts.append([page.head, jq_lines([page.data], program)])
+                parts.append(
+                    [page.head, await jq_lines([page.data], program, ctx)]
+                )
             except StreamRefusal as exc:
                 done = _bytes_of(_joined(parts + [[page.head]], between))
                 raise StreamRefusal(str(exc), done + exc.output) from exc

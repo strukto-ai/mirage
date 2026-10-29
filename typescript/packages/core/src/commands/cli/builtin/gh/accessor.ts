@@ -18,7 +18,9 @@
 import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { GITHUB_API_BASE } from '../../../../core/github/client.ts'
 import { parseRepo, repoHost, type RepoRef } from '../../../../core/github/repo.ts'
-import { jqRaised, jqRun, type JqRun } from '../../../../core/jq/index.ts'
+import { InputReader, jqOptions, type JqRun } from '../../../../core/jq/index.ts'
+import { Worker } from '../../../../concurrency/worker.ts'
+import { Engine, type Ending } from '../../../builtin/generic/jq.ts'
 import { UsageError } from '../../../errors.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
@@ -379,13 +381,13 @@ function gojqText(text: string, string: boolean): string {
  * (GOJQ_RAISED). A `halt_error` whose value is not null fails as
  * `halt error: <value>`.
  */
-async function jqFailure(value: unknown, program: string, run: JqRun): Promise<string | null> {
+function jqFailure(run: JqRun): string | null {
   const stop = run.stop
   if (stop === null) return null
   if (stop.kind === 'halt') {
     return stop.message === null ? null : `halt error: ${gojqText(stop.message, stop.string)}`
   }
-  if (await jqRaised(value, program, run)) return `error: ${gojqText(stop.text, stop.string)}`
+  if (stop.own === true) return `error: ${gojqText(stop.text, stop.string)}`
   const raised = GOJQ_RAISED.get(stop.text)
   return raised === undefined ? stop.text : `error: ${raised}`
 }
@@ -395,16 +397,54 @@ async function jqFailure(value: unknown, program: string, run: JqRun): Promise<s
  * evaluates them. `halt`, and `halt_error` on null, end that value's output
  * there. An error, or any other `halt_error`, fails the command after the
  * lines printed before it (see jqFailure): a StreamRefusal carries them.
+ *
+ * The program runs in mirage-rs's jq_eval, a bounded number of steps at a
+ * time, so one that never ends still yields and the signal stops it. One
+ * jq_eval refuses runs in jq-wasm in a worker, away from the loop. `input`
+ * finds no more input, `$ENV` is the command's environment, and what `debug`
+ * and `stderr` write is not printed. Throws JqCompileError for a program jq
+ * refuses.
  */
-export async function jqLines(values: readonly unknown[], program: string): Promise<string> {
+export async function jqLines(
+  values: readonly unknown[],
+  program: string,
+  ctx: Context,
+): Promise<string> {
+  const env = JSON.stringify(ctx.env ?? {})
+  const engine = await Engine.open(program, jqOptions(), null, env, ctx.signal)
+  const reader = new InputReader([], jqOptions())
+  let worker: Worker | null = null
   const lines: string[] = []
-  for (const value of values) {
-    const run = await jqRun(value, program)
-    for (const item of run.outputs) lines.push(`${jqLine(item)}\n`)
-    const failure = await jqFailure(value, program, run)
-    if (failure !== null) {
-      throw new StreamRefusal(failure, new TextEncoder().encode(lines.join('')))
+  try {
+    for (const value of values) {
+      let run: JqRun | null = null
+      if (engine !== null) {
+        const ending: Ending = { stop: null, declined: false }
+        const outputs: unknown[] = []
+        for await (const text of engine.run(
+          JSON.stringify(value),
+          reader,
+          () => undefined,
+          ending,
+        )) {
+          outputs.push(JSON.parse(text))
+        }
+        if (!ending.declined) run = { outputs, stop: ending.stop }
+      }
+      if (run === null) {
+        worker ??= new Worker()
+        run = await worker.call<JqRun>('jqRunRaised', [value, program, env], ctx.signal)
+      }
+      for (const item of run.outputs) lines.push(`${jqLine(item)}\n`)
+      const failure = jqFailure(run)
+      if (failure !== null) {
+        throw new StreamRefusal(failure, new TextEncoder().encode(lines.join('')))
+      }
     }
+  } finally {
+    await engine?.close()
+    await worker?.close()
+    await reader.close()
   }
   return lines.join('')
 }
@@ -414,6 +454,7 @@ export async function typedOut(
   fl: FlagView,
   human: string,
   allowed: readonly string[],
+  ctx: Context,
 ): Promise<CommandFnResult> {
   const program = fl.asStr('jq')
   const fields = jsonFields(fl, allowed)
@@ -423,7 +464,7 @@ export async function typedOut(
   }
   const selected = select(value, fields)
   if (program !== undefined && program !== '') {
-    return textOut(await jqLines([selected], program))
+    return textOut(await jqLines([selected], program, ctx))
   }
   return jsonOut(selected)
 }

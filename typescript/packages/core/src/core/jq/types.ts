@@ -57,6 +57,9 @@ export interface JqError {
   /** Whether the message was a string, which jq's report says when it
    * was not. */
   readonly string: boolean
+  /** Whether the program raised it with `error` itself, which jq never
+   * tells apart but gojq does. */
+  readonly own?: boolean
 }
 
 /** `halt` or `halt_error`, which end the whole invocation. */

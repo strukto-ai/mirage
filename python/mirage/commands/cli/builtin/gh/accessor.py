@@ -19,11 +19,13 @@ import json
 import re
 import sys
 from collections.abc import Callable, Iterable
+from contextlib import aclosing
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit
 
 from mirage.accessor.github import GitHubAccount
+from mirage.commands.builtin.generic.jq import Ending, Engine
 from mirage.commands.builtin.utils.http import DEFAULT_PORTS
 from mirage.commands.cli.builtin.gh.constants import (
     CONNECT_HINT,
@@ -35,9 +37,12 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.concurrency.worker import Worker
 from mirage.core.github.constants import API_BASE
 from mirage.core.github.repo import RepoRef, parse_repo, repo_host
-from mirage.core.jq import JqHalt, JqRun, jq_raised, jq_run
+from mirage.core.jq import JqHalt, JqRun, jq_run_raised
+from mirage.core.jq.stream import InputReader
+from mirage.core.jq.types import JqOptions
 from mirage.core.render.json import compact_json_text
 from mirage.errors.fs import fs_strerror
 from mirage.io.stream import materialize
@@ -312,13 +317,14 @@ def _go_number(number: int | float) -> str:
     """A number as Go's JSON encoders, gojq's among them, write a float64,
     which is how ES6 spells it: the shortest digits that read back the
     same, in exponent form below 1e-6 and from 1e21 on, anything past the
-    largest finite float at that float.
+    largest finite float at that float, and negative zero as 0, as the
+    TypeScript twin's JSON.stringify writes it.
 
     Args:
         number (int | float): the number.
     """
     bound = sys.float_info.max
-    clamped = float(min(max(number, -bound), bound))
+    clamped = float(min(max(number, -bound), bound)) or 0.0
     digits = Decimal(repr(clamped))
     magnitude = abs(clamped)
     if magnitude != 0 and (magnitude < 1e-6 or magnitude >= 1e21):
@@ -377,8 +383,9 @@ def jq_line(value: Any) -> str:
     decimals when it is whole and two otherwise (rounded half to even, as
     strconv rounds), and anything else as Go's json.Marshal writes it.
 
-    jq hands a whole number over as an int holding the double's exact
-    value, which is what Go's fixed notation prints for it.
+    Every number is the double jq holds, and a whole one prints as the
+    int of its exact value, which is what Go's fixed notation prints for
+    it, but for negative zero, which prints as 0.
 
     Args:
         value (Any): one output of the program.
@@ -392,7 +399,7 @@ def jq_line(value: Any) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, float):
-        return f"{value:.0f}" if value.is_integer() else f"{value:.2f}"
+        return str(int(value)) if value.is_integer() else f"{value:.2f}"
     return _go_encoded(value, _marshal_string)
 
 
@@ -466,9 +473,7 @@ def _gojq_text(text: str, string: bool) -> str:
     return text if string else _go_encoded(json.loads(text), _gojq_string)
 
 
-def _jq_failure(
-    value: JsonValue, program: str, run: JqRun[JsonValue]
-) -> str | None:
+def _jq_failure(run: JqRun[JsonValue]) -> str | None:
     """The message go-gh fails with when a run stopped early, or None when
     that stop ends the output without failing.
 
@@ -479,9 +484,7 @@ def _jq_failure(
     is not null fails as `halt error: <value>`.
 
     Args:
-        value (JsonValue): the value the program ran on.
-        program (str): the `--jq` program.
-        run (JqRun[JsonValue]): what jq_run returned for them.
+        run (JqRun[JsonValue]): the run.
     """
     stop = run.stop
     if stop is None:
@@ -490,39 +493,88 @@ def _jq_failure(
         if stop.message is None:
             return None
         return f"halt error: {_gojq_text(stop.message, stop.string)}"
-    if jq_raised(value, program, run):
+    if stop.own:
         return f"error: {_gojq_text(stop.text, stop.string)}"
     raised = GOJQ_RAISED.get(stop.text)
     return stop.text if raised is None else f"error: {raised}"
 
 
-def jq_lines(values: Iterable[JsonValue], program: str) -> str:
+async def jq_lines(
+    values: Iterable[JsonValue], program: str, ctx: Context
+) -> str:
     """The lines `--jq` prints for each value in turn, the way go-gh's jq
     evaluates them. `halt`, and `halt_error` on null, end that value's
     output there. An error, or any other `halt_error`, fails the command
     after the lines printed before it (see _jq_failure).
 
+    The program runs in mirage-rs's jq_eval, a bounded number of steps at
+    a time, so one that never ends still yields and `timeout` stops it.
+    One jq_eval refuses runs in libjq in a worker, away from the loop.
+    `input` finds no more input, `$ENV` is the command's environment, and
+    what `debug` and `stderr` write is not printed.
+
     Args:
         values (Iterable[JsonValue]): the JSON values the program reads.
         program (str): the `--jq` program.
+        ctx (Context): the command's context.
 
     Raises:
         StreamRefusal: the failure, carrying the lines before it.
+        JqCompileError: jq's refusal of the program.
     """
+    env = json.dumps(dict(ctx.env or {}))
+    engine = Engine.open(program, JqOptions(), None, env)
+    reader = InputReader([], JqOptions())
+    worker: Worker | None = None
     lines: list[str] = []
-    for value in values:
-        run = jq_run(value, program)
-        lines.extend(f"{jq_line(item)}\n" for item in run.outputs)
-        failure = _jq_failure(value, program, run)
-        if failure is not None:
-            raise StreamRefusal(failure, "".join(lines).encode())
+    try:
+        for value in values:
+            run: JqRun[JsonValue] | None = None
+            if engine is not None:
+                ending = Ending()
+                async with aclosing(
+                    engine.run(
+                        json.dumps(value), reader, lambda _line: None, ending
+                    )
+                ) as texts:
+                    outputs = [
+                        json.loads(text, parse_int=float)
+                        async for text in texts
+                    ]
+                if not ending.declined:
+                    run = JqRun(outputs, ending.stop)
+            if run is None:
+                worker = worker or Worker()
+                run = await worker.call(jq_run_raised, value, program, env)
+            lines.extend(f"{jq_line(item)}\n" for item in run.outputs)
+            failure = _jq_failure(run)
+            if failure is not None:
+                raise StreamRefusal(failure, "".join(lines).encode())
+    finally:
+        if engine is not None:
+            await engine.close()
+        if worker is not None:
+            await worker.close()
+        await reader.close()
     return "".join(lines)
 
 
 async def typed_out(
-    value: Any, fl: FlagView, human: str, allowed: Iterable[str]
+    value: Any,
+    fl: FlagView,
+    human: str,
+    allowed: Iterable[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    """Render a typed verb as stable projected JSON/jq or human text."""
+    """Render a typed verb as stable projected JSON/jq or human text.
+
+    Args:
+        value (Any): the verb's rows, or its one row.
+        fl (FlagView): the line's flags.
+        human (str): the text without `--json`.
+        allowed (Iterable[str]): the fields the verb exports.
+        ctx (Context): the command's context, which `--jq` runs in.
+    """
     program = fl.as_str("jq")
     fields = json_fields(fl, allowed)
     if fields is None:
@@ -531,5 +583,5 @@ async def typed_out(
         return text_out(human)
     selected = _select(value, fields)
     if program:
-        return text_out(jq_lines([selected], program))
+        return text_out(await jq_lines([selected], program, ctx))
     return json_out(selected)

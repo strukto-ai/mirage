@@ -468,7 +468,7 @@ async def view(
     if fields is not None:
         node = await repository_fields(accessor, ref, _repo_selection(fields))
         return await typed_out(
-            _exported_repo(node, fields), fl, "", REPO_FIELDS
+            _exported_repo(node, fields), fl, "", REPO_FIELDS, ctx
         )
     repo = await view_repo(accessor, ref)
     return await typed_out(
@@ -476,6 +476,7 @@ async def view(
         fl,
         summary(repo, await read_readme(accessor, ref)),
         REPO_FIELDS,
+        ctx,
     )
 
 
@@ -506,6 +507,7 @@ async def list_cmd(
             fl,
             "",
             REPO_FIELDS,
+            ctx,
         )
     rows = [_repo(value) for value in await list_repos(accessor, owner, limit)]
     human = "".join(
@@ -515,7 +517,7 @@ async def list_cmd(
         f"{row.get('updatedAt', '')}\n"
         for row in rows
     )
-    return await typed_out(rows, fl, human, REPO_FIELDS)
+    return await typed_out(rows, fl, human, REPO_FIELDS, ctx)
 
 
 async def create_cmd(

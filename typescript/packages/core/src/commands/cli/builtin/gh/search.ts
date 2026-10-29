@@ -186,6 +186,7 @@ async function searchCmd(
     fl,
     human(kind, rows, values, kind === 'issues' && boolean(fl, 'include_prs')),
     SEARCH_FIELDS[kind] ?? [],
+    ctx,
   )
 }
 

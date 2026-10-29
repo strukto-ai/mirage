@@ -113,7 +113,9 @@ struct InputReply {
 
 enum PrintKind {
     Output,
-    Error(bool),
+    /// Whether the error is a string, and whether the program raised it
+    /// with `error` itself.
+    Error(bool, bool),
     HaltMessage(bool, Option<f64>),
     HaltPayload,
 }
@@ -132,9 +134,10 @@ impl Printing {
     }
 
     fn error(mut raise: Raise) -> Self {
-        let value = loop {
+        let (value, own) = loop {
             match raise {
-                Raise::Error(value) => break value,
+                Raise::Error(value) => break (value, false),
+                Raise::Own(value) => break (value, true),
                 Raise::Wrapped(inner) => raise = *inner,
             }
         };
@@ -146,7 +149,7 @@ impl Printing {
         };
         Self {
             dumping,
-            kind: PrintKind::Error(string),
+            kind: PrintKind::Error(string, own),
         }
     }
 
@@ -178,7 +181,8 @@ impl Printing {
 /// program that never ends still hands control back.
 ///
 /// `drain` writes frames: an output's compact dump, an error that ended
-/// the run (a string flag, then its text), a halt (JSON), what `debug`
+/// the run (a flag byte, then its text: bit 0 set for a string, bit 1 when
+/// the program raised it with `error` itself), a halt (JSON), what `debug`
 /// prints (the compact dump of `["DEBUG:", value]`), and what `stderr`
 /// writes (the bytes). An output is dumped on the same step budget, so
 /// a large one takes several drains and its frame goes out whole once
@@ -462,10 +466,10 @@ impl Stream for Eval {
                         vm.retire_output(printing.dumping);
                         match printing.kind {
                             PrintKind::Output => frame(OUTPUT, text.as_bytes(), out),
-                            PrintKind::Error(string) => {
+                            PrintKind::Error(string, own) => {
                                 out.push(ERROR);
                                 out.extend_from_slice(&((text.len() + 1) as u32).to_le_bytes());
-                                out.push(u8::from(string));
+                                out.push(u8::from(string) | u8::from(own) << 1);
                                 out.extend_from_slice(text.as_bytes());
                                 break;
                             }
