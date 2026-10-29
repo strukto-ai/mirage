@@ -156,19 +156,27 @@ describe('Workspace.snapshot', () => {
       override readonly name = 'live'
     }
     const src = new Workspace({ '/m': new RAMVFS(), '/live': new Live() })
+    const addressed = new Workspace(
+      { '/m': new RAMVFS(), '/live': new Live() },
+      { network: { allow: ['10.0.0.5'] } },
+    )
     try {
       await expect(src.copy({ network: false })).rejects.toThrow(
+        "copy: /live/ keep this workspace's connections",
+      )
+      await expect(addressed.copy({ network: { allow: ['10.0.0.5.'] } })).rejects.toThrow(
         "copy: /live/ keep this workspace's connections",
       )
       const same = await src.copy({ network: true })
       await same.close()
     } finally {
       await src.close()
+      await addressed.close()
     }
   })
 
   it.each([
-    [{ allow: ['a.example', 'B.example.'] }, { allow: ['b.example', 'a.example', 'a.example'] }],
+    [{ allow: ['a.example', 'b.example'] }, { allow: ['b.example', 'a.example', 'a.example'] }],
     [false, { allow: [] }],
   ])('copies over a live mount under an equal network: %o', async (held, asked) => {
     class Live extends BaseVFS {

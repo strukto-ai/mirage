@@ -75,16 +75,17 @@ export function networkLayer(setting: unknown): Record<string, JsonValue> | null
 }
 
 /**
- * Whether two settings let the same connections: their allow lists hold the
- * same entries in any order, case or trailing dot, `false` being the empty
- * list.
+ * Whether two settings hold the same rule: their allow lists name the same
+ * entries as written, in any order, `false` being the empty list. An entry
+ * is compared as written, since one spelling can be an address and
+ * another a host name.
  */
 export function sameNetwork(a: NetworkSetting, b: NetworkSetting): boolean {
   const [left, right] = [a, b].map((setting) => {
     const layer = networkLayer(setting)
-    if (layer === null) return null
-    const entries = (layer.allow as string[]).map((entry) => entry.toLowerCase().replace(/\.$/, ''))
-    return JSON.stringify([...new Set(entries)].sort(compareCodePoints))
+    return layer === null
+      ? null
+      : JSON.stringify([...new Set(layer.allow as string[])].sort(compareCodePoints))
   })
   return left === right
 }
