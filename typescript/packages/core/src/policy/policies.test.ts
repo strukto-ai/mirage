@@ -14,7 +14,8 @@
 
 import type { ByteSource } from '../io/types.ts'
 import type { Handed } from '../vfs/types.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { Composition } from './composition.ts'
 
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { record, startOp } from '../observe/context.ts'
@@ -28,6 +29,8 @@ import { MountRootPolicy } from './builtin/mount_root.ts'
 import { PolicyDenied } from './errors.ts'
 import {
   Policies,
+  agreed,
+  settled,
   postExecuteGate,
   postVfsGate,
   preVfsGate,
@@ -1820,4 +1823,325 @@ describe('what a method sees', () => {
       await ws.close()
     }
   })
+})
+
+it.each([
+  'preCommand',
+  'postCommand',
+  'preExecute',
+  'postExecute',
+  'preVfs',
+  'postVfs',
+  'preSession',
+  'postSession',
+] as const)('composition stops before an invalid later action at %s', async (method) => {
+  const policy: Policy = {
+    [method]: () => [{ kind: 'deny', reason: 'first refusal' }, 'invalid later action'],
+  }
+  const policies = new Policies([policy])
+  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+  const answers = await policies.answers(method, ctx, false)
+  expect(answers).toHaveLength(1)
+  expect(answers[0]?.reason).toBe('first refusal')
+  await expect(policies.answers(method, ctx, true)).rejects.toThrow('invalid later action')
+})
+
+it('composition keeps registration snapshot during suspension', async () => {
+  let enter: () => void = () => {
+    throw new Error('enter not initialized')
+  }
+  let release: () => void = () => {
+    throw new Error('release not initialized')
+  }
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve
+  })
+  const released = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const policies = new Policies([
+    {
+      async preCommand() {
+        enter()
+        await released
+        return null
+      },
+    },
+  ])
+  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+  const running = policies.preCommand(ctx)
+  await entered
+  policies.add({ preCommand: () => ({ kind: 'deny', reason: 'added during suspension' }) })
+  release()
+  expect(await running).toBeNull()
+  expect(await policies.preCommand(ctx)).toMatchObject({
+    kind: 'deny',
+    reason: 'added during suspension',
+  })
+})
+
+it('composition does not inspect unreachable action fields', async () => {
+  let reads = 0
+  const later: Ask = {
+    reason: 'later ask',
+    get kind(): 'ask' {
+      reads += 1
+      throw new Error('unreachable getter')
+    },
+  }
+  const policies = new Policies([
+    {
+      preCommand: () => [{ kind: 'deny', reason: 'first refusal' }, later],
+    },
+  ])
+  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+  expect(await policies.preCommand(ctx)).toMatchObject({ kind: 'deny' })
+  expect(reads).toBe(0)
+  await expect(policies.answers('preCommand', ctx)).rejects.toThrow('unreachable getter')
+  expect(reads).toBe(1)
+})
+
+it('standalone composition keeps first agreed route and ask precedence', () => {
+  const first: Route = { kind: 'route', runtime: 'node', reason: 'first placement' }
+  const same: Route = { kind: 'route', runtime: 'node', reason: 'second placement' }
+  const other: Route = { kind: 'route', runtime: 'python', reason: 'other placement' }
+  const question: Ask = { kind: 'ask', reason: 'review' }
+  const refusal: Deny = { kind: 'deny', reason: 'refused' }
+  expect(agreed([first])).toBe(first)
+  expect(settled([first])).toBe(first)
+  expect(settled([question, refusal, first, other])).toBe(refusal)
+  expect(agreed([first, same])).toBe(first)
+  expect(settled([first, same])).toBe(first)
+  expect(agreed([first, other])).toMatchObject({ kind: 'deny' })
+  expect(settled([first, other])).toMatchObject({ kind: 'deny' })
+  expect(settled([first, question, other])).toBe(question)
+  expect(agreed([])).toBeNull()
+  expect(settled([])).toBeNull()
+})
+
+it('composition reads hook getters only when Rust requests their policy', async () => {
+  let reads = 0
+  const later: Policy = {
+    get preCommand(): NonNullable<Policy['preCommand']> {
+      reads += 1
+      throw new Error('unreachable hook getter')
+    },
+  }
+  const policies = new Policies([
+    { preCommand: () => ({ kind: 'deny', reason: 'first refusal' }) },
+    later,
+  ])
+  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+  const close = vi.spyOn(Composition.prototype, 'close')
+  try {
+    expect(await policies.preCommand(ctx)).toMatchObject({ reason: 'first refusal' })
+    expect(reads).toBe(0)
+    expect(close).toHaveBeenCalledTimes(1)
+    await expect(policies.answers('preCommand', ctx)).rejects.toThrow('unreachable hook getter')
+    expect(reads).toBe(1)
+    expect(close).toHaveBeenCalledTimes(2)
+  } finally {
+    close.mockRestore()
+  }
+})
+
+it('composition leaves singleton ask rules unread', async () => {
+  const question: Ask = {
+    kind: 'ask',
+    reason: 'review',
+    policy: 'First',
+    get rules(): CommandRule[] {
+      throw new Error('singleton rules read')
+    },
+  }
+  const policies = new Policies([{ preCommand: () => question }])
+  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+  expect(await policies.preCommand(ctx)).toBe(question)
+  expect(settled([question])).toBe(question)
+})
+
+it('composition merges ask rules from their current values', async () => {
+  const rules: CommandRule[] = [{ reason: 'first', commands: ['rm'] }]
+  const question: Ask = { kind: 'ask', reason: 'one', policy: 'First', rules }
+  const policies = new Policies([
+    { preCommand: () => question },
+    {
+      preCommand() {
+        rules.push({ reason: 'added', commands: ['cp'] })
+        return { kind: 'ask', reason: 'two', rules: [{ reason: 'second', commands: ['mv'] }] }
+      },
+    },
+  ])
+  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+  expect(await policies.preCommand(ctx)).toMatchObject({
+    rules: [
+      { reason: 'first', commands: ['rm'] },
+      { reason: 'added', commands: ['cp'] },
+      { reason: 'second', commands: ['mv'] },
+    ],
+  })
+})
+
+it('composition reconciles routes after later callbacks mutate them', async () => {
+  const first: Route = { kind: 'route', runtime: 'node', policy: 'First' }
+  const policies = new Policies([
+    { preExecute: () => first },
+    {
+      preExecute() {
+        first.runtime = 'ssh'
+        return { kind: 'route', runtime: 'node', policy: 'Second' }
+      },
+    },
+  ])
+  const ctx: RouteContext = { line: 'true', commands: [], sessionId: '' }
+  const [answer] = await policies.preExecute(ctx)
+  expect(answer).toMatchObject({ kind: 'deny' })
+})
+
+it('pure settlement does not read route values after a question', () => {
+  const question: Ask = { kind: 'ask', reason: 'review' }
+  const route: Route = {
+    kind: 'route',
+    get runtime(): string {
+      throw new Error('suppressed route read')
+    },
+  }
+  expect(settled([question, route])).toBe(question)
+})
+
+it('composition keeps the ask copy made before a later mutation', async () => {
+  const rules: CommandRule[] = [{ reason: 'first', commands: ['rm'] }]
+  const first: Ask = { kind: 'ask', reason: 'one', policy: 'First', rules }
+  const policies = new Policies([
+    { preCommand: () => first },
+    {
+      preCommand: () => ({
+        kind: 'ask',
+        reason: 'two',
+        rules: [{ reason: 'second', commands: ['mv'] }],
+      }),
+    },
+    {
+      preCommand() {
+        rules.push({ reason: 'late', commands: ['cp'] })
+        return null
+      },
+    },
+  ])
+  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+  expect(await policies.preCommand(ctx)).toMatchObject({
+    rules: [
+      { reason: 'first', commands: ['rm'] },
+      { reason: 'second', commands: ['mv'] },
+    ],
+  })
+})
+
+it('composition answers leave route values unread', async () => {
+  const route: Route = {
+    kind: 'route',
+    policy: 'Named',
+    get runtime(): string {
+      throw new Error('answers route read')
+    },
+  }
+  const policies = new Policies([{ preExecute: () => route }])
+  const ctx: RouteContext = { line: 'true', commands: [], sessionId: '' }
+  const answers = await policies.answers('preExecute', ctx)
+  expect(answers).toHaveLength(1)
+  expect(answers[0]).toBe(route)
+})
+
+it('composition compares current nested rules at each ask merge', async () => {
+  const rule: CommandRule = { reason: 'same', commands: ['rm'] }
+  const policies = new Policies([
+    { preCommand: () => ({ kind: 'ask', reason: 'one', rules: [rule] }) },
+    {
+      preCommand: () => ({
+        kind: 'ask',
+        reason: 'two',
+        rules: [{ reason: 'second', commands: ['mv'] }],
+      }),
+    },
+    {
+      preCommand() {
+        rule.commands = ['cp']
+        return { kind: 'ask', reason: 'three', rules: [{ reason: 'same', commands: ['cp'] }] }
+      },
+    },
+  ])
+  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+  expect(await policies.preCommand(ctx)).toMatchObject({
+    rules: [
+      { reason: 'same', commands: ['cp'] },
+      { reason: 'second', commands: ['mv'] },
+    ],
+  })
+})
+
+it('pure route agreement leaves diagnostic policy names unread', () => {
+  const route: Route = {
+    kind: 'route',
+    runtime: 'node',
+    get policy(): string {
+      throw new Error('unused policy name')
+    },
+  }
+  expect(agreed([route])).toBe(route)
+  expect(settled([route])).toBe(route)
+})
+
+it('pure settlement reads a winning denial kind once', () => {
+  let reads = 0
+  const refusal: Deny = {
+    reason: 'refused',
+    get kind(): 'deny' {
+      reads += 1
+      if (reads > 1) throw new Error('repeated kind read')
+      return 'deny'
+    },
+  }
+  expect(settled([refusal])).toBe(refusal)
+  expect(reads).toBe(1)
+})
+
+it('pure agreement leaves route kinds unread', () => {
+  const route: Route = {
+    runtime: 'node',
+    get kind(): 'route' {
+      throw new Error('unused route kind')
+    },
+  }
+  expect(agreed([route])).toBe(route)
+})
+
+it('composition reads the original next ask rules after naming its copy', async () => {
+  let reads = 0
+  const next: Ask = {
+    kind: 'ask',
+    reason: 'second',
+    get rules(): CommandRule[] {
+      reads += 1
+      return [{ reason: reads === 1 ? 'copied' : 'original', commands: ['cp'] }]
+    },
+  }
+  const policies = new Policies([
+    { preCommand: () => ({ kind: 'ask', reason: 'first', rules: [{ reason: 'first' }] }) },
+    { preCommand: () => next },
+  ])
+  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+  expect(await policies.preCommand(ctx)).toMatchObject({
+    rules: [{ reason: 'first' }, { reason: 'original', commands: ['cp'] }],
+  })
+  expect(reads).toBe(2)
+})
+
+it('composition merges many asks without recounting prior rules', async () => {
+  const rules: CommandRule[] = Array.from({ length: 362 }, (_, index) => ({
+    reason: `rule ${String(index)}`,
+  }))
+  const questions: Ask[] = rules.map((rule) => ({ kind: 'ask', reason: 'review', rules: [rule] }))
+  const policies = new Policies([{ preCommand: () => questions }])
+  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+  expect(await policies.preCommand(ctx)).toMatchObject({ rules })
 })

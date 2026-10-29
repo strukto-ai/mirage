@@ -274,7 +274,10 @@ The same wiring from the side of a change. Every file under `python/` sets
 change selects the shared Git disk/RAM corpus through these broad filters.
 The mirrored `core/msgraph/paths` and `core/dropbox/paths` spelling guards,
 disk resolvers and `session/visibility.json` case-alias regressions use these
-same whole-host filters. No per-verb allowlist is needed. The mirrored `commands/builtin/general/bc/`
+same whole-host filters. The shared policy composition stream, mirrored
+`policy/composition` adapters and `integ/policy/composition.json` use these
+filters too. The composition corpus also runs in the real browser suite.
+No per-verb allowlist is needed. The mirrored `commands/builtin/general/bc/`
 wrappers use these same whole-host filters, and `rust/` selects both hosts
 for their shared evaluator. The shared Rust diff engine, mirrored `rs/diff_*`
 adapters, workspace-owned pools and worker lifecycle use these same whole-host

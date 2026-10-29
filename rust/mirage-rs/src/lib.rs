@@ -358,6 +358,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "paste" => paste::open(config),
         "patch" => patch::open(config),
         "policy" => policy::stream::open(config),
+        "policy_compose" => policy::composition::open(config),
         "printf" => printf::open(config),
         "regex" => regex::stream::open(config),
         "rev" => rev::open(config),

@@ -21,6 +21,7 @@ import type { EvaluationContext } from '../evaluation.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import {
   currentCaller,
+  runLanding,
   type RedirectGuard,
   runWithCaller,
   runWithRedirectPaths,
@@ -826,7 +827,7 @@ async function runRedirects(
   }
   if (cancelled !== null) {
     try {
-      await keepOutput(recorder, outputs, dispatch, session)
+      await runLanding(() => keepOutput(recorder, outputs, dispatch, session))
     } catch (error) {
       console.debug(`kept output not written: ${String(error)}`)
     }

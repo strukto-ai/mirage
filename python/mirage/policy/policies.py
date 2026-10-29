@@ -38,8 +38,13 @@ from mirage.observe.context import command_records
 from mirage.policy.base import Policy
 from mirage.policy.builtin.mount_mode import MountModePolicy
 from mirage.policy.builtin.permissions import PermissionsPolicy
-from mirage.policy.decisions import Decisions, ask_rule, op_question
-from mirage.policy.errors import Explained, PolicyDenied, PolicyError
+from mirage.policy.composition import (
+    Composition,
+    CompositionResult,
+    compose_settled,
+)
+from mirage.policy.decisions import Decisions, op_question
+from mirage.policy.errors import Explained, PolicyDenied
 from mirage.policy.match.decide import source_of
 from mirage.policy.match.rule import operand_paths
 from mirage.policy.mixin import SessionScopedMixin
@@ -720,14 +725,9 @@ def agreed(routes: list[Route]) -> Deny | Route | None:
     Args:
         routes (list[Route]): every Route the stage answered, in order.
     """
-    runtimes = dict.fromkeys(route.runtime for route in routes)
-    if len(runtimes) < 2:
-        return routes[0] if routes else None
-    said = ", ".join(f"{r.policy} on {r.runtime}" for r in routes)
-    return Deny(
-        f"policies place the line on different runtimes: {said}",
-        policy=", ".join(dict.fromkeys(r.policy for r in routes)),
-    )
+    result = compose_settled(tuple(routes), "agreed")
+    assert result is None or isinstance(result, (Deny, Route))
+    return result
 
 
 @overload
@@ -749,13 +749,7 @@ def settled(
     Args:
         answers (tuple[Deny | Ask | Route, ...]): every answer, in order.
     """
-    deny = next((a for a in answers if isinstance(a, Deny)), None)
-    if deny is not None:
-        return deny
-    ask = next((a for a in answers if isinstance(a, Ask)), None)
-    if ask is not None:
-        return ask
-    return agreed([a for a in answers if isinstance(a, Route)])
+    return compose_settled(answers, "settled")
 
 
 class Policies:
@@ -899,139 +893,111 @@ class Policies:
                     break
         self._wanted = frozenset(wanted)
 
-    def _chain(
-        self, method: str, placed: bool, rules_only: bool = False
-    ) -> tuple[Policy, ...]:
-        """The policies a stage asks, in order: the built-in placement
-        first at ``pre_execute`` (unless the caller placed the line),
-        the registered ones, and the built-in mount mode last at
-        ``pre_vfs``, after every policy that could explain the refusal
-        in its own words.
-
-        Args:
-            method (str): the method in python spelling.
-            placed (bool): the caller placed the line itself.
-            rules_only (bool): ask the profile's rules alone
-                (``PermissionsPolicy``), not the policies registered in
-                code or a profile's script. Used for preliminary rule
-                passes and a policy's own file reads to avoid recursion.
-        """
-        # A snapshot, so the order holds if the host edits registrations
-        # while a method awaits. Changes take effect at the next gate.
-        chain: tuple[Policy, ...] = tuple(
-            p
-            for p in self._policies
-            if isinstance(p, PermissionsPolicy) or not rules_only
-        )
-        if method == "pre_execute" and self._placement and not placed:
-            chain = (self._placement, *chain)
-        if method == "pre_vfs":
-            chain = (*chain, self._mode)
-        return chain
-
-    async def _said(
+    async def _evaluate(
         self,
         method: str,
         ctx: MethodContext,
         every: bool,
         placed: bool = False,
         rules_only: bool = False,
-    ) -> tuple[list[Deny | Ask | Route], list[Limit]]:
-        """The one loop every stage runs: each policy's answer, named and
-        checked against what the method may carry; a policy answering a
-        tuple has each read in turn, as if its own policy had said it.
-        A later Ask's rules are appended to the first Ask's, so the first
-        Ask carries every question the stage raised and the host grants
-        each. Each method runs as a policy deciding, with its views filled
-        unless the profile's rules alone are asked.
-
-        The entry point stops at the first Deny, since nothing after it can
-        change the outcome; ``every`` goes on, so ``explain`` shows the
-        answers a Deny would hide. A policy that raises answers with a
-        Deny naming it (fail closed), except the built-in placement,
-        which raises to the caller. A kind the method cannot carry
-        (VALIDITY) raises PolicyError: a programming error, not a
-        refusal, and as loud in a dry run as at the entry point.
-
-        Args:
-            method (str): the method in python spelling.
-            ctx (MethodContext): the context the stage sees.
-            every (bool): ask every policy, past a Deny.
-            placed (bool): the caller placed the line itself, so the
-                built-in placement is not asked.
-            rules_only (bool): ask the profile's rules alone, as
-                ``_chain`` takes it.
-        """
-        base = getattr(Policy, method)
-        legal = VALIDITY[method]
-        said: list[Deny | Ask | Route] = []
-        limits: list[Limit] = []
-        for policy in self._chain(method, placed, rules_only):
-            if getattr(type(policy), method) is base:
-                continue
-            name = type(policy).__name__
-            handles = (
-                self.views(ctx.session_id, None)
-                if not rules_only
-                and self.views is not None
-                and ctx.session is None
-                else None
-            )
-            if handles is not None:
-                session, vfs, caller = handles
-                ctx = replace(ctx, session=session, vfs=vfs, caller=caller)
-            token = set_explaining(DryRun.DECIDING)
-            try:
-                answered = getattr(policy, method)(ctx)
-                if inspect.isawaitable(answered):
-                    answered = await answered
-            except Exception as exc:
-                if policy is self._placement:
-                    raise
-                # The agent reads which policy broke, never what it
-                # raised: the exception text is the deployment's to
-                # debug, in the log.
-                logger.error("%s policy %s raised: %s", method, name, exc)
-                said.append(Deny(f"{name} failed", policy=name, failed=True))
-                if not every:
-                    return said, []
-                continue
-            finally:
-                reset_explaining(token)
-            for action in (
-                answered if isinstance(answered, tuple) else (answered,)
-            ):
-                if action is None:
-                    continue
-                if not isinstance(action, (Deny, Ask, Route, Limit)) or (
-                    action.kind not in legal
-                ):
-                    raise PolicyError(
-                        f"{method} of {name} returned {action!r}; "
-                        f"legal kinds here: {sorted(legal)}"
-                    )
-                if isinstance(action, Limit):
-                    limits.append(action)
-                    continue
-                said.append(
-                    action if action.policy else replace(action, policy=name)
+        projection: str = "fire",
+    ) -> CompositionResult:
+        snapshot = tuple(self._policies)
+        placement = self._placement
+        policies = (
+            *snapshot,
+            *((placement,) if placement is not None else ()),
+            self._mode,
+        )
+        composition = Composition()
+        try:
+            descriptors = []
+            for slot, policy in enumerate(policies):
+                role = (
+                    "registered"
+                    if slot < len(snapshot)
+                    else "mount_mode"
+                    if policy is self._mode
+                    else "placement"
                 )
-                first = next((a for a in said if isinstance(a, Ask)), None)
-                if (
-                    isinstance(action, Ask)
-                    and first is not None
-                    and first is not said[-1]
+                if role == "registered" and isinstance(
+                    policy, PermissionsPolicy
                 ):
-                    rules = (
-                        *(first.rules or (ask_rule(ctx, first),)),
-                        *(action.rules or (ask_rule(ctx, action),)),
+                    role = "permissions"
+                descriptors.append(
+                    {
+                        "slot": slot,
+                        "role": role,
+                        "hooks": [method]
+                        if getattr(type(policy), method)
+                        is not getattr(Policy, method)
+                        else [],
+                    }
+                )
+                composition.names[slot] = type(policy).__name__
+            composition.feed(
+                {
+                    "op": "evaluate",
+                    "evaluation": composition.evaluation,
+                    "hook": method,
+                    "projection": projection,
+                    "every": every,
+                    "placed": placed,
+                    "rules_only": rules_only,
+                    "policies": descriptors,
+                }
+            )
+            composition.stream.finish()
+            pending: tuple[Any, ...] = ()
+            cursor = 0
+            while effect := composition.request():
+                if composition.respond_effect(effect, ctx):
+                    continue
+                requested_slot = effect["slot"]
+                assert isinstance(requested_slot, int)
+                policy = policies[requested_slot]
+                name = type(policy).__name__
+                if effect["op"] == "run_policy":
+                    handles = (
+                        self.views(ctx.session_id, None)
+                        if not rules_only
+                        and self.views is not None
+                        and ctx.session is None
+                        else None
                     )
-                    said[said.index(first)] = replace(
-                        first, rules=tuple(dict.fromkeys(rules))
+                    if handles is not None:
+                        session, vfs, caller = handles
+                        ctx = replace(
+                            ctx, session=session, vfs=vfs, caller=caller
+                        )
+                    token = set_explaining(DryRun.DECIDING)
+                    try:
+                        answered = getattr(policy, method)(ctx)
+                        if inspect.isawaitable(answered):
+                            answered = await answered
+                    except Exception as exc:
+                        if policy is placement:
+                            raise
+                        logger.error(
+                            "%s policy %s raised: %s", method, name, exc
+                        )
+                        answered = Deny(
+                            f"{name} failed", policy=name, failed=True
+                        )
+                    finally:
+                        reset_explaining(token)
+                    pending = (
+                        answered
+                        if isinstance(answered, tuple)
+                        else (answered,)
                     )
-                if isinstance(action, Deny) and not every:
-                    return said, []
-        return said, limits
+                    cursor = 0
+                item = pending[cursor] if cursor < len(pending) else None
+                cursor += 1
+                composition.respond(effect, item, name, cursor < len(pending))
+            return composition.result(method)
+        finally:
+            composition.close()
 
     async def _fire(
         self,
@@ -1039,30 +1005,9 @@ class Policies:
         ctx: MethodContext,
         placed: bool = False,
         rules_only: bool = False,
-    ) -> tuple[Deny | Ask | None, Limit | None, tuple[Route, ...]]:
-        """One stage at an entry point: the first Deny wins, Limits merge.
-
-        A refusal short-circuits (limits are moot once the result is
-        suppressed); Limit actions aggregate to the tightest value per
-        field, and Routes are collected for the caller to reconcile. An
-        Ask is remembered and the loop goes on looking for a Deny, so a
-        later policy's refusal outranks an earlier policy's question and
-        an approval can never re-open a deny; the first Ask is returned,
-        carrying every Ask's rules, when nothing refused.
-
-        Args:
-            method (str): the method in python spelling.
-            ctx (MethodContext): the context the stage sees.
-            placed (bool): the caller placed the line itself.
-            rules_only (bool): ask the profile's rules alone, as
-                ``_chain`` takes it.
-        """
-        said, limits = await self._said(method, ctx, False, placed, rules_only)
-        action = settled(tuple(a for a in said if isinstance(a, (Deny, Ask))))
-        if isinstance(action, Deny):
-            return action, None, ()
-        routes = tuple(a for a in said if isinstance(a, Route))
-        return action, Limit.aggr(limits), routes
+    ) -> tuple[Deny | Ask | None, Limit | None, Route | None]:
+        result = await self._evaluate(method, ctx, False, placed, rules_only)
+        return result.action, result.limit, result.route
 
     async def answers(
         self,
@@ -1087,11 +1032,12 @@ class Policies:
             method (str): the method in python spelling.
             ctx (MethodContext): the context the stage would see.
             every (bool): ask every policy, past a Deny.
-            rules_only (bool): ask the profile's rules alone, as
-                ``_chain`` takes it.
+            rules_only (bool): ask the profile's rules alone.
         """
-        said, _ = await self._said(method, ctx, every, rules_only=rules_only)
-        return tuple(said)
+        result = await self._evaluate(
+            method, ctx, every, rules_only=rules_only, projection="answers"
+        )
+        return result.answers
 
     async def pre_command(self, ctx: CommandContext) -> Deny | Ask | None:
         """Fire pre_command across the policies; first Deny wins, else
@@ -1129,12 +1075,7 @@ class Policies:
                 argument), so the built-in placement is not asked and a
                 Route is moot; a Deny or an Ask still holds the line.
         """
-        action, _, routes = await self._fire("pre_execute", ctx, placed)
-        if isinstance(action, Deny) or placed:
-            return action, None
-        route = agreed(list(routes))
-        if isinstance(route, Deny):
-            return route, None
+        action, _, route = await self._fire("pre_execute", ctx, placed)
         return action, route
 
     async def pre_vfs(

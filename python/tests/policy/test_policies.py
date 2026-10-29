@@ -16,6 +16,7 @@ import asyncio
 import errno
 
 import pytest
+from pydantic import field_serializer
 
 from mirage import Workspace
 from mirage.errors.fs import ebusy
@@ -43,6 +44,7 @@ from mirage.policy import (
     render_deny,
 )
 from mirage.policy.mixin import SessionScopedMixin
+from mirage.policy.policies import agreed, settled
 from mirage.policy.types import RouteContext, SessionContext
 from mirage.types import (
     FileStat,
@@ -700,3 +702,247 @@ async def test_remove_by_identity_refreshes_methods_and_keeps_admission_order():
     assert not policies.wants("pre_command")
     assert not policies.remove(first)
     assert await policies.pre_command(_ctx("weird")) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method",
+    [
+        "pre_command",
+        "post_command",
+        "pre_execute",
+        "post_execute",
+        "pre_vfs",
+        "post_vfs",
+        "pre_session",
+        "post_session",
+    ],
+)
+async def test_composition_stops_before_an_invalid_later_action(method: str):
+    def answer(self, ctx):
+        return Deny("first refusal"), f"invalid later action at {method}"
+
+    policy = type("TwoAnswers", (Policy,), {method: answer})()
+    policies = Policies([policy])
+    answers = await policies.answers(method, _ctx("true", []), every=False)
+    assert len(answers) == 1
+    assert answers[0].reason == "first refusal"
+    with pytest.raises(PolicyError, match="invalid later action"):
+        await policies.answers(method, _ctx("true", []), every=True)
+
+
+@pytest.mark.asyncio
+async def test_composition_keeps_registration_snapshot_during_suspension():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class Wait(Policy):
+        async def pre_command(self, ctx):
+            entered.set()
+            await release.wait()
+
+    policies = Policies([Wait()])
+    running = asyncio.create_task(policies.pre_command(_ctx("weird", [])))
+    await entered.wait()
+    policies.add(DenyWeird())
+    release.set()
+    assert await running is None
+    refused = await policies.pre_command(_ctx("weird", []))
+    assert isinstance(refused, Deny)
+    assert refused.reason == "nope"
+
+
+@pytest.mark.asyncio
+async def test_composition_cancellation_does_not_run_later_policy():
+    entered = asyncio.Event()
+    later_calls = []
+
+    class Wait(Policy):
+        async def pre_command(self, ctx):
+            entered.set()
+            await asyncio.Event().wait()
+
+    class Later(Policy):
+        async def pre_command(self, ctx):
+            later_calls.append(ctx.command)
+
+    policies = Policies([Wait(), Later()])
+    running = asyncio.create_task(policies.pre_command(_ctx("true", [])))
+    await entered.wait()
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    assert later_calls == []
+
+
+@pytest.mark.asyncio
+async def test_composition_does_not_inspect_unreachable_action_fields():
+    reads = []
+
+    class Later(Ask):
+        @property
+        def kind(self):
+            reads.append("kind")
+            raise RuntimeError("unreachable getter")
+
+    class Answers(Policy):
+        def pre_command(self, ctx):
+            return Deny("first refusal"), Later("later ask")
+
+    policies = Policies([Answers()])
+    answer = await policies.pre_command(_ctx("true", []))
+    assert isinstance(answer, Deny)
+    assert reads == []
+    with pytest.raises(RuntimeError, match="unreachable getter"):
+        await policies.answers("pre_command", _ctx("true", []))
+    assert reads == ["kind"]
+
+
+def test_standalone_composition_keeps_first_agreed_route_and_ask_precedence():
+    first = Route("node", reason="first placement")
+    same = Route("node", reason="second placement")
+    other = Route("python", reason="other placement")
+    question = Ask("review")
+    refusal = Deny("refused")
+    assert agreed([first]) is first
+    assert settled((first,)) is first
+    assert settled((question, refusal, first, other)) is refusal
+    assert agreed([first, same]) is first
+    assert settled((first, same)) is first
+    assert isinstance(agreed([first, other]), Deny)
+    assert isinstance(settled((first, other)), Deny)
+    assert settled((first, question, other)) is question
+    assert agreed([]) is None
+    assert settled(()) is None
+
+
+@pytest.mark.asyncio
+async def test_composition_leaves_singleton_ask_rules_unread():
+    class Question(Ask):
+        def __getattribute__(self, name):
+            if name == "rules":
+                raise RuntimeError("singleton rules read")
+            return super().__getattribute__(name)
+
+    question = Question("review", policy="First")
+
+    class First(Policy):
+        def pre_command(self, ctx):
+            return question
+
+    assert await Policies([First()]).pre_command(_ctx("true", [])) is question
+    assert settled((question,)) is question
+
+
+@pytest.mark.asyncio
+async def test_composition_aggregates_limits_after_later_callbacks_mutate_them():
+    limit = Limit(max_bytes=100)
+
+    class First(Policy):
+        def post_execute(self, ctx):
+            return limit
+
+    class Second(Policy):
+        def post_execute(self, ctx):
+            limit.max_bytes = 1
+
+    ctx = ExecuteResultContext(line="true", commands=(), session_id="")
+    _, merged = await Policies([First(), Second()]).post_execute(ctx)
+    assert merged.max_bytes == 1
+
+
+def test_pure_settlement_does_not_read_route_values_after_a_question():
+    class Placement(Route):
+        def __getattribute__(self, name):
+            if name == "runtime":
+                raise RuntimeError("suppressed route read")
+            return super().__getattribute__(name)
+
+    question = Ask("review")
+    assert settled((question, Placement("node"))) is question
+
+
+@pytest.mark.asyncio
+async def test_composition_keeps_repeated_named_ask_identity():
+    question = Ask("review", policy="Named")
+
+    class First(Policy):
+        def pre_command(self, ctx):
+            return question
+
+    result = await Policies([First(), First()]).pre_command(_ctx("true", []))
+    assert result is question
+    assert result.rules == ()
+
+
+@pytest.mark.asyncio
+async def test_composition_answers_leave_route_values_unread():
+    class Placement(Route):
+        def __getattribute__(self, name):
+            if name == "runtime":
+                raise RuntimeError("answers route read")
+            return super().__getattribute__(name)
+
+    route = Placement("node", policy="Named")
+
+    class First(Policy):
+        def pre_execute(self, ctx):
+            return route
+
+    ctx = RouteContext(line="true", commands=(), session_id="")
+    assert await Policies([First()]).answers("pre_execute", ctx) == (route,)
+
+
+def test_pure_route_agreement_leaves_diagnostic_policy_names_unread():
+    class Placement(Route):
+        def __getattribute__(self, name):
+            if name == "policy":
+                raise RuntimeError("unused policy name")
+            return super().__getattribute__(name)
+
+    route = Placement("node")
+    assert agreed([route]) is route
+    assert settled((route,)) is route
+
+
+@pytest.mark.asyncio
+async def test_composition_uses_raw_limit_values_instead_of_serializers():
+    class DisplayLimit(Limit):
+        @field_serializer("max_bytes")
+        def show_bytes(self, value):
+            return value + 1000
+
+    class First(Policy):
+        def post_execute(self, ctx):
+            return DisplayLimit(max_bytes=1)
+
+    ctx = ExecuteResultContext(line="true", commands=(), session_id="")
+    _, limit = await Policies([First()]).post_execute(ctx)
+    assert limit.max_bytes == 1
+
+
+@pytest.mark.asyncio
+async def test_composition_reads_all_limits_for_fields_named_by_any_limit():
+    class DefaultLimit(Limit):
+        max_bytes: int | None = 1
+
+    class First(Policy):
+        def post_execute(self, ctx):
+            return DefaultLimit(), Limit(max_bytes=100)
+
+    ctx = ExecuteResultContext(line="true", commands=(), session_id="")
+    _, limit = await Policies([First()]).post_execute(ctx)
+    assert limit.max_bytes == 1
+
+
+@pytest.mark.asyncio
+async def test_composition_merges_many_asks_without_recounting_prior_rules():
+    rules = tuple(CommandRule(reason=f"rule {index}") for index in range(362))
+
+    class Questions(Policy):
+        def pre_command(self, ctx):
+            return tuple(Ask("review", rules=(rule,)) for rule in rules)
+
+    result = await Policies([Questions()]).pre_command(_ctx("true", []))
+    assert isinstance(result, Ask)
+    assert result.rules == rules

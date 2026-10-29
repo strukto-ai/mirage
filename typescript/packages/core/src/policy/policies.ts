@@ -28,16 +28,17 @@ import {
 import { eacces, erofs } from '../errors/fs.ts'
 import { commandRecords } from '../observe/context.ts'
 import { fsErrorLine } from '../errors/render.ts'
-import { FileType, Limit, type PathSpec, type Refusal } from '../types.ts'
+import { FileType, type Limit, type PathSpec, type Refusal } from '../types.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import type { Policy } from './base.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
 import { PermissionsPolicy } from './builtin/permissions.ts'
-import { Explained, PolicyDenied, PolicyError } from './errors.ts'
+import { Explained, PolicyDenied } from './errors.ts'
+import { Composition, composeSettled, type CompositionResult } from './composition.ts'
 import { sourceOf } from './match/decide.ts'
 import { operandPaths } from './match/rule.ts'
 import { isSessionScoped } from './mixin.ts'
-import { Decisions, askRule, opQuestion, sameRule } from './decisions.ts'
+import { Decisions, opQuestion } from './decisions.ts'
 import {
   DryRun,
   Outcome,
@@ -267,14 +268,7 @@ export function describeRefusal(refusal: Refusal): string {
  * `agreed`.
  */
 export function agreed(routes: readonly Route[]): Deny | Route | null {
-  const runtimes = new Set(routes.map((route) => route.runtime))
-  if (runtimes.size < 2) return routes[0] ?? null
-  const said = routes.map((r) => `${r.policy ?? ''} on ${r.runtime}`).join(', ')
-  return {
-    kind: 'deny',
-    reason: `policies place the line on different runtimes: ${said}`,
-    policy: [...new Set(routes.map((r) => r.policy ?? ''))].join(', '),
-  }
+  return composeSettled(routes, 'agreed')
 }
 
 /**
@@ -285,11 +279,7 @@ export function agreed(routes: readonly Route[]): Deny | Route | null {
 export function settled(answers: readonly (Deny | Ask)[]): Deny | Ask | null
 export function settled(answers: readonly (Deny | Ask | Route)[]): Deny | Ask | Route | null
 export function settled(answers: readonly (Deny | Ask | Route)[]): Deny | Ask | Route | null {
-  const deny = answers.find((a): a is Deny => a.kind === 'deny')
-  if (deny !== undefined) return deny
-  const ask = answers.find((a): a is Ask => a.kind === 'ask')
-  if (ask !== undefined) return ask
-  return agreed(answers.filter((a): a is Route => a.kind === 'route'))
+  return composeSettled(answers, 'settled')
 }
 
 /**
@@ -691,26 +681,6 @@ export class Policies {
   }
 
   /**
-   * The policies a stage asks, in order: the built-in placement first at
-   * `preExecute` (unless the caller placed the line), the registered
-   * ones, and the built-in mount mode last at `preVfs`, after every
-   * policy that could explain the refusal in its own words. A snapshot,
-   * so the order holds if the host edits registrations while a method
-   * awaits; changes take effect at the next gate. `rulesOnly` asks the
-   * profile's rules alone (`PermissionsPolicy`), not the policies
-   * registered in code or a profile's script. Used for preliminary rule
-   * passes and a policy's own file reads to avoid recursion.
-   */
-  private chain(method: Method, placed: boolean, rulesOnly = false): Policy[] {
-    let chain = this.policies.filter((p) => p instanceof PermissionsPolicy || !rulesOnly)
-    if (method === 'preExecute' && this.placement !== null && !placed) {
-      chain = [this.placement, ...chain]
-    }
-    if (method === 'preVfs') chain = [...chain, this.mode]
-    return chain
-  }
-
-  /**
    * Register a policy after the existing ones. Code only: a
    * declarative rule belongs in the permissions document
    * (`commands.deny`), which the workspace compiles.
@@ -729,22 +699,7 @@ export class Policies {
     return true
   }
 
-  /**
-   * The one loop every stage runs: each policy's answer, named and checked
-   * against what the method may carry; a policy answering an array has each
-   * read in turn, as if its own policy had said it. The entry point stops
-   * at the first Deny, since nothing after it can change the outcome;
-   * `every` goes on, so `explain` shows the answers a Deny would hide. A
-   * policy that throws answers with a Deny naming it (fail closed), except
-   * the built-in placement, which throws to the caller. A kind the method
-   * cannot carry (VALIDITY) throws PolicyError: a programming error, not a
-   * refusal, and as loud in a dry run as at the entry point. A later Ask's
-   * rules are appended to the first Ask's, so the first Ask carries every
-   * question the stage raised and the host grants each. Each method runs as a
-   * policy deciding, with its views filled unless the profile's rules alone
-   * are asked. Mirrors the Python `_said`.
-   */
-  private async said(
+  private async evaluate(
     method: Method,
     ctx:
       | CommandContext
@@ -756,89 +711,96 @@ export class Policies {
     every: boolean,
     placed = false,
     rulesOnly = false,
-  ): Promise<[(Deny | Ask | Route)[], Limit[]]> {
-    const said: (Deny | Ask | Route)[] = []
-    const limits: Limit[] = []
-    let seen = ctx
-    for (const policy of this.chain(method, placed, rulesOnly)) {
-      const fn = policy[method]
-      if (fn === undefined) continue
-      const name = policy.constructor.name || 'policy'
-      const handles =
-        !rulesOnly && this.views !== null && seen.session === undefined
-          ? this.views(seen.sessionId ?? '', undefined)
-          : null
-      if (handles !== null) seen = { ...seen, ...handles }
-      const asked = seen
-      let answered
-      try {
-        const ask = async (): Promise<Awaited<ReturnType<typeof fn>>> =>
-          fn.call(
-            policy,
-            asked as CommandResultContext &
-              RouteContext &
-              VfsResultContext &
-              ExecuteResultContext &
-              SessionResultContext,
-          )
-        // Without task isolation the binding would reach other tasks' ops,
-        // so there the mark rides the method's own files and program alone.
-        answered = await (asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, ask) : ask())
-      } catch (err) {
-        if (policy === this.placement) throw err
-        // The agent reads which policy broke, never what it threw: the
-        // error text is the deployment's to debug, in the log.
-        const detail = err instanceof Error ? err.message : String(err)
-        console.error(`${method} policy ${name} raised: ${detail}`)
-        said.push({ kind: 'deny', reason: `${name} failed`, policy: name, failed: true })
-        if (!every) return [said, []]
-        continue
-      }
-      for (const action of Array.isArray(answered) ? answered : [answered]) {
-        if (action === null) continue
-        const kind: unknown = typeof action === 'object' ? action.kind : undefined
-        if (typeof kind !== 'string' || !VALIDITY[method].has(kind)) {
-          throw new PolicyError(
-            `${method} of ${name} returned ${JSON.stringify(action)}; ` +
-              `legal kinds here: ${[...VALIDITY[method]].join(', ')}`,
-          )
-        }
-        if (action instanceof Limit) {
-          limits.push(action)
-          continue
-        }
-        said.push(
-          action.policy === undefined || action.policy === ''
-            ? { ...action, policy: name }
-            : action,
-        )
-        const first = said.findIndex((a) => a.kind === 'ask')
-        const held = said[first]
-        if (action.kind === 'ask' && held?.kind === 'ask' && first < said.length - 1) {
-          const rules = [
-            ...(held.rules ?? [askRule(seen, held)]),
-            ...(action.rules ?? [askRule(seen, action)]),
-          ]
-          said[first] = {
-            ...held,
-            rules: rules.filter((rule, i) => rules.findIndex((r) => sameRule(r, rule)) === i),
+    projection: 'answers' | 'fire' = 'fire',
+  ): Promise<CompositionResult> {
+    const composition = new Composition()
+    try {
+      const snapshot = [...this.policies]
+      const placement = this.placement
+      const policies = [...snapshot, ...(placement === null ? [] : [placement]), this.mode]
+      const hook = method.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
+      const descriptors = policies.map((policy, slot) => {
+        const role =
+          slot < snapshot.length
+            ? policy instanceof PermissionsPolicy
+              ? 'permissions'
+              : 'registered'
+            : policy === this.mode
+              ? 'mount_mode'
+              : 'placement'
+        composition.names.set(slot, policy.constructor.name || 'policy')
+        return { slot, role, hooks: [hook] }
+      })
+      let seen = ctx
+      const signal = callerSignal()
+      composition.feed({
+        op: 'evaluate',
+        evaluation: composition.evaluation,
+        hook,
+        projection,
+        every,
+        placed,
+        rules_only: rulesOnly,
+        policies: descriptors,
+      })
+      composition.stream.finish()
+      let pending: unknown[] = []
+      let cursor = 0
+      for (let effect = composition.request(); effect !== null; effect = composition.request()) {
+        if (composition.respondEffect(effect, seen)) continue
+        if (effect.op !== 'run_policy' && effect.op !== 'read_action')
+          throw new Error('invalid evaluation effect')
+        const policy = policies[effect.slot]
+        if (policy === undefined) throw new Error('invalid policy slot')
+        const name = policy.constructor.name || 'policy'
+        if (effect.op === 'run_policy') {
+          const fn = policy[method]
+          if (fn === undefined) {
+            composition.respond(effect, null, name, false)
+            continue
           }
+          const handles =
+            !rulesOnly && this.views !== null && seen.session === undefined
+              ? this.views(seen.sessionId ?? '', undefined)
+              : null
+          if (handles !== null) seen = { ...seen, ...handles }
+          const asked = seen
+          let answered
+          try {
+            const ask = async (): Promise<Awaited<ReturnType<typeof fn>>> =>
+              fn.call(
+                policy,
+                asked as CommandResultContext &
+                  RouteContext &
+                  VfsResultContext &
+                  ExecuteResultContext &
+                  SessionResultContext,
+              )
+            answered = await abortable(
+              asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, ask) : ask(),
+              signal,
+            )
+          } catch (error) {
+            if (hasAborted(signal)) throw makeAbortError(signal)
+            if (policy === placement) throw error
+            const detail = error instanceof Error ? error.message : String(error)
+            console.error(`${method} policy ${name} raised: ${detail}`)
+            answered = { kind: 'deny', reason: `${name} failed`, policy: name, failed: true }
+          }
+          pending = Array.isArray(answered) ? answered : [answered]
+          cursor = 0
         }
-        if (action.kind === 'deny' && !every) return [said, []]
+        if (hasAborted(signal)) throw makeAbortError(signal)
+        const item = cursor < pending.length ? pending[cursor] : null
+        cursor += 1
+        composition.respond(effect, item, name, cursor < pending.length)
       }
+      return composition.result(method)
+    } finally {
+      composition.close()
     }
-    return [said, limits]
   }
 
-  /**
-   * One stage at an entry point: the first Deny wins (limits are moot once the
-   * result is suppressed), Limit actions merge to the tightest value per
-   * field, and Routes are collected for the caller to reconcile. An Ask is
-   * remembered and the loop goes on looking for a Deny, so a later
-   * policy's refusal outranks an earlier policy's question and an approval
-   * can never re-open a deny; the first Ask is returned, carrying every
-   * Ask's rules, when nothing refused.
-   */
   private async fire(
     method: Method,
     ctx:
@@ -850,11 +812,9 @@ export class Policies {
       | SessionContext,
     placed = false,
     rulesOnly = false,
-  ): Promise<[Deny | Ask | null, Limit | null, Route[]]> {
-    const [said, limits] = await this.said(method, ctx, false, placed, rulesOnly)
-    const action = settled(said.filter((a): a is Deny | Ask => a.kind !== 'route'))
-    if (action?.kind === 'deny') return [action, null, []]
-    return [action, Limit.aggr(limits), said.filter((a): a is Route => a.kind === 'route')]
+  ): Promise<[Deny | Ask | null, Limit | null, Route | null]> {
+    const result = await this.evaluate(method, ctx, false, placed, rulesOnly)
+    return [result.action, result.limit, result.route]
   }
 
   /**
@@ -880,8 +840,8 @@ export class Policies {
     every = true,
     rulesOnly = false,
   ): Promise<(Deny | Ask | Route)[]> {
-    const [said] = await this.said(method, ctx, every, false, rulesOnly)
-    return said
+    const result = await this.evaluate(method, ctx, every, false, rulesOnly, 'answers')
+    return result.answers
   }
 
   /** Fire preCommand across the policies; the first Deny wins, else the first Ask. */
@@ -905,10 +865,7 @@ export class Policies {
    * Ask still holds the line.
    */
   async preExecute(ctx: RouteContext, placed = false): Promise<[Deny | Ask | null, Route | null]> {
-    const [action, , routes] = await this.fire('preExecute', ctx, placed)
-    if (action?.kind === 'deny' || placed) return [action, null]
-    const route = agreed(routes)
-    if (route?.kind === 'deny') return [route, null]
+    const [action, , route] = await this.fire('preExecute', ctx, placed)
     return [action, route]
   }
 
