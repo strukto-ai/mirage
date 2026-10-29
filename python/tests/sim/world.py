@@ -14,18 +14,48 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import Any, TypeVar
+
+from pydantic import SecretStr
 
 from mirage import Mount, MountMode, Workspace, WritePolicy
+from mirage.core.github.config import GitHubConfig
 from mirage.shell.join import shell_join
 from mirage.utils.ids import SeededIdSource
+from mirage.vfs.discord.config import DiscordConfig
+from mirage.vfs.discord.discord import DiscordVFS
+from mirage.vfs.dropbox.config import DropboxConfig
+from mirage.vfs.dropbox.dropbox import DropboxVFS
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
+from mirage.vfs.github.github import GitHubVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.slack import SlackConfig, SlackVFS
+from tests.core.discord.conftest import FakeDiscordApi
+from tests.core.slack.conftest import FakeSlack
+from tests.e2e.gdrive_mock import FakeGDrive
 from tests.e2e.s3_mock import MultiBucketS3Client
+from tests.fixtures.dropbox_api import FakeDropbox
+from tests.fixtures.github_mock import FakeGitHubApi
 from tests.sim.loop import SimClock, SimLoop, run
 from tests.sim.model import stamped
 from tests.sim.rand import u64
-from tests.sim.seam import Hold, Latency, Match, Network, immediate, route_s3
+from tests.sim.seam import (
+    Hold,
+    Latency,
+    Match,
+    Network,
+    immediate,
+    route_discord,
+    route_dropbox,
+    route_gdrive,
+    route_github,
+    route_ram,
+    route_s3,
+    route_slack,
+)
 from tests.sim.trace import STEP, Intent, LineDone, StepRef, Trace
 
 T = TypeVar("T")
@@ -204,10 +234,28 @@ class Sim:
         seed (int): the run's seed.
         files (Mapping[str, bytes]): the bucket's starting objects.
         latency (Latency): each request leg's delay.
+        gdrive (FakeGDrive | None): optional Drive tree.
+        slack (FakeSlack | None): optional Slack workspace.
+        github (FakeGitHubApi | dict[str, Any] | None): optional GitHub
+            repository, or its mock tree and blobs.
+        dropbox (FakeDropbox | dict[str, bytes] | None): optional Dropbox
+            account, or its files.
+        discord (FakeDiscordApi | None): optional Discord server.
+        ram (bool): whether to mount an in-memory ``/ram``.
     """
 
     def __init__(
-        self, seed: int, files: Mapping[str, bytes], latency: Latency
+        self,
+        seed: int,
+        files: Mapping[str, bytes],
+        latency: Latency,
+        *,
+        gdrive: FakeGDrive | None = None,
+        slack: FakeSlack | None = None,
+        github: FakeGitHubApi | dict[str, Any] | None = None,
+        dropbox: FakeDropbox | dict[str, bytes] | None = None,
+        discord: FakeDiscordApi | None = None,
+        ram: bool = False,
     ) -> None:
         loop = asyncio.get_running_loop()
         assert isinstance(loop, SimLoop)
@@ -215,26 +263,94 @@ class Sim:
         self.loop = loop
         self.trace = Trace()
         self.store = MultiBucketS3Client({BUCKET: dict(files)})
+        self.gdrive_store = gdrive
+        self.slack_store = slack
+        self.github_store = github
+        self.dropbox_store = dropbox
+        self.discord_store = discord
+        self.ram_enabled = ram
         self.network = Network(self.trace, latency, self.store)
         self._workspaces: list[Workspace] = []
 
     def workspace(
-        self, write: WritePolicy = WritePolicy.CONDITIONAL
+        self,
+        write: WritePolicy = WritePolicy.CONDITIONAL,
+        *,
+        mounts: Mapping[str, Mount] | None = None,
     ) -> SimWorkspace:
-        """A new workspace with the bucket mounted at ``/s3``.
+        """A new workspace with mounts.
 
         Args:
-            write (WritePolicy): the mount's write policy.
+            write (WritePolicy): the S3 mount's write policy.
+            mounts (Mapping[str, Mount] | None): explicit mounts map.
         """
         clock = SimClock(self.loop)
         ids_seed = u64(self.seed, "ids", len(self._workspaces)) >> 11
-        mount = Mount(
-            S3VFS(S3Config(bucket=BUCKET, region="us-east-1")),
-            mode=MountMode.WRITE,
-            write=write,
-        )
+        if mounts is None:
+            mount_map: dict[str, Any] = {
+                PREFIX.rstrip("/"): Mount(
+                    S3VFS(S3Config(bucket=BUCKET, region="us-east-1")),
+                    mode=MountMode.WRITE,
+                    write=write,
+                )
+            }
+            if self.gdrive_store is not None:
+                mount_map["/gd"] = Mount(
+                    GoogleDriveVFS(
+                        GoogleDriveConfig(
+                            client_id="fake-id",
+                            client_secret=SecretStr("fake-secret"),
+                            refresh_token=SecretStr("fake-refresh"),
+                        )
+                    ),
+                    mode=MountMode.READ,
+                )
+            if self.slack_store is not None:
+                mount_map["/slack"] = Mount(
+                    SlackVFS(SlackConfig(token=SecretStr("xoxb-fake"))),
+                    mode=MountMode.READ,
+                )
+            if self.github_store is not None:
+                mount_map["/github"] = Mount(
+                    GitHubVFS(
+                        GitHubConfig(
+                            token=SecretStr("fake-token"),
+                            owner="test-owner",
+                            repo="test-repo",
+                        )
+                    ),
+                    mode=MountMode.READ,
+                )
+            if self.dropbox_store is not None:
+                mount_map["/dbx"] = Mount(
+                    DropboxVFS(
+                        DropboxConfig(
+                            client_id="fake-id",
+                            client_secret=SecretStr("fake-secret"),
+                            refresh_token=SecretStr("fake-refresh"),
+                        )
+                    ),
+                    mode=MountMode.WRITE,
+                    write=write,
+                )
+            if self.discord_store is not None:
+                mount_map["/discord"] = Mount(
+                    DiscordVFS(
+                        DiscordConfig(token=SecretStr("test-bot-token"))
+                    ),
+                    mode=MountMode.READ,
+                )
+            if self.ram_enabled:
+                mount_map["/ram"] = Mount(
+                    RAMVFS(),
+                    mode=MountMode.WRITE,
+                    write=WritePolicy.UNCONDITIONAL,
+                )
+        else:
+            mount_map = dict(mounts)
+
         workspace = Workspace(
-            {PREFIX.rstrip("/"): mount},
+            mount_map,
             mode=MountMode.WRITE,
             clock=clock,
             ids=SeededIdSource(ids_seed, clock),
@@ -258,8 +374,16 @@ class Sim:
 
     async def close(self) -> None:
         """Close every workspace the run built."""
+        errors: list[Exception] = []
         for workspace in self._workspaces:
-            await workspace.close()
+            try:
+                await workspace.close()
+            except Exception as exc:
+                errors.append(exc)
+        if errors:
+            if len(errors) == 1:
+                raise errors[0]
+            raise ExceptionGroup("errors closing workspaces", errors)
 
 
 def simulate(
@@ -267,6 +391,12 @@ def simulate(
     *,
     seed: int = 0,
     files: Mapping[str, bytes] | None = None,
+    gdrive: FakeGDrive | None = None,
+    slack: FakeSlack | None = None,
+    github: FakeGitHubApi | dict[str, Any] | None = None,
+    dropbox: FakeDropbox | dict[str, bytes] | None = None,
+    discord: FakeDiscordApi | None = None,
+    ram: bool = False,
     latency: Latency = immediate,
 ) -> tuple[T, Trace]:
     """Run ``scenario`` once on a fresh loop, store and network.
@@ -275,12 +405,56 @@ def simulate(
         scenario (Callable[[Sim], Awaitable[T]]): the program.
         seed (int): the run's seed.
         files (Mapping[str, bytes] | None): the bucket's starting objects.
+        gdrive (FakeGDrive | None): optional Drive tree.
+        slack (FakeSlack | None): optional Slack workspace.
+        github (FakeGitHubApi | dict[str, Any] | None): optional GitHub
+            repository, or its mock tree and blobs.
+        dropbox (FakeDropbox | dict[str, bytes] | None): optional Dropbox
+            account, or its files.
+        discord (FakeDiscordApi | None): optional Discord server.
+        ram (bool): whether to mount in-memory /ram VFS.
         latency (Latency): each request leg's delay.
     """
 
     async def main() -> tuple[T, Trace]:
-        sim = Sim(seed, files or {}, latency)
-        with route_s3(sim.network, sim.store):
+        sim = Sim(
+            seed,
+            files or {},
+            latency,
+            gdrive=gdrive,
+            slack=slack,
+            github=github,
+            dropbox=dropbox,
+            discord=discord,
+            ram=ram,
+        )
+        with ExitStack() as stack:
+            stack.enter_context(route_s3(sim.network, sim.store))
+            if gdrive is not None:
+                stack.enter_context(route_gdrive(sim.network, gdrive))
+            if slack is not None:
+                stack.enter_context(route_slack(sim.network, slack))
+            if github is not None:
+                if isinstance(github, FakeGitHubApi):
+                    stack.enter_context(route_github(sim.network, github))
+                else:
+                    tree = (
+                        github.get("tree")
+                        if isinstance(github, dict)
+                        else None
+                    )
+                    blobs = (
+                        github.get("blobs")
+                        if isinstance(github, dict)
+                        else None
+                    )
+                    stack.enter_context(route_github(sim.network, tree, blobs))
+            if dropbox is not None:
+                stack.enter_context(route_dropbox(sim.network, dropbox))
+            if discord is not None:
+                stack.enter_context(route_discord(sim.network, discord))
+            if ram:
+                stack.enter_context(route_ram(SimClock(sim.loop)))
             try:
                 return await scenario(sim), sim.trace
             finally:

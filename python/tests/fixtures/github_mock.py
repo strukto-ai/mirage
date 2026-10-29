@@ -12,11 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
+import logging
+from dataclasses import dataclass, field
+from typing import Any
+
 import pytest
+from pydantic import SecretStr
 
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.search import SearchResult
 from mirage.core.github.tree_entry import TreeEntry
+
+logger = logging.getLogger(__name__)
 
 MOCK_TREE = {
     "README.md": TreeEntry(
@@ -115,35 +123,194 @@ MOCK_SEARCH_RESULTS = {
 }
 
 
-@pytest.fixture
-def github_config():
-    return GitHubConfig(token="ghp_mock_token")
+@dataclass
+class FakeGitHubApi:
+    """In-memory GitHub API fake simulating repository data and operations.
 
+    Args:
+        tree (dict[str, Any]): path to TreeEntry map.
+        blobs (dict[str, bytes]): sha to blob bytes map.
+        default_branch (str): default branch name.
+        search_results (dict[str, list[SearchResult]]): query to search results map.
+    """
 
-@pytest.fixture
-def mock_github_api(monkeypatch):
-    async def _fetch_default_branch(account, owner, repo):
-        return MOCK_DEFAULT_BRANCH
+    tree: dict[str, Any] = field(default_factory=lambda: dict(MOCK_TREE))
+    blobs: dict[str, bytes] = field(default_factory=lambda: dict(MOCK_BLOBS))
+    default_branch: str = MOCK_DEFAULT_BRANCH
+    search_results: dict[str, list[SearchResult]] = field(
+        default_factory=lambda: dict(MOCK_SEARCH_RESULTS)
+    )
 
-    async def _fetch_tree(account, owner, repo, ref):
-        return dict(MOCK_TREE), False, None
+    def __post_init__(self) -> None:
+        old_to_real: dict[str, str] = {}
+        new_blobs = dict(self.blobs)
+        for old_sha, content in list(self.blobs.items()):
+            real_sha = hashlib.sha1(
+                f"blob {len(content)}\0".encode() + content
+            ).hexdigest()
+            new_blobs[real_sha] = content
+            old_to_real[old_sha] = real_sha
+        self.blobs = new_blobs
 
-    async def _read_bytes(account, owner, repo, sha):
-        return MOCK_BLOBS[sha]
+        self.tree = {
+            path: TreeEntry(
+                path=entry.path,
+                type=entry.type,
+                sha=old_to_real.get(entry.sha, entry.sha),
+                size=(
+                    len(self.blobs[old_to_real[entry.sha]])
+                    if entry.type == "blob" and entry.sha in old_to_real
+                    else entry.size
+                ),
+            )
+            for path, entry in self.tree.items()
+        }
 
-    async def _search_code(account, owner, repo, query, path_filter=None):
-        results = MOCK_SEARCH_RESULTS.get(query, [])
-        if path_filter:
-            results = [r for r in results if r.path.startswith(path_filter)]
+        new_search: dict[str, list[SearchResult]] = {}
+        for q, results in self.search_results.items():
+            new_search[q] = [
+                SearchResult(path=r.path, sha=old_to_real.get(r.sha, r.sha))
+                for r in results
+            ]
+        self.search_results = new_search
+
+    def head(self) -> str:
+        """The repository's head: a digest of its tree, so any edit to
+        ``tree`` moves it."""
+        state = "".join(
+            f"{path}\0{entry.type}\0{entry.sha}\n"
+            for path, entry in sorted(self.tree.items())
+        )
+        return hashlib.sha1(state.encode()).hexdigest()
+
+    async def fetch_default_branch(
+        self, account: Any, owner: str, repo: str
+    ) -> str:
+        return self.default_branch
+
+    async def fetch_tree(
+        self, account: Any, owner: str, repo: str, ref: str
+    ) -> tuple[dict[str, Any], bool, Any]:
+        return dict(self.tree), False, self.head()
+
+    async def fetch_head(
+        self, account: Any, owner: str, repo: str, ref: str
+    ) -> str | None:
+        return self.head()
+
+    async def fetch_dir_page(
+        self, account: Any, owner: str, repo: str, tree_sha: str
+    ) -> tuple[list[TreeEntry], bool]:
+        if ":" in tree_sha:
+            dir_path = tree_sha.split(":", 1)[1].strip("/")
+        else:
+            matching = [
+                entry.path
+                for entry in self.tree.values()
+                if entry.type == "tree" and entry.sha == tree_sha
+            ]
+            dir_path = matching[0] if matching else ""
+
+        results: list[TreeEntry] = []
+        if not dir_path:
+            for p, entry in self.tree.items():
+                if "/" not in p:
+                    results.append(
+                        TreeEntry(
+                            path=p,
+                            type=entry.type,
+                            sha=entry.sha,
+                            size=entry.size,
+                        )
+                    )
+        else:
+            prefix = dir_path + "/"
+            for p, entry in self.tree.items():
+                if p.startswith(prefix):
+                    rest = p[len(prefix) :]
+                    if "/" not in rest:
+                        results.append(
+                            TreeEntry(
+                                path=rest,
+                                type=entry.type,
+                                sha=entry.sha,
+                                size=entry.size,
+                            )
+                        )
         return results, False
 
+    async def read_bytes(
+        self, account: Any, owner: str, repo: str, sha: str
+    ) -> bytes:
+        return self.blobs[sha]
+
+    async def search_code(
+        self,
+        account: Any,
+        owner: str,
+        repo: str,
+        query: str,
+        path_filter: str | None = None,
+    ) -> tuple[list[SearchResult], bool]:
+        results = self.search_results.get(query, [])
+        if path_filter:
+            results = [r for r in results if r.path.startswith(path_filter)]
+        return list(results), False
+
+    async def graphql_data(
+        self, account: Any, query: str, variables: dict[str, Any]
+    ) -> dict[str, Any]:
+        repo_res: dict[str, Any] = {}
+        for k, v in variables.items():
+            if k in ("owner", "repo"):
+                continue
+            sha = str(v)
+            raw = self.blobs.get(sha, b"")
+            try:
+                text = raw.decode("utf-8")
+                repo_res[k] = {"text": text, "isTruncated": False}
+            except UnicodeDecodeError as exc:
+                logger.debug(
+                    "Skipping binary or non-utf8 blob %s: %s", sha, exc
+                )
+        return {"repository": repo_res}
+
+
+@pytest.fixture
+def github_config() -> GitHubConfig:
+    return GitHubConfig(token=SecretStr("ghp_mock_token"))
+
+
+@pytest.fixture
+def mock_github_api(monkeypatch: pytest.MonkeyPatch) -> FakeGitHubApi:
+    api = FakeGitHubApi()
     # Both are patched in the module that fetches, because the mount is
     # built without touching the network and hydrates on first use:
     # `refresh_tree` calls fetch_tree in tree.py, and
     # `ensure_default_branch` calls fetch_default_branch in repo.py.
     monkeypatch.setattr(
-        "mirage.core.github.repo.fetch_default_branch", _fetch_default_branch
+        "mirage.core.github.repo.fetch_default_branch",
+        api.fetch_default_branch,
     )
-    monkeypatch.setattr("mirage.core.github.tree.fetch_tree", _fetch_tree)
-    monkeypatch.setattr("mirage.core.github.read.read_bytes", _read_bytes)
-    monkeypatch.setattr("mirage.core.github.search.search_code", _search_code)
+    monkeypatch.setattr("mirage.core.github.tree.fetch_tree", api.fetch_tree)
+    monkeypatch.setattr(
+        "mirage.core.github.tree.fetch_head",
+        api.fetch_head,
+    )
+    monkeypatch.setattr(
+        "mirage.core.github.stat.fetch_head",
+        api.fetch_head,
+    )
+    monkeypatch.setattr(
+        "mirage.core.github.readdir.fetch_head",
+        api.fetch_head,
+    )
+    monkeypatch.setattr(
+        "mirage.core.github.tree.fetch_dir_page",
+        api.fetch_dir_page,
+    )
+    monkeypatch.setattr("mirage.core.github.read.read_bytes", api.read_bytes)
+    monkeypatch.setattr(
+        "mirage.core.github.search.search_code", api.search_code
+    )
+    return api
