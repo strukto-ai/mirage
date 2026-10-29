@@ -21,9 +21,11 @@ import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from aiohttp import web
+
+from mirage.core.dropbox.client import DropboxApiError
 
 BLOCK = 4 * 1024 * 1024
 MODIFIED = "2026-01-01T00:00:00Z"
@@ -46,6 +48,22 @@ def _norm(path: str) -> str:
 
 def _within(path: str, root: str) -> bool:
     return path == root or path.startswith(root.rstrip("/") + "/")
+
+
+class DropboxFakeError(DropboxApiError):
+    """An error raised by FakeDropbox simulating Dropbox API refusals."""
+
+    def __init__(
+        self,
+        message: str,
+        status: int = 409,
+        summary: str = "",
+        error_tag: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(message, status=status, summary=summary)
+        self.error_tag = error_tag
+        self.headers = headers or {}
 
 
 @dataclass
@@ -180,119 +198,210 @@ class FakeDropbox:
         hash_ = self.listed.get(path)
         return {} if hash_ is None else {"content_hash": hash_}
 
+    def _error_response(self, exc: DropboxFakeError) -> web.Response:
+        status = exc.status if exc.status is not None else 409
+        if status == 416:
+            return web.Response(status=416, headers=exc.headers)
+        body: dict[str, Any] = {"error_summary": exc.summary}
+        if exc.error_tag is not None:
+            body["error"] = {".tag": "path", "path": {".tag": exc.error_tag}}
+        return web.json_response(body, status=status, headers=exc.headers)
+
     def _missing(self) -> web.Response:
-        return web.json_response(
-            {
-                "error_summary": "path/not_found/..",
-                "error": {".tag": "path", "path": {".tag": "not_found"}},
-            },
-            status=409,
+        return self._error_response(
+            DropboxFakeError(
+                "not found",
+                409,
+                summary="path/not_found/..",
+                error_tag="not_found",
+            )
         )
 
     def _not_file(self) -> web.Response:
-        return web.json_response(
-            {
-                "error_summary": "path/not_file/..",
-                "error": {".tag": "path", "path": {".tag": "not_file"}},
-            },
-            status=409,
+        return self._error_response(
+            DropboxFakeError(
+                "not file",
+                409,
+                summary="path/not_file/..",
+                error_tag="not_file",
+            )
         )
 
     def _refused(self) -> web.Response:
-        return web.json_response(
-            {
-                "error_summary": "path/restricted_content/..",
-                "error": {
-                    ".tag": "path",
-                    "path": {".tag": "restricted_content"},
-                },
-            },
-            status=409,
+        return self._error_response(
+            DropboxFakeError(
+                "restricted content",
+                409,
+                summary="path/restricted_content/..",
+                error_tag="restricted_content",
+            )
         )
 
-    async def token(self, _req: web.Request) -> web.Response:
-        self.log.append(("token", ""))
-        return web.json_response(
-            {"access_token": "t", "expires_in": 14400, "token_type": "bearer"}
-        )
-
-    async def list_folder(self, req: web.Request) -> web.Response:
-        path = _norm((await req.json()).get("path") or "/")
-        self.log.append(("list_folder", path))
-        if path not in self._folders():
-            return self._missing()
-        return web.json_response(
-            {"entries": self._children(path), "cursor": "c", "has_more": False}
-        )
-
-    async def get_metadata(self, req: web.Request) -> web.Response:
-        path = _norm((await req.json())["path"])
-        self.log.append(("get_metadata", path))
-        if path in self.restricted:
-            return self._refused()
-        if path in self.files:
-            return web.json_response(self._file_entry(path))
-        if path in self._folders():
-            return web.json_response(self._folder_entry(path))
-        return self._missing()
+    @staticmethod
+    def _conflict(summary: str) -> web.Response:
+        return web.json_response({"error_summary": summary}, status=409)
 
     def _hook(self, route: str) -> None:
         hook = self.hooks.pop(route, None)
         if hook is not None:
             hook()
 
-    @staticmethod
-    def _conflict(summary: str) -> web.Response:
-        return web.json_response({"error_summary": summary}, status=409)
-
-    async def upload(self, req: web.Request) -> web.Response:
-        arg = json.loads(req.headers["Dropbox-API-Arg"])
-        path = _norm(arg["path"])
-        self.log.append(("upload", path))
-        self._hook("upload")
-        mode = arg.get("mode", "add")
-        if isinstance(mode, dict) and mode.get(".tag") == "update":
-            if self.revs.get(path) != mode["update"] or path not in self.files:
-                return self._conflict("path/conflict/file/..")
-        self.files[path] = await req.read()
-        self._mint(path)
-        return web.json_response(self._file_entry(path))
-
     def _under(self, path: str) -> list[str]:
         base = path.rstrip("/") + "/"
         return [k for k in self.files if k == path or k.startswith(base)]
 
-    async def delete_v2(self, req: web.Request) -> web.Response:
-        body = await req.json()
-        path = _norm(body["path"])
-        self.log.append(("delete", path))
-        self._hook("delete")
-        if path not in self.files and path not in self._folders():
-            return self._conflict("path_lookup/not_found/..")
-        want = body.get("parent_rev")
-        if want is not None and self.revs.get(path) != want:
-            return self._conflict("path_write/conflict/file/..")
-        entry = (
-            self._file_entry(path)
-            if path in self.files
-            else self._folder_entry(path)
-        )
-        for key in self._under(path):
-            del self.files[key]
-        self.dirs = {d for d in self.dirs if not _within(d, path)}
-        return web.json_response({"metadata": entry})
+    def handle_token(self) -> dict[str, Any]:
+        self.log.append(("token", ""))
+        return {
+            "access_token": "t",
+            "expires_in": 14400,
+            "token_type": "bearer",
+        }
 
-    async def _relocate(self, req: web.Request, route: str) -> web.Response:
-        body = await req.json()
-        src, dst = _norm(body["from_path"]), _norm(body["to_path"])
+    def handle_list_folder(
+        self, body: dict[str, Any] | None = None, *, path: str | None = None
+    ) -> dict[str, Any]:
+        p = _norm(
+            path if path is not None else (body or {}).get("path") or "/"
+        )
+        self.log.append(("list_folder", p))
+        if p not in self._folders():
+            raise DropboxFakeError(
+                f"not found: {p}",
+                409,
+                summary="path/not_found/..",
+                error_tag="not_found",
+            )
+        return {
+            "entries": self._children(p),
+            "cursor": "c",
+            "has_more": False,
+        }
+
+    def handle_get_metadata(
+        self, body: dict[str, Any] | None = None, *, path: str | None = None
+    ) -> dict[str, Any]:
+        p = _norm(path if path is not None else (body or {}).get("path", ""))
+        self.log.append(("get_metadata", p))
+        if p in self.restricted:
+            raise DropboxFakeError(
+                f"restricted: {p}",
+                409,
+                summary="path/restricted_content/..",
+                error_tag="restricted_content",
+            )
+        if p in self.files:
+            return self._file_entry(p)
+        if p in self._folders():
+            return self._folder_entry(p)
+        raise DropboxFakeError(
+            f"not found: {p}",
+            409,
+            summary="path/not_found/..",
+            error_tag="not_found",
+        )
+
+    def handle_upload(
+        self, path: str, data: bytes, mode: Any = "add"
+    ) -> dict[str, Any]:
+        p = _norm(path)
+        self.log.append(("upload", p))
+        self._hook("upload")
+        if isinstance(mode, dict) and mode.get(".tag") == "update":
+            if self.revs.get(p) != mode.get("update") or p not in self.files:
+                raise DropboxFakeError(
+                    f"conflict: {p}",
+                    409,
+                    summary="path/conflict/file/..",
+                )
+        elif isinstance(mode, str) and mode not in ("add", "overwrite"):
+            if self.revs.get(p) != mode or p not in self.files:
+                raise DropboxFakeError(
+                    f"conflict: {p}",
+                    409,
+                    summary="path/conflict/file/..",
+                )
+        self.files[p] = data
+        self._mint(p)
+        return self._file_entry(p)
+
+    def handle_delete_v2(
+        self,
+        body: dict[str, Any] | None = None,
+        *,
+        path: str | None = None,
+        parent_rev: str | None = None,
+    ) -> dict[str, Any]:
+        body = body or {}
+        p = _norm(path if path is not None else body.get("path", ""))
+        self.log.append(("delete", p))
+        self._hook("delete")
+        if p not in self.files and p not in self._folders():
+            raise DropboxFakeError(
+                f"not found: {p}", 409, summary="path_lookup/not_found/.."
+            )
+        want = parent_rev if parent_rev is not None else body.get("parent_rev")
+        if want is not None and self.revs.get(p) != want:
+            raise DropboxFakeError(
+                f"conflict: {p}", 409, summary="path_write/conflict/file/.."
+            )
+        if p in self.files:
+            entry = self._file_entry(p)
+            del self.files[p]
+            self.revs.pop(p, None)
+        else:
+            entry = self._folder_entry(p)
+            for key in self._under(p):
+                del self.files[key]
+                self.revs.pop(key, None)
+            self.dirs = {d for d in self.dirs if not _within(d, p)}
+        return {"metadata": entry}
+
+    def handle_create_folder_v2(
+        self, body: dict[str, Any] | None = None, *, path: str | None = None
+    ) -> dict[str, Any]:
+        body = body or {}
+        p = _norm(path if path is not None else body.get("path", ""))
+        self.log.append(("create_folder", p))
+        self._hook("create_folder")
+        if p in self.files or p in self._folders():
+            raise DropboxFakeError(
+                f"conflict: {p}", 409, summary="path/conflict/folder/.."
+            )
+        parts = p.strip("/").split("/")
+        for i in range(1, len(parts) + 1):
+            self.dirs.add("/" + "/".join(parts[:i]))
+        return {"metadata": self._folder_entry(p)}
+
+    def handle_relocate(
+        self,
+        body: dict[str, Any] | None = None,
+        route: str = "move",
+        *,
+        from_path: str | None = None,
+        to_path: str | None = None,
+    ) -> dict[str, Any]:
+        body = body or {}
+        src = _norm(
+            from_path if from_path is not None else body.get("from_path", "")
+        )
+        dst = _norm(
+            to_path if to_path is not None else body.get("to_path", "")
+        )
         self.log.append((route, src))
         self._hook(route)
         if src not in self.files and src not in self._folders():
-            return self._conflict("from_lookup/not_found/..")
+            raise DropboxFakeError(
+                f"not found: {src}", 409, summary="from_lookup/not_found/.."
+            )
         if dst in self.files:
-            return self._conflict("to/conflict/file/..")
+            raise DropboxFakeError(
+                f"conflict: {dst}", 409, summary="to/conflict/file/.."
+            )
         if dst in self._folders():
-            return self._conflict("to/conflict/folder/..")
+            raise DropboxFakeError(
+                f"conflict: {dst}", 409, summary="to/conflict/folder/.."
+            )
         moved = {k: dst + k[len(src) :] for k in self._under(src)}
         for old, new in moved.items():
             self.files[new] = self.files[old]
@@ -309,46 +418,209 @@ class FakeDropbox:
             if dst in self.files
             else self._folder_entry(dst)
         )
-        return web.json_response({"metadata": entry})
+        return {"metadata": entry}
+
+    def handle_move(
+        self,
+        body: dict[str, Any] | None = None,
+        *,
+        from_path: str | None = None,
+        to_path: str | None = None,
+    ) -> dict[str, Any]:
+        return self.handle_relocate(
+            body, "move", from_path=from_path, to_path=to_path
+        )
+
+    def handle_copy(
+        self,
+        body: dict[str, Any] | None = None,
+        *,
+        from_path: str | None = None,
+        to_path: str | None = None,
+    ) -> dict[str, Any]:
+        return self.handle_relocate(
+            body, "copy", from_path=from_path, to_path=to_path
+        )
+
+    def handle_rpc(
+        self, endpoint: str, body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        body = body or {}
+        ep = endpoint.removeprefix("/2")
+        if ep == "/files/list_folder":
+            return self.handle_list_folder(body)
+        if ep == "/files/get_metadata":
+            return self.handle_get_metadata(body)
+        if ep == "/files/delete_v2":
+            return self.handle_delete_v2(body)
+        if ep == "/files/move_v2":
+            return self.handle_move(body)
+        if ep == "/files/copy_v2":
+            return self.handle_copy(body)
+        if ep == "/files/create_folder_v2":
+            return self.handle_create_folder_v2(body)
+        if ep == "/files/list_folder/get_latest_cursor":
+            return {"cursor": "c"}
+        if ep == "/files/list_folder/continue":
+            return {"entries": [], "cursor": "c", "has_more": False}
+        if ep == "/files/search_v2":
+            return {"matches": [], "has_more": False}
+        if ep == "/users/get_space_usage":
+            return {
+                "allocation": {".tag": "individual", "allocated": 10**12},
+                "used": sum(len(v) for v in self.files.values()),
+            }
+        raise DropboxFakeError(
+            f"unknown endpoint: {endpoint}",
+            400,
+            summary=f"unknown_endpoint/{ep}",
+        )
+
+    def handle_download(
+        self,
+        path: str,
+        range_header: str | None = None,
+        window: Any = None,
+    ) -> tuple[bytes, dict[str, str], int]:
+        p = _norm(path)
+        self.log.append(("download", p))
+        self._hook("download")
+        if p in self.restricted:
+            raise DropboxFakeError(
+                f"restricted: {p}",
+                409,
+                summary="path/restricted_content/..",
+                error_tag="restricted_content",
+            )
+        if p in self.dirs:
+            raise DropboxFakeError(
+                f"not file: {p}",
+                409,
+                summary="path/not_file/..",
+                error_tag="not_file",
+            )
+        if p not in self.files:
+            raise DropboxFakeError(
+                f"not found: {p}",
+                409,
+                summary="path/not_found/..",
+                error_tag="not_found",
+            )
+        data = self.files[p]
+        result = {"Dropbox-API-Result": json.dumps(self._file_entry(p))}
+
+        if window is not None:
+            start = window.offset
+            if start >= len(data):
+                raise DropboxFakeError(
+                    "Range not satisfiable",
+                    status=416,
+                    headers={"Content-Range": f"bytes */{len(data)}"},
+                )
+            end = (
+                start + window.size - 1
+                if window.size is not None
+                else len(data) - 1
+            )
+            end = min(end, len(data) - 1)
+            return (
+                data[start : end + 1],
+                {
+                    **result,
+                    "Content-Range": f"bytes {start}-{end}/{len(data)}",
+                },
+                206,
+            )
+
+        if range_header:
+            match = re.fullmatch(r"bytes=(\d+)-(\d*)", range_header)
+            if match is not None:
+                start = int(match.group(1))
+                if start >= len(data):
+                    raise DropboxFakeError(
+                        "Range not satisfiable",
+                        status=416,
+                        headers={"Content-Range": f"bytes */{len(data)}"},
+                    )
+                end = int(match.group(2)) if match.group(2) else len(data) - 1
+                end = min(end, len(data) - 1)
+                return (
+                    data[start : end + 1],
+                    {
+                        **result,
+                        "Content-Range": f"bytes {start}-{end}/{len(data)}",
+                    },
+                    206,
+                )
+
+        return data, result, 200
+
+    async def token(self, _req: web.Request) -> web.Response:
+        return web.json_response(self.handle_token())
+
+    async def list_folder(self, req: web.Request) -> web.Response:
+        try:
+            body = await req.json()
+            return web.json_response(self.handle_list_folder(body))
+        except DropboxFakeError as exc:
+            return self._error_response(exc)
+
+    async def get_metadata(self, req: web.Request) -> web.Response:
+        try:
+            body = await req.json()
+            return web.json_response(self.handle_get_metadata(body))
+        except DropboxFakeError as exc:
+            return self._error_response(exc)
+
+    async def upload(self, req: web.Request) -> web.Response:
+        arg = json.loads(req.headers.get("Dropbox-API-Arg", "{}"))
+        path = arg.get("path", "")
+        mode = arg.get("mode", "add")
+        data = await req.read()
+        try:
+            return web.json_response(self.handle_upload(path, data, mode=mode))
+        except DropboxFakeError as exc:
+            return self._error_response(exc)
+
+    async def delete_v2(self, req: web.Request) -> web.Response:
+        try:
+            body = await req.json()
+            return web.json_response(self.handle_delete_v2(body))
+        except DropboxFakeError as exc:
+            return self._error_response(exc)
 
     async def move(self, req: web.Request) -> web.Response:
-        return await self._relocate(req, "move")
+        try:
+            body = await req.json()
+            return web.json_response(self.handle_move(body))
+        except DropboxFakeError as exc:
+            return self._error_response(exc)
 
     async def copy(self, req: web.Request) -> web.Response:
-        return await self._relocate(req, "copy")
+        try:
+            body = await req.json()
+            return web.json_response(self.handle_copy(body))
+        except DropboxFakeError as exc:
+            return self._error_response(exc)
+
+    async def create_folder_v2(self, req: web.Request) -> web.Response:
+        try:
+            body = await req.json()
+            return web.json_response(self.handle_create_folder_v2(body))
+        except DropboxFakeError as exc:
+            return self._error_response(exc)
 
     async def download(self, req: web.Request) -> web.Response:
-        path = _norm(json.loads(req.headers["Dropbox-API-Arg"])["path"])
-        self.log.append(("download", path))
-        self._hook("download")
-        if path in self.restricted:
-            return self._refused()
-        if path in self.dirs:
-            return self._not_file()
-        if path not in self.files:
-            return self._missing()
-        data = self.files[path]
-        result = {"Dropbox-API-Result": json.dumps(self._file_entry(path))}
-        match = re.fullmatch(
-            r"bytes=(\d+)-(\d*)", req.headers.get("Range", "")
-        )
-        if match is None:
-            return web.Response(body=data, headers=result)
-        start = int(match.group(1))
-        if start >= len(data):
-            return web.Response(
-                status=416, headers={"Content-Range": f"bytes */{len(data)}"}
+        arg = json.loads(req.headers.get("Dropbox-API-Arg", "{}"))
+        path = arg.get("path", "")
+        range_header = req.headers.get("Range")
+        try:
+            data, headers, status = self.handle_download(
+                path, range_header=range_header
             )
-        end = int(match.group(2)) if match.group(2) else len(data) - 1
-        end = min(end, len(data) - 1)
-        return web.Response(
-            status=206,
-            body=data[start : end + 1],
-            headers={
-                **result,
-                "Content-Range": f"bytes {start}-{end}/{len(data)}",
-            },
-        )
+            return web.Response(body=data, headers=headers, status=status)
+        except DropboxFakeError as exc:
+            return self._error_response(exc)
 
 
 @contextmanager
@@ -369,6 +641,7 @@ def serve(dropbox: FakeDropbox | None = None) -> Iterator[FakeDropbox]:
     app.router.add_post("/2/files/delete_v2", dropbox.delete_v2)
     app.router.add_post("/2/files/move_v2", dropbox.move)
     app.router.add_post("/2/files/copy_v2", dropbox.copy)
+    app.router.add_post("/2/files/create_folder_v2", dropbox.create_folder_v2)
     loop = asyncio.new_event_loop()
     ready = threading.Event()
     runner = web.AppRunner(app)
@@ -377,7 +650,7 @@ def serve(dropbox: FakeDropbox | None = None) -> Iterator[FakeDropbox]:
         await runner.setup()
         site = web.TCPSite(runner, "127.0.0.1", 0)
         await site.start()
-        port = site._server.sockets[0].getsockname()[1]
+        port = cast(Any, site._server).sockets[0].getsockname()[1]
         dropbox.url = f"http://127.0.0.1:{port}"
 
     def run() -> None:

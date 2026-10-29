@@ -18,11 +18,27 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
+from pydantic import SecretStr
+
 from mirage import Mount, MountMode, Workspace, WritePolicy
+from mirage.core.github.config import GitHubConfig
 from mirage.shell.join import shell_join
 from mirage.utils.ids import SeededIdSource
+from mirage.vfs.discord.config import DiscordConfig
+from mirage.vfs.discord.discord import DiscordVFS
+from mirage.vfs.dropbox.config import DropboxConfig
+from mirage.vfs.dropbox.dropbox import DropboxVFS
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
+from mirage.vfs.github.github import GitHubVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.slack import SlackConfig, SlackVFS
+from tests.core.discord.conftest import FakeDiscordApi
+from tests.core.slack.conftest import FakeSlack
+from tests.e2e.gdrive_mock import FakeGDrive
 from tests.e2e.s3_mock import MultiBucketS3Client
+from tests.fixtures.dropbox_api import FakeDropbox
+from tests.fixtures.github_mock import FakeGitHubApi
 from tests.sim.loop import SimClock, SimLoop, run
 from tests.sim.model import stamped
 from tests.sim.rand import u64
@@ -36,6 +52,7 @@ from tests.sim.seam import (
     route_dropbox,
     route_gdrive,
     route_github,
+    route_ram,
     route_s3,
     route_slack,
 )
@@ -217,8 +234,14 @@ class Sim:
         seed (int): the run's seed.
         files (Mapping[str, bytes]): the bucket's starting objects.
         latency (Latency): each request leg's delay.
-        gdrive (Any): optional FakeGDrive instance.
-        slack (Any): optional FakeSlack instance.
+        gdrive (FakeGDrive | None): optional Drive tree.
+        slack (FakeSlack | None): optional Slack workspace.
+        github (FakeGitHubApi | dict[str, Any] | None): optional GitHub
+            repository, or its mock tree and blobs.
+        dropbox (FakeDropbox | dict[str, bytes] | None): optional Dropbox
+            account, or its files.
+        discord (FakeDiscordApi | None): optional Discord server.
+        ram (bool): whether to mount an in-memory ``/ram``.
     """
 
     def __init__(
@@ -227,11 +250,11 @@ class Sim:
         files: Mapping[str, bytes],
         latency: Latency,
         *,
-        gdrive: Any = None,
-        slack: Any = None,
-        github: Any = None,
-        dropbox: Any = None,
-        discord: Any = None,
+        gdrive: FakeGDrive | None = None,
+        slack: FakeSlack | None = None,
+        github: FakeGitHubApi | dict[str, Any] | None = None,
+        dropbox: FakeDropbox | dict[str, bytes] | None = None,
+        discord: FakeDiscordApi | None = None,
         ram: bool = False,
     ) -> None:
         loop = asyncio.get_running_loop()
@@ -272,10 +295,6 @@ class Sim:
                 )
             }
             if self.gdrive_store is not None:
-                from pydantic import SecretStr
-
-                from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
-
                 mount_map["/gd"] = Mount(
                     GoogleDriveVFS(
                         GoogleDriveConfig(
@@ -287,20 +306,11 @@ class Sim:
                     mode=MountMode.READ,
                 )
             if self.slack_store is not None:
-                from pydantic import SecretStr
-
-                from mirage.vfs.slack import SlackConfig, SlackVFS
-
                 mount_map["/slack"] = Mount(
                     SlackVFS(SlackConfig(token=SecretStr("xoxb-fake"))),
                     mode=MountMode.READ,
                 )
             if self.github_store is not None:
-                from pydantic import SecretStr
-
-                from mirage.core.github.config import GitHubConfig
-                from mirage.vfs.github.github import GitHubVFS
-
                 mount_map["/github"] = Mount(
                     GitHubVFS(
                         GitHubConfig(
@@ -312,11 +322,6 @@ class Sim:
                     mode=MountMode.READ,
                 )
             if self.dropbox_store is not None:
-                from pydantic import SecretStr
-
-                from mirage.vfs.dropbox.config import DropboxConfig
-                from mirage.vfs.dropbox.dropbox import DropboxVFS
-
                 mount_map["/dbx"] = Mount(
                     DropboxVFS(
                         DropboxConfig(
@@ -329,11 +334,6 @@ class Sim:
                     write=write,
                 )
             if self.discord_store is not None:
-                from pydantic import SecretStr
-
-                from mirage.vfs.discord.config import DiscordConfig
-                from mirage.vfs.discord.discord import DiscordVFS
-
                 mount_map["/discord"] = Mount(
                     DiscordVFS(
                         DiscordConfig(token=SecretStr("test-bot-token"))
@@ -341,8 +341,6 @@ class Sim:
                     mode=MountMode.READ,
                 )
             if self.ram_enabled:
-                from mirage.vfs.ram import RAMVFS
-
                 mount_map["/ram"] = Mount(
                     RAMVFS(),
                     mode=MountMode.WRITE,
@@ -393,11 +391,11 @@ def simulate(
     *,
     seed: int = 0,
     files: Mapping[str, bytes] | None = None,
-    gdrive: Any = None,
-    slack: Any = None,
-    github: Any = None,
-    dropbox: Any = None,
-    discord: Any = None,
+    gdrive: FakeGDrive | None = None,
+    slack: FakeSlack | None = None,
+    github: FakeGitHubApi | dict[str, Any] | None = None,
+    dropbox: FakeDropbox | dict[str, bytes] | None = None,
+    discord: FakeDiscordApi | None = None,
     ram: bool = False,
     latency: Latency = immediate,
 ) -> tuple[T, Trace]:
@@ -407,11 +405,13 @@ def simulate(
         scenario (Callable[[Sim], Awaitable[T]]): the program.
         seed (int): the run's seed.
         files (Mapping[str, bytes] | None): the bucket's starting objects.
-        gdrive (Any): optional FakeGDrive instance.
-        slack (Any): optional FakeSlack instance.
-        github (Any): optional mock tree/blobs or True.
-        dropbox (Any): optional dict of Dropbox path -> bytes or FakeDropbox.
-        discord (Any): optional FakeDiscordApi instance.
+        gdrive (FakeGDrive | None): optional Drive tree.
+        slack (FakeSlack | None): optional Slack workspace.
+        github (FakeGitHubApi | dict[str, Any] | None): optional GitHub
+            repository, or its mock tree and blobs.
+        dropbox (FakeDropbox | dict[str, bytes] | None): optional Dropbox
+            account, or its files.
+        discord (FakeDiscordApi | None): optional Discord server.
         ram (bool): whether to mount in-memory /ram VFS.
         latency (Latency): each request leg's delay.
     """
@@ -435,15 +435,26 @@ def simulate(
             if slack is not None:
                 stack.enter_context(route_slack(sim.network, slack))
             if github is not None:
-                tree = github.get("tree") if isinstance(github, dict) else None
-                blobs = (
-                    github.get("blobs") if isinstance(github, dict) else None
-                )
-                stack.enter_context(route_github(sim.network, tree, blobs))
+                if isinstance(github, FakeGitHubApi):
+                    stack.enter_context(route_github(sim.network, github))
+                else:
+                    tree = (
+                        github.get("tree")
+                        if isinstance(github, dict)
+                        else None
+                    )
+                    blobs = (
+                        github.get("blobs")
+                        if isinstance(github, dict)
+                        else None
+                    )
+                    stack.enter_context(route_github(sim.network, tree, blobs))
             if dropbox is not None:
                 stack.enter_context(route_dropbox(sim.network, dropbox))
             if discord is not None:
                 stack.enter_context(route_discord(sim.network, discord))
+            if ram:
+                stack.enter_context(route_ram(SimClock(sim.loop)))
             try:
                 return await scenario(sim), sim.trace
             finally:

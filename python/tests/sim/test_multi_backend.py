@@ -12,10 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from tests.core.discord.conftest import FakeDiscordApi
+import asyncio
+from datetime import datetime, timezone
+
+from mirage.cache.index.ram import ListingCheckStore
+from mirage.core.discord.history import snowflake_at
+from tests.core.discord.conftest import DAY, FakeDiscordApi
 from tests.core.slack.conftest import FakeSlack
 from tests.e2e.gdrive_mock import FakeGDrive
-from tests.sim.seam import Exponential, Match
+from tests.sim.seam import Exponential, Leg, Match
+from tests.sim.trace import StepRef
 from tests.sim.world import Sim, simulate
 
 
@@ -225,7 +231,7 @@ def test_sim_discord():
     assert "list_guilds" in ops
     assert "list_channels" in ops
     assert "list_messages_for_day" in ops
-    assert "download_file" in ops
+    assert "download_file_stream" in ops
 
 
 def test_sim_ram_and_cross_mount():
@@ -298,3 +304,347 @@ def test_sim_hold_non_s3_backend():
         scenario,
         discord=fake_discord,
     )
+
+
+def test_sim_dropbox_spooled_upload():
+    """Verify streamed writer input (ByteSpool) uploads cleanly from S3 to Dropbox."""
+    s3_files = {
+        "large_blob.bin": b"hello streamed world from s3 to dropbox" * 100
+    }
+    dbx_files: dict[str, bytes] = {}
+
+    async def scenario(sim: Sim):
+        actor = await sim.workspace().actor("a")
+        res = await actor.sh("cp /s3/large_blob.bin /dbx/uploaded.bin")
+        assert res.exit_code == 0
+
+        res_cat = await actor.sh("cat /dbx/uploaded.bin")
+        assert res_cat.exit_code == 0
+        assert res_cat.stdout == s3_files["large_blob.bin"]
+
+    _, trace = simulate(
+        scenario,
+        files=s3_files,
+        dropbox=dbx_files,
+        latency=Exponential(seed=111, mean=0.005),
+    )
+
+    ops = [e.op for e in trace.served()]
+    assert "get_object" in ops
+    assert "dropbox:upload" in ops
+
+
+def test_sim_dropbox_stale_write_refused():
+    """Verify stale write refusal on Dropbox when a concurrent write
+    advances the rev."""
+    dbx_files = {"/shared.txt": b"initial content\n"}
+
+    async def scenario(sim: Sim):
+        ws1 = sim.workspace()
+        ws2 = sim.workspace()
+        a1 = await ws1.actor("a1")
+        a2 = await ws2.actor("a2")
+
+        # Both actors observe initial revision
+        res_r1 = await a1.sh("cat /dbx/shared.txt")
+        assert res_r1.exit_code == 0
+        res_r2 = await a2.sh("cat /dbx/shared.txt")
+        assert res_r2.exit_code == 0
+
+        # Hold a1's upload
+        hold = sim.hold(Match(op="dropbox:upload", key="/shared.txt"))
+        task_a1 = a1.start("printf 'stale update\n' > /dbx/shared.txt")
+        await sim.settle()
+        assert not task_a1.done()
+
+        # a2 commits a write, updating the file rev
+        res_w2 = await a2.sh("printf 'winner update\n' > /dbx/shared.txt")
+        assert res_w2.exit_code == 0
+
+        # Release a1's upload; must fail due to rev conflict
+        hold.release()
+        res_a1 = await task_a1
+        assert res_a1.exit_code != 0
+
+        # File content reflects a2's win
+        res_final = await a2.sh("cat /dbx/shared.txt")
+        assert res_final.stdout == b"winner update\n"
+
+    simulate(
+        scenario,
+        dropbox=dbx_files,
+    )
+
+
+def test_sim_dropbox_mkdir_mv_cp_and_empty_folder():
+    """Verify Dropbox mkdir, cp, mv, and empty folder survival after file deletion."""
+    dbx_files = {"/seed.txt": b"payload data\n"}
+
+    async def scenario(sim: Sim):
+        actor = await sim.workspace().actor("a")
+
+        # mkdir
+        res_mk = await actor.sh("mkdir /dbx/folder")
+        assert res_mk.exit_code == 0
+
+        # cp
+        res_cp = await actor.sh("cp /dbx/seed.txt /dbx/folder/c.txt")
+        assert res_cp.exit_code == 0
+
+        # mv
+        res_mv = await actor.sh("mv /dbx/folder/c.txt /dbx/folder/m.txt")
+        assert res_mv.exit_code == 0
+
+        res_cat = await actor.sh("cat /dbx/folder/m.txt")
+        assert res_cat.exit_code == 0
+        assert res_cat.stdout == b"payload data\n"
+
+        # rm file
+        res_rm = await actor.sh("rm /dbx/folder/m.txt")
+        assert res_rm.exit_code == 0
+
+        # Empty folder still exists
+        res_ls = await actor.sh("ls /dbx/folder")
+        assert res_ls.exit_code == 0
+        assert res_ls.stdout == b""
+
+    _, trace = simulate(
+        scenario,
+        dropbox=dbx_files,
+    )
+
+    ops = [e.op for e in trace.served()]
+    assert "dropbox:/files/create_folder_v2" in ops
+    assert "dropbox:/files/copy_v2" in ops
+    assert "dropbox:/files/move_v2" in ops
+    assert "dropbox:/files/delete_v2" in ops
+
+
+def test_sim_dropbox_download_window():
+    """Verify Dropbox downloading with byte window (offset and size)."""
+    dbx_files = {"/windowed.txt": b"0123456789abcdefghijklmnopqrstuvwxyz"}
+
+    async def scenario(sim: Sim):
+        ws = sim.workspace()
+        mount = next(m for m in ws.workspace.mounts() if m.prefix == "/dbx/")
+        # Read slice [10 : 25]
+        slice_bytes = await mount.call(
+            "read", "/windowed.txt", offset=10, size=15
+        )
+        assert slice_bytes == b"abcdefghijklmno"
+
+    _, trace = simulate(
+        scenario,
+        dropbox=dbx_files,
+    )
+
+    ops = [e.op for e in trace.served()]
+    assert "dropbox:download" in ops
+
+
+def test_sim_github_batched_graphql_read():
+    """Verify multi-file reads on GitHub stay batched in graphql_data with
+    valid git blob shas."""
+
+    async def scenario(sim: Sim):
+        actor = await sim.workspace().actor("a")
+        # List to prime directory index
+        await actor.sh("ls /github/src")
+        # Read multiple files: first file streams, subsequent files batched
+        # via read_many
+        res = await actor.sh(
+            "cat /github/src/__init__.py /github/src/main.py /github/src/utils.py"
+        )
+        assert res.exit_code == 0
+        assert b"from src.utils import helper" in res.stdout
+        assert b"def helper():" in res.stdout
+
+    _, trace = simulate(
+        scenario,
+        github=True,
+    )
+
+    ops = [e.op for e in trace.served()]
+    assert "graphql_data" in ops
+    read_bytes_ops = [e for e in trace.served() if e.op == "read_bytes"]
+    assert len(read_bytes_ops) == 1
+
+
+def test_sim_github_cold_stat_no_real_io():
+    """Verify cold stat, head check, and point lookup on GitHub route through
+    seam without real network I/O."""
+
+    async def scenario(sim: Sim):
+        ws = sim.workspace()
+        actor = await ws.actor("a")
+
+        # Head version check via ListingCheckStore calls fetch_head through seam
+        mount = next(
+            m for m in ws.workspace.mounts() if m.prefix == "/github/"
+        )
+        root_stat = await mount.call("stat", "/", index=ListingCheckStore())
+        assert root_stat.fingerprint == "mock-head-sha"
+
+        # Cold file stat via shell calls fetch_dir_page through seam
+        res = await actor.sh("wc -c /github/README.md")
+        assert res.exit_code == 0
+        assert b"README.md" in res.stdout
+
+    _, trace = simulate(
+        scenario,
+        github=True,
+    )
+
+    ops = [e.op for e in trace.served()]
+    assert "fetch_head" in ops
+    assert "fetch_dir_page" in ops
+
+
+def slow_stream_back(
+    step: StepRef | None, op: str, key: str, nth: int, leg: Leg
+) -> float:
+    return 1.0 if leg is Leg.BACK and op == "download_file_stream" else 0.0
+
+
+def test_sim_gdrive_stream_read_inside_request():
+    """Verify a Drive stream is read when its request is served, so a
+    write while the answer is on its way back does not change the bytes."""
+    fake_gd = FakeGDrive()
+    fake_gd.add_file("big.txt", b"old" * 40)
+
+    async def scenario(sim: Sim):
+        actor = await sim.workspace().actor("a")
+        await actor.sh("ls /gd")
+        task = actor.start("cat /gd/big.txt")
+        await asyncio.sleep(0.5)
+        fake_gd.add_file("big.txt", b"new" * 40)
+        res = await task
+        assert res.exit_code == 0
+        assert res.stdout == b"old" * 40
+
+    simulate(scenario, gdrive=fake_gd, latency=slow_stream_back)
+
+
+def test_sim_gdrive_hold_matches_positional_file_id():
+    """Verify a hold keyed on a Drive file id matches a request the
+    client sent with a positional argument."""
+    fake_gd = FakeGDrive()
+    file_id = fake_gd.add_file("notes.txt", b"notes\n")
+
+    async def scenario(sim: Sim):
+        hold = sim.hold(
+            Match(op="capture_file_metadata", key=file_id),
+        )
+        actor = await sim.workspace().actor("a")
+        await actor.sh("ls /gd")
+        task = actor.start("cat /gd/notes.txt")
+        await sim.settle()
+        assert hold.reached
+        hold.release()
+        res = await task
+        assert res.stdout == b"notes\n"
+
+    simulate(scenario, gdrive=fake_gd)
+
+
+def test_sim_gdrive_native_read_takes_virtual_time():
+    """Verify a native Doc read is a traced request that waits on the
+    latency like any other."""
+    fake_gd = FakeGDrive()
+    fake_gd.add_file(
+        "plan", b"plan body", mime="application/vnd.google-apps.document"
+    )
+
+    async def scenario(sim: Sim):
+        actor = await sim.workspace().actor("a")
+        await actor.sh("ls /gd")
+        started = sim.loop.time()
+        res = await actor.sh("cat /gd/plan.gdoc.json")
+        assert res.exit_code == 0
+        assert sim.loop.time() > started
+
+    _, trace = simulate(
+        scenario,
+        gdrive=fake_gd,
+        latency=Exponential(seed=7, mean=0.01),
+    )
+    assert "read_doc" in [e.op for e in trace.served()]
+
+
+posted = datetime(2024, 1, 15, 12, tzinfo=timezone.utc).timestamp()
+
+
+class _DatedDiscord(FakeDiscordApi):
+    async def list_messages_for_day(
+        self, accessor, channel_id, date_str, scope
+    ):
+        if channel_id != "C001" or date_str != DAY:
+            return []
+        return [
+            {
+                "id": str(snowflake_at(posted)),
+                "content": "hello",
+                "author": {"username": "alice"},
+            }
+        ]
+
+
+def test_sim_discord_follow_reads_through_seam():
+    """Verify ``tail -f`` on a channel day asks the seam, not Discord; the
+    follow runs until the line's virtual timeout."""
+    fake_discord = _DatedDiscord()
+
+    async def scenario(sim: Sim):
+        actor = await sim.workspace().actor("a")
+        base = "/discord/My\\ Server__G001/channels/general__C001"
+        await actor.sh(f"ls {base}")
+        res = await actor.sh(f"tail -f -n 1 {base}/{DAY}/chat.jsonl")
+        assert b"hello" in res.stdout
+        assert b"real I/O" not in res.stderr
+
+    _, trace = simulate(scenario, discord=fake_discord)
+    ops = [e.op for e in trace.served()]
+    assert ops.count("list_messages_for_day") >= 2
+
+
+def test_sim_slack_stream_hold_uses_stream_op():
+    """Verify an attachment stream is held by ``download_file_stream``."""
+    fake_slack = FakeSlack()
+
+    async def scenario(sim: Sim):
+        actor = await sim.workspace().actor("a")
+        day = "/slack/channels/general__C1/2025-11-05"
+        await actor.sh(f"ls {day}/files")
+        hold = sim.hold(Match(op="download_file_stream"))
+        task = actor.start(f"cat {day}/files/plan__F1.txt")
+        await sim.settle()
+        assert hold.reached
+        hold.release()
+        res = await task
+        assert res.stdout == b"plan\n"
+
+    simulate(scenario, slack=fake_slack)
+
+
+def test_sim_ram_timestamps_follow_virtual_time():
+    """Verify RAM writes are stamped from the simulated clock, so two runs
+    agree on every stamp."""
+
+    def run_once() -> bytes:
+        async def scenario(sim: Sim) -> bytes:
+            actor = await sim.workspace().actor("a")
+            await actor.sh("printf 'x' > /ram/a.txt")
+            await asyncio.sleep(5)
+            await actor.sh("printf 'y' > /ram/b.txt")
+            res = await actor.sh("stat -c '%n %Y' /ram/a.txt /ram/b.txt")
+            assert res.exit_code == 0
+            return res.stdout
+
+        out, _ = simulate(scenario, ram=True)
+        return out
+
+    first = run_once()
+    second = run_once()
+    assert first == second
+    stamps = [int(line.split()[1]) for line in first.splitlines()]
+    assert stamps[1] - stamps[0] == 5

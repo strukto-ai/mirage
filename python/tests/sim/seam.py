@@ -13,20 +13,40 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import hashlib
 import inspect
-import json
 from collections import Counter
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from types import SimpleNamespace
 from typing import Any, Protocol, TypeVar, cast
 from unittest.mock import patch
 
+import mirage.core.discord.history as discord_history
+import mirage.core.discord.read as discord_read
+import mirage.core.discord.readdir as discord_readdir
+from mirage.accessor.google_api import GoogleApiAccessor
+from mirage.utils.dates import to_iso_z
+from tests.core.discord.conftest import FakeDiscordApi
+from tests.core.slack.conftest import USERS, FakeSlack
+from tests.e2e.gdrive_mock import (
+    _FAKE_EXPIRES_IN,
+    _FAKE_TOKEN,
+    FakeDriveApi,
+    FakeGDrive,
+    FakeRenderApi,
+)
 from tests.e2e.s3_mock import CONDITION_KEYS, S3_SESSION, MultiBucketS3Client
-from tests.sim.loop import SimLoop
+from tests.fixtures.dropbox_api import FakeDropbox
+from tests.fixtures.github_mock import (
+    MOCK_BLOBS,
+    MOCK_DEFAULT_BRANCH,
+    MOCK_TREE,
+    FakeGitHubApi,
+)
+from tests.sim.loop import SimClock, SimLoop
 from tests.sim.rand import exponential
 from tests.sim.trace import (
     STEP,
@@ -56,6 +76,9 @@ GDRIVE_OPS = frozenset(
         "download_file",
         "download_file_stream",
         "capture_file_metadata",
+        "read_doc",
+        "read_spreadsheet",
+        "read_presentation",
         "upload_file",
         "update_file_content",
         "create_folder",
@@ -78,6 +101,8 @@ GITHUB_OPS = frozenset(
     {
         "fetch_default_branch",
         "fetch_tree",
+        "fetch_head",
+        "fetch_dir_page",
         "read_bytes",
         "search_code",
         "graphql_data",
@@ -93,6 +118,7 @@ DROPBOX_OPS = frozenset(
         "dropbox:/files/delete_v2",
         "dropbox:/files/move_v2",
         "dropbox:/files/copy_v2",
+        "dropbox:/files/create_folder_v2",
     }
 )
 
@@ -105,6 +131,16 @@ DISCORD_OPS = frozenset(
         "download_file",
         "download_file_stream",
     }
+)
+
+RAM_CLOCKED = (
+    "copy",
+    "create",
+    "mkdir",
+    "pwrite",
+    "rename",
+    "truncate",
+    "write",
 )
 
 KNOWN_OPS = (
@@ -283,12 +319,16 @@ def _key_of(op: str, kwargs: dict[str, Any]) -> str:
         "Key",
         "Prefix",
         "file_id",
+        "doc_id",
+        "spreadsheet_id",
+        "presentation_id",
         "folder_id",
         "folder_ids",
         "guild_id",
         "channel_id",
         "sha",
         "ref",
+        "tree_sha",
         "url",
         "path",
         "from_path",
@@ -302,6 +342,31 @@ def _key_of(op: str, kwargs: dict[str, Any]) -> str:
                 return str(val[0]) if val else ""
             return str(val)
     return ""
+
+
+def _named(
+    attr: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    """The call's arguments by parameter name, positional ones included.
+
+    Args:
+        attr (Callable[..., Any]): the fake's method.
+        args (tuple[Any, ...]): its positional arguments.
+        kwargs (dict[str, Any]): its keyword arguments.
+    """
+    bound = inspect.signature(attr).bind_partial(*args, **kwargs)
+    named: dict[str, Any] = {}
+    for name, value in bound.arguments.items():
+        kind = bound.signature.parameters[name].kind
+        if kind is inspect.Parameter.VAR_KEYWORD:
+            named.update(value)
+        elif kind is not inspect.Parameter.VAR_POSITIONAL:
+            named[name] = value
+    return named
+
+
+async def _drain(gen: AsyncIterator[T]) -> list[T]:
+    return [item async for item in gen]
 
 
 def _at_once(call: Coroutine[Any, Any, T]) -> T:
@@ -520,11 +585,12 @@ class Connection:
             async def gen_call(
                 *args: Any, **kwargs: Any
             ) -> AsyncIterator[Any]:
-                async def perform() -> Any:
-                    return attr(*args, **kwargs)
-
-                gen = await self._network.request(name, kwargs, perform)
-                async for item in gen:
+                items = await self._network.request(
+                    name,
+                    _named(attr, args, kwargs),
+                    lambda: _drain(attr(*args, **kwargs)),
+                )
+                for item in items:
                     yield item
 
             return gen_call
@@ -533,7 +599,9 @@ class Connection:
 
         async def call(*args: Any, **kwargs: Any) -> Any:
             return await self._network.request(
-                name, kwargs, lambda: attr(*args, **kwargs)
+                name,
+                _named(attr, args, kwargs),
+                lambda: attr(*args, **kwargs),
             )
 
         return call
@@ -576,7 +644,7 @@ class _NoYield:
 
 
 class _SlackConnection:
-    def __init__(self, network: Network, fake: Any) -> None:
+    def __init__(self, network: Network, fake: FakeSlack) -> None:
         self._network = network
         self._fake = fake
 
@@ -584,8 +652,6 @@ class _SlackConnection:
         async def perform() -> Any:
             with patch("asyncio.sleep", return_value=_NoYield()):
                 if method == "users.info":
-                    from tests.core.slack.conftest import USERS
-
                     uid = (params or {}).get("user")
                     for u in USERS:
                         if u.get("id") == uid:
@@ -611,32 +677,31 @@ class _SlackConnection:
     async def download_stream(
         self, accessor: Any, url: str
     ) -> AsyncIterator[bytes]:
-        data = await self.download(accessor, url, 0, None)
+        data = await self._network.request(
+            "download_file_stream",
+            {"url": url},
+            lambda: self._fake.download(accessor, url, 0, None),
+        )
         yield data
 
 
+async def _gdrive_refresh(_config: Any) -> tuple[str, int]:
+    return _FAKE_TOKEN, _FAKE_EXPIRES_IN
+
+
 @contextmanager
-def route_gdrive(network: Network, fake: Any) -> Iterator[None]:
+def route_gdrive(network: Network, fake: FakeGDrive) -> Iterator[None]:
     """Route Google Drive requests through ``network``.
 
     Args:
         network (Network): the gate.
-        fake: the FakeGDrive instance.
+        fake (FakeGDrive): the shared Drive tree.
     """
-    from mirage.accessor.google_api import GoogleApiAccessor
-    from tests.e2e.gdrive_mock import (
-        _FAKE_EXPIRES_IN,
-        _FAKE_TOKEN,
-        FakeDriveApi,
-        FakeRenderApi,
-    )
-
     registry = [(None, fake)]
     drive = FakeDriveApi(fake, registry)
-    conn = Connection(network, drive, "https://www.googleapis.com")
-
-    async def fake_refresh(_config: Any) -> tuple[str, int]:
-        return _FAKE_TOKEN, _FAKE_EXPIRES_IN
+    endpoint = "https://www.googleapis.com"
+    conn = Connection(network, drive, endpoint)
+    rendered = Connection(network, FakeRenderApi(drive), endpoint)
 
     with ExitStack() as stack:
         stack.enter_context(
@@ -651,25 +716,25 @@ def route_gdrive(network: Network, fake: Any) -> Iterator[None]:
                 patch.object(
                     GoogleApiAccessor,
                     service,
-                    property(lambda accessor: FakeRenderApi(cast(Any, conn))),
+                    property(lambda accessor: rendered),
                 )
             )
         stack.enter_context(
             patch(
                 "mirage.core.google.client.refresh_access_token",
-                new=fake_refresh,
+                new=_gdrive_refresh,
             )
         )
         yield
 
 
 @contextmanager
-def route_slack(network: Network, fake: Any) -> Iterator[None]:
+def route_slack(network: Network, fake: FakeSlack) -> Iterator[None]:
     """Route Slack requests through ``network``.
 
     Args:
         network (Network): the gate.
-        fake: the FakeSlack instance.
+        fake (FakeSlack): the shared Slack workspace.
     """
     conn = _SlackConnection(network, fake)
     with ExitStack() as stack:
@@ -719,23 +784,15 @@ def route_slack(network: Network, fake: Any) -> Iterator[None]:
 
 
 class _GitHubConnection:
-    def __init__(
-        self,
-        network: Network,
-        tree: dict[str, Any],
-        blobs: dict[str, bytes],
-        default_branch: str = "main",
-    ) -> None:
+    def __init__(self, network: Network, fake: FakeGitHubApi) -> None:
         self._network = network
-        self._tree = tree
-        self._blobs = blobs
-        self._default_branch = default_branch
+        self._fake = fake
 
     async def fetch_default_branch(
         self, account: Any, owner: str, repo: str
     ) -> str:
         async def perform() -> str:
-            return self._default_branch
+            return await self._fake.fetch_default_branch(account, owner, repo)
 
         return await self._network.request(
             "fetch_default_branch",
@@ -747,7 +804,7 @@ class _GitHubConnection:
         self, account: Any, owner: str, repo: str, ref: str
     ) -> tuple[dict[str, Any], bool, Any]:
         async def perform() -> tuple[dict[str, Any], bool, Any]:
-            return (dict(self._tree), False, None)
+            return await self._fake.fetch_tree(account, owner, repo, ref)
 
         return await self._network.request(
             "fetch_tree",
@@ -755,11 +812,37 @@ class _GitHubConnection:
             perform,
         )
 
+    async def fetch_head(
+        self, account: Any, owner: str, repo: str, ref: str
+    ) -> str | None:
+        async def perform() -> str | None:
+            return await self._fake.fetch_head(account, owner, repo, ref)
+
+        return await self._network.request(
+            "fetch_head",
+            {"owner": owner, "repo": repo, "ref": ref},
+            perform,
+        )
+
+    async def fetch_dir_page(
+        self, account: Any, owner: str, repo: str, tree_sha: str
+    ) -> tuple[list[Any], bool]:
+        async def perform() -> tuple[list[Any], bool]:
+            return await self._fake.fetch_dir_page(
+                account, owner, repo, tree_sha
+            )
+
+        return await self._network.request(
+            "fetch_dir_page",
+            {"owner": owner, "repo": repo, "tree_sha": tree_sha},
+            perform,
+        )
+
     async def read_bytes(
         self, account: Any, owner: str, repo: str, sha: str
     ) -> bytes:
         async def perform() -> bytes:
-            return self._blobs[sha]
+            return await self._fake.read_bytes(account, owner, repo, sha)
 
         return await self._network.request(
             "read_bytes",
@@ -777,18 +860,7 @@ class _GitHubConnection:
         self, account: Any, query: str, variables: dict[str, Any]
     ) -> dict[str, Any]:
         async def perform() -> dict[str, Any]:
-            repo_res: dict[str, Any] = {}
-            for k, v in variables.items():
-                if k in ("owner", "repo"):
-                    continue
-                sha = str(v)
-                raw = self._blobs.get(sha, b"")
-                try:
-                    text = raw.decode("utf-8")
-                    repo_res[k] = {"text": text, "isTruncated": False}
-                except UnicodeDecodeError:
-                    pass
-            return {"repository": repo_res}
+            return await self._fake.graphql_data(account, query, variables)
 
         return await self._network.request(
             "graphql_data",
@@ -804,15 +876,10 @@ class _GitHubConnection:
         query: str,
         path_filter: str | None = None,
     ) -> tuple[list[Any], bool]:
-        from tests.fixtures.github_mock import MOCK_SEARCH_RESULTS
-
         async def perform() -> tuple[list[Any], bool]:
-            results = MOCK_SEARCH_RESULTS.get(query, [])
-            if path_filter:
-                results = [
-                    r for r in results if r.path.startswith(path_filter)
-                ]
-            return list(results), False
+            return await self._fake.search_code(
+                account, owner, repo, query, path_filter
+            )
 
         return await self._network.request(
             "search_code",
@@ -829,7 +896,7 @@ class _GitHubConnection:
 @contextmanager
 def route_github(
     network: Network,
-    tree: dict[str, Any] | None = None,
+    tree: dict[str, Any] | FakeGitHubApi | None = None,
     blobs: dict[str, bytes] | None = None,
     default_branch: str = "main",
 ) -> Iterator[None]:
@@ -837,23 +904,24 @@ def route_github(
 
     Args:
         network (Network): the gate.
-        tree (dict[str, Any] | None): mock tree entries.
+        tree (dict[str, Any] | FakeGitHubApi | None): mock tree entries,
+            or the FakeGitHubApi to serve.
         blobs (dict[str, bytes] | None): mock blob sha-to-bytes map.
         default_branch (str): default branch name.
     """
-    from tests.fixtures.github_mock import (
-        MOCK_BLOBS,
-        MOCK_DEFAULT_BRANCH,
-        MOCK_TREE,
-    )
+    if isinstance(tree, FakeGitHubApi):
+        fake = tree
+    else:
+        mock_tree = MOCK_TREE if tree is None else tree
+        mock_blobs = MOCK_BLOBS if blobs is None else blobs
+        mock_branch = (
+            MOCK_DEFAULT_BRANCH if default_branch is None else default_branch
+        )
+        fake = FakeGitHubApi(
+            tree=mock_tree, blobs=mock_blobs, default_branch=mock_branch
+        )
 
-    mock_tree = MOCK_TREE if tree is None else tree
-    mock_blobs = MOCK_BLOBS if blobs is None else blobs
-    mock_branch = (
-        MOCK_DEFAULT_BRANCH if default_branch is None else default_branch
-    )
-
-    conn = _GitHubConnection(network, mock_tree, mock_blobs, mock_branch)
+    conn = _GitHubConnection(network, fake)
     with ExitStack() as stack:
         stack.enter_context(
             patch(
@@ -865,6 +933,30 @@ def route_github(
             patch(
                 "mirage.core.github.tree.fetch_tree",
                 new=conn.fetch_tree,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "mirage.core.github.tree.fetch_head",
+                new=conn.fetch_head,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "mirage.core.github.stat.fetch_head",
+                new=conn.fetch_head,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "mirage.core.github.readdir.fetch_head",
+                new=conn.fetch_head,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "mirage.core.github.tree.fetch_dir_page",
+                new=conn.fetch_dir_page,
             )
         )
         stack.enter_context(
@@ -907,18 +999,13 @@ def route_github(
 
 
 class _DropboxConnection:
-    def __init__(self, network: Network, files: dict[str, bytes]) -> None:
+    def __init__(self, network: Network, fake: FakeDropbox) -> None:
         self._network = network
-        self.files = {("/" + k.strip("/")): v for k, v in files.items()}
-        self._revs: dict[str, int] = {k: 1 for k in self.files}
+        self._fake = fake
 
-    def _folders(self) -> set[str]:
-        out = {"/"}
-        for key in self.files:
-            parts = key.strip("/").split("/")[:-1]
-            for i in range(1, len(parts) + 1):
-                out.add("/" + "/".join(parts[:i]))
-        return out
+    @property
+    def files(self) -> dict[str, bytes]:
+        return self._fake.files
 
     async def rpc(
         self, tm: Any, endpoint: str, body: dict[str, Any] | None
@@ -926,104 +1013,7 @@ class _DropboxConnection:
         body = body or {}
 
         async def perform() -> dict[str, Any]:
-            if endpoint == "/files/list_folder":
-                p = "/" + body.get("path", "").strip("/")
-                if p not in self._folders():
-                    from mirage.core.dropbox.client import DropboxApiError
-
-                    raise DropboxApiError(
-                        f"not found: {p}", 409, summary="path/not_found"
-                    )
-                p_pfx = "/" if p == "/" else p.rstrip("/") + "/"
-                entries: list[dict[str, Any]] = []
-                dirs_seen: set[str] = set()
-                for fpath, data in sorted(self.files.items()):
-                    if fpath.startswith(p_pfx):
-                        rel = fpath[len(p_pfx) :]
-                        if "/" in rel:
-                            dname = rel.split("/")[0]
-                            if dname not in dirs_seen:
-                                dirs_seen.add(dname)
-                                entries.append(
-                                    {
-                                        ".tag": "folder",
-                                        "name": dname,
-                                        "path_lower": f"{p_pfx}{dname}".lower(),
-                                        "path_display": f"{p_pfx}{dname}",
-                                    }
-                                )
-                        else:
-                            rev = str(self._revs.get(fpath, 1))
-                            chash = hashlib.sha256(data).hexdigest()
-                            entries.append(
-                                {
-                                    ".tag": "file",
-                                    "name": rel,
-                                    "path_lower": fpath.lower(),
-                                    "path_display": fpath,
-                                    "id": f"id:{rel}",
-                                    "size": len(data),
-                                    "rev": rev,
-                                    "content_hash": chash,
-                                }
-                            )
-                return {"entries": entries, "has_more": False}
-            if endpoint == "/files/get_metadata":
-                p = "/" + body.get("path", "").strip("/")
-                if p in self.files:
-                    name = p.rsplit("/", 1)[-1]
-                    content = self.files[p]
-                    rev = str(self._revs.get(p, 1))
-                    chash = hashlib.sha256(content).hexdigest()
-                    return {
-                        ".tag": "file",
-                        "name": name,
-                        "path_lower": p.lower(),
-                        "path_display": p,
-                        "id": f"id:{name}",
-                        "size": len(content),
-                        "rev": rev,
-                        "content_hash": chash,
-                    }
-                if p in self._folders():
-                    name = p.rsplit("/", 1)[-1] if p != "/" else ""
-                    return {
-                        ".tag": "folder",
-                        "name": name,
-                        "path_lower": p.lower(),
-                        "path_display": p,
-                        "id": f"id:{name or 'root'}",
-                    }
-                from mirage.core.dropbox.client import DropboxApiError
-
-                raise DropboxApiError(
-                    f"not found: {p}", 409, summary="path/not_found"
-                )
-            if endpoint == "/files/delete_v2":
-                p = "/" + body.get("path", "").strip("/")
-                to_delete = [
-                    f for f in self.files if f == p or f.startswith(p + "/")
-                ]
-                if not to_delete:
-                    from mirage.core.dropbox.client import DropboxApiError
-
-                    raise DropboxApiError(
-                        f"not found: {p}", 409, summary="path/not_found"
-                    )
-                for f in to_delete:
-                    del self.files[f]
-                    self._revs.pop(f, None)
-                name = p.rsplit("/", 1)[-1]
-                return {
-                    "metadata": {
-                        ".tag": "file",
-                        "name": name,
-                        "path_lower": p.lower(),
-                        "path_display": p,
-                        "id": f"id:{name}",
-                    }
-                }
-            return {}
+            return self._fake.handle_rpc(endpoint, body)
 
         return await self._network.request(
             f"dropbox:{endpoint}",
@@ -1034,20 +1024,9 @@ class _DropboxConnection:
     async def download(
         self, tm: Any, path: str, window: Any = None
     ) -> tuple[bytes, str | None]:
-
-        p = "/" + path.strip("/")
-
         async def perform() -> tuple[bytes, str | None]:
-            if p not in self.files:
-                from mirage.core.dropbox.client import DropboxApiError
-
-                raise DropboxApiError(
-                    f"not found: {p}", 409, summary="path/not_found"
-                )
-            content = self.files[p]
-            rev = str(self._revs.get(p, 1))
-            chash = hashlib.sha256(content).hexdigest()
-            return content, json.dumps({"rev": rev, "content_hash": chash})
+            data, headers, _ = self._fake.handle_download(path, window=window)
+            return data, headers.get("Dropbox-API-Result")
 
         return await self._network.request(
             "dropbox:download",
@@ -1076,25 +1055,15 @@ class _DropboxConnection:
     async def upload(
         self, tm: Any, path: str, data: Any, mode: Any = None
     ) -> dict[str, Any]:
-        p = "/" + path.strip("/")
-        content = data if isinstance(data, bytes) else bytes(data)
+        if hasattr(data, "read") and hasattr(data, "size"):
+            content = await data.read(0, data.size)
+        elif isinstance(data, bytes):
+            content = data
+        else:
+            content = bytes(data)
 
         async def perform() -> dict[str, Any]:
-            self.files[p] = content
-            self._revs[p] = self._revs.get(p, 0) + 1
-            rev = str(self._revs[p])
-            chash = hashlib.sha256(content).hexdigest()
-            name = p.rsplit("/", 1)[-1]
-            return {
-                ".tag": "file",
-                "name": name,
-                "path_lower": p.lower(),
-                "path_display": p,
-                "id": f"id:{name}",
-                "size": len(content),
-                "rev": rev,
-                "content_hash": chash,
-            }
+            return self._fake.handle_upload(path, content, mode=mode)
 
         return await self._network.request(
             "dropbox:upload",
@@ -1103,21 +1072,30 @@ class _DropboxConnection:
         )
 
 
+async def _dropbox_refresh(_config: Any) -> tuple[str, int]:
+    return "fake-dropbox-token", 3600
+
+
 @contextmanager
 def route_dropbox(
-    network: Network, files: dict[str, bytes] | Any
+    network: Network, files: dict[str, bytes] | FakeDropbox
 ) -> Iterator[None]:
     """Route Dropbox requests through ``network``.
 
     Args:
         network (Network): the gate.
-        files: dict of Dropbox path -> bytes or FakeDropbox.
+        files (dict[str, bytes] | FakeDropbox): Dropbox path to bytes, or
+            the FakeDropbox to serve.
     """
-    file_map = files.files if hasattr(files, "files") else dict(files)
-    conn = _DropboxConnection(network, file_map)
-
-    async def fake_refresh(_config: Any) -> tuple[str, int]:
-        return "fake-dropbox-token", 3600
+    if isinstance(files, FakeDropbox):
+        fake = files
+    elif hasattr(files, "files") and isinstance(files.files, dict):
+        fake = FakeDropbox(files=files.files)
+    elif isinstance(files, dict):
+        fake = FakeDropbox(files=files)
+    else:
+        fake = FakeDropbox(files=dict(files))
+    conn = _DropboxConnection(network, fake)
 
     with ExitStack() as stack:
         for mod in ("client", "api", "capacity"):
@@ -1147,14 +1125,14 @@ def route_dropbox(
         stack.enter_context(
             patch(
                 "mirage.core.dropbox.client.refresh_access_token",
-                new=fake_refresh,
+                new=_dropbox_refresh,
             )
         )
         yield
 
 
 class _DiscordConnection:
-    def __init__(self, network: Network, fake: Any) -> None:
+    def __init__(self, network: Network, fake: FakeDiscordApi) -> None:
         self._network = network
         self._fake = fake
 
@@ -1173,8 +1151,13 @@ class _DiscordConnection:
         )
 
     async def list_members(
-        self, accessor: Any, guild_id: str, stop_at: Any = None
+        self,
+        accessor: Any,
+        guild_id: str,
+        page_size: int = 1000,
+        stop_at: Any = None,
     ) -> Any:
+        del page_size
         return await self._network.request(
             "list_members",
             {"guild_id": guild_id},
@@ -1182,15 +1165,45 @@ class _DiscordConnection:
         )
 
     async def list_messages_for_day(
-        self, accessor: Any, channel_id: str, date_str: str, scope: Any
+        self,
+        accessor: Any,
+        channel_id: str,
+        date_str: str,
+        scope: Any,
+        page_size: int = 100,
+        after: str | None = None,
     ) -> Any:
-        return await self._network.request(
+        del page_size
+        messages = await self._network.request(
             "list_messages_for_day",
             {"channel_id": channel_id, "date_str": date_str},
             lambda: self._fake.list_messages_for_day(
                 accessor, channel_id, date_str, scope
             ),
         )
+        if after is None:
+            return messages
+        return [m for m in messages if int(m["id"]) > int(after)]
+
+    async def stream_messages_for_day(
+        self,
+        accessor: Any,
+        channel_id: str,
+        date_str: str,
+        scope: Any,
+        page_size: int = 100,
+        after: str | None = None,
+        last_day: str | None = None,
+    ) -> AsyncIterator[list[dict[str, Any]]]:
+        first = date.fromisoformat(date_str)
+        last = date.fromisoformat(last_day or date_str)
+        for offset in range((last - first).days + 1):
+            day = (first + timedelta(days=offset)).isoformat()
+            page = await self.list_messages_for_day(
+                accessor, channel_id, day, scope, page_size, after
+            )
+            if page:
+                yield page
 
     async def download_file(
         self, accessor: Any, url: str, offset: int = 0, size: Any = None
@@ -1204,51 +1217,48 @@ class _DiscordConnection:
     async def download_file_stream(
         self, accessor: Any, url: str
     ) -> AsyncIterator[bytes]:
-        data = await self.download_file(accessor, url, 0, None)
+        data = await self._network.request(
+            "download_file_stream",
+            {"url": url},
+            lambda: self._fake.download_file(accessor, url, 0, None),
+        )
         yield data
 
 
 @contextmanager
-def route_discord(network: Network, fake: Any) -> Iterator[None]:
+def route_discord(network: Network, fake: FakeDiscordApi) -> Iterator[None]:
     """Route Discord requests through ``network``.
 
     Args:
         network (Network): the gate.
-        fake: FakeDiscordApi instance.
+        fake (FakeDiscordApi): the shared Discord server.
     """
-    import mirage.core.discord.history as history_mod
-    import mirage.core.discord.read as read_mod
-    import mirage.core.discord.readdir as readdir_mod
-
     conn = _DiscordConnection(network, fake)
     with ExitStack() as stack:
-        stack.enter_context(
-            patch.object(readdir_mod, "list_guilds", new=conn.list_guilds)
-        )
-        stack.enter_context(
-            patch.object(readdir_mod, "list_channels", new=conn.list_channels)
-        )
-        stack.enter_context(
-            patch.object(readdir_mod, "list_members", new=conn.list_members)
-        )
-        stack.enter_context(
-            patch.object(
-                history_mod,
+        for module, name, new in (
+            (discord_readdir, "list_guilds", conn.list_guilds),
+            (discord_readdir, "list_channels", conn.list_channels),
+            (discord_readdir, "list_members", conn.list_members),
+            (
+                discord_history,
                 "list_messages_for_day",
-                new=conn.list_messages_for_day,
-            )
-        )
-        stack.enter_context(
-            patch.object(read_mod, "list_members", new=conn.list_members)
-        )
-        stack.enter_context(
-            patch.object(read_mod, "download_file", new=conn.download_file)
-        )
-        stack.enter_context(
-            patch.object(
-                read_mod, "download_file_stream", new=conn.download_file_stream
-            )
-        )
+                conn.list_messages_for_day,
+            ),
+            (discord_read, "list_members", conn.list_members),
+            (
+                discord_read,
+                "list_messages_for_day",
+                conn.list_messages_for_day,
+            ),
+            (
+                discord_read,
+                "stream_messages_for_day",
+                conn.stream_messages_for_day,
+            ),
+            (discord_read, "download_file", conn.download_file),
+            (discord_read, "download_file_stream", conn.download_file_stream),
+        ):
+            stack.enter_context(patch.object(module, name, new=new))
         for mod in ("read", "files"):
             stack.enter_context(
                 patch(
@@ -1261,5 +1271,24 @@ def route_discord(network: Network, fake: Any) -> Iterator[None]:
                     f"mirage.core.discord.{mod}.download_file_stream",
                     new=conn.download_file_stream,
                 )
+            )
+        yield
+
+
+@contextmanager
+def route_ram(clock: SimClock) -> Iterator[None]:
+    """Stamp every RAM mount's writes with virtual time.
+
+    Args:
+        clock (SimClock): the run's clock.
+    """
+
+    def now_iso() -> str:
+        return to_iso_z(datetime.fromtimestamp(clock.now(), timezone.utc))
+
+    with ExitStack() as stack:
+        for mod in RAM_CLOCKED:
+            stack.enter_context(
+                patch(f"mirage.core.ram.{mod}.now_iso", new=now_iso)
             )
         yield
