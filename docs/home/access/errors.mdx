@@ -15,7 +15,7 @@ A file call (`read`, `write`, `stat`, `readdir`, `rename`, ...) names its
 failure with one of these conditions, whatever the backend. A service's own
 error becomes the condition it means, such as an object that is not there
 becoming `ENOENT`. One that means none keeps its own words in an exception
-and in a shell diagnostic. HTTP answers it `500`, and RPC `-32603`, with
+and in a shell diagnostic. HTTP returns status `500`, and RPC `-32603`, with
 `detail` set to `internal server error` and no `errno`, since those words can
 carry credentials or host paths; they stay in the server's logs.
 
@@ -51,7 +51,7 @@ Each surface carries the condition its own way:
 | Shell | A line on stderr, `cat: /data/x: No such file or directory`, and the command's exit status. |
 | [HTTP](/home/access/http#errors) | `{detail, errno}` with the status above, plus a `refusal` record when a policy refused the call. |
 | [RPC](/home/access/rpc#errors) | `-32004` for `ENOENT` and `-32603` for the rest, with `{detail, errno}` in `data`. |
-| [MCP](/home/access/mcp#tools) | The tool's answer with `isError` set: `Error: /data/x: No such file or directory`. |
+| [MCP](/home/access/mcp#tools) | The tool result with `isError` set: `Error: /data/x: No such file or directory`. |
 | [FUSE](/home/setup/fuse) | The host's errno number. A failure with no errno reads as `EIO`. |
 | SFTP | An SFTP status code, such as `3` for permission denied and `4` for a general failure. |
 | NFS | An NFS3 status code, such as `NFS3ERR_NOTSUPP` (`10004`) for an unsupported call. |
@@ -59,10 +59,10 @@ Each surface carries the condition its own way:
 
 ## Shell lines
 
-A line that runs to its end answers `exit_code`, `stdout` and `stderr`. A
-non-zero status is the line's result, not a failed call: HTTP answers `200`, RPC
+A line that runs to completion returns `exit_code`, `stdout` and `stderr`. A
+non-zero status is the line's result, not a failed call: HTTP returns `200`, RPC
 a result, and MCP sets `isError`. Canceling the request is a failed call
-instead: HTTP answers `499` and RPC the error `-32800`. A command's stderr
+instead: HTTP returns status `499` and RPC returns error `-32800`. A command's stderr
 follows GNU coreutils, and its status is the one the real command exits with.
 These statuses come from the shell itself:
 

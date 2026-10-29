@@ -222,7 +222,7 @@ The container's identity. It carries `database_id`, `title`, `url`,
 timestamps, `parent`, `archived`, `is_inline`, and the `data_sources`
 stubs that name the directories beneath it. It **does not carry
 `properties`**: at this API version the column schema lives on the data
-source, and `GET /v1/databases/{id}` no longer answers with one.
+source, and `GET /v1/databases/{id}` no longer returns one.
 
 ```json
 {

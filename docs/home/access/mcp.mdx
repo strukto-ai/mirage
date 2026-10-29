@@ -247,8 +247,8 @@ batched, so take the full output from the final result.
 Add `?calls=all` to the URL, or `--all-calls` to `mirage mcp`, for 23 more
 tools: `vfs_read`, `vfs_is_dir` and the rest, one per
 [VFS call](/home/access/http#call-the-vfs). They take the same arguments and
-answer the same JSON as HTTP. With them on, `shell` and every `vfs_<call>` also
-take `explain: true`, which says what the call would do and runs nothing; see
+return the same JSON as HTTP. With them enabled, `shell` and every `vfs_<call>` also
+take `explain: true`, which reports what the call would do without running it; see
 [Explain](/home/policy/explain).
 
 ## Sessions

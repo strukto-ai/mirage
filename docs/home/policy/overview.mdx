@@ -17,14 +17,14 @@ policy is a class with a pair of methods for each thing an agent does, or
 | uses files: commands, file CLIs, runtime file APIs, file tools, `session.vfs`, FUSE, SFTP | `pre_vfs`, `post_vfs`; see [Lifecycle](/home/policy/policies#lifecycle) |
 | sets a variable: `export`, `X=1`, `unset` | `pre_session`, `post_session` |
 
-A `pre_` method answers before the action runs, a `post_` method after,
-with what came back. An answer can refuse, [ask a host](/home/policy/policies#asks),
-bound the output, or choose the underlying runtime. No policy grants what
+A `pre_` method runs before the action executes; a `post_` method runs afterward
+with the execution result. A policy decision can permit, refuse, [request host approval](/home/policy/policies#asks),
+bound the output, or select the target runtime. No policy can permit what
 another refuses.
 
-Policies are asked in order: the built-ins first (mount modes, hides,
-[runtime routing](/home/policy/route-runtime)), then the session's profile, then the
-workspace's own, in the order they were added.
+Policies evaluate in sequence: built-in checks first (mount modes, path restrictions,
+[runtime routing](/home/policy/route-runtime)), followed by the session profile, and finally
+the workspace policies in the order they were added.
 
 ## Why not a tool-call check
 
