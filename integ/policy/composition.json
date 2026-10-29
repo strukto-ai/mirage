@@ -1,0 +1,2509 @@
+{
+  "cases": [
+    {
+      "name": "pre_command deny wins",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "pre_command deny wins",
+        "hook": "pre_command",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 1,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "post_command deny wins",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "post_command deny wins",
+        "hook": "post_command",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "post_command"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "post_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 1,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "pre_execute deny wins",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "pre_execute deny wins",
+        "hook": "pre_execute",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 1,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "post_execute deny wins",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "post_execute deny wins",
+        "hook": "post_execute",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 1,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "pre_vfs deny wins",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "pre_vfs deny wins",
+        "hook": "pre_vfs",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_vfs"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_vfs"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 1,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "post_vfs deny wins",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "post_vfs deny wins",
+        "hook": "post_vfs",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "post_vfs"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "post_vfs"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 1,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "pre_session deny wins",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "pre_session deny wins",
+        "hook": "pre_session",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_session"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_session"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 1,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "post_session deny wins",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "post_session deny wins",
+        "hook": "post_session",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "post_session"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "post_session"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 1,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "all asks stable union",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "all asks stable union",
+        "hook": "pre_command",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 1
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_ask_rules",
+            "first": 0,
+            "next": 1
+          },
+          "reply": {
+            "first_rules": [
+              3,
+              1
+            ],
+            "next_rules": [
+              1,
+              2
+            ],
+            "same_ask": false
+          }
+        },
+        {
+          "request": {
+            "op": "replace_ask_rules",
+            "action": 0,
+            "rules": [
+              3,
+              1,
+              2
+            ]
+          },
+          "reply": {}
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "deny ignores malformed suffix",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "deny ignores malformed suffix",
+        "hook": "pre_command",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 0
+              },
+              {
+                "kind": "route",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "explain reaches invalid suffix",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "explain reaches invalid suffix",
+        "hook": "pre_command",
+        "every": true,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 0
+              },
+              {
+                "kind": "invalid",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": {
+          "action": 1,
+          "slot": 0,
+          "legal": [
+            "ask",
+            "deny"
+          ]
+        }
+      }
+    },
+    {
+      "name": "explain continues after deny",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "explain continues after deny",
+        "hook": "pre_command",
+        "every": true,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "first equivalent route retains reason",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "first equivalent route retains reason",
+        "hook": "pre_execute",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 1
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_final_values",
+            "routes": [
+              0,
+              1
+            ],
+            "limits": []
+          },
+          "reply": {
+            "routes": [
+              {
+                "action": 0,
+                "runtime": [
+                  110,
+                  111,
+                  100,
+                  101
+                ]
+              },
+              {
+                "action": 1,
+                "runtime": [
+                  110,
+                  111,
+                  100,
+                  101
+                ]
+              }
+            ],
+            "limits": []
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": null,
+        "ask_rules": null,
+        "route": 0,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "route conflict overrides ask",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "route conflict overrides ask",
+        "hook": "pre_execute",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          },
+          {
+            "slot": 2,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 1
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 2
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 2
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_final_values",
+            "routes": [
+              1,
+              2
+            ],
+            "limits": []
+          },
+          "reply": {
+            "routes": [
+              {
+                "action": 1,
+                "runtime": [
+                  110,
+                  111,
+                  100,
+                  101
+                ]
+              },
+              {
+                "action": 2,
+                "runtime": [
+                  112,
+                  121,
+                  116,
+                  104,
+                  111,
+                  110
+                ]
+              }
+            ],
+            "limits": []
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1,
+          2
+        ],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [
+          1,
+          2
+        ],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "placed ignores route conflict",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "placed ignores route conflict",
+        "hook": "pre_execute",
+        "every": false,
+        "placed": true,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          },
+          {
+            "slot": 2,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 1
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 2
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 2
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1,
+          2
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "limit field presence and zero",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "limit field presence and zero",
+        "hook": "post_execute",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "limit",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "limit",
+                "action": 1
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_final_values",
+            "routes": [],
+            "limits": [
+              0,
+              1
+            ]
+          },
+          "reply": {
+            "routes": [],
+            "limits": [
+              {
+                "action": 0,
+                "value": {
+                  "max_bytes": 0,
+                  "timeout_seconds": 0,
+                  "walk_limit": -1
+                }
+              },
+              {
+                "action": 1,
+                "value": {
+                  "max_lines": null,
+                  "timeout_seconds": 4,
+                  "walk_limit": 9,
+                  "on_exceed": "error"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": {
+          "max_bytes": 0,
+          "max_lines": null,
+          "timeout_seconds": 4,
+          "walk_limit": 9,
+          "on_exceed": "error"
+        },
+        "invalid": null
+      }
+    },
+    {
+      "name": "zero timeout is unlimited",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "zero timeout is unlimited",
+        "hook": "post_execute",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "limit",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_final_values",
+            "routes": [],
+            "limits": [
+              0
+            ]
+          },
+          "reply": {
+            "routes": [],
+            "limits": [
+              {
+                "action": 0,
+                "value": {
+                  "timeout_seconds": 0
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": {
+          "timeout_seconds": null
+        },
+        "invalid": null
+      }
+    },
+    {
+      "name": "empty limit remains configured",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "empty limit remains configured",
+        "hook": "post_execute",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "limit",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_final_values",
+            "routes": [],
+            "limits": [
+              0
+            ]
+          },
+          "reply": {
+            "routes": [],
+            "limits": [
+              {
+                "action": 0,
+                "value": {}
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": {},
+        "invalid": null
+      }
+    },
+    {
+      "name": "limit illegal before command",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "limit illegal before command",
+        "hook": "pre_command",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "limit",
+                "action": 0
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": {
+          "action": 0,
+          "slot": 0,
+          "legal": [
+            "ask",
+            "deny"
+          ]
+        }
+      }
+    },
+    {
+      "name": "deny discards earlier limits",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "deny discards earlier limits",
+        "hook": "post_execute",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "limit",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          1
+        ],
+        "action": 1,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "mount mode after rules only",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "mount mode after rules only",
+        "hook": "pre_vfs",
+        "every": false,
+        "placed": false,
+        "rules_only": true,
+        "policies": [
+          {
+            "slot": 2,
+            "role": "mount_mode",
+            "hooks": [
+              "pre_vfs"
+            ]
+          },
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_vfs"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "permissions",
+            "hooks": [
+              "pre_vfs"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": []
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 2
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 0
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "placement first and absent hooks skipped",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "placement first and absent hooks skipped",
+        "hook": "pre_execute",
+        "every": false,
+        "placed": false,
+        "rules_only": false,
+        "policies": [
+          {
+            "slot": 2,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          },
+          {
+            "slot": 0,
+            "role": "placement",
+            "hooks": [
+              "pre_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": []
+          }
+        },
+        {
+          "request": {
+            "op": "read_final_values",
+            "routes": [
+              0
+            ],
+            "limits": []
+          },
+          "reply": {
+            "routes": [
+              {
+                "action": 0,
+                "runtime": [
+                  110,
+                  111,
+                  100,
+                  101
+                ]
+              }
+            ],
+            "limits": []
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0
+        ],
+        "action": null,
+        "ask_rules": null,
+        "route": 0,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "pure settled precedence",
+      "input": {
+        "op": "settle",
+        "mode": "settled",
+        "evaluation": "pure settled precedence",
+        "count": 3
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "read_settlement_action",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_settlement_action",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 1
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_settlement_action",
+            "slot": 2
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 2
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1,
+          2
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "pure agreed precedence",
+      "input": {
+        "op": "settle",
+        "mode": "agreed",
+        "evaluation": "pure agreed precedence",
+        "count": 2
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "read_final_values",
+            "routes": [
+              0,
+              1
+            ],
+            "limits": []
+          },
+          "reply": {
+            "routes": [
+              {
+                "action": 0,
+                "runtime": [
+                  97
+                ]
+              },
+              {
+                "action": 1,
+                "runtime": [
+                  98
+                ]
+              }
+            ],
+            "limits": []
+          }
+        }
+      ],
+      "expected": {
+        "answers": [],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [
+          0,
+          1
+        ],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "arbitrary integer limits remain exact",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "huge-integers",
+        "hook": "post_execute",
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "limit",
+                "action": 0
+              },
+              {
+                "kind": "limit",
+                "action": 1
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_final_values",
+            "routes": [],
+            "limits": [
+              0,
+              1
+            ]
+          },
+          "reply": {
+            "routes": [],
+            "limits": [
+              {
+                "action": 0,
+                "value": {
+                  "max_bytes": "18446744073709551617",
+                  "max_lines": "100000000000000000000000000000000000000000000",
+                  "walk_limit": "18446744073709551618"
+                }
+              },
+              {
+                "action": 1,
+                "value": {
+                  "max_bytes": "18446744073709551616",
+                  "walk_limit": "-1"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": {
+          "max_bytes": "18446744073709551616",
+          "max_lines": "100000000000000000000000000000000000000000000",
+          "walk_limit": "18446744073709551618"
+        },
+        "invalid": null
+      }
+    },
+    {
+      "name": "lazy deny never requests suffix",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "lazy deny never requests suffix",
+        "hook": "pre_command",
+        "every": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 0
+              }
+            ],
+            "more": true
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "lazy explain requests suffix",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "lazy explain requests suffix",
+        "hook": "pre_command",
+        "every": true,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 0
+              }
+            ],
+            "more": true
+          }
+        },
+        {
+          "request": {
+            "op": "read_action",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "invalid",
+                "action": 1
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": {
+          "action": 1,
+          "slot": 0,
+          "legal": [
+            "ask",
+            "deny"
+          ]
+        }
+      }
+    },
+    {
+      "name": "lazy asks continue then advance",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "lazy asks continue then advance",
+        "hook": "pre_command",
+        "every": false,
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ],
+            "more": true
+          }
+        },
+        {
+          "request": {
+            "op": "read_action",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 1
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_ask_rules",
+            "first": 0,
+            "next": 1
+          },
+          "reply": {
+            "first_rules": [
+              0
+            ],
+            "next_rules": [
+              1
+            ],
+            "same_ask": false
+          }
+        },
+        {
+          "request": {
+            "op": "replace_ask_rules",
+            "action": 0,
+            "rules": [
+              0,
+              1
+            ]
+          },
+          "reply": {}
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": []
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "singleton ask does not consume rules",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "singleton ask does not consume rules",
+        "hook": "pre_command",
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "same Python ask skips replacement and rules",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "same Python ask skips replacement and rules",
+        "hook": "pre_command",
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_command"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "ask",
+                "action": 0
+              },
+              {
+                "kind": "ask",
+                "action": 1
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_ask_rules",
+            "first": 0,
+            "next": 1
+          },
+          "reply": {
+            "first_rules": [],
+            "next_rules": [],
+            "same_ask": true
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "answers projection never consumes route values",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "answers projection never consumes route values",
+        "hook": "pre_execute",
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          }
+        ],
+        "projection": "answers"
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 0
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0
+        ],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "answers projection never consumes limit values",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "answers projection never consumes limit values",
+        "hook": "post_execute",
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          }
+        ],
+        "projection": "answers"
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "limit",
+                "action": 0
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "late materialized route conflict",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "late materialized route conflict",
+        "hook": "pre_execute",
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "pre_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "route",
+                "action": 1
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "read_final_values",
+            "routes": [
+              0,
+              1
+            ],
+            "limits": []
+          },
+          "reply": {
+            "routes": [
+              {
+                "action": 0,
+                "runtime": [
+                  115,
+                  115,
+                  104
+                ]
+              },
+              {
+                "action": 1,
+                "runtime": [
+                  110,
+                  111,
+                  100,
+                  101
+                ]
+              }
+            ],
+            "limits": []
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0,
+          1
+        ],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [
+          0,
+          1
+        ],
+        "limit": null,
+        "invalid": null
+      }
+    },
+    {
+      "name": "late materialized limit tightening",
+      "input": {
+        "op": "evaluate",
+        "evaluation": "late materialized limit tightening",
+        "hook": "post_execute",
+        "policies": [
+          {
+            "slot": 0,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          },
+          {
+            "slot": 1,
+            "role": "registered",
+            "hooks": [
+              "post_execute"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "limit",
+                "action": 0
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "op": "run_policy",
+            "slot": 1
+          },
+          "reply": {
+            "actions": []
+          }
+        },
+        {
+          "request": {
+            "op": "read_final_values",
+            "routes": [],
+            "limits": [
+              0
+            ]
+          },
+          "reply": {
+            "routes": [],
+            "limits": [
+              {
+                "action": 0,
+                "value": {
+                  "max_bytes": "1"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [],
+        "action": null,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": {
+          "max_bytes": "1"
+        },
+        "invalid": null
+      }
+    },
+    {
+      "name": "pure settled deny leaves route uninspected",
+      "input": {
+        "op": "settle",
+        "mode": "settled",
+        "evaluation": "pure settled deny leaves route uninspected",
+        "count": 2
+      },
+      "effects": [
+        {
+          "request": {
+            "op": "read_settlement_action",
+            "slot": 0
+          },
+          "reply": {
+            "actions": [
+              {
+                "kind": "deny",
+                "action": 0
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "answers": [
+          0
+        ],
+        "action": 0,
+        "ask_rules": null,
+        "route": null,
+        "conflict": [],
+        "limit": null,
+        "invalid": null
+      }
+    }
+  ]
+}

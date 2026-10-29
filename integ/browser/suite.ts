@@ -46,6 +46,7 @@ import printfBasic from '../bash/printf/basic.json'
 import printfAssignments from '../bash/printf/vflag.json'
 import printfShared from '../bash/printf/shared.json'
 import printfOptions from '../unix/printf/unknown_option.json'
+import { POLICY_CHECKS } from './policy.ts'
 
 export interface Outcome {
   name: string
@@ -126,6 +127,7 @@ function battery(): [string, Check][] {
 }
 
 const CHECKS: [string, Check][] = [
+  ...POLICY_CHECKS,
   [
     'diff workers are reused, expire while idle and belong to their workspace',
     async (ws) => {

@@ -1,4 +1,5 @@
 mod admission;
+pub(crate) mod composition;
 mod pattern;
 mod profile;
 pub(crate) mod stream;

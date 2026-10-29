@@ -32,6 +32,7 @@ from mirage.policy.types import (
 )
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.policy import admission_matcher, units, visibility_matcher
+from mirage.rs.stream import open_stream
 from mirage.types import (
     HiddenPaths,
     HiddenVars,
@@ -200,3 +201,39 @@ def test_a_bad_request_is_a_stream_refusal():
         admission_matcher(None).ask("no_such_op")
     with pytest.raises(StreamRefusal, match="rule index is out of range"):
         admission_matcher(None).ask("posix_level", rule=0)
+
+
+def test_shared_composition_transcripts():
+    corpus = json.loads(CORPUS.with_name("composition.json").read_text())
+    for case in corpus["cases"]:
+        stream = open_stream("policy_compose", {})
+        try:
+            assert stream.feed(json.dumps(case["input"]).encode()) == b""
+            assert stream.finish() == b""
+            for index, effect in enumerate(case["effects"], start=1):
+                request = stream.request()
+                assert request is not None, case["name"]
+                header, data = request
+                assert header == {
+                    **effect["request"],
+                    "evaluation": case["input"]["evaluation"],
+                    "effect": index,
+                }, case["name"]
+                assert data == b""
+                assert stream.request() is None
+                assert (
+                    stream.respond(
+                        {
+                            **effect["reply"],
+                            "evaluation": header["evaluation"],
+                            "effect": header["effect"],
+                        },
+                        b"",
+                    )
+                    == b""
+                )
+            assert stream.request() is None
+            output = stream.finish()
+            assert json.loads(output) == case["expected"], case["name"]
+        finally:
+            stream.cancel()

@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { util } from 'zod'
+import { readFileSync } from 'node:fs'
+import { z, type util } from 'zod'
 import { decide } from '../policy/match/decide.ts'
 import { CommandWord, Outcome, type AdmissionRules, type CommandRule } from '../policy/types.ts'
 import { PathSpec, type Visibility } from '../types.ts'
@@ -22,7 +23,7 @@ import { pathVisible } from '../utils/hidden.ts'
 import { StreamRefusal } from './errors.ts'
 import { admissionMatcher, units, visibilityMatcher } from './policy.ts'
 import { PosixRegex } from './regex.ts'
-import { openStream } from './stream.ts'
+import { openStream, openStreamSync } from './stream.ts'
 
 function path(virtual: string): PathSpec {
   return new PathSpec({
@@ -38,6 +39,68 @@ function hidden(paths: string[]): Visibility {
 }
 
 describe('policy stream', () => {
+  it('preserves shared composition transcripts through Wasm', () => {
+    const corpus = z
+      .object({
+        cases: z.array(
+          z.object({
+            name: z.string(),
+            input: z.record(z.string(), z.json()),
+            effects: z.array(
+              z.object({
+                request: z.record(z.string(), z.json()),
+                reply: z.record(z.string(), z.json()),
+              }),
+            ),
+            expected: z.json(),
+          }),
+        ),
+      })
+      .parse(
+        JSON.parse(
+          readFileSync(
+            new URL('../../../../../integ/policy/composition.json', import.meta.url),
+            'utf8',
+          ),
+        ),
+      )
+    expect(corpus.cases.length).toBeGreaterThan(0)
+    for (const row of corpus.cases) {
+      const stream = openStreamSync('policy_compose', {})
+      try {
+        expect(stream.feed(new TextEncoder().encode(JSON.stringify(row.input))).byteLength).toBe(0)
+        expect(stream.finish().byteLength).toBe(0)
+        for (const [index, effect] of row.effects.entries()) {
+          const taken = stream.request()
+          expect(taken, row.name).not.toBeNull()
+          if (taken === null) throw new Error(row.name)
+          const [header, data] = taken
+          expect(header).toEqual({
+            ...effect.request,
+            evaluation: row.input.evaluation,
+            effect: index + 1,
+          })
+          expect(data.byteLength).toBe(0)
+          expect(stream.request()).toBeNull()
+          expect(
+            stream.respond(
+              {
+                ...effect.reply,
+                evaluation: header.evaluation ?? null,
+                effect: header.effect ?? null,
+              },
+              new Uint8Array(),
+            ).byteLength,
+          ).toBe(0)
+        }
+        expect(stream.request()).toBeNull()
+        const output = stream.finish()
+        expect(JSON.parse(new TextDecoder().decode(output)), row.name).toEqual(row.expected)
+      } finally {
+        stream.close()
+      }
+    }
+  })
   it("answers with the host's own rule objects", () => {
     const rule: CommandRule = { reason: 'review', paths: ['/repo/*'] }
     const rules: AdmissionRules = { allow: null, deny: [], ask: [rule] }
