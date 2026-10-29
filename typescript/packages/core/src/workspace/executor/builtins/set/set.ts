@@ -19,11 +19,13 @@ import { SET_OPTION_DEFAULTS, SET_OPTION_NAMES } from '../../../../shell/constan
 import type { SessionState } from '../../../session/session.ts'
 import { setPositionalParams, visibleEnv } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { SET_QUOTED_CHARS } from '../constants.ts'
 import { bashDeclareQuote } from '../declare/declare.ts'
 import { CONTROL_RE } from '../declare/constants.ts'
+import { builtinError, builtinUsage } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
@@ -46,6 +48,24 @@ function listedValue(value: string): string {
   return quoted ? singleQuote(value) : value
 }
 
+/**
+ * The first option letter of a `set` line that names no option, with the
+ * sign it was given under, null when there is none. bash reads every option
+ * word before it acts on any, so one such letter refuses the whole line and
+ * nothing it sets is set.
+ */
+function unknownLetter(args: readonly string[]): string | null {
+  let i = 0
+  while (i < args.length && args[i] !== '--') {
+    const tok = args[i] ?? ''
+    const word = parseOptionWord(tok, args[i + 1] ?? null)
+    if (word === null) return null
+    if (word.other !== '') return `${tok[0] ?? ''}${word.other[0] ?? ''}`
+    i += word.consumed
+  }
+  return null
+}
+
 export function handleSet(
   args: string[],
   session: SessionState,
@@ -57,6 +77,18 @@ export function handleSet(
     const lines = entries.map(([k, v]) => `${k}=${listedValue(v)}`)
     const out = encodeText(`${lines.join('\n')}\n`)
     return [out, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
+  }
+  const bad = unknownLetter(args)
+  if (bad !== null) {
+    const err = concat([
+      builtinError('set', `${bad}: invalid option`),
+      encodeText(builtinUsage('set')),
+    ])
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'set', exitCode: 2, stderr: err }),
+    ]
   }
   let i = 0
   while (i < args.length) {
@@ -95,11 +127,10 @@ export function handleSet(
       }
       session.shellOptions[option] = enable
     }
-    // A letter naming no option is ignored rather than refused: bash has
-    // options mirage does not implement (`-a`, `-B`, `-H`), and `set` is
-    // where a script turns those on without wanting to fail. A nested shell
-    // answers the same leftovers differently, which is why the grammar hands
-    // them back instead of deciding here.
+    // Every letter bash has names an option here, the ones mirage does not
+    // act on (`-a`, `-B`, `-H`) included, so a script can still turn those
+    // on. A nested shell answers a letter bash lacks differently, which is
+    // why the grammar hands it back.
     i += word.consumed
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]

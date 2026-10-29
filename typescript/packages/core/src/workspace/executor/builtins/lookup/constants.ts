@@ -14,7 +14,6 @@
 
 import { NameKind } from './types.ts'
 
-export const TYPE_USAGE = 'type: usage: type [-afptP] name [name ...]\n'
 export const WHICH_USAGE = 'which: usage: which [-as] name [name ...]\n'
 
 // The words each builtin accepts, as bash's usage line spells them.

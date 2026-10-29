@@ -37,6 +37,7 @@ import { getoptsBuiltin } from './getopts/getopts.ts'
 import { historyBuiltin } from './history/history.ts'
 import { letBuiltin } from './let/let.ts'
 import { typeBuiltin, whichBuiltin } from './lookup/lookup.ts'
+import { helpBuiltin } from './help/help.ts'
 import { manBuiltin } from './man/man.ts'
 import { mapfileBuiltin } from './mapfile/mapfile.ts'
 import { printenvBuiltin } from './printenv/printenv.ts'
@@ -94,6 +95,7 @@ export const BUILTINS: ReadonlyMap<string, BuiltinFn> = new Map<string, BuiltinF
   [SB.COMMAND, commandBuiltin],
   [SB.TYPE, typeBuiltin],
   [SB.WHICH, whichBuiltin],
+  [SB.HELP, helpBuiltin],
   [SB.TRUE, trueBuiltin],
   [SB.FALSE, falseBuiltin],
   [SB.COLON, colonBuiltin],

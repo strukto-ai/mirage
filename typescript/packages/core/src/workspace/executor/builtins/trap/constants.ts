@@ -14,8 +14,6 @@
 
 import { TrapEvent } from './types.ts'
 
-export const USAGE = 'trap: usage: trap [-lp] [[arg] signal_spec ...]\n'
-
 // bash's pseudo-signals besides EXIT, ERR and RETURN: names it accepts,
 // mirage runs none.
 export const PSEUDO_SIGNALS: ReadonlySet<string> = new Set(['DEBUG'])

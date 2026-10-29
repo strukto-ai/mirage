@@ -186,7 +186,7 @@ export type NodeType = (typeof NodeType)[keyof typeof NodeType]
 export interface OptionWord {
   // Shell options the word turns on or off, in the order written.
   settings: [string, boolean][]
-  // Cluster letters that name no shell option. `set` ignores them;
+  // Cluster letters that name no shell option. `set` refuses them;
   // shell startup reads its own startup letters out of them and refuses
   // the rest.
   other: string
@@ -329,6 +329,7 @@ export const ShellBuiltin = Object.freeze({
   // -- name lookup
   TYPE: 'type',
   WHICH: 'which',
+  HELP: 'help',
   // -- status and control flow
   TRUE: 'true',
   FALSE: 'false',
@@ -388,8 +389,8 @@ export type BuiltinTier = (typeof BuiltinTier)[keyof typeof BuiltinTier]
 // The family a shell builtin belongs to, one level below the tier.
 // Every group sits in exactly one tier (GROUP_TIER), so filing a word in
 // a group also files its tier; BUILTIN_GROUP is the one row per word. A
-// listing (bare `man`) or a rule can name a group where it would
-// otherwise have to spell out the words.
+// rule can name a group where it would otherwise have to spell out the
+// words.
 export const BuiltinGroup = Object.freeze({
   // grammar
   WORKING_DIRECTORY: 'working-directory',

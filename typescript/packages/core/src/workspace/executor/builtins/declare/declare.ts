@@ -42,17 +42,24 @@ import {
   subscriptIndex,
 } from '../../../session/state.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import { fail, isValidName, ok, readonlyLine, refusal, requireView, result } from '../shared.ts'
+import {
+  builtinUsage,
+  fail,
+  isValidName,
+  ok,
+  readonlyLine,
+  refusal,
+  requireView,
+  result,
+} from '../shared.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import {
   ANSI_C_ESCAPES,
   BARE_KEY_RE,
   CONTROL_RE,
   EXPORT_FLAGS,
-  EXPORT_USAGE,
   LISTED_ATTRIBUTES,
   READONLY_FLAGS,
-  READONLY_USAGE,
   SUBSCRIPT_RE,
   VISIBLE_SCOPE_BUILTINS,
 } from './constants.ts'
@@ -751,7 +758,7 @@ export async function markNames(
     exporting ? EXPORT_FLAGS : READONLY_FLAGS,
   )
   if (bad !== null) {
-    const usage = exporting ? EXPORT_USAGE : READONLY_USAGE
+    const usage = builtinUsage(exporting ? 'export' : 'readonly')
     return fail(cmd, `bash: ${cmd}: -${bad}: invalid option\n${usage}`, 2)
   }
   const on = !flags.has('n')

@@ -58,7 +58,7 @@
       "targets": [
         "ram-commands"
       ],
-      "command": "man | grep -c -e '^- cat '; man | grep -c -e '^- sort '",
+      "command": "man -k . | grep -c '^cat '; man -k . | grep -c '^sort '",
       "expect": {
         "exit": 0,
         "stdout": "1\n1\n",
@@ -71,7 +71,7 @@
       "targets": [
         "ram-commands"
       ],
-      "command": "man sort | grep -c -e '^# sort$'",
+      "command": "man sort | grep -c '^SYNOPSIS$'",
       "expect": {
         "exit": 0,
         "stdout": "1\n",

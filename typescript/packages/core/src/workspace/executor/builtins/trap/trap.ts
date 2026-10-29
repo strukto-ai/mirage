@@ -14,10 +14,10 @@
 
 import { boundedDecimal } from '../../../../commands/builtin/utils/strtol.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { builtinError, result } from '../shared.ts'
+import { builtinError, builtinUsage, result } from '../shared.ts'
 import { SIGNALS } from '../timeout/constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
-import { PSEUDO_SIGNALS, RUN_EVENTS, SIGNAL_MAX, USAGE } from './constants.ts'
+import { PSEUDO_SIGNALS, RUN_EVENTS, SIGNAL_MAX } from './constants.ts'
 import { TrapEvent } from './types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
@@ -69,7 +69,7 @@ export function handleTrap(args: readonly string[], session: SessionState): Resu
         return result('trap', { exitCode: 2, stderr: 'mirage: trap: -l: not supported\n' })
       } else {
         const message = decodeText(builtinError('trap', `-${flag}: invalid option`))
-        return result('trap', { exitCode: 2, stderr: message + USAGE })
+        return result('trap', { exitCode: 2, stderr: message + builtinUsage('trap') })
       }
     }
   }
@@ -94,7 +94,7 @@ export function handleTrap(args: readonly string[], session: SessionState): Resu
   }
   const [first = '', ...rest] = words
   if (rest.length === 0 && eventOf(first) === null) {
-    return result('trap', { exitCode: 2, stderr: USAGE })
+    return result('trap', { exitCode: 2, stderr: builtinUsage('trap') })
   }
   const action = rest.length === 0 ? '-' : first
   const specs = rest.length === 0 ? words : rest

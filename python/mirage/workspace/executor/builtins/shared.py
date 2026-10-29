@@ -16,6 +16,7 @@ from collections.abc import Sequence
 
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.synopsis import SHELL_SYNOPSES
 from mirage.errors.types import GlobLimitError
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
@@ -352,6 +353,16 @@ def builtin_error(name: str, message: str) -> bytes:
         message (str): what went wrong, without the newline.
     """
     return encode_text(f"bash: {name}: {message}\n")
+
+
+def builtin_usage(name: str) -> str:
+    """A builtin's usage line, which bash prints after refusing one of
+    its options: the synopsis `help NAME` opens with.
+
+    Args:
+        name (str): the builtin, as it was called.
+    """
+    return f"{name}: usage: {SHELL_SYNOPSES[name]}\n"
 
 
 def numeric_operands(args: list[str]) -> list[str]:

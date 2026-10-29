@@ -15,13 +15,6 @@
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.compile import compile_spec
 
-# GNU prints the refusal and the usage line together, both under the
-# builtin's own name as typed (`source` or `.`), and exits 2 without
-# ending the script.
-SOURCE_USAGE = (
-    "filename argument required\n{name}: usage: {name} filename [arguments]"
-)
-
 # Startup letters bash has that `set` does not. `c` takes the program
 # text from the next word and `s` reads it from stdin; the rest have
 # nothing to configure in an embedded shell, which has no login profile,

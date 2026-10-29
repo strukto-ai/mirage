@@ -14,8 +14,6 @@
 
 from mirage.workspace.executor.builtins.trap.types import TrapEvent
 
-USAGE = "trap: usage: trap [-lp] [[arg] signal_spec ...]\n"
-
 # bash's pseudo-signals besides EXIT, ERR and RETURN: names it accepts,
 # mirage runs none.
 PSEUDO_SIGNALS = frozenset({"DEBUG"})

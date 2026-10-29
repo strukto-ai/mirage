@@ -149,3 +149,9 @@ def test_options_preserve_aliases_clusters_and_partial_parse():
         assert parse.needs_value == (
             "--max-args" if tail == ["--max-args"] else None
         )
+
+
+def test_every_short_spelling_of_an_option_is_read():
+    for word in ("-?", "-h", "--help", "--he"):
+        parsed = parse_shell_options(SHELL_SPECS["man"], [word, "ls"])
+        assert (parsed.flags, parsed.operands) == ({"?": True}, ["ls"])

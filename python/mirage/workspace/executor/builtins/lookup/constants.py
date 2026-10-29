@@ -14,7 +14,6 @@
 
 from mirage.workspace.executor.builtins.lookup.types import NameKind
 
-TYPE_USAGE = "type: usage: type [-afptP] name [name ...]\n"
 WHICH_USAGE = "which: usage: which [-as] name [name ...]\n"
 
 # The words each builtin accepts, as bash's usage line spells them.

@@ -26,6 +26,8 @@ import {
 } from '@struktoai/mirage-core/commands/spec/index'
 
 import type { Argument, CommandSpec } from '@struktoai/mirage-core/commands/spec/index'
+import { SHELL_SPECS } from '@struktoai/mirage-core/commands/spec/shell'
+import { SHELL_SYNOPSES, SYNOPSES } from '@struktoai/mirage-core/commands/spec/synopsis'
 import type { Command } from '@struktoai/mirage-core/commands/config'
 
 import {
@@ -340,6 +342,15 @@ function emitVfsNames(
     capabilities,
     configs,
     cli_specs: programs,
+    shell_specs: Object.fromEntries(
+      Object.keys(SHELL_SPECS)
+        .sort(compareCodePoints)
+        .map((key) => [
+          key,
+          prune(specFields(SHELL_SPECS[key] as CommandSpec), specFields(new SpecClass({}))),
+        ]),
+    ),
+    synopses: { programs: { ...SYNOPSES }, shell: { ...SHELL_SYNOPSES } },
   }
   const path = resolve(SPEC_ROOT, name, 'vfs.json')
   writeFileSync(path, sortedStringify(payload) + '\n')

@@ -12,7 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
-import { boundedDecimal, cInt, strtol, strtoul, signedDecimal, unsignedDecimal } from './strtol.ts'
+import {
+  atoi,
+  boundedDecimal,
+  cInt,
+  strtol,
+  strtoul,
+  signedDecimal,
+  unsignedDecimal,
+} from './strtol.ts'
 
 // Mirrors python/tests/commands/builtin/utils/test_strtol.py.
 describe('strtol', () => {
@@ -88,5 +96,21 @@ describe('boundedDecimal', () => {
     expect(boundedDecimal('0'.repeat(5000) + '1', 2n ** 64n - 1n)).toBe(1n)
     expect(boundedDecimal('0'.repeat(5000), 10n)).toBe(0n)
     expect(boundedDecimal('9'.repeat(5000), 2n ** 64n - 1n)).toBeNull()
+  })
+})
+
+describe('atoi', () => {
+  it.each([
+    ['80', 80],
+    [' 100x', 100],
+    ['+7', 7],
+    ['-3', -3],
+    ['010', 10],
+    ['0x10', 0],
+    ['abc', 0],
+    ['', 0],
+    ['99999999999999999999', Number(2n ** 63n - 1n)],
+  ])('reads the leading decimal number of %j', (raw, value) => {
+    expect(atoi(raw)).toBe(value)
   })
 })

@@ -16,6 +16,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mirage.commands.builtin.utils.strtol import atoi
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, line_buffer
 from mirage.io.stream import async_chain
@@ -622,11 +623,7 @@ def _select_menu(words: list[str], columns: str) -> str:
         words (list[str]): the menu entries.
         columns (str): ``$COLUMNS`` as set.
     """
-    width = (
-        int(match.group())
-        if (match := re.match(r"\s*[+-]?\d+", columns))
-        else 0
-    )
+    width = atoi(columns)
     index_len = len(str(len(words)))
     cell = max(map(len, words)) + index_len + 4
     rows = -(-len(words) // max((width if width > 0 else 80) // cell, 1))

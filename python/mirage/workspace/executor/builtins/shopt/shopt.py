@@ -26,12 +26,10 @@ from mirage.workspace.executor.builtins.alias import (
     note_expanding,
 )
 from mirage.workspace.executor.builtins.getopt import last_of, scan_options
-from mirage.workspace.executor.builtins.shared import fail
+from mirage.workspace.executor.builtins.shared import builtin_usage, fail
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
-
-_USAGE = "shopt: usage: shopt [-pqsu] [-o] [optname ...]"
 
 
 def _row(name: str, on: bool, reusable: bool, set_o: bool) -> str:
@@ -82,7 +80,9 @@ async def handle_shopt(
     scan = scan_options(args, "pqosu")
     if scan.bad is not None:
         return fail(
-            "shopt", f"bash: shopt: {scan.bad}: invalid option\n{_USAGE}\n", 2
+            "shopt",
+            f"bash: shopt: {scan.bad}: invalid option\n{builtin_usage('shopt')}",
+            2,
         )
     if "s" in scan.letters and "u" in scan.letters:
         return fail(

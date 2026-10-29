@@ -15,7 +15,6 @@
 import { usageHint } from '../../../../commands/spec/usage.ts'
 import { isProgramInvocation } from '../../../../context/session_context.ts'
 import { concat } from '../../../../utils/bytes.ts'
-import { yieldBytes } from '../../../../io/stream.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
@@ -28,54 +27,7 @@ import { printfOutput, runPrintf } from './format.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { envSnapshot, sessionView } from '../../../session/state.ts'
 import { TARGET_RE } from '../constants.ts'
-import { fail, result } from '../shared.ts'
-
-// bash 5.2.21's own string, which both the usage error and the invalid-option
-// refusal end with.
-const USAGE = 'printf: usage: printf [-v var] format [arguments]\n'
-
-// bash's own help page for the printf builtin, byte for byte as bash 5.2.37
-// writes it, because `printf --help` is answered by the builtin and a
-// builtin's page is bash's, not GNU coreutils'. It cannot come from
-// renderHelp: the page documents `-v`, which is the BUILTIN's option alone
-// (run as a program through `find -exec printf`, `-v` is not available), so
-// CommandSpec must not declare it and the spec-driven renderer has nothing to
-// render it from.
-//
-// One deliberate divergence, and it is a subtraction: bash lists `%Q` and
-// `%(fmt)T` among the conversions it adds to printf(1), and mirage implements
-// neither, so those two entries are dropped rather than promised. Everything
-// mirage does implement is described in bash's own words. Adding either
-// conversion means adding its lines back here. `_HELP` in printf.py is the
-// twin.
-export const HELP =
-  'printf: printf [-v var] format [arguments]\n' +
-  '    Formats and prints ARGUMENTS under control of the FORMAT.\n' +
-  '    \n' +
-  '    Options:\n' +
-  '      -v var\tassign the output to shell variable VAR rather than\n' +
-  '    \t\tdisplay it on the standard output\n' +
-  '    \n' +
-  '    FORMAT is a character string which contains three types of objects: plain\n' +
-  '    characters, which are simply copied to standard output; character escape\n' +
-  '    sequences, which are converted and copied to the standard output; and\n' +
-  '    format specifications, each of which causes printing of the next successive\n' +
-  '    argument.\n' +
-  '    \n' +
-  '    In addition to the standard format specifications described in printf(1),\n' +
-  '    printf interprets:\n' +
-  '    \n' +
-  '      %b\texpand backslash escape sequences in the corresponding argument\n' +
-  '      %q\tquote the argument in a way that can be reused as shell input\n' +
-  '    \n' +
-  '    The format is re-used as necessary to consume all of the arguments.  If\n' +
-  '    there are fewer arguments than the format requires,  extra format\n' +
-  '    specifications behave as if a zero value or null string, as appropriate,\n' +
-  '    had been supplied.\n' +
-  '    \n' +
-  '    Exit Status:\n' +
-  '    Returns success unless an invalid option is given or a write or assignment\n' +
-  '    error occurs.\n'
+import { builtinUsage, fail, result } from '../shared.ts'
 
 /**
  * Print formatted output, honoring GNU printf's format-reuse rules.
@@ -130,20 +82,8 @@ export async function handlePrintf(
         // is bash's usage error rather than an empty one (bash 5.2.21:
         // `printf --` is exit 2 with the usage, where `printf -- --zzz` prints
         // `--zzz`).
-        return fail('printf', USAGE, 2)
+        return fail('printf', builtinUsage('printf'), 2)
       }
-    } else if (first === '--help') {
-      // bash answers the EXACT word `--help` for every builtin, ahead of
-      // its option scan, by writing the builtin's help page to STDOUT and
-      // exiting 2 -- only a spelling the option scan actually reads (`--hel`,
-      // `--version`) takes the invalid-option path below (bash 5.2.37). The
-      // page is the BUILTIN's, in bash's own words and layout, because that
-      // is whose printf this is; see HELP.
-      return [
-        yieldBytes(encodeText(HELP)),
-        new IOResult({ exitCode: 2 }),
-        new ExecutionNode({ command: 'printf', exitCode: 2 }),
-      ]
     } else if (first.startsWith('-') && first.length > 1 && first !== '-v') {
       // bash's option scan takes single letters only, so it reports the
       // first character it does not know spelled with ONE dash: a long
@@ -154,7 +94,11 @@ export async function handlePrintf(
       // ships printf as a builtin, so the builtin governs. A bare `-v` short
       // of its NAME is left to the format path, where bash's own `option
       // requires an argument` is a separate change.
-      return fail('printf', `bash: printf: -${first[1] ?? ''}: invalid option\n${USAGE}`, 2)
+      return fail(
+        'printf',
+        `bash: printf: -${first[1] ?? ''}: invalid option\n${builtinUsage('printf')}`,
+        2,
+      )
     }
   } else if (first === '--') {
     // coreutils printf takes one leading `--` as the end of its options.
@@ -163,7 +107,7 @@ export async function handlePrintf(
   if (args.length === 0) {
     // A format is required: bash's usage error, `printf -v x` too.
     if (program) return fail('printf', `printf: missing operand\n${usageHint('printf')}\n`)
-    return fail('printf', USAGE, 2)
+    return fail('printf', builtinUsage('printf'), 2)
   }
   const posix = program && Object.hasOwn(envSnapshot(session), 'POSIXLY_CORRECT')
   const utf8 = utf8Locale(envSnapshot(session))

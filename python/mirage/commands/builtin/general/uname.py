@@ -21,18 +21,20 @@ from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.version import __version__
 
 # What uname reports, in GNU's print order and keyed by each option's
 # dest. Mirage is no kernel: it answers as the GNU/Linux userland its
 # commands implement, the way gVisor and WSL1 answer `Linux` for the
 # interface they emulate, and names itself in the node, release and
-# version fields. Fixed, so every host (the browser included) prints
-# the same line and no host detail leaks.
+# version fields, the version field carrying its own version. Fixed, so
+# every host (the browser included) prints the same line and no host
+# detail leaks.
 UNAME_FIELDS = (
     ("kernel_name", "Linux"),
     ("nodename", HOSTNAME),
     ("kernel_release", "mirage"),
-    ("kernel_version", "#1 Mirage"),
+    ("kernel_version", f"#1 Mirage {__version__}"),
     ("machine", "x86_64"),
     ("processor", "unknown"),
     ("hardware_platform", "unknown"),

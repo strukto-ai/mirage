@@ -15,8 +15,10 @@
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.version import __version__
 
-_ALL = "Linux mirage mirage #1 Mirage x86_64 GNU/Linux\n"
+_KERNEL_VERSION = f"#1 Mirage {__version__}"
+_ALL = f"Linux mirage mirage {_KERNEL_VERSION} x86_64 GNU/Linux\n"
 
 
 async def _run(ws: Workspace, line: str) -> tuple[str, str, int]:
@@ -37,7 +39,7 @@ async def _run(ws: Workspace, line: str) -> tuple[str, str, int]:
         ("uname --kernel-name", "Linux\n"),
         ("uname -n", "mirage\n"),
         ("uname -r", "mirage\n"),
-        ("uname -v", "#1 Mirage\n"),
+        ("uname -v", f"{_KERNEL_VERSION}\n"),
         ("uname -m", "x86_64\n"),
         ("uname -p", "unknown\n"),
         ("uname -i", "unknown\n"),
@@ -47,7 +49,7 @@ async def _run(ws: Workspace, line: str) -> tuple[str, str, int]:
         ("uname -a -p", _ALL),
         (
             "uname -snrvmpio",
-            "Linux mirage mirage #1 Mirage x86_64 unknown unknown GNU/Linux\n",
+            f"Linux mirage mirage {_KERNEL_VERSION} x86_64 unknown unknown GNU/Linux\n",
         ),
         ("uname -ms", "Linux x86_64\n"),
         ("uname -o -n", "mirage GNU/Linux\n"),

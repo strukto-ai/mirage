@@ -30,6 +30,7 @@ from mirage.commands.quote import quote_text
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.commands.spec.standard import version_line
+from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.commands.spec.usage import (
     ambiguous_option_error,
     missing_value_error,
@@ -72,8 +73,6 @@ from mirage.workspace.session.state import env_snapshot
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
-
-_SYNOPSIS = "xargs [OPTION]... COMMAND [INITIAL-ARGS]..."
 
 # The sizes GNU findutils 4.10 reports with --show-limits on Linux with
 # an 8 MiB stack: exec takes 2 MiB of arguments and environment, 2 KiB of
@@ -150,7 +149,9 @@ def _answer(option: str, notes: str) -> Result:
     # the options before them.
     if option == "help":
         text = encode_text(
-            render_help("xargs", SHELL_SPECS["xargs"], synopsis=_SYNOPSIS)
+            render_help(
+                "xargs", SHELL_SPECS["xargs"], synopsis=SYNOPSES["xargs"]
+            )
         )
     else:
         text = version_line("xargs")

@@ -47,7 +47,8 @@ from mirage.workspace.executor.builtins.declare.types import (
     Declaration,
     DeclarationOperand,
 )
-from mirage.workspace.executor.builtins.shared import fail
+from mirage.workspace.executor.builtins.help import flag_help
+from mirage.workspace.executor.builtins.shared import builtin_usage, fail
 from mirage.workspace.expand import expand_node
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -95,10 +96,6 @@ def _merge_conversion_errors(
 # /`-I` are modes the handlers read. `-n` stores the reference and every
 # reader and writer resolves through it (`deref` in `session/state`).
 _DECLARE_LETTERS = frozenset("aAfFgiIlnprtux")
-_DECLARE_USAGE = (
-    "declare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] "
-    "or declare -p [-aAfFilnrtux] [name ...]"
-)
 # `-l` displaces `-u` and vice versa; the record keeps one.
 _DISPLACES = {"l": VarAttr.UPPER, "u": VarAttr.LOWER}
 # The attributes that shape a value as it stores.
@@ -131,7 +128,9 @@ def _declare_option_refusal(
         return None
     sign = "-" if bad in flag_chars else "+"
     return fail(
-        cmd, f"bash: {cmd}: {sign}{bad}: invalid option\n{_DECLARE_USAGE}\n", 2
+        cmd,
+        f"bash: {cmd}: {sign}{bad}: invalid option\n{builtin_usage(cmd)}",
+        2,
     )
 
 
@@ -296,6 +295,12 @@ async def execute_declaration(
             b"".join(trace_array(n, items, add) for n, add, items in staged)
             + trace_command([cmd_word, *traced])
         )
+    if traced and traced[0] == "--help":
+        # bash answers `--help` as the first word with the builtin's
+        # help, before it reads a single option.
+        answered = flag_help(cmd_word)
+        if answered is not None:
+            return answered
     if keyword in VISIBLE_SCOPE_BUILTINS:
         # Array literals travel as data: the handler stores them through
         # the session view and owns both refusal voices, so the executor

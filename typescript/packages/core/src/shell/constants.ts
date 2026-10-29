@@ -386,6 +386,7 @@ export const BUILTIN_GROUP: ReadonlyMap<ShellBuiltin, BuiltinGroup> = new Map<
   [ShellBuiltin.COMMAND, BuiltinGroup.RUNNING_LINES],
   [ShellBuiltin.TYPE, BuiltinGroup.NAME_LOOKUP],
   [ShellBuiltin.WHICH, BuiltinGroup.NAME_LOOKUP],
+  [ShellBuiltin.HELP, BuiltinGroup.NAME_LOOKUP],
   [ShellBuiltin.TRUE, BuiltinGroup.CONTROL_FLOW],
   [ShellBuiltin.FALSE, BuiltinGroup.CONTROL_FLOW],
   [ShellBuiltin.COLON, BuiltinGroup.CONTROL_FLOW],

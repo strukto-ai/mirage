@@ -43,10 +43,10 @@
         "git-ram",
         "git-disk"
       ],
-      "command": "which git; type -t git; man git status | head -n 1",
+      "command": "which git; type -t git; man git status | sed -n 4p",
       "expect": {
         "exit": 0,
-        "stdout": "/usr/bin/git\nfile\ngit status: Show the working tree status\n",
+        "stdout": "/usr/bin/git\nfile\n       git-status - Show the working tree status\n",
         "stderr": ""
       }
     },
@@ -62,7 +62,7 @@
           "path": "/SKILL.md"
         }
       ],
-      "command": "airtable record list --help > /scratch/help.txt; man airtable record list > /scratch/man.txt; cmp /scratch/help.txt /scratch/man.txt; grep -c '^usage: airtable record list' /SKILL.md; which airtable; type -t airtable",
+      "command": "airtable record list --help | head -1 | sed 's/^usage: //' > /scratch/help.txt; man airtable record list | sed -n '/^SYNOPSIS/,/^$/p' | sed '1d;$d;s/^ *//' | paste -sd ' ' > /scratch/man.txt; cmp /scratch/help.txt /scratch/man.txt; grep -c '^usage: airtable record list' /SKILL.md; which airtable; type -t airtable",
       "expect": {
         "exit": 0,
         "stdout": "1\n/usr/bin/airtable\nfile\n",

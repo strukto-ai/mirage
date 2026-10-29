@@ -28,8 +28,7 @@ import { NameKind } from '../lookup/types.ts'
 import { sessionEntry } from '../../../session/session.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-
-const USAGE = 'command: usage: command [-pVv] command [arg ...]\n'
+import { builtinUsage } from '../shared.ts'
 
 /**
  * Run the `-v`/`-V` introspection modes.
@@ -106,7 +105,7 @@ export async function handleCommandBuiltin(
 ): Promise<Result> {
   const scan = scanOptions(args, 'pvV')
   if (scan.bad !== null) {
-    const err = encodeText(`bash: command: ${scan.bad}: invalid option\n${USAGE}`)
+    const err = encodeText(`bash: command: ${scan.bad}: invalid option\n${builtinUsage('command')}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),

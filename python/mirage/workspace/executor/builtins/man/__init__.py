@@ -12,18 +12,37 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.executor.builtins.man.man import (
-    _command_entry,
-    _render_man_index,
-    _render_page,
-    handle_man,
-)
-from mirage.workspace.executor.builtins.man.types import ManEntry
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.workspace.executor.builtins.man.man import (
+        find_page,
+        handle_man,
+        pages_of,
+        render_page,
+    )
+    from mirage.workspace.executor.builtins.man.types import (
+        ManPage,
+    )
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.workspace.executor.builtins.man.man": (
+        "find_page",
+        "handle_man",
+        "pages_of",
+        "render_page",
+    ),
+    "mirage.workspace.executor.builtins.man.types": ("ManPage",),
+}
 
 __all__ = [
-    "ManEntry",
-    "_command_entry",
-    "_render_man_index",
-    "_render_page",
+    "ManPage",
+    "find_page",
     "handle_man",
+    "pages_of",
+    "render_page",
 ]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

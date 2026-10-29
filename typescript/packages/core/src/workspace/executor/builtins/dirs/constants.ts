@@ -16,6 +16,3 @@
 // them; `set -P` supplies the mode when a line names neither -L nor -P.
 export const CD_OPTIONS = 'LPe@'
 export const PWD_OPTIONS = 'LP'
-
-export const CD_USAGE = 'cd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n'
-export const PWD_USAGE = 'pwd: usage: pwd [-LP]\n'

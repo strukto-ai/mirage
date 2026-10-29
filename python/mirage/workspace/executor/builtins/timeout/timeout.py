@@ -26,6 +26,7 @@ from mirage.commands.quote import quote_text
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.commands.spec.standard import version_line
+from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.commands.spec.usage import (
     ambiguous_option_error,
     missing_value_error,
@@ -67,8 +68,6 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
-
-_SYNOPSIS = "timeout [OPTION] DURATION COMMAND [ARG]..."
 
 _UNIT_SECONDS = {"": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
 
@@ -264,7 +263,9 @@ async def handle_timeout(
         if name == "help":
             text = encode_text(
                 render_help(
-                    "timeout", SHELL_SPECS["timeout"], synopsis=_SYNOPSIS
+                    "timeout",
+                    SHELL_SPECS["timeout"],
+                    synopsis=SYNOPSES["timeout"],
                 )
             )
             return (

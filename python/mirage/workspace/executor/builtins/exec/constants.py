@@ -68,9 +68,3 @@ EXEC_STREAM_UNBOUND: dict[int, dict[str, bool | None]] = {
         "exec_stderr_input": None,
     },
 }
-
-# bash's usage line for `exec`, printed after an invalid option.
-EXEC_USAGE = (
-    "exec: usage: exec [-cl] [-a name] [command [argument ...]] "
-    "[redirection ...]\n"
-)

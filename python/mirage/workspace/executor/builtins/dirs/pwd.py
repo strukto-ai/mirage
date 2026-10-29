@@ -19,9 +19,9 @@ from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.workspace.executor.builtins.dirs.constants import (
     PWD_OPTIONS,
-    PWD_USAGE,
 )
 from mirage.workspace.executor.builtins.dirs.dirs import split_mode_options
+from mirage.workspace.executor.builtins.shared import builtin_usage
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import logical_cwd
@@ -47,7 +47,7 @@ async def handle_pwd(
     if bad_opt is not None:
         voice = "" if program_invocation(session) else "bash: "
         err = encode_text(
-            f"{voice}pwd: -{bad_opt}: invalid option\n{PWD_USAGE}"
+            f"{voice}pwd: -{bad_opt}: invalid option\n{builtin_usage('pwd')}"
         )
         return (
             None,

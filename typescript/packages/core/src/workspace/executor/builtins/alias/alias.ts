@@ -24,8 +24,8 @@ import {
 import { singleQuote } from '../../../../utils/quote.ts'
 import { scanOptions } from '../getopt.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { fail, finish, ok, result } from '../shared.ts'
-import { ALIAS_USAGE, BAD_NAME_CHARS, UNALIAS_USAGE } from './constants.ts'
+import { builtinUsage, fail, finish, ok, result } from '../shared.ts'
+import { BAD_NAME_CHARS } from './constants.ts'
 import type { AliasMark } from './types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -44,7 +44,7 @@ function hasBadChar(name: string): boolean {
 export function handleAlias(args: string[], session: SessionState, mark: AliasMark): Result {
   const scan = scanOptions(args, 'p')
   if (scan.bad !== null)
-    return fail('alias', `bash: alias: ${scan.bad}: invalid option\n${ALIAS_USAGE}\n`, 2)
+    return fail('alias', `bash: alias: ${scan.bad}: invalid option\n${builtinUsage('alias')}`, 2)
   const operands = scan.operands
   const lines: string[] = []
   const errors: string[] = []
@@ -89,14 +89,18 @@ export function handleAlias(args: string[], session: SessionState, mark: AliasMa
 export function handleUnalias(args: string[], session: SessionState, mark: AliasMark): Result {
   const scan = scanOptions(args, 'a')
   if (scan.bad !== null)
-    return fail('unalias', `bash: unalias: ${scan.bad}: invalid option\n${UNALIAS_USAGE}\n`, 2)
+    return fail(
+      'unalias',
+      `bash: unalias: ${scan.bad}: invalid option\n${builtinUsage('unalias')}`,
+      2,
+    )
   const operands = scan.operands
   if (scan.letters.includes('a')) {
     for (const name of Object.keys(session.aliases)) changing(session, name, mark)
     session.aliases = ownRecord<string>()
     return ok('unalias')
   }
-  if (operands.length === 0) return fail('unalias', `${UNALIAS_USAGE}\n`, 2)
+  if (operands.length === 0) return fail('unalias', builtinUsage('unalias'), 2)
   const errors: string[] = []
   for (const name of operands) {
     if (sessionEntry(session.aliases, name) !== undefined) {

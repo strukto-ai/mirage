@@ -14,12 +14,6 @@
 
 import re
 
-EXPORT_USAGE = "export: usage: export [-fn] [name[=value] ...] or export -p\n"
-
-READONLY_USAGE = (
-    "readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n"
-)
-
 # bash takes `-a` / `-A` too, though its usage line names only `-fn`.
 EXPORT_FLAGS = frozenset("aAfnp")
 

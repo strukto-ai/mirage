@@ -19,6 +19,7 @@ from mirage.core.history.render import render_history_listing
 from mirage.io.types import IOResult
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ExitSignal
+from mirage.workspace.executor.builtins.shared import builtin_usage
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.session import SessionState
@@ -26,10 +27,6 @@ from mirage.workspace.types import ExecutionNode
 
 # bash 5.2.21's own string, letters in ITS order (`history -anrw`, not
 # the accepted-set order the flag table is written in).
-_USAGE = (
-    "history: usage: history [-c] [-d offset] [n] or "
-    "history -anrw [filename] or history -ps arg [arg...]\n"
-)
 _OPTION_CHARS = "cdanrwsp"
 
 
@@ -138,7 +135,7 @@ async def handle_history(
     """
     flags, texts, error = _parse_args(args)
     if error is not None:
-        return _result(None, 2, encode_text(error + _USAGE))
+        return _result(None, 2, encode_text(error + builtin_usage("history")))
     if not flags and len(texts) > 1:
         # bash abandons everything still to run, as `exit 1 2` does;
         # `-p` and `-s` take any number of words.

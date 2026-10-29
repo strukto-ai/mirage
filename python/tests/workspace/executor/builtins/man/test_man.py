@@ -18,14 +18,16 @@ from unittest.mock import MagicMock
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Command
 from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.version import __version__
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.executor.builtins.man import (
-    ManEntry,
-    _command_entry,
-    _render_man_index,
-    _render_page,
+    ManPage,
+    find_page,
     handle_man,
+    render_page,
 )
+from mirage.workspace.session.session import SessionState
+from mirage.workspace.session.state import seed_var
 
 
 def _mk_cmd(name, spec, filetype=None, vfs="ram"):
@@ -80,131 +82,6 @@ def _mk_registry(mounts):
     return reg
 
 
-def test_command_entry_skips_dev():
-    spec = CommandSpec(description="x")
-    cat_cmd = _mk_cmd("cat", spec)
-    mount_dev = _mk_mount("/dev/", "dev", cmds={"cat": cat_cmd})
-    reg = _mk_registry([mount_dev])
-    assert _command_entry("cat", reg) is None
-    mount_ram = _mk_mount("/ram/", "ram", cmds={"cat": cat_cmd})
-    entry = _command_entry("cat", _mk_registry([mount_dev, mount_ram]))
-    assert entry == ManEntry(name="cat", spec=spec)
-
-
-def test_command_entry_is_the_first_registration_found():
-    spec = CommandSpec(description="cat")
-    plain = _mk_cmd("cat", spec)
-    parquet = _mk_cmd("cat", spec, filetype=".parquet")
-    m1 = _mk_mount("/a/", "ram", cmds={"cat": plain})
-    m2 = _mk_mount("/b/", "s3", cmds={"cat": parquet})
-    assert _command_entry("cat", _mk_registry([m1, m2])) == ManEntry(
-        name="cat", spec=spec
-    )
-    assert _command_entry("nope", _mk_registry([m1, m2])) is None
-
-
-def test_a_wrapper_has_the_page_of_the_program_it_runs():
-    # Debian links egrep's page to grep's; a mount's own egrep still wins.
-    spec = CommandSpec(description="print lines that match patterns")
-    grep = _mk_mount("/a/", "ram", cmds={"grep": _mk_cmd("grep", spec)})
-    reg = _mk_registry([grep])
-    assert _command_entry("egrep", reg) == ManEntry(name="egrep", spec=spec)
-    assert _command_entry("zegrep", reg) is None
-    assert "- egrep — print lines that match patterns" in (
-        _render_man_index(reg)
-    )
-    own = CommandSpec(description="custom")
-    egrep = _mk_mount("/b/", "ram", cmds={"egrep": _mk_cmd("egrep", own)})
-    assert _command_entry("egrep", _mk_registry([grep, egrep])) == ManEntry(
-        name="egrep", spec=own
-    )
-
-
-def test_render_page_no_options():
-    spec = CommandSpec(description="Concatenate files.")
-    out = _render_page(ManEntry(name="cat", spec=spec))
-    assert out == "# cat\n\nConcatenate files.\n"
-    assert "## OPTIONS" not in out
-    assert "RESOURCES" not in out
-
-
-def test_render_page_with_options():
-    spec = CommandSpec(
-        description="Print a sequence.",
-        arguments=(
-            Argument("-s", help="separator"),
-            Argument("-w", action="store_true", help="zero-pad"),
-        ),
-    )
-    out = _render_page(ManEntry(name="seq", spec=spec))
-    assert out.startswith("# seq\n\nPrint a sequence.\n\n## OPTIONS\n\n")
-    assert "| short | long | value | description |" in out
-    assert "| -s |  | str | separator |" in out
-    assert out.endswith("| -w |  | bool | zero-pad |\n")
-
-
-def test_render_page_placeholder_description():
-    out = _render_page(ManEntry(name="bc", spec=CommandSpec()))
-    assert out == "# bc\n\n(no description)\n"
-
-
-def test_handle_man_missing_entry():
-    reg = _mk_registry([])
-    out, io, node = asyncio.run(handle_man(["nope"], reg))
-    assert out is None
-    assert io.exit_code == 1
-    assert io.stderr == b"man: no entry for nope\n"
-    assert node.exit_code == 1
-
-
-def test_handle_man_page_carries_no_vfs():
-    spec = CommandSpec(description="cat files")
-    cat = _mk_cmd("cat", spec)
-    m1 = _mk_mount("/a/", "ram", cmds={"cat": cat})
-    m2 = _mk_mount("/b/", "s3", cmds={"cat": cat})
-    out, io, _node = asyncio.run(handle_man(["cat"], _mk_registry([m1, m2])))
-    assert io.exit_code == 0
-    assert out.decode() == "# cat\n\ncat files\n"
-
-
-def test_handle_man_documents_bash_and_sh_from_the_bash_spec():
-    out, io, _node = asyncio.run(handle_man(["bash"], _mk_registry([])))
-    assert io.exit_code == 0
-    text = out.decode()
-    assert text.startswith("# bash\n")
-    assert "-c" in text
-    assert "RESOURCES" not in text
-    sh, io2, _node = asyncio.run(handle_man(["sh"], _mk_registry([])))
-    assert io2.exit_code == 0
-    assert sh.decode().startswith("# sh\n")
-
-
-def test_render_man_index_lists_every_name_once_sorted():
-    spec_g = CommandSpec(description="bc desc")
-    bc = _mk_cmd("bc", spec_g, vfs=None)
-    spec_a = CommandSpec(description="ls files")
-    ls = _mk_cmd("ls", spec_a)
-    spec_c = CommandSpec(description="cat files")
-    cat = _mk_cmd("cat", spec_c)
-    m1 = _mk_mount("/a/", "ram", cmds={"ls": ls}, general={"bc": bc})
-    m2 = _mk_mount("/b/", "s3", cmds={"cat": cat}, general={"bc": bc})
-    text = _render_man_index(_mk_registry([m1, m2]))
-    assert text == (
-        "# commands\n\n"
-        "- bc \u2014 bc desc\n"
-        "- cat \u2014 cat files\n"
-        "- ls \u2014 ls files\n"
-    )
-    assert "ram" not in text and "s3" not in text
-
-
-def test_render_man_index_skips_dev_and_is_empty_with_nothing_to_list():
-    cat = _mk_cmd("cat", CommandSpec(description="x"))
-    dev = _mk_mount("/dev/", "dev", cmds={"cat": cat})
-    assert _render_man_index(_mk_registry([dev])) == ""
-    assert _render_man_index(_mk_registry([])) == ""
-
-
 def _cli_tree() -> CLI:
     return CLI(
         spec=CommandSpec(
@@ -235,53 +112,260 @@ def _cli_registry(mounts=None):
     return reg
 
 
-def test_handle_man_renders_an_installed_cli():
-    out, io, _node = asyncio.run(handle_man(["linear"], _cli_registry()))
-    assert io.exit_code == 0
-    text = out.decode()
-    assert "usage: linear" in text
-    assert "issue" in text
+def _man(args, reg, **env):
+    session = SessionState(session_id="s1")
+    for name, value in env.items():
+        seed_var(session, name, value)
+    return asyncio.run(handle_man(args, reg, session))
 
 
-def test_handle_man_descends_a_verb_path_and_resolves_aliases():
-    reg = _cli_registry()
-    text = asyncio.run(handle_man(["linear", "issue", "create"], reg))[
-        0
-    ].decode()
-    assert "usage: linear issue create" in text
-    aliased = asyncio.run(handle_man(["linear", "i", "create"], reg))[
-        0
-    ].decode()
-    assert aliased == text
+def _header(title):
+    centered = title.ljust(28) + "General Commands Manual"
+    return centered.ljust(79 - len(title)) + title + "\n"
 
 
-def test_handle_man_unknown_verb_names_the_whole_line():
-    out, io, node = asyncio.run(
-        handle_man(["linear", "bogus"], _cli_registry())
+def _footer(title):
+    return f"Mirage {__version__}".ljust(79 - len(title)) + title + "\n"
+
+
+def test_a_page_has_the_man_layout():
+    spec = CommandSpec(
+        description="Join files.",
+        arguments=(
+            Argument(
+                "-n", "--number", action="store_true", help="number lines"
+            ),
+            Argument("-s", action="store_true", help="squeeze blanks"),
+        ),
     )
+    cat = _mk_cmd("cat", spec)
+    out, io, _node = _man(
+        ["cat"], _mk_registry([_mk_mount("/a/", "ram", {"cat": cat})])
+    )
+    assert io.exit_code == 0
+    assert out.decode() == (
+        _header("CAT(1)")
+        + "\nNAME\n       cat - Join files.\n\n"
+        + "SYNOPSIS\n       cat [OPTION]... [FILE]...\n\n"
+        + "DESCRIPTION\n       Join files.\n\n"
+        + "OPTIONS\n       -n, --number\n              number lines\n\n"
+        + "       -s     squeeze blanks\n\n"
+        + _footer("CAT(1)")
+    )
+
+
+def test_an_operand_with_help_of_its_own_is_listed():
+    spec = CommandSpec(
+        arguments=(
+            Argument("PATH", type="path", help="where to write"),
+            Argument("rest", nargs="*"),
+        ),
+    )
+    reg = _mk_registry(
+        [_mk_mount("/a/", "ram", {"put": _mk_cmd("put", spec)})]
+    )
+    text = _man(["put"], reg)[0].decode()
+    assert "OPERANDS\n       PATH   where to write\n\n" in text
+    assert "rest" not in text.split("OPERANDS")[1]
+
+
+def test_a_page_without_a_description_names_the_command_alone():
+    page = render_page(ManPage("bc", "", (("SYNOPSIS", ("bc",)),)), 80)
+    assert "\nNAME\n       bc\n\n" in page
+
+
+def test_text_fills_the_line_and_breaks_after_a_hyphen():
+    words = " ".join(["a"] * 33) + " read-only word"
+    page = render_page(ManPage("x", "", (("DESCRIPTION", (words,)),)), 80)
+    assert (
+        "       " + " ".join(["a"] * 33) + " read-\n       only word\n" in page
+    )
+
+
+def test_the_width_follows_manwidth_then_columns():
+    spec = CommandSpec(description="Join files.")
+    reg = _mk_registry(
+        [_mk_mount("/a/", "ram", {"cat": _mk_cmd("cat", spec)})]
+    )
+    narrow = _man(["cat"], reg, MANWIDTH="60", COLUMNS="100")[0].decode()
+    assert len(narrow.split("\n")[0]) == 59
+    wide = _man(["cat"], reg, COLUMNS="100")[0].decode()
+    assert len(wide.split("\n")[0]) == 99
+
+
+def test_the_first_registration_is_the_page_and_dev_is_skipped():
+    dev = _mk_mount(
+        "/dev/", "dev", {"cat": _mk_cmd("cat", CommandSpec(description="dev"))}
+    )
+    ram = _mk_mount(
+        "/a/", "ram", {"cat": _mk_cmd("cat", CommandSpec(description="ram"))}
+    )
+    s3 = _mk_mount(
+        "/b/", "s3", {"cat": _mk_cmd("cat", CommandSpec(description="s3"))}
+    )
+    assert find_page("cat", _mk_registry([dev, ram, s3])).summary == "ram"
+
+
+def test_a_wrapper_has_the_page_of_the_program_it_runs():
+    grep = _mk_cmd("grep", CommandSpec(description="Search."))
+    reg = _mk_registry([_mk_mount("/a/", "ram", {"grep": grep})])
+    page = find_page("egrep", reg)
+    assert page.name == "egrep"
+    assert page.sections == find_page("grep", reg).sections
+
+
+def test_a_builtin_page_is_its_help_topic():
+    text = _man(["wait"], _mk_registry([]))[0].decode()
+    assert text.startswith(_header("WAIT(1)"))
+    assert (
+        "NAME\n       wait - Wait for jobs and return their status.\n" in text
+    )
+    assert "SYNOPSIS\n       wait [-fn] [-p var] [id ...]\n" in text
+    assert "       -n     wait for the next job to end" in text
+    assert "EXIT STATUS\n" in text
+
+
+def test_bash_and_sh_have_the_bash_spec_page():
+    bash = _man(["bash"], _mk_registry([]))[0].decode()
+    assert bash.startswith(_header("BASH(1)"))
+    sh = _man(["sh"], _mk_registry([]))[0].decode()
+    assert sh.startswith("SH(1)")
+    reg = _mk_registry([])
+    assert (
+        find_page("sh", reg).sections[1:]
+        == find_page("bash", reg).sections[1:]
+    )
+
+
+def test_no_page_asks_which():
+    out, io, _node = _man([], _mk_registry([]))
     assert out is None
     assert io.exit_code == 1
-    assert io.stderr == b"man: no entry for linear bogus\n"
-    assert node.exit_code == 1
+    assert (
+        io.stderr
+        == b"What manual page do you want?\nFor example, try 'man man'.\n"
+    )
 
 
-def test_handle_man_prints_the_cli_before_a_colliding_mount_command():
+def test_a_missing_page_is_status_16_after_the_pages_found():
+    out, io, _node = _man(["nope", "wait"], _mk_registry([]))
+    assert out.decode().startswith("WAIT(1)")
+    assert io.exit_code == 16
+    assert io.stderr == b"No manual entry for nope\n"
+
+
+def test_a_section_other_than_1_has_no_pages():
+    out, io, _node = _man(["2", "wait"], _mk_registry([]))
+    assert out is None
+    assert io.exit_code == 16
+    assert io.stderr == b"No manual entry for wait in section 2\n"
+    assert _man(["1", "wait"], _mk_registry([]))[1].exit_code == 0
+
+
+def test_an_option_after_a_page_is_a_page():
+    _out, io, _node = _man(["wait", "-f"], _mk_registry([]))
+    assert io.stderr == b"No manual entry for -f\n"
+
+
+def test_whatis_prints_the_summary_lines():
+    out, io, _node = _man(["-f", "wait", "nope", "cd"], _mk_registry([]))
+    assert io.exit_code == 0
+    assert out == (
+        b"wait (1)             - Wait for jobs and return their status.\n"
+        b"cd (1)               - Change the working directory.\n"
+    )
+    assert io.stderr == b"nope: nothing appropriate.\n"
+    assert _man(["-f", "nope"], _mk_registry([]))[1].exit_code == 16
+
+
+def test_apropos_searches_names_and_summaries_ignoring_case():
+    out, io, _node = _man(["-k", "JOB"], _mk_registry([]))
+    assert io.exit_code == 0
+    lines = out.decode().splitlines()
+    assert [line.split()[0] for line in lines] == [
+        "disown",
+        "fg",
+        "jobs",
+        "kill",
+        "wait",
+    ]
+    assert _man(["-k", "zzzz"], _mk_registry([]))[1].exit_code == 16
+
+
+def test_option_refusals_name_the_option_and_hint():
+    hint = b"Try 'man --help' or 'man --usage' for more information.\n"
+    for args, message in (
+        (["-x"], b"man: invalid option -- 'x'\n"),
+        (["--nope"], b"man: unrecognized option '--nope'\n"),
+        (
+            ["--a", "ls"],
+            b"man: option '--a' is ambiguous; possibilities: '--all' '--apropos'\n",
+        ),
+        (
+            ["--whatis=ls"],
+            b"man: option '--whatis' doesn't allow an argument\n",
+        ),
+        (["-fk", "ls"], b"man: -f -k : incompatible options\n"),
+    ):
+        _out, io, _node = _man(args, _mk_registry([]))
+        assert io.exit_code == 1
+        assert io.stderr == message + hint
+    assert _man(["-f"], _mk_registry([]))[1].stderr == b"whatis what?\n"
+    assert _man(["-k"], _mk_registry([]))[1].stderr == b"apropos what?\n"
+
+
+def test_help_and_usage_answer_on_stdout():
+    out, io, _node = _man(["--help"], _mk_registry([]))
+    assert io.exit_code == 0
+    assert out.startswith(
+        b"man: Show the manual page of a command.\n\n"
+        b"Usage: man [OPTION...] [SECTION] PAGE...\n"
+    )
+    assert _man(["-?"], _mk_registry([]))[0] == out
+    assert _man(["-h"], _mk_registry([]))[0] == out
+    assert _man(["--usage"], _mk_registry([]))[0] == (
+        b"Usage: man [OPTION...] [SECTION] PAGE...\n"
+    )
+
+
+def test_an_installed_cli_has_a_page_with_its_commands():
+    text = _man(["linear"], _cli_registry())[0].decode()
+    assert text.startswith(_header("LINEAR(1)"))
+    assert "NAME\n       linear - Linear API client\n" in text
+    assert (
+        "COMMANDS\n       issue  Manage issues\n\n       team   Manage one\n"
+        in text
+    )
+
+
+def test_a_subcommand_page_is_named_with_hyphens():
+    reg = _cli_registry()
+    text = _man(["linear", "issue", "create"], reg)[0].decode()
+    assert text.startswith("LINEAR-ISSUE-CREATE(1)")
+    assert "NAME\n       linear-issue-create - Create one\n" in text
+    assert _man(["linear", "i", "create"], reg)[0].decode() == text
+    assert _man(["linear-issue-create"], reg)[0].decode() == text
+    assert _man(["linear-i-create"], reg)[0].decode() == text
+
+
+def test_words_past_a_cli_path_are_pages_of_their_own():
+    out, io, _node = _man(["linear", "bogus"], _cli_registry())
+    assert out.decode().startswith("LINEAR(1)")
+    assert io.exit_code == 16
+    assert io.stderr == b"No manual entry for bogus\n"
+
+
+def test_a_cli_comes_before_a_colliding_command_and_all_shows_both():
     spec = CommandSpec(description="mount side")
     mount = _mk_mount("/ram/", "ram", cmds={"linear": _mk_cmd("linear", spec)})
     reg = _cli_registry([mount])
-    text = asyncio.run(handle_man(["linear"], reg))[0].decode()
-    assert text.index("usage: linear") < text.index("mount side")
+    first = _man(["linear"], reg)[0].decode()
+    assert "mount side" not in first
+    both = _man(["-a", "linear"], reg)[0].decode()
+    assert both.startswith(first)
+    assert "mount side" in both[len(first) :]
 
 
-def test_render_man_index_lists_installed_clis_after_commands():
-    cat = _mk_cmd("cat", CommandSpec(description="cat files"))
-    mount = _mk_mount("/ram/", "ram", cmds={"cat": cat})
-    text = _render_man_index(_cli_registry([mount]))
-    assert text == (
-        "# commands\n\n- cat \u2014 cat files\n\n"
-        "# clis\n\n- linear \u2014 Linear API client\n"
-    )
-
-
-def test_render_man_index_omits_the_cli_section_when_none_installed():
-    assert "# clis" not in _render_man_index(_mk_registry([]))
+def test_apropos_lists_cli_subcommand_pages():
+    out = _man(["-k", "create one"], _cli_registry())[0]
+    assert out == b"linear-issue-create (1) - Create one\n"

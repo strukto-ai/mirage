@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-ALIAS_USAGE = "alias: usage: alias [-p] [name[=value] ... ]"
-UNALIAS_USAGE = "unalias: usage: unalias [-a] name [name ...]"
 
 # The names bash's `alias` refuses: a shell metacharacter, a quote, `/`,
 # `$` or a backtick anywhere in the name makes it unusable, since the parser

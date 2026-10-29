@@ -26,7 +26,6 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError, dotted_spelling, resolve_path
-from mirage.workspace.executor.builtins.dirs.constants import CD_USAGE
 from mirage.workspace.executor.builtins.dirs.dirs import (
     join_raw,
     norm,
@@ -35,6 +34,7 @@ from mirage.workspace.executor.builtins.dirs.dirs import (
     typed_path,
 )
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
+from mirage.workspace.executor.builtins.shared import builtin_usage
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.expand.classify import classify_bare_path
 from mirage.workspace.files import Files
@@ -301,7 +301,9 @@ async def cd_builtin(call: BuiltinCall) -> Result:
     # but only one the session sees: a hidden root answers ENOENT too.
     is_mount = call.namespace.session_links(session).is_mount
     if bad_opt is not None:
-        err = encode_text(f"bash: cd: -{bad_opt}: invalid option\n{CD_USAGE}")
+        err = encode_text(
+            f"bash: cd: -{bad_opt}: invalid option\n{builtin_usage('cd')}"
+        )
         return (
             None,
             IOResult(exit_code=2, stderr=err),

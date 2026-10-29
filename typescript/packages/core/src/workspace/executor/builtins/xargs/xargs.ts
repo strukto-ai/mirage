@@ -27,6 +27,7 @@ import { quoteText } from '../../../../commands/quote.ts'
 import { runAsProgram, runWithEvaluation } from '../../../../context/session_context.ts'
 import { renderHelp } from '../../../../commands/spec/help.ts'
 import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
+import { SYNOPSES } from '../../../../commands/spec/synopsis.ts'
 import {
   ambiguousOptionError,
   missingValueError,
@@ -53,8 +54,6 @@ import { readScriptBytes } from '../script/script.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { concat, findBytes } from '../../../../utils/bytes.ts'
 import { NOT_FOUND_STATUS, SIGPIPE_STATUS } from '../../../../shell/constants.ts'
-
-const SYNOPSIS = 'xargs [OPTION]... COMMAND [INITIAL-ARGS]...'
 
 // The sizes GNU findutils 4.10 reports with --show-limits on Linux with an
 // 8 MiB stack: exec takes 2 MiB of arguments and environment, 2 KiB of
@@ -128,7 +127,7 @@ function answer(option: string, notes: string): Result {
   // the options before them.
   const text =
     option === 'help'
-      ? renderHelp('xargs', SHELL_SPECS.xargs, [], undefined, SYNOPSIS)
+      ? renderHelp('xargs', SHELL_SPECS.xargs, [], undefined, SYNOPSES.xargs)
       : versionLine('xargs')
   return [
     yieldBytes(encodeText(text)),

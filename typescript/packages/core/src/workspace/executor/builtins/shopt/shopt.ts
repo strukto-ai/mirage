@@ -22,11 +22,9 @@ import type { SessionState } from '../../../session/session.ts'
 import { type AliasMark, aliasMark, noteExpanding } from '../alias/index.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { fail } from '../shared.ts'
+import { builtinUsage, fail } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-
-const USAGE = 'shopt: usage: shopt [-pqsu] [-o] [optname ...]'
 
 function row(name: string, on: boolean, reusable: boolean, setO: boolean): string {
   if (reusable) {
@@ -53,7 +51,7 @@ export function handleShopt(
 ): Result {
   const scan = scanOptions(args, 'pqosu')
   if (scan.bad !== null)
-    return fail('shopt', `bash: shopt: ${scan.bad}: invalid option\n${USAGE}\n`, 2)
+    return fail('shopt', `bash: shopt: ${scan.bad}: invalid option\n${builtinUsage('shopt')}`, 2)
   if (scan.letters.includes('s') && scan.letters.includes('u')) {
     return fail('shopt', 'bash: shopt: cannot set and unset shell options simultaneously\n', 1)
   }

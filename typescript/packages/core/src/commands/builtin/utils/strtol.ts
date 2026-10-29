@@ -17,7 +17,7 @@ import { decimalValue, parseBase0 } from './size_suffix.ts'
 
 // A whole decimal word as GNU's count options read one: C blanks, one sign,
 // ASCII digits, and nothing after them, not even a blank.
-const DECIMAL = new RegExp(`^${C_SPACE}([+-]?)([0-9]+)$`)
+const DECIMAL = new RegExp(`^${C_SPACE}([+-]?)([0-9]+)`)
 // C's strto(u)l at base 0: C blanks, one sign, then hex after 0x, octal after
 // a bare 0, decimal otherwise; the text after the digits is left.
 const BASE0 = new RegExp(`^${C_SPACE}([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)`)
@@ -40,7 +40,7 @@ export const EOVERFLOW_REASON = 'Value too large for defined data type'
  */
 export function unsignedDecimal(text: string): bigint | null {
   const match = DECIMAL.exec(text)
-  if (match === null || match[1] === '-') return null
+  if (match?.[0].length !== text.length || match[1] === '-') return null
   return decimalValue(match[2] ?? '0')
 }
 
@@ -50,7 +50,7 @@ export function unsignedDecimal(text: string): bigint | null {
  */
 export function signedDecimal(text: string): bigint | null {
   const match = DECIMAL.exec(text)
-  if (match === null) return null
+  if (match?.[0].length !== text.length) return null
   const value = decimalValue(match[2] ?? '0')
   return match[1] === '-' ? -value : value
 }
@@ -66,6 +66,19 @@ export function boundedDecimal(digits: string, bound: bigint): bigint | null {
   if (significant.length > bound.toString().length) return null
   const value = BigInt(significant === '' ? '0' : significant)
   return value < bound ? value : null
+}
+
+/**
+ * C's `atoi`: the decimal number `text` begins with, after C blanks and one
+ * sign, 0 when it begins with none, saturated to the `long` range as glibc's
+ * `strtol` underneath it is. Mirrors Python's `atoi`.
+ */
+export function atoi(text: string): number {
+  const match = DECIMAL.exec(text)
+  if (match === null) return 0
+  const value = decimalValue(match[2] ?? '0')
+  const signed = match[1] === '-' ? -value : value
+  return Number(signed < LONG_MIN ? LONG_MIN : signed > LONG_MAX ? LONG_MAX : signed)
 }
 
 /**

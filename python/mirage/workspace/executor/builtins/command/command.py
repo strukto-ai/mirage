@@ -27,13 +27,12 @@ from mirage.workspace.executor.builtins.lookup import (
     program_file,
 )
 from mirage.workspace.executor.builtins.lookup.types import NameKind
-from mirage.workspace.executor.builtins.shared import ok, result
+from mirage.workspace.executor.builtins.shared import builtin_usage, ok, result
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
-_USAGE = "command: usage: command [-pVv] command [arg ...]\n"
 _OPTIONS = "pvV"
 
 
@@ -124,7 +123,8 @@ async def handle_command_builtin(
         return result(
             "command",
             exit_code=2,
-            stderr=f"bash: command: {scan.bad}: invalid option\n{_USAGE}",
+            stderr=f"bash: command: {scan.bad}: invalid option\n"
+            + builtin_usage("command"),
         )
     mode = last_of(scan.letters, "vV")
     rest = scan.operands

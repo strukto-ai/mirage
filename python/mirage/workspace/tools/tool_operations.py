@@ -24,8 +24,7 @@ from mirage.context import strongest_under_session
 from mirage.errors.types import StaleWriteError
 from mirage.io.types import IOResult
 from mirage.policy.decisions import Decisions
-from mirage.policy.match import head_allowed
-from mirage.policy.match.pattern import pattern_matches
+from mirage.policy.match import runs
 from mirage.shell.errors import TooManyMatches
 from mirage.types import MOUNT_MODE_RANK, MountMode
 from mirage.utils.hidden import path_visible
@@ -169,33 +168,6 @@ async def missing(vfs: Files, path: str) -> bool:
         return False
 
 
-def runs(name: str, session: SessionState) -> bool:
-    """Whether a session can run a command at all: its allow list
-    allows the name and no rule refuses the bare command everywhere. A
-    rule written under one mount refuses it only on a line working
-    inside that mount, which the shell judges line by line, so the
-    command still runs; one written under ``/`` covers every line.
-
-    Args:
-        name (str): the command name.
-        session (SessionState): the session.
-    """
-    rules = session.commands
-    if not head_allowed(name, rules):
-        return False
-    if rules is None:
-        return True
-    return not any(
-        not rule.paths
-        and rule.mount in ("", "/")
-        and (
-            not rule.commands
-            or any(pattern_matches(p, (name,)) for p in rule.commands)
-        )
-        for rule in rules.deny
-    )
-
-
 def writes(session: SessionState, mounts: list[MountEntry]) -> bool:
     """Whether a session may write anywhere: a mount it can see whose
     mode, narrowed by the profile or opened by a show entry below it,
@@ -294,8 +266,8 @@ class MirageToolOperations:
             "shell": allow is None or len(allow) > 0,
             "read": True,
             "write": writes(session, self._session.mounts()),
-            "ls": runs("ls", session),
-            "grep": runs("grep", session),
+            "ls": runs("ls", rules),
+            "grep": runs("grep", rules),
             "glob": True,
         }
         offered["edit"] = offered["write"]

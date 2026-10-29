@@ -16,14 +16,13 @@ import { strongestUnderSession } from '../../context/session_context.ts'
 import { type Files, withCaller } from '../files.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
-import { patternMatches } from '../../policy/match/pattern.ts'
 import { MOUNT_MODE_RANK, MountMode } from '../../types.ts'
 import { isEacces, isStaleWrite } from '../../errors/fs.ts'
 import { TooManyMatches } from '../../shell/errors.ts'
 import { pathVisible } from '../../utils/hidden.ts'
 import { gnuDirname } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { headAllowed } from '../../policy/match/allow.ts'
+import { runs } from '../../policy/match/allow.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { DEV_PREFIX } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
@@ -116,26 +115,6 @@ async function missing(vfs: Files, path: string): Promise<boolean> {
 
 /** Every tool, in the order the entry points list them. */
 export const TOOL_NAMES = ['shell', 'read', 'write', 'edit', 'ls', 'grep', 'glob'] as const
-
-/**
- * Whether a session can run a command at all: its allow list allows the
- * name and no rule refuses the bare command everywhere. A rule written
- * under one mount refuses it only on a line working inside that mount,
- * which the shell judges line by line, so the command still runs; one
- * written under `/` covers every line. Mirrors Python's `runs`.
- */
-export function runs(name: string, session: SessionState): boolean {
-  const rules = session.commands
-  if (!headAllowed(name, rules)) return false
-  if (rules === null) return true
-  return !rules.deny.some(
-    (rule) =>
-      (rule.paths ?? []).length === 0 &&
-      ['', '/'].includes(rule.mount ?? '') &&
-      ((rule.commands ?? []).length === 0 ||
-        (rule.commands ?? []).some((p) => patternMatches(p, [name]))),
-  )
-}
 
 /**
  * Whether a session may write anywhere: a mount it can see whose mode,
@@ -235,8 +214,8 @@ export class MirageToolOperations {
       read: true,
       write: writable,
       edit: writable,
-      ls: runs('ls', session),
-      grep: runs('grep', session),
+      ls: runs('ls', session.commands),
+      grep: runs('grep', session.commands),
       glob: true,
     }
     return TOOL_NAMES.filter((name) => offered[name] === true)

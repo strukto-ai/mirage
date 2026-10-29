@@ -266,10 +266,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "man gh | head -8",
+      "command": "man gh | sed -n '3,4p;/^SYNOPSIS/,/^$/p'; man gh | sed -n '/^COMMANDS/,$p' | head -6",
       "expect": {
         "exit": 0,
-        "stdout": "usage: gh [-h] {auth,help,version (--version),api,issue,pr,repo,release,run,workflow,search} ...\n\nGitHub CLI\n\ncommands:\n  auth                 Manage authentication\n  help                 Help about any command\n  version (--version)  Show the Mirage GitHub CLI implementation version\n",
+        "stdout": "NAME\n       gh - GitHub CLI\nSYNOPSIS\n       gh [-h]\n       {auth,help,version,api,issue,pr,repo,release,run,workflow,search} ...\n\nCOMMANDS\n       auth   Manage authentication\n\n       help   Help about any command\n\n       version\n",
         "stderr": ""
       }
     },
@@ -279,10 +279,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "man gh api | head -4",
+      "command": "man gh api | sed -n '3,4p;/^SYNOPSIS/,/^$/p'",
       "expect": {
         "exit": 0,
-        "stdout": "usage: gh api [-X METHOD] [-f RAW_FIELD] [-F FIELD] [-H HEADER] [-i[={true,false}]] [--input INPUT] [-q JQ] [--paginate[={true,false}]] [--slurp[={true,false}]] [--silent[={true,false}]] [-h] ENDPOINT\n\nMake an authenticated GitHub API request\n\n",
+        "stdout": "NAME\n       gh-api - Make an authenticated GitHub API request\nSYNOPSIS\n       gh api [-X METHOD] [-f RAW_FIELD] [-F FIELD] [-H HEADER]\n       [-i[={true,false}]] [--input INPUT] [-q JQ] [--paginate[={true,false}]]\n       [--slurp[={true,false}]] [--silent[={true,false}]] [-h] ENDPOINT\n\n",
         "stderr": ""
       }
     },

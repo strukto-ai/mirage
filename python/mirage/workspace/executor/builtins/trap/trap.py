@@ -14,13 +14,16 @@
 
 from mirage.commands.builtin.utils.strtol import bounded_decimal
 from mirage.shell.bytes import decode_text, encode_text
-from mirage.workspace.executor.builtins.shared import builtin_error, result
+from mirage.workspace.executor.builtins.shared import (
+    builtin_error,
+    builtin_usage,
+    result,
+)
 from mirage.workspace.executor.builtins.timeout.constants import SIGNALS
 from mirage.workspace.executor.builtins.trap.constants import (
     PSEUDO_SIGNALS,
     RUN_EVENTS,
     SIGNAL_MAX,
-    USAGE,
 )
 from mirage.workspace.executor.builtins.trap.types import TrapEvent
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
@@ -99,7 +102,9 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
             else:
                 message = builtin_error("trap", f"-{flag}: invalid option")
                 return result(
-                    "trap", exit_code=2, stderr=decode_text(message) + USAGE
+                    "trap",
+                    exit_code=2,
+                    stderr=decode_text(message) + builtin_usage("trap"),
                 )
     errors: list[str] = []
     if printing or not words:
@@ -126,7 +131,7 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
         )
     if len(words) == 1:
         if event_of(words[0]) is None:
-            return result("trap", exit_code=2, stderr=USAGE)
+            return result("trap", exit_code=2, stderr=builtin_usage("trap"))
         action, specs = "-", words
     else:
         action, specs = words[0], words[1:]

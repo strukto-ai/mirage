@@ -37,6 +37,7 @@ from mirage.workspace.executor.builtins.env.env import env_builtin
 from mirage.workspace.executor.builtins.eval.eval import eval_builtin
 from mirage.workspace.executor.builtins.exec.exec import exec_builtin
 from mirage.workspace.executor.builtins.getopts.getopts import getopts_builtin
+from mirage.workspace.executor.builtins.help.help import help_builtin
 from mirage.workspace.executor.builtins.history.history import history_builtin
 from mirage.workspace.executor.builtins.let.let import let_builtin
 from mirage.workspace.executor.builtins.lookup.lookup import (
@@ -103,6 +104,7 @@ BUILTINS: dict[str, BuiltinFn] = {
     SB.COMMAND: command_builtin,
     SB.TYPE: type_builtin,
     SB.WHICH: which_builtin,
+    SB.HELP: help_builtin,
     SB.TRUE: true_builtin,
     SB.FALSE: false_builtin,
     SB.COLON: colon_builtin,

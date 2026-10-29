@@ -59,7 +59,3 @@ export const EXEC_STREAM_UNBOUND = {
   1: { execStdout: null, execStdoutAppend: false, execStdoutInput: null },
   2: { execStderr: null, execStderrAppend: false, execStderrInput: null },
 } as const
-
-// bash's usage line for `exec`, printed after an invalid option.
-export const EXEC_USAGE =
-  'exec: usage: exec [-cl] [-a name] [command [argument ...]] [redirection ...]\n'

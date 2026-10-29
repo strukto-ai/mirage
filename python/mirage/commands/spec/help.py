@@ -88,6 +88,33 @@ def flag_rows(spec: CommandSpec) -> list[tuple[str, str]]:
     ]
 
 
+def _operand_label(operand: Argument) -> str:
+    """An operand's name in help: the one its spec gives, else its type.
+
+    Args:
+        operand (Argument): the operand.
+    """
+    return positional_name(operand) or (
+        "PATH" if operand.type == "path" else "ARG"
+    )
+
+
+def operand_rows(spec: CommandSpec) -> list[tuple[str, str]]:
+    """Display rows (operand name, description) for the operands a spec
+    explains, the ones with help of their own.
+
+    Args:
+        spec (CommandSpec): the spec whose operands to render.
+    """
+    compiled = compile_spec(spec)
+    rest = (compiled.rest,) if compiled.rest else ()
+    return [
+        (_operand_label(operand), operand.help)
+        for operand in (*compiled.positional, *rest)
+        if operand.help
+    ]
+
+
 def _slot(operand: Argument) -> str:
     """One operand's placeholder outside the clap dialect.
 
@@ -269,10 +296,11 @@ def clap_group_refusal(
     ).encode()
 
 
-def argparse_help(
+def argparse_parts(
     name: str, spec: CommandSpec, subcommands: SubcommandRows = ()
-) -> str:
-    """Human-readable CLI help from the declared argparse-shaped grammar.
+) -> tuple[str, list[tuple[str, str]], list[tuple[str, str]]]:
+    """The usage line and the operand and option rows of a CLI's
+    argparse-shaped help, before they are laid out.
 
     Args:
         name (str): Installed command and canonical subcommand path.
@@ -314,9 +342,7 @@ def argparse_help(
         *compiled.positional,
         *((compiled.rest,) if compiled.rest else ()),
     ):
-        label = positional_name(operand) or (
-            "PATH" if operand.type == "path" else "ARG"
-        )
+        label = _operand_label(operand)
         slot = label + (" ..." if operand is compiled.rest else "")
         usage.append(
             slot if positional_required(operand) else "[" + slot + "]"
@@ -331,7 +357,22 @@ def argparse_help(
         )
     if subcommands:
         usage.append("{" + ",".join(sub for sub, _ in subcommands) + "} ...")
-    lines = ["usage: " + " ".join(usage)]
+    return "usage: " + " ".join(usage), operands, rows
+
+
+def argparse_help(
+    name: str, spec: CommandSpec, subcommands: SubcommandRows = ()
+) -> str:
+    """Human-readable CLI help from the declared argparse-shaped grammar.
+
+    Args:
+        name (str): Installed command and canonical subcommand path.
+        spec (CommandSpec): Argument grammar for this node; group
+            options are listed on their group.
+        subcommands (SubcommandRows): Visible immediate subcommands.
+    """
+    usage, operands, rows = argparse_parts(name, spec, subcommands)
+    lines = [usage]
     if spec.description:
         lines.extend(["", spec.description])
     for title, table in (

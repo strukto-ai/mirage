@@ -25,11 +25,11 @@ from mirage.shell.console import JobConsole
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.types import PathSpec, word_text
 from mirage.workspace.executor.builtins.scope import _scope_path
-from mirage.workspace.executor.builtins.script.constants import SOURCE_USAGE
 from mirage.workspace.executor.builtins.script.script import (
     read_script_text,
     script_error,
 )
+from mirage.workspace.executor.builtins.shared import builtin_usage
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.control import ended, returning
 from mirage.workspace.session import SessionState
@@ -144,7 +144,10 @@ async def source_builtin(call: BuiltinCall) -> Result:
     name = str(call.argv.name)
     if not operands:
         return script_error(
-            f"bash: {name}", SOURCE_USAGE.format(name=name), 2, name
+            f"bash: {name}",
+            "filename argument required\n" + builtin_usage(name).rstrip("\n"),
+            2,
+            name,
         )
     return await handle_source(
         call.dispatch,

@@ -596,7 +596,7 @@ async def test_man_of_a_script_cli_promises_no_help_flag(ws):
     ws.register_cli("pager", pager_spec("print('hi')"))
     code, out, _ = await run(ws, "man pager")
     assert code == 0
-    assert out.startswith(b"usage: pager\n")
+    assert b"SYNOPSIS\n       pager\n" in out
     assert b"--help" not in out
 
 

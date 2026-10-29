@@ -30,6 +30,8 @@ import mirage.commands.builtin
 from mirage.commands.cli.specs import BUILTIN_CLI_SPECS, cli_spec_for
 from mirage.commands.config import Command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.shell import SHELL_SPECS
+from mirage.commands.spec.synopsis import SHELL_SYNOPSES, SYNOPSES
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.registry import REGISTRY, resolve_class
@@ -457,6 +459,14 @@ def _emit_vfs_names(registry: dict[str, list[Command]]) -> None:
         "capabilities": _capabilities(),
         "configs": _configs(),
         "cli_specs": _cli_specs(),
+        "shell_specs": {
+            name: _spec_payload(spec)
+            for name, spec in sorted(SHELL_SPECS.items())
+        },
+        "synopses": {
+            "programs": dict(sorted(SYNOPSES.items())),
+            "shell": dict(sorted(SHELL_SYNOPSES.items())),
+        },
     }
     path = OUT.parent / "vfs.json"
     path.write_text(

@@ -137,32 +137,28 @@ def test_man_renders_help_for_known_command():
     assert "cat" in out
 
 
-def test_man_no_args_lists_commands_by_kind_of_word():
-    ws = _ws()
-    io = _exec(ws, "man")
-    assert io.exit_code == 0
-    out = (
-        io.stdout.decode()
-        if isinstance(io.stdout, bytes)
-        else _run(_materialize(io.stdout))
-    )
-    assert out.startswith("# commands\n\n")
-    assert "- cat" in out
-    assert "- ls" in out
-    assert "RAM" not in out
-    assert "# general" not in out
-
-
-def test_man_unknown_command_exits_1():
-    ws = _ws()
-    io = _exec(ws, "man definitely-not-a-real-command")
+def test_man_with_no_page_asks_for_one():
+    io = _exec(_ws(), "man")
     assert io.exit_code == 1
-    err = (
-        io.stderr.decode()
-        if isinstance(io.stderr, bytes)
-        else _run(_materialize(io.stderr))
+    assert _run(_materialize(io.stderr)) == (
+        "What manual page do you want?\nFor example, try 'man man'.\n"
     )
-    assert "no entry for" in err
+
+
+def test_man_k_lists_every_command():
+    io = _exec(_ws(), "man -k .")
+    assert io.exit_code == 0
+    names = {line.split(" ", 1)[0] for line in _out(io).splitlines()}
+    assert {"cat", "ls", "cd", "help"} <= names
+    assert "RAM" not in _out(io)
+
+
+def test_man_unknown_command_exits_16():
+    io = _exec(_ws(), "man definitely-not-a-real-command")
+    assert io.exit_code == 16
+    assert _run(_materialize(io.stderr)) == (
+        "No manual entry for definitely-not-a-real-command\n"
+    )
 
 
 def _cli_ws():
@@ -193,8 +189,10 @@ def test_installed_cli_is_discoverable_from_the_shell():
     assert _out(_exec(ws, "type -t linear")) == "file\n"
     assert _out(_exec(ws, "which linear")) == "/usr/bin/linear\n"
     assert "command linear" in _out(_exec(ws, "cat /usr/bin/linear"))
-    assert "usage: linear" in _out(_exec(ws, "man linear"))
-    assert "# clis" in _out(_exec(ws, "man"))
+    assert "SYNOPSIS\n       linear " in _out(_exec(ws, "man linear"))
+    assert _out(_exec(ws, "man -f linear")) == (
+        "linear (1)           - Linear API client\n"
+    )
 
 
 def test_man_lists_every_cli_verb_whatever_the_profile():
@@ -234,7 +232,8 @@ async def test_workspace_vfs_md_mentions_help_and_man():
     prompt = await ws.vfs_md()
     assert "--help" in prompt
     assert "man <cmd>" in prompt
-    assert "`man`" in prompt
+    assert "`man -k .`" in prompt
+    assert "`help`" in prompt
 
 
 async def _materialize(source):

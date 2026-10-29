@@ -522,8 +522,8 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
             ]
         )
     parts.append(
-        "Run `man` to list every command, and `man <cmd>` or "
-        "`<cmd> --help` for one command's usage."
+        "Run `man -k .` to list every command, `help` for the shell's "
+        "own, and `man <cmd>` or `<cmd> --help` for one command's usage."
     )
     return "\n\n".join(parts) + "\n"
 

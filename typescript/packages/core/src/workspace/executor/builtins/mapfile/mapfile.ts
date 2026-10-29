@@ -24,13 +24,11 @@ import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { sessionView, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { countOperand, fail, recordDelimiter, requireView } from '../shared.ts'
+import { builtinUsage, countOperand, fail, recordDelimiter, requireView } from '../shared.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
-const USAGE =
-  'mapfile: usage: mapfile [-d delim] [-n count] [-O origin] [-s count] [-t] [-u fd] [-C callback] [-c quantum] [array]'
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 const DEFAULT_QUANTUM = 5000
 // The bytes one array slot costs, a hole the array pads with included.
@@ -55,12 +53,12 @@ export async function handleMapfile(
   const parse = parseShellOptions(SHELL_SPECS.mapfile, args)
   if (parse.invalid !== null) {
     const token = parse.invalid.startsWith('--') ? parse.invalid : `-${parse.invalid}`
-    return fail(cmd, `bash: ${cmd}: ${token}: invalid option\n${USAGE}\n`, 2)
+    return fail(cmd, `bash: ${cmd}: ${token}: invalid option\n${builtinUsage(cmd)}`, 2)
   }
   if (parse.needsValue !== null) {
     return fail(
       cmd,
-      `bash: ${cmd}: -${parse.needsValue}: option requires an argument\n${USAGE}\n`,
+      `bash: ${cmd}: -${parse.needsValue}: option requires an argument\n${builtinUsage(cmd)}`,
       2,
     )
   }

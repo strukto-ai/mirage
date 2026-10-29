@@ -272,7 +272,7 @@ describe('script CLI e2e', () => {
       const res = await ws.shell('man pager')
       const out = dec.decode(res.stdout)
       expect(res.exitCode).toBe(0)
-      expect(out.startsWith('usage: pager\n')).toBe(true)
+      expect(out).toContain('SYNOPSIS\n       pager\n')
       expect(out).not.toContain('--help')
     } finally {
       await ws.close()

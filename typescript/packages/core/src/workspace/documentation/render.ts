@@ -413,7 +413,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
     )
   }
   parts.push(
-    "Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.",
+    "Run `man -k .` to list every command, `help` for the shell's own, and `man <cmd>` or `<cmd> --help` for one command's usage.",
   )
   return parts.join('\n\n') + '\n'
 }

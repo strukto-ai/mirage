@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from mirage.policy.match.pattern import pattern_matches
 from mirage.policy.types import AdmissionRules, CommandContext
 from mirage.rs.policy import admission_matcher, units
 
@@ -41,3 +42,29 @@ def line_tokens(ctx: CommandContext) -> tuple[str, ...]:
         ctx (CommandContext): the classified command.
     """
     return ctx.tokens or (ctx.command, *ctx.argv)
+
+
+def runs(name: str, rules: AdmissionRules | None) -> bool:
+    """Whether a session can run a command at all: its allow list
+    allows the name and no rule refuses the bare command everywhere. A
+    rule written under one mount refuses it only on a line working
+    inside that mount, which the shell judges line by line, so the
+    command still runs; one written under ``/`` covers every line.
+
+    Args:
+        name (str): the command name.
+        rules (AdmissionRules | None): the session's admission rules.
+    """
+    if not head_allowed(name, rules):
+        return False
+    if rules is None:
+        return True
+    return not any(
+        not rule.paths
+        and rule.mount in ("", "/")
+        and (
+            not rule.commands
+            or any(pattern_matches(p, (name,)) for p in rule.commands)
+        )
+        for rule in rules.deny
+    )

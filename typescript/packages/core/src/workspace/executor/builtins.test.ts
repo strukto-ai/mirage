@@ -11,37 +11,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../../commands/spec/types.ts'
-import { CLIHandler } from '../../commands/cli/types.ts'
 
-import { commandsFor } from '../mount/backends.ts'
 import { EvaluationContext } from '../evaluation.ts'
 import { helpPage, versionLine } from '../../commands/spec/standard.ts'
-import { HELP as PRINTF_HELP } from './builtins/printf/printf.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import { specOf } from '../../commands/spec/index.ts'
-import { renderHelp } from '../../commands/spec/help.ts'
 import { makeVar } from '../../shell/variable.ts'
 import { envSnapshot, seedVar, sessionView, setAttr } from '../../workspace/session/state.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { markNames } from './builtins/declare/declare.ts'
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { CLI } from '../../commands/cli/types.ts'
-import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { ExecutionNode } from '../types.ts'
 import { CAPACITY } from '../../io/pipe.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { enoent } from '../../errors/fs.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
 import { byteChar } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { ContentType, FileStat, FileType, MountMode } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
-import type { MountEntry } from '../mount/mount.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { SessionState } from '../session/session.ts'
 import type { ResolveFn } from '../mount/namespace/namespace.ts'
@@ -52,7 +42,6 @@ import {
   handleEval,
   handleExport,
   handleLocal,
-  handleMan,
   handlePrintenv,
   handlePrintf,
   handleGetopts,
@@ -72,22 +61,6 @@ import { durationSeconds, parseSignal, signalName } from './builtins/timeout/tim
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel } from '../../shell/console/index.ts'
-
-function wireMount(mount: MountEntry): void {
-  for (const cmd of commandsFor(mount.vfs)) {
-    if (cmd instanceof CLI) mount.registerCommands([cmd])
-    else if (cmd.filetype !== null) mount.register(cmd)
-    else if (cmd.vfs === null) mount.registerGeneral(cmd)
-    else mount.register(cmd)
-  }
-  for (const cmd of GENERAL_COMMANDS) {
-    mount.registerGeneral(cmd)
-  }
-}
-
-function wireRegistry(reg: MountRegistry): void {
-  for (const m of reg.allMounts()) wireMount(m)
-}
 
 async function readBody(out: ByteSource | null): Promise<string> {
   if (out === null) return ''
@@ -538,48 +511,6 @@ describe('handlePrintf', () => {
       `bash: printf: ${bad}: invalid option\nprintf: usage: printf [-v var] format [arguments]\n`,
     )
     expect(node.exitCode).toBe(2)
-  })
-
-  // bash answers the EXACT word `--help` for every builtin ahead of
-  // its option scan, writing the page to STDOUT and exiting 2, where `--hel`
-  // and `--version` take the invalid-option path above (measured on bash
-  // 5.2.37). Mirrors test_printf.py.
-  it('prints the help page to stdout and exits 2', async () => {
-    const [out, io, node] = await printed(['--help'], new SessionState({ sessionId: 'test' }))
-    expect(io.exitCode).toBe(2)
-    expect(io.stderr).toBeNull()
-    expect(await readBody(out)).toBe(PRINTF_HELP)
-    expect(node.exitCode).toBe(2)
-  })
-
-  // The page is the BUILTIN's, so it is bash's own text and not the
-  // spec-rendered one every other command answers --help with: the
-  // spec-rendered page cannot mention `-v`, which is the builtin's option
-  // alone and so is absent from CommandSpec by design. The first line is
-  // bash's synopsis, not GNU's `Usage:` line. Mirrors test_printf.py.
-  it('answers with the bash builtin page, not the spec page', () => {
-    expect(PRINTF_HELP.startsWith('printf: printf [-v var] format [arguments]\n')).toBe(true)
-    expect(PRINTF_HELP).toContain('  -v var\tassign the output to shell variable VAR')
-    expect(PRINTF_HELP).not.toBe(renderHelp('printf', specOf('printf')))
-    expect(PRINTF_HELP.startsWith('printf\n\nUsage:')).toBe(false)
-  })
-
-  // Byte for byte bash 5.2.37's page, minus the two conversions mirage does
-  // not implement. Keeping the check explicit means adding `%Q` or `%(fmt)T`
-  // to the engine without adding it to the page fails here. Mirrors
-  // test_printf.py.
-  it('drops only the conversions mirage lacks', () => {
-    expect(PRINTF_HELP).toContain('      %b\texpand backslash escape sequences')
-    expect(PRINTF_HELP).toContain('      %q\tquote the argument in a way')
-    expect(PRINTF_HELP).not.toContain('%Q')
-    expect(PRINTF_HELP).not.toContain('%(fmt)T')
-    expect(
-      PRINTF_HELP.endsWith(
-        '    Exit Status:\n' +
-          '    Returns success unless an invalid option is given or a write or assignment\n' +
-          '    error occurs.\n',
-      ),
-    ).toBe(true)
   })
 
   it('takes -- as the end of the options', async () => {
@@ -1539,6 +1470,25 @@ describe('handleSet', () => {
     handleSet(['--', 'a', 'b'], s)
     expect(s.positionalArgs).toEqual(['a', 'b'])
   })
+
+  // bash reads every option word before it acts on any, so one letter it
+  // lacks refuses the whole line. Mirrors test_set.py.
+  it.each([
+    [['-z'], '-z'],
+    [['-xz'], '-z'],
+    [['-e', '+%'], '+%'],
+  ])('refuses %j whole', (args, named) => {
+    const s = new SessionState({ sessionId: 'test' })
+    const [, io, node] = handleSet([...args, 'a'], s)
+    expect(node.exitCode).toBe(2)
+    expect(decode(io.stderr as Uint8Array)).toBe(
+      `bash: set: ${named}: invalid option\n` +
+        'set: usage: set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [-] [arg ...]\n',
+    )
+    expect(s.shellOptions.xtrace).not.toBe(true)
+    expect(s.shellOptions.errexit).not.toBe(true)
+    expect(s.positionalArgs).toEqual([])
+  })
 })
 
 describe('handleReturn / handleLocal', () => {
@@ -1737,82 +1687,6 @@ describe('handleSource', () => {
   })
 })
 
-describe('handleMan', () => {
-  it('renders header and description for a known command, no VFS section', async () => {
-    const reg = new MountRegistry({ '/ram/': new RAMVFS() }, MountMode.WRITE)
-    wireRegistry(reg)
-    const [out, io] = handleMan(['date'], reg)
-    expect(io.exitCode).toBe(0)
-    const body = await readBody(out)
-    expect(body.startsWith('# date\n\n')).toBe(true)
-    expect(body).not.toContain('RESOURCES')
-    expect(body).not.toMatch(/^- general$/m)
-  })
-
-  it('renders OPTIONS table when the spec has options', async () => {
-    const reg = new MountRegistry({ '/ram/': new RAMVFS() }, MountMode.WRITE)
-    wireRegistry(reg)
-    const [out, io] = handleMan(['date'], reg)
-    expect(io.exitCode).toBe(0)
-    const body = await readBody(out)
-    expect(body).toContain('## OPTIONS')
-    expect(body).toContain('| short | long | value | description |')
-  })
-
-  it('renders one page however many mounts register the name', async () => {
-    const reg = new MountRegistry(
-      { '/ram-a/': new RAMVFS(), '/ram-b/': new RAMVFS() },
-      MountMode.WRITE,
-    )
-    wireRegistry(reg)
-    const [out, io] = handleMan(['cat'], reg)
-    expect(io.exitCode).toBe(0)
-    const body = await readBody(out)
-    expect(body.startsWith('# cat\n\n')).toBe(true)
-    expect(body).not.toContain('ram')
-  })
-
-  it('documents bash and sh from the bash spec', async () => {
-    const reg = new MountRegistry({ '/ram/': new RAMVFS() }, MountMode.WRITE)
-    wireRegistry(reg)
-    const [out, io] = handleMan(['bash'], reg)
-    expect(io.exitCode).toBe(0)
-    const body = await readBody(out)
-    expect(body.startsWith('# bash\n')).toBe(true)
-    expect(body).toContain('-c')
-    expect(body).not.toContain('RESOURCES')
-    const [sh] = handleMan(['sh'], reg)
-    expect((await readBody(sh)).startsWith('# sh\n')).toBe(true)
-  })
-
-  it('exits 1 with a clear error for unknown commands', () => {
-    const reg = new MountRegistry({ '/ram/': new RAMVFS() }, MountMode.WRITE)
-    wireRegistry(reg)
-    const [, io] = handleMan(['definitely-not-a-real-command-xyz'], reg)
-    expect(io.exitCode).toBe(1)
-    const errBytes = io.stderr instanceof Uint8Array ? io.stderr : null
-    expect(decode(errBytes)).toContain('no entry for definitely-not-a-real-command-xyz')
-  })
-
-  it('lists every command once under # commands, sorted, with no VFS sections', async () => {
-    const reg = new MountRegistry(
-      { '/ram-a/': new RAMVFS(), '/ram-b/': new RAMVFS() },
-      MountMode.WRITE,
-    )
-    wireRegistry(reg)
-    const [body, io] = handleMan([], reg)
-    const out = await readBody(body)
-    expect(io.exitCode).toBe(0)
-    expect(out.startsWith('# commands\n\n')).toBe(true)
-    expect(out).not.toContain('# ram')
-    expect(out).not.toContain('# general')
-    const rows = out.split('\n').filter((l) => l.startsWith('- '))
-    const names = rows.map((l) => l.slice(2, l.indexOf(' — ')))
-    expect(names.filter((n) => n === 'cat').length).toBe(1)
-    expect(names).toEqual([...names].sort(compareCodePoints))
-  })
-})
-
 // A line that prints, then prints again a moment after its stop.
 async function goesOn(
   _cmd: string,
@@ -1877,64 +1751,6 @@ function fakeShell(exitCodes: number[] = []): {
     },
   }
 }
-
-describe('handleMan for installed CLIs', () => {
-  function cliRegistry(): MountRegistry {
-    const reg = new MountRegistry({ '/ram/': new RAMVFS() }, MountMode.WRITE)
-    wireRegistry(reg)
-    reg.clis.install(
-      'linear',
-      new CLI({
-        spec: new CommandSpec({
-          name: 'linear',
-          description: 'Linear API client',
-          subcommands: [
-            new CommandSpec({
-              name: 'issue',
-              description: 'Manage issues',
-              aliases: ['i'],
-              subcommands: [new CommandSpec({ name: 'create', description: 'Create one' })],
-            }),
-          ],
-        }),
-        handlers: { 'issue create': new CLIHandler({ fn: () => [null, new IOResult()] }) },
-      }),
-    )
-    return reg
-  }
-
-  it('renders an installed CLI', async () => {
-    const [out, io] = handleMan(['linear'], cliRegistry())
-    expect(io.exitCode).toBe(0)
-    const text = await readBody(out)
-    expect(text).toContain('usage: linear')
-    expect(text).toContain('issue')
-  })
-
-  it('descends a verb path and resolves aliases', async () => {
-    const reg = cliRegistry()
-    const text = await readBody(handleMan(['linear', 'issue', 'create'], reg)[0])
-    expect(text).toContain('usage: linear issue create')
-    expect(await readBody(handleMan(['linear', 'i', 'create'], reg)[0])).toBe(text)
-  })
-
-  it('names the whole line for an unknown verb', () => {
-    const [out, io] = handleMan(['linear', 'bogus'], cliRegistry())
-    expect(out).toBeNull()
-    expect(io.exitCode).toBe(1)
-    const errBytes = io.stderr instanceof Uint8Array ? io.stderr : null
-    expect(decode(errBytes)).toBe('man: no entry for linear bogus\n')
-  })
-
-  it('lists installed CLIs in the bare index, after the commands', async () => {
-    const reg = cliRegistry()
-    const text = await readBody(handleMan([], reg)[0])
-    expect(text).toContain('# clis')
-    expect(text).toContain('- linear — Linear API client')
-    expect(text.indexOf('# commands')).toBeLessThan(text.indexOf('# clis'))
-    expect(text).not.toContain('# general')
-  })
-})
 
 describe('handleEcho GNU option rules', () => {
   it('trailing -n prints literally', () => {

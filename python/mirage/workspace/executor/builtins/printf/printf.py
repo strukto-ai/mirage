@@ -19,7 +19,6 @@ from contextlib import aclosing
 from mirage.commands.spec.usage import usage_hint
 from mirage.context import program_invocation
 from mirage.io import IOResult
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import decode_text, encode_text, utf8_locale
@@ -30,7 +29,11 @@ from mirage.workspace.executor.builtins.printf.format import (
     printf_output,
     run_printf,
 )
-from mirage.workspace.executor.builtins.shared import fail, result
+from mirage.workspace.executor.builtins.shared import (
+    builtin_usage,
+    fail,
+    result,
+)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.elements import assign_element
@@ -39,60 +42,6 @@ from mirage.workspace.types import ExecutionNode
 
 # bash 5.2.21's own string, which both the usage error and the
 # invalid-option refusal end with.
-_USAGE = "printf: usage: printf [-v var] format [arguments]\n"
-
-# bash's own help page for the printf builtin, byte for byte as bash
-# 5.2.37 writes it, because `printf --help` is answered by the builtin
-# and a builtin's page is bash's, not GNU coreutils'. It cannot come
-# from render_help: the page documents `-v`, which is the BUILTIN's
-# option alone (run as a program through `find -exec printf`, `-v` is
-# not available), so CommandSpec must not declare it and the spec-driven
-# renderer has nothing to render it from.
-#
-# One deliberate divergence, and it is a subtraction: bash lists `%Q` and
-# `%(fmt)T` among the conversions it adds to printf(1), and mirage
-# implements neither, so those two entries are dropped rather than
-# promised. Everything mirage does implement is described in bash's own
-# words. Adding either conversion means adding its lines back here.
-_HELP = (
-    "printf: printf [-v var] format [arguments]\n"
-    "    Formats and prints ARGUMENTS under control of the FORMAT.\n"
-    "    \n"
-    "    Options:\n"
-    "      -v var\tassign the output to shell variable VAR rather than\n"
-    "    \t\tdisplay it on the standard output\n"
-    "    \n"
-    "    FORMAT is a character string which contains three types of objects:"
-    " plain\n"
-    "    characters, which are simply copied to standard output; character"
-    " escape\n"
-    "    sequences, which are converted and copied to the standard output;"
-    " and\n"
-    "    format specifications, each of which causes printing of the next"
-    " successive\n"
-    "    argument.\n"
-    "    \n"
-    "    In addition to the standard format specifications described in"
-    " printf(1),\n"
-    "    printf interprets:\n"
-    "    \n"
-    "      %b\texpand backslash escape sequences in the corresponding"
-    " argument\n"
-    "      %q\tquote the argument in a way that can be reused as shell"
-    " input\n"
-    "    \n"
-    "    The format is re-used as necessary to consume all of the arguments."
-    "  If\n"
-    "    there are fewer arguments than the format requires,  extra format\n"
-    "    specifications behave as if a zero value or null string, as"
-    " appropriate,\n"
-    "    had been supplied.\n"
-    "    \n"
-    "    Exit Status:\n"
-    "    Returns success unless an invalid option is given or a write or"
-    " assignment\n"
-    "    error occurs.\n"
-)
 
 
 async def handle_printf(
@@ -158,20 +107,7 @@ async def handle_printf(
                 # than an empty one (bash 5.2.21: `printf --` is exit 2
                 # with the usage, where `printf -- --zzz` prints
                 # `--zzz`).
-                return fail("printf", _USAGE, 2)
-        elif first == "--help":
-            # bash answers the EXACT word `--help` for every builtin,
-            # ahead of its option scan, by writing the builtin's help
-            # page to STDOUT and exiting 2 -- only a spelling
-            # the option scan actually reads (`--hel`, `--version`)
-            # takes the invalid-option path below (bash 5.2.37). The
-            # page is the BUILTIN's, in bash's own words and layout,
-            # because that is whose printf this is; see _HELP.
-            return (
-                yield_bytes(encode_text(_HELP)),
-                IOResult(exit_code=2),
-                ExecutionNode(command="printf", exit_code=2),
-            )
+                return fail("printf", builtin_usage("printf"), 2)
         elif first.startswith("-") and len(first) > 1 and first != "-v":
             # bash's option scan takes single letters only, so it
             # reports the first character it does not know spelled with
@@ -186,7 +122,7 @@ async def handle_printf(
             # change.
             return fail(
                 "printf",
-                f"bash: printf: -{first[1]}: invalid option\n{_USAGE}",
+                f"bash: printf: -{first[1]}: invalid option\n{builtin_usage('printf')}",
                 2,
             )
     elif args and args[0] == "--":
@@ -199,7 +135,7 @@ async def handle_printf(
             return fail(
                 "printf", f"printf: missing operand\n{usage_hint('printf')}\n"
             )
-        return fail("printf", _USAGE, 2)
+        return fail("printf", builtin_usage("printf"), 2)
     posix = program and "POSIXLY_CORRECT" in env_snapshot(session)
     utf8 = utf8_locale(env_snapshot(session))
     if target is None or parsed is None:

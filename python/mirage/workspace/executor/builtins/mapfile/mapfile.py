@@ -28,6 +28,7 @@ from mirage.shell.bytes import decode_text, encode_text
 from mirage.utils.quote import single_quote
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.shared import (
+    builtin_usage,
     count_operand,
     fail,
     record_delimiter,
@@ -42,10 +43,6 @@ from mirage.workspace.session.state import (
 )
 from mirage.workspace.types import ExecutionNode
 
-_USAGE = (
-    "mapfile: usage: mapfile [-d delim] [-n count] [-O origin] "
-    "[-s count] [-t] [-u fd] [-C callback] [-c quantum] [array]"
-)
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _DEFAULT_QUANTUM = 5000
 # The bytes one array slot costs, a hole the array pads with included.
@@ -91,13 +88,15 @@ async def handle_mapfile(
             else f"-{parse.invalid}"
         )
         return fail(
-            cmd, f"bash: {cmd}: {token}: invalid option\n{_USAGE}\n", 2
+            cmd,
+            f"bash: {cmd}: {token}: invalid option\n{builtin_usage(cmd)}",
+            2,
         )
     if parse.needs_value is not None:
         return fail(
             cmd,
             f"bash: {cmd}: -{parse.needs_value}: option requires an "
-            f"argument\n{_USAGE}\n",
+            f"argument\n{builtin_usage(cmd)}",
             2,
         )
     flags = parse.flags

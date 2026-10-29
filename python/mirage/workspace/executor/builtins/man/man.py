@@ -12,49 +12,214 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Sequence
+import re
+from collections.abc import Iterator, Sequence
 
-from mirage.commands.cli.walk import find_node, node_help
+from mirage.commands.cli.walk import find_child, listed_node
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.compile import compile_spec, option_spellings
-from mirage.commands.spec.types import CommandSpec
-from mirage.io import IOResult
-from mirage.io.types import ByteSource
+from mirage.commands.spec.help import (
+    argparse_parts,
+    flag_rows,
+    operand_rows,
+    render_help,
+    usage_line,
+)
+from mirage.commands.spec.shell import (
+    SHELL_SPECS,
+    ShellParse,
+    parse_shell_options,
+)
+from mirage.commands.spec.synopsis import SHELL_SYNOPSES, SYNOPSES
+from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.shell.bytes import encode_text
-from mirage.workspace.cli.types import CLIInstall
-from mirage.workspace.executor.builtins.man.types import ManEntry
+from mirage.shell.types import ShellBuiltin
+from mirage.version import __version__
+from mirage.workspace.executor.builtins.help import (
+    env_width,
+    fill,
+    option_rows,
+    paragraphs,
+    summary,
+)
+from mirage.workspace.executor.builtins.man.constants import (
+    DEFAULT_WIDTH,
+    HINT,
+    MANUAL,
+    MIN_WIDTH,
+    NO_PAGE,
+    SECTION,
+    SECTION_RE,
+    TAG_INDENT,
+    TEXT_INDENT,
+    WHATIS_WIDTH,
+)
+from mirage.workspace.executor.builtins.man.types import (
+    ManPage,
+    ManSection,
+)
+from mirage.workspace.executor.builtins.shared import result
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.lookup.constants import EXEC_WRAPPERS
+from mirage.workspace.lookup.constants import BASH_BUILTINS, EXEC_WRAPPERS
 from mirage.workspace.mount.registry import DEV_PREFIX, MountRegistry
-from mirage.workspace.types import ExecutionNode
+from mirage.workspace.session.session import SessionState
 
-# Shell builtins the manual documents through a spec of another name.
-_SHELL_BUILTIN_MAN: dict[str, str] = {
-    "bash": "bash",
-    "sh": "bash",
-}
+_SHELL_WORDS = frozenset(str(b) for b in ShellBuiltin)
+
+# Builtins whose page is the spec of another name.
+_SPEC_OF = {"sh": "bash"}
 
 
-def _described(text: str | None) -> str:
-    """A description, or man's placeholder when the spec carries none.
+def _sections(
+    synopsis: str,
+    description: Sequence[str],
+    options: Sequence[tuple[str, str]],
+    extra: Sequence[ManSection] = (),
+) -> tuple[ManSection, ...]:
+    """A page's sections after NAME, leaving out the empty ones.
 
     Args:
-        text (str | None): the spec's description.
+        synopsis (str): how the command is written.
+        description (Sequence[str]): the description's paragraphs.
+        options (Sequence[tuple[str, str]]): each option and its text.
+        extra (Sequence[ManSection]): sections that
+            follow the options.
     """
-    return text if text is not None else "(no description)"
+    sections: list[ManSection] = [("SYNOPSIS", (synopsis,))]
+    if description:
+        sections.append(("DESCRIPTION", tuple(description)))
+    if options:
+        sections.append(("OPTIONS", tuple(options)))
+    sections += [(head, blocks) for head, blocks in extra if blocks]
+    return tuple(sections)
 
 
-def _command_entry(name: str, registry: MountRegistry) -> ManEntry | None:
-    """The entry for a mount command, None when no mount registers it.
-
-    A name has one spec however many mounts register it (spec parity
-    holds every registration of a name to one spec), so the first
-    registration found is the page. A wrapper no mount registers
-    (``egrep``) has the page of the program it runs, as Debian links
-    one to the other.
+def _described(spec: CommandSpec) -> tuple[str, ...]:
+    """A spec's DESCRIPTION: what its description says after the summary
+    NAME carries, and its epilog; the summary alone when that is all.
 
     Args:
-        name (str): the word to document.
+        spec (CommandSpec): the command or CLI node.
+    """
+    lead, *text = paragraphs(spec.description) or ("",)
+    rest = (*text, *paragraphs(spec.epilog))
+    return rest or ((lead,) if lead else ())
+
+
+def builtin_page(name: str) -> ManPage:
+    """The page of a shell builtin, from the spec ``help`` shows it by:
+    its epilog is the exit status.
+
+    Args:
+        name (str): the builtin.
+    """
+    spec = SHELL_SPECS[name]
+    lead, *text = paragraphs(spec.description)
+    status = (("EXIT STATUS", (spec.epilog,)),) if spec.epilog else ()
+    return ManPage(
+        name=name,
+        summary=lead,
+        sections=_sections(
+            SHELL_SYNOPSES[name], text or (lead,), option_rows(spec), status
+        ),
+    )
+
+
+def spec_page(name: str, spec: CommandSpec) -> ManPage:
+    """The page of a command, from its spec.
+
+    The synopsis is the program's own first ``--help`` line where mirage
+    keeps one, else the line the spec's slots spell.
+
+    Args:
+        name (str): the command.
+        spec (CommandSpec): its grammar.
+    """
+    synopsis = SYNOPSES.get(name) or usage_line(
+        name, spec, (), spec.usage_style
+    ).removeprefix("Usage: ")
+    return ManPage(
+        name=name,
+        summary=summary(spec),
+        sections=_sections(
+            synopsis,
+            _described(spec),
+            flag_rows(spec),
+            (("OPERANDS", tuple(operand_rows(spec))),),
+        ),
+    )
+
+
+def cli_page(
+    head: str,
+    path: Sequence[str],
+    node: CommandSpec,
+    style: UsageStyle,
+) -> ManPage:
+    """The page of one node of an installed CLI, named after its path
+    with hyphens (``git-commit``).
+
+    The synopsis, the options and the operands are the ones the node's
+    ``--help`` prints, in the root's dialect.
+
+    Args:
+        head (str): the installed head word.
+        path (Sequence[str]): canonical subcommand names below it.
+        node (CommandSpec): the node.
+        style (UsageStyle): the root's dialect.
+    """
+    words = " ".join((head, *path))
+    rows = [
+        (child.name, child.description or "") for child in node.subcommands
+    ]
+    listed = listed_node(node, style)
+    if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA):
+        usage, operands, options = argparse_parts(words, listed, rows)
+        synopsis = usage.removeprefix("usage: ")
+    else:
+        synopsis = usage_line(words, listed, rows, style).removeprefix(
+            "Usage: "
+        )
+        operands, options = operand_rows(listed), flag_rows(listed)
+    return ManPage(
+        name=words.replace(" ", "-"),
+        summary=node.description or "",
+        sections=_sections(
+            synopsis,
+            _described(node),
+            options,
+            (
+                ("OPERANDS", tuple(row for row in operands if row[1])),
+                ("COMMANDS", tuple(rows)),
+            ),
+        ),
+    )
+
+
+def _shell_page(name: str) -> ManPage | None:
+    """The page of a shell builtin: bash's from its help, else the spec
+    of one that is a program elsewhere (``man``, ``sleep``, ``env``).
+
+    Args:
+        name (str): the word.
+    """
+    if name in SHELL_SYNOPSES and name in BASH_BUILTINS:
+        return builtin_page(name)
+    spec = SHELL_SPECS.get(name) or SPECS.get(_SPEC_OF.get(name, name))
+    if name in _SHELL_WORDS and spec is not None:
+        return spec_page(name, spec)
+    return None
+
+
+def _command_page(name: str, registry: MountRegistry) -> ManPage | None:
+    """The page of a mounted command, None when no mount registers it.
+
+    A name has one spec however many mounts register it, so the first
+    registration is the page. A wrapper no mount registers (``egrep``)
+    has the page of the program it runs, as Debian links one to the
+    other.
+
+    Args:
+        name (str): the word.
         registry (MountRegistry): registry holding the mounts.
     """
     for mount in registry.mounts():
@@ -62,212 +227,360 @@ def _command_entry(name: str, registry: MountRegistry) -> ManEntry | None:
             continue
         cmd = mount.resolve_command(name)
         if cmd is not None:
-            return ManEntry(name=name, spec=cmd.spec)
-    if name in EXEC_WRAPPERS:
-        runs = _command_entry(EXEC_WRAPPERS[name][0], registry)
-        if runs is not None:
-            return ManEntry(name=name, spec=runs.spec)
+            return spec_page(name, cmd.spec)
+    runs = EXEC_WRAPPERS.get(name)
+    if runs is not None:
+        page = _command_page(runs[0], registry)
+        if page is not None:
+            return ManPage(name, page.summary, page.sections)
     return None
 
 
-def _builtin_entry(name: str) -> ManEntry | None:
-    """The entry for a shell builtin the manual documents, else None.
+def _subpage(
+    node: CommandSpec, rest: str
+) -> tuple[CommandSpec, tuple[str, ...]] | None:
+    """The node a hyphenated rest of a page name spells below ``node``.
 
     Args:
-        name (str): the word to document.
+        node (CommandSpec): the node to descend from.
+        rest (str): the name after the node's own, without its hyphen.
     """
-    spec_key = _SHELL_BUILTIN_MAN.get(name)
-    spec = SPECS.get(spec_key) if spec_key is not None else None
-    if spec is None:
-        return None
-    return ManEntry(name=name, spec=spec)
+    for child in node.subcommands:
+        for word in (child.name, *child.aliases):
+            if rest == word:
+                return child, (child.name,)
+            if rest.startswith(word + "-"):
+                deeper = _subpage(child, rest[len(word) + 1 :])
+                if deeper is not None:
+                    return deeper[0], (child.name, *deeper[1])
+    return None
 
 
-def _command_entries(registry: MountRegistry) -> list[ManEntry]:
-    """One entry per name registered on any mount, first registration
-    wins, and one per wrapper of a listed program.
-
-    Args:
-        registry (MountRegistry): registry holding the mounts.
-    """
-    seen: dict[str, ManEntry] = {}
-    for mount in registry.mounts():
-        if mount.prefix == DEV_PREFIX:
-            continue
-        for cmd in mount.all_commands():
-            if cmd.name not in seen:
-                seen[cmd.name] = ManEntry(name=cmd.name, spec=cmd.spec)
-    for wrapper, (runs, _) in EXEC_WRAPPERS.items():
-        if wrapper not in seen and runs in seen:
-            seen[wrapper] = ManEntry(name=wrapper, spec=seen[runs].spec)
-    return list(seen.values())
-
-
-def _cli_entries(registry: MountRegistry) -> list[ManEntry]:
-    """One entry per installed CLI head word.
+def _cli_lookup(name: str, registry: MountRegistry) -> ManPage | None:
+    """The page an installed CLI has under a name: its head word, or a
+    subcommand spelled with hyphens (``git-commit``).
 
     Args:
+        name (str): the page name.
         registry (MountRegistry): registry holding the installs.
     """
-    return [
-        ManEntry(name=name, spec=install.cli.spec)
-        for name, install in registry.clis.items().items()
-    ]
+    for head, install in registry.clis.items().items():
+        spec = install.cli.spec
+        if name == head:
+            return cli_page(head, (), spec, spec.usage_style)
+        if name.startswith(head + "-"):
+            found = _subpage(spec, name[len(head) + 1 :])
+            if found is not None:
+                return cli_page(head, found[1], found[0], spec.usage_style)
+    return None
 
 
-def _render_options_table(spec: CommandSpec) -> list[str]:
-    if not compile_spec(spec).options:
-        return []
-    lines: list[str] = []
-    lines.append("## OPTIONS")
-    lines.append("")
-    lines.append("| short | long | value | description |")
-    lines.append("| ----- | ---- | ----- | ----------- |")
-    for opt in compile_spec(spec).options:
-        short, long = option_spellings(opt)
-        kind = "bool" if opt.action in ("store_true", "count") else opt.type
-        lines.append(
-            f"| {short or ''} | {long or ''} | {kind} | {opt.help or ''} |"
-        )
-    return lines
-
-
-def _render_page(entry: ManEntry) -> str:
-    """The page for one entry: title, description, options table.
+def pages_of(name: str, registry: MountRegistry) -> list[ManPage]:
+    """Every page a name has, in the order ``man`` prefers them: an
+    installed CLI's, then a builtin's, then a mounted command's.
 
     Args:
-        entry (ManEntry): the word and its spec.
+        name (str): the page name.
+        registry (MountRegistry): registry holding mounts and installs.
     """
-    lines = [f"# {entry.name}", "", _described(entry.spec.description)]
-    table = _render_options_table(entry.spec)
-    if table:
-        lines.append("")
-        lines.extend(table)
-    return "\n".join(lines) + "\n"
+    found = (
+        _cli_lookup(name, registry),
+        _shell_page(name),
+        _command_page(name, registry),
+    )
+    return [page for page in found if page is not None]
 
 
-def _render_section(title: str, entries: Sequence[ManEntry]) -> str:
-    """One section of the bare listing, empty when there is nothing to list.
+def find_page(name: str, registry: MountRegistry) -> ManPage | None:
+    """The page a name opens, the first of ``pages_of``.
 
     Args:
-        title (str): the section heading.
-        entries (Sequence[ManEntry]): the words to list, sorted here.
+        name (str): the page name.
+        registry (MountRegistry): registry holding mounts and installs.
     """
-    if not entries:
-        return ""
-    lines = [f"# {title}", ""]
-    for entry in sorted(entries, key=lambda e: e.name):
-        desc = _described(entry.spec.description)
-        lines.append(f"- {entry.name} \u2014 {desc}")
-    return "\n".join(lines)
+    pages = pages_of(name, registry)
+    return pages[0] if pages else None
 
 
-def _render_cli_entry(
-    head: str, verbs: Sequence[str], spec: CommandSpec
-) -> str | None:
-    """The page for one node of an installed CLI, None when verbs miss.
-
-    The page is the node's own ``--help``, rendered by the one renderer
-    that serves ``--help`` and the bare-group refusal, so a CLI's manual
-    cannot drift from the program. A tree is a manual with sections:
-    ``man linear`` lists the verbs and ``man linear issue create`` is
-    the page for one leaf.
+def _cli_pages(
+    head: str,
+    path: tuple[str, ...],
+    node: CommandSpec,
+    style: UsageStyle,
+) -> Iterator[ManPage]:
+    """Every page of an installed CLI's tree, the node's first.
 
     Args:
-        head (str): installed head word, as typed.
-        verbs (Sequence[str]): verb words after the head, aliases
-            allowed.
-        spec (CommandSpec): the installed program tree.
+        head (str): the installed head word.
+        path (tuple[str, ...]): the node's path below it.
+        node (CommandSpec): the node.
+        style (UsageStyle): the root's dialect.
     """
-    found = find_node(spec, verbs)
-    if found is None:
-        return None
-    node, path = found
-    # The root's dialect, so a manual page reads exactly like the
-    # --help it renders from.
-    return node_help(" ".join((head,) + path), node, spec.usage_style)
+    yield cli_page(head, path, node, style)
+    for child in node.subcommands:
+        yield from _cli_pages(head, (*path, child.name), child, style)
 
 
-def _render_man_index(registry: MountRegistry) -> str:
-    """The bare ``man`` listing, by kind of word: commands, then CLIs.
-
-    Every name registered on any mount is one row however many mounts
-    register it, and no row says which: the manual documents words, and
-    dispatch by name already picks the mount that serves one.
+def _all_pages(registry: MountRegistry) -> list[ManPage]:
+    """Every page of the manual, one per name, sorted by name.
 
     Args:
         registry (MountRegistry): registry holding mounts and installs.
     """
-    sections = [
-        _render_section("commands", _command_entries(registry)),
-        _render_section("clis", _cli_entries(registry)),
-    ]
-    body = "\n\n".join(s for s in sections if s)
-    return body + "\n" if body else ""
+    pages: dict[str, ManPage] = {}
+    for head, install in registry.clis.items().items():
+        spec = install.cli.spec
+        for page in _cli_pages(head, (), spec, spec.usage_style):
+            pages.setdefault(page.name, page)
+    words = {
+        *(name for name in SHELL_SYNOPSES if name in BASH_BUILTINS),
+        *_SHELL_WORDS,
+    }
+    for mount in registry.mounts():
+        if mount.prefix != DEV_PREFIX:
+            words.update(cmd.name for cmd in mount.all_commands())
+    words.update(w for w, (runs, _) in EXEC_WRAPPERS.items() if runs in words)
+    for word in words:
+        if word not in pages:
+            found = find_page(word, registry)
+            if found is not None:
+                pages[word] = found
+    return [pages[name] for name in sorted(pages)]
 
 
-def _cli_man(
-    install: CLIInstall,
-    verbs: Sequence[str],
-    cmd_str: str,
-    registry: MountRegistry,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """The page (or pages) for an installed head word.
-
-    A CLI may not take a general command's name, but a mount can
-    register a custom command under any name, so both pages can exist
-    for one word. The CLI goes first: it is the one dispatch would run.
+def _three(left: str, center: str, right: str, length: int) -> str:
+    """A header or footer line: one part at each margin, one centered.
 
     Args:
-        install (CLIInstall): the installed CLI, head word included.
-        verbs (Sequence[str]): verb words after the head, aliases
-            allowed.
-        cmd_str (str): the line, for the execution node.
-        registry (MountRegistry): registry holding the mounts.
+        left (str): the part at the left margin.
+        center (str): the centered part, empty for none.
+        right (str): the part at the right margin.
+        length (int): the line length.
     """
-    head = install.name
-    entry = _render_cli_entry(head, verbs, install.cli.spec)
-    if entry is None:
-        typed = " ".join([head, *verbs])
-        err = encode_text(f"man: no entry for {typed}\n")
+    line = left
+    if center:
+        start = max((length - len(center) + 1) // 2, len(line) + 1)
+        line = line.ljust(start) + center
+    return line.ljust(max(length - len(right), len(line) + 1)) + right
+
+
+def render_page(page: ManPage, width: int) -> str:
+    """A page laid out as man prints it with justification and
+    hyphenation off: a header, NAME, each section with its text indented
+    and its tags hanging, and a footer.
+
+    Args:
+        page (ManPage): the page.
+        width (int): the terminal width; lines stop one short of it.
+    """
+    length = width - 1
+    title = f"{page.name.upper()}({SECTION})"
+    text = " " * TEXT_INDENT
+    tagged = " " * TAG_INDENT
+    lines = [_three(title, MANUAL, title, length), ""]
+    named = f"{page.name} - {page.summary}" if page.summary else page.name
+    sections = (("NAME", (named,)), *page.sections)
+    for heading, blocks in sections:
+        lines.append(heading)
+        for i, block in enumerate(blocks):
+            if i:
+                lines.append("")
+            if isinstance(block, str):
+                lines += [
+                    text + line for line in fill(block, length - TEXT_INDENT)
+                ]
+                continue
+            tag, does = block
+            body = fill(does, length - TAG_INDENT)
+            if body and len(tag) < TAG_INDENT - TEXT_INDENT:
+                lines.append(
+                    text + tag.ljust(TAG_INDENT - TEXT_INDENT) + body[0]
+                )
+                body = body[1:]
+            else:
+                lines.append(text + tag)
+            lines += [tagged + line for line in body]
+        lines.append("")
+    lines.append(_three(f"Mirage {__version__}", "", title, length))
+    return "\n".join(lines) + "\n"
+
+
+def _whatis(page: ManPage) -> str:
+    """A page's line in ``man -f`` and ``man -k``.
+
+    Args:
+        page (ManPage): the page.
+    """
+    named = f"{page.name} ({SECTION})".ljust(WHATIS_WIDTH)
+    return f"{named} - {page.summary or '(unknown subject)'}\n"
+
+
+def _usage_error(message: str) -> Result:
+    """man's refusal of its own command line: the message, then the
+    hint, status 1.
+
+    Args:
+        message (str): what is wrong, without the newline.
+    """
+    return result("man", exit_code=1, stderr=f"man: {message}\n{HINT}")
+
+
+def _refusal(parse: ShellParse) -> str | None:
+    """What man says of a command line its options refuse, None when
+    they take it.
+
+    Args:
+        parse (ShellParse): the scan of man's options.
+    """
+    if parse.unexpected_value is not None:
+        spelled = parse.unexpected_value.partition("=")[0]
+        return f"option '{spelled}' doesn't allow an argument"
+    if parse.invalid is None:
+        return None
+    if not parse.invalid.startswith("--"):
+        return f"invalid option -- '{parse.invalid}'"
+    if parse.candidates:
+        listed = " ".join(f"'{name}'" for name in parse.candidates)
         return (
-            None,
-            IOResult(exit_code=1, stderr=err),
-            ExecutionNode(command=cmd_str, exit_code=1, stderr=err),
+            f"option '{parse.invalid}' is ambiguous; possibilities: {listed}"
         )
-    sections = [entry]
-    command = _command_entry(head, registry) if not verbs else None
-    if command is not None:
-        sections.append(_render_page(command))
-    out = encode_text("\n".join(sections))
-    return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
+    return f"unrecognized option '{parse.invalid}'"
+
+
+def _lookup(
+    pages: list[str], registry: MountRegistry
+) -> Iterator[tuple[str, list[ManPage]]]:
+    """Each page asked for and every page it opens. Words after an
+    installed CLI's head that name its subcommands make one page with
+    it, as ``man git commit`` opens git-commit.
+
+    Args:
+        pages (list[str]): the page names, in order.
+        registry (MountRegistry): registry holding mounts and installs.
+    """
+    i = 0
+    while i < len(pages):
+        name = pages[i]
+        i += 1
+        install = registry.clis.get(name)
+        if install is None:
+            yield name, pages_of(name, registry)
+            continue
+        spec = install.cli.spec
+        node: CommandSpec = spec
+        path: tuple[str, ...] = ()
+        while i < len(pages):
+            child = find_child(node, pages[i])
+            if child is None:
+                break
+            node, path = child, (*path, child.name)
+            i += 1
+        if path:
+            yield name, [cli_page(name, path, node, spec.usage_style)]
+        else:
+            yield name, pages_of(name, registry)
 
 
 async def handle_man(
-    args: list[str],
+    args: Sequence[str],
     registry: MountRegistry,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    if not args:
-        out = encode_text(_render_man_index(registry))
-        return out, IOResult(), ExecutionNode(command="man", exit_code=0)
-    name = args[0]
-    cmd_str = "man " + " ".join(args)
-    # Only an installed head word reads the words after it: they are its
-    # verb path. Everything else keeps man's older shape and documents
-    # args[0].
-    install = registry.clis.get(name)
-    if install is not None:
-        return _cli_man(install, args[1:], cmd_str, registry)
-    entry = _command_entry(name, registry) or _builtin_entry(name)
-    if entry is None:
-        err = encode_text(f"man: no entry for {name}\n")
-        return (
-            None,
-            IOResult(exit_code=1, stderr=err),
-            ExecutionNode(command=cmd_str, exit_code=1, stderr=err),
-        )
-    out = encode_text(_render_page(entry))
-    return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
+    session: SessionState,
+) -> Result:
+    """Run ``man``: show the pages asked for, or their summary lines.
+
+    Status 16 when a page is missing, as man-db answers, after the
+    pages it did find; 1 for a command line it refuses.
+
+    Args:
+        args (Sequence[str]): the words after ``man``.
+        registry (MountRegistry): registry holding mounts and installs.
+        session (SessionState): the shell session, whose $MANWIDTH or
+            $COLUMNS sets the width.
+    """
+    spec = SHELL_SPECS["man"]
+    parse = parse_shell_options(spec, list(args))
+    wrong = _refusal(parse)
+    if wrong is not None:
+        return _usage_error(wrong)
+    chosen, pages = parse.flags, parse.operands
+    if "?" in chosen:
+        page = render_help("man", spec, synopsis=SYNOPSES["man"])
+        return result("man", out=encode_text(page))
+    if "usage" in chosen:
+        line = usage_line("man", spec, (), spec.usage_style, SYNOPSES["man"])
+        return result("man", out=encode_text(line + "\n"))
+    if "f" in chosen and "k" in chosen:
+        return _usage_error("-f -k : incompatible options")
+    if "f" in chosen or "k" in chosen:
+        return _summaries(pages, registry, "f" in chosen)
+    if not pages:
+        return result("man", exit_code=1, stderr=NO_PAGE)
+    section = ""
+    if len(pages) > 1 and SECTION_RE.fullmatch(pages[0]):
+        section = pages.pop(0)
+    width = env_width(
+        session, ("MANWIDTH", "COLUMNS"), MIN_WIDTH, DEFAULT_WIDTH
+    )
+    out: list[str] = []
+    errors: list[str] = []
+    for name, found in _lookup(pages, registry):
+        if not found or section not in ("", SECTION):
+            where = f" in section {section}" if section else ""
+            errors.append(f"No manual entry for {name}{where}\n")
+            continue
+        shown = found if "a" in chosen else found[:1]
+        out += [render_page(page, width) for page in shown]
+    return result(
+        "man",
+        out=encode_text("".join(out)) if out else None,
+        exit_code=16 if errors else 0,
+        stderr="".join(errors) or None,
+    )
+
+
+def _summaries(
+    words: list[str], registry: MountRegistry, whatis: bool
+) -> Result:
+    """``man -f`` (each page's summary line) or ``man -k`` (every page
+    whose name or summary the word matches, as a regular expression,
+    ignoring case).
+
+    Args:
+        words (list[str]): the page names or keywords.
+        registry (MountRegistry): registry holding mounts and installs.
+        whatis (bool): ``-f`` when True, ``-k`` when False.
+    """
+    if not words:
+        verb = "whatis" if whatis else "apropos"
+        return result("man", exit_code=1, stderr=f"{verb} what?\n")
+    found: list[ManPage] = []
+    errors: list[str] = []
+    every = [] if whatis else _all_pages(registry)
+    for word in words:
+        if whatis:
+            page = find_page(word, registry)
+            hits = [page] if page is not None else []
+        else:
+            try:
+                pattern = re.compile(word, re.IGNORECASE)
+            except re.error:
+                pattern = re.compile(re.escape(word), re.IGNORECASE)
+            hits = [
+                page
+                for page in every
+                if pattern.search(page.name) or pattern.search(page.summary)
+            ]
+        if not hits:
+            errors.append(f"{word}: nothing appropriate.\n")
+        found += [page for page in hits if page not in found]
+    if not whatis:
+        found.sort(key=lambda page: page.name)
+    return result(
+        "man",
+        out=encode_text("".join(_whatis(page) for page in found)) or None,
+        exit_code=0 if found else 16,
+        stderr="".join(errors) or None,
+    )
 
 
 async def man_builtin(call: BuiltinCall) -> Result:
@@ -276,4 +589,6 @@ async def man_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_man(list(call.argv.args), call.registry)
+    return await handle_man(
+        list(call.argv.args), call.registry, call.context.session
+    )

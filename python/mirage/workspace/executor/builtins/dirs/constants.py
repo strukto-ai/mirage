@@ -16,6 +16,3 @@
 # them; `set -P` supplies the mode when a line names neither -L nor -P.
 CD_OPTIONS = "LPe@"
 PWD_OPTIONS = "LP"
-
-CD_USAGE = "cd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n"
-PWD_USAGE = "pwd: usage: pwd [-LP]\n"
