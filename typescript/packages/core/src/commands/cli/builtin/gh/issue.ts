@@ -177,6 +177,7 @@ export async function listCmd(
       fl,
       '',
       ISSUE_FIELDS,
+      ctx,
     )
   }
   const params: Record<string, string> = { state }
@@ -190,7 +191,7 @@ export async function listCmd(
     listLimit(fl, 30),
   )
   const rows = values.map(issue)
-  return typedOut(rows, fl, listText(rows), ISSUE_FIELDS)
+  return typedOut(rows, fl, listText(rows), ISSUE_FIELDS, ctx)
 }
 
 /**
@@ -209,7 +210,7 @@ export async function viewCmd(
   const fields = jsonFields(fl, ISSUE_FIELDS)
   if (fields !== null) {
     const node = await viewedIssue(accessor.transport, ref, number, fields)
-    return typedOut(exportedNode(ISSUE_FIELD_TABLE, node, fields), fl, '', ISSUE_FIELDS)
+    return typedOut(exportedNode(ISSUE_FIELD_TABLE, node, fields), fl, '', ISSUE_FIELDS, ctx)
   }
   const row = issue(await getIssue(accessor.transport, ref, number))
   const comments = await commentsFor(accessor, fl, ref, number)
@@ -218,6 +219,7 @@ export async function viewCmd(
     fl,
     ghBool(fl, 'comments') ? commentsText(comments ?? []) : viewText(row),
     ISSUE_FIELDS,
+    ctx,
   )
 }
 

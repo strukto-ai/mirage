@@ -238,6 +238,7 @@ async def search_cmd(
             kind == "issues" and _boolean(fl, "include_prs"),
         ),
         SEARCH_FIELDS[kind],
+        ctx,
     )
 
 

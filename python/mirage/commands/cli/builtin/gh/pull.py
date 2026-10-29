@@ -474,6 +474,7 @@ async def list_cmd(
             fl,
             "",
             PR_FIELDS,
+            ctx,
         )
     params: dict[str, str] = {
         "state": "closed" if wanted == "merged" else wanted
@@ -495,7 +496,7 @@ async def list_cmd(
         include=include,
     )
     rows = [_pull(value) for value in values]
-    return await typed_out(rows, fl, _list_text(rows), PR_FIELDS)
+    return await typed_out(rows, fl, _list_text(rows), PR_FIELDS, ctx)
 
 
 async def view_cmd(
@@ -520,7 +521,11 @@ async def view_cmd(
     if fields is not None:
         node = await _viewed_pull(accessor, ref, number, fields)
         return await typed_out(
-            exported_node(PULL_FIELD_TABLE, node, fields), fl, "", PR_FIELDS
+            exported_node(PULL_FIELD_TABLE, node, fields),
+            fl,
+            "",
+            PR_FIELDS,
+            ctx,
         )
     row = _pull(await get_pull(accessor, ref, number))
     comments = await comments_for(accessor, fl, ref, number)
@@ -531,6 +536,7 @@ async def view_cmd(
         if gh_bool(fl, "comments")
         else _view_text(row),
         PR_FIELDS,
+        ctx,
     )
 
 
@@ -695,7 +701,7 @@ async def checks_cmd(
         f"{row.get('link', '')}\n"
         for row in rows
     )
-    out, io = await typed_out(rows, fl, human, CHECK_FIELDS)
+    out, io = await typed_out(rows, fl, human, CHECK_FIELDS, ctx)
     buckets = {row.get("bucket") for row in rows}
     if "fail" in buckets:
         io.exit_code = 1

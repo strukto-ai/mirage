@@ -371,6 +371,7 @@ export async function listCmd(
       fl,
       '',
       PR_FIELDS,
+      ctx,
     )
   }
   const params: Record<string, string> = { state: wanted === 'merged' ? 'closed' : wanted }
@@ -386,7 +387,7 @@ export async function listCmd(
       : undefined,
   )
   const rows = values.map(pull)
-  return typedOut(rows, fl, listText(rows), PR_FIELDS)
+  return typedOut(rows, fl, listText(rows), PR_FIELDS, ctx)
 }
 
 /**
@@ -405,7 +406,7 @@ export async function viewCmd(
   const fields = jsonFields(fl, PR_FIELDS)
   if (fields !== null) {
     const node = await viewedPull(accessor.transport, ref, number, fields)
-    return typedOut(exportedNode(PULL_FIELD_TABLE, node, fields), fl, '', PR_FIELDS)
+    return typedOut(exportedNode(PULL_FIELD_TABLE, node, fields), fl, '', PR_FIELDS, ctx)
   }
   const row = pull(await getPull(accessor.transport, ref, number))
   const comments = await commentsFor(accessor, fl, ref, number)
@@ -414,6 +415,7 @@ export async function viewCmd(
     fl,
     ghBool(fl, 'comments') ? commentsText(comments ?? []) : viewText(row),
     PR_FIELDS,
+    ctx,
   )
 }
 
@@ -573,7 +575,7 @@ export async function checksCmd(
   const human = rows
     .map((row) => `${textValue(row.name)}\t${textValue(row.state)}\t${textValue(row.link)}\n`)
     .join('')
-  const out = await typedOut(rows, fl, human, CHECK_FIELDS)
+  const out = await typedOut(rows, fl, human, CHECK_FIELDS, ctx)
   if (out !== null) {
     const buckets = new Set(rows.map((row) => row.bucket))
     if (buckets.has('fail')) out[1].exitCode = 1

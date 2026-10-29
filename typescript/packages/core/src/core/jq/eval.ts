@@ -833,6 +833,18 @@ export async function jqRaised(
 }
 
 /**
+ * Run a jq program on one value the way jqRun does, with `env` (an object as
+ * text) as the environment `$ENV` and `env` read, and its error marked `own`
+ * when the program raised it with `error` itself (see jqRaised): a whole run,
+ * for a worker to make away from the event loop.
+ */
+export async function jqRunRaised(obj: unknown, expr: string, env: string): Promise<JqRun> {
+  const done = await run(bound(jqText(obj), expr, new Map(), null, null, null, env), expr, false)
+  if (done.stop?.kind !== 'error' || !(await jqRaised(obj, expr, done))) return done
+  return { outputs: done.outputs, stop: { ...done.stop, own: true } }
+}
+
+/**
  * Compile a program the way a run would, without running it: on an empty
  * stdin, which jq reads no document from. jq compiles its program before
  * it reads any input, so it refuses a bad one even when there is no

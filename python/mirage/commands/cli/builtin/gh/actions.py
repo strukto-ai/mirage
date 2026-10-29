@@ -144,7 +144,7 @@ async def run_list_cmd(
         f"{row.get('event', '')}\t{row.get('databaseId', '')}\n"
         for row in rows
     )
-    return await typed_out(rows, fl, human, RUN_FIELDS)
+    return await typed_out(rows, fl, human, RUN_FIELDS, ctx)
 
 
 async def run_view_cmd(
@@ -174,7 +174,7 @@ async def run_view_cmd(
         f"branch:\t{row.get('headBranch', '')}\n"
         f"event:\t{row.get('event', '')}\n"
     )
-    out, io = await typed_out(row, fl, human, RUN_FIELDS)
+    out, io = await typed_out(row, fl, human, RUN_FIELDS, ctx)
     if gh_bool(fl, "exit_status") and row.get("conclusion") not in (
         None,
         "",
@@ -430,7 +430,7 @@ async def workflow_list_cmd(
         f"{row.get('name', '')}\t{row.get('state', '')}\t{row.get('id', '')}\n"
         for row in rows
     )
-    return await typed_out(rows, fl, human, WORKFLOW_FIELDS)
+    return await typed_out(rows, fl, human, WORKFLOW_FIELDS, ctx)
 
 
 async def workflow_view_cmd(

@@ -91,7 +91,7 @@ function args(
   texts: string[],
   flags: Context['flags'] = {},
   config: GhConfig = { token: 't' },
-  extra: Partial<Pick<Context, 'stdin' | 'vfs' | 'argv'>> = {},
+  extra: Partial<Pick<Context, 'stdin' | 'vfs' | 'argv' | 'env' | 'signal'>> = {},
 ): [GitHubAccount, PathSpec[], string[], Context] {
   return [account(config), [], texts, context({ flags, ...extra })]
 }
@@ -814,17 +814,20 @@ describe('gh api --jq', () => {
       '["\\u2028","\\u2029","\x7f","é","\\u0001","\\b"]',
     ],
     ['[true, null, "x"]', '[true,null,"x"]'],
+    ['12345678901234567890', '12345678901234567168'],
+    ['[12345678901234567890]', '[12345678901234567000]'],
   ])('prints %s as go-gh does', async (program, line) => {
     reset({ n: 5000 })
     const out = await api(...args(['repos/o/r'], { jq: program }))
     expect(out === null ? '' : text(out)).toBe(`${line}\n`)
   })
 
-  // gh prints a computed negative zero as -0, but jq.py hands it to Python as
-  // the int 0, so both hosts print 0.
+  // gh prints a computed negative zero as -0, but a whole number reads as an
+  // int, so both hosts print 0.
   it.each([
     ['.n * 0 * -1', '0'],
     ['[.n * 0 * -1]', '[0]'],
+    ['-0.0', '0'],
   ])('prints the negative zero of %s as 0', async (program, line) => {
     reset({ n: 5000 })
     const out = await api(...args(['repos/o/r'], { jq: program }))
@@ -907,6 +910,63 @@ describe('gh api --jq', () => {
     expect(failure).toBeInstanceOf(StreamRefusal)
     const partial = failure as StreamRefusal
     expect([partial.message, new TextDecoder().decode(partial.output)]).toEqual([message, 'x\n'])
+  })
+
+  // `--jq` runs in mirage-rs a bounded number of steps at a time, so a
+  // program that never ends leaves the loop free and the signal stops it.
+  it('stops a program that never ends at the signal', async () => {
+    reset({ a: 'x' })
+    const abort = new AbortController()
+    const run = api(
+      ...args(['repos/o/r'], { jq: 'until(false; .)' }, undefined, { signal: abort.signal }),
+    )
+    const settled = run.then(
+      () => 'done',
+      () => 'stopped',
+    )
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(await Promise.race([settled, Promise.resolve('running')])).toBe('running')
+    abort.abort()
+    expect(await settled).toBe('stopped')
+  })
+
+  it('reads the command environment', async () => {
+    reset({ a: 'x' })
+    const out = await api(
+      ...args(['repos/o/r'], { jq: '[$ENV.TOKEN, env.TOKEN, $ENV.PATH]' }, undefined, {
+        env: { TOKEN: 't' },
+      }),
+    )
+    expect(out === null ? '' : text(out)).toBe('["t","t",null]\n')
+  })
+
+  // The value is the program's whole input: `inputs` yields nothing and
+  // `input` fails with `break`, as jq 1.8.2's does past the last input.
+  it('finds no more input', async () => {
+    reset({ a: 'x' })
+    const out = await api(...args(['repos/o/r'], { jq: '[inputs], (try input catch .)' }))
+    expect(out === null ? '' : text(out)).toBe('[]\nbreak\n')
+    const failure = await api(...args(['repos/o/r'], { jq: '.a, input' })).catch(
+      (error: unknown) => error,
+    )
+    expect(failure).toBeInstanceOf(StreamRefusal)
+    const partial = failure as StreamRefusal
+    expect([partial.message, new TextDecoder().decode(partial.output)]).toEqual(['break', 'x\n'])
+  })
+
+  // A program jq_eval leaves to jq-wasm runs in a worker, away from the loop,
+  // and the program's own errors still read as gojq words them.
+  it('runs a program jq_eval refuses in a worker', async () => {
+    reset({ a: 'x' })
+    const failure = await api(...args(['repos/o/r'], { jq: '[1 | lgamma], error("boom")' })).catch(
+      (error: unknown) => error,
+    )
+    expect(failure).toBeInstanceOf(StreamRefusal)
+    const partial = failure as StreamRefusal
+    expect([partial.message, new TextDecoder().decode(partial.output)]).toEqual([
+      'error: boom',
+      '[0]\n',
+    ])
   })
 })
 

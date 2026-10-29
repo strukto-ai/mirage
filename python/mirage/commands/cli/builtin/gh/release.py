@@ -104,7 +104,7 @@ async def list_cmd(
     )
     if latest is not None:
         latest["isLatest"] = True
-    return await typed_out(rows, fl, _list_text(rows), RELEASE_FIELDS)
+    return await typed_out(rows, fl, _list_text(rows), RELEASE_FIELDS, ctx)
 
 
 async def view_cmd(
@@ -130,7 +130,7 @@ async def view_cmd(
         f"prerelease:\t{str(bool(row.get('isPrerelease'))).lower()}\n--\n"
         f"{row.get('body', '')}\n"
     )
-    return await typed_out(row, fl, human, RELEASE_FIELDS)
+    return await typed_out(row, fl, human, RELEASE_FIELDS, ctx)
 
 
 async def create_cmd(

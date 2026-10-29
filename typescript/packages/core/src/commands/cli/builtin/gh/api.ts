@@ -275,6 +275,7 @@ export async function api(
       return failed(
         pages,
         fl,
+        ctx,
         { body: error.body, head: include ? responseHead(error.status, error.headers) : '' },
         serverError(error.data, error.status) || `HTTP ${String(error.status)}`,
       )
@@ -283,7 +284,7 @@ export async function api(
     if (endpoint === 'graphql') {
       const diagnostic = serverError(response.data, response.status)
       if (diagnostic !== '') {
-        return failed(pages, fl, { body: JSON.stringify(response.data), head }, diagnostic)
+        return failed(pages, fl, ctx, { body: JSON.stringify(response.data), head }, diagnostic)
       }
     }
     pages.push({ data: response.data, head })
@@ -293,7 +294,7 @@ export async function api(
       : undefined
   }
 
-  return [await renderPages(pages, fl), new IOResult()]
+  return [await renderPages(pages, fl, ctx), new IOResult()]
 }
 
 // gh's name for a header: each word capitalized, the way Go canonicalizes one.
@@ -356,11 +357,12 @@ function serverError(data: unknown, status: number): string {
 async function failed(
   pages: Printed[],
   fl: FlagView,
+  ctx: Context,
   failure: Failure,
   diagnostic: string,
 ): Promise<CommandFnResult> {
   return [
-    await renderPages(pages, fl, failure),
+    await renderPages(pages, fl, ctx, failure),
     new IOResult({ exitCode: 1, stderr: ENC.encode(`gh: ${diagnostic}\n`) }),
   ]
 }
@@ -422,9 +424,14 @@ function joinedPages(pages: unknown[], more: boolean): (string | Uint8Array)[] {
  * between two responses, and pages print as they came rather than joined
  * into one array. `--silent` drops the bodies and keeps the heads, and under
  * `--slurp` the array's `[` or `,` goes before a page's head, since gh's
- * writer opens each page before the head is printed.
+ * writer opens each page before the head is printed. `--jq` runs in `ctx`.
  */
-async function renderPages(pages: Printed[], fl: FlagView, failure?: Failure): Promise<Uint8Array> {
+async function renderPages(
+  pages: Printed[],
+  fl: FlagView,
+  ctx: Context,
+  failure?: Failure,
+): Promise<Uint8Array> {
   const include = ghBool(fl, 'include')
   const between = include ? '\n' : ''
   const all = failure === undefined ? pages : [...pages, { data: null, head: failure.head }]
@@ -450,12 +457,16 @@ async function renderPages(pages: Printed[], fl: FlagView, failure?: Failure): P
         between,
       )
       const data = pages.map((page) => page.data)
-      return bytesOf([...heads, await jqLines(slurp ? [data] : data, program), failure?.body ?? ''])
+      return bytesOf([
+        ...heads,
+        await jqLines(slurp ? [data] : data, program, ctx),
+        failure?.body ?? '',
+      ])
     }
     const parts: (string | Uint8Array)[][] = []
     for (const page of pages) {
       try {
-        parts.push([page.head, await jqLines([page.data], program)])
+        parts.push([page.head, await jqLines([page.data], program, ctx)])
       } catch (err) {
         if (!(err instanceof StreamRefusal)) throw err
         const done = bytesOf([...joined([...parts, [page.head]], between), err.output])

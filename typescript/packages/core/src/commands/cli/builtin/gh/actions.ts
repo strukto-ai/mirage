@@ -146,7 +146,7 @@ export async function runListCmd(
         `${textValue(row.status)}\t${textValue(row.conclusion)}\t${textValue(row.displayTitle)}\t${textValue(row.workflowName)}\t${textValue(row.headBranch)}\t${textValue(row.event)}\t${textValue(row.databaseId)}\n`,
     )
     .join('')
-  return typedOut(rows, fl, human, RUN_FIELDS)
+  return typedOut(rows, fl, human, RUN_FIELDS, ctx)
 }
 
 export async function runViewCmd(
@@ -169,7 +169,7 @@ export async function runViewCmd(
     return [await runLog(transport, ref, row, failedOnly), new IOResult()]
   }
   const human = `title:\t${textValue(row.displayTitle)}\nworkflow:\t${textValue(row.workflowName)}\nstatus:\t${textValue(row.status)}\nconclusion:\t${textValue(row.conclusion)}\nbranch:\t${textValue(row.headBranch)}\nevent:\t${textValue(row.event)}\n`
-  const out = await typedOut(row, fl, human, RUN_FIELDS)
+  const out = await typedOut(row, fl, human, RUN_FIELDS, ctx)
   if (
     out !== null &&
     ghBool(fl, 'exit_status') &&
@@ -465,7 +465,7 @@ export async function workflowListCmd(
   const human = rows
     .map((row) => `${textValue(row.name)}\t${textValue(row.state)}\t${textValue(row.id)}\n`)
     .join('')
-  return typedOut(rows, fl, human, WORKFLOW_FIELDS)
+  return typedOut(rows, fl, human, WORKFLOW_FIELDS, ctx)
 }
 
 export async function workflowViewCmd(

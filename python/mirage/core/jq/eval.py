@@ -879,6 +879,32 @@ def jq_raised(
     return _marked_verdict(compiled.input_text(bound.stdin), run) is True
 
 
+def jq_run_raised(obj: JsonValue, expr: str, env: str) -> JqRun[JsonValue]:
+    """Run a jq program on one value the way jq_run does, with `env` as
+    the environment `$ENV` and `env` read, and its error marked `own` when
+    the program raised it with `error` itself (see jq_raised): a whole
+    run, for a worker to make away from the event loop.
+
+    Args:
+        obj (JsonValue): the value the program runs on.
+        expr (str): jq program text.
+        env (str): the environment, an object as text.
+
+    Raises:
+        JqCompileError: libjq's refusal of the program.
+    """
+    run = _run(
+        expr,
+        _bound(_value_text(obj), expr, None, None, None, None, env),
+        False,
+    )
+    if isinstance(run.stop, JqError) and jq_raised(obj, expr, run):
+        return JqRun(
+            run.outputs, JqError(run.stop.text, run.stop.string, True)
+        )
+    return run
+
+
 def jq_check(
     expr: str,
     named: Mapping[str, str] | None = None,
