@@ -425,24 +425,32 @@ async def test_an_observation_a_kept_listing_leaves_out_drops_the_memo(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("known", [False, True])
-async def test_peer_observation_drops_a_contradicted_memo_after_eviction(store, peer, known):
+async def test_peer_observation_drops_a_contradicted_memo_after_eviction(
+    store, peer, known
+):
     await store.set_dir("/d", LISTED)
     key = store._children_key("/d")
     async with command_scope():
         assert (await store.list_dir("/d")).entries == ["/d/a", "/d/b"]
         if known:
-            listing = IndexDirectory.model_validate_json(await store._client.get(key))
+            listing = IndexDirectory.model_validate_json(
+                await store._client.get(key)
+            )
             listing.entries.append("/d/new")
             listing.folders.append(0)
             await store._client.set(key, listing.model_dump_json())
             assert "/d/new" in (await peer.list_dir("/d")).entries
         await store._client.delete(key)
+        ticket = await store.refill_token()
         assert await peer.invalidate_missing(["/d/new"]) is False
+        assert await store.refill_dir("/d", LISTED, ticket) is None
         assert (await store.list_dir("/d")).entries is None
 
 
 @pytest.mark.asyncio
-async def test_peer_unknown_observation_keeps_an_unrelated_memo(store, peer, mgets):
+async def test_peer_unknown_observation_keeps_an_unrelated_memo(
+    store, peer, mgets
+):
     await store.set_dir("/d", LISTED)
     mgets.clear()
     async with command_scope():
