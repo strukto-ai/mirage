@@ -37,7 +37,6 @@ if TYPE_CHECKING:
         handle_declare_print,
         handle_export,
         handle_local,
-        handle_readonly,
         note_local_array,
     )
     from mirage.workspace.executor.builtins.df import handle_df
@@ -186,7 +185,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "handle_declare_print",
         "handle_export",
         "handle_local",
-        "handle_readonly",
         "note_local_array",
     ),
 }
@@ -234,7 +232,6 @@ __all__ = [
     "handle_printenv",
     "handle_printf",
     "handle_read",
-    "handle_readonly",
     "handle_return",
     "handle_getopts",
     "handle_set",

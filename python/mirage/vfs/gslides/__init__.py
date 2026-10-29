@@ -16,12 +16,11 @@ from typing import TYPE_CHECKING
 
 from mirage.utils.loader import lazy_exports
 from mirage.vfs.gslides.config import GSlidesConfig
-from mirage.vfs.gslides.slide_entry import SlideEntry
 
 if TYPE_CHECKING:
     from mirage.vfs.gslides.gslides import GSlidesVFS
 
-__all__ = ["GSlidesConfig", "SlideEntry", "GSlidesVFS"]
+__all__ = ["GSlidesConfig", "GSlidesVFS"]
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.vfs.gslides.gslides": ("GSlidesVFS",),

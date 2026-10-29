@@ -13,25 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from mirage.vfs.gdocs.doc_entry import DocEntry, make_filename
-
-
-def test_doc_entry_creation():
-    entry = DocEntry(
-        id="abc123",
-        name="My Doc",
-        modified_time="2026-04-01T12:00:00.000Z",
-        created_time="2026-03-01T12:00:00.000Z",
-        owner="user@gmail.com",
-        owned_by_me=True,
-        can_edit=True,
-        filename="My_Doc__abc123.gdoc.json",
-    )
-    assert entry.id == "abc123"
-    assert entry.name == "My Doc"
-    assert entry.owned_by_me is True
-    assert entry.can_edit is True
-    assert entry.filename == "My_Doc__abc123.gdoc.json"
+from mirage.vfs.gdocs.doc_entry import make_filename
 
 
 def test_make_filename_names_a_document():

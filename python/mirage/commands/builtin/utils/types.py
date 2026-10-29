@@ -13,27 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable
-from dataclasses import dataclass
 from typing import Callable
 
 AsyncReaddirFn = Callable[[str], Awaitable[list[str]]]
-
-
-@dataclass(frozen=True, slots=True)
-class HostRegex:
-    """A pattern translated from its dialect into this host's.
-
-    Args:
-        source (str): the host source.
-        ignore_case (bool): the host engine must fold case itself. A
-            translator folds each literal and class in the source when
-            case sensitivity changes inside the pattern, and leaves it to
-            the host when the whole pattern is caseless, which keeps the
-            source plain enough for the grep prefilter to read.
-        newline (bool): the pattern holds a literal newline, or a class
-            of nothing else, which ripgrep refuses outside multiline mode.
-    """
-
-    source: str
-    ignore_case: bool = False
-    newline: bool = False

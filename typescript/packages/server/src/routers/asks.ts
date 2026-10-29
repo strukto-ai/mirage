@@ -34,7 +34,7 @@ interface ListAsksQuery {
   all?: string
 }
 
-interface AnswerAskBody {
+interface AnswerAskRequest {
   answer?: string
   scope?: string
   note?: string
@@ -95,7 +95,7 @@ export function registerAsksRoutes(app: FastifyInstance, deps: AsksRoutesDeps): 
     },
   )
 
-  app.post<{ Params: WsAskParams; Body: AnswerAskBody | undefined }>(
+  app.post<{ Params: WsAskParams; Body: AnswerAskRequest | undefined }>(
     '/v1/workspaces/:wsId/asks/:askId',
     async (req, reply) => {
       // Answer one waiting ask, allow or deny, and return the settled
@@ -109,7 +109,7 @@ export function registerAsksRoutes(app: FastifyInstance, deps: AsksRoutesDeps): 
       // Fastify's generic type does not validate at runtime: a POST
       // with no JSON body reaches here with req.body undefined, and
       // that is the caller's 422, not a 500.
-      const body: AnswerAskBody = req.body ?? {}
+      const body: AnswerAskRequest = req.body ?? {}
       const answer = body.answer
       if (answer !== 'allow' && answer !== 'deny') {
         return reply.status(422).send({ detail: "answer must be 'allow' or 'deny'" })

@@ -109,7 +109,7 @@ export function scriptFromDict(data: ScriptJSON): ProfileScript {
 }
 
 /** A session's policy programs as the record stores them, keyed by the document's method names. */
-export function scriptsToJSON(scripts: ProfileScripts): Record<string, ScriptJSON[]> {
+export function scriptsToDict(scripts: ProfileScripts): Record<string, ScriptJSON[]> {
   return Object.fromEntries(
     Object.entries(scripts).map(([method, entries]) => [
       METHODS[method as ScriptMethod],
@@ -119,7 +119,7 @@ export function scriptsToJSON(scripts: ProfileScripts): Record<string, ScriptJSO
 }
 
 /** A session's policy programs read back from a record, keyed by the document's method names. */
-export function scriptsFromJSON(data: Record<string, ScriptJSON[]>): ProfileScripts {
+export function scriptsFromDict(data: Record<string, ScriptJSON[]>): ProfileScripts {
   return Object.fromEntries(
     Object.entries(data).map(([key, entries]) => [snakeToCamel(key), entries.map(scriptFromDict)]),
   )

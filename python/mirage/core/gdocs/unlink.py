@@ -19,10 +19,10 @@ from mirage.core.hierarchy.unlink import make_unlink
 from mirage.types import FileStat
 
 
-async def _delete(
+async def _del(
     accessor: GDocsAccessor, match: ScopeMatch, entry: FileStat
 ) -> None:
     await accessor.drive.delete_file(match.slots["file_id"])
 
 
-unlink = make_unlink(detect_scope, deleters={"file": _delete})
+unlink = make_unlink(detect_scope, deleters={"file": _del})

@@ -77,8 +77,10 @@ def fold(name: str) -> str:
     camelCase and snake_case fold together, and so do the two spellings
     of an acronym (``dispatchIO`` and ``dispatch_io``, ``WCFlags`` and
     ``WcFlags``) and of a digit run (``absentOn404`` and
-    ``absent_on_404``). An ALL_CAPS constant stays as typed, so one side
-    spelling a module constant as a camelCase value still counts.
+    ``absent_on_404``), and the absent value each language spells
+    (``stat_or_none`` and ``statOrNull``). An ALL_CAPS constant stays as
+    typed, so one side spelling a module constant as a camelCase value
+    still counts.
 
     Args:
         name (str): the name as declared, a leading underscore included.
@@ -89,7 +91,7 @@ def fold(name: str) -> str:
     spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", bare)
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", spaced)
     spaced = re.sub(r"([A-Za-z])(\d)", r"\1_\2", spaced)
-    return spaced.lower()
+    return re.sub(r"(?<![^_])none(?![^_])", "null", spaced.lower())
 
 
 def python_names(path: Path) -> dict[str, str]:

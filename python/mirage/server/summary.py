@@ -39,7 +39,7 @@ def _is_auto_prefix(prefix: str) -> bool:
     return prefix in _AUTO_PREFIXES
 
 
-def _mount_description(vfs: BaseVFS) -> str:
+def _describe_vfs(vfs: BaseVFS) -> str:
     raw = vfs.vfs_md
     if len(raw) <= _DESCRIPTION_MAX:
         return raw
@@ -97,7 +97,7 @@ async def make_detail(
                 prefix=m.prefix,
                 vfs=m.vfs.name,
                 mode=m.mode.value,
-                description=_mount_description(m.vfs),
+                description=_describe_vfs(m.vfs),
             )
             for m in user_mounts
         ]

@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CommandContext, AdmissionRules } from '../types.ts'
-import { headAllowed, lineAllowed, lineTokens } from './allow.ts'
+import { headAllowed, lineTokens } from './allow.ts'
 
 function ctx(
   command: string,
@@ -37,22 +37,7 @@ describe('allow lists', () => {
     expect(headAllowed('rm', null)).toBe(true)
   })
 
-  it('lineAllowed reads the whole line and skips non-tools', () => {
-    const rules: AdmissionRules = {
-      allow: ['ls', 'git log', 'git status'],
-      ask: [],
-      deny: [],
-    }
-    expect(lineAllowed(ctx('ls', { argv: ['-la'], tokens: ['ls', '-la'] }), rules)).toBe(true)
-    expect(lineAllowed(ctx('git', { tokens: ['git', 'log', '-1'] }), rules)).toBe(true)
-    // The head is allowed (some git line is) but this line is
-    // covered by no pattern.
-    expect(lineAllowed(ctx('git', { tokens: ['git', 'push'] }), rules)).toBe(false)
-    // A word that is not a tool is never refused by an allow list.
-    expect(lineAllowed(ctx('cd', { tokens: ['cd', '/x'], tool: false }), rules)).toBe(true)
-    // A context built without the entry point's tokens reads the raw argv.
-    const raw = ctx('git', { argv: ['push'] })
-    expect(lineTokens(raw)).toEqual(['git', 'push'])
-    expect(lineAllowed(raw, rules)).toBe(false)
+  it('lineTokens reads the raw argv without the entry point', () => {
+    expect(lineTokens(ctx('git', { argv: ['push'] }))).toEqual(['git', 'push'])
   })
 })

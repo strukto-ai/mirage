@@ -13,56 +13,6 @@ export const POSIX_CLASSES: Readonly<Record<string, string>> = {
   xdigit: '0-9A-Fa-f',
 }
 
-/** Translate one bracket expression; returns the index past its `]`. */
-export function translateBracket(pattern: string, start: number, out: string[]): number {
-  let idx = start + 1
-  out.push('[')
-  if (pattern.charAt(idx) === '^') {
-    out.push('^')
-    idx += 1
-  }
-  // A `]` in the first position is a literal member in an ERE, but the
-  // host engine would read it as the end of the bracket expression.
-  if (pattern.charAt(idx) === ']') {
-    out.push('\\]')
-    idx += 1
-  }
-  while (idx < pattern.length) {
-    const ch = pattern.charAt(idx)
-    if (ch === ']') {
-      out.push(']')
-      return idx + 1
-    }
-    if (pattern.startsWith('[:', idx)) {
-      const close = pattern.indexOf(':]', idx + 2)
-      if (close === -1) {
-        out.push('\\[')
-        idx += 1
-        continue
-      }
-      const name = pattern.slice(idx + 2, close)
-      const expansion = Object.hasOwn(POSIX_CLASSES, name) ? POSIX_CLASSES[name] : undefined
-      if (expansion === undefined) throw new SyntaxError('Invalid character class name')
-      out.push(expansion)
-      idx = close + 2
-      continue
-    }
-    if (ch === '\\' && idx + 1 < pattern.length) {
-      out.push(pattern.slice(idx, idx + 2))
-      idx += 2
-      continue
-    }
-    if (ch === '[') {
-      out.push('\\[')
-      idx += 1
-      continue
-    }
-    out.push(ch)
-    idx += 1
-  }
-  throw new SyntaxError('Unmatched [, [^, [:, [., or [=')
-}
-
 // What each `.` and negated bracket checks first under a UTF-8 locale: a byte
 // that is no part of a character rides the text as its surrogate escape, and
 // glibc matches it with neither.
@@ -180,11 +130,6 @@ export function foldRegexSource(source: string, unicode: boolean): string {
     if (token.startsWith('\\')) return token
     return foldAscii(token)
   })
-}
-
-/** Whether `pattern` ignores case for ASCII letters only, as POSIX grep does. */
-export function foldsAsciiOnly(pattern: RegExp): boolean {
-  return pattern instanceof AsciiIgnoreCaseRegex
 }
 
 /**

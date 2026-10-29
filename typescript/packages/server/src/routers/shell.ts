@@ -36,7 +36,7 @@ interface ShellParams {
   wsId: string
 }
 
-const ShellBodySchema = z
+const ShellRequestSchema = z
   .object({
     command: z.string(),
     cwd: z.string().optional(),
@@ -45,18 +45,18 @@ const ShellBodySchema = z
   })
   .strict()
 
-type ShellBody = z.infer<typeof ShellBodySchema>
+type ShellRequest = z.infer<typeof ShellRequestSchema>
 
 interface ShellUpload {
-  body: ShellBody
+  body: ShellRequest
   stdin: UploadStdin | Uint8Array | undefined
   /** Settles once the body is read, with why it failed, if it did. */
   failed: Promise<unknown>
   finish: () => Promise<void>
 }
 
-function parseRequestPart(chunks: Uint8Array[]): ShellBody {
-  return ShellBodySchema.parse(JSON.parse(Buffer.concat(chunks).toString()))
+function parseRequestPart(chunks: Uint8Array[]): ShellRequest {
+  return ShellRequestSchema.parse(JSON.parse(Buffer.concat(chunks).toString()))
 }
 
 /**
@@ -95,7 +95,7 @@ async function readShellBody(
   const contentType = req.headers['content-type'] ?? ''
   if (!contentType.startsWith('multipart/')) {
     return {
-      body: ShellBodySchema.parse(req.body),
+      body: ShellRequestSchema.parse(req.body),
       stdin: undefined,
       failed: Promise.resolve(undefined),
       finish: () => Promise.resolve(),
@@ -104,7 +104,7 @@ async function readShellBody(
   const events = partEvents(req.raw, contentType)
   const request: Uint8Array[] = []
   let size = 0
-  let body: ShellBody | undefined
+  let body: ShellRequest | undefined
   let name = ''
   for (let next = await events.next(); next.done !== true; next = await events.next()) {
     const event = next.value
@@ -235,14 +235,14 @@ interface ShellQuery {
  * `_explained`.
  */
 async function explained(
-  req: FastifyRequest<{ Params: ShellParams; Body: ShellBody; Querystring: ShellQuery }>,
+  req: FastifyRequest<{ Params: ShellParams; Body: ShellRequest; Querystring: ShellQuery }>,
   reply: FastifyReply,
   deps: ShellRoutesDeps,
 ): Promise<FastifyReply> {
   let said: ShellExplanation
   try {
     const entry = requireEntry(deps.registry, req.params.wsId, req.account)
-    const parsed = ShellBodySchema.safeParse(req.body)
+    const parsed = ShellRequestSchema.safeParse(req.body)
     if (
       queryFlag(req.query.background, 'background') ||
       req.headers['content-type']?.startsWith('multipart/') === true ||
@@ -260,7 +260,7 @@ async function explained(
 }
 
 export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps): void {
-  app.post<{ Params: ShellParams; Body: ShellBody; Querystring: ShellQuery }>(
+  app.post<{ Params: ShellParams; Body: ShellRequest; Querystring: ShellQuery }>(
     '/v1/workspaces/:wsId/shell',
     async (req, reply) => {
       let streaming: boolean

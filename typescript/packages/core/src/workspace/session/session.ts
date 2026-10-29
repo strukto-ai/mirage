@@ -43,8 +43,8 @@ import {
   commandsToDict,
   decisionFromDict,
   decisionToDict,
-  scriptsFromJSON,
-  scriptsToJSON,
+  scriptsFromDict,
+  scriptsToDict,
   type CommandsJSON,
   type DecisionJSON,
   type ScriptJSON,
@@ -960,7 +960,7 @@ export class SessionState {
       }
     }
     if (this.commands !== null) data.commands = commandsToDict(this.commands)
-    if (Object.keys(this.scripts).length > 0) data.scripts = scriptsToJSON(this.scripts)
+    if (Object.keys(this.scripts).length > 0) data.scripts = scriptsToDict(this.scripts)
     if (Object.keys(this.commandLimits).length > 0)
       data.command_limits = commandLimitsToJSON(this.commandLimits)
     if (JSON.stringify(this.processes) !== JSON.stringify(DEFAULT_PROCESS_PERMISSIONS))
@@ -1039,7 +1039,7 @@ export class SessionState {
           ? data.hide_reasons.map((g) => ({ patterns: g.patterns ?? [], reason: g.reason ?? '' }))
           : [],
       commands,
-      scripts: scriptsFromJSON(data.scripts ?? {}),
+      scripts: scriptsFromDict(data.scripts ?? {}),
       profile: data.profile ?? null,
       commandLimits: parseCommandLimits(data.command_limits),
       processes,

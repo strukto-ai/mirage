@@ -14,7 +14,6 @@
 
 import { Errors } from 'isomorphic-git'
 import { getOpcodes } from '../../../builtin/diff_format.ts'
-import { DiffOpTag } from '../../../builtin/diff_types.ts'
 import { plural } from './dates.ts'
 import { short } from './format.ts'
 import { readBlobBytes, type Repo } from './repo.ts'
@@ -88,7 +87,7 @@ function countLines(oldData: Uint8Array, newData: Uint8Array): [number, number] 
   let insertions = 0
   let deletions = 0
   for (const [tag, i1, i2, j1, j2] of getOpcodes(split(oldData), split(newData))) {
-    if (tag === DiffOpTag.EQUAL) continue
+    if (tag === 'equal') continue
     deletions += i2 - i1
     insertions += j2 - j1
   }

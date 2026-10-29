@@ -111,7 +111,7 @@ def _needs_escape(char: str) -> bool:
     return 0x80 <= code <= 0x9F or code in (0x2028, 0x2029)
 
 
-def _escape(char: str) -> str:
+def _escape_char(char: str) -> str:
     named = NAMED_ESCAPES.get(char)
     if named is not None:
         return f"\\{named}"
@@ -149,7 +149,7 @@ def _escaped(name: str, protected: str) -> str:
         elif 0xDC80 <= ord(char) <= 0xDCFF:
             parts.append(f"\\{ord(char) - 0xDC00:03o}")
         elif _needs_escape(char):
-            parts.append(_escape(char))
+            parts.append(_escape_char(char))
         else:
             parts.append(char)
     return "".join(parts)
@@ -199,7 +199,7 @@ def shell_quote_always(name: str) -> str:
             if not in_escape:
                 parts.append("'$'")
                 in_escape = True
-            parts.append(_escape(char))
+            parts.append(_escape_char(char))
             continue
         # A quote closes whichever group is open and reopens the plain
         # one, so it costs the same three characters either way; only a

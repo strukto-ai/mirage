@@ -32,17 +32,3 @@ export function headAllowed(name: string, rules: AdmissionRules | null): boolean
 export function lineTokens(ctx: CommandContext): readonly string[] {
   return (ctx.tokens?.length ?? 0) > 0 ? (ctx.tokens ?? []) : [ctx.command, ...ctx.argv]
 }
-/**
- * Whether the profile's allow list has a pattern for the whole line. A
- * word that is not a tool (`ctx.tool` cleared by the entry point: the agent's
- * own function, an executed path) is always allowed here; a deny rule
- * is the only thing that can refuse it.
- */
-export function lineAllowed(ctx: CommandContext, rules: AdmissionRules | null): boolean {
-  return (
-    admissionMatcher(rules).ask('line_allowed', {
-      tokens: lineTokens(ctx).map(units),
-      tool: ctx.tool ?? true,
-    }) === true
-  )
-}

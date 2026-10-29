@@ -15,7 +15,6 @@ const CORRUPT: &str = "\ngzip: {}: invalid compressed data--format violated";
 #[serde(rename_all = "snake_case")]
 enum Format {
     Gzip,
-    Raw,
     Bzip2,
     Xz,
 }
@@ -56,7 +55,7 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             Ok(match format {
                 Format::Bzip2 => Box::new(Packer::new(bz2::Encoder::new(level))),
                 Format::Xz => Box::new(Packer::new(xz::Encoder::new(level)?)),
-                _ => Box::new(Encoder::new(format, level, name)),
+                Format::Gzip => Box::new(Encoder::new(level, name)),
             })
         }
         Config::Decode {
@@ -66,7 +65,7 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         } => Ok(match format {
             Format::Bzip2 => Box::new(Unpacker::new(bz2::Decoder::new())),
             Format::Xz => Box::new(Unpacker::new(xz::Decoder::new())),
-            _ => Box::new(Decoder::new(format, test, passthrough)),
+            Format::Gzip => Box::new(Decoder::new(test, passthrough)),
         }),
     }
 }
@@ -269,7 +268,6 @@ enum Part {
 }
 
 struct Decoder {
-    format: Format,
     test: bool,
     passthrough: bool,
     part: Part,
@@ -289,16 +287,11 @@ struct Decoder {
 }
 
 impl Decoder {
-    fn new(format: Format, test: bool, passthrough: bool) -> Self {
+    fn new(test: bool, passthrough: bool) -> Self {
         Self {
-            format,
             test,
             passthrough,
-            part: if format == Format::Gzip {
-                Part::Fixed
-            } else {
-                Part::Body
-            },
+            part: Part::Fixed,
             fixed: Vec::with_capacity(10),
             flags: 0,
             header_crc: Crc::new(),
@@ -490,11 +483,7 @@ impl Decoder {
                 }
                 Part::Body => {
                     let mut output = [0; OUTPUT];
-                    let limit = if self.format == Format::Raw {
-                        INPUT
-                    } else {
-                        OUTPUT - self.held.len()
-                    };
+                    let limit = OUTPUT - self.held.len();
                     let before_in = self.inflater.total_in();
                     let before_out = self.inflater.total_out();
                     let status =
@@ -504,38 +493,24 @@ impl Decoder {
                     let produced = (self.inflater.total_out() - before_out) as usize;
                     self.at += consumed;
                     self.crc.update(&output[..produced]);
-                    if self.format == Format::Raw && status.is_ok() {
-                        out.extend_from_slice(&output[..produced]);
-                    } else if self.format == Format::Gzip {
-                        self.held.extend_from_slice(&output[..produced]);
-                        // gzip only flushes complete windows before a body format error.
-                        let emit = if matches!(status, Ok(Status::StreamEnd)) {
-                            self.held.len()
-                        } else {
-                            self.held.len() / 32768 * 32768
-                        };
-                        out.extend_from_slice(&self.held[..emit]);
-                        self.held.drain(..emit);
-                    }
+                    self.held.extend_from_slice(&output[..produced]);
+                    // gzip only flushes complete windows before a body format error.
+                    let emit = if matches!(status, Ok(Status::StreamEnd)) {
+                        self.held.len()
+                    } else {
+                        self.held.len() / 32768 * 32768
+                    };
+                    out.extend_from_slice(&self.held[..emit]);
+                    self.held.drain(..emit);
                     self.again = produced == limit;
                     match status {
-                        Err(error) => {
-                            if self.format == Format::Raw {
-                                self.part = Part::End;
-                                return Err(StreamError::new(
-                                    error.message().unwrap_or("invalid deflate stream"),
-                                ));
-                            }
+                        Err(_) => {
                             self.fail(vec![CORRUPT.into()], true, 1, false, false);
                             self.held.clear();
                         }
                         Ok(Status::StreamEnd) => {
                             self.again = false;
-                            self.part = if self.format == Format::Raw {
-                                Part::End
-                            } else {
-                                Part::Trailer
-                            };
+                            self.part = Part::Trailer;
                         }
                         _ => {}
                     }
@@ -590,10 +565,6 @@ impl Decoder {
             }
         }
         if self.eof && self.part != Part::End && !self.again && self.at == input.len() {
-            if self.format == Format::Raw {
-                self.part = Part::End;
-                return Err(StreamError::new("truncated deflate stream"));
-            }
             let boundary = self.part == Part::Fixed;
             if self.part == Part::Copy || (self.passthrough && boundary && self.fixed.len() < 2) {
                 out.extend_from_slice(&self.fixed);
@@ -664,7 +635,6 @@ impl Stream for Decoder {
 }
 
 struct Encoder {
-    format: Format,
     compressor: Compress,
     crc: Crc,
     header: Vec<u8>,
@@ -677,34 +647,30 @@ struct Encoder {
 }
 
 impl Encoder {
-    fn new(format: Format, level: i32, name: String) -> Self {
-        let mut header = Vec::new();
-        if format == Format::Gzip {
-            header.extend_from_slice(&[
-                0x1f,
-                0x8b,
-                8,
-                if name.is_empty() { 0 } else { 8 },
-                0,
-                0,
-                0,
-                0,
-                if level == 9 {
-                    2
-                } else if level == 1 {
-                    4
-                } else {
-                    0
-                },
-                3,
-            ]);
-            if !name.is_empty() {
-                header.extend_from_slice(name.as_bytes());
-                header.push(0);
-            }
+    fn new(level: i32, name: String) -> Self {
+        let mut header = vec![
+            0x1f,
+            0x8b,
+            8,
+            if name.is_empty() { 0 } else { 8 },
+            0,
+            0,
+            0,
+            0,
+            if level == 9 {
+                2
+            } else if level == 1 {
+                4
+            } else {
+                0
+            },
+            3,
+        ];
+        if !name.is_empty() {
+            header.extend_from_slice(name.as_bytes());
+            header.push(0);
         }
         Self {
-            format,
             compressor: Compress::new(
                 Compression::new(if level < 0 { 6 } else { level as u32 }),
                 false,
@@ -755,14 +721,12 @@ impl Encoder {
         if status == Status::StreamEnd {
             self.ended = true;
             self.again = false;
-            if self.format == Format::Gzip {
-                self.header = [
-                    self.crc.sum().to_le_bytes(),
-                    self.crc.amount().to_le_bytes(),
-                ]
-                .concat();
-                self.header_at = 0;
-            }
+            self.header = [
+                self.crc.sum().to_le_bytes(),
+                self.crc.amount().to_le_bytes(),
+            ]
+            .concat();
+            self.header_at = 0;
         }
         Ok(())
     }
@@ -809,7 +773,7 @@ mod tests {
         test: bool,
         passthrough: bool,
     ) -> (Vec<u8>, Option<Failure>) {
-        let mut decoder = Decoder::new(Format::Gzip, test, passthrough);
+        let mut decoder = Decoder::new(test, passthrough);
         let mut result = Vec::new();
         for input in data.chunks(width) {
             let mut out = Vec::new();
@@ -872,7 +836,7 @@ mod tests {
 
     #[test]
     fn long_optional_headers_keep_only_fixed_fields() {
-        let mut decoder = Decoder::new(Format::Gzip, false, false);
+        let mut decoder = Decoder::new(false, false);
         let mut head = HELLO[..10].to_vec();
         head[3] = 0x1a;
         let mut header_crc = Crc::new();
@@ -922,7 +886,7 @@ mod tests {
     #[test]
     fn encoding_and_expansion_are_bounded_at_each_call() {
         let plain = vec![b'x'; OUTPUT * 100];
-        let mut encoder = Encoder::new(Format::Gzip, 9, "name".into());
+        let mut encoder = Encoder::new(9, "name".into());
         let mut encoded = Vec::new();
         for data in plain.chunks(INPUT) {
             let mut out = Vec::new();
@@ -946,7 +910,7 @@ mod tests {
         let (out, failure) = decode(&encoded, INPUT, false, false);
         assert_eq!(out, plain);
         assert!(failure.is_none());
-        let mut decoder = Decoder::new(Format::Gzip, false, false);
+        let mut decoder = Decoder::new(false, false);
         assert!(decoder.feed(&[0; INPUT + 1], &mut Vec::new()).is_err());
     }
 
@@ -991,7 +955,7 @@ mod tests {
             second.as_slice(),
         ]
         .concat();
-        let mut decoder = Decoder::new(Format::Gzip, false, false);
+        let mut decoder = Decoder::new(false, false);
         let mut out = Vec::new();
         decoder.feed(&prefix, &mut out).unwrap();
         assert!(out.is_empty());
@@ -1016,16 +980,11 @@ mod tests {
             assert!(out.is_empty());
             assert_eq!(failure.unwrap().reasons, [CORRUPT]);
         }
-        let body = [0, 6, 0, 249, 255, b'h', b'e', b'l', b'l', b'o', 10, 7];
-        let mut decoder = Decoder::new(Format::Raw, false, false);
-        let mut out = Vec::new();
-        assert!(decoder.feed(&body, &mut out).is_err());
-        assert!(out.is_empty());
     }
 
     #[test]
     fn terminal_metadata_is_taken_once_and_status_stays_failed() {
-        let mut decoder = Decoder::new(Format::Gzip, false, false);
+        let mut decoder = Decoder::new(false, false);
         decoder.feed(b"not gzip", &mut Vec::new()).unwrap();
         let mut record = Vec::new();
         decoder.take_stderr(&mut record);

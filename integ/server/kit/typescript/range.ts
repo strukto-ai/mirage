@@ -19,7 +19,7 @@ import type { Reply } from './types.ts'
 // The TypeScript dropbox fake answered 200 with the whole file for any Range
 // at all while its python twin answered 206/416, so on the TypeScript host
 // every windowed read transferred the whole object and the range push-down was
-// never exercised -- the client's own windowOf() sliced the result and the
+// never exercised -- the client sliced the result itself and the
 // battery stayed green. A range is served here, once, so a fake cannot forget.
 
 export interface ByteRange {

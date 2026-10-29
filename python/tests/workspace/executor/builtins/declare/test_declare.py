@@ -2,7 +2,7 @@ import pytest
 
 from mirage.io.stream import materialize
 from mirage.shell.variable import VarAttr
-from mirage.workspace.executor.builtins.declare import handle_readonly
+from mirage.workspace.executor.builtins.declare.declare import mark_names
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import seed_var, set_attr
 
@@ -19,7 +19,7 @@ async def test_readonly_p_prints_scalars_and_arrays():
     set_attr(session, "ONLY", VarAttr.READONLY)
     seed_var(session, "AR", ["a", "b c"])
     set_attr(session, "AR", VarAttr.READONLY)
-    out, io, _ = await handle_readonly(["-p"], session)
+    out, io, _ = await mark_names(["-p"], session, None, VarAttr.READONLY)
     assert io.exit_code == 0
     text = (await materialize(out)).decode()
     assert 'declare -ar AR=([0]="a" [1]="b c")\n' in text
@@ -33,6 +33,6 @@ async def test_readonly_f_and_A_list_nothing():
     seed_var(session, "VAL", "x")
     set_attr(session, "VAL", VarAttr.READONLY)
     for flag in ("-f", "-A"):
-        out, io, _ = await handle_readonly([flag], session)
+        out, io, _ = await mark_names([flag], session, None, VarAttr.READONLY)
         assert io.exit_code == 0
         assert await materialize(out) == b""

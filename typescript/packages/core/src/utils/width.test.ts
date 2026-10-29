@@ -14,8 +14,8 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { advanceColumn, charWidth, isSpace, TAB_WIDTH } from './width.ts'
-import { WHITESPACE, WIDE, ZERO_WIDTH } from './generated/width_data.ts'
+import { charWidth } from './width.ts'
+import { WIDE, ZERO_WIDTH } from './generated/width_data.ts'
 
 const FIXTURE = new URL('../../../../../integ/fixtures/wc/width.json', import.meta.url)
 
@@ -27,11 +27,9 @@ describe('width tables', () => {
     const tables = JSON.parse(readFileSync(FIXTURE, 'utf-8')) as {
       zero_width: number[][]
       wide: number[][]
-      whitespace: number[][]
     }
     expect(ZERO_WIDTH.map((r) => [...r])).toEqual(tables.zero_width)
     expect(WIDE.map((r) => [...r])).toEqual(tables.wide)
-    expect(WHITESPACE.map((r) => [...r])).toEqual(tables.whitespace)
   })
 })
 
@@ -63,57 +61,4 @@ describe('charWidth', () => {
       expect(charWidth(char.codePointAt(0) ?? 0)).toBe(1)
     },
   )
-})
-
-describe('isSpace', () => {
-  it.each([
-    [' ', true],
-    ['\t', true],
-    ['\n', true],
-    ['\r', true],
-    ['\v', true],
-    ['\f', true],
-    ['\u00a0', true],
-    ['\u1680', true],
-    ['\u2000', true],
-    ['\u200a', true],
-    ['\u2028', true],
-    ['\u2029', true],
-    ['\u202f', true],
-    ['\u205f', true],
-    ['\u3000', true],
-    ['a', false],
-    ['\u200b', false],
-    ['\u202a', false],
-    ['\u180e', false],
-  ])('reads %j as a separator: %s', (char, expected) => {
-    expect(isSpace(char.codePointAt(0) ?? 0)).toBe(expected)
-  })
-
-  it('does not split on U+FEFF, which JavaScript \\s matches', () => {
-    // The one character where /\s/ over-split relative to GNU:
-    // `printf 'a<U+FEFF>b' | wc -w` is 1.
-    expect(/\s/u.test('\ufeff')).toBe(true)
-    expect(isSpace(0xfeff)).toBe(false)
-  })
-})
-
-describe('advanceColumn', () => {
-  it('puts tab stops on multiples of eight', () => {
-    expect(TAB_WIDTH).toBe(8)
-    expect(advanceColumn(0, 0x09)).toBe(8)
-    expect(advanceColumn(1, 0x09)).toBe(8)
-    expect(advanceColumn(7, 0x09)).toBe(8)
-    expect(advanceColumn(8, 0x09)).toBe(16)
-  })
-
-  it.each([[0x0d], [0x0c]])('rewinds the column on %i', (cp) => {
-    expect(advanceColumn(5, cp)).toBe(0)
-  })
-
-  it('otherwise adds the character width', () => {
-    expect(advanceColumn(3, 0x61)).toBe(4)
-    expect(advanceColumn(3, 0x4e2d)).toBe(5)
-    expect(advanceColumn(3, 0x0301)).toBe(3)
-  })
 })

@@ -16,12 +16,11 @@ from typing import TYPE_CHECKING
 
 from mirage.utils.loader import lazy_exports
 from mirage.vfs.gdocs.config import GDocsConfig
-from mirage.vfs.gdocs.doc_entry import DocEntry
 
 if TYPE_CHECKING:
     from mirage.vfs.gdocs.gdocs import GDocsVFS
 
-__all__ = ["GDocsConfig", "DocEntry", "GDocsVFS"]
+__all__ = ["GDocsConfig", "GDocsVFS"]
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.vfs.gdocs.gdocs": ("GDocsVFS",),

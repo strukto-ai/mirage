@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { WHITESPACE, WIDE, ZERO_WIDTH } from './generated/width_data.ts'
-
-export const TAB_WIDTH = 8
+import { WIDE, ZERO_WIDTH } from './generated/width_data.ts'
 
 const CONTROL: readonly (readonly [number, number])[] = [
   [0x00, 0x1f],
@@ -61,32 +59,4 @@ export function textWidth(text: string): number {
   let width = 0
   for (const ch of text) width += charWidth(ch.codePointAt(0) ?? 0)
   return width
-}
-
-/**
- * Whether the character at `cp` is a space to glibc's `iswspace`.
- *
- * That is Unicode White_Space minus U+0085. JavaScript's `\s` is not that
- * set: it also matches U+FEFF. The generated table is the pinned set.
- *
- * Mirrors Python's `is_space`.
- */
-export function isSpace(cp: number): boolean {
-  return inRanges(cp, WHITESPACE)
-}
-
-/**
- * Move `column` past the character at `cp`, as a terminal moves its cursor.
- *
- * A tab jumps to the next multiple of `TAB_WIDTH`, so a tab in column 0 lands
- * on 8. Carriage return and form feed return the cursor to column 0 rather
- * than ending the line. Callers handle the newline, which ends the line
- * outright.
- *
- * Mirrors Python's `advance_column`.
- */
-export function advanceColumn(column: number, cp: number): number {
-  if (cp === 0x0d || cp === 0x0c) return 0
-  if (cp === 0x09) return column + TAB_WIDTH - (column % TAB_WIDTH)
-  return column + charWidth(cp)
 }

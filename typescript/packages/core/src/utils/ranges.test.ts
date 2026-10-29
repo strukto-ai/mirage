@@ -20,8 +20,6 @@ import {
   sliceWindow,
   spliceWindow,
   windowFor,
-  windowIfUnranged,
-  windowOf,
 } from './ranges.js'
 
 const ENC = new TextEncoder()
@@ -150,30 +148,6 @@ describe('isUnsatisfiableRange', () => {
   })
 })
 
-const bytes = (s: string): Uint8Array => new TextEncoder().encode(s)
-const text = (b: Uint8Array): string => new TextDecoder().decode(b)
-
-describe('windowIfUnranged', () => {
-  it('trusts a 206 as already the window', () => {
-    expect(text(windowIfUnranged(bytes('234'), 206, 2, 3))).toBe('234')
-  })
-
-  // RFC 9110 lets a server answer the whole representation to a Range
-  // request, and a CDN in front of one may. Without this the caller gets the
-  // entire file for what it asked to be a window.
-  it('slices a 200 because the server ignored the range', () => {
-    expect(text(windowIfUnranged(bytes('0123456789'), 200, 2, 3))).toBe('234')
-  })
-
-  it('slices a 200 to EOF from the offset', () => {
-    expect(text(windowIfUnranged(bytes('0123456789'), 200, 7, null))).toBe('789')
-  })
-
-  it('answers empty for a 200 whose offset is past EOF', () => {
-    expect(text(windowIfUnranged(bytes('abc'), 200, 500, 10))).toBe('')
-  })
-})
-
 describe('isUnsatisfiableRange on a WebDAV 416', () => {
   // OpenDAL puts the whole response in the message, so the status is only
   // readable inside the string and the exception name has no spaces for the
@@ -203,22 +177,6 @@ describe('windowFor', () => {
   it('carries both numbers otherwise', () => {
     expect(windowFor(2, 3)).toEqual({ offset: 2, size: 3 })
     expect(windowFor(7, null)).toEqual({ offset: 7, size: null })
-  })
-})
-
-describe('windowOf', () => {
-  it('trusts a 206 body', () => {
-    expect(DEC.decode(windowOf(ENC.encode('234'), 206, { offset: 2, size: 3 }))).toBe('234')
-  })
-
-  it('slices a 200 body', () => {
-    expect(DEC.decode(windowOf(DATA, 200, { offset: 2, size: 3 }))).toBe('234')
-  })
-
-  // A reader with no window passes undefined, and the offset a slice would
-  // otherwise apply is not zero by accident but absent.
-  it('leaves a whole-file read alone', () => {
-    expect(DEC.decode(windowOf(DATA, 200, undefined))).toBe('0123456789')
   })
 })
 

@@ -5,7 +5,6 @@ from typing import (
     Any,
     NamedTuple,
     Protocol,
-    runtime_checkable,
 )
 
 from mirage.types import PathSpec, SearchQuery
@@ -103,10 +102,3 @@ class SearchOps:
 
     search: SearchOp
     search_many: SearchManyOp
-
-
-@runtime_checkable
-class EndpointVFS(Protocol):
-    """A backend that declares the endpoint its writes go to."""
-
-    def resolved_endpoint(self) -> str | None: ...

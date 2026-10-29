@@ -18,7 +18,7 @@ import type { EntryGate } from '../policy/types.ts'
 import { compileSpec } from './spec/compile.ts'
 import type { ProcessView } from '../process/view.ts'
 import type { Accessor } from '../accessor/base.ts'
-import { IOResult, type ByteSource } from '../io/types.ts'
+import { IOResult, type ByteSource, type CommandOutput } from '../io/types.ts'
 import type { Limit, PathSpec } from '../types.ts'
 import type { CommandRuntime, ShellFn } from '../runtime/types.ts'
 import type { SessionView } from '../view/types.ts'
@@ -83,7 +83,7 @@ export interface Context {
   timeoutSeconds?: number
 }
 
-export type CommandFnResult = [ByteSource | null, IOResult] | null
+export type CommandFnResult = CommandOutput | null
 
 /**
  * A command handler: `(accessor, paths, texts, ctx)`. Generic on the

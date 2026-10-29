@@ -21,7 +21,7 @@ from mirage.errors.fs import eacces, enoent
 from mirage.types import FileStat
 
 
-async def _delete(
+async def _del(
     accessor: GCalAccessor, match: ScopeMatch, entry: FileStat
 ) -> None:
     """Delete the event the row names, on the slotted calendar.
@@ -47,4 +47,4 @@ async def _delete(
     await accessor.calendar.delete_event(cal_id, str(entry.extra["event_id"]))
 
 
-unlink = make_unlink(detect_scope, deleters={"event": _delete})
+unlink = make_unlink(detect_scope, deleters={"event": _del})

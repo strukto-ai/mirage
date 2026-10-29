@@ -43,22 +43,6 @@ ZERO_FORMAT = (
     (0xFEFF, 0xFEFF),
 )
 
-# GNU splits words on glibc's iswspace, which is Unicode White_Space *minus*
-# U+0085. Python's str.isspace() adds U+001C-U+001F and U+0085; JavaScript's
-# \s adds U+FEFF. Both were wrong in opposite directions, so the set is
-# spelled out once here and generated into both trees.
-WHITESPACE = (
-    (0x0009, 0x000D),
-    (0x0020, 0x0020),
-    (0x00A0, 0x00A0),
-    (0x1680, 0x1680),
-    (0x2000, 0x200A),
-    (0x2028, 0x2029),
-    (0x202F, 0x202F),
-    (0x205F, 0x205F),
-    (0x3000, 0x3000),
-)
-
 
 def in_ranges(cp: int, ranges: tuple[tuple[int, int], ...]) -> bool:
     return any(lo <= cp <= hi for lo, hi in ranges)
@@ -102,7 +86,6 @@ def rows(ranges: list[list[int]], per_row: int, indent: str, fmt: str) -> str:
 def render_py(
     zero: list[list[int]],
     wide: list[list[int]],
-    space: list[list[int]],
     version: str,
 ) -> str:
     head = "\n".join(LICENSE_PY)
@@ -119,17 +102,12 @@ ZERO_WIDTH: tuple[tuple[int, int], ...] = (
 WIDE: tuple[tuple[int, int], ...] = (
 {rows(wide, 4, "    ", "({}, {}),")}
 )
-
-WHITESPACE: tuple[tuple[int, int], ...] = (
-{rows(space, 4, "    ", "({}, {}),")}
-)
 """
 
 
 def render_ts(
     zero: list[list[int]],
     wide: list[list[int]],
-    space: list[list[int]],
     version: str,
 ) -> str:
     head = "\n".join("//" + line[1:] for line in LICENSE_PY)
@@ -146,10 +124,6 @@ export const ZERO_WIDTH: readonly (readonly [number, number])[] = [
 export const WIDE: readonly (readonly [number, number])[] = [
 {rows(wide, 4, "  ", "[{}, {}],")}
 ]
-
-export const WHITESPACE: readonly (readonly [number, number])[] = [
-{rows(space, 4, "  ", "[{}, {}],")}
-]
 """
 
 
@@ -157,13 +131,12 @@ def main() -> int:
     version = unicodedata.unidata_version
     zero = ranges_of(is_zero)
     wide = ranges_of(is_wide)
-    space = [list(pair) for pair in WHITESPACE]
 
     PY_OUT.parent.mkdir(parents=True, exist_ok=True)
     (PY_OUT.parent / "__init__.py").write_text("\n".join(LICENSE_PY) + "\n")
-    PY_OUT.write_text(render_py(zero, wide, space, version))
+    PY_OUT.write_text(render_py(zero, wide, version))
     TS_OUT.parent.mkdir(parents=True, exist_ok=True)
-    TS_OUT.write_text(render_ts(zero, wide, space, version))
+    TS_OUT.write_text(render_ts(zero, wide, version))
     FIXTURE.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE.write_text(
         json.dumps(
@@ -171,16 +144,12 @@ def main() -> int:
                 "unicode_version": version,
                 "zero_width": zero,
                 "wide": wide,
-                "whitespace": space,
             },
             indent=2,
         )
         + "\n"
     )
-    print(
-        f"unicode {version}: {len(zero)} zero-width, {len(wide)} wide, "
-        f"{len(space)} whitespace ranges"
-    )
+    print(f"unicode {version}: {len(zero)} zero-width, {len(wide)} wide")
     return 0
 
 

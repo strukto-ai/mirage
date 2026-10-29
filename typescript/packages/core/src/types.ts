@@ -940,10 +940,6 @@ export interface CapacityResult {
   inodesFree?: number | null
 }
 
-export type ReadBytesFn<Args extends unknown[] = [path: PathSpec]> = (
-  ...args: Args
-) => Promise<Uint8Array>
-
 export type ReadStreamFn<Args extends unknown[] = [path: PathSpec]> = (
   ...args: Args
 ) => AsyncIterable<Uint8Array>
