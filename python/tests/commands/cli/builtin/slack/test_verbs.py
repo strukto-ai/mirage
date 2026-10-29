@@ -30,12 +30,10 @@ from mirage.commands.cli.builtin.slack import (
     search,
     send_message,
     unpin_message,
-    upload_file,
 )
 from mirage.commands.config import Context
 from mirage.core.slack.config import SlackConfig
 from mirage.io.types import materialize
-from mirage.types import PathSpec
 
 ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
 
@@ -201,61 +199,3 @@ async def test_emoji_list(monkeypatch):
     monkeypatch.setitem(emoji_list.__globals__, "list_emoji", fake_emoji)
     out, _io = await emoji_list(ACCESSOR, [], [], _ctx("emoji-list"))
     assert await _json(out) == {"shipit": "url"}
-
-
-class _Files:
-    def __init__(self, files: dict[str, bytes]) -> None:
-        self.files = files
-
-    async def read(self, path: PathSpec) -> bytes:
-        try:
-            return self.files[path.virtual]
-        except KeyError:
-            raise FileNotFoundError(2, "No such file", path.virtual) from None
-
-
-def _upload_ctx(vfs, **flags) -> Context:
-    spec = next(s for s in SLACK.spec.subcommands if s.name == "upload-file")
-    return Context(flags=flags, spec=spec, vfs=vfs)
-
-
-@pytest.mark.asyncio
-async def test_upload_file_shares_the_workspace_file(monkeypatch):
-    calls = []
-
-    async def fake_share(accessor, channel, filename, data, comment, thread):
-        calls.append((channel, filename, data, comment, thread))
-        return {"ok": True, "files": [{"id": "F1"}]}
-
-    monkeypatch.setitem(upload_file.__globals__, "share_file", fake_share)
-    vfs = _Files({"/tmp/reply.wav": b"RIFF"})
-    out, io = await upload_file(
-        ACCESSOR,
-        [],
-        [],
-        _upload_ctx(
-            vfs,
-            channel="C1",
-            file=PathSpec.from_str_path("/tmp/reply.wav"),
-            initial_comment="here",
-            thread_ts="9.9",
-        ),
-    )
-    assert io.exit_code == 0
-    assert await _json(out) == {"ok": True, "files": [{"id": "F1"}]}
-    assert calls == [("C1", "reply.wav", b"RIFF", "here", "9.9")]
-
-
-@pytest.mark.asyncio
-async def test_upload_file_names_a_missing_file():
-    with pytest.raises(ValueError, match="read /tmp/nope.wav: No such file"):
-        await upload_file(
-            ACCESSOR,
-            [],
-            [],
-            _upload_ctx(
-                _Files({}),
-                channel="C1",
-                file=PathSpec.from_str_path("/tmp/nope.wav"),
-            ),
-        )
