@@ -60,6 +60,31 @@ describe('rg program files from stdin', () => {
   })
 })
 
+describe('grep exclude-from lists', () => {
+  it('trims trailing ASCII whitespace from each glob', async () => {
+    const [, flags, , error] = await prepareProgram(
+      'grep',
+      ['/in'],
+      { exclude_from: [typed('-')] },
+      ENC.encode('*.log \t\v\f\r\n \t\n\tkeep\u00a0\n'),
+      noDispatch,
+    )
+    expect(error).toBeNull()
+    expect(flags.exclude_from).toEqual(['*.log', '\tkeep\u00a0'])
+  })
+
+  it('reads a long run of tabs in linear time', async () => {
+    const [, flags] = await prepareProgram(
+      'grep',
+      ['/in'],
+      { exclude_from: [typed('-')] },
+      ENC.encode(`${'\t'.repeat(200_000)}x`),
+      noDispatch,
+    )
+    expect((flags.exclude_from as string[])[0]?.length).toBe(200_001)
+  })
+})
+
 describe('a program file the command cannot read', () => {
   it.each([
     ['sed', true],
