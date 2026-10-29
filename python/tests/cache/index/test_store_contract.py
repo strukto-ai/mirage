@@ -7,12 +7,12 @@ import pytest
 import pytest_asyncio
 from fakeredis.aioredis import FakeRedis
 
+from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import Evicted, LookupStatus, RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
-from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.types import FileStat, FileType
 
 
@@ -1255,28 +1255,41 @@ async def test_prefix_forget_retires_an_older_refill(store):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("deep", [False, True])
 @pytest.mark.parametrize("directory", [False, True])
-async def test_failed_observation_recovery_preserves_deletion_history(store, monkeypatch, deep, directory):
+@pytest.mark.parametrize("recover_by_observation", [False, True])
+async def test_failed_observation_recovery_preserves_deletion_history(
+    store, monkeypatch, deep, directory, recover_by_observation
+):
     cache = RAMFileCacheStore()
     parent = "/data/sub" if deep else "/data"
     old = parent + "/old"
     body = old + "/inside" if directory else old
     await cache.set(body, b"deleted bytes")
-    await store.set_dir(parent, [("old", folder("old") if directory else entry("old"))])
+    await store.set_dir(
+        parent, [("old", folder("old") if directory else entry("old"))]
+    )
     if directory:
         await store.set_dir(old, [("inside", entry("inside"))])
     removed = []
+
     async def cleanup(gone):
         removed.extend(gone)
         for child in gone:
             await cache.remove(child.path, subtree=child.folder)
+
     view = IndexView(store, cache, "/data", lambda _: True, on_gone=cleanup)
+
     async def unavailable(paths):
         raise RuntimeError("unavailable")
+
     with monkeypatch.context() as patcher:
         patcher.setattr(store, "invalidate_missing", unavailable)
         with pytest.raises(RuntimeError):
             await view.invalidate_missing([parent + "/new"])
+    if recover_by_observation:
+        await view.invalidate_missing([parent + "/new"])
     ticket = await view.refill_token()
-    assert await view.refill_dir(parent, [("new", entry("new"))], ticket) == [Evicted(old, folder=directory)]
+    assert await view.refill_dir(parent, [("new", entry("new"))], ticket) == [
+        Evicted(old, folder=directory)
+    ]
     assert removed == [Evicted(old, folder=directory)]
     assert await cache.get(body) is None

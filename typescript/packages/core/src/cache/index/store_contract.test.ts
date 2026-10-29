@@ -126,29 +126,48 @@ for (const backend of ['ram', 'redis']) {
         expect(await store.refillDir('/dir', [], ticket)).toBe(null)
       })
 
-      it.each([false, true])('recovery preserves deletion history (deep=%s)', async (deep) => {
-        const cache = new RAMFileCacheStore()
-        const parent = deep ? '/data/sub' : '/data'
-        const old = `${parent}/old`
-        await cache.set(old, new TextEncoder().encode('deleted bytes'))
-        await store.setDir(parent, [['old', entry('old')]])
-        const removed: string[] = []
-        const view = new IndexView(store, cache, '/data', () => true, {
-          onGone: async (gone) => {
-            for (const child of gone) {
-              removed.push(child.path)
-              await cache.remove(child.path, child.folder)
-            }
-          },
-        })
-        const failure = vi.spyOn(store, 'invalidateMissing').mockRejectedValueOnce(new Error('unavailable'))
-        await expect(view.invalidateMissing([`${parent}/new`])).rejects.toThrow('unavailable')
-        failure.mockRestore()
-        const ticket = await view.refillToken()
-        expect(await view.refillDir(parent, [['new', entry('new')]], ticket)).toEqual([{ path: old, folder: false }])
-        expect(removed).toEqual([old])
-        expect(await cache.get(old)).toBe(null)
-      })
+      it.each([
+        [false, false, false],
+        [false, false, true],
+        [false, true, false],
+        [false, true, true],
+        [true, false, false],
+        [true, false, true],
+        [true, true, false],
+        [true, true, true],
+      ])(
+        'recovery preserves deletion history (deep=%s, directory=%s, observation=%s)',
+        async (deep, directory, observation) => {
+          const cache = new RAMFileCacheStore()
+          const parent = deep ? '/data/sub' : '/data'
+          const old = `${parent}/old`
+          const body = directory ? `${old}/inside` : old
+          await cache.set(body, new TextEncoder().encode('deleted bytes'))
+          await store.setDir(parent, [['old', directory ? folder('old') : entry('old')]])
+          if (directory) await store.setDir(old, [['inside', entry('inside')]])
+          const removed: string[] = []
+          const view = new IndexView(store, cache, '/data', () => true, {
+            onGone: async (gone) => {
+              for (const child of gone) {
+                removed.push(child.path)
+                await cache.remove(child.path, { subtree: child.folder })
+              }
+            },
+          })
+          const failure = vi
+            .spyOn(store, 'invalidateMissing')
+            .mockRejectedValueOnce(new Error('unavailable'))
+          await expect(view.invalidateMissing([`${parent}/new`])).rejects.toThrow('unavailable')
+          failure.mockRestore()
+          if (observation) await view.invalidateMissing([`${parent}/new`])
+          const ticket = await view.refillToken()
+          expect(await view.refillDir(parent, [['new', entry('new')]], ticket)).toEqual([
+            { path: old, folder: directory },
+          ])
+          expect(removed).toEqual([old])
+          expect(await cache.get(body)).toBe(null)
+        },
+      )
 
       it('returns only requested retained rows in a batch', async () => {
         expect(await store.getMany([])).toEqual(new Map())

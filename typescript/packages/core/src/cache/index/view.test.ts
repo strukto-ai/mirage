@@ -1066,7 +1066,9 @@ it('listing refills recover a failed observation scope', async () => {
   expect(await view.refillDir('/data', [['old', row]], old)).toBe(null)
   const fresh = await view.refillToken()
   expect(await view.refillDir('/data', [['old', row]], old)).toBe(null)
-  expect(await view.refillDir('/data', [['new', row]], fresh)).toEqual([])
+  expect(await view.refillDir('/data', [['new', row]], fresh)).toEqual([
+    { path: '/data/old', folder: false },
+  ])
   expect((await view.listDir('/data')).entries).toEqual(['/data/new'])
   expect((await index.listDir('/other')).entries).toEqual(['/other/keep'])
   expect((await index.listDir('/data/nested')).entries).toEqual(['/data/nested/keep'])

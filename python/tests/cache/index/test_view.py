@@ -964,7 +964,9 @@ async def test_listing_refill_recovers_a_failed_observation_scope(monkeypatch):
     assert await view.refill_dir("/data", [("old", _row())], old) is None
     fresh = await view.refill_token()
     assert await view.refill_dir("/data", [("old", _row())], old) is None
-    assert await view.refill_dir("/data", [("new", _row())], fresh) == []
+    assert await view.refill_dir("/data", [("new", _row())], fresh) == [
+        Evicted("/data/old", folder=False)
+    ]
     assert (await view.list_dir("/data")).entries == ["/data/new"]
     assert (await index.list_dir("/other")).entries == ["/other/keep"]
     assert (await index.list_dir("/data/nested")).entries == [

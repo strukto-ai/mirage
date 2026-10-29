@@ -154,7 +154,11 @@ export abstract class IndexCacheStore {
    * complete listing; the default forgets it.
    * Mirrors Python `IndexCacheStore.invalidate_prefix`.
    */
-  abstract invalidatePrefix(vfsPath: string, excluded?: readonly string[], remember?: boolean): Promise<void>
+  abstract invalidatePrefix(
+    vfsPath: string,
+    excluded?: readonly string[],
+    remember?: boolean,
+  ): Promise<void>
   /**
    * Whether the running command fetched `folder`'s listing itself.
    *

@@ -369,7 +369,9 @@ class IndexView(IndexCacheStore):
         async with self._fence():
             if self._unverified and self._owns(self._prefix):
                 await self._store.invalidate_prefix(
-                    self._prefix, excluded=self._excluded_prefixes(), remember=True
+                    self._prefix,
+                    excluded=self._excluded_prefixes(),
+                    remember=True,
                 )
                 self._unverified = False
             return await self._store.refill_token()
@@ -382,7 +384,9 @@ class IndexView(IndexCacheStore):
             try:
                 if self._unverified:
                     await self._store.invalidate_prefix(
-                        self._prefix, excluded=self._excluded_prefixes(), remember=True
+                        self._prefix,
+                        excluded=self._excluded_prefixes(),
+                        remember=True,
                     )
                 result = await self._store.invalidate_missing(owned)
                 self._unverified = False
@@ -449,7 +453,9 @@ class IndexView(IndexCacheStore):
         async with self._fence():
             if self._owns(vfs_path):
                 await self._store.invalidate_prefix(
-                    vfs_path, excluded=excluded + self._excluded_prefixes(), remember=remember
+                    vfs_path,
+                    excluded=excluded + self._excluded_prefixes(),
+                    remember=remember,
                 )
 
     async def holds_subtree(self, vfs_path: str) -> bool:

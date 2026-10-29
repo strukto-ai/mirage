@@ -1261,13 +1261,22 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     } while (cursor !== '')
   }
 
-  invalidatePrefix(vfsPath: string, excluded: readonly string[] = [], remember = false): Promise<void> {
+  invalidatePrefix(
+    vfsPath: string,
+    excluded: readonly string[] = [],
+    remember = false,
+  ): Promise<void> {
     return this.listings.writing(async () => {
       await this.flushSeed()
       await (await this.client()).set(`${this.generationKey}-observation`, this.ids.uuid7())
       // Tombstones survive until the next complete listing proves removals.
       await this.deletePaths([this.entryPrefix], vfsPath, excluded)
-      await this.deletePaths([this.childrenPrefix, `${this.generationKey}:`], vfsPath, excluded, remember)
+      await this.deletePaths(
+        [this.childrenPrefix, `${this.generationKey}:`],
+        vfsPath,
+        excluded,
+        remember,
+      )
     })
   }
 

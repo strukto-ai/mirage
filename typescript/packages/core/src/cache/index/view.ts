@@ -313,7 +313,8 @@ export class IndexView extends IndexCacheStore {
       const owned = paths.filter((path) => this.owns(path))
       if (owned.length === 0) return false
       try {
-        if (this.unverified) await this.inner.invalidatePrefix(this.prefix, this.excludedPrefixes(), true)
+        if (this.unverified)
+          await this.inner.invalidatePrefix(this.prefix, this.excludedPrefixes(), true)
         const result = await this.inner.invalidateMissing(owned)
         this.unverified = false
         return result
@@ -359,7 +360,11 @@ export class IndexView extends IndexCacheStore {
     })
   }
 
-  invalidatePrefix(path: string, excluded: readonly string[] = [], remember = false): Promise<void> {
+  invalidatePrefix(
+    path: string,
+    excluded: readonly string[] = [],
+    remember = false,
+  ): Promise<void> {
     return this.fence(async () => {
       if (this.owns(path))
         await this.inner.invalidatePrefix(path, [...excluded, ...this.excludedPrefixes()], remember)
