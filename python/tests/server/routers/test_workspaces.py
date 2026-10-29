@@ -432,20 +432,21 @@ def test_a_policy_file_names_only_methods(tmp_path):
         build_app(idle_grace_seconds=10.0, policy_file=policy_file)
 
 
+async def _answer(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    await reader.read(1024)
+    writer.write(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n"
+        b"Connection: close\r\n\r\nok\n"
+    )
+    await writer.drain()
+    writer.close()
+
+
 @pytest_asyncio.fixture
 async def listening() -> AsyncIterator[int]:
-    async def answer(
-        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
-        await reader.read(1024)
-        writer.write(
-            b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n"
-            b"Connection: close\r\n\r\nok\n"
-        )
-        await writer.drain()
-        writer.close()
-
-    server = await asyncio.start_server(answer, "127.0.0.1", 0)
+    server = await asyncio.start_server(_answer, "127.0.0.1", 0)
     yield server.sockets[0].getsockname()[1]
     server.close()
     await server.wait_closed()
