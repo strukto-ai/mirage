@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { DEFAULT_RUN, DEFAULT_TENANT, RUN_QUERY, TENANT_QUERY } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, Reply } from '../kit/typescript/index.ts'
 import { BOT_USER_ID, POST_TS_BASE, type C } from './config.ts'
 import { channelById, messageAt, messageKey, pinKey } from './store.ts'
-import { fail, reactionsOf } from './wire.ts'
+import { argsOf, fail, reactionsOf } from './wire.ts'
 
 function obj(v: JsonValue | undefined): Record<string, JsonValue> {
   return typeof v === 'object' && v !== null && !Array.isArray(v) ? v : {}
@@ -41,10 +42,25 @@ export async function postMessage(ctx: Ctx<C>): Promise<Reply> {
   if (channel === '') return fail('channel_not_found')
   // The row has to land somewhere real, so an unknown channel is rejected
   // rather than left as an orphan message no listing can reach.
-  if ((await channelById(ctx.db, ctx.tenant, channel)) === null) return fail('channel_not_found')
+  const row = await channelById(ctx.db, ctx.tenant, channel)
+  if (row === null) return fail('channel_not_found')
+  if (!row.isMember) return fail('not_in_channel')
+  const threadTs = str(payload.thread_ts) === '' ? null : str(payload.thread_ts)
+  const ts = await post(ctx, channel, text, threadTs)
+  const message: Record<string, JsonValue> = { type: 'message', user: BOT_USER_ID, text, ts }
+  if (threadTs !== null) message.thread_ts = threadTs
+  return { status: 200, body: { ok: true, channel, ts, message } }
+}
+
+// A message from the bot, at the next synthetic ts.
+async function post(
+  ctx: Ctx<C>,
+  channel: string,
+  text: string,
+  threadTs: string | null,
+): Promise<string> {
   const n = ctx.minter.next('post')
   const ts = `${String(POST_TS_BASE)}.${String(n).padStart(6, '0')}`
-  const threadTs = str(payload.thread_ts) === '' ? null : str(payload.thread_ts)
   await ctx.db.message.create({
     data: {
       tenant: ctx.tenant,
@@ -57,9 +73,7 @@ export async function postMessage(ctx: Ctx<C>): Promise<Reply> {
       seq: n,
     },
   })
-  const message: Record<string, JsonValue> = { type: 'message', user: BOT_USER_ID, text, ts }
-  if (threadTs !== null) message.thread_ts = threadTs
-  return { status: 200, body: { ok: true, channel, ts, message } }
+  return ts
 }
 
 export async function reactionsAdd(ctx: Ctx<C>): Promise<Reply> {
@@ -113,5 +127,117 @@ export function pins(add: boolean) {
     if (pinned === null) return fail('no_pin')
     await ctx.db.pin.delete({ where: key })
     return { status: 200, body: { ok: true } }
+  }
+}
+
+// The file types an upload is given by its name; anything else is binary, as
+// Slack calls a type it does not recognise.
+const UPLOAD_TYPES: Record<string, string> = {
+  txt: 'text/plain',
+  json: 'application/json',
+  wav: 'audio/wav',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  png: 'image/png',
+}
+
+// The upload URL is presigned: the client sends the bytes to it with no token,
+// so the run and the tenant ride in the url, as the discord fake's CDN does.
+function uploadUrl(ctx: Ctx<C>, id: string): string {
+  const parts: string[] = []
+  if (ctx.runPrefix === '' && ctx.run !== DEFAULT_RUN) {
+    parts.push(`${RUN_QUERY}=${encodeURIComponent(ctx.run)}`)
+  }
+  if (ctx.tenant !== DEFAULT_TENANT) {
+    parts.push(`${TENANT_QUERY}=${encodeURIComponent(ctx.tenant)}`)
+  }
+  const query = parts.length === 0 ? '' : `?${parts.join('&')}`
+  return `${ctx.url.origin}${ctx.runPrefix}/upload/${id}${query}`
+}
+
+// files.getUploadURLExternal: reserve a file id for `filename` of `length`
+// bytes and hand back where to send them.
+export async function getUploadUrl(ctx: Ctx<C>): Promise<Reply> {
+  if (!authed(ctx)) return fail('not_authed')
+  const args = argsOf(ctx)
+  const name = args.get('filename') ?? ''
+  const length = Number.parseInt(args.get('length') ?? '', 10)
+  if (name === '' || Number.isNaN(length) || length < 0) return fail('invalid_arguments')
+  const n = ctx.minter.next('file')
+  const id = `FU${String(n).padStart(6, '0')}`
+  await ctx.db.upload.create({ data: { tenant: ctx.tenant, id, name, length, body: null, seq: n } })
+  return { status: 200, body: { ok: true, upload_url: uploadUrl(ctx, id), file_id: id } }
+}
+
+// The upload URL itself: the raw bytes, answered the way Slack answers them.
+export async function receiveUpload(ctx: Ctx<C>): Promise<Reply> {
+  const key = { tenant_id: { tenant: ctx.tenant, id: ctx.params.id ?? '' } }
+  if ((await ctx.db.upload.findUnique({ where: key })) === null) return { status: 404 }
+  await ctx.db.upload.update({ where: key, data: { body: new Uint8Array(ctx.body) } })
+  return { status: 200, body: Buffer.from(`OK - ${String(ctx.body.length)}`) }
+}
+
+// files.completeUploadExternal: share the uploaded files in `channel_id`, as
+// one bot message carrying `initial_comment`, in `thread_ts` when given.
+// Without a channel the files complete unshared, so nothing lists them.
+export async function completeUpload(ctx: Ctx<C>): Promise<Reply> {
+  if (!authed(ctx)) return fail('not_authed')
+  const args = argsOf(ctx)
+  let asked: JsonValue
+  try {
+    asked = JSON.parse(args.get('files') ?? '') as JsonValue
+  } catch {
+    return fail('invalid_arguments')
+  }
+  if (!Array.isArray(asked) || asked.length === 0) return fail('invalid_arguments')
+  const entries = asked.map(obj)
+  const uploads = []
+  for (const entry of entries) {
+    const row = await ctx.db.upload.findUnique({
+      where: { tenant_id: { tenant: ctx.tenant, id: str(entry.id) } },
+    })
+    if (row === null || row.body === null) return fail('file_not_found')
+    uploads.push({ row, title: str(entry.title) === '' ? row.name : str(entry.title) })
+  }
+  const channel = args.get('channel_id') ?? ''
+  let ts: string | null = null
+  if (channel !== '') {
+    const target = await channelById(ctx.db, ctx.tenant, channel)
+    if (target === null) return fail('channel_not_found')
+    if (!target.isMember) return fail('not_in_channel')
+    const threadTs = args.get('thread_ts') ?? ''
+    ts = await post(
+      ctx,
+      channel,
+      args.get('initial_comment') ?? '',
+      threadTs === '' ? null : threadTs,
+    )
+  }
+  for (const { row, title } of uploads) {
+    await ctx.db.upload.delete({ where: { tenant_id: { tenant: ctx.tenant, id: row.id } } })
+    if (ts === null) continue
+    const ext = row.name.includes('.') ? row.name.slice(row.name.lastIndexOf('.') + 1) : ''
+    await ctx.db.slackFile.create({
+      data: {
+        tenant: ctx.tenant,
+        id: row.id,
+        channelId: channel,
+        messageTs: ts,
+        name: row.name,
+        title,
+        mimetype: UPLOAD_TYPES[ext.toLowerCase()] ?? 'application/octet-stream',
+        filetype: ext === '' ? 'binary' : ext.toLowerCase(),
+        size: row.body?.length ?? 0,
+        timestamp: Math.floor(Number(ts)),
+        content: '',
+        contentPath: null,
+        blob: row.body,
+        seq: row.seq,
+      },
+    })
+  }
+  return {
+    status: 200,
+    body: { ok: true, files: uploads.map(({ row, title }) => ({ id: row.id, title })) },
   }
 }

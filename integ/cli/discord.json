@@ -246,6 +246,39 @@
         "stdout": "0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "dc_send_file",
+      "seq": 565017,
+      "targets": ["cli-discord"],
+      "command": "printf 'reply text\\n' > /scratch/reply.txt && discord send --channel 200000000000000001 --text here --file /scratch/reply.txt | jq -r '.content, .attachments[0].filename, .attachments[0].size'",
+      "expect": {
+        "exit": 0,
+        "stdout": "here\nreply.txt\n11\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_sent_file_persists",
+      "seq": 565018,
+      "targets": ["cli-discord"],
+      "command": "discord read --channel 200000000000000001 --limit 1 | jq -r '.[0].attachments[0].filename'",
+      "expect": {
+        "exit": 0,
+        "stdout": "reply.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_send_file_missing",
+      "seq": 565019,
+      "targets": ["cli-discord"],
+      "command": "discord send --channel 200000000000000001 --text hi --file /scratch/nope.wav",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "discord send: read /scratch/nope.wav: No such file or directory\n"
+      }
     }
   ]
 }

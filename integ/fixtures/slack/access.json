@@ -1,0 +1,45 @@
+{
+  "users": [
+    {
+      "id": "U1",
+      "name": "alice",
+      "realName": "Alice Anderson",
+      "email": "alice@kestrel.example.com"
+    }
+  ],
+  "channels": [
+    {
+      "id": "C1",
+      "name": "general",
+      "kind": "channel",
+      "created": 1767225600,
+      "membersJson": [
+        "U1"
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "ops",
+      "kind": "channel",
+      "created": 1767225600,
+      "membersJson": [
+        "U1"
+      ],
+      "isMember": false
+    }
+  ],
+  "messages": [
+    {
+      "channelId": "C1",
+      "ts": "1767225600.000001",
+      "userId": "U1",
+      "text": "general is open"
+    },
+    {
+      "channelId": "C2",
+      "ts": "1767225600.000001",
+      "userId": "U1",
+      "text": "ops is closed"
+    }
+  ]
+}

@@ -12,9 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { eacces } from '../../errors/fs.ts'
+import type { PathSpec } from '../../types.ts'
 import { windowFor } from '../../utils/ranges.ts'
 import { apiRequest, apiStream } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
+
+export const REFUSED_ERRORS: ReadonlySet<string> = new Set([
+  'not_in_channel',
+  'channel_not_found',
+  'missing_scope',
+  'is_archived',
+  'not_authed',
+])
 
 export interface SlackResponse {
   ok: boolean
@@ -34,6 +44,23 @@ export class SlackApiError extends ApiError {
   ) {
     super(formatSlackErrorMessage(endpoint, slackError, needed, provided), status)
     this.name = 'SlackApiError'
+  }
+}
+
+/**
+ * Report a conversation Slack will not show as permission denied.
+ *
+ * `not_in_channel`, `missing_scope` and the rest are Slack declining to show
+ * what the path names, never the conversation saying it is empty, so the path
+ * answers the way a directory the caller may not open does: ls names it and
+ * fails, find reports it and walks on.
+ */
+export async function refusalsDenied<T>(pathSpec: PathSpec, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (err) {
+    if (err instanceof SlackApiError && REFUSED_ERRORS.has(err.slackError)) throw eacces(pathSpec)
+    throw err
   }
 }
 
@@ -75,6 +102,7 @@ export interface SlackTransport {
   call(endpoint: string, params?: Record<string, string>, body?: unknown): Promise<SlackResponse>
   downloadFile?(url: string, offset?: number, size?: number | null): Promise<Uint8Array>
   downloadFileStream?(url: string, signal?: AbortSignal): AsyncIterable<Uint8Array>
+  uploadBytes?(url: string, data: Uint8Array): Promise<void>
   // Whether this transport's credentials can reach search.* at all. Slack
   // rejects a bot token there, so a doomed call is worth not making; the
   // python twin is `search_available(config)`. A transport that cannot tell
@@ -147,6 +175,19 @@ export abstract class HttpSlackTransport implements SlackTransport {
       timeout: this.timeout,
     })
     return data as Uint8Array
+  }
+
+  // The URL files.getUploadURLExternal issues is presigned, so the request
+  // carries no token.
+  async uploadBytes(url: string, data: Uint8Array): Promise<void> {
+    await apiRequest('POST', url, {
+      errorOf: (response) =>
+        new ApiError(`slack: upload failed (${String(response.status)}): ${url}`, response.status),
+      body: data as Uint8Array<ArrayBuffer>,
+      read: 'none',
+      fetchFn: this.fetch,
+      timeout: this.timeout,
+    })
   }
 
   async *downloadFileStream(url: string, signal?: AbortSignal): AsyncGenerator<Uint8Array, void> {

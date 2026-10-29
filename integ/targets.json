@@ -4110,6 +4110,40 @@
       "dataset": "time_scope"
     },
     {
+      "id": "slack-access",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "slack",
+      "facet": "chat",
+      "mounts": [
+        {
+          "path": "/slack",
+          "vfs": "slack",
+          "backend": "slack"
+        }
+      ],
+      "dataset": "access"
+    },
+    {
+      "id": "discord-access",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "discord",
+      "facet": "chat",
+      "mounts": [
+        {
+          "path": "/discord",
+          "vfs": "discord",
+          "backend": "discord"
+        }
+      ],
+      "dataset": "access"
+    },
+    {
       "id": "gcal-time-scope",
       "hosts": [
         "python",

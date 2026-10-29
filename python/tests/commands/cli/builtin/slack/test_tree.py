@@ -19,6 +19,7 @@ from mirage.core.slack.config import SlackConfig
 
 VERBS = [
     "send-message",
+    "upload-file",
     "read-messages",
     "react",
     "reactions",
@@ -49,6 +50,7 @@ def test_write_classification():
     }
     assert writers == {
         "send-message",
+        "upload-file",
         "react",
         "pin-message",
         "unpin-message",
@@ -62,6 +64,11 @@ def test_required_flags():
         if o.required
     }
     assert required == {"--channel", "--text"}
+    assert {
+        o.names[-1]
+        for o in compile_spec(leaf("upload-file")).options
+        if o.required
+    } == {"--channel", "--file"}
     assert not any(
         o.required for o in compile_spec(leaf("emoji-list")).options
     )

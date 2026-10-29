@@ -47,6 +47,7 @@ export const DISCORD = new CLI({
           new Argument('--channel', { required: true }),
           new Argument('--text', { required: true }),
           new Argument('--reply-to', { help: 'Reply to this message ID' }),
+          new Argument('--file', { type: 'path', help: 'Workspace file to attach' }),
         ],
       }),
       new CommandSpec({

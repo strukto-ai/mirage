@@ -76,6 +76,8 @@ MESSAGES = [
 DAY = "2024-01-15"
 SEALED_DAY = "2024-01-13"
 BROKEN_DAY = "2024-01-12"
+GONE_DAY = "2024-01-11"
+THROTTLED_DAY = "2024-01-10"
 
 
 def _http_error(status: int) -> ApiError:
@@ -106,6 +108,10 @@ class FakeDiscordApi:
             raise _http_error(403)
         if date_str == BROKEN_DAY:
             raise _http_error(500)
+        if date_str == GONE_DAY:
+            raise _http_error(404)
+        if date_str == THROTTLED_DAY:
+            raise _http_error(429)
         if channel_id == "C001" and date_str == DAY:
             return [dict(m) for m in MESSAGES]
         return []

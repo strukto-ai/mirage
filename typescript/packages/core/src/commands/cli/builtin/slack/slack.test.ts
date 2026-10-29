@@ -63,6 +63,7 @@ function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
 
 const VERBS = [
   'send-message',
+  'upload-file',
   'read-messages',
   'react',
   'reactions',
@@ -86,7 +87,9 @@ describe('slack tree', () => {
     const writers = new Set(
       SLACK.spec.subcommands.filter((v) => SLACK.handlers[v.name]?.write).map((v) => v.name),
     )
-    expect(writers).toEqual(new Set(['send-message', 'react', 'pin-message', 'unpin-message']))
+    expect(writers).toEqual(
+      new Set(['send-message', 'upload-file', 'react', 'pin-message', 'unpin-message']),
+    )
   })
 })
 

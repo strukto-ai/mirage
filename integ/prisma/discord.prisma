@@ -59,6 +59,10 @@ model DiscordChannel {
   topic         String?
   position      Int
   lastMessageId String?
+  // A channel whose permission overwrites deny the bot VIEW_CHANNEL. Discord
+  // still lists it among the guild's channels, and answers 403 Missing Access
+  // to reading or posting there.
+  botHidden     Boolean      @default(false)
   guild         DiscordGuild @relation(fields: [tenant, guildId], references: [tenant, id])
 
   @@id([tenant, id])

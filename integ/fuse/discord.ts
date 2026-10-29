@@ -27,7 +27,7 @@ import { Workspace } from '@struktoai/mirage-node/workspace'
 interface Case {
   id: string
   adapter: 'core' | 'fuse'
-  kind: 'hydrate' | 'failure' | 'policy'
+  kind: 'listed' | 'failure' | 'policy'
   early_close?: boolean
   status?: number
   recover?: boolean
@@ -51,7 +51,7 @@ const file = corpus.file
 const body = new TextEncoder().encode(corpus.body)
 
 class DiscordHTTP {
-  status = 403
+  status = 200
   requests: string[] = []
   statuses: number[] = []
   responses: Response[] = []
@@ -197,59 +197,55 @@ async function run(test: Case): Promise<void> {
   const ws = new Workspace({ '/discord/': backend }, { mode: MountMode.READ, policies: [policy] })
   const driver = new Driver(ws, test.adapter)
   try {
-    assert.equal((await ws.vfs.stat(file)).size, null)
-    assert.equal(await driver.size(), 0)
-    assert.deepEqual(http.statuses, [403])
-    http.status = test.status ?? 200
-    const fd = await driver.open()
     if (test.kind === 'failure') {
-      assert.equal(driver.core.handles.get(fd)?.data, undefined)
-      const result = await driver.read(fd)
+      http.status = test.status ?? 200
+      const result = await driver.getattr()
       assert.equal(result.code, -(test.expected_errno ?? 0))
-      assert.equal(result.value, undefined)
-      assert.equal(driver.core.handles.get(fd)?.data, undefined)
-      if (test.adapter === 'core') {
+      if (test.adapter === 'core' && test.status === 429) {
         assert(result.error instanceof DiscordApiError)
         assert.equal(result.error.status, test.status)
       }
       if (test.recover === true) {
         http.status = 200
+        assert.equal(await driver.size(), body.length)
+      }
+      assert.deepEqual(http.statuses, test.expected_statuses)
+      return
+    }
+    assert.equal((await ws.vfs.stat(file)).size, body.length)
+    assert.equal(await driver.size(), body.length)
+    assert.deepEqual(http.statuses, [200])
+    const fd = await driver.open()
+    assert.equal(await driver.size(fd), body.length)
+    if (test.kind === 'listed') {
+      const { offset, size } = corpus.partial
+      await checkedRead(driver, fd, body.slice(offset, offset + size), offset, size)
+      if (test.early_close !== true) {
         await checkedRead(driver, fd, body)
-        assert.equal(await driver.size(fd), body.length)
+        await checkedRead(driver, fd, new Uint8Array(), body.length, 9)
       }
     } else {
-      assert.equal(await driver.size(fd), body.length)
-      if (test.kind === 'hydrate') {
-        const { offset, size } = corpus.partial
-        await checkedRead(driver, fd, body.slice(offset, offset + size), offset, size)
-        if (test.early_close !== true) {
-          await checkedRead(driver, fd, body)
-          await checkedRead(driver, fd, new Uint8Array(), body.length, 9)
-        }
-      } else {
-        await checkedRead(driver, fd, body)
-        const before = http.requests.length
-        const restriction = test.restriction
-        if (restriction === 'hide')
-          await ws.setSessionProfile('reader', { paths: { hide: [file] } })
-        else if (restriction === 'deny')
-          await ws.setSessionProfile('reader', {
-            commands: { deny: [{ paths: [file], reason: 'sealed' }] },
-          })
-        else {
-          assert(restriction !== undefined)
-          stage = restriction
-        }
-        assert.equal((await driver.read(fd)).code, -(test.expected_errno ?? 0))
-        if (restriction === 'hide') assert.equal((await driver.getattr(fd)).code, -2)
-        if (restriction === 'pre_vfs' || restriction === 'post_vfs')
-          assert.deepEqual(seen, [restriction])
-        assert.equal(http.requests.length, before)
-        stage = ''
-        await ws.setSessionProfile('reader', {})
-        await checkedRead(driver, fd, body)
-        assert.equal(http.requests.length, before)
+      await checkedRead(driver, fd, body)
+      const before = http.requests.length
+      const restriction = test.restriction
+      if (restriction === 'hide') await ws.setSessionProfile('reader', { paths: { hide: [file] } })
+      else if (restriction === 'deny')
+        await ws.setSessionProfile('reader', {
+          commands: { deny: [{ paths: [file], reason: 'sealed' }] },
+        })
+      else {
+        assert(restriction !== undefined)
+        stage = restriction
       }
+      assert.equal((await driver.read(fd)).code, -(test.expected_errno ?? 0))
+      if (restriction === 'hide') assert.equal((await driver.getattr(fd)).code, -2)
+      if (restriction === 'pre_vfs' || restriction === 'post_vfs')
+        assert.deepEqual(seen, [restriction])
+      assert.equal(http.requests.length, before)
+      stage = ''
+      await ws.setSessionProfile('reader', {})
+      await checkedRead(driver, fd, body)
+      assert.equal(http.requests.length, before)
     }
     const before = http.requests.length
     await driver.release(fd)

@@ -34,6 +34,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec.types import FlagValue
 from mirage.core.discord.config import DiscordConfig
 from mirage.io.types import materialize
+from mirage.types import PathSpec
 
 ACCESSOR = DiscordAccessor(DiscordConfig(token="bot-token"))
 
@@ -51,8 +52,8 @@ async def _json(out):
 async def test_send_forwards_reply_to(monkeypatch):
     calls = []
 
-    async def fake_send(accessor, channel, text, reply_to):
-        calls.append((accessor, channel, text, reply_to))
+    async def fake_send(accessor, channel, text, reply_to, file):
+        calls.append((accessor, channel, text, reply_to, file))
         return {"id": "M1"}
 
     monkeypatch.setitem(send.__globals__, "send_message", fake_send)
@@ -62,7 +63,37 @@ async def test_send_forwards_reply_to(monkeypatch):
         [],
         _ctx("send", channel="C1", text="hi", reply_to="M0"),
     )
-    assert calls == [(ACCESSOR, "C1", "hi", "M0")]
+    assert calls == [(ACCESSOR, "C1", "hi", "M0", None)]
+
+
+class _Files:
+    async def read(self, path: PathSpec) -> bytes:
+        if path.virtual != "/tmp/reply.wav":
+            raise FileNotFoundError(2, "No such file", path.virtual)
+        return b"RIFF"
+
+
+@pytest.mark.asyncio
+async def test_send_attaches_the_workspace_file(monkeypatch):
+    calls = []
+
+    async def fake_send(accessor, channel, text, reply_to, file):
+        calls.append(file)
+        return {"id": "M1"}
+
+    monkeypatch.setitem(send.__globals__, "send_message", fake_send)
+    spec = next(s for s in DISCORD.spec.subcommands if s.name == "send")
+    ctx = Context(
+        flags={
+            "channel": "C1",
+            "text": "",
+            "file": PathSpec.from_str_path("/tmp/reply.wav"),
+        },
+        spec=spec,
+        vfs=_Files(),
+    )
+    await send(ACCESSOR, [], [], ctx)
+    assert calls == [("reply.wav", b"RIFF")]
 
 
 @pytest.mark.asyncio

@@ -24,7 +24,7 @@ import {
   type DiscordResponse,
   type DiscordTransport,
 } from './client.ts'
-import { dateRangeDescending, listFiles, readdir } from './readdir.ts'
+import { dateRangeDescending, readdir } from './readdir.ts'
 import { snowflakeToDate } from './entry.ts'
 import { compactJsonBytes, jsonlBytes } from '../render/json.ts'
 
@@ -329,60 +329,67 @@ describe('readdir unrecognized paths', () => {
   })
 })
 
-describe('readdir channel and sealed-day windows', () => {
-  it('lists a channel and a sealed day as windows', async () => {
-    // The channel lists the last 30 days, and a 403/404/429 seals an empty
-    // day: neither is the backend saying anything outside it is gone.
-    const sealed: DiscordTransport = {
-      call: (_method, endpoint) =>
-        endpoint === '/channels/C1/messages'
-          ? Promise.reject(new DiscordApiError(endpoint, 403, 'Missing Access'))
-          : Promise.resolve(null),
-    }
-    const accessor = new DiscordAccessor(sealed)
+describe('readdir channel window', () => {
+  it('lists a channel as a window', async () => {
+    // The channel lists the last 30 days: not the backend saying anything
+    // outside them is gone.
+    const accessor = new DiscordAccessor({ call: () => Promise.resolve(null) })
     const extra = { channel_id: 'C1', last_message_id: '175928847299117056' }
     const channel = await readdir(
       accessor,
       spec(CHANNEL, '/mnt/discord'),
       new FileStat({ name: 'general__C1', type: FileType.DIRECTORY, extra }),
     )
-    const day = await readdir(
-      accessor,
-      spec(`${CHANNEL}/2016-04-30`, '/mnt/discord'),
-      new FileStat({ name: '2016-04-30', type: FileType.DIRECTORY, extra: { channel_id: 'C1' } }),
-    )
     expect(channel).toBeInstanceOf(DirListing)
     expect((channel as DirListing).window).toBe(true)
-    expect(day).toBeInstanceOf(DirListing)
-    expect((day as DirListing).entries).toEqual([])
-    expect((day as DirListing).window).toBe(true)
   })
 })
 
-describe('listFiles of a sealed day', () => {
-  // Reached when the files listing was evicted but the day survived; a soft
-  // error there must not evict the attachments it listed before.
-  it('lists the files as a window too', async () => {
-    const sealed: DiscordTransport = {
+describe('a day Discord refuses', () => {
+  function failing(status: number): DiscordAccessor {
+    return new DiscordAccessor({
       call: (_method, endpoint) =>
         endpoint === '/channels/C1/messages'
-          ? Promise.reject(new DiscordApiError(endpoint, 403, 'Missing Access'))
+          ? Promise.reject(new DiscordApiError(endpoint, status, 'refused'))
           : Promise.resolve(null),
-    }
+    })
+  }
+  const day = `${CHANNEL}/2016-04-30`
+
+  it.each([
+    [403, ''],
+    [403, '/files'],
+    [401, ''],
+  ])('answers %i at the day%s with EACCES', async (status, below) => {
     const own = new FileStat({
-      name: 'files',
+      name: below === '' ? '2016-04-30' : 'files',
       type: FileType.DIRECTORY,
       extra: { channel_id: 'C1' },
     })
-    const listing = await listFiles(
-      new DiscordAccessor(sealed),
-      {
-        kind: 'files',
-        vfsPath: 'g/channels/c/2016-04-30/files',
-        slots: { day: '2016-04-30' },
-      } as never,
-      own,
+    await expect(
+      readdir(failing(status), spec(day + below, '/mnt/discord'), own),
+    ).rejects.toMatchObject({ code: 'EACCES', virtualPath: day + below })
+  })
+
+  it('answers a vanished channel with ENOENT', async () => {
+    const own = new FileStat({
+      name: '2016-04-30',
+      type: FileType.DIRECTORY,
+      extra: { channel_id: 'C1' },
+    })
+    await expect(readdir(failing(404), spec(day, '/mnt/discord'), own)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it.each([429, 500])('propagates %i', async (status) => {
+    const own = new FileStat({
+      name: '2016-04-30',
+      type: FileType.DIRECTORY,
+      extra: { channel_id: 'C1' },
+    })
+    await expect(readdir(failing(status), spec(day, '/mnt/discord'), own)).rejects.toBeInstanceOf(
+      DiscordApiError,
     )
-    expect((listing as DirListing).window).toBe(true)
   })
 })

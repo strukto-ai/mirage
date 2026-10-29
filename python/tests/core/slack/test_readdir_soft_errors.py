@@ -17,14 +17,17 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.slack.client import SlackApiError
 from mirage.core.slack.config import SlackConfig
-from mirage.core.slack.readdir import _latest_message_ts, _list_files, readdir
-from mirage.types import DirListing, FileStat, FileType, PathSpec
+from mirage.core.slack.read import read
+from mirage.core.slack.readdir import readdir
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.slack import SlackVFS
 from tests.fixtures.mounted import Mounted
+
+CHANNEL = "/slack/channels/private__C_INACCESSIBLE"
+DAY = f"{CHANNEL}/2026-05-10"
 
 
 @pytest.fixture
@@ -32,92 +35,27 @@ def accessor():
     return SlackAccessor(SlackConfig(token="xoxb-test"))
 
 
-@pytest.mark.asyncio
-async def test_latest_message_ts_returns_none_on_not_in_channel(accessor):
-    err = SlackApiError(
-        "Slack API error (conversations.history): not_in_channel"
+def _refused(code: str) -> SlackApiError:
+    return SlackApiError(
+        f"Slack API error (conversations.history): {code}", slack_error=code
     )
-    with patch(
-        "mirage.core.slack.readdir.slack_get", new=AsyncMock(side_effect=err)
-    ):
-        result = await _latest_message_ts(accessor, "C_INACCESSIBLE")
-    assert result is None
 
 
-@pytest.mark.asyncio
-async def test_latest_message_ts_returns_none_on_missing_scope(accessor):
-    err = SlackApiError(
-        "Slack API error (conversations.history): missing_scope "
-        "(needed: channels:history; provided: channels:read)"
+def _spec(virtual: str) -> PathSpec:
+    return PathSpec(
+        vfs_path=mount_key(virtual, "/slack"),
+        virtual=virtual,
+        directory=virtual + "/",
     )
-    with patch(
-        "mirage.core.slack.readdir.slack_get", new=AsyncMock(side_effect=err)
-    ):
-        result = await _latest_message_ts(accessor, "C_NO_SCOPE")
-    assert result is None
 
 
-@pytest.mark.asyncio
-async def test_latest_message_ts_reraises_unrelated_errors(accessor):
-    err = SlackApiError(
-        "Slack API error (conversations.history): rate_limited"
-    )
-    with patch(
-        "mirage.core.slack.readdir.slack_get", new=AsyncMock(side_effect=err)
-    ):
-        with pytest.raises(SlackApiError, match="rate_limited"):
-            await _latest_message_ts(accessor, "C1")
-
-
-@pytest.mark.asyncio
-async def test_day_listing_seals_empty_dir_on_not_in_channel(accessor):
-    err = SlackApiError(
-        "Slack API error (conversations.history): not_in_channel"
-    )
-    channels_page = {
-        "channels": [{"id": "C_INACCESSIBLE", "name": "foo", "created": 1}],
-        "response_metadata": {"next_cursor": ""},
-    }
-
-    async def fake_get(_accessor, method, params=None):
-        if method == "conversations.list":
-            return channels_page
-        if method == "conversations.history":
-            raise err
-        raise AssertionError(f"unexpected {method}")
-
-    async def fake_history(_accessor, channel_id, date_str, _scope):
-        raise err
-
-    day = "/slack/channels/foo__C_INACCESSIBLE/2026-05-10"
-    with (
-        patch("mirage.core.slack.paginate.slack_get", new=fake_get),
-        patch("mirage.core.slack.readdir.slack_get", new=fake_get),
-        patch(
-            "mirage.core.slack.readdir.fetch_messages_for_day",
-            new=fake_history,
-        ),
-    ):
-        names = await Mounted(SlackVFS, accessor, "/slack").readdir(
-            PathSpec(
-                vfs_path=mount_key(day, "/slack"), virtual=day, directory=day
-            )
-        )
-    assert names == []
-
-
-@pytest.mark.asyncio
-async def test_readdir_channel_inaccessible_yields_no_dates(accessor):
-    """Full integration: ls /slack/channels/inaccessible/ → no dates."""
+def _history_fails(err: SlackApiError):
     channels_page = {
         "channels": [
             {"id": "C_INACCESSIBLE", "name": "private", "created": 1}
         ],
         "response_metadata": {"next_cursor": ""},
     }
-    err = SlackApiError(
-        "Slack API error (conversations.history): not_in_channel"
-    )
 
     async def fake_get(_accessor, method, params=None):
         if method == "conversations.list":
@@ -126,90 +64,77 @@ async def test_readdir_channel_inaccessible_yields_no_dates(accessor):
             raise err
         raise AssertionError(f"unexpected {method}")
 
+    return fake_get
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code",
+    [
+        "not_in_channel",
+        "channel_not_found",
+        "missing_scope",
+        "is_archived",
+        "not_authed",
+    ],
+)
+async def test_a_channel_slack_refuses_is_eacces(accessor, code):
+    fake_get = _history_fails(_refused(code))
     mounted = Mounted(SlackVFS, accessor, "/slack")
     with (
         patch("mirage.core.slack.paginate.slack_get", new=fake_get),
         patch("mirage.core.slack.readdir.slack_get", new=fake_get),
     ):
-        await mounted.readdir(
-            PathSpec(
-                vfs_path=mount_key("/slack/channels", "/slack"),
-                virtual="/slack/channels",
-                directory="/slack/channels/",
-            )
-        )
-        dates = await mounted.readdir(
-            PathSpec(
-                vfs_path=mount_key(
-                    "/slack/channels/private__C_INACCESSIBLE", "/slack"
-                ),
-                virtual="/slack/channels/private__C_INACCESSIBLE",
-                directory="/slack/channels/private__C_INACCESSIBLE/",
-            )
-        )
-    assert dates == []
+        await mounted.readdir(_spec("/slack/channels"))
+        with pytest.raises(PermissionError) as raised:
+            await mounted.readdir(_spec(CHANNEL))
+    assert raised.value.filename == CHANNEL
 
 
 @pytest.mark.asyncio
-async def test_a_soft_error_day_is_a_window(accessor):
-    # An empty day from not_in_channel is not the backend saying the day's
-    # messages are gone, so it must not evict what an earlier listing held.
-    err = SlackApiError(
-        "Slack API error (conversations.history): not_in_channel"
-    )
-    channels_page = {
-        "channels": [{"id": "C_INACCESSIBLE", "name": "foo", "created": 1}],
-        "response_metadata": {"next_cursor": ""},
-    }
-
-    async def fake_get(_accessor, method, params=None):
-        return channels_page
-
+@pytest.mark.parametrize("below", ["", "/files"])
+async def test_a_day_slack_refuses_is_eacces(accessor, below):
     async def fake_history(_accessor, channel_id, date_str, _scope):
-        raise err
+        raise _refused("not_in_channel")
 
-    day = "/slack/channels/foo__C_INACCESSIBLE/2026-05-10"
     own = FileStat(
+        name="files" if below else "2026-05-10",
+        type=FileType.DIRECTORY,
+        extra={"channel_id": "C_INACCESSIBLE"},
+    )
+    with patch(
+        "mirage.core.slack.readdir.fetch_messages_for_day", new=fake_history
+    ):
+        with pytest.raises(PermissionError) as raised:
+            await readdir(accessor, _spec(DAY + below), own)
+    assert raised.value.filename == DAY + below
+
+
+@pytest.mark.asyncio
+async def test_reading_a_refused_day_is_eacces(accessor):
+    chat = f"{DAY}/chat.jsonl"
+    day = FileStat(
         name="2026-05-10",
         type=FileType.DIRECTORY,
         extra={"channel_id": "C_INACCESSIBLE"},
     )
-    with (
-        patch("mirage.core.slack.paginate.slack_get", new=fake_get),
-        patch(
-            "mirage.core.slack.readdir.fetch_messages_for_day",
-            new=fake_history,
-        ),
+    with patch(
+        "mirage.core.slack.read.get_history_jsonl",
+        new=AsyncMock(side_effect=_refused("not_in_channel")),
     ):
-        listing = await readdir(
-            accessor,
-            PathSpec(
-                vfs_path=mount_key(day, "/slack"), virtual=day, directory=day
-            ),
-            own,
-        )
-    assert listing.window is True
-
-
-async def _soft_day_listing(_accessor, _channel_id, _day):
-    return DirListing(entries=[], window=True)
+        with pytest.raises(PermissionError) as raised:
+            await read(accessor, _spec(chat), None, day)
+    assert raised.value.filename == chat
 
 
 @pytest.mark.asyncio
-async def test_a_soft_error_files_listing_is_a_window_too(accessor):
-    # Reached when the files listing was evicted but the day survived; a
-    # soft error there must not evict the attachments it listed before.
-    own = FileStat(
-        name="files", type=FileType.DIRECTORY, extra={"channel_id": "C1"}
-    )
-
-    match = ScopeMatch(
-        kind="files",
-        vfs_path="channels/c__C1/2026-05-10/files",
-        slots={"day": "2026-05-10"},
-    )
-    with patch(
-        "mirage.core.slack.readdir._day_listing", new=_soft_day_listing
+async def test_other_slack_errors_propagate(accessor):
+    fake_get = _history_fails(_refused("ratelimited"))
+    mounted = Mounted(SlackVFS, accessor, "/slack")
+    with (
+        patch("mirage.core.slack.paginate.slack_get", new=fake_get),
+        patch("mirage.core.slack.readdir.slack_get", new=fake_get),
     ):
-        listing = await _list_files(accessor, match, own)
-    assert listing.window is True
+        await mounted.readdir(_spec("/slack/channels"))
+        with pytest.raises(SlackApiError, match="ratelimited"):
+            await mounted.readdir(_spec(CHANNEL))

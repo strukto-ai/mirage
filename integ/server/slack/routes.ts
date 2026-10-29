@@ -29,7 +29,14 @@ import {
   usersList,
 } from './reads.ts'
 import { searchAll, searchFiles, searchMessages } from './search.ts'
-import { pins, postMessage, reactionsAdd } from './writes.ts'
+import {
+  completeUpload,
+  getUploadUrl,
+  pins,
+  postMessage,
+  reactionsAdd,
+  receiveUpload,
+} from './writes.ts'
 
 // Slack's Web API is method-per-path under /api, so the routes are a flat
 // table rather than a tree. GET and POST are both accepted on the read
@@ -66,5 +73,10 @@ export function slackRoutes(): KitRoute<C>[] {
     route('GET', '/api/search.files', searchFiles),
     route('POST', '/api/search.files', searchFiles),
     route('GET', '/files/download/:id', download),
+    route('GET', '/api/files.getUploadURLExternal', getUploadUrl, { write: true }),
+    route('POST', '/api/files.getUploadURLExternal', getUploadUrl, { write: true }),
+    route('POST', '/upload/:id', receiveUpload, { write: true }),
+    route('GET', '/api/files.completeUploadExternal', completeUpload, { write: true }),
+    route('POST', '/api/files.completeUploadExternal', completeUpload, { write: true }),
   ]
 }

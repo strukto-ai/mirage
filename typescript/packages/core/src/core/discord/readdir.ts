@@ -14,12 +14,12 @@
 
 import { guardDay } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
-import { ContentType, DirListing, FileStat, FileType } from '../../types.ts'
+import { ContentType, DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForMime } from '../../utils/filetype.ts'
 import { cutListing, makeReaddir, type Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { listChannels } from './channels.ts'
-import { DiscordApiError } from './client.ts'
+import { refusalsDenied } from './client.ts'
 import { channelEntry, guildEntry, historyEntry, memberEntry, snowflakeToDate } from './entry.ts'
 import { fileBlobName, isListed } from './files.ts'
 import { listGuilds } from './guilds.ts'
@@ -28,8 +28,6 @@ import { listMembers } from './members.ts'
 import { jsonlBytes } from '../render/json.ts'
 import { detectScope } from './scope.ts'
 import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
-
-const SOFT_HTTP_STATUSES = new Set([403, 404, 429])
 
 /**
  * The channel's day directories, newest first.
@@ -72,10 +70,6 @@ function todayUtc(): string {
   const mm = (now.getUTCMonth() + 1).toString().padStart(2, '0')
   const dd = now.getUTCDate().toString().padStart(2, '0')
   return `${yyyy}-${mm}-${dd}`
-}
-
-function isSoftError(err: unknown): boolean {
-  return err instanceof DiscordApiError && SOFT_HTTP_STATUSES.has(err.status)
 }
 
 function containerEntry(name: string, guildId: string): FileStat {
@@ -134,26 +128,13 @@ function listChannelDays(
   )
 }
 
-/**
- * One history fetch, answering the day dir and its files subdir.
- *
- * A soft HTTP error (403/404/429) seals an empty day: the dir lists nothing,
- * and stat serves chat.jsonl with the size left unknown.
- */
+/** One history fetch, answering the day dir and its files subdir. */
 async function dayListing(
   accessor: DiscordAccessor,
   channelId: string,
   dateStr: string,
 ): Promise<DirListing> {
-  let messages
-  try {
-    messages = await listedMessagesForDay(accessor, channelId, dateStr)
-  } catch (e) {
-    // A soft error is not the channel saying the day's messages are gone,
-    // so the empty day must not evict what it held.
-    if (isSoftError(e)) return new DirListing({ entries: [], window: true })
-    throw e
-  }
+  const messages = await listedMessagesForDay(accessor, channelId, dateStr)
   // The day's messages are already in hand, so chat.jsonl's exact rendered
   // size is free here; read() renders the same messages the same way.
   const blobs: FileStat[] = []
@@ -223,14 +204,10 @@ export async function listFiles(
   // Normally served from the day lister's seed; reached only when the index
   // evicted the files listing while the day's rows survived.
   const listing = await dayListing(accessor, String(own.extra.channel_id), match.slots.day ?? '')
-  // A soft-error day proves nothing about its attachments either.
-  return new DirListing({
-    entries: [...(listing.seeds.get('files') ?? [])],
-    window: listing.window,
-  })
+  return [...(listing.seeds.get('files') ?? [])]
 }
 
-export const readdir = makeReaddir<DiscordAccessor>(detectScope, {
+const listing = makeReaddir<DiscordAccessor>(detectScope, {
   listers: { root: listRoot },
   entryListers: {
     guild: listGuildContainers,
@@ -244,3 +221,14 @@ export const readdir = makeReaddir<DiscordAccessor>(detectScope, {
   patternKinds: { channel: hasGlobSpan },
   leafError: 'enotdir',
 })
+
+/** List a Discord directory; a channel Discord will not show is EACCES. */
+export function readdir(
+  accessor: DiscordAccessor,
+  pathSpec: PathSpec,
+  entry: FileStat | null = null,
+  parent: FileStat | null = null,
+  limit?: number,
+): Promise<FileStat[] | DirListing> {
+  return refusalsDenied(pathSpec, () => listing(accessor, pathSpec, entry, parent, limit))
+}

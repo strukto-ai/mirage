@@ -24,13 +24,14 @@ from mirage.commands.cli.builtin.slack.read_messages import read_messages
 from mirage.commands.cli.builtin.slack.search import search
 from mirage.commands.cli.builtin.slack.send_message import send_message
 from mirage.commands.cli.builtin.slack.unpin_message import unpin_message
+from mirage.commands.cli.builtin.slack.upload_file import upload_file
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.slack.config import SlackConfig
 
 # The slack program, spelled with the OpenClaw Slack action vocabulary
-# (kebab verbs: send-message, read-messages, pin-message, list-pins,
-# member-info, emoji-list). search and list-members are mirage
+# (kebab verbs: send-message, upload-file, read-messages, pin-message,
+# list-pins, member-info, emoji-list). search and list-members are mirage
 # extensions carrying over the old mount commands' capabilities.
 # Install with a SlackConfig; two installs are two workspaces.
 SLACK = CLI(
@@ -45,6 +46,24 @@ SLACK = CLI(
                     Argument("--channel", required=True),
                     Argument("--text", required=True),
                     Argument("--thread-ts", help="Reply in this thread"),
+                ),
+            ),
+            CommandSpec(
+                name="upload-file",
+                description="Share a workspace file in a channel or thread",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument(
+                        "--file",
+                        type="path",
+                        required=True,
+                        help="Workspace file to upload",
+                    ),
+                    Argument(
+                        "--initial-comment",
+                        help="Message posted with the file",
+                    ),
+                    Argument("--thread-ts", help="Share in this thread"),
                 ),
             ),
             CommandSpec(
@@ -141,6 +160,7 @@ SLACK = CLI(
     ),
     handlers={
         "send-message": CLIHandler(fn=send_message, write=True),
+        "upload-file": CLIHandler(fn=upload_file, write=True),
         "read-messages": CLIHandler(fn=read_messages),
         "react": CLIHandler(fn=react, write=True),
         "reactions": CLIHandler(fn=reactions),

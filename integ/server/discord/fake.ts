@@ -22,10 +22,12 @@ import { idWhere, tenantWhere } from '../kit/typescript/tenant.ts'
 import type { Fake } from '../kit/typescript/base.ts'
 import type { Dmmf } from '../kit/typescript/seed.ts'
 import type { JsonValue, Reply } from '../kit/typescript/types.ts'
+import { readMultipart } from '../box/multipart.ts'
 import { materialize } from './seed.ts'
 import { pyField } from './pyvalue.ts'
 import { renderChannel, renderGuild, renderMember, renderMessage, renderThread } from './render.ts'
 import {
+  BASE_TOKEN,
   EDIT_TIMESTAMP,
   MEMBERS_MAX_LIMIT,
   MESSAGES_MAX_LIMIT,
@@ -37,6 +39,7 @@ import {
   cursor,
   invalidFormBody,
   isObject,
+  missingAccess,
   parseRange,
   postSnowflake,
   requireBody,
@@ -174,7 +177,9 @@ async function searchMembers(ctx: Ctx<C>): Promise<Reply> {
 async function channelMessages(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
   const channelId = ctx.params.channel_id ?? ''
-  if ((await channelRow(ctx, channelId)) === null) return unknownChannel()
+  const channel = await channelRow(ctx, channelId)
+  if (channel === null) return unknownChannel()
+  if (channel.botHidden) return missingAccess()
   const limit = clamp(ctx.query.get('limit'), 50, MESSAGES_MAX_LIMIT)
   const after = ctx.query.get('after')
   const before = ctx.query.get('before')
@@ -209,13 +214,63 @@ async function channelMessages(ctx: Ctx<C>): Promise<Reply> {
   }
 }
 
+// A message with attachments arrives as multipart: the JSON body in its
+// `payload_json` part and each file in a `files[n]` part, named by the
+// `attachments` entry whose id is n. Each file is stored as a blob the CDN
+// route serves, and the reply carries its resolved url, as Discord's does.
+async function attachmentsOf(
+  ctx: Ctx<C>,
+  payload: { [key: string]: JsonValue },
+  parts: Awaited<ReturnType<typeof readMultipart>>,
+): Promise<JsonValue[]> {
+  const declared = Array.isArray(payload.attachments) ? payload.attachments : []
+  const out: JsonValue[] = []
+  for (const entry of declared) {
+    if (!isObject(entry)) continue
+    const part = parts[`files[${String(entry.id)}]`]
+    if (part === undefined) continue
+    const n = ctx.minter.next('attachment')
+    const id = postSnowflake(n)
+    const filename = typeof entry.filename === 'string' ? entry.filename : 'file'
+    await ctx.db.discordBlob.create({ data: { tenant: ctx.tenant, id, seq: n, body: part.bytes } })
+    out.push({
+      id,
+      filename,
+      size: part.bytes.length,
+      url: `${BASE_TOKEN}/attachments/${id}/${filename}`,
+      proxy_url: `${BASE_TOKEN}/attachments/${id}/${filename}`,
+      content_type: 'application/octet-stream',
+    })
+  }
+  return out
+}
+
 async function createMessage(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
   const channelId = ctx.params.channel_id ?? ''
   const channel = await channelRow(ctx, channelId)
   if (channel === null) return unknownChannel()
-  requireBody(ctx.body)
-  const body = bodyObject(ctx.json())
+  if (channel.botHidden) return missingAccess()
+  const type = ctx.headers['content-type']
+  const multipart = (Array.isArray(type) ? type[0] : type)?.startsWith('multipart/form-data')
+  let raw = ctx.body
+  let body: { [key: string]: JsonValue }
+  let attachments: JsonValue[] = []
+  if (multipart === true) {
+    const parts = await readMultipart(ctx)
+    const payload = parts.payload_json
+    if (payload === undefined) return invalidFormBody()
+    raw = Buffer.from(payload.bytes)
+    try {
+      body = bodyObject(JSON.parse(payload.text) as JsonValue)
+    } catch {
+      return invalidFormBody()
+    }
+    attachments = await attachmentsOf(ctx, body, parts)
+  } else {
+    requireBody(raw)
+    body = bodyObject(ctx.json())
+  }
   const bot = await botPayload(ctx)
   const tail = await ctx.db.discordMessage.aggregate({
     where: { ...scope(ctx), channelId },
@@ -231,17 +286,21 @@ async function createMessage(ctx: Ctx<C>): Promise<Reply> {
       idNum: BigInt(id),
       channelId,
       guildId: channel.guildId,
-      content: pyField(ctx.body, 'content'),
+      content: pyField(raw, 'content'),
       timestamp: POST_TIMESTAMP,
       editedTimestamp: null,
       authorJson: JSON.stringify({ ...bot, bot: true }),
-      attachmentsJson: '[]',
+      attachmentsJson: JSON.stringify(attachments),
       // Discord echoes the poll object (with defaults resolved) on the created
       // message; the fake echoes it verbatim.
       pollJson: poll !== undefined && isObject(poll) ? JSON.stringify(poll) : null,
     },
   })
-  return { status: 200, body: renderMessage(row) }
+  if (attachments.length === 0) return { status: 200, body: renderMessage(row) }
+  return {
+    status: 200,
+    body: resolveBase(renderMessage(row), baseOf(ctx.url), cdnQuery(ctx.run, ctx.tenant)),
+  }
 }
 
 async function editMessage(ctx: Ctx<C>): Promise<Reply> {

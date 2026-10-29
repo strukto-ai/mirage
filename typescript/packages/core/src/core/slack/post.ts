@@ -38,3 +38,37 @@ export async function replyToThread(
     text,
   })
 }
+
+/**
+ * Share a file in a channel or thread, the way Slack's own SDKs do: ask for
+ * an upload URL, send the bytes there, then complete the upload into the
+ * conversation. Both API calls carry their arguments in the query string,
+ * which every Slack method accepts.
+ */
+export async function uploadFile(
+  accessor: SlackAccessor,
+  channelId: string,
+  filename: string,
+  data: Uint8Array,
+  initialComment?: string,
+  threadTs?: string,
+): Promise<SlackResponse> {
+  const transport = accessor.transport
+  if (transport.uploadBytes === undefined) {
+    throw new Error('slack transport does not support file uploads')
+  }
+  const ticket = await transport.call('files.getUploadURLExternal', {
+    filename,
+    length: String(data.byteLength),
+  })
+  await transport.uploadBytes(String(ticket.upload_url), data)
+  const params: Record<string, string> = {
+    files: JSON.stringify([{ id: ticket.file_id, title: filename }]),
+    channel_id: channelId,
+  }
+  if (initialComment !== undefined && initialComment !== '') {
+    params.initial_comment = initialComment
+  }
+  if (threadTs !== undefined && threadTs !== '') params.thread_ts = threadTs
+  return transport.call('files.completeUploadExternal', params)
+}

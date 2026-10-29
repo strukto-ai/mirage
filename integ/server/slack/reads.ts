@@ -33,7 +33,12 @@ import {
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'fixtures', 'slack')
 
-export function fileBytes(f: { content: string; contentPath: string | null }): Buffer {
+export function fileBytes(f: {
+  content: string
+  contentPath: string | null
+  blob: Uint8Array | null
+}): Buffer {
+  if (f.blob !== null) return Buffer.from(f.blob)
   return f.contentPath !== null && f.contentPath !== ''
     ? readFileSync(join(FIXTURE_DIR, f.contentPath))
     : Buffer.from(f.content, 'utf8')
@@ -111,7 +116,9 @@ export async function conversationsList(ctx: Ctx<C>): Promise<Reply> {
 export async function conversationsReplies(ctx: Ctx<C>): Promise<Reply> {
   const args = argsOf(ctx)
   const channel = args.get('channel') ?? ''
-  if ((await channelById(ctx.db, ctx.tenant, channel)) === null) return fail('channel_not_found')
+  const row = await channelById(ctx.db, ctx.tenant, channel)
+  if (row === null) return fail('channel_not_found')
+  if (!row.isMember) return fail('not_in_channel')
   const asked = await messageAt(ctx.db, ctx.tenant, channel, args.get('ts') ?? '')
   if (asked === null) return fail('thread_not_found')
   const root = asked.threadTs !== null && asked.threadTs !== '' ? asked.threadTs : asked.ts
@@ -229,9 +236,15 @@ function cursorTs(cursor: string): string | null {
   return key === undefined ? null : `${key.slice(0, -6)}.${key.slice(-6)}`
 }
 
+// A channel the token's holder is not in answers `not_in_channel`, and one
+// that does not exist `channel_not_found`, as Slack does; the fake used to
+// answer both with an empty history.
 export async function conversationsHistory(ctx: Ctx<C>): Promise<Reply> {
   const args = argsOf(ctx)
   const channel = args.get('channel') ?? ''
+  const row = await channelById(ctx.db, ctx.tenant, channel)
+  if (row === null) return fail('channel_not_found')
+  if (!row.isMember) return fail('not_in_channel')
   const oldest = args.get('oldest')
   const latest = args.get('latest')
   const cursor = args.get('cursor') ?? ''

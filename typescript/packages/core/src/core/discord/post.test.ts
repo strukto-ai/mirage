@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
+import type { DiscordFile, DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
 import { deleteMessage, editMessage, sendMessage, sendPoll } from './post.ts'
 
 interface RecordedCall {
@@ -61,6 +61,26 @@ describe('sendMessage', () => {
       content: 'reply',
       message_reference: { message_id: 'M0' },
     })
+  })
+
+  it('posts a file as multipart through the transport', async () => {
+    const posted: [string, Record<string, unknown>, readonly DiscordFile[]][] = []
+    class Uploading extends FakeDiscordTransport {
+      postFiles(
+        endpoint: string,
+        body: Record<string, unknown>,
+        files: readonly DiscordFile[],
+      ): Promise<DiscordResponse> {
+        posted.push([endpoint, body, files])
+        return Promise.resolve({ id: 'M3' })
+      }
+    }
+    const t = new Uploading()
+    const file = { name: 'reply.wav', data: new TextEncoder().encode('RIFF') }
+    const out = await sendMessage(new DiscordAccessor(t), 'C1', '', undefined, file)
+    expect(t.calls).toEqual([])
+    expect(posted).toEqual([['/channels/C1/messages', { content: '' }, [file]]])
+    expect(out).toMatchObject({ id: 'M3' })
   })
 
   it('omits message_reference when messageReferenceId is empty string', async () => {

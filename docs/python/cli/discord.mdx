@@ -49,12 +49,14 @@ This list is generated from Mirage's registered command tree.
 discord read --channel 1256522563555819574 --limit 20
 discord send --channel 1256522563555819574 --text "Release is ready"
 discord send --channel 1256522563555819574 --text "A reply" --reply-to 1489887688978075769
+discord send --channel 1256522563555819574 --text "Spoken reply" --file /data/reply.wav
 discord edit --channel 1256522563555819574 --message 1489887688978075769 --text "Updated"
 discord delete --channel 1256522563555819574 --message 1489887688978075769
 ```
 
 `edit` works only on messages authored by the bot. Channel, guild and message
-arguments are Discord snowflake IDs, not workspace paths.
+arguments are Discord snowflake IDs; `send --file` reads a workspace path and
+attaches it.
 
 ## Threads, polls and search
 

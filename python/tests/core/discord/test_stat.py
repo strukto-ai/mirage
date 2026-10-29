@@ -108,12 +108,9 @@ async def test_stat_chat_jsonl(api, accessor):
     assert row.size == len(jsonl_bytes(MESSAGES))
 
 
-async def test_stat_chat_jsonl_sealed_day_has_unknown_size(api, accessor):
-    # A day whose history could not be listed (403/404/429) seals an empty
-    # date dir; the file still stats, with the size left unknown.
-    row = await stat(accessor, spec(f"/{CHANNEL}/{SEALED_DAY}/chat.jsonl"))
-    assert row.content is ContentType.TEXT
-    assert row.size is None
+async def test_stat_chat_jsonl_in_a_refused_day_is_eacces(api, accessor):
+    with pytest.raises(PermissionError):
+        await stat(accessor, spec(f"/{CHANNEL}/{SEALED_DAY}/chat.jsonl"))
 
 
 async def test_stat_chat_jsonl_under_bogus_channel_is_enoent(api, accessor):
@@ -129,8 +126,8 @@ async def test_stat_files_dir(api, accessor):
     assert row.type is FileType.DIRECTORY
 
 
-async def test_stat_files_under_a_sealed_day_is_enoent(api, accessor):
-    with pytest.raises(FileNotFoundError):
+async def test_stat_files_under_a_refused_day_is_eacces(api, accessor):
+    with pytest.raises(PermissionError):
         await stat(accessor, spec(f"/{CHANNEL}/{SEALED_DAY}/files"))
 
 

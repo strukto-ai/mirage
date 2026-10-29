@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "discord_access_lists_a_hidden_channel",
+      "seq": 9951000,
+      "targets": [
+        "discord-access"
+      ],
+      "command": "ls '/discord/Mirage HQ__100000000000000001/channels'/",
+      "expect": {
+        "exit": 0,
+        "stdout": "general__200000000000000001\nops__200000000000000002\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "discord_access_ls_hidden_day",
+      "seq": 9951001,
+      "targets": [
+        "discord-access"
+      ],
+      "command": "ls '/discord/Mirage HQ__100000000000000001/channels/ops__200000000000000002/2026-01-01'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot open directory '/discord/Mirage HQ__100000000000000001/channels/ops__200000000000000002/2026-01-01': Permission denied\n"
+      }
+    },
+    {
+      "id": "discord_access_cat_hidden_chat",
+      "seq": 9951002,
+      "targets": [
+        "discord-access"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/ops__200000000000000002/2026-01-01/chat.jsonl'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: '/discord/Mirage HQ__100000000000000001/channels/ops__200000000000000002/2026-01-01/chat.jsonl': Permission denied\n"
+      }
+    },
+    {
+      "id": "discord_access_find_walks_past_a_hidden_channel",
+      "seq": 9951003,
+      "targets": [
+        "discord-access"
+      ],
+      "command": "find '/discord/Mirage HQ__100000000000000001/channels' -path '*2026-01-01*' -name chat.jsonl 2>/dev/null; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-01-01/chat.jsonl\nexit=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "discord_access_open_channel_still_reads",
+      "seq": 9951004,
+      "targets": [
+        "discord-access"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-01-01/chat.jsonl' | jq -r .content",
+      "expect": {
+        "exit": 0,
+        "stdout": "general is open\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "discord_access_find_names_a_hidden_day",
+      "seq": 9951005,
+      "targets": [
+        "discord-access"
+      ],
+      "command": "find '/discord/Mirage HQ__100000000000000001/channels/ops__200000000000000002' -name chat.jsonl 2>&1 >/dev/null | sort | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "find: '/discord/Mirage HQ__100000000000000001/channels/ops__200000000000000002/2026-01-01': Permission denied\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

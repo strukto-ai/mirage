@@ -150,6 +150,10 @@ export function unknownChannel(): Reply {
   return { status: 404, body: { message: 'Unknown Channel', code: 10003 } }
 }
 
+export function missingAccess(): Reply {
+  return { status: 403, body: { message: 'Missing Access', code: 50001 } }
+}
+
 export function unknownMessage(): Reply {
   return { status: 404, body: { message: 'Unknown Message', code: 10008 } }
 }

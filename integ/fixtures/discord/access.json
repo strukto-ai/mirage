@@ -1,0 +1,75 @@
+{
+  "bot_user": {
+    "id": "900000000000000001",
+    "username": "mirage-bot"
+  },
+  "guilds": [
+    {
+      "id": "100000000000000001",
+      "name": "Mirage HQ",
+      "channels": [
+        {
+          "id": "200000000000000001",
+          "name": "general",
+          "type": 0,
+          "topic": "open to the bot",
+          "position": 0
+        },
+        {
+          "id": "200000000000000002",
+          "name": "ops",
+          "type": 0,
+          "topic": "hidden from the bot",
+          "position": 1,
+          "botHidden": true
+        }
+      ],
+      "members": [
+        {
+          "user": {
+            "id": "300000000000000001",
+            "username": "alice",
+            "global_name": "Alice",
+            "bot": false
+          },
+          "nick": null,
+          "roles": [],
+          "joined_at": "2026-01-01T00:00:00.000000+00:00",
+          "deaf": false,
+          "mute": false
+        },
+        {
+          "user": {
+            "id": "900000000000000001",
+            "username": "mirage-bot",
+            "global_name": null,
+            "bot": true
+          },
+          "nick": null,
+          "roles": [],
+          "joined_at": "2026-01-01T00:00:00.000000+00:00",
+          "deaf": false,
+          "mute": false
+        }
+      ],
+      "messages": {
+        "200000000000000001": [
+          {
+            "id": "1456210339430400000",
+            "author": "300000000000000001",
+            "content": "general is open",
+            "timestamp": "2026-01-01T09:00:00Z"
+          }
+        ],
+        "200000000000000002": [
+          {
+            "id": "1456210339430400001",
+            "author": "300000000000000001",
+            "content": "ops is closed",
+            "timestamp": "2026-01-01T09:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

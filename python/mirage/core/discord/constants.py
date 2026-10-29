@@ -14,6 +14,8 @@
 
 DISCORD_API = "https://discord.com/api/v10"
 MAX_RETRIES = 3
+REFUSED_STATUSES = frozenset({401, 403})
+GONE_STATUS = 404
 
 CHAT_FILE = "chat.jsonl"
 FILES_DIR = "files"

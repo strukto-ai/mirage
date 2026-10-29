@@ -7,7 +7,7 @@
       "command": "slack --help | head -n 1",
       "expect": {
         "exit": 0,
-        "stdout": "usage: slack [-h] {send-message,read-messages,react,reactions,pin-message,unpin-message,list-pins,member-info,list-members,emoji-list,search} ...\n",
+        "stdout": "usage: slack [-h] {send-message,upload-file,read-messages,react,reactions,pin-message,unpin-message,list-pins,member-info,list-members,emoji-list,search} ...\n",
         "stderr": ""
       }
     },
@@ -264,6 +264,61 @@
         "exit": 0,
         "stdout": "100\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "sl_upload_file",
+      "seq": 564021,
+      "targets": ["cli-slack"],
+      "command": "printf 'reply text\\n' > /scratch/reply.txt && slack upload-file --channel C1 --file /scratch/reply.txt --initial-comment here",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"files\":[{\"id\":\"FU000001\",\"title\":\"reply.txt\"}]}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_uploaded_file_posts_its_comment",
+      "seq": 564022,
+      "targets": ["cli-slack"],
+      "command": "slack read-messages --channel C1 --limit 1 | jq -r '.[0].text, .[0].files[0].name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "here\nreply.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_uploaded_file_reads_back",
+      "seq": 564023,
+      "targets": ["cli-slack"],
+      "command": "cat /slack/channels/general__C1/2026-03-31/files/reply__FU000001.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "reply text\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_upload_file_in_a_thread",
+      "seq": 564024,
+      "targets": ["cli-slack"],
+      "command": "slack upload-file --channel C1 --file /scratch/reply.txt --thread-ts 1766165985.000426 >/dev/null && slack read-messages --channel C1 --limit 1 | jq -r '.[0].thread_ts'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1766165985.000426\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_upload_file_missing",
+      "seq": 564025,
+      "targets": ["cli-slack"],
+      "command": "slack upload-file --channel C1 --file /scratch/nope.wav",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "slack upload-file: read /scratch/nope.wav: No such file or directory\n"
       }
     }
   ]
