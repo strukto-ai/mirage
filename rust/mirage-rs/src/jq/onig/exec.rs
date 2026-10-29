@@ -66,6 +66,13 @@ enum Frame {
         old: usize,
         value: usize,
     },
+    /// A recursive group's start set back to its activation's at the
+    /// end, undone with that end as a MEM_END entry undoes it; the scans
+    /// that pair starts with ends pass over it.
+    Start {
+        slot: usize,
+        old: usize,
+    },
     Count {
         id: usize,
         count: u32,
@@ -479,7 +486,7 @@ impl Machine {
                 self.pos = pos;
                 return Ok(Popped::Resumed);
             }
-            Frame::Slot { slot, old, .. } => self.slots[slot] = old,
+            Frame::Slot { slot, old, .. } | Frame::Start { slot, old } => self.slots[slot] = old,
             Frame::Count { id, count, start } => {
                 self.loops.counts[id] = count;
                 self.loops.starts[id] = start;
@@ -577,7 +584,9 @@ impl Machine {
         while let Some(frame) = self.frames.pop() {
             match frame {
                 Frame::Mark { .. } => return,
-                Frame::Slot { slot, old, .. } => self.slots[slot] = old,
+                Frame::Slot { slot, old, .. } | Frame::Start { slot, old } => {
+                    self.slots[slot] = old
+                }
                 Frame::Count { id, count, start } => {
                     self.loops.counts[id] = count;
                     self.loops.starts[id] = start;
@@ -809,6 +818,8 @@ impl Machine {
                     }
                 }
                 if let Some(value) = found {
+                    let old = self.slots[start];
+                    self.push(Frame::Start { slot: start, old })?;
                     self.slots[start] = value;
                 }
                 self.save(start + 1, self.pos)?;
