@@ -80,6 +80,16 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
     },
   )
 
+  it('a failed seed flush still releases the listing memo', async () => {
+    const closing = new RedisIndexCacheStore({ url: REDIS_URL ?? '', keyPrefix: prefix, ttl: 600 })
+    vi.spyOn(
+      closing as unknown as { flushSeed: () => Promise<void> },
+      'flushSeed',
+    ).mockRejectedValue(new Error('unavailable'))
+    await expect(closing.close()).rejects.toThrow('unavailable')
+    expect((closing as unknown as { listings: { closed: boolean } }).listings.closed).toBe(true)
+  })
+
   it.each([false, true])(
     'refill tokens stay out of the listing script (window=%s)',
     async (window) => {
