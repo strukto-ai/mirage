@@ -20,6 +20,8 @@ from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.stream import OpenStream, open_stream
 
+WHITESPACE = " \t\r\n"
+
 
 async def decode_utf8(data: bytes) -> str:
     """Decode raw bytes using jq's malformed sequence rules.
@@ -30,36 +32,6 @@ async def decode_utf8(data: bytes) -> str:
     return b"".join(
         [part async for part in run_codec("jq_decode", {}, data)]
     ).decode()
-
-
-def utf8_missing(piece: bytes | bytearray) -> int:
-    """Bytes needed to finish a jq reader piece's final UTF-8 character.
-
-    Args:
-        piece (bytes | bytearray): the nonempty reader piece.
-    """
-    at = len(piece) - 1
-    if at <= 0:
-        return 0
-    seen = 1
-    while 0x80 <= piece[at] < 0xC0:
-        if at == 0:
-            break
-        at -= 1
-        seen += 1
-    first = piece[at]
-    length = (
-        1
-        if first < 0x80
-        else 2
-        if 0xC2 <= first < 0xE0
-        else 3
-        if 0xE0 <= first < 0xF0
-        else 4
-        if 0xF0 <= first <= 0xF4
-        else 0
-    )
-    return max(0, length - seen)
 
 
 def string_text(value: str) -> str:
@@ -144,3 +116,46 @@ class JqParser:
                 wire += stream.finish()
             else:
                 return NO_VALUE
+
+
+async def value_text(text: bytes) -> str | NoValue:
+    """The JSON text of the one value a text holds, as jq's jv_parse reads
+    an --argjson or a --jsonargs value, or NO_VALUE when it holds none,
+    several, or bad JSON.
+
+    Args:
+        text (bytes): the text.
+    """
+    parser = JqParser()
+    try:
+        parser.feed(text, False)
+        value = await parser.next()
+        if value is NO_VALUE or isinstance(value, JqParseError):
+            return NO_VALUE
+        if await parser.next() is not NO_VALUE:
+            return NO_VALUE
+        return value.strip(WHITESPACE)
+    finally:
+        await parser.close()
+
+
+async def read_texts(text: bytes) -> tuple[list[str], JqParseError | None]:
+    """The JSON text of every value a file holds, and the parse error that
+    ended it early, as jq reads a --slurpfile.
+
+    Args:
+        text (bytes): the file's bytes.
+    """
+    parser = JqParser()
+    texts: list[str] = []
+    try:
+        parser.feed(text, False)
+        while True:
+            value = await parser.next()
+            if isinstance(value, JqParseError):
+                return texts, value
+            if value is NO_VALUE:
+                return texts, None
+            texts.append(value)
+    finally:
+        await parser.close()

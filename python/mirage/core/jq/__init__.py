@@ -12,39 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.jq.errors import JqCompileError
-from mirage.core.jq.eval import args_text, references_args, stream_reads
-from mirage.core.jq.format import (
-    error_report,
-    format_one,
-    halt_report,
-    load_failure,
-    print_config,
+from mirage.core.jq.errors import JqCompileError, load_failure
+from mirage.core.jq.eval import Ending, Engine, local_zone
+from mirage.core.jq.parse import (
+    JqParser,
+    decode_utf8,
+    read_texts,
+    string_text,
+    value_text,
 )
-from mirage.core.jq.parse import JqParser, decode_utf8, string_text
-from mirage.core.jq.stream import InputReader, read_texts, value_text
 from mirage.core.jq.types import (
     DEFAULT_INDENT,
     NO_VALUE,
     STDIN_NAME,
-    UNKNOWN_POSITION,
-    InputSource,
     JqError,
     JqHalt,
     JqOptions,
     JqParseError,
     JqRun,
     NoValue,
-    StreamReads,
 )
 
 __all__ = [
     "DEFAULT_INDENT",
     "NO_VALUE",
     "STDIN_NAME",
-    "UNKNOWN_POSITION",
-    "InputReader",
-    "InputSource",
+    "Ending",
+    "Engine",
     "JqCompileError",
     "JqError",
     "JqHalt",
@@ -53,17 +47,10 @@ __all__ = [
     "JqParser",
     "JqRun",
     "NoValue",
-    "StreamReads",
-    "args_text",
     "decode_utf8",
-    "error_report",
-    "format_one",
-    "halt_report",
     "load_failure",
-    "print_config",
+    "local_zone",
     "read_texts",
-    "references_args",
-    "stream_reads",
     "string_text",
     "value_text",
 ]

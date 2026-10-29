@@ -55,7 +55,7 @@ struct Config {
     /// which `get_prog_origin` answers.
     #[serde(default)]
     prog_origin: Option<String>,
-    /// The options jq prints its outputs by (jq_format's): each output
+    /// The options jq prints its outputs by: each output
     /// then goes out printed, in a print frame, instead of as its dump.
     #[serde(default)]
     print: Option<format::Config>,
@@ -192,7 +192,7 @@ impl Printing {
 /// compact dump fed to the formatter a piece a slice, and what it printed
 /// since it last went out, after a byte that says whether the output was
 /// null or false, which `-e` reads.
-struct Formatting {
+pub(super) struct Formatting {
     formatter: Formatter,
     text: String,
     fed: usize,
@@ -202,7 +202,7 @@ struct Formatting {
 }
 
 impl Formatting {
-    fn begin(options: &format::Config, text: String) -> Self {
+    pub(super) fn begin(options: &format::Config, text: String) -> Self {
         let printed = vec![u8::from(text == "null" || text == "false")];
         Self {
             formatter: Formatter::new(options.clone()),
@@ -216,7 +216,7 @@ impl Formatting {
 
     /// Print on while the budget lasts: None until the output is printed,
     /// then the formatter's refusal of it, if it refused it.
-    fn run(&mut self, budget: &mut u64) -> Option<Result<(), StreamError>> {
+    pub(super) fn run(&mut self, budget: &mut u64) -> Option<Result<(), StreamError>> {
         while self.refused.is_none() && (!self.finished || self.formatter.busy()) {
             if *budget == 0 {
                 return None;
@@ -244,6 +244,12 @@ impl Formatting {
     /// Send what it printed so far in a print frame.
     fn flush(&mut self, out: &mut Vec<u8>) {
         frame(PRINT, &self.printed, out);
+        self.printed.truncate(1);
+    }
+
+    /// Hand on what it printed so far.
+    pub(super) fn take(&mut self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.printed[1..]);
         self.printed.truncate(1);
     }
 
@@ -277,7 +283,7 @@ impl Formatting {
 /// prints (the compact dump of `["DEBUG:", value]`), and what `stderr`
 /// writes (the bytes). An output is dumped on the same step budget, so
 /// a large one takes several drains and its frame goes out whole once
-/// it is written. Given jq_format's options as `print`, the stream prints
+/// it is written. Given jq's printer options as `print`, the stream prints
 /// each output itself, on that budget too, and writes print frames
 /// instead: a byte set when the output was null or false, then the bytes
 /// printed since the last, at least one frame an output and its last
@@ -399,12 +405,22 @@ fn frame(tag: u8, payload: &[u8], out: &mut Vec<u8>) {
     out.extend_from_slice(payload);
 }
 
-fn memory_error_frame(limits: Limits, out: &mut Vec<u8>) {
-    let text = format!("jq memory limit of {} bytes exceeded", limits.memory);
+/// The error a run ends with once it holds more than `memory` bytes.
+pub(super) fn memory_report(memory: usize) -> String {
+    format!("jq memory limit of {memory} bytes exceeded")
+}
+
+/// An error frame: its flag byte (bit 0 for a string, bit 1 when the
+/// program raised it with `error` itself), then its text.
+fn error_frame(flags: u8, text: &str, out: &mut Vec<u8>) {
     out.push(ERROR);
     out.extend_from_slice(&((text.len() + 1) as u32).to_le_bytes());
-    out.push(1);
+    out.push(flags);
     out.extend_from_slice(text.as_bytes());
+}
+
+fn memory_error_frame(limits: Limits, out: &mut Vec<u8>) {
+    error_frame(1, &memory_report(limits.memory), out);
 }
 
 impl Stream for Eval {
@@ -546,11 +562,7 @@ impl Stream for Eval {
                         };
                         let mut formatting = self.formatting.take().expect("the printed output");
                         if let Err(refusal) = printed {
-                            let text = refusal.message;
-                            out.push(ERROR);
-                            out.extend_from_slice(&((text.len() + 1) as u32).to_le_bytes());
-                            out.push(1);
-                            out.extend_from_slice(text.as_bytes());
+                            error_frame(1, &refusal.message, out);
                             break;
                         }
                         formatting.flush(out);
@@ -577,10 +589,7 @@ impl Stream for Eval {
                                 }
                             },
                             PrintKind::Error(string, own) => {
-                                out.push(ERROR);
-                                out.extend_from_slice(&((text.len() + 1) as u32).to_le_bytes());
-                                out.push(u8::from(string) | u8::from(own) << 1);
-                                out.extend_from_slice(text.as_bytes());
+                                error_frame(u8::from(string) | u8::from(own) << 1, &text, out);
                                 break;
                             }
                             PrintKind::HaltMessage(string, code) => {

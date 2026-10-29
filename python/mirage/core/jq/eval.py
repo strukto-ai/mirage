@@ -12,132 +12,193 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
+import os
 import re
+import time
+from collections.abc import AsyncGenerator, Mapping
+from dataclasses import dataclass
 
-from mirage.core.jq.parse import string_text
-from mirage.core.jq.types import JqOptions, StreamReads
+from mirage.core.jq.errors import JqCompileError
+from mirage.core.jq.types import JqError, JqHalt
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import memory_room
+from mirage.io.yield_budget import YieldBudget
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.stream import OpenStream, close_stream, open_stream
+from mirage.utils.timezone import TZ_VAR
 
-INPUT_REF = re.compile(r"(?<![\w$.:])input(?![\w:])")
-INPUTS_REF = re.compile(r"(?<![\w$.:])inputs(?![\w:])")
-INPUT_DEF = re.compile(r"(?<![\w$.:])def\s+input\s*[:(]")
-INPUTS_DEF = re.compile(r"(?<![\w$.:])def\s+inputs\s*[:(]")
-ARGS_REF = re.compile(r"\$ARGS(?![\w:])")
-IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-INTERP = "\\("
-OPENERS = "([{"
-CLOSERS = ")]}"
+FRAME_OUTPUT = 1
+FRAME_ERROR = 2
+FRAME_HALT = 3
+FRAME_DEBUG = 4
+FRAME_STDERR = 5
 
+# The last line of jq's report of a program it refuses, which jq_eval's
+# refusal to compile such a program ends in.
+COMPILE_REPORT = re.compile(r"(?:\A|\n)jq: [0-9]+ compile errors?\Z")
 
-def code_only(expr: str) -> str:
-    """Blank out every part of a jq program that cannot be a call.
-
-    Three things are replaced by spaces: string bodies, `#` comments,
-    and the field names an object shorthand abbreviates (`{a, inputs}`
-    is `{a: .a, inputs: .inputs}`). Interpolations stay code, because
-    `"\\(inputs)"` really does call the builtin, so everything between
-    `\\(` and its closing paren survives, nested strings included.
-
-    Args:
-        expr (str): jq program text.
-    """
-    out: list[str] = []
-    # Open brackets, innermost last, with an interpolation recorded as
-    # one too; empty means the scan is at the top level of the program.
-    stack: list[str] = []
-    in_string = False
-    prev = ""
-    i = 0
-    while i < len(expr):
-        ch = expr[i]
-        if in_string:
-            if ch == "\\" and i + 1 < len(expr):
-                if expr[i + 1] == "(":
-                    in_string = False
-                    stack.append(INTERP)
-                out.append("  ")
-                i += 2
-                continue
-            in_string = ch != '"'
-            out.append(" ")
-            i += 1
-            continue
-        if ch == '"':
-            in_string = True
-            out.append(" ")
-            i += 1
-            continue
-        if ch == "#":
-            while i < len(expr) and expr[i] != "\n":
-                out.append(" ")
-                i += 1
-            continue
-        word = IDENT.match(expr, i)
-        if word is not None:
-            text = word.group()
-            key = bool(stack) and stack[-1] == "{" and prev in ("{", ",")
-            out.append(" " * len(text) if key else text)
-            prev = text[-1]
-            i = word.end()
-            continue
-        if ch in OPENERS:
-            stack.append(ch)
-        elif ch == ")" and stack and stack[-1] == INTERP:
-            stack.pop()
-            in_string = True
-            out.append(" ")
-            prev = ""
-            i += 1
-            continue
-        elif ch in CLOSERS and stack and stack[-1] != INTERP:
-            stack.pop()
-        out.append(ch)
-        if not ch.isspace():
-            prev = ch
-        i += 1
-    return "".join(out)
+# The error jq_eval ends a run with once it holds more than its memory.
+MEMORY_REPORT = "jq memory limit of {} bytes exceeded"
 
 
-def references_args(expr: str) -> bool:
-    """Report whether a jq program reads the `$ARGS` variable.
+def local_zone(env: Mapping[str, str] | None) -> str | None:
+    """The time zone jq's local time reads, as a `TZ` value: the command
+    environment's, else the process's, else the tz database zone
+    /etc/localtime links to; None for a host zone with no name, which
+    jq_eval reads as UTC.
 
     Args:
-        expr (str): jq program text.
+        env (Mapping[str, str] | None): the command's environment.
     """
-    return ARGS_REF.search(code_only(expr)) is not None
+    for zone in ((env or {}).get(TZ_VAR), os.environ.get(TZ_VAR)):
+        if zone is not None:
+            return zone
+    _, marker, key = os.path.realpath("/etc/localtime").partition("/zoneinfo/")
+    return key if marker else None
 
 
-def args_text(opts: JqOptions) -> str:
-    """The JSON text of the value `$ARGS` resolves to for a run.
+@dataclass
+class Ending:
+    """How a run whose outputs went out as it made them ended: the error
+    or halt that stopped it, if one did."""
+
+    stop: JqError | JqHalt | None = None
+
+
+def read_frames(wire: bytes, outputs: list[bytes]) -> JqError | JqHalt | None:
+    """Fold one drain of mirage-rs's jq_eval into a run: each output frame
+    is a compact dump, appended to ``outputs``, a `debug` or `stderr`
+    frame is dropped, and an error or a halt frame is what stopped the
+    run. An error's flag byte says whether it is a string (bit 0) and
+    whether the program raised it with `error` itself (bit 1).
 
     Args:
-        opts (JqOptions): resolved options carrying both binding kinds.
+        wire (bytes): the frames, a tag byte and a little-endian u32
+            length before each payload.
+        outputs (list[bytes]): the run's outputs so far.
     """
-    positional = ",".join(opts.positional_args)
-    named = ",".join(
-        f"{string_text(name)}:{text}" for name, text in opts.named_args.items()
-    )
-    return f'{{"positional":[{positional}],"named":{{{named}}}}}'
+    stop: JqError | JqHalt | None = None
+    at = 0
+    while at < len(wire):
+        tag = wire[at]
+        size = int.from_bytes(wire[at + 1 : at + 5], "little")
+        payload = wire[at + 5 : at + 5 + size]
+        at += 5 + size
+        if tag == FRAME_OUTPUT:
+            outputs.append(payload)
+        elif tag == FRAME_ERROR:
+            flags = payload[0]
+            stop = JqError(
+                payload[1:].decode(), bool(flags & 1), bool(flags & 2)
+            )
+        elif tag == FRAME_HALT:
+            halt = json.loads(payload)
+            stop = JqHalt(halt["message"], halt["string"], halt["code"])
+        elif tag not in (FRAME_DEBUG, FRAME_STDERR):
+            raise ValueError(f"unknown jq_eval frame {tag}")
+    return stop
 
 
-def stream_reads(expr: str) -> StreamReads:
-    """Report which of the builtins that read the input stream a program
-    calls.
-
-    Binding the unread documents is what makes `input` and `inputs`
-    work, and it also changes how many documents a run consumes, so only
-    the builtins may answer here: the words also spell a field
-    (`.inputs`, `{inputs}`), a variable (`$inputs`), an object key
-    (`{inputs: 1}`), a module member (`m::inputs`), a function the
-    program defines for itself (`def input: ...`), and anything at all
-    inside a string or a comment, none of which read the stream.
+class Engine:
+    """A program compiled once by mirage-rs's jq_eval and run on one value
+    at a time on the loop's own thread, a bounded number of VM steps per
+    drain, so a program that never ends still yields and its task can be
+    cancelled. `input` finds no more input, `$ENV` is the given
+    environment, and what `debug` and `stderr` write is dropped, as
+    `gh --jq` evaluates.
 
     Args:
-        expr (str): jq program text.
+        stream (OpenStream): the compiled program.
+        memory (int | None): the bytes the run may hold, what the
+            workspace's ``max_memory`` had left; None for jq_eval's own.
     """
-    code = code_only(expr)
-    return StreamReads(
-        input=INPUT_REF.search(code) is not None
-        and INPUT_DEF.search(code) is None,
-        inputs=INPUTS_REF.search(code) is not None
-        and INPUTS_DEF.search(code) is None,
-    )
+
+    def __init__(self, stream: OpenStream, memory: int | None) -> None:
+        self._stream = stream
+        self._memory = memory
+        self._budget = YieldBudget()
+
+    @classmethod
+    def open(cls, expr: str, env: str, zone: str | None) -> "Engine":
+        """Compile `expr`.
+
+        Args:
+            expr (str): jq program text, as typed.
+            env (str): the environment `$ENV` and `env` read, as text.
+            zone (str | None): the `TZ` local time reads (local_zone).
+
+        Raises:
+            JqCompileError: a program jq itself refuses, with jq's report.
+        """
+        limit = memory_room()
+        try:
+            stream = open_stream(
+                "jq_eval",
+                {
+                    "program": expr,
+                    "env": env,
+                    "zone": zone,
+                    **({} if limit is None else {"memory": limit}),
+                },
+            )
+        except StreamRefusal as exc:
+            if COMPILE_REPORT.search(exc.message):
+                raise JqCompileError(exc.message) from exc
+            raise
+        return cls(stream, limit)
+
+    async def run(self, doc: str, ending: Ending) -> AsyncGenerator[str, None]:
+        """Run the program on one value, yielding each output's compact dump
+        as a drain decodes it, and leave on `ending` how the run stopped.
+        A run its caller stops reading is cancelled, so the next can begin.
+
+        Args:
+            doc (str): the value's JSON text.
+            ending (Ending): set once the run ends.
+        """
+        stream = self._stream
+        stream.begin({"filename": None, "line": 0})
+        outputs: list[bytes] = []
+        try:
+            stop = read_frames(stream.feed(doc.encode()), outputs)
+            stop = read_frames(stream.finish(), outputs) or stop
+            while True:
+                for output in outputs:
+                    yield output.decode()
+                outputs.clear()
+                if stream.busy():
+                    await self._budget.run()
+                    wire = stream.drain()
+                elif (asked := stream.request()) is not None:
+                    op = asked[0].get("op")
+                    if op == "now":
+                        wire = stream.respond(
+                            {"kind": "now", "now": time.time()}, b""
+                        )
+                    elif op == "input":
+                        wire = stream.respond({"kind": "end"}, b"")
+                    else:
+                        raise ValueError(
+                            f"jq_eval: unknown host request {asked[0]}"
+                        )
+                else:
+                    break
+                stop = read_frames(wire, outputs) or stop
+        except GeneratorExit:
+            if stream.cancel():
+                while stream.busy():
+                    await self._budget.run()
+                    stream.drain()
+            raise
+        if (
+            self._memory is not None
+            and isinstance(stop, JqError)
+            and stop.text == MEMORY_REPORT.format(self._memory)
+        ):
+            raise MemoryExhausted()
+        ending.stop = stop
+
+    async def close(self) -> None:
+        """Retire a run cut short a bounded slice at a time."""
+        await close_stream(self._stream)

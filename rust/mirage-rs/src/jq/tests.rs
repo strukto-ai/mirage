@@ -99,7 +99,7 @@ fn outputs(program: &str, input: &str) -> Vec<String> {
         .collect()
 }
 
-/// Run `program` over `input`, printing its outputs by jq_format's
+/// Run `program` over `input`, printing its outputs by jq's printer
 /// `options`, with `steps` VM steps per drain; and how many drains it took.
 fn printed(
     program: &str,

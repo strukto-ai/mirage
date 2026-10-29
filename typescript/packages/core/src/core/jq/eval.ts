@@ -12,121 +12,204 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stringText } from './parse.ts'
-import type { JqOptions, StreamReads } from './types.ts'
+import { JqCompileError } from './errors.ts'
+import type { JqError, JqHalt } from './types.ts'
+import { MemoryExhausted } from '../../io/errors.ts'
+import { memoryRoom } from '../../io/memory.ts'
+import { YieldBudget } from '../../io/yield_budget.ts'
+import { StreamRefusal } from '../../rs/errors.ts'
+import { closeStream, openStream, type OpenStream } from '../../rs/stream.ts'
+import { TZ_VAR } from '../../utils/timezone.ts'
 
-const INPUT_REF = /(?<![\w$.:])input(?![\w:])/
-const INPUTS_REF = /(?<![\w$.:])inputs(?![\w:])/
-const INPUT_DEF = /(?<![\w$.:])def\s+input\s*[:(]/
-const INPUTS_DEF = /(?<![\w$.:])def\s+inputs\s*[:(]/
-const ARGS_REF = /\$ARGS(?![\w:])/
-const IDENT = /[A-Za-z_][A-Za-z0-9_]*/y
-const INTERP = '\\('
-const OPENERS = '([{'
-const CLOSERS = ')]}'
+const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
+const ENC = new TextEncoder()
+
+export const FRAME_OUTPUT = 1
+export const FRAME_ERROR = 2
+export const FRAME_HALT = 3
+export const FRAME_DEBUG = 4
+export const FRAME_STDERR = 5
+
+// The last line of jq's report of a program it refuses, which jq_eval's
+// refusal to compile such a program ends in. Mirrors Python's
+// COMPILE_REPORT.
+export const COMPILE_REPORT = /(?:^|\n)jq: [0-9]+ compile errors?$/
+
+// The error jq_eval ends a run with once it holds more than its memory, with
+// the bytes. Mirrors Python's MEMORY_REPORT.
+export const MEMORY_REPORT = 'jq memory limit of {} bytes exceeded'
 
 /**
- * Blank out every part of a jq program that cannot be a call.
- *
- * Three things are replaced by spaces: string bodies, `#` comments, and the
- * field names an object shorthand abbreviates (`{a, inputs}` is
- * `{a: .a, inputs: .inputs}`). Interpolations stay code, because
- * `"\(inputs)"` really does call the builtin, so everything between `\(`
- * and its closing paren survives, nested strings included.
+ * The time zone jq's local time reads, as a `TZ` value: the command
+ * environment's, else the process's, else the host's own zone.
  */
-function codeOnly(expr: string): string {
-  const out: string[] = []
-  // Open brackets, innermost last, with an interpolation recorded as one
-  // too; empty means the scan is at the top level of the program.
-  const stack: string[] = []
-  let inString = false
-  let prev = ''
-  let i = 0
-  while (i < expr.length) {
-    const ch = expr.charAt(i)
-    if (inString) {
-      if (ch === '\\' && i + 1 < expr.length) {
-        if (expr.charAt(i + 1) === '(') {
-          inString = false
-          stack.push(INTERP)
+export function localZone(env: Record<string, string> | undefined): string {
+  const host = globalThis as {
+    process?: { env?: Record<string, string | undefined> }
+  }
+  return (
+    env?.[TZ_VAR] ?? host.process?.env?.[TZ_VAR] ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  )
+}
+
+/**
+ * How a run whose outputs went out as it made them ended: the error or halt
+ * that stopped it, if one did.
+ */
+export interface Ending {
+  stop: JqError | JqHalt | null
+}
+
+/**
+ * Fold one drain of mirage-rs's jq_eval into a run: each output frame is a
+ * compact dump, pushed onto `outputs`, a `debug` or `stderr` frame is
+ * dropped, and an error or a halt frame is what stopped the run. A frame is a
+ * tag, a little-endian u32 length and its payload; an error's flag byte says
+ * whether it is a string (bit 0) and whether the program raised it with
+ * `error` itself (bit 1).
+ */
+export function readFrames(bytes: Uint8Array, outputs: Uint8Array[]): JqError | JqHalt | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let stop: JqError | JqHalt | null = null
+  let at = 0
+  while (at < bytes.byteLength) {
+    if (at + 5 > bytes.byteLength) throw new Error('jq_eval: truncated frame header')
+    const tag = view.getUint8(at)
+    const end = at + 5 + view.getUint32(at + 1, true)
+    if (end > bytes.byteLength) throw new Error('jq_eval: truncated frame')
+    const payload = bytes.subarray(at + 5, end)
+    at = end
+    if (tag === FRAME_OUTPUT) {
+      outputs.push(payload)
+    } else if (tag === FRAME_ERROR) {
+      const flags = payload[0] ?? 0
+      stop = {
+        kind: 'error',
+        text: DEC.decode(payload.subarray(1)),
+        string: (flags & 1) === 1,
+        own: (flags & 2) === 2,
+      }
+    } else if (tag === FRAME_HALT) {
+      const halt = JSON.parse(DEC.decode(payload)) as Omit<JqHalt, 'kind'>
+      stop = { kind: 'halt', message: halt.message, string: halt.string, code: halt.code }
+    } else if (tag !== FRAME_DEBUG && tag !== FRAME_STDERR) {
+      throw new Error(`jq_eval: unknown frame ${String(tag)}`)
+    }
+  }
+  return stop
+}
+
+/**
+ * A program compiled once by mirage-rs's jq_eval and run on one value at a
+ * time on this thread, a bounded number of VM steps per drain, so a program
+ * that never ends still yields and the signal can stop it between two.
+ * `input` finds no more input, `$ENV` is the given environment, and what
+ * `debug` and `stderr` write is dropped, as `gh --jq` evaluates. Mirrors
+ * Python's Engine.
+ */
+export class Engine {
+  private readonly budget: YieldBudget
+
+  // What the workspace's max_memory had left when the program compiled, the
+  // bytes the run may hold; null for jq_eval's own.
+  private constructor(
+    private readonly stream: OpenStream,
+    private readonly memory: number | null,
+    signal?: AbortSignal,
+  ) {
+    this.budget = new YieldBudget(signal)
+  }
+
+  /**
+   * Compile `expr`, as typed, with `env` (JSON text) as `$ENV` and `env` and
+   * `zone` (localZone) as the `TZ` local time reads. Throws JqCompileError,
+   * with jq's report, for a program jq itself refuses.
+   */
+  static async open(
+    expr: string,
+    env: string,
+    zone: string,
+    signal?: AbortSignal,
+  ): Promise<Engine> {
+    let stream: OpenStream
+    const limit = memoryRoom()
+    try {
+      stream = await openStream('jq_eval', {
+        program: expr,
+        env,
+        zone,
+        ...(limit === null ? {} : { memory: limit }),
+      })
+    } catch (error) {
+      if (error instanceof StreamRefusal && COMPILE_REPORT.test(error.message)) {
+        throw new JqCompileError(error.message)
+      }
+      throw error
+    }
+    return new Engine(stream, limit, signal)
+  }
+
+  /**
+   * Run the program on one value's JSON text, yielding each output's compact
+   * dump as a drain decodes it, and leave on `ending` how the run stopped. A
+   * run its caller stops reading is cancelled, so the next can begin.
+   */
+  async *run(doc: string, ending: Ending): AsyncGenerator<string, void, undefined> {
+    const stream = this.stream
+    stream.begin({ filename: null, line: 0 })
+    const outputs: Uint8Array[] = []
+    let stop: JqError | JqHalt | null
+    // Whether the caller stopped reading while the run was still going.
+    let abandoned = true
+    try {
+      stop = readFrames(stream.feed(ENC.encode(doc)), outputs)
+      stop = readFrames(stream.finish(), outputs) ?? stop
+      for (;;) {
+        for (const output of outputs) yield DEC.decode(output)
+        outputs.length = 0
+        let wire: Uint8Array
+        if (stream.busy()) {
+          const pending = this.budget.run()
+          if (pending !== undefined) await pending
+          wire = stream.drain()
+        } else {
+          const asked = stream.request()
+          if (asked === null) break
+          if (asked[0].op === 'now') {
+            wire = stream.respond({ kind: 'now', now: Date.now() / 1000 }, new Uint8Array())
+          } else if (asked[0].op === 'input') {
+            wire = stream.respond({ kind: 'end' }, new Uint8Array())
+          } else {
+            throw new Error(`jq_eval: unknown host request ${JSON.stringify(asked[0])}`)
+          }
         }
-        out.push('  ')
-        i += 2
-        continue
+        stop = readFrames(wire, outputs) ?? stop
       }
-      inString = ch !== '"'
-      out.push(' ')
-      i += 1
-      continue
-    }
-    if (ch === '"') {
-      inString = true
-      out.push(' ')
-      i += 1
-      continue
-    }
-    if (ch === '#') {
-      while (i < expr.length && expr.charAt(i) !== '\n') {
-        out.push(' ')
-        i += 1
+      abandoned = false
+    } catch (error) {
+      abandoned = false
+      throw error
+    } finally {
+      if (abandoned && stream.cancel()) {
+        while (stream.busy()) {
+          const pending = this.budget.run()
+          if (pending !== undefined) await pending
+          stream.drain()
+        }
       }
-      continue
     }
-    IDENT.lastIndex = i
-    const word = IDENT.exec(expr)
-    if (word !== null) {
-      const text = word[0]
-      const key = stack[stack.length - 1] === '{' && (prev === '{' || prev === ',')
-      out.push(key ? ' '.repeat(text.length) : text)
-      prev = text.charAt(text.length - 1)
-      i += text.length
-      continue
+    if (
+      this.memory !== null &&
+      stop?.kind === 'error' &&
+      stop.text === MEMORY_REPORT.replace('{}', String(this.memory))
+    ) {
+      throw new MemoryExhausted()
     }
-    if (OPENERS.includes(ch)) {
-      stack.push(ch)
-    } else if (ch === ')' && stack[stack.length - 1] === INTERP) {
-      stack.pop()
-      inString = true
-      out.push(' ')
-      prev = ''
-      i += 1
-      continue
-    } else if (CLOSERS.includes(ch) && stack.length > 0 && stack[stack.length - 1] !== INTERP) {
-      stack.pop()
-    }
-    out.push(ch)
-    if (ch.trim() !== '') prev = ch
-    i += 1
+    ending.stop = stop
   }
-  return out.join('')
-}
 
-/**
- * Report which of the builtins that read the input stream a program calls.
- *
- * Binding the unread documents is what makes `input` and `inputs` work,
- * and it also changes how many documents a run consumes, so only the
- * builtins may answer here: the words also spell a field (`.inputs`,
- * `{inputs}`), a variable (`$inputs`), an object key (`{inputs: 1}`), a
- * module member (`m::inputs`), a function the program defines for itself
- * (`def input: ...`), and anything at all inside a string or a comment,
- * none of which read the stream.
- */
-export function streamReads(expr: string): StreamReads {
-  const code = codeOnly(expr)
-  return {
-    input: INPUT_REF.test(code) && !INPUT_DEF.test(code),
-    inputs: INPUTS_REF.test(code) && !INPUTS_DEF.test(code),
+  /** Close the program; a run cut short is retired a bounded slice at a time. */
+  close(): Promise<void> {
+    return closeStream(this.stream)
   }
-}
-
-/** Report whether a jq program reads the `$ARGS` variable. */
-export function referencesArgs(expr: string): boolean {
-  return ARGS_REF.test(codeOnly(expr))
-}
-
-/** The JSON text of the value `$ARGS` resolves to for a run. */
-export function argsText(opts: JqOptions): string {
-  const named = [...opts.namedArgs].map(([name, text]) => `${stringText(name)}:${text}`)
-  return `{"positional":[${opts.positionalArgs.join(',')}],"named":{${named.join(',')}}}`
 }

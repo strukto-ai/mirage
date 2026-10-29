@@ -12,8 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fsStrerror, isEisdir } from '../../errors/fs.ts'
+
 /**
  * jq's refusal of a program, which jq reports on stderr and exits 3
  * for. The message is jq's report, numbered by the program's own lines.
  */
 export class JqCompileError extends Error {}
+
+/**
+ * Why jq could not load a whole file (jv_load_file): an -f program, a
+ * --rawfile or a --slurpfile, named as typed. It opens the file itself, so a
+ * directory gets words of its own instead of a failed read.
+ */
+export function loadFailure(name: string, err: unknown): string {
+  if (isEisdir(err)) return `Could not open ${name}: It's a directory`
+  return `Could not open ${name}: ${fsStrerror(err) ?? ''}`
+}

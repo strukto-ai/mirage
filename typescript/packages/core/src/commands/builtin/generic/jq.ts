@@ -15,46 +15,34 @@
 // The option loop, main loop and exit statuses follow jq 1.8.2's
 // src/main.c (MIT; see licenses/third_party/jq.txt).
 
-import { YieldBudget } from '../../../io/yield_budget.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { OPERAND, REFUSED } from '../../spec/constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import {
   DEFAULT_INDENT,
-  InputReader,
-  JqCompileError,
-  JqParseError,
   NO_VALUE,
   STDIN_NAME,
-  argsText,
   decodeUtf8,
-  errorReport,
-  formatOne,
-  haltReport,
   jqOptions,
   loadFailure,
-  printConfig,
+  localZone,
   readTexts,
-  referencesArgs,
-  streamReads,
   stringText,
   valueText,
-  type InputSource,
-  type JqError,
-  type JqHalt,
   type JqOptions,
 } from '../../../core/jq/index.ts'
+import { COMPILE_REPORT } from '../../../core/jq/eval.ts'
+import { READ_FAILURES } from '../../../errors/constants.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
-import { closeStream, openStream, type OpenStream } from '../../../rs/stream.ts'
+import { closeStream, openStream, serveRequests, type Served } from '../../../rs/stream.ts'
 import { MemoryExhausted } from '../../../io/errors.ts'
 import { memoryRoom } from '../../../io/memory.ts'
-import { yieldBytes } from '../../../io/stream.ts'
+import { ByteSpool } from '../../../io/spool.ts'
+import { closeQuietly } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec, type JsonValue } from '../../../types.ts'
-import { isFsError } from '../../../errors/fs.ts'
+import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { parent } from '../../../utils/path.ts'
-import { concat } from '../../../utils/bytes.ts'
-import { TZ_VAR } from '../../../utils/timezone.ts'
 import { type CommandFnResult, type Context } from '../../config.ts'
 import { helpPage, versionLine } from '../../spec/standard.ts'
 import { UsageError } from '../../errors.ts'
@@ -83,37 +71,10 @@ const STANDARD = ['help', 'version'] as const
 type Binding = (typeof BINDINGS)[number]
 type Mode = (typeof MODES)[number]
 
-// What jq's process() answers for one run, which its exit status is made
-// of (main.c): the last output was not false or null, it was, there was
-// none, and an error no `try` caught ended the run.
-const OK = 0
-const OK_NULL_KIND = -1
-const OK_NO_OUTPUT = -4
-const ERROR_UNKNOWN = 5
-
-// The frames a jq_eval drain writes: an output's compact dump, the error
-// that ended the run, a halt, a `debug` line, what `stderr` writes and an
-// output printed.
-const FRAME_OUTPUT = 1
-const FRAME_ERROR = 2
-const FRAME_HALT = 3
-const FRAME_DEBUG = 4
-const FRAME_STDERR = 5
-const FRAME_PRINT = 6
-
 // jq's exit status when it refuses the program itself, and when it could not
 // read one of its inputs, whatever the runs answered.
 const ERROR_COMPILE = 3
 const ERROR_SYSTEM = 2
-
-// The last line of jq's report of a program it refuses, which jq_eval's
-// refusal to compile such a program ends in; any other refusal names what
-// jq_eval cannot run yet.
-const COMPILE_REPORT = /(?:^|\n)jq: [0-9]+ compile errors?$/
-
-// The error jq_eval ends a run with once it holds more than its memory, `{}`
-// the bytes. Mirrors Python's MEMORY_REPORT.
-const MEMORY_REPORT = 'jq memory limit of {} bytes exceeded'
 
 const USAGE_HINT =
   'Use jq --help for help with command-line options,\n' +
@@ -158,19 +119,6 @@ export function optionRefusal(word: string): UsageError {
   if (word === '-f' || word === '--from-file') return new UsageError(SHORT_USAGE, 2)
   const line = TAKES[word] ?? `Unknown option ${word}`
   return new UsageError(`jq: ${line}\n${USAGE_HINT}`, 2)
-}
-
-/**
- * The time zone jq's local time reads, as a `TZ` value: the command
- * environment's, else the process's, else the host's tz database zone.
- */
-export function localZone(env: Record<string, string> | undefined): string {
-  const host = globalThis as {
-    process?: { env?: Record<string, string | undefined> }
-  }
-  return (
-    env?.[TZ_VAR] ?? host.process?.env?.[TZ_VAR] ?? Intl.DateTimeFormat().resolvedOptions().timeZone
-  )
 }
 
 function pairArgs(values: readonly string[]): [string, string][] {
@@ -241,7 +189,7 @@ async function binding(
   const data = await loadFile(read, dest, name, value)
   if (dest === 'rawfile') return stringText(await decodeUtf8(data))
   const shown = flagFileName(value)
-  const [texts, failure] = await readTexts({ name: shown, chunks: yieldBytes(data) })
+  const [texts, failure] = await readTexts(data)
   if (failure !== null) {
     throw new UsageError(
       `jq: Bad JSON in --slurpfile ${name} ${shown}: ${failure.message}`,
@@ -422,455 +370,126 @@ export function inputName(path: PathSpec): string {
   return path.rawPath === '' ? path.virtual : path.rawPath
 }
 
-/** What jq's process() answers for one run, from how it ended. */
-export function runStatus(ending: Ending): number {
-  if (ending.stop?.kind === 'halt') {
-    return ending.stop.code === null ? OK : Math.trunc(ending.stop.code)
-  }
-  if (ending.stop?.kind === 'error') return ERROR_UNKNOWN
-  if (!ending.printed) return OK_NO_OUTPUT
-  return ending.falsy ? OK_NULL_KIND : OK
-}
+// What the stream ends with once what jq holds outgrows the workspace's
+// room (mirage-rs's jq EXHAUSTED). Mirrors Python's EXHAUSTED.
+const EXHAUSTED = new MemoryExhausted().message
 
 /**
- * Read one jq_eval drain into a run: every output, print, debug or stderr
- * frame onto `frames` as its tag and payload, in the order the run wrote
- * them, and the stop an error or halt frame names, or null. A frame is a
- * tag, a little-endian u32 length and its payload: an output's dump, an
- * error's flag byte (bit 0 for a string, bit 1 when the program raised it
- * with `error` itself) then its text, a halt's JSON, a `debug` line's dump,
- * the text `stderr` writes, or an output printed (a byte set when it was
- * null or false, then its bytes).
+ * The inputs jq's main loop reads, each opened when the loop first asks for
+ * its bytes, as jq opens its files one after another, and the clock `now`
+ * reads. `sources` are the inputs, in order, not yet opened. Mirrors
+ * Python's JqInputs.
  */
-export function readFrames(
-  bytes: Uint8Array,
-  frames: [number, Uint8Array][],
-): JqError | JqHalt | null {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  let stop: JqError | JqHalt | null = null
-  let at = 0
-  while (at < bytes.byteLength) {
-    if (at + 5 > bytes.byteLength) throw new Error('jq_eval: truncated frame header')
-    const tag = view.getUint8(at)
-    const end = at + 5 + view.getUint32(at + 1, true)
-    if (end > bytes.byteLength) throw new Error('jq_eval: truncated frame')
-    const payload = bytes.subarray(at + 5, end)
-    at = end
-    if (
-      tag === FRAME_OUTPUT ||
-      tag === FRAME_PRINT ||
-      tag === FRAME_DEBUG ||
-      tag === FRAME_STDERR
-    ) {
-      frames.push([tag, payload])
-    } else if (tag === FRAME_ERROR) {
-      const flags = payload[0] ?? 0
-      stop = {
-        kind: 'error',
-        text: DEC.decode(payload.subarray(1)),
-        string: (flags & 1) === 1,
-        own: (flags & 2) === 2,
-      }
-    } else if (tag === FRAME_HALT) {
-      const halt = JSON.parse(DEC.decode(payload)) as Omit<JqHalt, 'kind'>
-      stop = { kind: 'halt', message: halt.message, string: halt.string, code: halt.code }
-    } else {
-      throw new Error(`jq_eval: unknown frame ${String(tag)}`)
-    }
-  }
-  return stop
-}
+export class JqInputs {
+  readonly errors = new ByteSpool()
+  private readonly iterators: (AsyncIterator<Uint8Array> | null)[]
 
-/**
- * Where jq's input reader stands, as jq_eval takes it: the input it reads
- * and the lines read of it.
- */
-export function readerPosition(reader: InputReader): { filename: string | null; line: number } {
-  return { filename: reader.filename(), line: reader.lineNumber() }
-}
-
-/**
- * jq's input callback (util.c) answering one `input`: the reader's next
- * document, the end of the stream, or its parse error, and where the reader
- * stands after it.
- */
-export async function inputReply(
-  reader: InputReader,
-): Promise<[Record<string, string | number | null>, Uint8Array]> {
-  const item = await reader.nextInput()
-  const position = readerPosition(reader)
-  if (item === NO_VALUE) return [{ kind: 'end', ...position }, new Uint8Array()]
-  if (item instanceof JqParseError) {
-    return [{ kind: 'error', ...position }, ENC.encode(item.message)]
-  }
-  return [{ kind: 'value', ...position }, ENC.encode(item)]
-}
-
-/**
- * How a run whose outputs went out as it made them ended: the error or halt
- * that stopped it, if one did, and for a printed run whether it printed an
- * output and whether the last was null or false.
- */
-export interface Ending {
-  stop: JqError | JqHalt | null
-  printed?: boolean
-  falsy?: boolean
-}
-
-/**
- * A program compiled once by mirage-rs's jq_eval and run on this thread, a
- * bounded number of VM steps per drain, so a program that never ends still
- * yields and the signal can stop it between two.
- */
-export class Engine {
-  private readonly budget: YieldBudget
-  // jq's debug callback prints compactly, with -S and -a but none of the
-  // layout or raw options (main.c's dumpopts less pretty).
-  private readonly debugOpts: JqOptions
-
-  // What the workspace's max_memory had left when the program compiled, the
-  // bytes the run may hold; null for jq_eval's own.
-  private constructor(
-    private readonly stream: OpenStream,
-    opts: JqOptions,
-    private readonly memory: number | null,
-    private readonly signal?: AbortSignal,
-  ) {
-    this.budget = new YieldBudget(signal)
-    this.debugOpts = jqOptions({
-      ...opts,
-      compact: true,
-      tab: false,
-      rawOutput: false,
-      joinOutput: false,
-      nulOutput: false,
-      seq: false,
-    })
+  constructor(private readonly sources: readonly AsyncIterable<Uint8Array>[]) {
+    this.iterators = sources.map(() => null)
   }
 
   /**
-   * Compile `expr`, as typed, with the options' named bindings, `args` as
-   * `$ARGS`, `env` (JSON text) as `$ENV` and `env`, `zone` (localZone) as
-   * the `TZ` local time reads and `origin` as the directory
-   * `get_prog_origin` answers. `printing` has jq_eval print the outputs by
-   * the options, for `print`, instead of dumping them, for `run`. Throws
-   * JqCompileError, with jq's report, for a program jq itself refuses.
+   * Answer the stream: the clock, or the next bytes of an input, its end, or
+   * why it could not be opened or read, in strerror's words.
    */
-  static async open(
-    expr: string,
-    opts: JqOptions,
-    args: string | null,
-    env: string,
-    zone: string,
-    origin: string | null,
-    signal?: AbortSignal,
-    printing = false,
-  ): Promise<Engine> {
-    let stream: OpenStream
-    const limit = memoryRoom()
+  async serve(request: Readonly<Record<string, JsonValue>>): Promise<Served> {
+    if (request.op === 'now') return { reply: { kind: 'now', now: Date.now() / 1000 } }
+    const index = request.input
+    const source = typeof index === 'number' ? this.sources[index] : undefined
+    if (request.op !== 'read' || typeof index !== 'number' || source === undefined)
+      throw new Error(`jq: unknown host request ${JSON.stringify(request)}`)
+    const iterator = (this.iterators[index] ??= source[Symbol.asyncIterator]())
+    let next: IteratorResult<Uint8Array>
     try {
-      stream = await openStream('jq_eval', {
-        program: expr,
-        named: Object.fromEntries(opts.namedArgs),
-        args,
-        env,
-        zone,
-        prog_origin: origin,
-        ...(limit === null ? {} : { memory: limit }),
-        ...(printing ? { print: printConfig(opts) } : {}),
-      })
+      next = await iterator.next()
     } catch (error) {
-      if (error instanceof StreamRefusal && COMPILE_REPORT.test(error.message)) {
-        throw new JqCompileError(error.message)
+      if (!isFsError(error)) throw error
+      const code = (error as { code?: string }).code
+      return {
+        reply: {
+          kind: 'error',
+          message: fsStrerror(error) ?? '',
+          read: code !== undefined && READ_FAILURES.has(code),
+        },
       }
-      throw error
     }
-    return new Engine(stream, opts, limit, signal)
+    if (next.done === true) return { reply: { kind: 'end' } }
+    return { reply: { kind: 'data' }, data: next.value }
   }
 
-  /**
-   * Run the program on one document's JSON text, yielding each output's
-   * compact dump as a drain decodes it, and leave on `ending` how the run
-   * stopped (see `drains`).
-   */
-  async *run(
-    doc: string,
-    reader: InputReader,
-    report: (line: string) => void,
-    ending: Ending,
-  ): AsyncGenerator<string, void, undefined> {
-    for await (const outputs of this.drains(doc, reader, report, ending)) {
-      for (const output of outputs) yield DEC.decode(output)
-    }
-  }
-
-  /**
-   * Run a program opened for printing on one document's JSON text, yielding
-   * what each drain printed as one chunk, and leave on `ending` how the run
-   * stopped and what it printed last (see `drains`).
-   */
-  async *print(
-    doc: string,
-    reader: InputReader,
-    report: (line: string) => void,
-    ending: Ending,
-  ): AsyncGenerator<Uint8Array, void, undefined> {
-    for await (const outputs of this.drains(doc, reader, report, ending)) {
-      ending.printed = true
-      ending.falsy = outputs[outputs.length - 1]?.[0] === 1
-      yield concat(outputs.map((output) => output.subarray(1)))
-    }
-  }
-
-  /**
-   * Run the program on one document's JSON text, yielding each drain's
-   * outputs, those between two `debug` or `stderr` lines together, so the
-   * lines go to `report` in the order the run wrote them, and leave on
-   * `ending` how the run stopped.
-   *
-   * Each `input` the program calls takes the reader's next document then and
-   * there, as jq's input callback does, so the run consumes exactly what it
-   * asks for and the main loop reads on after it. A run its caller stops
-   * reading is cancelled, so the next can begin.
-   */
-  private async *drains(
-    doc: string,
-    reader: InputReader,
-    report: (line: string) => void,
-    ending: Ending,
-  ): AsyncGenerator<Uint8Array[], void, undefined> {
-    const stream = this.stream
-    stream.begin(readerPosition(reader))
-    const frames: [number, Uint8Array][] = []
-    let stop: JqError | JqHalt | null
-    // Whether the caller stopped reading while the run was still going.
-    let abandoned = true
-    try {
-      stop = readFrames(stream.feed(ENC.encode(doc)), frames)
-      stop = readFrames(stream.finish(), frames) ?? stop
-      for (;;) {
-        let outputs: Uint8Array[] = []
-        for (const [tag, payload] of frames) {
-          if (tag === FRAME_OUTPUT || tag === FRAME_PRINT) {
-            outputs.push(payload)
-            continue
-          }
-          if (outputs.length > 0) {
-            yield outputs
-            outputs = []
-          }
-          report(await this.message(tag, DEC.decode(payload)))
-        }
-        frames.length = 0
-        if (outputs.length > 0) yield outputs
-        let wire: Uint8Array
-        if (stream.busy()) {
-          const pending = this.budget.run()
-          if (pending !== undefined) await pending
-          wire = stream.drain()
-        } else {
-          const asked = stream.request()
-          if (asked === null) break
-          let reply: Record<string, JsonValue>
-          let data: Uint8Array = new Uint8Array()
-          if (asked[0].op === 'now') {
-            reply = { kind: 'now', now: Date.now() / 1000 }
-          } else if (asked[0].op === 'input') {
-            ;[reply, data] = await inputReply(reader)
-          } else {
-            throw new Error(`jq_eval: unknown host request ${JSON.stringify(asked[0])}`)
-          }
-          wire = stream.respond(reply, data)
-        }
-        stop = readFrames(wire, frames) ?? stop
-      }
-      abandoned = false
-    } catch (error) {
-      abandoned = false
-      throw error
-    } finally {
-      if (abandoned) await this.cancel()
-    }
-    if (
-      this.memory !== null &&
-      stop?.kind === 'error' &&
-      stop.text === MEMORY_REPORT.replace('{}', String(this.memory))
-    ) {
-      throw new MemoryExhausted()
-    }
-    ending.stop = stop
-  }
-
-  // Stop the run in flight and retire it, so the next can begin.
-  private async cancel(): Promise<void> {
-    if (!this.stream.cancel()) return
-    while (this.stream.busy()) {
-      const pending = this.budget.run()
-      if (pending !== undefined) await pending
-      this.stream.drain()
-    }
-  }
-
-  // `debug` prints its line through jq's dumper, `stderr` its text.
-  private async message(tag: number, text: string): Promise<string> {
-    if (tag === FRAME_STDERR) return text
-    return DEC.decode(await formatOne(text, this.debugOpts, this.signal))
-  }
-
-  /** Close the program; a run cut short is retired a bounded slice at a time. */
-  close(): Promise<void> {
-    return closeStream(this.stream)
+  /** Close every input, the one the loop stopped in among them. */
+  async close(): Promise<void> {
+    for (const iterator of this.iterators) if (iterator !== null) await closeQuietly(iterator)
   }
 }
 
 /**
- * Exit status for the program run over the whole input, as jq's main loop
- * settles it from what each run answered (runStatus).
- *
- * Only the last run counts, even after one that failed, unless it printed
- * nothing, when -e looks back to the last value any run printed. Without
- * -e only a failure shows, and a halt's own code.
+ * What mirage-rs's jq takes for one invocation: the program, the options,
+ * `env` (JSON text) as `$ENV` and `env`, `zone` (localZone) as the `TZ` local
+ * time reads, `origin` as the directory `get_prog_origin` answers, and the
+ * inputs' names as jq reports them. Mirrors Python's run_config.
  */
-export function exitCode(statuses: readonly number[], opts: JqOptions): number {
-  let ret = OK_NO_OUTPUT
-  let lastResult = -1
-  for (const status of statuses) {
-    ret = status
-    if (status <= 0 && status !== OK_NO_OUTPUT) lastResult = status === OK_NULL_KIND ? 0 : 1
+export function runConfig(
+  expr: string,
+  opts: JqOptions,
+  env: string,
+  zone: string,
+  origin: string | null,
+  inputs: readonly string[],
+): Record<string, JsonValue> {
+  const limit = memoryRoom()
+  return {
+    program: expr,
+    named: [...opts.namedArgs].map(([name, text]) => [name, text]),
+    positional: [...opts.positionalArgs],
+    env,
+    zone,
+    prog_origin: origin,
+    ...(limit === null ? {} : { memory: limit }),
+    inputs: [...inputs],
+    null_input: opts.nullInput,
+    raw_input: opts.rawInput,
+    slurp: opts.slurp,
+    stream: opts.stream,
+    seq: opts.seq,
+    exit_status: opts.exitStatus,
+    raw_output: opts.rawOutput,
+    join_output: opts.joinOutput,
+    nul_output: opts.nulOutput,
+    ascii_output: opts.asciiOutput,
+    sort_keys: opts.sortKeys,
+    compact: opts.compact,
+    tab: opts.tab,
+    indent: opts.indent,
   }
-  let code: number
-  if (!opts.exitStatus) code = Math.max(ret, 0)
-  else if (ret !== OK_NO_OUTPUT) code = Math.abs(ret)
-  else code = lastResult === -1 ? 4 : lastResult === 0 ? 1 : 0
-  return code % 256
 }
 
 /**
- * jq's report of a parse error its main loop meets: fatal, or under --seq a
- * line it prints before reading on.
+ * jq's main loop in mirage-rs over the inputs, a bounded slice of work at a
+ * time: what the runs print, as they print it, with jq's exit status and
+ * stderr settled on `io` once the stream is drained. Throws MemoryExhausted,
+ * after what was printed before it, once what jq holds outgrew the
+ * workspace's room. Mirrors Python's run_outputs.
  */
-export function parseReport(failure: JqParseError, opts: JqOptions): string {
-  const kind = opts.seq ? 'ignoring parse error' : 'parse error'
-  return `jq: ${kind}: ${failure.message}\n`
-}
-
-/**
- * jq's main loop (main.c) over an invocation's input stream.
- *
- * Each document runs as soon as the reader parses it, and its outputs stream
- * out. A run's error is reported and the next document runs; a halt ends the
- * loop; a parse error is reported with status 5 and ends it, except under
- * --seq, which reports it and reads on. Under -n the program runs once, on
- * null. The exit status and stderr settle on `io` once the stream is
- * drained.
- *
- * A program runs in mirage-rs's jq_eval, compiled once per invocation and
- * stepped in bounded slices on this thread, so a run that never ends still
- * yields to the signal. Its `input` and `inputs` take each document from the
- * reader when they ask for it, as jq's input callback does, so the next run
- * starts after the documents the program consumed, and `debug` and `stderr`
- * lines go to stderr in the order they were written, before the run's own
- * report. `env` (JSON text) is what `$ENV` and `env` read, `zone`
- * (localZone) the `TZ` local time reads and `origin` the directory
- * `get_prog_origin` answers.
- *
- * An input that cannot be opened or read is reported when the reader reaches
- * it, and the reader goes on to the next. The loop checks for such a failure
- * before each document it reads, so it stops after the run of the document
- * the failing read went on to, and the exit status is 2 whatever the runs
- * answered. `sources` are the inputs, in order, not yet opened.
- */
-export class MainLoop {
-  // The compiled program, once the first run asks for it.
-  private engine: Engine | null = null
-  private readonly statuses: number[] = []
-  private readonly reports: string[] = []
-  private readonly reader: InputReader
-  private halted = false
-
-  constructor(
-    sources: readonly InputSource[],
-    private readonly expr: string,
-    private readonly opts: JqOptions,
-    private readonly args: string | null,
-    private readonly env: string,
-    private readonly zone: string,
-    private readonly origin: string | null,
-    private readonly io: IOResult,
-    private readonly signal?: AbortSignal,
-  ) {
-    this.reader = new InputReader(sources, opts, (line) => this.reports.push(line), signal)
-  }
-
-  /** The invocation's stdout, each drain's outputs as its run prints them. */
-  async *outputs(): AsyncIterable<Uint8Array> {
-    try {
-      if (this.opts.nullInput) {
-        yield* this.run('null')
-        return
-      }
-      while (this.reader.failures() === 0) {
-        const item = await this.reader.nextInput()
-        if (item === NO_VALUE) return
-        if (item instanceof JqParseError) {
-          this.fail(item)
-          if (this.opts.seq) continue
-          return
-        }
-        yield* this.run(item)
-        if (this.halted) return
-      }
-    } finally {
-      this.io.exitCode =
-        this.reader.failures() > 0 ? ERROR_SYSTEM : exitCode(this.statuses, this.opts)
-      if (this.reports.length > 0) this.io.stderr = ENC.encode(this.reports.join(''))
-      await this.engine?.close()
-      await this.reader.close()
-    }
-  }
-
-  /**
-   * Run the program on one document (null under -n), printing its outputs as
-   * the run makes them, a chunk a drain, then fold the run into the
-   * invocation, its error reported where the reader stands after it. jq_eval
-   * prints them by the options, so an output --raw-output0 cannot print
-   * stops the run with that error, as it does jq's.
-   */
-  private async *run(doc: string): AsyncGenerator<Uint8Array, void, undefined> {
-    const ending: Ending = { stop: null }
-    this.engine ??= await Engine.open(
-      this.expr,
-      this.opts,
-      this.args,
-      this.env,
-      this.zone,
-      this.origin,
-      this.signal,
-      true,
-    )
-    yield* this.engine.print(doc, this.reader, (line) => this.reports.push(line), ending)
-    this.halted = this.settle(ending, this.reader.position())
-  }
-
-  // Fold one run into the invocation: its answer toward the exit status,
-  // and its report when it stopped early. A halt ends the invocation, which
-  // is what this answers.
-  private settle(ending: Ending, position: string): boolean {
-    this.statuses.push(runStatus(ending))
-    if (ending.stop?.kind === 'error') {
-      this.reports.push(errorReport(position, ending.stop))
-    } else if (ending.stop?.kind === 'halt') {
-      this.reports.push(haltReport(ending.stop))
-      return true
-    }
-    return false
-  }
-
-  // jq's `ret = JQ_ERROR_UNKNOWN; break`, or under --seq a report that
-  // leaves the status alone.
-  private fail(failure: JqParseError): void {
-    this.reports.push(parseReport(failure, this.opts))
-    if (!this.opts.seq) this.statuses.push(ERROR_UNKNOWN)
+export async function* runOutputs(
+  config: Readonly<Record<string, JsonValue>>,
+  inputs: JqInputs,
+  io: IOResult,
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array, void, undefined> {
+  const stream = await openStream('jq', config)
+  try {
+    yield* serveRequests(stream, inputs, signal)
+  } catch (error) {
+    if (!(error instanceof StreamRefusal) || error.message !== EXHAUSTED) throw error
+    if (error.output.byteLength > 0) yield error.output
+    throw new MemoryExhausted()
+  } finally {
+    io.exitCode = stream.status()
+    await inputs.errors.append(stream.takeStderr())
+    io.stderr = await inputs.errors.output()
+    await inputs.close()
+    await closeStream(stream)
   }
 }
 
@@ -929,51 +548,35 @@ export async function jqGeneric(
     expression = DEC.decode(data)
   }
   const origin = programFile === null ? ctx.cwd.virtual : parent(programFile.virtual)
-  const expr = expression.trim()
-  const reads = streamReads(expr)
-  const readsStream = reads.input || reads.inputs
-  const args = referencesArgs(expr) ? argsText(jq) : null
   // `$ENV` and `env` read the session's exported environment in place of
   // jq's process environment, and local time its `TZ`.
   const env = JSON.stringify(ctx.env ?? {})
   const zone = localZone(ctx.env)
+  const operands = [...paths]
+  const names = operands.map(inputName)
+  if (operands.length === 0 && ctx.stdin !== null) {
+    operands.push(PathSpec.fromStrPath('/dev/stdin'))
+    names.push(STDIN_NAME)
+  }
   try {
     // jq compiles its program before it opens a single input, so a
-    // refusal is all it prints. jq_eval words jq's refusals itself, reading
-    // the program as typed, so its lines and columns are jq's. The run
-    // compiles it again when it starts, so nothing is held open for a
+    // refusal is all it prints. mirage-rs words jq's refusals itself,
+    // reading the program as typed, so its lines and columns are jq's. The
+    // run compiles it again when it starts, so nothing is held open for a
     // stream no one reads.
-    const checked = await Engine.open(expression, jq, args, env, zone, origin, ctx.signal)
-    await checked.close()
+    const checked = await openStream('jq', runConfig(expression, jq, env, zone, origin, names))
+    await closeStream(checked)
   } catch (error) {
-    if (!(error instanceof JqCompileError)) throw error
+    if (!(error instanceof StreamRefusal) || !COMPILE_REPORT.test(error.message)) throw error
     return [
       null,
-      new IOResult({
-        exitCode: ERROR_COMPILE,
-        stderr: new TextEncoder().encode(`${error.message}\n`),
-      }),
+      new IOResult({ exitCode: ERROR_COMPILE, stderr: ENC.encode(`${error.message}\n`) }),
     ]
   }
-
-  const sources: InputSource[] = []
-  // -n does not read its inputs at all unless the program asks for them
-  // through `input` or `inputs`, which is why jq -n never opens a missing
-  // file. Each input is opened when the reader reaches it, as jq opens its
-  // files one after another.
-  if (!jq.nullInput || readsStream) {
-    if (paths.length > 0) {
-      for (const path of paths) {
-        sources.push({ name: inputName(path), chunks: readInput(path) })
-      }
-    } else if (ctx.stdin !== null) {
-      sources.push({
-        name: STDIN_NAME,
-        chunks: readInput(PathSpec.fromStrPath('/dev/stdin')),
-      })
-    }
-  }
+  const config = runConfig(expression.trim(), jq, env, zone, origin, names)
+  // Each input opens when the loop first reads it, as jq opens its files one
+  // after another, so -n never opens one its program does not read.
+  const inputs = new JqInputs(operands.map((path) => readInput(path)))
   const io = new IOResult()
-  const loop = new MainLoop(sources, expr, jq, args, env, zone, origin, io, ctx.signal)
-  return [loop.outputs(), io]
+  return [runOutputs(config, inputs, io, ctx.signal), io]
 }

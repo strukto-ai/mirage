@@ -4,12 +4,10 @@
 import dataclasses
 import json
 import logging
-import os
 import posixpath
 import re
 import time
 from collections.abc import (
-    AsyncGenerator,
     AsyncIterator,
     Awaitable,
     Callable,
@@ -33,42 +31,36 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
 from mirage.core.jq import (
-    args_text,
     decode_utf8,
-    error_report,
-    format_one,
-    halt_report,
     load_failure,
-    print_config,
+    local_zone,
     read_texts,
-    references_args,
-    stream_reads,
     string_text,
     value_text,
 )
-from mirage.core.jq.errors import JqCompileError
-from mirage.core.jq.stream import InputReader
+from mirage.core.jq.eval import COMPILE_REPORT
 from mirage.core.jq.types import (
     DEFAULT_INDENT,
     NO_VALUE,
     STDIN_NAME,
-    InputSource,
-    JqError,
-    JqHalt,
     JqOptions,
-    JqParseError,
 )
-from mirage.errors.constants import FS_ERRORS
+from mirage.errors.constants import FS_ERRORS, READ_FAILURES
+from mirage.errors.fs import fs_strerror
 from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import memory_room
-from mirage.io.stream import yield_bytes
+from mirage.io.spool import ByteSpool
+from mirage.io.stream import close_quietly, yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.stream import OpenStream, close_stream, open_stream
+from mirage.rs.stream import (
+    Served,
+    close_stream,
+    open_stream,
+    serve_requests,
+)
 from mirage.runtime.types import DispatchFn
 from mirage.types import JsonValue, PathSpec, ReadStreamFn
-from mirage.utils.timezone import TZ_VAR
 
 logger = logging.getLogger(__name__)
 
@@ -87,32 +79,10 @@ MODES = ("args", "jsonargs")
 # The options jq answers where its loop reaches them, and then exits.
 STANDARD = ("help", "version")
 
-# What jq's process() answers for one run, which its exit status is made
-# of (main.c): the last output was not false or null, it was, there was
-# none, and an error no `try` caught ended the run.
-OK = 0
-OK_NULL_KIND = -1
-OK_NO_OUTPUT = -4
-ERROR_UNKNOWN = 5
-
-FRAME_OUTPUT = 1
-FRAME_ERROR = 2
-FRAME_HALT = 3
-FRAME_DEBUG = 4
-FRAME_STDERR = 5
-FRAME_PRINT = 6
-
 # jq's exit status when it refuses the program itself, and when it could
 # not read one of its inputs, whatever the runs answered.
 ERROR_COMPILE = 3
 ERROR_SYSTEM = 2
-
-# The last line of jq's report of a program it refuses, which jq_eval's
-# refusal to compile such a program ends in.
-COMPILE_REPORT = re.compile(r"(?:\A|\n)jq: [0-9]+ compile errors?\Z")
-
-# The error jq_eval ends a run with once it holds more than its memory.
-MEMORY_REPORT = "jq memory limit of {} bytes exceeded"
 
 USAGE_HINT = (
     "Use jq --help for help with command-line options,\n"
@@ -151,22 +121,6 @@ SHORT_USAGE = (
     "\t}\n\n"
     "For listing the command options, use jq --help."
 )
-
-
-def local_zone(env: Mapping[str, str] | None) -> str | None:
-    """The time zone jq's local time reads, as a `TZ` value: the command
-    environment's, else the process's, else the tz database zone
-    /etc/localtime links to; None for a host zone with no name, which
-    jq_eval reads as UTC.
-
-    Args:
-        env (Mapping[str, str] | None): the command's environment.
-    """
-    for zone in ((env or {}).get(TZ_VAR), os.environ.get(TZ_VAR)):
-        if zone is not None:
-            return zone
-    _, marker, key = os.path.realpath("/etc/localtime").partition("/zoneinfo/")
-    return key if marker else None
 
 
 def _pair_args(values: Sequence[Any]) -> list[tuple[str, Any]]:
@@ -265,7 +219,7 @@ async def _binding(
     if dest == "rawfile":
         return string_text(await decode_utf8(data))
     shown = flag_file_name(value)
-    texts, failure = await read_texts(InputSource(shown, yield_bytes(data)))
+    texts, failure = await read_texts(data)
     if failure is not None:
         raise UsageError(
             f"jq: Bad JSON in --slurpfile {name} {shown}: {failure.message}",
@@ -484,499 +438,140 @@ def flag_file_name(path: PathSpec) -> str:
     return path.raw_path or path.virtual
 
 
-@dataclasses.dataclass
-class Ending:
-    """How a run whose outputs went out as it made them ended: the error
-    or halt that stopped it, if one did, and for a printed run whether it
-    printed an output and whether the last was null or false."""
-
-    stop: JqError | JqHalt | None = None
-    printed: bool = False
-    falsy: bool = False
+# What the stream ends with once what jq holds outgrows the workspace's
+# room (mirage-rs's jq EXHAUSTED).
+EXHAUSTED = str(MemoryExhausted())
 
 
-def run_status(ending: Ending) -> int:
-    """What jq's process() answers for one run.
+class JqInputs:
+    """The inputs jq's main loop reads, each opened when the loop first
+    asks for its bytes, as jq opens its files one after another, and the
+    clock `now` reads.
 
     Args:
-        ending (Ending): how the run ended.
-    """
-    if isinstance(ending.stop, JqHalt):
-        return OK if ending.stop.code is None else int(ending.stop.code)
-    if isinstance(ending.stop, JqError):
-        return ERROR_UNKNOWN
-    if not ending.printed:
-        return OK_NO_OUTPUT
-    return OK_NULL_KIND if ending.falsy else OK
-
-
-def exit_code(statuses: Sequence[int], opts: JqOptions) -> int:
-    """Exit status for the program run over the whole input, as jq's
-    main loop settles it.
-
-    Only the last run counts, even after one that failed, unless it
-    printed nothing, when -e looks back to the last value any run
-    printed. Without -e only a failure shows, and a halt's own code.
-
-    Args:
-        statuses (Sequence[int]): what each run answered (run_status).
-        opts (JqOptions): resolved options.
-    """
-    ret = OK_NO_OUTPUT
-    last_result = -1
-    for status in statuses:
-        ret = status
-        if status <= 0 and status != OK_NO_OUTPUT:
-            last_result = 0 if status == OK_NULL_KIND else 1
-    if not opts.exit_status:
-        code = max(ret, 0)
-    elif ret != OK_NO_OUTPUT:
-        code = abs(ret)
-    else:
-        code = {-1: 4, 0: 1, 1: 0}[last_result]
-    return code % 256
-
-
-def parse_report(failure: JqParseError, opts: JqOptions) -> str:
-    """jq's report of a parse error its main loop meets: fatal, or under
-    --seq a line it prints before reading on.
-
-    Args:
-        failure (JqParseError): the error.
-        opts (JqOptions): resolved options.
-    """
-    kind = "ignoring parse error" if opts.seq else "parse error"
-    return f"jq: {kind}: {failure.message}\n"
-
-
-def read_frames(
-    wire: bytes, frames: list[tuple[int, bytes]]
-) -> JqError | JqHalt | None:
-    """Fold one drain of mirage-rs's jq_eval into a run: each output frame
-    is a compact dump, each print frame an output printed (a byte set
-    when it was null or false, then its bytes), and a debug or stderr
-    frame a message for stderr, all kept in the order the run wrote them,
-    and an error or a halt frame is what stopped the run. An error's flag
-    byte says whether it is a string (bit 0) and whether the program
-    raised it with `error` itself (bit 1).
-
-    Args:
-        wire (bytes): the frames, a tag byte and a little-endian u32
-            length before each payload.
-        frames (list[tuple[int, bytes]]): the run's outputs and messages
-            so far, each its tag and payload, appended to.
-    """
-    stop: JqError | JqHalt | None = None
-    at = 0
-    while at < len(wire):
-        tag = wire[at]
-        size = int.from_bytes(wire[at + 1 : at + 5], "little")
-        payload = wire[at + 5 : at + 5 + size]
-        at += 5 + size
-        if tag in (FRAME_OUTPUT, FRAME_PRINT, FRAME_DEBUG, FRAME_STDERR):
-            frames.append((tag, payload))
-        elif tag == FRAME_ERROR:
-            flags = payload[0]
-            stop = JqError(
-                payload[1:].decode(), bool(flags & 1), bool(flags & 2)
-            )
-        elif tag == FRAME_HALT:
-            halt = json.loads(payload)
-            stop = JqHalt(halt["message"], halt["string"], halt["code"])
-        else:
-            raise ValueError(f"unknown jq_eval frame {tag}")
-    return stop
-
-
-def reader_position(reader: InputReader) -> dict[str, JsonValue]:
-    """Where jq's input reader stands, as jq_eval takes it: the input it
-    reads and the lines read of it.
-
-    Args:
-        reader (InputReader): the invocation's reader.
-    """
-    return {"filename": reader.filename(), "line": reader.line_number()}
-
-
-async def input_reply(
-    reader: InputReader,
-) -> tuple[dict[str, JsonValue], bytes]:
-    """jq's input callback (util.c) answering one `input`: the reader's
-    next document, the end of the stream, or its parse error, and where
-    the reader stands after it.
-
-    Args:
-        reader (InputReader): the invocation's reader, which the main
-            loop reads on from.
-    """
-    item = await reader.next_input()
-    position = reader_position(reader)
-    if item is NO_VALUE:
-        return {"kind": "end", **position}, b""
-    if isinstance(item, JqParseError):
-        return {"kind": "error", **position}, item.message.encode()
-    return {"kind": "value", **position}, item.encode()
-
-
-class Engine:
-    """A program compiled once by mirage-rs's jq_eval and run on the
-    loop's own thread, a bounded number of VM steps per drain, so a
-    program that never ends still yields and its task can be cancelled.
-
-    Args:
-        stream (OpenStream): the compiled program.
-        opts (JqOptions): resolved options, which `debug` prints by.
-        memory (int | None): the bytes the run may hold, what the
-            workspace's ``max_memory`` had left; None for jq_eval's own.
+        sources (Sequence[AsyncIterator[bytes]]): the inputs, in order, not
+            yet opened.
     """
 
-    def __init__(
-        self, stream: OpenStream, opts: JqOptions, memory: int | None = None
-    ) -> None:
-        self._stream = stream
-        self._memory = memory
-        self._budget = YieldBudget()
-        # jq's debug callback prints compactly, with -S and -a but none of
-        # the layout or raw options (main.c's dumpopts less pretty).
-        self._debug_opts = dataclasses.replace(
-            opts,
-            compact=True,
-            tab=False,
-            raw_output=False,
-            join_output=False,
-            nul_output=False,
-            seq=False,
-        )
+    def __init__(self, sources: Sequence[AsyncIterator[bytes]]) -> None:
+        self._sources = sources
+        self.errors = ByteSpool()
 
-    @classmethod
-    def open(
-        cls,
-        expr: str,
-        opts: JqOptions,
-        args: str | None,
-        env: str,
-        zone: str | None,
-        origin: str | None,
-        printing: bool = False,
-    ) -> "Engine":
-        """Compile `expr`.
+    async def serve(
+        self, request: Mapping[str, JsonValue], data: bytes
+    ) -> Served:
+        """Answer the stream: the clock, or the next bytes of an input, its
+        end, or why it could not be opened or read, in strerror's words.
 
         Args:
-            expr (str): jq program text, as typed.
-            opts (JqOptions): resolved options, for the named bindings.
-            args (str | None): the value of `$ARGS`, as text.
-            env (str): the environment `$ENV` and `env` read, as text.
-            zone (str | None): the `TZ` local time reads (local_zone).
-            origin (str | None): the directory `get_prog_origin` answers.
-            printing (bool): whether jq_eval prints the outputs by the
-                options, for `print`, or dumps them, for `run`.
-
-        Raises:
-            JqCompileError: a program jq itself refuses, with jq's report.
+            request (Mapping[str, JsonValue]): ``{"op": "now"}``, or
+                ``{"op": "read", "input": i}``.
+            data (bytes): unused; a read carries no bytes.
         """
-        limit = memory_room()
+        if request.get("op") == "now":
+            return Served({"kind": "now", "now": time.time()})
+        index = request.get("input")
+        if request.get("op") != "read" or not isinstance(index, int):
+            raise ValueError(f"jq: unknown host request {request}")
+        source = self._sources[index]
         try:
-            stream = open_stream(
-                "jq_eval",
+            chunk = await anext(source, None)
+        except FS_ERRORS as exc:
+            return Served(
                 {
-                    "program": expr,
-                    "named": dict(opts.named_args),
-                    "args": args,
-                    "env": env,
-                    "zone": zone,
-                    "prog_origin": origin,
-                    **({} if limit is None else {"memory": limit}),
-                    **({"print": print_config(opts)} if printing else {}),
-                },
+                    "kind": "error",
+                    "message": fs_strerror(exc),
+                    "read": isinstance(exc, READ_FAILURES),
+                }
             )
-        except StreamRefusal as exc:
-            if COMPILE_REPORT.search(exc.message):
-                raise JqCompileError(exc.message) from exc
-            raise
-        return cls(stream, opts, limit)
-
-    async def run(
-        self,
-        doc: str,
-        reader: InputReader,
-        report: Callable[[str], None],
-        ending: Ending,
-    ) -> AsyncGenerator[str, None]:
-        """Run the program on one document, yielding each output's compact
-        dump as a drain decodes it, and leave on `ending` how the run
-        stopped (see `_drains`).
-
-        Args:
-            doc (str): the document's JSON text.
-            reader (InputReader): the invocation's reader.
-            report (Callable[[str], None]): takes each line `debug` and
-                `stderr` write, in order.
-            ending (Ending): set once the run ends.
-        """
-        async with aclosing(
-            self._drains(doc, reader, report, ending)
-        ) as drains:
-            async for outputs in drains:
-                for output in outputs:
-                    yield output.decode()
-
-    async def print(
-        self,
-        doc: str,
-        reader: InputReader,
-        report: Callable[[str], None],
-        ending: Ending,
-    ) -> AsyncGenerator[bytes, None]:
-        """Run a program opened for printing on one document, yielding
-        what each drain printed as one chunk, and leave on `ending` how the
-        run stopped and what it printed last (see `_drains`).
-
-        Args:
-            doc (str): the document's JSON text.
-            reader (InputReader): the invocation's reader.
-            report (Callable[[str], None]): takes each line `debug` and
-                `stderr` write, in order.
-            ending (Ending): set once the run ends.
-        """
-        async with aclosing(
-            self._drains(doc, reader, report, ending)
-        ) as drains:
-            async for outputs in drains:
-                ending.printed = True
-                ending.falsy = outputs[-1][0] == 1
-                yield b"".join(memoryview(output)[1:] for output in outputs)
-
-    async def _drains(
-        self,
-        doc: str,
-        reader: InputReader,
-        report: Callable[[str], None],
-        ending: Ending,
-    ) -> AsyncGenerator[list[bytes], None]:
-        """Run the program on one document, yielding each drain's outputs,
-        those between two `debug` or `stderr` lines together, so the lines
-        go to `report` in the order the run wrote them, and leave on
-        `ending` how the run stopped.
-
-        Each `input` the program calls takes the reader's next document
-        then and there, as jq's input callback does, so the run consumes
-        exactly what it asks for and the main loop reads on after it. A
-        run its caller stops reading is cancelled, so the next can begin.
-
-        Args:
-            doc (str): the document's JSON text.
-            reader (InputReader): the invocation's reader.
-            report (Callable[[str], None]): takes each line `debug` and
-                `stderr` write, in order.
-            ending (Ending): set once the run ends.
-        """
-        stream = self._stream
-        stream.begin(reader_position(reader))
-        frames: list[tuple[int, bytes]] = []
-        try:
-            stop = read_frames(stream.feed(doc.encode()), frames)
-            stop = read_frames(stream.finish(), frames) or stop
-            while True:
-                outputs: list[bytes] = []
-                for tag, payload in frames:
-                    if tag in (FRAME_OUTPUT, FRAME_PRINT):
-                        outputs.append(payload)
-                        continue
-                    if outputs:
-                        yield outputs
-                        outputs = []
-                    report(await self._message(tag, payload.decode()))
-                frames.clear()
-                if outputs:
-                    yield outputs
-                if stream.busy():
-                    await self._budget.run()
-                    wire = stream.drain()
-                elif (asked := stream.request()) is not None:
-                    reply: dict[str, JsonValue]
-                    op = asked[0].get("op")
-                    if op == "now":
-                        reply, data = {"kind": "now", "now": time.time()}, b""
-                    elif op == "input":
-                        reply, data = await input_reply(reader)
-                    else:
-                        raise ValueError(
-                            f"jq_eval: unknown host request {asked[0]}"
-                        )
-                    wire = stream.respond(reply, data)
-                else:
-                    break
-                stop = read_frames(wire, frames) or stop
-        except GeneratorExit:
-            await self._cancel()
-            raise
-        if (
-            self._memory is not None
-            and isinstance(stop, JqError)
-            and stop.text == MEMORY_REPORT.format(self._memory)
-        ):
-            raise MemoryExhausted()
-        ending.stop = stop
-
-    async def _cancel(self) -> None:
-        # Stop the run in flight and retire it, so the next can begin.
-        if self._stream.cancel():
-            while self._stream.busy():
-                await self._budget.run()
-                self._stream.drain()
-
-    async def _message(self, tag: int, text: str) -> str:
-        # `debug` prints its line through jq's dumper, `stderr` its text.
-        if tag == FRAME_STDERR:
-            return text
-        return (await format_one(text, self._debug_opts)).decode()
+        if chunk is None:
+            return Served({"kind": "end"})
+        return Served({"kind": "data"}, chunk)
 
     async def close(self) -> None:
-        """Retire a run cut short a bounded slice at a time."""
-        await close_stream(self._stream)
+        """Close every input, the one the loop stopped in among them."""
+        for source in self._sources:
+            await close_quietly(source)
 
 
-class MainLoop:
-    """jq's main loop (main.c) over an invocation's input stream.
-
-    Each document runs as soon as the reader parses it, and its outputs
-    stream out. A run's error is reported and the next document runs; a
-    halt ends the loop; a parse error is reported with status 5 and ends
-    it, except under --seq, which reports it and reads on. Under -n the
-    program runs once, on null. The exit status and stderr settle on `io`
-    once the stream is drained.
-
-    A program runs in mirage-rs's jq_eval (Engine), compiled once per
-    invocation and stepped in bounded slices on this thread, so a run
-    that never ends still yields and `timeout` cancels it between two.
-    Its `input` and `inputs` take each document from the reader when they
-    ask for it, as jq's input callback does, so the next run starts after
-    the documents the program consumed, and `debug` and `stderr` lines go
-    to stderr in the order they were written, before the run's own
-    report.
-
-    An input that cannot be opened or read is reported when the reader
-    reaches it, and the reader goes on to the next. The loop checks for
-    such a failure before each document it reads, so it stops after the
-    run of the document the failing read went on to, and the exit status
-    is 2 whatever the runs answered.
+def run_config(
+    expr: str,
+    opts: JqOptions,
+    env: str,
+    zone: str | None,
+    origin: str | None,
+    inputs: Sequence[str],
+) -> dict[str, JsonValue]:
+    """What mirage-rs's jq takes for one invocation.
 
     Args:
-        sources (list[InputSource]): the inputs, in order, not yet opened.
         expr (str): jq program text.
         opts (JqOptions): resolved options.
-        args (str | None): the value of `$ARGS`, as text.
         env (str): the environment `$ENV` and `env` read, as text.
         zone (str | None): the `TZ` local time reads (local_zone).
         origin (str | None): the directory `get_prog_origin` answers.
-        io (IOResult): the result to settle.
+        inputs (Sequence[str]): the inputs' names as jq reports them.
     """
+    limit = memory_room()
+    return {
+        "program": expr,
+        "named": [[name, text] for name, text in opts.named_args.items()],
+        "positional": list(opts.positional_args),
+        "env": env,
+        "zone": zone,
+        "prog_origin": origin,
+        **({} if limit is None else {"memory": limit}),
+        "inputs": list(inputs),
+        "null_input": opts.null_input,
+        "raw_input": opts.raw_input,
+        "slurp": opts.slurp,
+        "stream": opts.stream,
+        "seq": opts.seq,
+        "exit_status": opts.exit_status,
+        "raw_output": opts.raw_output,
+        "join_output": opts.join_output,
+        "nul_output": opts.nul_output,
+        "ascii_output": opts.ascii_output,
+        "sort_keys": opts.sort_keys,
+        "compact": opts.compact,
+        "tab": opts.tab,
+        "indent": opts.indent,
+    }
 
-    def __init__(
-        self,
-        sources: list[InputSource],
-        expr: str,
-        opts: JqOptions,
-        args: str | None,
-        env: str,
-        zone: str | None,
-        origin: str | None,
-        io: IOResult,
-    ) -> None:
-        self._engine: Engine | None = None
-        self._reports: list[str] = []
-        self._reader = InputReader(sources, opts, self._reports.append)
-        self._expr = expr
-        self._opts = opts
-        self._args = args
-        self._env = env
-        self._zone = zone
-        self._origin = origin
-        self._io = io
-        self._statuses: list[int] = []
-        self._halted = False
 
-    async def outputs(self) -> AsyncIterator[bytes]:
-        """The invocation's stdout, each drain's outputs as its run prints
-        them."""
-        try:
-            if self._opts.null_input:
-                async with aclosing(self._run("null")) as chunks:
-                    async for chunk in chunks:
-                        yield chunk
-                return
-            while not self._reader.failures():
-                item = await self._reader.next_input()
-                if item is NO_VALUE:
-                    return
-                if isinstance(item, JqParseError):
-                    self._fail(item)
-                    if self._opts.seq:
-                        continue
-                    return
-                async with aclosing(self._run(item)) as chunks:
-                    async for chunk in chunks:
-                        yield chunk
-                if self._halted:
-                    return
-        finally:
-            self._io.exit_code = (
-                ERROR_SYSTEM
-                if self._reader.failures()
-                else exit_code(self._statuses, self._opts)
-            )
-            if self._reports:
-                self._io.stderr = "".join(self._reports).encode()
-            if self._engine is not None:
-                await self._engine.close()
-            await self._reader.close()
+async def run_outputs(
+    config: Mapping[str, JsonValue], inputs: JqInputs, io: IOResult
+) -> AsyncIterator[bytes]:
+    """jq's main loop in mirage-rs over the inputs, a bounded slice of
+    work at a time: what the runs print, as they print it, with jq's
+    exit status and stderr settled on ``io`` once the stream is drained.
 
-    async def _run(self, doc: str) -> AsyncGenerator[bytes, None]:
-        """Run the program on one document, printing its outputs as the
-        run makes them, a chunk a drain, then fold the run into the
-        invocation, its error reported where the reader stands after it.
-        jq_eval prints them by the options, so an output --raw-output0
-        cannot print stops the run with that error, as it does jq's.
+    Args:
+        config (Mapping[str, JsonValue]): the invocation (run_config).
+        inputs (JqInputs): serves the inputs and the clock.
+        io (IOResult): the result to settle.
 
-        Args:
-            doc (str): the run's own document, null under -n.
-        """
-        ending = Ending()
-        if self._engine is None:
-            self._engine = Engine.open(
-                self._expr,
-                self._opts,
-                self._args,
-                self._env,
-                self._zone,
-                self._origin,
-                printing=True,
-            )
-        async with aclosing(
-            self._engine.print(doc, self._reader, self._reports.append, ending)
-        ) as chunks:
-            async for chunk in chunks:
+    Raises:
+        MemoryExhausted: what jq holds outgrew the workspace's room,
+            after what was printed before it.
+    """
+    stream = open_stream("jq", config)
+    try:
+        async with aclosing(serve_requests(stream, inputs)) as output:
+            async for chunk in output:
                 yield chunk
-        self._halted = self._settle(ending, self._reader.position())
-
-    def _settle(self, ending: Ending, position: str) -> bool:
-        # Fold one run into the invocation: its answer toward the exit
-        # status, and its report when it stopped early. A halt ends the
-        # invocation, which is what this answers.
-        self._statuses.append(run_status(ending))
-        if isinstance(ending.stop, JqError):
-            self._reports.append(error_report(position, ending.stop))
-        elif isinstance(ending.stop, JqHalt):
-            self._reports.append(halt_report(ending.stop))
-            return True
-        return False
-
-    def _fail(self, failure: JqParseError) -> None:
-        # jq's `ret = JQ_ERROR_UNKNOWN; break`, or under --seq a report
-        # that leaves the status alone.
-        self._reports.append(parse_report(failure, self._opts))
-        if not self._opts.seq:
-            self._statuses.append(ERROR_UNKNOWN)
+    except StreamRefusal as exc:
+        if exc.message != EXHAUSTED:
+            raise
+        if exc.output:
+            yield exc.output
+        raise MemoryExhausted() from exc
+    finally:
+        io.exit_code = stream.status()
+        await inputs.errors.append(stream.take_stderr())
+        io.stderr = await inputs.errors.output()
+        await inputs.close()
+        await close_stream(stream)
 
 
 async def jq_generic(
@@ -1083,44 +678,37 @@ async def _jq(
         # jq defaults the filter to "." when no expression is given.
         expression = texts[0] if texts else "."
         origin = None if cwd is None else cwd.virtual
-    expr = expression.strip()
-    reads = stream_reads(expr)
-    reads_stream = reads.input or reads.inputs
-    args = args_text(opts) if references_args(expr) else None
     env_text = json.dumps(dict(env or {}))
     zone = local_zone(env)
+    operands = list(paths)
+    names = [input_name(path) for path in operands]
+    if not operands and stdin is not None:
+        operands.append(PathSpec.from_str_path("/dev/stdin"))
+        names.append(STDIN_NAME)
     try:
         # jq compiles its program before it opens a single input, so a
-        # refusal is all it prints. jq_eval words jq's refusals itself,
+        # refusal is all it prints. mirage-rs words jq's refusals itself,
         # reading the program as typed, so its lines and columns are jq's.
         # The run compiles it again when it starts, so nothing is held
         # open for a stream no one reads.
-        checked = Engine.open(expression, opts, args, env_text, zone, origin)
-        await checked.close()
-    except JqCompileError as exc:
-        return None, IOResult(
-            exit_code=ERROR_COMPILE, stderr=f"{exc}\n".encode()
+        checked = open_stream(
+            "jq", run_config(expression, opts, env_text, zone, origin, names)
         )
-
-    sources: list[InputSource] = []
-    # -n does not read its inputs at all unless the program asks for them
-    # through `input` or `inputs`, which is why jq -n never opens a
-    # missing file. Each input is opened when the reader reaches it, as
-    # jq opens its files one after another.
-    if not opts.null_input or reads_stream:
-        if paths:
-            for path in paths:
-                sources.append(InputSource(input_name(path), read_input(path)))
-        elif stdin is not None:
-            sources.append(
-                InputSource(
-                    STDIN_NAME,
-                    read_input(PathSpec.from_str_path("/dev/stdin")),
-                )
-            )
+        await close_stream(checked)
+    except StreamRefusal as exc:
+        if not COMPILE_REPORT.search(exc.message):
+            raise
+        return None, IOResult(
+            exit_code=ERROR_COMPILE, stderr=f"{exc.message}\n".encode()
+        )
+    config = run_config(
+        expression.strip(), opts, env_text, zone, origin, names
+    )
+    # Each input opens when the loop first reads it, as jq opens its files
+    # one after another, so -n never opens one its program does not read.
+    inputs = JqInputs([read_input(path) for path in operands])
     io = IOResult()
-    loop = MainLoop(sources, expr, opts, args, env_text, zone, origin, io)
-    return loop.outputs(), io
+    return run_outputs(config, inputs, io), io
 
 
 __all__ = ["jq"]

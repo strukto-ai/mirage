@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as rs from '../../../rs/stream.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
-import { InputReader, jqOptions, type JqOptions } from '../../../core/jq/index.ts'
+import { type JqOptions } from '../../../core/jq/index.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { materialize, type ByteSource, type IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -26,18 +26,13 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { parseCommand, parseToKwargs } from '../../spec/parser.ts'
 import {
-  Engine,
-  exitCode,
   indentWidth,
   inputName,
   jqGeneric,
-  localZone,
   optionRefusal,
   parseFlags,
   positionalValue,
-  readFrames,
   readOptions,
-  runStatus,
 } from './jq.ts'
 
 const ENC = new TextEncoder()
@@ -308,50 +303,6 @@ describe('readOptions', () => {
   ] as const)('never reads a binding of a taken name: %j', async (words) => {
     const opts = await readLine(['-n', '--arg', 'v', '1', ...words, '$v'], unread)
     expect(opts.namedArgs).toEqual(new Map([['v', '"1"']]))
-  })
-})
-
-/** Inputs named the way jq names files, one per text. */
-describe('exitCode', () => {
-  const printed = (...outputs: string[]): number =>
-    runStatus({
-      stop: null,
-      printed: outputs.length > 0,
-      falsy: ['null', 'false'].includes(outputs[outputs.length - 1] ?? ''),
-    })
-  const failed = runStatus({
-    stop: { kind: 'error', text: 'x', string: true },
-    printed: true,
-  })
-
-  const halted = (code: number | null): number =>
-    runStatus({
-      stop: { kind: 'halt', message: null, string: false, code },
-      printed: true,
-      falsy: true,
-    })
-
-  it.each([
-    [[printed('1', 'false')], true, 1],
-    [[printed('false', '1')], true, 0],
-    [[printed('null')], true, 1],
-    [[printed('"false"'), printed('0.0')], true, 0],
-    [[], true, 4],
-    [[], false, 0],
-    [[printed('null')], false, 0],
-    [[failed, printed('1')], false, 0],
-    [[printed('1'), failed], false, 5],
-    [[failed, printed('false')], true, 1],
-    [[printed('false'), printed()], true, 1],
-    [[printed('1'), printed()], true, 0],
-    [[halted(null)], false, 0],
-    [[halted(2)], false, 2],
-    [[halted(-1)], false, 0],
-    [[halted(-1)], true, 1],
-    [[halted(1.5)], false, 1],
-    [[halted(300)], false, 44],
-  ])('reads the statuses %j (-e %s) as %s', (statuses, exitStatus, expected) => {
-    expect(exitCode(statuses, jqOptions({ exitStatus }))).toBe(expected)
   })
 })
 
@@ -715,62 +666,7 @@ describe('jqGeneric over an input it cannot read', () => {
   })
 })
 
-function frame(tag: number, payload: string | Uint8Array): Uint8Array {
-  const body = typeof payload === 'string' ? ENC.encode(payload) : payload
-  const out = new Uint8Array(5 + body.length)
-  out[0] = tag
-  new DataView(out.buffer).setUint32(1, body.length, true)
-  out.set(body, 5)
-  return out
-}
-
-function joined(...parts: Uint8Array[]): Uint8Array {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
-  let at = 0
-  for (const part of parts) {
-    out.set(part, at)
-    at += part.length
-  }
-  return out
-}
-
 describe('jq_eval', () => {
-  it('folds frames in order with the stop that ended the run', () => {
-    const frames: [number, Uint8Array][] = []
-    const wire = joined(
-      frame(1, '1'),
-      frame(4, '["DEBUG:",1]'),
-      frame(6, '\u0001null\n'),
-      frame(5, 'x'),
-      frame(2, joined(Uint8Array.of(0), ENC.encode('{}'))),
-    )
-    expect(readFrames(wire, frames)).toEqual({
-      kind: 'error',
-      text: '{}',
-      string: false,
-      own: false,
-    })
-    expect(readFrames(frame(2, joined(Uint8Array.of(3), ENC.encode('x'))), [])).toEqual({
-      kind: 'error',
-      text: 'x',
-      string: true,
-      own: true,
-    })
-    expect(frames).toEqual([
-      [1, ENC.encode('1')],
-      [4, ENC.encode('["DEBUG:",1]')],
-      [6, ENC.encode('\u0001null\n')],
-      [5, ENC.encode('x')],
-    ])
-    expect(readFrames(frame(3, '{"message":"bye","string":true,"code":3.0}'), [])).toEqual({
-      kind: 'halt',
-      message: 'bye',
-      string: true,
-      code: 3,
-    })
-    expect(() => readFrames(frame(9, ''), [])).toThrow()
-  })
-
   it.each([
     ['[., input]', {}, '[1,2]\n[3,4]\n', '', 0],
     ['first(inputs)', {}, '2\n4\n', '', 0],
@@ -872,30 +768,6 @@ describe('jq_eval', () => {
     }
   })
 
-  it("reads the zone from the session's TZ, else the process's, else the runtime's", () => {
-    const saved = process.env.TZ
-    process.env.TZ = 'EST5EDT'
-    try {
-      expect(localZone({ TZ: ':Asia/Tokyo' })).toBe(':Asia/Tokyo')
-      expect(localZone({ TZ: '' })).toBe('')
-      expect(localZone({})).toBe('EST5EDT')
-      delete process.env.TZ
-      expect(localZone(undefined)).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
-    } finally {
-      if (saved === undefined) delete process.env.TZ
-      else process.env.TZ = saved
-    }
-  })
-
-  it("refuses a program with jq's report", async () => {
-    await expect(Engine.open('if', jqOptions(), null, '{}', 'UTC', null)).rejects.toThrow(
-      /\njq: 1 compile error$/,
-    )
-    await expect(
-      Engine.open('import "a" as a; .', jqOptions(), null, '{}', 'UTC', null),
-    ).rejects.toThrow(/^jq: error: module not found: a\n\njq: 1 compile error$/)
-  })
-
   it("answers get_prog_origin with the program file's directory, else the cwd", async () => {
     const program = '[get_prog_origin, get_jq_origin]'
     const ctx = {
@@ -976,13 +848,13 @@ describe('local time', () => {
   })
 })
 
-describe('jq_eval refusals', () => {
-  it('does not replay after an input request', async () => {
+describe('jq refusals', () => {
+  it('does not read on after a refused read', async () => {
     const open = rs.openStream
     const message = 'reply fixture'
     const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
       const stream = await open(kind, config)
-      if (kind === 'jq_eval') {
+      if (kind === 'jq') {
         vi.spyOn(stream, 'respond').mockImplementation(() => {
           throw new StreamRefusal(message, new Uint8Array())
         })
@@ -996,41 +868,11 @@ describe('jq_eval refusals', () => {
     }
   })
 
-  it('does not replay after debug output', async () => {
-    const open = rs.openStream
-    let seen = false
-    let refused = false
-    const message = 'drain fixture'
-    const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
-      const stream = await open(kind, config)
-      if (kind === 'jq_eval') {
-        const drain = stream.drain.bind(stream)
-        vi.spyOn(stream, 'drain').mockImplementation(() => {
-          if (seen && !refused) {
-            refused = true
-            throw new StreamRefusal(message, new Uint8Array())
-          }
-          const output = drain()
-          seen ||= output.byteLength > 0
-          return output
-        })
-      }
-      return stream
-    })
-    try {
-      await expect(ranOver([], '1|debug|until(false;.)', { null_input: true })).rejects.toThrow(
-        message,
-      )
-    } finally {
-      patched.mockRestore()
-    }
-  })
-
   it('rejects an unknown request without reading input', async () => {
     const open = rs.openStream
     const patched = vi.spyOn(rs, 'openStream').mockImplementation(async (kind, config) => {
       const stream = await open(kind, config)
-      if (kind === 'jq_eval') {
+      if (kind === 'jq') {
         vi.spyOn(stream, 'request').mockReturnValue([{ op: 'unknown-fixture' }, new Uint8Array()])
       }
       return stream
@@ -1067,28 +909,6 @@ describe('outputs as a run makes them', () => {
     expect(first.done).toBe(false)
     expect(DEC.decode(first.value as Uint8Array)).toBe('0\n')
     await chunks.return?.()
-  })
-
-  it('writes messages and outputs in the order the run wrote them', async () => {
-    const engine = await Engine.open(
-      '1, ("a" | stderr | empty), 2, (3 | debug)',
-      jqOptions(),
-      null,
-      '{}',
-      'UTC',
-      null,
-    )
-    const seen: string[] = []
-    try {
-      const reader = new InputReader([], jqOptions())
-      const ending = { stop: null }
-      for await (const value of engine.run('null', reader, (line) => seen.push(line), ending)) {
-        seen.push(value)
-      }
-    } finally {
-      await engine.close()
-    }
-    expect(seen).toEqual(['1', 'a', '2', '["DEBUG:",3]\n', '3'])
   })
 
   it('stops a run at an output --raw-output0 cannot print, and runs the next', async () => {

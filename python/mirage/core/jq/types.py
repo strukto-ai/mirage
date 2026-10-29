@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Generic, TypeVar
@@ -24,7 +24,6 @@ DEFAULT_INDENT = 2
 # What jq names standard input when it reports where it stands, and what
 # it reports before it has read any input at all.
 STDIN_NAME = "<stdin>"
-UNKNOWN_POSITION = "<unknown>"
 
 
 class NoValue(Enum):
@@ -48,20 +47,6 @@ class JqParseError:
     """
 
     message: str
-
-
-@dataclass(frozen=True, slots=True)
-class InputSource:
-    """One input of the stream jq reads: a file operand or stdin.
-
-    Args:
-        name (str): the input as jq reports it, the operand as the command
-            line spelled it or ``<stdin>``.
-        chunks (AsyncIterator[bytes]): its bytes.
-    """
-
-    name: str
-    chunks: AsyncIterator[bytes]
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,24 +100,6 @@ class JqRun(Generic[T]):
 
     outputs: list[T]
     stop: JqError | JqHalt | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class StreamReads:
-    """Which of the builtins that read the input stream a program calls.
-
-    Args:
-        input (bool): `input`, which takes the next unread document.
-        inputs (bool): `inputs`, which yields every unread document.
-    """
-
-    input: bool
-    inputs: bool
-
-
-# The record separator an application/json-seq stream puts before every
-# value (RFC 7464).
-RS = "\x1e"
 
 
 @dataclass(frozen=True, slots=True)

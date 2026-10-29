@@ -4,9 +4,6 @@ import pytest
 
 from mirage.commands.builtin.generic import jq as jq_module
 from mirage.commands.builtin.generic.jq import (
-    Ending,
-    Engine,
-    exit_code,
     indent_width,
     input_name,
     jq,
@@ -14,9 +11,7 @@ from mirage.commands.builtin.generic.jq import (
     option_refusal,
     parse_flags,
     positional_value,
-    read_frames,
     read_options,
-    run_status,
 )
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
@@ -24,10 +19,10 @@ from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
-from mirage.core.jq import InputReader, JqError, JqHalt, JqOptions
-from mirage.core.jq.errors import JqCompileError
+from mirage.core.jq import JqOptions
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult, materialize
+from mirage.rs.errors import StreamRefusal
 from mirage.types import PathSpec
 
 FILES = {
@@ -112,18 +107,6 @@ async def _bound(**flags: FlagValue) -> dict[str, str]:
     ctx = await read_options(_spec_flags(**flags), [], False, _unread)
     assert isinstance(ctx, JqOptions)
     return dict(ctx.named_args)
-
-
-def _printed(*outputs: str) -> int:
-    falsy = bool(outputs) and outputs[-1] in ("null", "false")
-    return run_status(Ending(printed=bool(outputs), falsy=falsy))
-
-
-def _halted(code: float | None) -> int:
-    return run_status(Ending(JqHalt(None, False, code), True, True))
-
-
-_FAILED = run_status(Ending(JqError("x", True), True))
 
 
 async def _run(paths: list[str], *texts: str, **flags: FlagValue) -> tuple:
@@ -337,33 +320,6 @@ async def test_a_binding_of_a_taken_name_is_never_read(words):
         FlagView(bag, spec=SPECS["jq"]), texts, False, _unread
     )
     assert ctx.named_args == {"v": '"1"'}
-
-
-@pytest.mark.parametrize(
-    "statuses, exit_status, expected",
-    [
-        ([_printed("1", "false")], True, 1),
-        ([_printed("false", "1")], True, 0),
-        ([_printed("null")], True, 1),
-        ([_printed('"false"'), _printed("0.0")], True, 0),
-        ([], True, 4),
-        ([], False, 0),
-        ([_printed("null")], False, 0),
-        ([_FAILED, _printed("1")], False, 0),
-        ([_printed("1"), _FAILED], False, 5),
-        ([_FAILED, _printed("false")], True, 1),
-        ([_printed("false"), _printed()], True, 1),
-        ([_printed("1"), _printed()], True, 0),
-        ([_halted(None)], False, 0),
-        ([_halted(2)], False, 2),
-        ([_halted(-1)], False, 0),
-        ([_halted(-1)], True, 1),
-        ([_halted(1.5)], False, 1),
-        ([_halted(300)], False, 44),
-    ],
-)
-def test_exit_code_reads_the_runs_as_jq_does(statuses, exit_status, expected):
-    assert exit_code(statuses, JqOptions(exit_status=exit_status)) == expected
 
 
 def test_an_input_is_named_as_typed_and_dash_as_stdin():
@@ -748,33 +704,6 @@ async def test_the_program_file_is_read_after_the_option_loop():
     assert b"Could not open" in await materialize(io.stderr)
 
 
-def _frame(tag: int, payload: bytes) -> bytes:
-    return bytes([tag]) + len(payload).to_bytes(4, "little") + payload
-
-
-def test_frames_fold_in_order_with_the_stop_that_ended_the_run():
-    frames: list[tuple[int, bytes]] = []
-    wire = (
-        _frame(1, b"1")
-        + _frame(4, b'["DEBUG:",1]')
-        + _frame(6, b"\x01null\n")
-        + _frame(5, b"x")
-        + _frame(2, b"\x00{}")
-    )
-    assert read_frames(wire, frames) == JqError("{}", False)
-    assert read_frames(_frame(2, b"\x03x"), []) == JqError("x", True, True)
-    assert frames == [
-        (1, b"1"),
-        (4, b'["DEBUG:",1]'),
-        (6, b"\x01null\n"),
-        (5, b"x"),
-    ]
-    halt = b'{"message":"bye","string":true,"code":3.0}'
-    assert read_frames(_frame(3, halt), []) == JqHalt("bye", True, 3.0)
-    with pytest.raises(ValueError):
-        read_frames(_frame(9, b""), [])
-
-
 @pytest.mark.asyncio
 async def test_a_program_that_never_ends_is_cancelled_on_this_thread():
     with pytest.raises(asyncio.TimeoutError):
@@ -807,22 +736,6 @@ async def test_dates_and_the_clock_stay_on_the_loops_thread(monkeypatch):
     )
 
 
-def test_local_zone_is_the_sessions_tz_else_the_hosts(monkeypatch):
-    monkeypatch.setenv("TZ", "EST5EDT")
-    assert jq_module.local_zone({"TZ": ":Asia/Tokyo"}) == ":Asia/Tokyo"
-    assert jq_module.local_zone({"TZ": ""}) == ""
-    assert jq_module.local_zone({}) == "EST5EDT"
-    monkeypatch.delenv("TZ")
-    monkeypatch.setattr(
-        jq_module.os.path,
-        "realpath",
-        lambda _path: "/usr/share/zoneinfo/Europe/Paris",
-    )
-    assert jq_module.local_zone(None) == "Europe/Paris"
-    monkeypatch.setattr(jq_module.os.path, "realpath", lambda path: path)
-    assert jq_module.local_zone(None) is None
-
-
 @pytest.mark.asyncio
 async def test_local_time_reads_the_sessions_zone_from_the_tz_database(
     monkeypatch,
@@ -848,34 +761,10 @@ async def test_local_time_reads_the_sessions_zone_from_the_tz_database(
     assert await materialize(source) == b'"09:56 IST +0530"\n"GMT"\n5\n'
 
 
-def _open(expr: str) -> Engine:
-    return Engine.open(expr, JqOptions(), None, "{}", None, None)
-
-
-async def _engine_run(
-    engine: Engine, doc: str, reader: InputReader, report
-) -> tuple[list[str], Ending]:
-    ending = Ending()
-    outputs = [
-        value async for value in engine.run(doc, reader, report, ending)
-    ]
-    return outputs, ending
-
-
 @pytest.mark.asyncio
 async def test_each_output_goes_out_before_its_run_ends():
-    # An output is yielded as its drain decodes it, so the first of a run
-    # that never ends can be read, and a run its reader stops is cancelled
-    # so the next document can begin.
-    engine = _open("., until(false; .)")
-    reader = InputReader([], JqOptions())
-    try:
-        for doc in ("1", "2"):
-            values = engine.run(doc, reader, print, Ending())
-            assert await asyncio.wait_for(anext(values), 10) == doc
-            await values.aclose()
-    finally:
-        await engine.close()
+    # An output is printed as its drain makes it, so the first of a run
+    # that never ends can be read.
     source, io = await jq(
         [], "0, until(false; .)", stream=_read_stream, null_input=True
     )
@@ -883,20 +772,6 @@ async def test_each_output_goes_out_before_its_run_ends():
     chunks = aiter(source)
     assert await asyncio.wait_for(anext(chunks), 10) == b"0\n"
     await chunks.aclose()
-
-
-@pytest.mark.asyncio
-async def test_messages_and_outputs_go_out_in_the_order_the_run_wrote_them():
-    engine = _open('1, ("a" | stderr | empty), 2, (3 | debug)')
-    seen: list[str] = []
-    try:
-        async for value in engine.run(
-            "null", InputReader([], JqOptions()), seen.append, Ending()
-        ):
-            seen.append(value)
-    finally:
-        await engine.close()
-    assert seen == ["1", "a", "2", '["DEBUG:",3]\n', "3"]
 
 
 @pytest.mark.asyncio
@@ -1043,17 +918,6 @@ async def test_jq_eval_reports_a_refused_program_as_jq_does():
     )
 
 
-def test_engine_refuses_a_program_with_jqs_report():
-    with pytest.raises(JqCompileError, match=r"\njq: 1 compile error\Z"):
-        _open("if")
-    with pytest.raises(JqCompileError) as error:
-        _open('import "a" as a; .')
-    assert (
-        str(error.value)
-        == "jq: error: module not found: a\n\njq: 1 compile error"
-    )
-
-
 @pytest.mark.asyncio
 async def test_get_prog_origin_is_the_program_files_directory_else_the_cwd():
     program = "[get_prog_origin, get_jq_origin]"
@@ -1077,82 +941,43 @@ async def test_now_reads_the_clock_at_each_call():
     assert (out, io.exit_code) == (b'"done"\n', 0)
 
 
+def _patched(monkeypatch, method: str, replacement) -> None:
+    # Patch one method of every jq stream the command opens.
+    opened = jq_module.open_stream
+
+    def opening(kind, config):
+        stream = opened(kind, config)
+        setattr(stream, method, replacement)
+        return stream
+
+    monkeypatch.setattr(jq_module, "open_stream", opening)
+
+
 @pytest.mark.asyncio
-async def test_a_refusal_after_input_is_not_replayed(monkeypatch):
-    engine = _open("input")
-    reader = InputReader([], JqOptions())
+async def test_a_refused_read_is_not_read_past(monkeypatch):
+    def respond(reply, data):
+        raise StreamRefusal("reply fixture", b"")
+
+    _patched(monkeypatch, "respond", respond)
+    with pytest.raises(StreamRefusal, match="reply fixture"):
+        await _run(["/d/one.json"], "input", null_input=True)
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_request_is_refused_without_reading_input(
+    monkeypatch,
+):
     reads = 0
 
-    async def next_input():
+    async def counted(path: PathSpec):
         nonlocal reads
         reads += 1
-        return "1"
+        yield b"1"
 
-    message = "reply fixture"
-
-    def respond(stream, reply, data):
-        raise jq_module.StreamRefusal(message, b"")
-
-    monkeypatch.setattr(reader, "next_input", next_input)
-    monkeypatch.setattr(jq_module.OpenStream, "respond", respond)
-    try:
-        with pytest.raises(jq_module.StreamRefusal, match="reply fixture"):
-            await _engine_run(engine, "null", reader, print)
-        assert reads == 1
-    finally:
-        await engine.close()
-
-
-@pytest.mark.asyncio
-async def test_a_refusal_after_debug_is_not_replayed(monkeypatch):
-    engine = _open("1 | debug | until(false; .)")
-    reader = InputReader([], JqOptions())
-    original = jq_module.OpenStream.drain
-    seen = False
-    rejected = False
-    reports = []
-
-    def drain(stream):
-        nonlocal seen, rejected
-        if stream is not engine._stream:
-            return original(stream)
-        if seen and not rejected:
-            rejected = True
-            raise jq_module.StreamRefusal("drain fixture", b"")
-        wire = original(stream)
-        seen |= bool(wire)
-        return wire
-
-    monkeypatch.setattr(jq_module.OpenStream, "drain", drain)
-    try:
-        with pytest.raises(jq_module.StreamRefusal, match="drain fixture"):
-            await _engine_run(engine, "null", reader, reports.append)
-        assert reports == ['["DEBUG:",1]\n']
-    finally:
-        await engine.close()
-
-
-@pytest.mark.asyncio
-async def test_an_unknown_request_does_not_consume_input(monkeypatch):
-    engine = _open("input")
-    reader = InputReader([], JqOptions())
-    reads = 0
-
-    async def next_input():
-        nonlocal reads
-        reads += 1
-        return "1"
-
-    request = ({"op": "unknown-fixture"}, b"")
-
-    def unknown(stream):
-        return request
-
-    monkeypatch.setattr(reader, "next_input", next_input)
-    monkeypatch.setattr(jq_module.OpenStream, "request", unknown)
-    try:
-        with pytest.raises(ValueError, match="unknown host request"):
-            await _engine_run(engine, "null", reader, print)
-        assert reads == 0
-    finally:
-        await engine.close()
+    _patched(monkeypatch, "request", lambda: ({"op": "fixture"}, b""))
+    source, _ = await jq(
+        [_path("/d/one.json")], "input", stream=counted, null_input=True
+    )
+    with pytest.raises(ValueError, match="unknown host request"):
+        await materialize(source)
+    assert reads == 0

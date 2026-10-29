@@ -13,10 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { Engine, type Ending } from '../../commands/builtin/generic/jq.ts'
-import { argsText, referencesArgs, streamReads } from './eval.ts'
-import { InputReader } from './stream.ts'
-import { jqOptions } from './types.ts'
+import { Engine, localZone, readFrames, type Ending } from './eval.ts'
 
 /**
  * Every output of a jq program on one value, run to its end in mirage-rs's
@@ -24,17 +21,15 @@ import { jqOptions } from './types.ts'
  * the error that ended the run.
  */
 async function jqEval(obj: unknown, expr: string): Promise<unknown[]> {
-  const engine = await Engine.open(expr, jqOptions(), null, '{}', 'UTC', null)
-  const reader = new InputReader([], jqOptions())
+  const engine = await Engine.open(expr, '{}', 'UTC')
   const ending: Ending = { stop: null }
   const outputs: unknown[] = []
   try {
-    for await (const text of engine.run(JSON.stringify(obj), reader, () => undefined, ending)) {
+    for await (const text of engine.run(JSON.stringify(obj), ending)) {
       outputs.push(JSON.parse(text))
     }
   } finally {
     await engine.close()
-    await reader.close()
   }
   if (ending.stop?.kind === 'error') throw new Error(ending.stop.text)
   return outputs
@@ -370,72 +365,94 @@ describe('jq eval — user expressions that broke the homegrown parser', () => {
   })
 })
 
-describe('program scanners', () => {
-  it('finds whole-word stream references only', () => {
-    expect(streamReads('[inputs]')).toEqual({ input: false, inputs: true })
-    expect(streamReads('reduce inputs as $x (0; . + $x)').inputs).toBe(true)
-    expect(streamReads('input')).toEqual({ input: true, inputs: false })
-    expect(streamReads('input as $h | [inputs]')).toEqual({ input: true, inputs: true })
-    expect(streamReads('.myinputs').inputs).toBe(false)
-    expect(streamReads('.inputs_total').inputs).toBe(false)
-    expect(streamReads('input_filename').input).toBe(false)
-    expect(streamReads('input_line_number').input).toBe(false)
-  })
+const ENC = new TextEncoder()
 
-  it('ignores the words where they spell data', () => {
-    for (const expr of [
-      '.inputs',
-      '.a.inputs',
-      '$inputs',
-      '{inputs: .a}',
-      '{inputs}',
-      '{a, inputs}',
-      'm::inputs',
-    ]) {
-      expect(streamReads(expr).inputs).toBe(false)
-    }
-    for (const expr of ['.input', '$input', '{input: 1}', '{input}', 'm::input']) {
-      expect(streamReads(expr).input).toBe(false)
-    }
-  })
+function frame(tag: number, payload: string | Uint8Array): Uint8Array {
+  const body = typeof payload === 'string' ? ENC.encode(payload) : payload
+  const out = new Uint8Array(5 + body.length)
+  out[0] = tag
+  new DataView(out.buffer).setUint32(1, body.length, true)
+  out.set(body, 5)
+  return out
+}
 
-  it('ignores strings and comments', () => {
-    expect(streamReads('"no inputs found"').inputs).toBe(false)
-    expect(streamReads('. # drains inputs').inputs).toBe(false)
-    expect(streamReads('"a\\("b" + "inputs")c"').inputs).toBe(false)
-    expect(streamReads('"read the input"').input).toBe(false)
-  })
-
-  it('ignores a function the program defines for itself', () => {
-    expect(streamReads('def input: 1; input').input).toBe(false)
-    expect(streamReads('def inputs: 9; [inputs]').inputs).toBe(false)
-    expect(streamReads('def f(x): x; f(input)').input).toBe(true)
-  })
-
-  it('reads calls in every value position', () => {
-    expect(streamReads('{a: inputs}').inputs).toBe(true)
-    expect(streamReads('{(inputs): 1}').inputs).toBe(true)
-    expect(streamReads('[1, inputs, 2]').inputs).toBe(true)
-    expect(streamReads('"\\(inputs)"').inputs).toBe(true)
-    expect(streamReads('{a: input}').input).toBe(true)
-  })
-
-  it('reads $ARGS the same way', () => {
-    expect(referencesArgs('$ARGS.positional')).toBe(true)
-    expect(referencesArgs('{$ARGS}')).toBe(true)
-    expect(referencesArgs('"$ARGS"')).toBe(false)
-    expect(referencesArgs('. # $ARGS')).toBe(false)
-    expect(referencesArgs('$ARGSX')).toBe(false)
-  })
-
-  it('holds both binding kinds in $ARGS', () => {
-    const opts = jqOptions({
-      positionalArgs: ['1', '"a"'],
-      namedArgs: new Map([
-        ['x', '2'],
-        ['y', '[]'],
-      ]),
+describe('the engine gh --jq runs', () => {
+  it('folds frames into outputs and the stop that ended the run', () => {
+    const outputs: Uint8Array[] = []
+    const wire = new Uint8Array([
+      ...frame(1, '1'),
+      ...frame(4, '["DEBUG:",1]'),
+      ...frame(1, '2'),
+      ...frame(5, 'x'),
+      ...frame(2, new Uint8Array([0, ...ENC.encode('{}')])),
+    ])
+    expect(readFrames(wire, outputs)).toEqual({
+      kind: 'error',
+      text: '{}',
+      string: false,
+      own: false,
     })
-    expect(argsText(opts)).toBe('{"positional":[1,"a"],"named":{"x":2,"y":[]}}')
+    expect(outputs).toEqual([ENC.encode('1'), ENC.encode('2')])
+    expect(readFrames(frame(2, new Uint8Array([3, ...ENC.encode('x')])), [])).toEqual({
+      kind: 'error',
+      text: 'x',
+      string: true,
+      own: true,
+    })
+    expect(readFrames(frame(3, '{"message":"bye","string":true,"code":3.0}'), [])).toEqual({
+      kind: 'halt',
+      message: 'bye',
+      string: true,
+      code: 3,
+    })
+    expect(() => readFrames(frame(9, ''), [])).toThrow()
+  })
+
+  it("reads the zone from the session's TZ, else the process's, else the runtime's", () => {
+    const saved = process.env.TZ
+    process.env.TZ = 'EST5EDT'
+    try {
+      expect(localZone({ TZ: ':Asia/Tokyo' })).toBe(':Asia/Tokyo')
+      expect(localZone({ TZ: '' })).toBe('')
+      expect(localZone({})).toBe('EST5EDT')
+      delete process.env.TZ
+      expect(localZone(undefined)).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+    } finally {
+      if (saved === undefined) delete process.env.TZ
+      else process.env.TZ = saved
+    }
+  })
+
+  it('finds no more input and drops what debug and stderr write', async () => {
+    const engine = await Engine.open('(1 | debug), ("x" | stderr), try input catch .', '{}', 'UTC')
+    const ending: Ending = { stop: null }
+    const outputs: string[] = []
+    try {
+      for await (const text of engine.run('null', ending)) outputs.push(text)
+    } finally {
+      await engine.close()
+    }
+    expect(outputs).toEqual(['1', '"x"', '"break"'])
+    expect(ending.stop).toBeNull()
+  })
+
+  it('cancels a run its reader stops, so the next can begin', async () => {
+    const engine = await Engine.open('., until(false; .)', '{}', 'UTC')
+    try {
+      for (const doc of ['1', '2']) {
+        const values = engine.run(doc, { stop: null })
+        expect((await values.next()).value).toBe(doc)
+        await values.return()
+      }
+    } finally {
+      await engine.close()
+    }
+  })
+
+  it("refuses a program with jq's report", async () => {
+    await expect(Engine.open('if', '{}', 'UTC')).rejects.toThrow(/\njq: 1 compile error$/)
+    await expect(Engine.open('import "a" as a; .', '{}', 'UTC')).rejects.toThrow(
+      /^jq: error: module not found: a\n\njq: 1 compile error$/,
+    )
   })
 })

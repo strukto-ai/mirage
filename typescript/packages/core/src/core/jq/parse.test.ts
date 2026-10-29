@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { JqParser, decodeUtf8, stringText, utf8Missing } from './parse.ts'
+import { JqParser, decodeUtf8, readTexts, stringText, valueText } from './parse.ts'
 import { JqParseError, NO_VALUE } from './types.ts'
 
 const cases = z
@@ -88,12 +88,6 @@ it('quotes host strings without altering them', () => {
   expect(JSON.parse(stringText(text))).toBe(text)
 })
 
-it('finishes a reader piece inside a UTF-8 character', () => {
-  expect(utf8Missing(new Uint8Array([0x61, 0xe2]))).toBe(2)
-  expect(utf8Missing(new Uint8Array([0x61, 0xe2, 0x82]))).toBe(1)
-  expect(utf8Missing(new Uint8Array([0x61, 0xe2, 0x82, 0xac]))).toBe(0)
-})
-
 it('cancels and discards a large unfinished input', async () => {
   const controller = new AbortController()
   const parser = new JqParser(false, false, controller.signal)
@@ -106,5 +100,28 @@ it('cancels and discards a large unfinished input', async () => {
   } finally {
     clearTimeout(timer)
     await parser.close()
+  }
+})
+
+it('reads a slurpfile as jq does', async () => {
+  const enc = new TextEncoder()
+  expect(await readTexts(enc.encode('{"a":1.0}\n{"a":2}\n'))).toEqual([
+    ['{"a":1.0}', '{"a":2}'],
+    null,
+  ])
+  expect(await readTexts(enc.encode('1 ['))).toEqual([
+    ['1'],
+    new JqParseError('Unfinished JSON term at EOF at line 1, column 3'),
+  ])
+})
+
+it('takes one value as jv_parse does', async () => {
+  const enc = new TextEncoder()
+  expect(await valueText(enc.encode('{"b":1,"1":2.50}'))).toBe('{"b":1,"1":2.50}')
+  expect(await valueText(enc.encode('nan'))).toBe('nan')
+  expect(await valueText(enc.encode(' 12 \n'))).toBe('12')
+  expect(await valueText(new Uint8Array([0xef, 0xbb, 0xbf, 0x31, 0x2e, 0x30]))).toBe('1.0')
+  for (const text of ['1 2', '', 'nope', '[1,']) {
+    expect(await valueText(enc.encode(text))).toBe(NO_VALUE)
   }
 })
