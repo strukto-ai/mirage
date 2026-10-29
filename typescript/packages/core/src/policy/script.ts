@@ -498,6 +498,9 @@ export class ScriptPolicy implements Policy, SessionScoped {
       if (this.wiring !== null) {
         engine.bind(new WorkspaceBinding(this.wiring.dispatch(this.issuer), this.wiring.resolver))
       }
+      // A program judges reads that runs on the shared pool make, so it must
+      // not queue behind them for a worker.
+      if (engine instanceof MontyRuntime) engine.shared = false
       if (Object.keys(this.externalLookup).length > 0 && engine instanceof MontyRuntime) {
         engine.externalLookup = this.externalLookup
         this.unqueued.add(engine)

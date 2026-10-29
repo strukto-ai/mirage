@@ -539,6 +539,10 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             if self._dispatch is not None and self._resolver is not None:
                 engine.bind(WorkspaceBinding(self._reading, self._resolver))
             lock: asyncio.Lock | None = asyncio.Lock()
+            if isinstance(engine, MontyRuntime):
+                # A program judges reads that runs on the shared pool make,
+                # so it must not queue behind them for a worker.
+                engine.shared = False
             if self._external_lookup and isinstance(engine, MontyRuntime):
                 engine.external_lookup = self._external_lookup
                 lock = None
