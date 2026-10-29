@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use super::builtin::{self, Fault};
-use super::eval::{BLOCKS, BYTES, ITEMS, MEMORY};
+use super::eval::{BLOCKS, BYTES, ITEMS, MEMORY, STEPS};
 use super::lalr::{self, Action, Assoc, Tables};
 use super::parse::parse_value;
 use super::value::{Number, Object, Value};
-use super::vm::Limits;
+use super::vm::{Limits, Pending};
 
 /// Bison's YYMAXDEPTH: the parser stack jq's parser grows up to.
 const STACK: usize = 10000;
@@ -1722,6 +1722,10 @@ fn loc_object(source: &str, loc: Loc) -> Ast {
     Ast::Literal(Value::object(object))
 }
 
+/// The constant a module's metadata folds to, as jq folds it while it
+/// parses, or None when it is not one. Its binops run as the VM runs
+/// them, and all of them share one slice of steps, so metadata that would
+/// hold the loop longer than a slice of a run is not a constant.
 fn metadata_constant(ast: &Ast) -> Option<Value> {
     enum Step<'a> {
         Visit(&'a Ast),
@@ -1729,6 +1733,13 @@ fn metadata_constant(ast: &Ast) -> Option<Value> {
         Array(usize),
         Object(usize),
     }
+    let limits = Limits {
+        blocks: BLOCKS,
+        items: ITEMS,
+        bytes: BYTES,
+        memory: MEMORY,
+    };
+    let mut budget = STEPS;
     let mut steps = vec![Step::Visit(ast)];
     let mut values = Vec::new();
     while let Some(step) = steps.pop() {
@@ -1761,13 +1772,15 @@ fn metadata_constant(ast: &Ast) -> Option<Value> {
                 let right = values.pop()?;
                 let left = values.pop()?;
                 let f = builtin::lookup(op.function(), 2).expect("binop builtin");
-                let limits = Limits {
-                    blocks: BLOCKS,
-                    items: ITEMS,
-                    bytes: BYTES,
-                    memory: MEMORY,
+                let mut args = [Value::Null, left, right];
+                budget = budget.checked_sub(builtin::cost(&args))?;
+                let value = match Pending::begin(f, &mut args) {
+                    Some(Ok(mut task)) if budget > 0 => task.run(&mut budget, limits)?,
+                    Some(Ok(_)) => return None,
+                    Some(Err(fault)) => Err(fault),
+                    None => builtin::call(f, &mut args, limits),
                 };
-                values.push(builtin::call(f, &mut [Value::Null, left, right], limits).ok()?);
+                values.push(value.ok()?);
             }
             Step::Array(len) => {
                 let items = values.split_off(values.len() - len);

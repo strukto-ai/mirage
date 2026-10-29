@@ -1113,21 +1113,26 @@ impl Reader<'_> {
         }
     }
 
-    /// Past white space, one to `width` digits in `low..=high`.
+    /// Past white space, one to `width` digits in `low..=high`. A field
+    /// takes another digit only while ten times what it has read is still
+    /// at most `high`, so `%m%d` reads `"228"` as February 28.
     fn number(&mut self, width: usize, low: i64, high: i64) -> Option<i64> {
         self.skip_space();
         let rest = self.rest();
-        let len = rest
-            .iter()
-            .take(width)
-            .take_while(|b| b.is_ascii_digit())
-            .count();
+        let mut value = 0i64;
+        let mut len = 0;
+        while let Some(digit) = rest.get(len).filter(|b| b.is_ascii_digit()) {
+            if len == width || len > 0 && value.saturating_mul(10) > high {
+                break;
+            }
+            value = value
+                .saturating_mul(10)
+                .saturating_add(i64::from(digit - b'0'));
+            len += 1;
+        }
         if len == 0 {
             return None;
         }
-        let value = rest[..len].iter().fold(0i64, |v, b| {
-            v.saturating_mul(10).saturating_add(i64::from(b - b'0'))
-        });
         self.at += len;
         (low..=high).contains(&value).then_some(value)
     }

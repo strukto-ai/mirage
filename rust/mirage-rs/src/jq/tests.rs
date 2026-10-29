@@ -1133,7 +1133,8 @@ fn programs_compile_or_get_jqs_report() {
 
 /// jq folds `[1,2] - [2]` and `"ab" * 2` while it parses; this parser
 /// leaves them to run time, so metadata folds them itself, under the
-/// default limits, and metadata that is not constant gets jq's error.
+/// default limits and one slice of steps, and metadata that is not
+/// constant gets jq's error.
 #[test]
 fn module_metadata_folds_what_jq_folds() {
     for program in [
@@ -1141,6 +1142,7 @@ fn module_metadata_folds_what_jq_folds() {
         "module {a: ([1,2] - [2])}; .",
         r#"module {a: ("ab" * 2)}; ."#,
         "module {a: [([1] - [1])]}; .",
+        r#"module {a: ((("a" * 100) / "") - ["a"])}; ."#,
     ] {
         assert_eq!(outputs(program, "7"), vec!["7"], "{program}");
     }
@@ -1148,6 +1150,7 @@ fn module_metadata_folds_what_jq_folds() {
         "module {a: .}; .",
         r#"module {a: (1 - "a")}; ."#,
         r#"module {a: ("x" * 1e9)}; ."#,
+        r#"module {a: ((("a" * 50000) / "") - (("b" * 50000) / ""))}; ."#,
     ] {
         let report = refusal(program);
         assert!(
@@ -2479,6 +2482,212 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
 "no match"
 [1900,0,0,0,0,0,8,367]
 "no match""#,
+    ),
+    (
+        r"UTC",
+        r#""2023228"|strptime("%Y%m%d")"#,
+        r#"[2023,1,28,0,0,0,2,58]"#,
+    ),
+    (
+        r"UTC",
+        r#""135"|strptime("%m%M")"#,
+        r#"!date "135" does not match format "%m%M""#,
+    ),
+    (
+        r"UTC",
+        r#""13"|strptime("%m")"#,
+        r#"!date "13" does not match format "%m""#,
+    ),
+    (r"UTC", r#""1"|strptime("%m")"#, r#"[1900,0,0,0,0,0,0,-1]"#),
+    (
+        r"UTC",
+        r#""0"|strptime("%m")"#,
+        r#"!date "0" does not match format "%m""#,
+    ),
+    (
+        r"UTC",
+        r#""00"|strptime("%m")"#,
+        r#"!date "00" does not match format "%m""#,
+    ),
+    (
+        r"UTC",
+        r#""325"|strptime("%d%M")"#,
+        r#"!date "325" does not match format "%d%M""#,
+    ),
+    (
+        r"UTC",
+        r#""32"|strptime("%d")"#,
+        r#"!date "32" does not match format "%d""#,
+    ),
+    (
+        r"UTC",
+        r#""245"|strptime("%H%M")"#,
+        r#"!date "245" does not match format "%H%M""#,
+    ),
+    (
+        r"UTC",
+        r#""24"|strptime("%H")"#,
+        r#"!date "24" does not match format "%H""#,
+    ),
+    (
+        r"UTC",
+        r#""135"|strptime("%I%M")"#,
+        r#"!date "135" does not match format "%I%M""#,
+    ),
+    (
+        r"UTC",
+        r#""625"|strptime("%S%M")"#,
+        r#"!date "625" does not match format "%S%M""#,
+    ),
+    (
+        r"UTC",
+        r#""545"|strptime("%U%M")"#,
+        r#"!date "545" does not match format "%U%M""#,
+    ),
+    (
+        r"UTC",
+        r#""545"|strptime("%W%M")"#,
+        r#"!date "545" does not match format "%W%M""#,
+    ),
+    (
+        r"UTC",
+        r#""20231"|strptime("%Y%m")"#,
+        r#"[2023,0,0,0,0,0,6,-1]"#,
+    ),
+    (
+        r"UTC",
+        r#""3700"|strptime("%j%M")"#,
+        r#"[1900,0,0,0,0,0,8,36]"#,
+    ),
+    (
+        r"UTC",
+        r#""36745"|strptime("%j%M")"#,
+        r#"!date "36745" does not match format "%j%M""#,
+    ),
+    (
+        r"UTC",
+        r#""3671"|strptime("%j%m")"#,
+        r#"!date "3671" does not match format "%j%m""#,
+    ),
+    (
+        r"UTC",
+        r#""0012"|strptime("%m%d")"#,
+        r#"!date "0012" does not match format "%m%d""#,
+    ),
+    (
+        r"UTC",
+        r#""1 2"|strptime("%m %d")"#,
+        r#"[1900,0,2,0,0,0,2,1]"#,
+    ),
+    (
+        r"UTC",
+        r#"" 135"|strptime("%m%M")"#,
+        r#"!date " 135" does not match format "%m%M""#,
+    ),
+    (
+        r"UTC",
+        r#""925"|strptime("%y%M")"#,
+        r#"[1992,0,0,0,5,0,2,-1]"#,
+    ),
+    (
+        r"UTC",
+        r#""205"|strptime("%C%M")"#,
+        r#"[2000,0,0,0,5,0,5,-1]"#,
+    ),
+    (
+        r"UTC",
+        r#""85"|strptime("%u%M")"#,
+        r#"!date "85" does not match format "%u%M""#,
+    ),
+    (
+        r"UTC",
+        r#""75"|strptime("%w%M")"#,
+        r#"!date "75" does not match format "%w%M""#,
+    ),
+    (
+        r"UTC",
+        r#""2023 325"|strptime("%Y %e%M")"#,
+        r#"!date "2023 325" does not match format "%Y %e%M""#,
+    ),
+    (
+        r"UTC",
+        r#""2023 1 135"|strptime("%Y %d %I%M%p")"#,
+        r#"!date "2023 1 135" does not match format "%Y %d %I%M%p""#,
+    ),
+    (
+        r"UTC",
+        r#""23 1 1 135"|strptime("%y %m %d %H%M")"#,
+        r#"[2023,0,1,13,5,0,0,0]"#,
+    ),
+    (
+        r"UTC",
+        r#""545"|strptime("%V%M")"#,
+        r#"!date "545" does not match format "%V%M""#,
+    ),
+    (
+        r"UTC",
+        r#""605"|strptime("%V%M")"#,
+        r#"[1900,0,0,0,5,0,8,367]"#,
+    ),
+    (
+        r"UTC",
+        r#""925"|strptime("%g%M")"#,
+        r#"[1900,0,0,0,5,0,8,367]"#,
+    ),
+    (
+        r"UTC",
+        r#""325"|strptime("%e%M")"#,
+        r#"!date "325" does not match format "%e%M""#,
+    ),
+    (
+        r"UTC",
+        r#""425"|strptime("%e%M")"#,
+        r#"[1900,0,4,0,25,0,4,3]"#,
+    ),
+    (
+        r"UTC",
+        r#""245"|strptime("%k%M")"#,
+        r#"!date "245" does not match format "%k%M""#,
+    ),
+    (
+        r"UTC",
+        r#""345"|strptime("%k%M")"#,
+        r#"[1900,0,0,3,45,0,8,367]"#,
+    ),
+    (
+        r"UTC",
+        r#""135"|strptime("%l%M")"#,
+        r#"!date "135" does not match format "%l%M""#,
+    ),
+    (
+        r"UTC",
+        r#""235"|strptime("%l%M")"#,
+        r#"[1900,0,0,2,35,0,8,367]"#,
+    ),
+    (
+        r"UTC",
+        r#""445"|strptime("%d%M")"#,
+        r#"[1900,0,4,0,45,0,4,3]"#,
+    ),
+    (
+        r"UTC",
+        r#""745"|strptime("%S%M")"#,
+        r#"[1900,0,0,0,45,7,8,367]"#,
+    ),
+    (
+        r"UTC",
+        r#""2023 445"|strptime("%Y %j%M")"#,
+        r#"[2023,1,13,0,5,0,1,43]"#,
+    ),
+    (
+        r"UTC",
+        r#""2023 4005"|strptime("%Y %j%M")"#,
+        r#"[2023,1,9,0,5,0,4,39]"#,
+    ),
+    (
+        r"UTC",
+        r#""2023 0405"|strptime("%Y %j%M")"#,
+        r#"[2023,1,9,0,5,0,4,39]"#,
     ),
 ];
 

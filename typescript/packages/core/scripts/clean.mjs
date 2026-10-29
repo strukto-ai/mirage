@@ -20,4 +20,6 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-rmSync(resolve(here, '..', 'dist'), { recursive: true, force: true })
+for (const dir of ['dist', 'src/generated']) {
+  rmSync(resolve(here, '..', dir), { recursive: true, force: true })
+}

@@ -822,6 +822,26 @@
         "n",
         "c"
       ]
+    },
+    {
+      "id": "jq_strptime_stops_a_field_before_a_digit_it_cannot_take",
+      "seq": 18710043,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "TZ=Europe/Paris jq -nc '[\"2023228\", \"20231335\"] | map(try (strptime(\"%Y%m%d\") | mktime) catch \"no\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1677542400,\"no\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "c"
+      ]
     }
   ]
 }

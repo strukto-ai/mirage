@@ -22,7 +22,7 @@ from mirage.core.jq import InputSource, JqError, read_texts
 from mirage.io.stream import yield_bytes
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import open_stream
-from mirage.types import MountMode
+from mirage.types import JsonValue, MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.commands.builtin.conftest import run_raw as run_raw
@@ -37,11 +37,11 @@ def write_to_backend(backend, path, data):
     store.files[_norm(path)] = data
 
 
-def jq_eval(obj: object, expr: str) -> list[object]:
+def jq_eval(obj: JsonValue, expr: str) -> list[JsonValue]:
     """Every output of a jq program on one value (see jq_texts).
 
     Args:
-        obj (object): JSON-like input value.
+        obj (JsonValue): the input value.
         expr (str): jq program text.
 
     Raises:
@@ -51,7 +51,7 @@ def jq_eval(obj: object, expr: str) -> list[object]:
     return jq_texts(json.dumps(obj), expr)
 
 
-def jq_texts(text: str, expr: str) -> list[object]:
+def jq_texts(text: str, expr: str) -> list[JsonValue]:
     """Every output of a jq program on one document's JSON text, run to
     its end in mirage-rs's jq_eval, with no input left to read.
 
@@ -67,7 +67,7 @@ def jq_texts(text: str, expr: str) -> list[object]:
         stream = open_stream("jq_eval", {"program": expr, "env": "{}"})
     except StreamRefusal as exc:
         raise ValueError(exc.message) from exc
-    position = {"filename": None, "line": 0}
+    position: dict[str, JsonValue] = {"filename": None, "line": 0}
     stream.begin(position)
     frames: list[tuple[int, str]] = []
     stop = read_frames(stream.feed(text.encode()), frames)
@@ -76,6 +76,7 @@ def jq_texts(text: str, expr: str) -> list[object]:
         if stream.busy():
             wire = stream.drain()
         elif (asked := stream.request()) is not None:
+            reply: dict[str, JsonValue]
             if asked[0].get("op") == "now":
                 reply = {"kind": "now", "now": time.time()}
             else:
@@ -89,7 +90,7 @@ def jq_texts(text: str, expr: str) -> list[object]:
     return [json.loads(out) for tag, out in frames if tag == FRAME_OUTPUT]
 
 
-def eval_one(obj: object, expr: str) -> object:
+def eval_one(obj: JsonValue, expr: str) -> JsonValue:
     """Evaluate expr and return its single output.
 
     jq_eval keeps every output, so a program that emits one value still
@@ -97,7 +98,7 @@ def eval_one(obj: object, expr: str) -> object:
     through here, which asserts the arity instead of assuming it.
 
     Args:
-        obj (object): JSON-like input value.
+        obj (JsonValue): the input value.
         expr (str): jq program text.
     """
     outputs = jq_eval(obj, expr.strip())

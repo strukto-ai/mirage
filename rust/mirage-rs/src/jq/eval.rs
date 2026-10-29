@@ -10,7 +10,7 @@ use super::time::{Clock, Zone};
 use super::value::{Dumping, Object, Parsing, Value, parse_json};
 use super::vm::{Halt, Limits, Next, Program, Raise, Vm};
 
-const STEPS: u64 = 1 << 16;
+pub(super) const STEPS: u64 = 1 << 16;
 pub(super) const BLOCKS: usize = 1 << 20;
 pub(super) const ITEMS: usize = 1 << 24;
 pub(super) const BYTES: usize = 1 << 28;
