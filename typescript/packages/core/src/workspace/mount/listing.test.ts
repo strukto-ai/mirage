@@ -912,3 +912,24 @@ it('a retired beyond stat does not note a probe', async () => {
     await ws.close()
   }
 })
+
+
+class CachedKeys extends Keys {
+  override readonly cachesReads: boolean = true
+}
+
+it('recovery removes bytes of a file the peer deleted', async () => {
+  const keys = new CachedKeys(new Map([['old', ENC.encode('deleted bytes')]]))
+  const ws = keysWorkspace(keys)
+  try {
+    await ws.vfs.readdir('/k')
+    expect(await ws.vfs.read('/k/old')).toEqual(ENC.encode('deleted bytes'))
+    keys.files.delete('old')
+    keys.files.set('new', ENC.encode('new'))
+    const failure = vi.spyOn(ws.mount('/k').indexStore, 'invalidateMissing').mockRejectedValueOnce(new Error('unavailable'))
+    expect((await ws.vfs.stat('/k/new')).name).toBe('new')
+    failure.mockRestore()
+    expect(await ws.vfs.readdir('/k')).toEqual(['/k/new'])
+    await expect(ws.vfs.read('/k/old')).rejects.toThrow()
+  } finally { await ws.close() }
+})

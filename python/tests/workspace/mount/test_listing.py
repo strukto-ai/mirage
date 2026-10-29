@@ -849,3 +849,28 @@ async def test_a_retired_beyond_stat_does_not_note_a_probe():
             )
     finally:
         await ws.close()
+
+
+class CachedKeys(Keys):
+    caches_reads = True
+
+
+@pytest.mark.asyncio
+async def test_recovery_removes_bytes_of_a_file_the_peer_deleted(monkeypatch):
+    keys = CachedKeys({"old": b"deleted bytes"})
+    ws = Workspace({"/k": keys})
+    try:
+        await ws.vfs.readdir("/k")
+        assert await ws.vfs.read("/k/old") == b"deleted bytes"
+        del keys.files["old"]
+        keys.files["new"] = b"new"
+        async def unavailable(paths):
+            raise RuntimeError("unavailable")
+        with monkeypatch.context() as patcher:
+            patcher.setattr(ws.mount("/k").index_store, "invalidate_missing", unavailable)
+            assert (await ws.vfs.stat("/k/new")).name == "new"
+        assert await ws.vfs.readdir("/k") == ["/k/new"]
+        with pytest.raises(FileNotFoundError):
+            await ws.vfs.read("/k/old")
+    finally:
+        await ws.close()
