@@ -151,6 +151,34 @@ fn configured_allocations(input: &str, config: serde_json::Value) -> (usize, Vec
     (PEAK.load(Ordering::Relaxed) - before, wire)
 }
 
+/// A value only the run holds, a `reduce` accumulator, grows in place:
+/// copying it on every step would make a large allocation per step.
+#[test]
+fn reduce_accumulators_grow_in_place() {
+    let _serial = SERIAL.lock().unwrap();
+    for program in [
+        "reduce range(20000) as $i ([]; . + [$i]) | length",
+        "reduce range(20000) as $i ([]; .[$i] = $i) | length",
+        "reduce range(20000) as $i ({}; .[\"k\\($i)\"] = $i) | length",
+        "reduce range(20000) as $i ({}; . + {\"k\\($i)\": $i}) | length",
+        "[range(20000) | {key: \"k\\(.)\", value: .}] | from_entries | length",
+        "[range(20000)] | flatten | length",
+    ] {
+        let config = serde_json::to_vec(&serde_json::json!({ "program": program })).unwrap();
+        let mut stream = mirage_rs::open("jq_eval", &config).unwrap();
+        let mut wire = Vec::new();
+        LARGE.store(0, Ordering::Relaxed);
+        stream.feed(b"null", &mut wire).unwrap();
+        stream.finish(&mut wire).unwrap();
+        while stream.busy() {
+            stream.drain(&mut wire).unwrap();
+        }
+        let large = LARGE.load(Ordering::Relaxed);
+        assert!(large < 200, "{program}: {large} large allocations");
+        assert!(wire.ends_with(b"20000"), "{program}: {wire:?}");
+    }
+}
+
 #[test]
 fn limit_errors_refuse_before_building_the_result() {
     let _serial = SERIAL.lock().unwrap();

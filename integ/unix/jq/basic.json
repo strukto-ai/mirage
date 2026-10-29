@@ -731,6 +731,63 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "jq_reduce_appends_to_an_array_in_place",
+      "seq": 701224,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 5 jq -n 'reduce range(1e5) as $i ([]; . + [$i]) | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "100000\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_from_entries_builds_a_large_object",
+      "seq": 701225,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 5 jq -n '[range(1e5) | {key: \"k\\(.)\", value: .}] | from_entries | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "100000\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_flatten_of_a_long_array",
+      "seq": 701226,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 5 jq -n '[range(1e5)] | flatten | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "100000\ncode=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

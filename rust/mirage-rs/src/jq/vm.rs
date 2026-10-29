@@ -1001,7 +1001,7 @@ impl Vm {
                                 | Cfunc::Strftime
                                 | Cfunc::StrfLocaltime
                                 | Cfunc::Strptime => time::call(*f, &args, &self.clock),
-                                _ => builtin::call(*f, &args, self.limits),
+                                _ => builtin::call(*f, &mut args, self.limits),
                             }),
                         }
                     }

@@ -817,7 +817,28 @@ pub(super) fn array_limit(items: Vec<Value>, limits: Limits) -> Answer {
     Ok(Value::array(items))
 }
 
-pub(crate) fn call(f: Cfunc, args: &[Value], limits: Limits) -> Answer {
+pub(crate) fn call(f: Cfunc, args: &mut [Value], limits: Limits) -> Answer {
+    // jq's f_plus frees its input before it adds, and setpath and delpaths
+    // take theirs, so a value nothing else holds, a `reduce` accumulator,
+    // is changed in place rather than copied.
+    match f {
+        Cfunc::Plus => {
+            args[0] = Value::Null;
+            let a = std::mem::replace(&mut args[1], Value::Null);
+            let b = std::mem::replace(&mut args[2], Value::Null);
+            return plus(a, b, limits);
+        }
+        Cfunc::SetPath => {
+            let root = std::mem::replace(&mut args[0], Value::Null);
+            let value = std::mem::replace(&mut args[2], Value::Null);
+            return setpath(root, &args[1], value, limits);
+        }
+        Cfunc::DelPaths => {
+            let root = std::mem::replace(&mut args[0], Value::Null);
+            return delpaths(root, &args[1], limits);
+        }
+        _ => {}
+    }
     let input = &args[0];
     let a = args.get(1).unwrap_or(&Value::Null);
     let b = args.get(2).unwrap_or(&Value::Null);
@@ -826,7 +847,7 @@ pub(crate) fn call(f: Cfunc, args: &[Value], limits: Limits) -> Answer {
             Value::Number(n) => Ok(Value::Number(n.negate())),
             _ => Err(type_error(input, "cannot be negated")),
         },
-        Cfunc::Plus => plus(a, b, limits),
+        Cfunc::Plus | Cfunc::SetPath | Cfunc::DelPaths => unreachable!("taken by value above"),
         Cfunc::Minus => minus(a, b),
         Cfunc::Multiply => multiply(a, b, limits),
         Cfunc::Divide => divide(a, b, limits),
@@ -920,9 +941,7 @@ pub(crate) fn call(f: Cfunc, args: &[Value], limits: Limits) -> Answer {
             }
             _ => Err(fail("trim input must be a string")),
         },
-        Cfunc::SetPath => setpath(input.clone(), a, b.clone(), limits),
         Cfunc::GetPath => getpath(input, a),
-        Cfunc::DelPaths => delpaths(input.clone(), a, limits),
         Cfunc::Has => has(input, a),
         Cfunc::Contains => {
             if let Some(containing) = Containing::begin(input, a) {
@@ -1186,36 +1205,35 @@ fn is_number(text: &str) -> bool {
     at == bytes.len()
 }
 
-fn plus(a: &Value, b: &Value, limits: Limits) -> Answer {
+fn plus(a: Value, b: Value, limits: Limits) -> Answer {
     match (a, b) {
-        (Value::Null, _) => Ok(b.clone()),
-        (_, Value::Null) => Ok(a.clone()),
+        (Value::Null, b) => Ok(b),
+        (a, Value::Null) => Ok(a),
         (Value::Number(x), Value::Number(y)) => Ok(Value::number(x.value() + y.value())),
         (Value::String(x), Value::String(y)) => {
             if x.len() + y.len() > limits.bytes {
                 return Err(string_too_long(limits));
             }
             let mut text = String::with_capacity(x.len() + y.len());
-            text.push_str(x);
-            text.push_str(y);
+            text.push_str(&x);
+            text.push_str(&y);
             string_limit(text, limits)
         }
-        (Value::Array(x), Value::Array(y)) => {
+        (Value::Array(mut x), Value::Array(y)) => {
             if x.len() + y.len() > limits.items {
                 return Err(array_too_long(limits.items));
             }
-            let mut items = x.to_vec();
-            items.extend(y.iter().cloned());
-            array_limit(items, limits)
+            Arc::make_mut(&mut x).extend(y.iter().cloned());
+            Ok(Value::Array(x))
         }
-        (Value::Object(x), Value::Object(y)) => {
-            let mut merged: Object = (**x).clone();
+        (Value::Object(mut x), Value::Object(y)) => {
+            let merged = Arc::make_mut(&mut x);
             for (k, v) in y.iter() {
                 merged.insert(k.clone(), v.clone());
             }
-            Ok(Value::object(merged))
+            Ok(Value::Object(x))
         }
-        _ => Err(type_error2(a, b, "cannot be added")),
+        (a, b) => Err(type_error2(&a, &b, "cannot be added")),
     }
 }
 
@@ -1339,7 +1357,7 @@ enum Piece {
     /// An empty separator: each character as a string.
     Char,
     /// The text up to the next separator, and the separator's length.
-    Between(Finder<'static>, usize),
+    Between(Box<Finder<'static>>, usize),
 }
 
 impl Splitting {
@@ -1360,7 +1378,10 @@ impl Splitting {
         let piece = if sep.is_empty() {
             Piece::Char
         } else {
-            Piece::Between(Finder::new(sep.as_bytes()).into_owned(), sep.len())
+            Piece::Between(
+                Box::new(Finder::new(sep.as_bytes()).into_owned()),
+                sep.len(),
+            )
         };
         Self::new(text, piece)
     }
@@ -1450,7 +1471,7 @@ enum Within {
     /// The byte the search goes on from, and the characters before it.
     Text {
         text: Arc<Text>,
-        finder: Finder<'static>,
+        finder: Box<Finder<'static>>,
         at: usize,
         chars: usize,
     },
@@ -1482,7 +1503,7 @@ impl Indexing {
             ended: needle.is_empty(),
             within: Within::Text {
                 text: Arc::clone(text),
-                finder: Finder::new(needle.as_bytes()).into_owned(),
+                finder: Box::new(Finder::new(needle.as_bytes()).into_owned()),
                 at: 0,
                 chars: 0,
             },
@@ -2666,7 +2687,7 @@ mod tests {
         let b = Value::string("y".repeat(100));
         let meter = Arc::new(Meter::limited(150));
         let _installed = meter::install(&meter);
-        let answer = plus(&a, &b, Limits { bytes: 1, ..LIMITS });
+        let answer = plus(a, b, Limits { bytes: 1, ..LIMITS });
         assert!(answer.is_err());
         assert!(!meter.exceeded());
         drop(answer);
@@ -2735,8 +2756,8 @@ mod tests {
         let output_bytes = {
             let meter = Arc::new(Meter::default());
             let _installed = meter::install(&meter);
-            let answer = call(Cfunc::Keys, std::slice::from_ref(&input), LIMITS)
-                .unwrap_or_else(|_| unreachable!());
+            let answer =
+                call(Cfunc::Keys, &mut [input.clone()], LIMITS).unwrap_or_else(|_| unreachable!());
             let bytes = meter.live();
             drop(answer);
             assert_eq!(meter.live(), 0);
@@ -2745,8 +2766,8 @@ mod tests {
         for function in [Cfunc::KeysUnsorted, Cfunc::Keys] {
             let meter = Arc::new(Meter::limited(output_bytes + 4000));
             let _installed = meter::install(&meter);
-            let answer = call(function, std::slice::from_ref(&input), LIMITS)
-                .unwrap_or_else(|_| unreachable!());
+            let answer =
+                call(function, &mut [input.clone()], LIMITS).unwrap_or_else(|_| unreachable!());
             assert_eq!(meter.exceeded(), function == Cfunc::Keys);
             drop(answer);
             assert_eq!(meter.live(), 0);
