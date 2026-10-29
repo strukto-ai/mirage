@@ -15,7 +15,7 @@ import { DiffPool } from '../../rs/diff_pool.ts'
 
 import { IOConfig } from '../../io/config.ts'
 import { MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
-import { networkRule, runWithNetwork, type NetworkSetting } from '../../io/network.ts'
+import { networkRule, runWithNetwork, sameNetwork, type NetworkSetting } from '../../io/network.ts'
 import { parseLimit } from '../../utils/size.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { ShellExecution } from '../shell_execution.ts'
@@ -2328,7 +2328,7 @@ export class Workspace {
     if (
       shared.length > 0 &&
       options.network !== undefined &&
-      JSON.stringify(options.network) !== JSON.stringify(this.networkSetting)
+      !sameNetwork(options.network, this.networkSetting)
     ) {
       throw new Error(
         `copy: ${shared.join(', ')} keep this workspace's connections; ` +

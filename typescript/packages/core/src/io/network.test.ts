@@ -19,8 +19,21 @@ import {
   networkLayer,
   networkLets,
   runWithNetwork,
+  sameNetwork,
   type NetworkSetting,
 } from './network.ts'
+
+describe('sameNetwork', () => {
+  it.each<[NetworkSetting, NetworkSetting, boolean]>([
+    [true, true, true],
+    [false, { allow: [] }, true],
+    [{ allow: ['a.com', 'B.com.'] }, { allow: ['b.com', 'a.com', 'a.com'] }, true],
+    [true, { allow: [] }, false],
+    [{ allow: ['a.com'] }, { allow: ['b.com'] }, false],
+  ])('%o and %o: %s', (a, b, same) => {
+    expect(sameNetwork(a, b)).toBe(same)
+  })
+})
 
 describe('networkLayer', () => {
   it.each<[NetworkSetting, Record<string, unknown> | null]>([

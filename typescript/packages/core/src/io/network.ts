@@ -16,6 +16,7 @@ import { StreamRefusal } from '../rs/errors.ts'
 import { MovableStream } from '../rs/stream.ts'
 import type { JsonValue } from '../types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 
 const ENC = new TextEncoder()
 
@@ -71,6 +72,21 @@ export function networkLayer(setting: unknown): Record<string, JsonValue> | null
   throw new Error(
     `network is true, false or {allow: [hosts and ranges]}, not ${JSON.stringify(setting)}`,
   )
+}
+
+/**
+ * Whether two settings let the same connections: their allow lists hold the
+ * same entries in any order, case or trailing dot, `false` being the empty
+ * list.
+ */
+export function sameNetwork(a: NetworkSetting, b: NetworkSetting): boolean {
+  const [left, right] = [a, b].map((setting) => {
+    const layer = networkLayer(setting)
+    if (layer === null) return null
+    const entries = (layer.allow as string[]).map((entry) => entry.toLowerCase().replace(/\.$/, ''))
+    return JSON.stringify([...new Set(entries)].sort(compareCodePoints))
+  })
+  return left === right
 }
 
 /**
