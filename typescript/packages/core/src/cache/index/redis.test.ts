@@ -1609,6 +1609,36 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
     })
   })
 
+  it.each([false, true])('peer observation drops a contradicted memo after eviction (known=%s)', async (known) => {
+    await store.setDir('/d', LISTED)
+    const client = await redis()
+    const key = (store as unknown as { childrenKey: (path: string) => string }).childrenKey('/d')
+    await runInCommandScope(async () => {
+      expect((await store.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
+      if (known) {
+        const listing = IndexDirectorySchema.parse(JSON.parse((await client.get(key)) ?? '{}'))
+        listing.entries.push('/d/new')
+        listing.folders.push(0)
+        await client.set(key, JSON.stringify(listing))
+        expect((await peer.listDir('/d')).entries).toContain('/d/new')
+      }
+      await client.del(key)
+      expect(await peer.invalidateMissing(['/d/new'])).toBe(false)
+      expect((await store.listDir('/d')).entries ?? null).toBe(null)
+    })
+  })
+
+  it('peer unknown observation keeps an unrelated memo', async () => {
+    await store.setDir('/d', LISTED)
+    const sent = await mGets()
+    await runInCommandScope(async () => {
+      const before = await store.listDir('/d')
+      expect(await peer.invalidateMissing(['/e/new'])).toBe(false)
+      expect(await store.listDir('/d')).toEqual(before)
+    })
+    expect(sent.mock.calls).toHaveLength(1)
+  })
+
   it('keeps the siblings of a written row batched', async () => {
     await store.setDir('/d', LISTED)
     const sent = await mGets()

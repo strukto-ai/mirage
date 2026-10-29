@@ -21,6 +21,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.cache.index import LookupStatus
+from mirage.cache.index.config import IndexDirectory
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.store import IndexCacheStore
@@ -420,6 +421,35 @@ async def test_an_observation_a_kept_listing_leaves_out_drops_the_memo(
         await store._client.delete(store._children_key("/d"))
         assert await store.invalidate_missing(["/d/new"]) is False
         assert (await store.list_dir("/d")).entries is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("known", [False, True])
+async def test_peer_observation_drops_a_contradicted_memo_after_eviction(store, peer, known):
+    await store.set_dir("/d", LISTED)
+    key = store._children_key("/d")
+    async with command_scope():
+        assert (await store.list_dir("/d")).entries == ["/d/a", "/d/b"]
+        if known:
+            listing = IndexDirectory.model_validate_json(await store._client.get(key))
+            listing.entries.append("/d/new")
+            listing.folders.append(0)
+            await store._client.set(key, listing.model_dump_json())
+            assert "/d/new" in (await peer.list_dir("/d")).entries
+        await store._client.delete(key)
+        assert await peer.invalidate_missing(["/d/new"]) is False
+        assert (await store.list_dir("/d")).entries is None
+
+
+@pytest.mark.asyncio
+async def test_peer_unknown_observation_keeps_an_unrelated_memo(store, peer, mgets):
+    await store.set_dir("/d", LISTED)
+    mgets.clear()
+    async with command_scope():
+        before = await store.list_dir("/d")
+        assert await peer.invalidate_missing(["/e/new"]) is False
+        assert await store.list_dir("/d") == before
+    assert len(mgets) == 1
 
 
 @pytest.mark.asyncio
