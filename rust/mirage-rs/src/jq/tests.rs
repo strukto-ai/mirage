@@ -1136,14 +1136,14 @@ fn compile_report(message: &str) -> bool {
 /// jq 1.8.2's tests/jq.test and the generator's probes, each case's
 /// outputs as a jq 1.8.2 binary printed them (scripts/gen_jq_corpus.py),
 /// at a budget that pauses the VM every few steps. A program jq refuses
-/// must be refused with jq's report, byte for byte, or left to libjq; one
-/// jq runs may be left to libjq at compile; any other difference fails
-/// unless DIVERGENT names it.
+/// must be refused with jq's report, byte for byte; one jq runs may be
+/// left to libjq at compile; any other difference fails unless DIVERGENT
+/// names it.
 #[test]
 fn jq_test_corpus() {
     let (pass, refused, reported, left) = run_corpus(include_str!("corpus.json"));
     assert!(
-        pass >= 506 && refused <= 13 && reported >= 161 && left <= 13,
+        pass >= 570 && refused <= 3 && reported >= 213 && left == 0,
         "pass {pass}, refused {refused}, reported {reported}, left {left}"
     );
 }

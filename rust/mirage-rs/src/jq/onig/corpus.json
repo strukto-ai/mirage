@@ -2062,5 +2062,239 @@
     "f": "g",
     "i": "x",
     "answer": "error: undefined name <1a> reference"
+  },
+  {
+    "p": "[^\\x{d7ff}\\x{e000}]",
+    "f": "g",
+    "i": "퟿⿠a",
+    "answer": "[[1,1,\"⿠\",[]],[3,1,\"a\",[]]]"
+  },
+  {
+    "p": "\\p{In_No_Block}",
+    "f": "g",
+    "i": "퟿⿠a",
+    "answer": "[[1,1,\"⿠\",[]]]"
+  },
+  {
+    "p": "\\P{In_No_Block}",
+    "f": "g",
+    "i": "퟿⿠a",
+    "answer": "[[0,1,\"퟿\",[]],[2,1,\"\",[]],[3,1,\"a\",[]]]"
+  },
+  {
+    "p": "[^\\p{In_Hangul_Jamo_Extended-B}\\p{In_Private_Use_Area}]",
+    "f": "g",
+    "i": "퟿⿠a",
+    "answer": "[[1,1,\"⿠\",[]],[3,1,\"a\",[]]]"
+  },
+  {
+    "p": "[^\\p{Cn}\\p{Co}]",
+    "f": "g",
+    "i": "퟿⿠a",
+    "answer": "[[3,1,\"a\",[]]]"
+  },
+  {
+    "p": "[\\W\\x{d7ff}]",
+    "f": "g",
+    "i": "퟿⿠a",
+    "answer": "[[0,1,\"퟿\",[]],[1,1,\"⿠\",[]],[2,1,\"\",[]]]"
+  },
+  {
+    "p": "(?{x})*",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(?{x})+",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(?{x}){2}",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(?{x}){1}",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(*FAIL)*",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(*FAIL)+",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(*FAIL)??",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(*FAIL){0}",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(*COUNT[x])?",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(*MAX{2})*",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(*SKIP)*",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(?{x}X)+",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(*ERROR{3}){1,2}",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(?:(*FAIL)|a)*",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(?:(?{x}))*",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "(?:(*FAIL)a)*",
+    "f": "g",
+    "i": "aa",
+    "answer": "[[0,0,\"\",[]],[1,0,\"\",[]],[2,0,\"\",[]]]"
+  },
+  {
+    "p": "(?:a(*FAIL))*",
+    "f": "g",
+    "i": "aa",
+    "answer": "[[0,0,\"\",[]],[1,0,\"\",[]],[2,0,\"\",[]]]"
+  },
+  {
+    "p": "a\\K*",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: target of repeat operator is invalid"
+  },
+  {
+    "p": "\\g<n>\\2",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: invalid backref number/name"
+  },
+  {
+    "p": "\\2\\g<0>",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: invalid backref number/name"
+  },
+  {
+    "p": "\\k<1>\\g<-1>",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: invalid backref number/name"
+  },
+  {
+    "p": "(?<n>a)\\g<m>\\3",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: invalid backref number/name"
+  },
+  {
+    "p": "a{100000}{100000}",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: too big number for repeat range"
+  },
+  {
+    "p": "(?:a{100000}){100000}",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: too big number for repeat range"
+  },
+  {
+    "p": "[a-z]{100000}{100000}",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: too big number for repeat range"
+  },
+  {
+    "p": "a{1000}{1000}{1000}{3}",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: too big number for repeat range"
+  },
+  {
+    "p": "a{100000}?{100000}",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: too big number for repeat range"
+  },
+  {
+    "p": "a{100000}{1}{100000}",
+    "f": "g",
+    "i": "aa",
+    "answer": "error: too big number for repeat range"
+  },
+  {
+    "p": "a{1000}{1000}{1000}",
+    "f": "g",
+    "i": "aaa",
+    "answer": "[]"
+  },
+  {
+    "p": "(a{100000}){100000}",
+    "f": "g",
+    "i": "aaa",
+    "answer": "[]"
+  },
+  {
+    "p": "a{2}{3}",
+    "f": "g",
+    "i": "aaaaaaa",
+    "answer": "[[0,6,\"aaaaaa\",[]]]"
+  },
+  {
+    "p": "a{2}?{3}",
+    "f": "g",
+    "i": "aaaaaaa",
+    "answer": "[[0,6,\"aaaaaa\",[]]]"
+  },
+  {
+    "p": "a{0}{100000}{100000}",
+    "f": "g",
+    "i": "aa",
+    "answer": "[[0,0,\"\",[]],[1,0,\"\",[]],[2,0,\"\",[]]]"
   }
 ]

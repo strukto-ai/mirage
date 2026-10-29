@@ -257,9 +257,6 @@ pub(super) struct Parsed {
     /// Each name and the groups it names, in the order they open.
     pub(super) names: Vec<(String, Vec<usize>)>,
     pub(super) callouts: Vec<Callout>,
-    /// The highest group a backreference or condition names, checked
-    /// once the calls are.
-    pub(super) referenced: usize,
 }
 
 enum Atom {
@@ -306,6 +303,7 @@ struct Parser {
     groups: usize,
     names: Vec<(String, Vec<usize>)>,
     depth: usize,
+    /// The highest group a backreference or condition names.
     referenced: usize,
     /// Whether `\g<0>` or `(?0)` calls the whole pattern.
     calls_zero: bool,
@@ -335,6 +333,9 @@ pub(super) fn parse(pattern: &str, flags: Flags) -> Result<Parsed, String> {
         node = Node::Group(0, Box::new(node));
     }
     let groups = parser.groups;
+    if parser.referenced > groups {
+        return Err(INVALID_BACKREF.into());
+    }
     resolve_calls(&mut node, groups, &parser.names)?;
     let callouts = callout::resolve_tags(parser.callouts, &parser.tags)?;
     Ok(Parsed {
@@ -342,7 +343,6 @@ pub(super) fn parse(pattern: &str, flags: Flags) -> Result<Parsed, String> {
         groups,
         names: parser.names,
         callouts,
-        referenced: parser.referenced,
     })
 }
 
@@ -653,11 +653,27 @@ impl Parser {
             if min == 1 && max == Some(1) {
                 continue;
             }
-            let repeat = Node::Repeat {
-                body: Box::new(node),
-                min,
-                max,
-                greedy,
+            let repeat = match node {
+                Node::Repeat {
+                    body,
+                    min: inner,
+                    max: Some(upper),
+                    ..
+                } if max == Some(min) && inner == upper => {
+                    let count = fixed_count(min, inner).ok_or(TOO_BIG_REPEAT)?;
+                    Node::Repeat {
+                        body,
+                        min: count,
+                        max: Some(count),
+                        greedy,
+                    }
+                }
+                node => Node::Repeat {
+                    body: Box::new(node),
+                    min,
+                    max,
+                    greedy,
+                },
             };
             node = if possessive {
                 Node::Atomic(Box::new(repeat))
@@ -2200,11 +2216,20 @@ fn one_char_repeat(node: Node) -> Result<(u32, Option<u32>, Node, bool), Node> {
     Ok((min, max, *body, possessive))
 }
 
-/// Anchors, lookarounds and `\K` take no quantifier, nor does an
-/// alternation holding one.
+/// A fixed count of a fixed count, as onig_reduce_nested_quantifier folds
+/// it into one: None where onig_positive_int_multiply finds it too big.
+fn fixed_count(outer: u32, inner: u32) -> Option<u32> {
+    if outer == 0 || inner == 0 {
+        return Some(0);
+    }
+    (outer < i32::MAX as u32 / inner).then(|| outer * inner)
+}
+
+/// Anchors, lookarounds, `\K`, `(*FAIL)` and callouts take no quantifier,
+/// nor does an alternation holding one.
 fn invalid_target(node: &Node) -> bool {
     match node {
-        Node::Anchor(_) | Node::Look { .. } | Node::Keep => true,
+        Node::Anchor(_) | Node::Look { .. } | Node::Keep | Node::Fail | Node::Callout(_) => true,
         Node::Alt(items) => items.iter().any(invalid_target),
         _ => false,
     }

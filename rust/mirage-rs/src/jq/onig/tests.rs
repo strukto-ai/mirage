@@ -332,7 +332,7 @@ fn extended_patterns_match_the_jq_oracle() {
         .spawn(|| {
             let cases: Vec<serde_json::Value> =
                 serde_json::from_str(include_str!("corpus.json")).unwrap();
-            assert_eq!(cases.len(), 344);
+            assert_eq!(cases.len(), 383);
             for case in cases {
                 let pattern = case["p"].as_str().unwrap();
                 let flags = case["f"].as_str().unwrap();

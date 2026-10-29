@@ -74,9 +74,12 @@ fn union(mut set: Set, other: &Set) -> Set {
     set
 }
 
-pub(super) fn negate(mut set: Set) -> Set {
-    set.negate();
-    set
+/// Every character outside `set`. regex-syntax's own negate joins U+D7FF
+/// and U+E000 across the surrogate gap, so a set holding both kept them.
+pub(super) fn negate(set: Set) -> Set {
+    let mut all = range('\0', char::MAX);
+    all.difference(&set);
+    all
 }
 
 /// The class holding `codes`, skipping any that is no character.

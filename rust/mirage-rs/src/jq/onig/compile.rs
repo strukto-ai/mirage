@@ -2,7 +2,7 @@
 
 use super::callout::Callout;
 use super::class::Set;
-use super::parse::{Anchor, INVALID_BACKREF, Node, Parsed, Saved, Update};
+use super::parse::{Anchor, Node, Parsed, Saved, Update};
 
 const INVALID_LOOK_BEHIND: &str = "invalid pattern in look-behind";
 const NEVER_ENDING_RECURSION: &str = "never ending recursion";
@@ -143,13 +143,9 @@ pub(super) fn compile(parsed: Parsed) -> Result<Program, String> {
         mut node,
         groups,
         callouts,
-        referenced,
         ..
     } = parsed;
     let (called, recursive) = mark_calls(&mut node, groups)?;
-    if referenced > groups {
-        return Err(INVALID_BACKREF.into());
-    }
     let mut bodies = vec![None; groups + 1];
     collect_bodies(&node, &mut bodies);
     let mut lens = vec![None; groups + 1];
