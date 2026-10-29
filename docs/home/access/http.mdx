@@ -250,7 +250,7 @@ curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/profiles/reader \
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/clone`
 
 <ParamField body="id" type="string">The new workspace's id.</ParamField>
-<ParamField body="override" type="object">Configuration overrides for the clone. Mount definitions in this object replace corresponding source mounts; the scratch root is preserved unless explicitly overridden.</ParamField>
+<ParamField body="override" type="object">Configuration overrides for the clone. Mount definitions replace corresponding source mounts. Overriding `/` replaces its backing VFS, but it remains the scratch root.</ParamField>
 
 Returns HTTP 201 Created with the cloned workspace.
 
@@ -272,7 +272,7 @@ Upload the tar as `multipart/form-data`: a `request` part holding the JSON field
 
 <ParamField body="key" type="string">The tar's key in the snapshot store; leave it out when uploading.</ParamField>
 <ParamField body="id" type="string">The new workspace's id.</ParamField>
-<ParamField body="override" type="object">Configuration supplying credentials that were redacted in the snapshot. Preserves the scratch root unless explicitly specified.</ParamField>
+<ParamField body="override" type="object">Configuration overrides for the restored workspace, including credentials redacted from the snapshot. Overriding `/` replaces its backing VFS, but it remains the scratch root.</ParamField>
 
 Returns HTTP 201 Created with the restored workspace.
 
