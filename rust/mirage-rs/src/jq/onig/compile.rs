@@ -1,5 +1,7 @@
 // Adapted from Oniguruma 6.9.10 (BSD-2-Clause), src/regcomp.c. See licenses/third_party/oniguruma.txt.
 
+use std::ops::Range;
+
 use super::callout::Callout;
 use super::class::Set;
 use super::parse::{Anchor, Node, Parsed, Saved, Update};
@@ -80,8 +82,13 @@ pub(super) enum Inst {
     LookEnd {
         negate: bool,
     },
-    /// Enter a group's body at `addr`, to come back after this.
-    Call(usize),
+    /// Enter a group's body at `addr`, to come back after this; the
+    /// body's own loops are `loops`, which the call keeps apart from the
+    /// caller's.
+    Call {
+        addr: usize,
+        loops: Range<usize>,
+    },
     Return,
     /// `\X`.
     TextSegment,
@@ -134,6 +141,8 @@ struct Compiler<'a> {
     addrs: Vec<Option<usize>>,
     /// Each call instruction and the group it enters.
     calls: Vec<(usize, usize)>,
+    /// Each called group's loops, once compiled.
+    ranges: Vec<Range<usize>>,
     /// Each group's body, for the slots a call changes.
     bodies: Vec<Option<&'a Node>>,
 }
@@ -167,6 +176,7 @@ pub(super) fn compile(parsed: Parsed) -> Result<Program, String> {
         groups: &info,
         addrs: vec![None; groups + 1],
         calls: Vec::new(),
+        ranges: vec![0..0; groups + 1],
         bodies,
     };
     compiler.node(&node);
@@ -174,7 +184,10 @@ pub(super) fn compile(parsed: Parsed) -> Result<Program, String> {
     for (at, group) in compiler.calls {
         let addr =
             compiler.addrs[group].unwrap_or_else(|| unreachable!("a called group is compiled"));
-        compiler.insts[at] = Inst::Call(addr);
+        compiler.insts[at] = Inst::Call {
+            addr,
+            loops: compiler.ranges[group].clone(),
+        };
     }
     Ok(Program {
         insts: compiler.insts,
@@ -206,13 +219,25 @@ fn mark_calls(node: &mut Node, groups: usize) -> Result<(Vec<bool>, Vec<bool>), 
     let mut called = vec![false; groups + 1];
     let mut chain = vec![root];
     collect_calls(node, &mut chain, false, &mut calls_in, &mut called);
-    let reach: Vec<Vec<bool>> = (0..=groups).map(|g| closure(g, &calls_in)).collect();
+    let mut target = vec![false; groups + 1];
+    for &g in &calls_in[root] {
+        target[g] = true;
+    }
+    let reach: Vec<Vec<u64>> = (0..=groups)
+        .map(|g| {
+            if target[g] {
+                closure(g, &calls_in)
+            } else {
+                Vec::new()
+            }
+        })
+        .collect();
     let mut chain = vec![root];
     flag_calls(node, &mut chain, &reach);
     let mut bodies = vec![None; groups + 1];
     collect_bodies(node, &mut bodies);
     for g in 0..=groups {
-        if !(called[g] && reach[g][g]) {
+        if !(called[g] && has(&reach[g], g)) {
             continue;
         }
         let Some(body) = bodies[g] else {
@@ -228,7 +253,7 @@ fn mark_calls(node: &mut Node, groups: usize) -> Result<(Vec<bool>, Vec<bool>), 
             return Err(NEVER_ENDING_RECURSION.into());
         }
     }
-    let recursive = (0..=groups).map(|g| reach[g][g]).collect();
+    let recursive = (0..=groups).map(|g| has(&reach[g], g)).collect();
     Ok((called, recursive))
 }
 
@@ -270,22 +295,28 @@ fn collect_calls(
     }
 }
 
-/// The groups whose subtree a call from `from`'s subtree reaches.
-fn closure(from: usize, calls_in: &[Vec<usize>]) -> Vec<bool> {
-    let mut seen = vec![false; calls_in.len()];
+/// The groups whose subtree a call from `from`'s subtree reaches, a bit
+/// each.
+fn closure(from: usize, calls_in: &[Vec<usize>]) -> Vec<u64> {
+    let mut seen = vec![0; calls_in.len().div_ceil(64)];
     let mut stack = calls_in[from].clone();
     while let Some(g) = stack.pop() {
-        if seen[g] {
+        if has(&seen, g) {
             continue;
         }
-        seen[g] = true;
+        seen[g / 64] |= 1 << (g % 64);
         stack.extend(calls_in[g].iter().copied());
     }
     seen
 }
 
+fn has(bits: &[u64], g: usize) -> bool {
+    bits.get(g / 64)
+        .is_some_and(|word| word & (1 << (g % 64)) != 0)
+}
+
 /// Marks each call its own group's body reaches as recursive.
-fn flag_calls(node: &mut Node, chain: &mut Vec<usize>, reach: &[Vec<bool>]) {
+fn flag_calls(node: &mut Node, chain: &mut Vec<usize>, reach: &[Vec<u64>]) {
     let mut stack = vec![Some(node)];
     while let Some(node) = stack.pop() {
         let Some(node) = node else {
@@ -295,7 +326,7 @@ fn flag_calls(node: &mut Node, chain: &mut Vec<usize>, reach: &[Vec<bool>]) {
         match node {
             Node::Call(call) => {
                 call.recursive = chain.iter().any(|&enclosing| {
-                    enclosing == call.group || reach[call.group].get(enclosing) == Some(&true)
+                    enclosing == call.group || has(&reach[call.group], enclosing)
                 });
             }
             Node::Group(index, body) => {
@@ -911,9 +942,11 @@ impl<'a> Compiler<'a> {
                 behind: Option<usize>,
                 negate: bool,
             },
+            /// A called group's end; its loops begin at `loops`.
             Group {
                 index: usize,
                 jump: usize,
+                loops: usize,
             },
             Alt {
                 items: &'a [Node],
@@ -967,7 +1000,8 @@ impl<'a> Compiler<'a> {
                         exit: self.here(),
                     };
                 }
-                Task::Group { index, jump } => {
+                Task::Group { index, jump, loops } => {
+                    self.ranges[index] = loops..self.loops.len();
                     if index != 0 {
                         self.emit(if self.groups.recursive[index] {
                             Inst::SaveRec(index)
@@ -1079,15 +1113,15 @@ impl<'a> Compiler<'a> {
                         } else {
                             let call = self.emit(Inst::Fail);
                             let jump = self.emit(Inst::Jump(0));
-                            let addr = self.here();
-                            self.addrs[*index] = Some(addr);
-                            self.insts[call] = Inst::Call(addr);
+                            self.addrs[*index] = Some(self.here());
+                            self.calls.push((call, *index));
                             if *index != 0 {
                                 self.emit(Inst::Save(2 * index));
                             }
                             tasks.push(Task::Group {
                                 index: *index,
                                 jump,
+                                loops: self.loops.len(),
                             });
                         }
                         tasks.push(Task::Node(body));

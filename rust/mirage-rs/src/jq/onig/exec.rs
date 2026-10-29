@@ -1,5 +1,7 @@
 // Adapted from Oniguruma 6.9.10 (BSD-2-Clause), src/regexec.c. See licenses/third_party/oniguruma.txt.
 
+use std::ops::Range;
+
 use super::callout::{Outcome, State};
 use super::compile::{Inst, Program, Unit};
 use super::parse::{Anchor, Saved, Update};
@@ -47,6 +49,31 @@ struct Loops {
     counts: Vec<u32>,
     starts: Vec<usize>,
     snaps: Vec<Box<[usize]>>,
+}
+
+impl Loops {
+    fn copy(&self, ids: Range<usize>) -> Loops {
+        Loops {
+            counts: self.counts[ids.clone()].to_vec(),
+            starts: self.starts[ids.clone()].to_vec(),
+            snaps: self.snaps[ids].to_vec(),
+        }
+    }
+
+    /// Trades the loops `ids` names with `other`, which holds only those.
+    fn swap(&mut self, ids: Range<usize>, other: &mut Loops) {
+        self.counts[ids.clone()].swap_with_slice(&mut other.counts);
+        self.starts[ids.clone()].swap_with_slice(&mut other.starts);
+        self.snaps[ids].swap_with_slice(&mut other.snaps);
+    }
+}
+
+/// A call not yet returned from: where it goes back to, and the loops of
+/// the called group as the other side of the call has them.
+struct Active {
+    ret: usize,
+    ids: Range<usize>,
+    loops: Loops,
 }
 
 enum Frame {
@@ -111,15 +138,10 @@ enum Frame {
         pos: usize,
         count: u32,
     },
-    /// A call began, to come back to `ret` with the loops as they were.
-    Call {
-        ret: usize,
-        loops: Loops,
-    },
-    /// A call returned, leaving the loops as the callee had them.
-    Return {
-        loops: Loops,
-    },
+    /// A call began; its return is the top of `Machine::active`.
+    Call,
+    /// A call returned, holding the callee's loops to go back into it.
+    Return(Active),
     SaveVal {
         kind: Saved,
         id: usize,
@@ -219,8 +241,8 @@ pub(super) struct Machine {
     failing: bool,
     retries: u64,
     star: Option<Repeat>,
-    /// The calls entered and not returned from.
-    calls: usize,
+    /// The calls entered and not returned from, the innermost last.
+    active: Vec<Active>,
     /// Callout state, which lasts a search.
     pub(super) callouts: State,
     /// The subject's cluster starts, found on the first `\y` or `\X`.
@@ -416,7 +438,7 @@ impl Machine {
         self.segment = None;
         self.failing = false;
         self.retries = 0;
-        self.calls = 0;
+        self.active.clear();
         self.callouts.attempt += 1;
         if self.callouts.data.len() != prog.callouts.len() {
             self.callouts.data = vec![Default::default(); prog.callouts.len()];
@@ -446,6 +468,20 @@ impl Machine {
         self.push(Frame::Slot { slot, old, value })?;
         self.slots[slot] = value;
         Ok(())
+    }
+
+    /// Backtracks past a call: the caller's loops come back.
+    fn uncall(&mut self) {
+        let Some(mut active) = self.active.pop() else {
+            unreachable!("a call frame has its call")
+        };
+        self.loops.swap(active.ids.clone(), &mut active.loops);
+    }
+
+    /// Backtracks past a return, back into the callee as it left.
+    fn unreturn(&mut self, mut active: Active) {
+        self.loops.swap(active.ids.clone(), &mut active.loops);
+        self.active.push(active);
     }
 
     fn retry(&mut self) -> Result<(), &'static str> {
@@ -547,14 +583,8 @@ impl Machine {
                     }
                 }
             }
-            Frame::Call { loops, .. } => {
-                self.loops = loops;
-                self.calls -= 1;
-            }
-            Frame::Return { loops } => {
-                self.loops = loops;
-                self.calls += 1;
-            }
+            Frame::Call => self.uncall(),
+            Frame::Return(active) => self.unreturn(active),
             Frame::SaveVal { .. } => {}
             Frame::Callout(num) => match self.callouts.run(&prog.callouts, num, self.pos, true) {
                 Outcome::Success | Outcome::Fail => {}
@@ -593,14 +623,8 @@ impl Machine {
                 }
                 Frame::Snap { id, old } => self.loops.snaps[id] = old,
                 Frame::Keep { old } => self.keep = old,
-                Frame::Call { loops, .. } => {
-                    self.loops = loops;
-                    self.calls -= 1;
-                }
-                Frame::Return { loops } => {
-                    self.loops = loops;
-                    self.calls += 1;
-                }
+                Frame::Call => self.uncall(),
+                Frame::Return(active) => self.unreturn(active),
                 _ => {}
             }
         }
@@ -632,8 +656,8 @@ impl Machine {
         self.frames.iter().rev().map(move |frame| {
             let at = level;
             match frame {
-                Frame::Call { .. } => level -= 1,
-                Frame::Return { .. } => level += 1,
+                Frame::Call => level -= 1,
+                Frame::Return(_) => level += 1,
                 _ => {}
             }
             (at, frame)
@@ -1061,42 +1085,27 @@ impl Machine {
                 self.unwind();
                 false
             }
-            Inst::Call(addr) => {
-                if self.calls == CALL_NEST_LIMIT {
+            Inst::Call { addr, loops } => {
+                if self.active.len() == CALL_NEST_LIMIT {
                     false
                 } else {
-                    self.calls += 1;
-                    self.push(Frame::Call {
+                    self.push(Frame::Call)?;
+                    self.active.push(Active {
                         ret: self.pc,
-                        loops: self.loops.clone(),
-                    })?;
+                        ids: loops.clone(),
+                        loops: self.loops.copy(loops.clone()),
+                    });
                     self.pc = *addr;
                     true
                 }
             }
             Inst::Return => {
-                let mut level = 0;
-                let mut found = None;
-                for frame in self.frames.iter().rev() {
-                    match frame {
-                        Frame::Call { ret, loops } => {
-                            if level == 0 {
-                                found = Some((*ret, loops.clone()));
-                                break;
-                            }
-                            level -= 1;
-                        }
-                        Frame::Return { .. } => level += 1,
-                        _ => {}
-                    }
-                }
-                let Some((ret, loops)) = found else {
+                let Some(mut active) = self.active.pop() else {
                     unreachable!("a return has its call")
                 };
-                let inner = std::mem::replace(&mut self.loops, loops);
-                self.push(Frame::Return { loops: inner })?;
-                self.calls -= 1;
-                self.pc = ret;
+                self.loops.swap(active.ids.clone(), &mut active.loops);
+                self.pc = active.ret;
+                self.push(Frame::Return(active))?;
                 true
             }
             Inst::TextSegment => {
