@@ -111,6 +111,28 @@ describe('the workspace memory budget', () => {
     expect(new TextDecoder().decode(store.files.get('/a'))).toBe('5678')
   })
 
+  it('keeps writes in flight together within what the workspace has left', async () => {
+    const store = new RAMStore()
+    const accessor = new RAMAccessor(store)
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    async function* heldBack(): AsyncIterable<Uint8Array> {
+      yield new TextEncoder().encode('12345')
+      await released
+    }
+    const files = store.files as RAMFiles
+    const results = await runWithMemory(new MemoryBudget(8, () => files.held), async () => {
+      const both = ['/a', '/b'].map((name) => write(accessor, mkPath(name), heldBack()))
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      release()
+      return Promise.allSettled(both)
+    })
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1)
+    expect(files.held).toBeLessThanOrEqual(8)
+  })
+
   it('counts what RAM files hold', () => {
     const files = new RAMFiles()
     files.set('/a', new Uint8Array(4))

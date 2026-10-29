@@ -111,6 +111,7 @@ export async function write(
       const start = append ? current.byteLength : position
       const end = pending.reduce((at, piece) => at + piece.byteLength, start)
       const length = Math.max(current.byteLength, end)
+      checkRoom(path, length - current.byteLength)
       const grows = current === grown.view && start === current.byteLength
       if (!grows || length > grown.buffer.byteLength) {
         const size = grows ? Math.max(length, grown.buffer.byteLength * 2) : length

@@ -131,6 +131,7 @@ async def write(
             with store.lock:
                 current = store.files.get(p, b"")
                 start = len(current) if append else position
+                check_room(path_spec, max(start + arrived - len(current), 0))
                 if start >= len(current):
                     gap = b"\0" * (start - len(current))
                     store.files[p] = b"".join([current, gap, *pending])

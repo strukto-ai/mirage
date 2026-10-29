@@ -1481,6 +1481,22 @@
             "stdout": "",
             "stderr": "line: memory exhausted\n"
           }
+        },
+        {
+          "command": "{ echo 1; seq 1 2000 | tr '0-9' ' '; echo 2; } | jq -c .",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n2\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "for i in 1 2 3; do mapfile -t -O \"${#a[@]}\" a < <(seq 1 500); echo \"n=${#a[@]}\"; done",
+          "expect": {
+            "exit": 1,
+            "stdout": "n=500\nn=1000\n",
+            "stderr": "line: memory exhausted\n"
+          }
         }
       ]
     },

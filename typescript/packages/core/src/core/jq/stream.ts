@@ -196,17 +196,16 @@ export class InputReader {
       const value = await parser.next()
       if (value instanceof JqParseError) return value
       if (value !== NO_VALUE) {
-        if (!Array.isArray(this.slurped)) {
-          this.held = 0
-          return value
-        }
+        if (!Array.isArray(this.slurped)) return value
         this.slurped.push(value)
         continue
       }
       if (this.jsonEof) break
       const [piece, last] = await this.readMore()
       this.jsonEof = last
-      parser.feed(this.take(piece), !last)
+      if (Array.isArray(this.slurped)) this.count(piece)
+      else checkMemory(parser.held + piece.byteLength)
+      parser.feed(piece, !last)
     }
     return this.takeSlurped()
   }
@@ -216,7 +215,7 @@ export class InputReader {
     for (;;) {
       const [piece, isLast] = await this.readMore()
       if (piece.length > 0) {
-        this.take(piece)
+        this.count(piece)
         if (Array.isArray(this.slurped)) {
           this.slurped.push(await decodeUtf8(piece, this.signal))
         } else if (piece[piece.length - 1] === NEWLINE) {
@@ -236,13 +235,13 @@ export class InputReader {
 
   /**
    * Count a piece read into memory, which must fit in what the workspace's
-   * `max_memory` has left: a value or a line holds the pieces read of it, and
-   * a slurp the whole input. Mirrors Python's `_take`.
+   * `max_memory` has left: a raw line holds the pieces read of it, and a
+   * slurp the whole input. A JSON value counts what the scanner still holds
+   * instead. Mirrors Python's `_count`.
    */
-  private take(piece: Uint8Array): Uint8Array {
+  private count(piece: Uint8Array): void {
     this.held += piece.byteLength
     checkMemory(this.held)
-    return piece
   }
 
   private takeSlurped(): string | NoValue {

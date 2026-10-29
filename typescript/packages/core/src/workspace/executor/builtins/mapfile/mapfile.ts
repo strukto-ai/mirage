@@ -27,7 +27,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { countOperand, fail, recordDelimiter, requireView } from '../shared.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { concat } from '../../../../utils/bytes.ts'
-import { decodeText } from '../../../../shell/bytes.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
 const USAGE =
   'mapfile: usage: mapfile [-d delim] [-n count] [-O origin] [-s count] [-t] [-u fd] [-C callback] [-c quantum] [array]'
@@ -102,7 +102,9 @@ export async function handleMapfile(
   let index = origin
   let stored = 0
   let seen = 0
-  let held = 0
+  // What the array keeps counts too, so -O appends cannot grow it past the
+  // workspace's max_memory a few lines at a time.
+  let held = arr.reduce((sum, v) => sum + (v === null ? 0 : encodeText(v).byteLength), 0)
   const outputs: Uint8Array[] = []
   const errs: Uint8Array[] = []
   while (buffer !== null && (limit === 0 || stored < limit)) {

@@ -101,6 +101,7 @@ from mirage.core.generic.rewrite import (
     truncate_by_rewrite,
 )
 from mirage.errors.fs import ebusy, enotdir, enotsup
+from mirage.io.memory import check_memory
 from mirage.io.spool import MEMORY_LIMIT, ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, rechunk
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -140,6 +141,7 @@ from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import declared, declared_calls
 from mirage.vfs.constants import WRITE_EFFECTS
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import Effect
 from mirage.view.types import StatPath
 from mirage.workspace.dispatcher.constants import CALLS
@@ -422,8 +424,11 @@ async def _collected(
     path: PathSpec,
     whole: bool,
     clock: Clock,
+    counted: bool = False,
 ) -> bytes:
-    """A backend read's answer as bytes, a stream collected.
+    """A backend read's answer as bytes, a stream collected, which must
+    fit in what the workspace's ``max_memory`` has left unless a store
+    already counts it.
 
     A whole read's stream publishes the version it recorded for the bytes
     collected from it, as a whole read answering bytes publishes its own,
@@ -439,9 +444,13 @@ async def _collected(
         whole (bool): whether the read is of the whole file.
         clock (Clock): the workspace clock a read outside a line records
             on.
+        counted (bool): whether bytes answered whole are what a RAM store
+            holds, already counted against the workspace's ``max_memory``.
     """
     found = await answer if inspect.isawaitable(answer) else answer
     if isinstance(found, bytes):
+        if not counted:
+            check_memory(len(found))
         return found
     if not whole:
         return await materialize(found)
@@ -478,6 +487,7 @@ async def _recorded(
 async def _read_window(
     read: Callable[..., Awaitable[ByteSource] | AsyncIterator[bytes]],
     ranges: bool,
+    counted: bool,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
@@ -500,6 +510,8 @@ async def _read_window(
         read (Callable[..., Awaitable[ByteSource] | AsyncIterator[bytes]]):
             the VFS's read, or the renderer for the path's filetype.
         ranges (bool): whether ``read`` takes a window natively.
+        counted (bool): whether ``read`` answers bytes a RAM store holds,
+            already counted against the workspace's ``max_memory``.
         path (PathSpec): the file.
         index (IndexCacheStore): the mount's index.
         offset (int): the window's first byte.
@@ -520,12 +532,15 @@ async def _read_window(
                 path,
                 False,
                 index.clock,
+                counted,
             )
         except Exception as exc:
             if not is_unsatisfiable_range(exc):
                 raise
             return b""
-    data = await _collected(read(path, **handed), path, True, index.clock)
+    data = await _collected(
+        read(path, **handed), path, True, index.clock, counted
+    )
     if whole:
         return data
     return slice_window(data, offset, size)
@@ -1591,12 +1606,17 @@ class MountEntry:
             if renderer is not None:
                 levels.append(
                     functools.partial(
-                        _read_window, getattr(vfs, renderer), True
+                        _read_window, getattr(vfs, renderer), True, False
                     )
                 )
             if vfs.supports("read"):
                 levels.append(
-                    functools.partial(_read_window, vfs.read, vfs.reads_ranges)
+                    functools.partial(
+                        _read_window,
+                        vfs.read,
+                        vfs.reads_ranges,
+                        isinstance(vfs, RAMVFS),
+                    )
                 )
             return levels
         if name == "write" and vfs.supports("write"):
@@ -1769,7 +1789,11 @@ class MountEntry:
             path (PathSpec): the file, keyed below the mount.
         """
         return await _collected(
-            await self._answer(index, path), path, True, index.clock
+            await self._answer(index, path),
+            path,
+            True,
+            index.clock,
+            isinstance(self.vfs, RAMVFS),
         )
 
     async def _read_into(

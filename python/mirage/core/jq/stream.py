@@ -149,14 +149,17 @@ class InputReader:
                 return value
             if value is not NO_VALUE:
                 if not isinstance(self._slurped, list):
-                    self._held = 0
                     return value
                 self._slurped.append(value)
                 continue
             if self._json_eof:
                 break
             piece, self._json_eof = await self._read_more()
-            parser.feed(self._take(piece), not self._json_eof)
+            if isinstance(self._slurped, list):
+                self._count(piece)
+            else:
+                check_memory(parser.held + len(piece))
+            parser.feed(piece, not self._json_eof)
         return self._take_slurped()
 
     async def _next_line(self) -> "str | NoValue":
@@ -164,7 +167,7 @@ class InputReader:
         while True:
             piece, is_last = await self._read_more()
             if piece:
-                self._take(piece)
+                self._count(piece)
                 if isinstance(self._slurped, list):
                     self._slurped.append(await decode_utf8(piece))
                 elif piece.endswith(b"\n"):
@@ -180,17 +183,17 @@ class InputReader:
             return self._take_slurped()
         return NO_VALUE if parts is None else string_text("".join(parts))
 
-    def _take(self, piece: bytes) -> bytes:
+    def _count(self, piece: bytes) -> None:
         """Count a piece read into memory, which must fit in what the
-        workspace's ``max_memory`` has left: a value or a line holds the
-        pieces read of it, and a slurp the whole input.
+        workspace's ``max_memory`` has left: a raw line holds the pieces
+        read of it, and a slurp the whole input. A JSON value counts
+        what the scanner still holds instead.
 
         Args:
             piece (bytes): the bytes jq's reader read.
         """
         self._held += len(piece)
         check_memory(self._held)
-        return piece
 
     def _take_slurped(self) -> "str | NoValue":
         slurped = self._slurped

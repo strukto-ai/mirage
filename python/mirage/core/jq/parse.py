@@ -90,6 +90,13 @@ class JqParser:
         self._finished = False
         self._wire = bytearray()
         self._parts: list[bytes] = []
+        self._part_bytes = 0
+
+    @property
+    def held(self) -> int:
+        """The bytes the scanner holds: the value it is collecting, and
+        the input and frames it has not handed on."""
+        return self._part_bytes + len(self._input) - self._at + len(self._wire)
 
     def feed(self, data: bytes, partial: bool) -> None:
         """Offer one reader piece; EOF belongs to the whole input stream.
@@ -123,9 +130,11 @@ class JqParser:
                     del wire[: size + 5]
                     if tag == 1:
                         self._parts.append(payload)
+                        self._part_bytes += len(payload)
                     elif tag == 2:
                         text = b"".join(self._parts).decode()
                         self._parts.clear()
+                        self._part_bytes = 0
                         return text
                     elif tag == 3:
                         return JqParseError(payload.decode())

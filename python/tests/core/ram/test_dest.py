@@ -146,3 +146,30 @@ def test_ram_files_count_what_they_hold():
     assert files.held == 1
     files.clear()
     assert files.held == 0
+
+
+@pytest.mark.asyncio
+async def test_writes_in_flight_together_stay_within_the_workspace():
+    store = RAMStore()
+    accessor = RAMAccessor(store)
+    release = asyncio.Event()
+
+    async def held_back(data: bytes):
+        yield data
+        await release.wait()
+
+    async def writes() -> list[object]:
+        both = [
+            asyncio.ensure_future(
+                write(accessor, _spec(name), held_back(b"12345"))
+            )
+            for name in ("/a", "/b")
+        ]
+        await asyncio.sleep(0.01)
+        release.set()
+        return await asyncio.gather(*both, return_exceptions=True)
+
+    budget = MemoryBudget(8, lambda: store.files.held)
+    results = await run_with_memory(budget, writes())
+    assert [type(r) for r in results].count(QuotaExceededError) == 1
+    assert store.files.held <= 8

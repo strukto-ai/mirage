@@ -68,6 +68,7 @@ export class JqParser {
   private finished = false
   private wire: Uint8Array = new Uint8Array(0)
   private parts: Uint8Array[] = []
+  private partBytes = 0
 
   constructor(
     private readonly seq = false,
@@ -75,6 +76,14 @@ export class JqParser {
     signal?: AbortSignal,
   ) {
     this.budget = new YieldBudget(signal)
+  }
+
+  /**
+   * The bytes the scanner holds: the value it is collecting, and the input
+   * and frames it has not handed on. Mirrors Python's `held`.
+   */
+  get held(): number {
+    return this.partBytes + this.input.length - this.at + this.wire.length
   }
 
   /** Offer one reader piece; EOF belongs to the whole input stream. */
@@ -103,10 +112,13 @@ export class JqParser {
           const tag = this.wire[0]
           const payload = this.wire.slice(5, size + 5)
           this.wire = this.wire.slice(size + 5)
-          if (tag === 1) this.parts.push(payload)
-          else if (tag === 2) {
+          if (tag === 1) {
+            this.parts.push(payload)
+            this.partBytes += payload.byteLength
+          } else if (tag === 2) {
             const text = DEC.decode(concat(this.parts))
             this.parts = []
+            this.partBytes = 0
             return text
           } else if (tag === 3) return new JqParseError(DEC.decode(payload))
           else throw new Error('unknown jq scanner frame')
