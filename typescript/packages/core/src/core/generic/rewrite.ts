@@ -61,6 +61,7 @@ export async function appendByRewrite<Written>(
   let own: string | OwnRead | null
   try {
     ;[existing, own] = await readVersioned(path, () => read(path))
+    own = own ?? OwnRead.UNKNOWN
   } catch (error) {
     if (!isMissingPath(error)) throw error
     return await write({
@@ -107,11 +108,11 @@ export async function appendByStreamedRewrite<Written>(
       if (found.type === FileType.DIRECTORY) throw eisdir(path)
       return
     }
-    let own: string | OwnRead | null = null
+    let own: string | OwnRead = OwnRead.UNKNOWN
     try {
       await spool.fill(
         read(path, (version) => {
-          own = version
+          own = version ?? OwnRead.UNKNOWN
         }),
       )
     } catch (error) {
@@ -175,7 +176,7 @@ export async function pwriteByStreamedRewrite(
     }
     let own: string | OwnRead | null
     try {
-      own = await read(path, spool)
+      own = (await read(path, spool)) ?? OwnRead.UNKNOWN
     } catch (error) {
       if (!isMissingPath(error) || spool.size > 0) throw error
       let missing: FileStat | null = null
@@ -241,6 +242,7 @@ export async function truncateByRewrite(
   let own: string | OwnRead | null
   try {
     ;[data, own] = await readVersioned(path, () => read(path))
+    own = own ?? OwnRead.UNKNOWN
   } catch (error) {
     if (!isMissingPath(error)) throw error
     data = new Uint8Array(0)

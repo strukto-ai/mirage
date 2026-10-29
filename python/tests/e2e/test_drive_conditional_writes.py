@@ -552,6 +552,29 @@ async def test_a_box_resize_holds_the_bytes_it_downloaded(drive, workspace):
 
 @pytest.mark.asyncio
 @BOX
+@pytest.mark.parametrize("operation", ["append", "resize"])
+async def test_a_box_rewrite_uses_its_completed_tokenless_read(
+    drive, workspace, operation
+):
+    ws = workspace()
+    a = await ws.session("a")
+    await a.vfs.read("/box/f")
+    drive.put("f", b"peer\n")
+    drive.box.unhashed.add(drive.box.id_of("f"))
+    await ws.cache.clear()
+    line = (
+        "echo extra >> /box/f"
+        if operation == "append"
+        else "truncate -s 2 /box/f"
+    )
+    result = await a.shell(line)
+    assert result.exit_code == 0, await result.stderr_str()
+    want = b"peer\nextra\n" if operation == "append" else b"pe"
+    assert drive.fake.read("f") == want
+
+
+@pytest.mark.asyncio
+@BOX
 async def test_a_box_resize_of_a_file_with_no_sha1_goes_out_plain(
     drive, workspace
 ):

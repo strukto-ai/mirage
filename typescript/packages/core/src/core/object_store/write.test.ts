@@ -28,7 +28,8 @@ import {
   spec,
 } from '../../../tests/core/object_store/fakes.ts'
 import { makeCreate, makeMkdir, makeTruncate, makeWrite, makeReplace } from './write.ts'
-import { ABSENT_WRITE } from '../../cache/types.ts'
+import { ABSENT_WRITE, type WriteContext } from '../../cache/types.ts'
+import { runWithWriteContext } from '../../cache/context.ts'
 
 const accessor = new FakeAccessor()
 const ENC = new TextEncoder()
@@ -427,3 +428,25 @@ describe('object store write records the put token', () => {
     expect(records).toEqual([])
   })
 })
+
+it.each([false, true])(
+  'uses a tokenless own read for nonempty truncate, versioned %s',
+  async (versioned) => {
+    const store = new FakeStore({ 'f.bin': 'peer' })
+    const driver = makeDriver(store)
+    if (versioned) driver.getVersioned = () => Promise.resolve([ENC.encode('peer'), null])
+    const context: WriteContext = {
+      vfs: 'fake',
+      conditions: ['put'],
+      readVersion: () => Promise.resolve('old'),
+      readVersions: () => Promise.resolve(['old']),
+      drop: () => Promise.resolve(),
+      keep: () => Promise.resolve(),
+    }
+    await runWithWriteContext('/mnt/', context, () =>
+      makeTruncate(driver)(accessor, spec('/f.bin'), 2),
+    )
+    expect(store.contents()).toEqual({ 'f.bin': 'pe' })
+    expect(store.puts).toEqual([['f.bin', ENC.encode('pe')]])
+  },
+)

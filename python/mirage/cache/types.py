@@ -127,10 +127,11 @@ KnownVersions = Callable[[list[str]], Awaitable[dict[str, str]]]
 
 
 class OwnRead(Enum):
-    """An op's own read that found no file, as against one it never made."""
+    """An op's own read that found no file or no usable version."""
 
     ABSENT = auto()
+    UNKNOWN = auto()
 
 
 # The version a key was measured on, or ABSENT for a key found gone.
-Measured: TypeAlias = str | OwnRead
+Measured: TypeAlias = str | Literal[OwnRead.ABSENT]

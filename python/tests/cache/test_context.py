@@ -123,7 +123,14 @@ async def _noop(*_args: PathSpec | str) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("own, want", [("v2", "v2"), (None, "v1")])
+@pytest.mark.parametrize(
+    "own, want",
+    [
+        ("v2", MatchWrite("v2")),
+        (None, MatchWrite("v1")),
+        (OwnRead.UNKNOWN, ANY_WRITE),
+    ],
+)
 async def test_explicit_own_version_takes_precedence(own, want):
     path = PathSpec(virtual="/s3/f", directory="/s3/", vfs_path="/f")
     context = WriteContext(
@@ -139,7 +146,7 @@ async def test_explicit_own_version_takes_precedence(own, want):
         cond = await write_condition(path, "put", own=own)
     finally:
         reset_caller(prev)
-    assert isinstance(cond, MatchWrite) and cond.version == want
+    assert cond == want
 
 
 @pytest.mark.asyncio

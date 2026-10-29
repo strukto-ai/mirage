@@ -1701,7 +1701,9 @@ class MountEntry:
                 "put",
                 request.condition,
             )
-            if isinstance(request.condition, AnyWrite):
+            if isinstance(
+                request.condition, AnyWrite
+            ) and not self.vfs.supports("_replace"):
                 result = await self._write(index, request.path, request.body)
                 return result if isinstance(result, FileStat) else None
             replace: Callable[..., Awaitable[FileStat | None]] = (

@@ -253,6 +253,8 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
                 if data is None:
                     data = b""
                     own = OwnRead.ABSENT
+                elif own is None:
+                    own = OwnRead.UNKNOWN
                 result = data[:length].ljust(length, b"\0")
                 cond = await write_condition(path_spec, "put", own=own)
             meta = await _put(driver, conn, key, result, path_spec, cond)

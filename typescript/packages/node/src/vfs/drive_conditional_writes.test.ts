@@ -571,6 +571,23 @@ describe('conditional writes only Box has', () => {
     }
   })
 
+  it.each(['append', 'resize'] as const)(
+    'uses a completed tokenless read for a Box %s',
+    async (operation) => {
+      const ws = await workspace()
+      const a = await ws.session('a')
+      await a.vfs.read('/box/f')
+      drive.put('f', 'peer\n')
+      drive.box.unhashed.add(drive.box.idOf('f'))
+      await ws.cache.clear()
+      const line = operation === 'append' ? 'echo extra >> /box/f' : 'truncate -s 2 /box/f'
+      const result = await a.shell(line)
+      expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([0, ''])
+      const want = operation === 'append' ? 'peer\nextra\n' : 'pe'
+      expect(drive.text('f')).toBe(want)
+    },
+  )
+
   it('resizing a file Box keeps no sha1 for goes out plain', async () => {
     drive.box.unhashed.add(drive.box.idOf('f'))
     const ws = await workspace()

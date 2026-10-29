@@ -99,10 +99,11 @@ export type WriteKind = 'put' | 'copy' | 'delete'
  */
 export type KnownVersions = (keys: readonly string[]) => Promise<Map<string, string>>
 
-/** An op's own read that found no file, as against one it never made. */
+/** An op's own read that found no file or no usable version. */
 export enum OwnRead {
   ABSENT = 0,
+  UNKNOWN = 1,
 }
 
 /** The version a key was measured on, or ABSENT for a key found gone. */
-export type Measured = string | OwnRead
+export type Measured = string | OwnRead.ABSENT

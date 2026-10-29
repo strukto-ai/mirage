@@ -16,12 +16,18 @@ import asyncio
 import errno
 from collections.abc import AsyncIterator
 from types import MappingProxyType
+from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import read_versioned
-from mirage.cache.types import ABSENT_WRITE, ANY_WRITE, ReplaceRequest
+from mirage.cache.types import (
+    ABSENT_WRITE,
+    ANY_WRITE,
+    MatchWrite,
+    ReplaceRequest,
+)
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import Context, command
 from mirage.commands.spec import CommandSpec
@@ -755,3 +761,38 @@ async def test_parallel_collected_reads_keep_their_own_versions():
     finally:
         scope.close()
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "condition", [ANY_WRITE, ABSENT_WRITE, MatchWrite("v1")]
+)
+async def test_native_replacement_preserves_the_settled_condition(
+    monkeypatch, condition
+):
+    vfs = RAMVFS()
+    monkeypatch.setattr(
+        RAMVFS, "condition_support", {"put": frozenset({"absent", "match"})}
+    )
+    native = AsyncMock(return_value=None)
+    monkeypatch.setattr(vfs, "_replace", native)
+    mount = MountEntry("/data/", vfs)
+    ordinary = AsyncMock()
+    monkeypatch.setattr(mount, "_write", ordinary)
+    path = PathSpec.from_str_path("/data/f", "f")
+    closed = []
+
+    async def body():
+        try:
+            yield b"head"
+            yield b"tail"
+        finally:
+            closed.append(True)
+
+    source = body()
+    assert await anext(source) == b"head"
+    request = ReplaceRequest(path, source, condition)
+    await mount._replace(mount.index, request)
+    assert native.await_args.args[0] is request
+    ordinary.assert_not_awaited()
+    assert closed == [True]

@@ -1108,7 +1108,7 @@ export class MountEntry {
         'put',
         request.condition,
       )
-      if (request.condition.kind === 'any')
+      if (request.condition.kind === 'any' && !this.vfs.supports('_replace'))
         return await this.writeAt(index, request.path, request.body)
       return await this.vfs._replace(
         request,

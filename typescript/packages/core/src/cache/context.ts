@@ -295,6 +295,7 @@ async function settle(
   read: string | OwnRead | null,
   cached: string | null,
 ): Promise<WriteCondition> {
+  if (read === OwnRead.UNKNOWN) return condition(context, path, kind, null)
   // The op's own read found no file: one the mount saw was removed since.
   if (read === OwnRead.ABSENT && cached !== null && cached !== '') {
     throw await stale(path, { gone: true })
@@ -413,7 +414,7 @@ export async function dropCached(path: PathSpec, keep: string | null = null): Pr
  */
 export async function stale(
   path: PathSpec,
-  options: { landed?: boolean; gone?: boolean; version?: string | OwnRead | null } = {},
+  options: { landed?: boolean; gone?: boolean; version?: string | OwnRead.ABSENT | null } = {},
 ): Promise<StaleWriteError> {
   const { landed = false, gone = false, version = null } = options
   const context = activeWriteContext(path)

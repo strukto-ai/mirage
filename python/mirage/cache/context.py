@@ -244,6 +244,8 @@ async def _settle(
     own: str | OwnRead | None,
     cached: str | None,
 ) -> WriteCondition:
+    if own is OwnRead.UNKNOWN:
+        return _condition(context, path, kind, None)
     if own is OwnRead.ABSENT:
         if cached:
             raise await stale(path, gone=True)
@@ -360,7 +362,7 @@ async def stale(
     path: PathSpec,
     landed: bool = False,
     gone: bool = False,
-    version: str | OwnRead | None = None,
+    version: str | Literal[OwnRead.ABSENT] | None = None,
 ) -> StaleWriteError:
     """The refusal for a lost condition, after dropping the cached copy.
 
@@ -373,7 +375,7 @@ async def stale(
         landed (bool): a move's copy landed before its source's delete
             lost.
         gone (bool): the file no longer exists.
-        version (str | OwnRead | None): the version the write sent, when
+        version (str | Literal[OwnRead.ABSENT] | None): the version the write sent, when
             the line no longer names it (a move retracts both paths);
             ABSENT when the op found the file gone, which keeps none.
     """

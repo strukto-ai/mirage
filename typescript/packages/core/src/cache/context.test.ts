@@ -165,3 +165,22 @@ it('preserves absent evidence without optional mount policy', async () => {
   expect(await writeCondition(path, 'put')).toEqual(ANY_WRITE)
   expect(await writeCondition(path, 'copy')).toBeNull()
 })
+
+it.each([
+  ['v2', { kind: 'match', version: 'v2' }],
+  [null, { kind: 'match', version: 'v1' }],
+  [OwnRead.UNKNOWN, ANY_WRITE],
+] as const)('selects the explicit own-read condition %s', async (own, want) => {
+  const context: WriteContext = {
+    vfs: 'test',
+    conditions: ['put'],
+    readVersion: () => Promise.resolve('v1'),
+    readVersions: () => Promise.resolve(['v1']),
+    drop: () => Promise.resolve(),
+    keep: () => Promise.resolve(),
+  }
+  const condition = await runWithWriteContext('/m/', context, () =>
+    writeCondition(PathSpec.fromStrPath('/m/f'), 'put', own),
+  )
+  expect(condition).toEqual(want)
+})
