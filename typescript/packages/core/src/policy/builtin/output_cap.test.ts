@@ -19,8 +19,11 @@ import {
   checkCommandLimits,
   DEFAULT_COMMAND_LIMITS,
   LINE,
+  LINE_MAX_MEMORY,
   LINE_TIMEOUT_SECONDS,
+  lineMemory,
   lineTimeout,
+  parseCommandLimits,
   resolveProducer,
   resolveLimit,
 } from './output_cap.ts'
@@ -209,6 +212,37 @@ describe('lineTimeout', () => {
   })
 })
 
+describe('lineMemory', () => {
+  it('defaults to LINE_MAX_MEMORY, 32 MB', () => {
+    expect(LINE_MAX_MEMORY).toBe(32 * 1024 * 1024)
+    expect(lineMemory()).toBe(LINE_MAX_MEMORY)
+    expect(lineMemory({ [LINE]: new Limit({ timeoutSeconds: 5 }) })).toBe(LINE_MAX_MEMORY)
+  })
+
+  it("takes the profile's entry over the workspace's", () => {
+    const workspace = { [LINE]: new Limit({ maxMemory: '64MB' }) }
+    expect(lineMemory(workspace)).toBe(64 * 1024 * 1024)
+    expect(lineMemory(workspace, { [LINE]: new Limit({ maxMemory: 1024 }) })).toBe(1024)
+    expect(lineMemory(workspace, { [LINE]: new Limit({ timeoutSeconds: 1 }) })).toBe(
+      64 * 1024 * 1024,
+    )
+  })
+
+  it.each([null, 0])('is lifted by an entry naming it as %s', (size) => {
+    const lifted = { [LINE]: new Limit({ maxMemory: size }) }
+    expect(lineMemory(lifted)).toBeNull()
+    expect(lineMemory({ [LINE]: new Limit({ maxMemory: '1MB' }) }, lifted)).toBeNull()
+  })
+
+  it('reads a size as config spells it', () => {
+    const limits = parseCommandLimits({ '@line': { max_memory: '8MB' } })
+    expect(limits['@line']?.maxMemory).toBe(8 * 1024 * 1024)
+    expect(() => parseCommandLimits({ '@line': { max_memory: 'lots' } })).toThrow(
+      'max_memory must be a size like 100MB, got "lots"',
+    )
+  })
+})
+
 describe('checkCommandLimits', () => {
   it('accepts output bounds and a line entry naming only its time', () => {
     const limits = {
@@ -233,7 +267,15 @@ describe('checkCommandLimits', () => {
     expect(() => {
       checkCommandLimits({ [LINE]: line }, 'profile', true)
     }).toThrow(
-      "profile: command_limits['@line'] takes only timeout_seconds, not max_lines, walk_limit",
+      "profile: command_limits['@line'] takes only timeout_seconds and max_memory, not max_lines, walk_limit",
+    )
+  })
+
+  it('refuses a memory limit on any entry but the line', () => {
+    expect(() => {
+      checkCommandLimits({ jq: new Limit({ maxMemory: '1GB' }) }, 'profile', true)
+    }).toThrow(
+      "profile: command_limits['jq'].max_memory: a line has one memory limit, set it on '@line'",
     )
   })
 

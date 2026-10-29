@@ -1381,6 +1381,100 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_line_holds_no_object_past_its_memory_limit",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {}
+          }
+        },
+        "command_limits": {
+          "@line": {
+            "max_memory": "4KB"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "x=$(seq 1 10); echo \"len=${#x}\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "len=20\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "x=$(seq 1 2000); echo \"len=${#x}\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        },
+        {
+          "command": "seq 1 2000 | jq -Rs length; echo \"jq=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "jq=1\n",
+            "stderr": "jq: memory exhausted\n"
+          }
+        },
+        {
+          "command": "seq 1 2000 | wc -c",
+          "expect": {
+            "exit": 0,
+            "stdout": "8893\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "seq 1 2000 > /ram/n; read -r -d '' x < /ram/n; echo \"read=$?\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_profile_raises_the_line_memory_limit",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {}
+          }
+        },
+        "command_limits": {
+          "@line": {
+            "max_memory": "4KB"
+          }
+        },
+        "profiles": {
+          "big": {
+            "command_limits": {
+              "@line": {
+                "max_memory": "1MB"
+              }
+            }
+          }
+        },
+        "profile": "big"
+      },
+      "steps": [
+        {
+          "command": "x=$(seq 1 2000); echo \"len=${#x}\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "len=8892\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

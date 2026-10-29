@@ -21,6 +21,7 @@ import signal
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from mirage.io.memory import line_memory_limit
 from mirage.io.types import materialize
 from mirage.runtime.python.execution import main_filename
 from mirage.runtime.python.monty.constants import DEFAULT_PROG, LIMITS
@@ -156,8 +157,13 @@ class MontyExecution:
         start = cwd.virtual if cwd is not None else None
         # A script is Monty's own script_name, which it keeps the last
         # part of for `__file__`, under the directory a feed starts in.
+        limit = line_memory_limit()
         checkout = pool.checkout(
-            limits=self._limits,
+            limits=(
+                {**self._limits, "max_memory": limit}
+                if limit is not None and "max_memory" not in self._limits
+                else self._limits
+            ),
             assert_message_annotations=False,
             os_policy={"sleep_system_max": float("inf")},
             **(

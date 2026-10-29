@@ -35,7 +35,13 @@ from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
-from mirage.policy.builtin.output_cap import LINE_NAME, line_timeout
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import run_with_memory_limit
+from mirage.policy.builtin.output_cap import (
+    LINE_NAME,
+    line_memory,
+    line_timeout,
+)
 from mirage.policy.decisions import is_pending
 from mirage.process.table import ProcessTable
 from mirage.process.types import ProcessInfo
@@ -924,24 +930,30 @@ async def run_prepared_line(
                             whole_names,
                             await ws.secret_sources(),
                         )
-                io = await run_whole_line(
-                    line_runtime,
-                    command,
-                    stdin,
-                    effective_session,
-                    ws.registry,
-                    claimant_for(ast, handed),
-                    cancel,
-                    ws.router.context(
-                        command, effective_session, await judged()
-                    )
-                    if await ws.registry.policies.wants_for(
-                        "post_execute", effective_session.session_id
-                    )
-                    else None,
-                    sink,
-                    context.frame.line_timeout if top_level else None,
-                    budget_start,
+                io = await run_with_memory_limit(
+                    line_memory(
+                        ws.registry.command_limits,
+                        effective_session.command_limits,
+                    ),
+                    run_whole_line(
+                        line_runtime,
+                        command,
+                        stdin,
+                        effective_session,
+                        ws.registry,
+                        claimant_for(ast, handed),
+                        cancel,
+                        ws.router.context(
+                            command, effective_session, await judged()
+                        )
+                        if await ws.registry.policies.wants_for(
+                            "post_execute", effective_session.session_id
+                        )
+                        else None,
+                        sink,
+                        context.frame.line_timeout if top_level else None,
+                        budget_start,
+                    ),
                 )
                 if io.refusal is None:
                     io.refusal = nested.latest
@@ -1050,33 +1062,39 @@ async def run_prepared_line(
             # No seam of its own: the whole line is one task under
             # ``Workspace.shell``, and a cancel lands on whichever await
             # the tree is in. A top-level line runs under its ``@line``
-            # deadline, which a nested one shares.
-            io, _ = await run_with_timeout(
-                run_command_tree(
-                    ws.dispatch,
-                    ws.registry,
-                    ws.namespace,
-                    job_table or ws.job_table,
-                    exec_recursion,
-                    ast,
-                    context,
-                    stdin,
-                    cancel,
-                    handed=handed,
-                    sink=sink,
-                    call_stack=call_stack,
-                    execution_scope=execution_scope,
-                    route=ws.router.context(
-                        command, effective_session, await judged()
-                    )
-                    if await ws.registry.policies.wants_for(
-                        "post_execute", effective_session.session_id
-                    )
-                    else None,
+            # deadline, which a nested one shares, and every object a
+            # line holds is checked against its ``@line`` memory limit.
+            io, _ = await run_with_memory_limit(
+                line_memory(
+                    ws.registry.command_limits, effective_session.command_limits
                 ),
-                context.frame.line_timeout if top_level else None,
-                LINE_NAME,
-                budget_start,
+                run_with_timeout(
+                    run_command_tree(
+                        ws.dispatch,
+                        ws.registry,
+                        ws.namespace,
+                        job_table or ws.job_table,
+                        exec_recursion,
+                        ast,
+                        context,
+                        stdin,
+                        cancel,
+                        handed=handed,
+                        sink=sink,
+                        call_stack=call_stack,
+                        execution_scope=execution_scope,
+                        route=ws.router.context(
+                            command, effective_session, await judged()
+                        )
+                        if await ws.registry.policies.wants_for(
+                            "post_execute", effective_session.session_id
+                        )
+                        else None,
+                    ),
+                    context.frame.line_timeout if top_level else None,
+                    LINE_NAME,
+                    budget_start,
+                )
             )
             # A record a nested line earned is the line's to report when
             # its own tree earned none (see NestedRefusal).
@@ -1144,6 +1162,10 @@ async def run_prepared_line(
     except Exception as exc:
         if call_stack is not None and isinstance(exc, UNWINDING):
             # A line run in its caller's frame unwinds into the caller.
+            raise
+        if isinstance(exc, MemoryExhausted) and not top_level:
+            # The shell's own object past the line's memory limit ends
+            # the line, as its deadline does, from a nested one too.
             raise
         # The fold is a failed command like any other (a SecretsError
         # folds here), so $? must report it, mirroring the TS catch.

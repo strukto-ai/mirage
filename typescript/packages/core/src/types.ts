@@ -14,6 +14,7 @@
 
 import { rstripSlash, stripSlash } from './utils/slash.ts'
 import { dottedSpelling, resolvePath } from './utils/path.ts'
+import { parseLimit } from './utils/size.ts'
 
 // Any value that survives a JSON round trip: what a decoded payload holds,
 // what jq evaluates over, what an API field hands back. The mirror of
@@ -339,6 +340,7 @@ export interface LimitInit {
   maxBytes?: number | null
   maxLines?: number | null
   timeoutSeconds?: number | null
+  maxMemory?: number | string | null
   walkLimit?: number | null
   onExceed?: OnExceed
 }
@@ -367,13 +369,15 @@ function tightestWalk(values: (number | null)[]): number | null {
  * discriminant; `aggr` is the composition law (AND to the tightest
  * per bound, ANY on error mode) and `layered` the resolution law (each
  * field from the most specific layer that sets it). `walkLimit` caps the
- * entries one walk lists on a mount, -1 for no cap.
+ * entries one walk lists on a mount, -1 for no cap. `maxMemory` caps the
+ * bytes any one object a line holds may reach, a size like `32MB`.
  */
 export class Limit {
   readonly kind = 'limit' as const
   readonly maxBytes: number | null
   readonly maxLines: number | null
   readonly timeoutSeconds: number | null
+  readonly maxMemory: number | null
   readonly walkLimit: number | null
   /** The fields the limit names, null among them; the rest inherit. Mirrors Python's model_fields_set. */
   readonly fieldsSet: ReadonlySet<keyof LimitInit>
@@ -383,6 +387,10 @@ export class Limit {
     const maxBytes = init.maxBytes ?? null
     const maxLines = init.maxLines ?? null
     const timeoutSeconds = init.timeoutSeconds ?? null
+    const maxMemory =
+      init.maxMemory === undefined || init.maxMemory === null
+        ? null
+        : parseLimit(init.maxMemory, 'max_memory')
     const walkLimit = init.walkLimit ?? null
     if (maxBytes !== null && (!Number.isInteger(maxBytes) || maxBytes < 0)) {
       throw new TypeError(`maxBytes must be a non-negative integer, got ${String(maxBytes)}`)
@@ -401,6 +409,7 @@ export class Limit {
     this.maxBytes = maxBytes
     this.maxLines = maxLines
     this.timeoutSeconds = timeoutSeconds
+    this.maxMemory = maxMemory
     this.walkLimit = walkLimit
     this.exceed = init.onExceed ?? null
     this.fieldsSet = new Set(
@@ -461,6 +470,7 @@ const LIMIT_FIELDS: readonly (keyof LimitInit)[] = [
   'maxBytes',
   'maxLines',
   'timeoutSeconds',
+  'maxMemory',
   'walkLimit',
   'onExceed',
 ]
@@ -476,6 +486,7 @@ const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[
   maxBytes: (present) => minBound(present.map((s) => s.maxBytes)),
   maxLines: (present) => minBound(present.map((s) => s.maxLines)),
   timeoutSeconds: (present) => minPositive(present.map((s) => s.timeoutSeconds)),
+  maxMemory: (present) => minBound(present.map((s) => s.maxMemory)),
   walkLimit: (present) => tightestWalk(present.map((s) => s.walkLimit)),
   onExceed: (present) =>
     present.some((s) => s.onExceed === OnExceed.ERROR) ? OnExceed.ERROR : OnExceed.TRUNCATE,

@@ -62,6 +62,7 @@ from mirage.core.jq.types import (
     StreamReads,
 )
 from mirage.errors.constants import FS_ERRORS
+from mirage.io.memory import line_memory_limit
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
@@ -658,6 +659,7 @@ class Engine:
         Raises:
             JqCompileError: a program jq itself refuses, with jq's report.
         """
+        limit = line_memory_limit()
         try:
             stream = open_stream(
                 "jq_eval",
@@ -667,6 +669,7 @@ class Engine:
                     "args": args,
                     "env": env,
                     "zone": local_zone(),
+                    **({} if limit is None else {"memory": limit}),
                 },
             )
         except StreamRefusal as exc:

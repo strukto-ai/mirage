@@ -49,6 +49,7 @@ import {
 } from '../../../core/jq/index.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { closeStream, openStream, type OpenStream } from '../../../rs/stream.ts'
+import { lineMemoryLimit } from '../../../io/memory.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec, type JsonValue } from '../../../types.ts'
@@ -529,6 +530,7 @@ export class Engine {
     signal?: AbortSignal,
   ): Promise<Engine | null> {
     let stream: OpenStream
+    const limit = lineMemoryLimit()
     try {
       stream = await openStream('jq_eval', {
         program: expr,
@@ -536,6 +538,7 @@ export class Engine {
         args,
         env,
         zone: localZone() ?? null,
+        ...(limit === null ? {} : { memory: limit }),
       })
     } catch (error) {
       if (!(error instanceof StreamRefusal)) throw error

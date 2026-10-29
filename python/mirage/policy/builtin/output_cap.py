@@ -26,12 +26,16 @@ DEFAULT_COMMAND_LIMITS: dict[str, Limit] = {
 
 LINE_TIMEOUT_SECONDS = 600.0
 
+LINE_MAX_MEMORY = 32 << 20
+
 # The groups a limit table names besides commands, spelled with the `@`
 # a runtime's captures use for theirs, so no command name can clash.
 ALL_COMMANDS = "@all"
 LINE = "@line"
 # What a line past its time limit is called: `line: timed out after Ns`.
 LINE_NAME = "line"
+
+LINE_BOUNDS = {"timeout_seconds": "time limit", "max_memory": "memory limit"}
 
 
 class LimitMount(Protocol):
@@ -216,16 +220,42 @@ def line_timeout(
     return found.timeout_seconds or None
 
 
+def line_memory(
+    workspace_limits: Mapping[str, Limit] | None = None,
+    profile_limits: Mapping[str, Limit] | None = None,
+) -> int | None:
+    """The bytes any one object a line holds may reach, the one memory
+    limit a line runs under: the ``@line`` entry's ``max_memory``, the
+    profile's over the workspace's, else ``LINE_MAX_MEMORY``. An entry
+    naming it as None or 0 lifts it.
+
+    Args:
+        workspace_limits (Mapping[str, Limit] | None): the workspace's
+            command limits.
+        profile_limits (Mapping[str, Limit] | None): the session
+            profile's.
+    """
+    found = Limit.layered(
+        (
+            (profile_limits or {}).get(LINE),
+            (workspace_limits or {}).get(LINE),
+        )
+    )
+    if found is None or "max_memory" not in found.model_fields_set:
+        return LINE_MAX_MEMORY
+    return found.max_memory or None
+
+
 def check_command_limits(
     limits: Mapping[str, Limit], where: str, *, takes_line: bool
 ) -> None:
-    """Refuse a table that names time where no time limit applies.
+    """Refuse a table that names a line's bound where none applies.
 
-    A line runs under one time limit, the ``@line`` entry's
-    ``timeout_seconds``; no command or op entry takes one, and the
-    ``@line`` entry takes nothing else. A mount names no line, since a
-    line spans mounts. A key is a command or one of the two groups,
-    ``@all`` and ``@line``.
+    A line runs under one time limit and one memory limit, the ``@line``
+    entry's ``timeout_seconds`` and ``max_memory``; no command or op
+    entry takes either, and the ``@line`` entry takes nothing else. A
+    mount names no line, since a line spans mounts. A key is a command
+    or one of the two groups, ``@all`` and ``@line``.
 
     Args:
         limits (Mapping[str, Limit]): the table, keyed by command.
@@ -245,20 +275,21 @@ def check_command_limits(
                 f" group; the groups are {ALL_COMMANDS!r} and {LINE!r}"
             )
         if name != LINE:
-            if "timeout_seconds" in limit.model_fields_set:
-                raise ValueError(
-                    f"{where}: command_limits[{name!r}].timeout_seconds:"
-                    f" a line has one time limit, set it on {LINE!r}"
-                )
+            for field, bound in LINE_BOUNDS.items():
+                if field in limit.model_fields_set:
+                    raise ValueError(
+                        f"{where}: command_limits[{name!r}].{field}:"
+                        f" a line has one {bound}, set it on {LINE!r}"
+                    )
             continue
         if not takes_line:
             raise ValueError(
                 f"{where}: command_limits[{LINE!r}]: a line spans mounts,"
                 " set it on the workspace or a profile"
             )
-        extra = sorted(limit.model_fields_set - {"timeout_seconds"})
+        extra = sorted(limit.model_fields_set - LINE_BOUNDS.keys())
         if extra:
             raise ValueError(
                 f"{where}: command_limits[{LINE!r}] takes only"
-                f" timeout_seconds, not {', '.join(extra)}"
+                f" timeout_seconds and max_memory, not {', '.join(extra)}"
             )

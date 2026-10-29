@@ -32,6 +32,7 @@ from mirage.core.jq.types import (
 )
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import fs_strerror
+from mirage.io.memory import check_memory
 
 # The most bytes one read of jq's input reader takes (jq 1.8.2's util.c):
 # fgets into a 4096-byte buffer, less the four bytes it keeps for UTF-8
@@ -85,9 +86,8 @@ class InputReader:
             else JqParser(seq=opts.seq, streaming=opts.stream)
         )
         self._json_eof = False
-        self._slurped: "list[str] | str | NoValue" = NO_VALUE
-        if opts.slurp:
-            self._slurped = "" if opts.raw_input else []
+        self._slurped: "list[str] | NoValue" = [] if opts.slurp else NO_VALUE
+        self._held = 0
         self._name: str | None = None
         self._line = 0
         self._chunks: AsyncIterator[bytes] | None = None
@@ -150,7 +150,7 @@ class InputReader:
             if value is not NO_VALUE:
                 if not isinstance(self._slurped, list):
                     return value
-                self._slurped.append(value)
+                self._slurp(self._slurped, value)
                 continue
             if self._json_eof:
                 break
@@ -159,31 +159,44 @@ class InputReader:
         return self._take_slurped()
 
     async def _next_line(self) -> "str | NoValue":
-        line: str | NoValue = NO_VALUE
+        parts: list[str] | None = None
         while True:
             piece, is_last = await self._read_more()
             if piece:
-                if isinstance(self._slurped, str):
-                    self._slurped += await decode_utf8(piece)
+                if isinstance(self._slurped, list):
+                    self._slurp(self._slurped, await decode_utf8(piece))
                 elif piece.endswith(b"\n"):
-                    head = "" if line is NO_VALUE else line
-                    return string_text(head + (await decode_utf8(piece[:-1])))
+                    tail = await decode_utf8(piece[:-1])
+                    return string_text("".join(parts or ()) + tail)
                 else:
-                    line = (
-                        "" if line is NO_VALUE else line
-                    ) + await decode_utf8(piece)
+                    parts = parts if parts is not None else []
+                    parts.append(await decode_utf8(piece))
             if is_last:
                 break
-        if isinstance(self._slurped, str):
+        if isinstance(self._slurped, list):
             return self._take_slurped()
-        return line if line is NO_VALUE else string_text(line)
+        return NO_VALUE if parts is None else string_text("".join(parts))
+
+    def _slurp(self, slurped: list[str], text: str) -> None:
+        """Keep one value or piece of a slurped stream, which grows to
+        the whole input and so counts against the line's memory limit.
+
+        Args:
+            slurped (list[str]): what the stream slurped so far.
+            text (str): the value's JSON text, or a piece of raw input.
+        """
+        self._held += len(text)
+        check_memory(self._held)
+        slurped.append(text)
 
     def _take_slurped(self) -> "str | NoValue":
         slurped = self._slurped
         self._slurped = NO_VALUE
-        if isinstance(slurped, list):
-            return f"[{','.join(slurped)}]"
-        return slurped if slurped is NO_VALUE else string_text(slurped)
+        if slurped is NO_VALUE:
+            return slurped
+        if self._parser is None:
+            return string_text("".join(slurped))
+        return f"[{','.join(slurped)}]"
 
     async def _open_next(self) -> None:
         """Move on to the next input once the current one is read to its

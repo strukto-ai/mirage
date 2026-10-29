@@ -125,19 +125,19 @@ async def write(
         if not pending:
             return
         try:
-            data = b"".join(pending)
+            arrived = sum(map(len, pending))
             with store.lock:
                 current = store.files.get(p, b"")
-                if append:
-                    store.files[p] = current + data
+                start = len(current) if append else position
+                if start >= len(current):
+                    gap = b"\0" * (start - len(current))
+                    store.files[p] = b"".join([current, gap, *pending])
                 else:
-                    current = current.ljust(position, b"\0")
-                    store.files[p] = (
-                        current[:position]
-                        + data
-                        + current[position + len(data) :]
+                    data = b"".join(pending)
+                    store.files[p] = b"".join(
+                        [current[:start], data, current[start + arrived :]]
                     )
-                    position += len(data)
+                position = start + arrived
             store.modified[p] = now_iso()
         finally:
             pending.clear()

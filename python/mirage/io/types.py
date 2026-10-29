@@ -19,10 +19,12 @@ from collections.abc import (
     Callable,
     Sequence,
 )
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, Protocol, TypeVar
 
 from mirage.io.cooperative import chunks
+from mirage.io.memory import check_memory
 from mirage.types import PathSpec, Producer, Refusal
 
 ByteSource = bytes | AsyncIterator[bytes]
@@ -123,7 +125,14 @@ async def materialize(stream: ByteSource | None) -> bytes:
         return b""
     if isinstance(stream, bytes):
         return stream
-    return b"".join([chunk async for chunk in chunks(stream)])
+    held: list[bytes] = []
+    size = 0
+    async with aclosing(chunks(stream)) as source:
+        async for chunk in source:
+            size += len(chunk)
+            check_memory(size)
+            held.append(chunk)
+    return b"".join(held)
 
 
 @dataclass(frozen=True, slots=True)

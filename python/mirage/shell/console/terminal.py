@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.concurrency.limiter import owned_task
 from mirage.io.cooperative import CHUNK_SIZE
+from mirage.io.memory import check_memory
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.types import Channel, OwnedStream
 
@@ -31,13 +32,15 @@ class Terminal(JobConsole):
     through ``jobs``, the line's own ``JobOutput``. A job that writes
     while no line runs waits here for the next one, as bash's job prints
     to the terminal whenever it likes. With a reader attached (a caller
-    streaming the line), every chunk goes straight on to it. A session
-    has one (``tty``), shared by every fork of it.
+    streaming the line), every chunk goes straight on to it; what it
+    keeps counts against the writer's ``max_memory``. A session has one
+    (``tty``), shared by every fork of it.
     """
 
     def __init__(self) -> None:
         super().__init__()
         self.chunks: deque[tuple[Channel, bytes, bool]] = deque()
+        self.held = 0
         self.reader: JobConsole | None = None
         self.jobs = JobOutput(JobSide(self))
         self.ended = 0
@@ -82,7 +85,9 @@ class Terminal(JobConsole):
             self._remember(channel, data)
             await reader.emit(channel, data)
             return
+        check_memory(self.held + len(data))
         self.chunks.append((channel, data, job))
+        self.held += len(data)
         if reader is not None:
             self.reader = None
             self._draining = owned_task(self._pass(reader))
@@ -121,6 +126,7 @@ class Terminal(JobConsole):
         try:
             while self.chunks:
                 channel, data, _ = self.chunks.popleft()
+                self.held -= len(data)
                 self._remember(channel, data)
                 await reader.emit(channel, data)
                 if self.ended != ended:
@@ -141,13 +147,16 @@ class Terminal(JobConsole):
             to (Terminal): the terminal that takes the rest.
         """
         to.chunks = self.chunks + to.chunks
+        to.held += self.held
         self.chunks = deque()
+        self.held = 0
         self.reader = to.jobs
 
     def drain(self) -> tuple[bytes, bytes]:
         """What reached the terminal so far, stdout and stderr, taken out
         to be bounded and put back (``put_back``)."""
         chunks, self.chunks = self.chunks, deque()
+        self.held = 0
         return (
             b"".join(d for c, d, _ in chunks if c == Channel.STDOUT),
             b"".join(d for c, d, _ in chunks if c == Channel.STDERR),
@@ -166,6 +175,7 @@ class Terminal(JobConsole):
             if data
         ]
         self.chunks = deque(returned) + self.chunks
+        self.held += len(out) + len(err)
 
     def take(self) -> tuple[bytes, bytes]:
         """End a line: its stdout and stderr, jobs' output among them."""
@@ -175,6 +185,7 @@ class Terminal(JobConsole):
     def drop_line(self) -> None:
         """End an abandoned line: what it wrote goes, its jobs' stays."""
         self.chunks = deque(chunk for chunk in self.chunks if chunk[2])
+        self.held = sum(len(data) for _, data, _ in self.chunks)
         self._end()
 
     def _end(self) -> None:

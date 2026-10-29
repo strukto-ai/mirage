@@ -14,6 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { CHUNK_SIZE } from '../../io/cooperative.ts'
+import { MemoryExhausted } from '../../io/errors.ts'
+import { runWithMemoryLimit } from '../../io/memory.ts'
 import { concat } from '../../utils/bytes.ts'
 import { Recorder } from '../descriptors.ts'
 import { Channel, JobConsole, Tee, Terminal } from './index.ts'
@@ -210,6 +212,24 @@ describe('Terminal', () => {
     await tty.jobs.emit(Channel.STDOUT, enc('later\n'))
     tty.putBack(out.subarray(0, 4), err)
     expect(dec(tty.take())).toEqual(['longlater\n', ''])
+  })
+
+  it('counts what it keeps against the line memory limit', async () => {
+    const tty = new Terminal()
+    const write = (data: string) => () => tty.emit(Channel.STDOUT, enc(data))
+    await runWithMemoryLimit(8, write('abcd'))
+    await runWithMemoryLimit(8, write('efgh'))
+    await expect(runWithMemoryLimit(8, write('i'))).rejects.toThrow(MemoryExhausted)
+    expect(dec(tty.take())).toEqual(['abcdefgh', ''])
+    await runWithMemoryLimit(8, write('12345678'))
+    expect(tty.held).toBe(8)
+  })
+
+  it('counts nothing it hands to its reader', async () => {
+    const tty = new Terminal()
+    await tty.attach(new JobConsole())
+    await runWithMemoryLimit(8, () => tty.emit(Channel.STDOUT, enc('x'.repeat(16))))
+    expect(tty.held).toBe(0)
   })
 })
 

@@ -15,6 +15,7 @@
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { mainFilename } from '../execution.ts'
 import type { Context } from '../../../commands/config.ts'
+import { lineMemoryLimit } from '../../../io/memory.ts'
 import { materialize } from '../../../io/types.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
 import {
@@ -222,9 +223,13 @@ export class MontyExecution {
 
   private async checkout(scriptName?: string | null): Promise<MontySessionLike> {
     const pool = await this.ensurePool()
+    const limit = lineMemoryLimit()
     return pool.checkout({
       ...(scriptName === undefined ? {} : { scriptName }),
-      limits: this.limits,
+      limits:
+        limit !== null && this.limits.maxMemory === undefined
+          ? { ...this.limits, maxMemory: limit }
+          : this.limits,
       assertMessageAnnotations: false,
       osPolicy: { sleepSystemMax: Infinity },
     })

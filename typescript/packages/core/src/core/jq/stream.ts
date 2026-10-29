@@ -26,6 +26,7 @@ import {
 } from './types.ts'
 import { READ_FAILURES } from '../../errors/constants.ts'
 import { fsStrerror, isFsError } from '../../errors/fs.ts'
+import { checkMemory } from '../../io/memory.ts'
 
 /**
  * The most bytes one read of jq's input reader takes (jq 1.8.2's util.c):
@@ -110,7 +111,8 @@ export class InputReader {
   private opened = 0
   private readonly parser: JqParser | null
   private jsonEof = false
-  private slurped: string[] | string | NoValue = NO_VALUE
+  private slurped: string[] | NoValue = NO_VALUE
+  private held = 0
   private name: string | null = null
   private line = 0
   private chunks: AsyncIterator<Uint8Array> | null = null
@@ -129,7 +131,7 @@ export class InputReader {
     this.sources = sources
     this.report = report
     this.parser = opts.rawInput ? null : new JqParser(opts.seq, opts.stream, signal)
-    if (opts.slurp) this.slurped = opts.rawInput ? '' : []
+    if (opts.slurp) this.slurped = []
   }
 
   /**
@@ -195,7 +197,7 @@ export class InputReader {
       if (value instanceof JqParseError) return value
       if (value !== NO_VALUE) {
         if (!Array.isArray(this.slurped)) return value
-        this.slurped.push(value)
+        this.slurp(this.slurped, value)
         continue
       }
       if (this.jsonEof) break
@@ -207,32 +209,43 @@ export class InputReader {
   }
 
   private async nextLine(): Promise<string | NoValue> {
-    let line: string | NoValue = NO_VALUE
+    let parts: string[] | null = null
     for (;;) {
       const [piece, isLast] = await this.readMore()
       if (piece.length > 0) {
-        if (typeof this.slurped === 'string') {
-          this.slurped += await decodeUtf8(piece, this.signal)
+        if (Array.isArray(this.slurped)) {
+          this.slurp(this.slurped, await decodeUtf8(piece, this.signal))
         } else if (piece[piece.length - 1] === NEWLINE) {
-          const head = line === NO_VALUE ? '' : line
-          return stringText(
-            head + (await decodeUtf8(piece.subarray(0, piece.length - 1), this.signal)),
-          )
+          const tail = await decodeUtf8(piece.subarray(0, piece.length - 1), this.signal)
+          return stringText((parts ?? []).join('') + tail)
         } else {
-          line = (line === NO_VALUE ? '' : line) + (await decodeUtf8(piece, this.signal))
+          parts ??= []
+          parts.push(await decodeUtf8(piece, this.signal))
         }
       }
       if (isLast) break
     }
-    if (typeof this.slurped === 'string') return this.takeSlurped()
-    return line === NO_VALUE ? line : stringText(line)
+    if (Array.isArray(this.slurped)) return this.takeSlurped()
+    return parts === null ? NO_VALUE : stringText(parts.join(''))
+  }
+
+  /**
+   * Keep one value or piece of a slurped stream, which grows to the whole
+   * input and so counts against the line's memory limit. Mirrors Python's
+   * `_slurp`.
+   */
+  private slurp(slurped: string[], text: string): void {
+    this.held += text.length
+    checkMemory(this.held)
+    slurped.push(text)
   }
 
   private takeSlurped(): string | NoValue {
     const slurped = this.slurped
     this.slurped = NO_VALUE
-    if (Array.isArray(slurped)) return `[${slurped.join(',')}]`
-    return slurped === NO_VALUE ? slurped : stringText(slurped)
+    if (slurped === NO_VALUE) return slurped
+    if (this.parser === null) return stringText(slurped.join(''))
+    return `[${slurped.join(',')}]`
   }
 
   /**

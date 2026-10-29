@@ -93,23 +93,37 @@ export async function write(
   let later: ReturnType<typeof setTimeout> | null = null
   const usage = accessor.store.usage
   let held = 0
+  // What this write last published: a view of a buffer it grows, so a
+  // publish copies only the bytes that arrived since. A file another writer
+  // changed in between is copied instead, so no view a reader holds changes.
+  const grown: { buffer: Uint8Array; view: Uint8Array | null } = {
+    buffer: new Uint8Array(),
+    view: null,
+  }
   const publish = (): void => {
     if (later !== null) clearTimeout(later)
     later = null
     last = performance.now()
     if (pending.length === 0) return
     try {
-      const data = concat(pending)
       const current = files.get(p) ?? new Uint8Array()
-      if (append) {
-        files.set(p, concat([current, data]))
-      } else {
-        const next = new Uint8Array(Math.max(current.byteLength, position + data.byteLength))
-        next.set(current)
-        next.set(data, position)
-        files.set(p, next)
-        position += data.byteLength
+      const start = append ? current.byteLength : position
+      const end = pending.reduce((at, piece) => at + piece.byteLength, start)
+      const length = Math.max(current.byteLength, end)
+      const grows = current === grown.view && start === current.byteLength
+      if (!grows || length > grown.buffer.byteLength) {
+        const size = grows ? Math.max(length, grown.buffer.byteLength * 2) : length
+        grown.buffer = new Uint8Array(size)
+        grown.buffer.set(current)
       }
+      let at = start
+      for (const piece of pending) {
+        grown.buffer.set(piece, at)
+        at += piece.byteLength
+      }
+      grown.view = grown.buffer.subarray(0, length)
+      files.set(p, grown.view)
+      if (!append) position = end
       modified.set(p, nowIso())
     } finally {
       pending = []
@@ -142,6 +156,9 @@ export async function write(
     }
   } finally {
     publish()
+    const { buffer, view } = grown
+    if (view !== null && files.get(p) === view && view.byteLength < buffer.byteLength)
+      files.set(p, view.slice())
   }
   if (failed.error !== undefined) throw failed.error
   record(op, path.virtual, VFSName.RAM, size, timer)

@@ -16,6 +16,7 @@ import { concat, findBytes } from '../utils/bytes.ts'
 import { abortable } from '../utils/abort.ts'
 import { YieldBudget } from './yield_budget.ts'
 import { chunks } from './cooperative.ts'
+import { checkMemory } from './memory.ts'
 import { type ByteSource, DeviceInput, type PipeEnd, PipeStream } from './types.ts'
 import type { PathSpec } from '../types.ts'
 
@@ -267,7 +268,10 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         if (pending !== undefined) await pending
         const result = await this.pull()
         if (result.done === true) this.exhausted = true
-        else this.buf = concat([this.buf, result.value])
+        else {
+          checkMemory(this.buf.byteLength + result.value.byteLength)
+          this.buf = concat([this.buf, result.value])
+        }
       }
     } catch (error) {
       await this.failed(error)
@@ -327,6 +331,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
     const parts: Uint8Array[] = []
+    let held = 0
     const width = typeof delim === 'number' ? 1 : delim.length
     if (width === 0) throw new Error('empty separator')
     try {
@@ -335,11 +340,13 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         if (pending !== undefined) await pending
         const idx = typeof delim === 'number' ? this.buf.indexOf(delim) : findBytes(this.buf, delim)
         if (idx >= 0) {
+          checkMemory(held + idx)
           const tail = this.buf.subarray(0, idx)
           this.buf = this.buf.subarray(idx + width)
           return [parts.length === 0 ? tail : concat([...parts, tail]), true]
         }
         if (this.exhausted) {
+          checkMemory(held + this.buf.byteLength)
           parts.push(this.buf)
           this.buf = new Uint8Array()
           return [concat(parts), false]
@@ -347,6 +354,8 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         const keep = Math.min(width - 1, this.buf.length)
         const cut = this.buf.length - keep
         if (cut > 0) parts.push(this.buf.subarray(0, cut))
+        held += cut
+        checkMemory(held)
         this.buf = this.buf.subarray(cut)
         // Raced, not just checked between pulls: a stalled stdin must lose
         // to the read's own signal, or the reader outlives the caller.

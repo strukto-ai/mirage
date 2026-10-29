@@ -15,6 +15,8 @@
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { UsageError } from '../../commands/errors.ts'
+import { MemoryExhausted } from '../../io/errors.ts'
+import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
 import { ContentDriftError } from '../snapshot/drift.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { refusalOf, renderDeny } from '../../policy/policies.ts'
@@ -49,6 +51,9 @@ export function failureResult(err: unknown): { stderr: Uint8Array; exitCode: num
   }
   if (err instanceof UsageError) {
     return { stderr: encodeText(`${err.message}\n`), exitCode: err.exitCode }
+  }
+  if (err instanceof MemoryExhausted) {
+    return { stderr: encodeText(`${LINE_NAME}: ${err.message}\n`), exitCode: 1 }
   }
   const msg = err instanceof Error ? err.message : String(err)
   if (!isControlFlowError(err) && !isFsError(err)) {

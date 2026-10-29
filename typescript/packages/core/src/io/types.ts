@@ -15,6 +15,7 @@
 import type { PathSpec, Producer, Refusal } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { chunks } from './cooperative.ts'
+import { checkMemory } from './memory.ts'
 
 export type ByteSource = Uint8Array | AsyncIterable<Uint8Array>
 export type StreamName = 'stdout' | 'stderr'
@@ -80,7 +81,12 @@ export async function materialize(source: ByteSource | null | undefined): Promis
   if (source === null || source === undefined) return new Uint8Array()
   if (source instanceof Uint8Array) return source
   const parts: Uint8Array[] = []
-  for await (const chunk of chunks(source)) parts.push(chunk)
+  let size = 0
+  for await (const chunk of chunks(source)) {
+    size += chunk.byteLength
+    checkMemory(size)
+    parts.push(chunk)
+  }
   return concat(parts)
 }
 

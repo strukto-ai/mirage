@@ -38,10 +38,12 @@ from pydantic import (
     Field,
     NonNegativeFloat,
     NonNegativeInt,
+    field_validator,
     model_validator,
 )
 
 from mirage.utils.path import dotted_spelling, resolve_path
+from mirage.utils.size import parse_limit
 
 
 class Aggr:
@@ -758,7 +760,8 @@ class Limit(BaseModel):
     composition law (AND to the tightest per bound, ANY on error mode)
     and ``layered`` the resolution law (each field from the most
     specific layer that sets it). ``walk_limit`` caps the entries one
-    walk lists on a mount, -1 for no cap.
+    walk lists on a mount, -1 for no cap. ``max_memory`` caps the bytes
+    any one object a line holds may reach, a size like ``32MB``.
     """
 
     kind: ClassVar[str] = "limit"
@@ -772,10 +775,16 @@ class Limit(BaseModel):
         Field(allow_inf_nan=False),
         Aggr(_min_positive),
     ] = None
+    max_memory: Annotated[NonNegativeInt | None, Aggr(_min_bound)] = None
     walk_limit: Annotated[int | None, Field(ge=-1), Aggr(_tightest_walk)] = (
         None
     )
     on_exceed: Annotated[OnExceed, Aggr(_prefer_error)] = OnExceed.TRUNCATE
+
+    @field_validator("max_memory", mode="before")
+    @classmethod
+    def _v_max_memory(cls, v: Any) -> Any:
+        return v if v is None else parse_limit(v, "max_memory")
 
     @classmethod
     def aggr(

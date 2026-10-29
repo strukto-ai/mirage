@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CommandTimeoutError } from '../../errors/types.ts'
-import { LINE_NAME, lineTimeout } from '../../policy/builtin/output_cap.ts'
+import { LINE_NAME, lineMemory, lineTimeout } from '../../policy/builtin/output_cap.ts'
+import { MemoryExhausted } from '../../io/errors.ts'
+import { runWithMemoryLimit } from '../../io/memory.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
@@ -452,10 +454,8 @@ async function runPreparedLine(
     // and the line answers 124, as Python's asyncio.timeout does. The
     // deadline is in the line's stop, the one object the tree runs on, so a
     // nested line (`eval`) still finds the one signal its line answers to.
-    const lineSeconds =
-      options.record !== false || currentCaller().lineAbort === null
-        ? context.frame.lineTimeout
-        : null
+    const topLevel = options.record !== false || currentCaller().lineAbort === null
+    const lineSeconds = topLevel ? context.frame.lineTimeout : null
     const expiry = lineSeconds !== null && lineSeconds > 0 ? new AbortController() : null
     const lineSignal = mergeSignals(options.signal, context.frame.abortSignal)
     const stop = mergeSignals(lineSignal, expiry?.signal)
@@ -826,6 +826,7 @@ async function runPreparedLine(
                 handed,
                 judged,
                 deadline,
+                topLevel,
               ),
             env.sessions,
           )
@@ -883,6 +884,9 @@ async function runParsedLine(
   // seconds, the line's signal with it folded in and when its budget began;
   // null for a nested line, or one whose deadline is lifted.
   deadline: { expiry: AbortController; seconds: number; signal: AbortSignal; start: number } | null,
+  // Whether this is the outermost line, which a nested one's memory refusal
+  // ends.
+  topLevel: boolean,
 ): Promise<ExecuteResult> {
   const effectiveSession = context.session
   const cacheFacts = env.dispatcher.captureCacheFacts()
@@ -1055,18 +1059,22 @@ async function runParsedLine(
         ? env.router.context(command, effectiveSession, await judged())
         : null
       const runLine = (): ReturnType<typeof runWholeLine> =>
-        runWholeLine(
-          lineRuntime,
-          command,
-          stdin,
-          effectiveSession,
-          env.registry,
-          killed,
-          claimantFor(rootNode, handed),
-          route,
-          options.sink,
-          deadline?.seconds ?? null,
-          deadline?.start,
+        runWithMemoryLimit(
+          lineMemory(env.registry.commandLimits, effectiveSession.commandLimits),
+          () =>
+            runWholeLine(
+              lineRuntime,
+              command,
+              stdin,
+              effectiveSession,
+              env.registry,
+              killed,
+              claimantFor(rootNode, handed),
+              route,
+              options.sink,
+              deadline?.seconds ?? null,
+              deadline?.start,
+            ),
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
@@ -1197,16 +1205,22 @@ async function runParsedLine(
         // caller is released here. Leaf checks below this point exist to
         // stop side effects and free producers, not to release the caller.
         const release = deps.parser instanceof ParseScope ? deps.parser.retain() : undefined
-        const running = runCommandTree(
-          deadline === null ? deps : { ...deps, signal: deadline.signal },
-          rootNode,
-          context,
-          stdin,
-          false,
-          options.callStack ?? null,
-          (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
-            ? env.router.context(command, context.session, await judged())
-            : null,
+        // Every object a line holds is checked against its `@line` memory
+        // limit, a nested line's against the same.
+        const running = runWithMemoryLimit(
+          lineMemory(env.registry.commandLimits, effectiveSession.commandLimits),
+          async () =>
+            runCommandTree(
+              deadline === null ? deps : { ...deps, signal: deadline.signal },
+              rootNode,
+              context,
+              stdin,
+              false,
+              options.callStack ?? null,
+              (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
+                ? env.router.context(command, context.session, await judged())
+                : null,
+            ),
         ).finally(release)
         // A `kill` names a signal, and what the line started gets the stop
         // bound to answer it, as Python joins the cancelled line whole.
@@ -1224,6 +1238,7 @@ async function runParsedLine(
       } catch (error) {
         // A line run in its caller's frame unwinds into the caller.
         if (options.callStack !== undefined && isUnwinding(error)) throw error
+        if (error instanceof MemoryExhausted && !topLevel) throw error
         // Return through the recording scope so completed op records survive
         // a throw. Once the caller aborted, the line's answer is the abort,
         // whatever a leaf threw while unwinding.
@@ -1265,6 +1280,9 @@ async function runParsedLine(
       // the caller.
       if (isControlFlowError(err) || (options.callStack !== undefined && isUnwinding(err)))
         throw err
+      // The shell's own object past the line's memory limit ends the line,
+      // as its deadline does, from a nested one too.
+      if (err instanceof MemoryExhausted && !topLevel) throw err
       const failed = failureResult(err)
       recordStatus(targetSession, failed.exitCode)
       return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)

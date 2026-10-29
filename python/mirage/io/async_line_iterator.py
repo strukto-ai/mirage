@@ -16,6 +16,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 
 from mirage.io.cooperative import chunks
+from mirage.io.memory import check_memory
 from mirage.io.types import ByteSource, DeviceInput, PipeEnd, PipeStream
 from mirage.io.yield_budget import YieldBudget
 from mirage.types import PathSpec
@@ -231,15 +232,18 @@ class AsyncLineIterator:
         if not delim:
             raise ValueError("empty separator")
         parts: list[bytes] = []
+        held = 0
         try:
             await self._budget.run()
             while True:
                 index = self._buf.find(delim)
                 if index >= 0:
+                    check_memory(held + index)
                     parts.append(self._buf[:index])
                     self._buf = self._buf[index + len(delim) :]
                     return b"".join(parts), True
                 if self._exhausted:
+                    check_memory(held + len(self._buf))
                     parts.append(self._buf)
                     self._buf = b""
                     return b"".join(parts), False
@@ -247,6 +251,8 @@ class AsyncLineIterator:
                 keep = min(len(delim) - 1, len(self._buf))
                 split = len(self._buf) - keep
                 parts.append(self._buf[:split])
+                held += split
+                check_memory(held)
                 self._buf = self._buf[split:]
                 try:
                     self._buf += await self._next_chunk()
@@ -377,6 +383,7 @@ class AsyncLineIterator:
             try:
                 await self._budget.run()
                 chunk = await self._next_chunk()
+                check_memory(len(self._buf) + len(chunk))
             except StopAsyncIteration:
                 self._exhausted = True
             except BaseException as exc:

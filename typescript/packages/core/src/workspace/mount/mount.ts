@@ -58,6 +58,7 @@ import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 import type { Clock } from '../../utils/clock.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
+import { checkMemory } from '../../io/memory.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
 import { closeQuietly, rechunk } from '../../io/stream.ts'
 import type { ByteSpool } from '../../io/spool.ts'
@@ -262,7 +263,10 @@ async function collected(
   clock: Clock,
 ): Promise<Uint8Array> {
   const found = await answer
-  if (found instanceof Uint8Array) return found
+  if (found instanceof Uint8Array) {
+    checkMemory(found.byteLength)
+    return found
+  }
   if (!whole) return materialize(found)
   const [data, records] = await recorded(() => materialize(found), clock)
   publishRead(path.virtual, data, latestFingerprint(records, path.virtual))
