@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SessionState } from '../workspace/session/session.ts'
+import { Dispatcher } from '../workspace/dispatcher/dispatcher.ts'
+import { Workspace } from '../workspace/workspace/workspace.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { record, runWithRecording, startOp } from '../observe/context.ts'
 import { OpRecord } from '../observe/record.ts'
 import { CacheManager } from './manager.ts'
@@ -637,3 +640,146 @@ it.each([
     expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
   },
 )
+
+class ConditionalReadRAM extends RAMVFS {
+  override readonly cachesReads = true
+
+  override get conditionSupport(): ConditionSupport {
+    return { put: ['absent', 'match'], copy: ['match'], delete: ['match'] }
+  }
+
+  override read(path: PathSpec): Promise<Uint8Array> {
+    const data = new Uint8Array(path.virtual.endsWith('/f') ? [1] : [2])
+    record('read', path.virtual, 'ram', data.byteLength, startOp(), {
+      fingerprint: path.virtual.endsWith('/f') ? 'v1' : 'v2',
+    })
+    return Promise.resolve(data)
+  }
+}
+
+async function conditionalReads(cached = true): Promise<{
+  ws: Workspace
+  mount: MountEntry
+  dispatcher: Dispatcher
+}> {
+  const ws = new Workspace(
+    { '/data': new ConditionalReadRAM() },
+    { mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL },
+  )
+  await ws.namespace.ensureLoaded()
+  const mount = ws.namespace.mountFor('/data/f')
+  await mount.ensureReady()
+  if (cached) {
+    await ws.cache.set('/data/f', new Uint8Array([1]), { fingerprint: 'v1', ttl: 600 })
+    await ws.cache.set('/data/g', new Uint8Array([2]), { fingerprint: 'v2', ttl: 600 })
+  }
+  return { ws, mount, dispatcher: new Dispatcher(ws.namespace, ws.cache) }
+}
+
+it.each([false, true])(
+  'overlapping warm dispatcher reads keep their owners, reverse=%s',
+  async (reverse) => {
+    const { ws, mount, dispatcher } = await conditionalReads()
+    const manager = mount.cacheManager!
+    const a = new SessionState({ sessionId: 'a' })
+    const b = new SessionState({ sessionId: 'b' })
+    const caller = currentCaller()
+    const holds = [gate(), gate()] as const
+    const ready = ws.namespace.ensureLoaded.bind(ws.namespace)
+    let entered = 0
+    vi.spyOn(ws.namespace, 'ensureLoaded').mockImplementation(async () => {
+      const pending = holds[entered++]
+      if (pending !== undefined) await pending[0]
+      await ready()
+    })
+    const first = runWithCaller({ ...caller, session: a }, () =>
+      dispatcher.dispatch('read', PathSpec.fromStrPath('/data/f')),
+    )
+    const other = runWithCaller({ ...caller, session: b }, () =>
+      dispatcher.dispatch('read', PathSpec.fromStrPath('/data/g'), [], {}, undefined, {
+        ...caller,
+        session: b,
+      }),
+    )
+    try {
+      if (reverse) {
+        holds[1][1]()
+        expect((await other)[0]).toEqual(new Uint8Array([2]))
+        holds[0][1]()
+        expect((await first)[0]).toEqual(new Uint8Array([1]))
+      } else {
+        holds[0][1]()
+        expect((await first)[0]).toEqual(new Uint8Array([1]))
+        holds[1][1]()
+        expect((await other)[0]).toEqual(new Uint8Array([2]))
+      }
+      expect(a.versions.read(manager.versionScope, '/f')).toBe('v1')
+      expect(a.versions.read(manager.versionScope, '/g')).toBeNull()
+      expect(b.versions.read(manager.versionScope, '/g')).toBe('v2')
+      expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
+    } finally {
+      holds[0][1]()
+      holds[1][1]()
+      await Promise.allSettled([first, other])
+      await ws.close()
+    }
+  },
+)
+
+it('an explicit dispatcher owner wins over an already live browser peer', async () => {
+  const { ws, mount, dispatcher } = await conditionalReads()
+  const a = new SessionState({ sessionId: 'a' })
+  const b = new SessionState({ sessionId: 'b' })
+  const caller = currentCaller()
+  try {
+    const [result] = await runWithCaller({ ...caller, session: b }, () =>
+      dispatcher.dispatch('read', PathSpec.fromStrPath('/data/f'), [], {}, undefined, {
+        ...caller,
+        session: a,
+      }),
+    )
+    expect(result).toEqual(new Uint8Array([1]))
+    expect(a.versions.read(mount.cacheManager!.versionScope, '/f')).toBe('v1')
+    expect(b.versions.read(mount.cacheManager!.versionScope, '/f')).toBeNull()
+  } finally {
+    await ws.close()
+  }
+})
+
+it('an ambiguous unbound browser read cannot bless the newest session', async () => {
+  const { ws, mount, dispatcher } = await conditionalReads()
+  const a = new SessionState({ sessionId: 'a' })
+  const b = new SessionState({ sessionId: 'b' })
+  const caller = currentCaller()
+  try {
+    await expect(
+      runWithCaller({ ...caller, session: a }, () =>
+        runWithCaller({ ...caller, session: b }, () =>
+          dispatcher.dispatch('read', PathSpec.fromStrPath('/data/f')),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+    expect(a.versions.read(mount.cacheManager!.versionScope, '/f')).toBeNull()
+    expect(b.versions.read(mount.cacheManager!.versionScope, '/f')).toBeNull()
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each([
+  [false, '/data/f'],
+  [false, '/data/./f'],
+  [true, '/data/./f'],
+] as const)('a known browser read keeps its owner, cached=%s path=%s', async (cached, path) => {
+  const { ws, mount, dispatcher } = await conditionalReads(cached)
+  const a = new SessionState({ sessionId: 'a' })
+  try {
+    const [result] = await runWithCaller({ ...currentCaller(), session: a }, () =>
+      dispatcher.dispatch('read', PathSpec.fromStrPath(path, undefined, '/')),
+    )
+    expect(result).toEqual(new Uint8Array([1]))
+    expect(a.versions.read(mount.cacheManager!.versionScope, '/f')).toBe('v1')
+  } finally {
+    await ws.close()
+  }
+})
