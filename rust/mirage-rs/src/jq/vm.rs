@@ -467,6 +467,7 @@ impl Vm {
                         std::mem::replace(&mut self.path, Value::Null),
                         std::mem::replace(&mut self.value_at_path, Value::Null),
                         std::mem::replace(&mut self.host.env, Value::Null),
+                        std::mem::replace(&mut self.host.origin, Value::Null),
                         std::mem::replace(&mut self.host.filename, Value::Null),
                     ]
                 }

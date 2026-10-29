@@ -56,17 +56,44 @@ fn fail(message: impl Into<String>) -> Fault {
 
 /// What the host gives a run: the local time zone, which `localtime`,
 /// `strflocaltime` and `strptime`'s `%s` consult. `now` asks the host.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct Clock {
-    pub(crate) zone: Option<Arc<Zone>>,
+    pub(crate) zone: Arc<Zone>,
+}
+
+impl Default for Clock {
+    fn default() -> Self {
+        Self {
+            zone: Arc::new(Zone::parse("UTC")),
+        }
+    }
+}
+
+/// The local time zone a `TZ` value names: a file of the tz database, or
+/// a POSIX rule.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Zone {
+    File(Tzif),
+    Posix(Posix),
 }
 
 /// A POSIX `TZ` rule: a standard offset and name, and optionally a daylight
 /// offset and name with the rules that switch between them.
 #[derive(Debug, PartialEq)]
-pub(crate) struct Zone {
+pub(crate) struct Posix {
     std: Offset,
     dst: Option<Daylight>,
+}
+
+/// A zone file of the tz database (TZif, RFC 8536): the instants its local
+/// time changes, the type of local time each starts, and the POSIX rule
+/// that goes on past the last.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Tzif {
+    times: Vec<i64>,
+    starts: Vec<usize>,
+    types: Vec<Fix>,
+    after: Option<Posix>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -95,6 +122,7 @@ enum Day {
     Month(i64, i64, i64),
 }
 
+#[derive(Clone, Debug, PartialEq)]
 struct Fix {
     east: i64,
     dst: bool,
@@ -102,16 +130,182 @@ struct Fix {
 }
 
 impl Zone {
-    /// The zone a `TZ` value names, or None when it needs a time zone
-    /// database this engine does not carry.
-    pub(crate) fn parse(text: &str) -> Option<Zone> {
+    /// The zone a `TZ` value names, as glibc's tzset reads one: past a
+    /// leading `:`, a file of the tz database this engine carries, by its
+    /// name or a path ending in `zoneinfo/` and its name, else a POSIX
+    /// rule, else UTC under the value's leading letters, or under no name
+    /// when there are fewer than three.
+    pub(crate) fn parse(text: &str) -> Zone {
         let text = text.strip_prefix(':').unwrap_or(text);
         if text.is_empty() {
-            return Some(Zone::fixed("UTC"));
+            return Zone::Posix(Posix::fixed("UTC"));
         }
         if let Some((_, name)) = UTC_NAMES.iter().find(|(n, _)| *n == text) {
-            return Some(Zone::fixed(name));
+            return Zone::Posix(Posix::fixed(name));
         }
+        let name = text.rsplit_once("zoneinfo/").map_or(text, |(_, name)| name);
+        let file = jiff_tzdb::get(name).filter(|(found, _)| *found == name);
+        if let Some(zone) = file.and_then(|(_, data)| Tzif::parse(data)) {
+            return Zone::File(zone);
+        }
+        if let Some(rule) = Posix::parse(text) {
+            return Zone::Posix(rule);
+        }
+        let letters = text.bytes().take_while(u8::is_ascii_alphabetic).count();
+        Zone::Posix(Posix::fixed(if letters < 3 {
+            ""
+        } else {
+            &text[..letters]
+        }))
+    }
+
+    fn at(&self, t: i64) -> Fix {
+        match self {
+            Zone::File(file) => file.at(t),
+            Zone::Posix(rule) => rule.at(t),
+        }
+    }
+
+    /// mktime with tm_isdst of -1: the instant a wall-clock reading
+    /// (seconds since the epoch as if it were UTC) names, the reading
+    /// nearer UTC when it occurs twice, as glibc's mktime answers it first
+    /// in a run, and the offset before the change when it is skipped.
+    fn instant(&self, wall: i64) -> i64 {
+        let before = self.at(wall - DAY);
+        let after = self.at(wall + DAY);
+        let mut offsets = [&before, &after];
+        offsets.sort_by_key(|fix| fix.east.abs());
+        for fix in offsets {
+            let t = wall - fix.east;
+            if self.at(t).east == fix.east {
+                return t;
+            }
+        }
+        wall - before.east
+    }
+
+    /// mktime with tm_isdst of 0, which strftime's %s calls on the time it
+    /// read as UTC: the instant a wall-clock reading names under the
+    /// standard offset in force near it.
+    fn standard(&self, wall: i64) -> i64 {
+        let near = self.instant(wall);
+        let east = match self {
+            Zone::Posix(rule) => rule.std.east,
+            Zone::File(file) => file.standard(near),
+        };
+        wall - east
+    }
+}
+
+impl Tzif {
+    fn parse(data: &[u8]) -> Option<Tzif> {
+        let counts = |at: usize| -> Option<[usize; 6]> {
+            if data.get(at..at + 4)? != b"TZif" {
+                return None;
+            }
+            let mut counts = [0; 6];
+            for (i, count) in counts.iter_mut().enumerate() {
+                let field = data.get(at + 20 + 4 * i..at + 24 + 4 * i)?;
+                *count = u32::from_be_bytes(field.try_into().ok()?) as usize;
+            }
+            Some(counts)
+        };
+        let [isut, isstd, leaps, times, types, chars] = counts(0)?;
+        let (wide, mut at) = if *data.get(4)? >= b'2' {
+            (
+                8,
+                44 + times * 5 + types * 6 + chars + leaps * 8 + isstd + isut,
+            )
+        } else {
+            (4, 0)
+        };
+        let [isut, isstd, leaps, times, types, chars] = counts(at)?;
+        at += 44;
+        let mut take = |len: usize| -> Option<&[u8]> {
+            let bytes = data.get(at..at + len)?;
+            at += len;
+            Some(bytes)
+        };
+        let instants = take(times * wide)?
+            .chunks(wide)
+            .map(|b| match wide {
+                8 => i64::from_be_bytes(b.try_into().expect("8 bytes")),
+                _ => i64::from(i32::from_be_bytes(b.try_into().expect("4 bytes"))),
+            })
+            .collect();
+        let starts: Vec<usize> = take(times)?.iter().map(|&i| usize::from(i)).collect();
+        let records = take(types * 6)?.to_vec();
+        let names = take(chars)?.to_vec();
+        take(leaps * (wide + 4) + isstd + isut)?;
+        let types: Vec<Fix> = records
+            .chunks(6)
+            .map(|r| {
+                let from = usize::from(r[5]).min(names.len());
+                let name = names[from..].split(|&b| b == 0).next().unwrap_or_default();
+                Fix {
+                    east: i64::from(i32::from_be_bytes([r[0], r[1], r[2], r[3]])),
+                    dst: r[4] != 0,
+                    name: Arc::new(Text::new(String::from_utf8_lossy(name).into())),
+                }
+            })
+            .collect();
+        if types.is_empty() || starts.iter().any(|&i| i >= types.len()) {
+            return None;
+        }
+        let footer = if wide == 8 { data.get(at..) } else { None };
+        let after = footer
+            .and_then(|rest| rest.strip_prefix(b"\n"))
+            .and_then(|rest| rest.split(|&b| b == b'\n').next())
+            .and_then(|rule| std::str::from_utf8(rule).ok())
+            .filter(|rule| !rule.is_empty())
+            .and_then(Posix::parse);
+        Some(Tzif {
+            times: instants,
+            starts,
+            types,
+            after,
+        })
+    }
+
+    /// The local time at `t`: before the first change, the first type
+    /// that is not daylight time, as glibc takes it; past the last, the
+    /// file's POSIX rule, when it has one.
+    fn at(&self, t: i64) -> Fix {
+        let n = self.times.partition_point(|&change| change <= t);
+        if n == 0 {
+            let first = self.types.iter().find(|fix| !fix.dst);
+            return first.unwrap_or(&self.types[0]).clone();
+        }
+        if n == self.times.len() {
+            if let Some(rule) = &self.after {
+                return rule.at(t);
+            }
+        }
+        self.types[self.starts[n - 1]].clone()
+    }
+
+    /// The offset of standard time at `t`: of the type in force when it is
+    /// not daylight time, else of the last standard type before it, past
+    /// the last change the rule's, else the first after it.
+    fn standard(&self, t: i64) -> i64 {
+        let fix = self.at(t);
+        if !fix.dst {
+            return fix.east;
+        }
+        let n = self.times.partition_point(|&change| change <= t);
+        if let (true, Some(rule)) = (n == self.times.len(), &self.after) {
+            return rule.std.east;
+        }
+        let earlier = self.starts[..n].iter().rev();
+        let mut types = earlier.chain(&self.starts[n..]).map(|&i| &self.types[i]);
+        types
+            .find(|other| !other.dst)
+            .map_or(fix.east, |other| other.east)
+    }
+}
+
+impl Posix {
+    fn parse(text: &str) -> Option<Posix> {
         let mut at = Cursor { text, at: 0 };
         let name = at.name()?;
         let std = Offset {
@@ -119,7 +313,7 @@ impl Zone {
             east: -at.offset()?,
         };
         if at.done() {
-            return Some(Zone { std, dst: None });
+            return Some(Posix { std, dst: None });
         }
         let name = at.name()?;
         let east = if at.peek().is_some_and(|c| c != b',') {
@@ -143,7 +337,7 @@ impl Zone {
         if !at.done() {
             return None;
         }
-        Some(Zone {
+        Some(Posix {
             std,
             dst: Some(Daylight {
                 offset: Offset { name, east },
@@ -153,8 +347,8 @@ impl Zone {
         })
     }
 
-    fn fixed(name: &str) -> Zone {
-        Zone {
+    fn fixed(name: &str) -> Posix {
+        Posix {
             std: Offset {
                 name: Arc::new(Text::new(name.into())),
                 east: 0,
@@ -189,25 +383,6 @@ impl Zone {
         } else {
             std
         }
-    }
-
-    /// mktime with tm_isdst of -1: the instant a wall-clock reading
-    /// (seconds since the epoch as if it were UTC) names, the daylight
-    /// reading when it occurs twice and the standard offset when it is
-    /// skipped.
-    fn instant(&self, wall: i64) -> i64 {
-        let mut offsets = Vec::with_capacity(2);
-        if let Some(dst) = &self.dst {
-            offsets.push((dst.offset.east, true));
-        }
-        offsets.push((self.std.east, false));
-        for (east, dst) in offsets {
-            let t = wall - east;
-            if self.at(t).dst == dst {
-                return t;
-            }
-        }
-        wall - self.std.east
     }
 }
 
@@ -395,7 +570,7 @@ impl Tm {
             Fix {
                 east: 0,
                 dst: false,
-                name: Arc::new(Text::new("UTC".into())),
+                name: Arc::new(Text::new("GMT".into())),
             },
             |z| z.at(t),
         );
@@ -421,9 +596,14 @@ impl Tm {
         })
     }
 
+    /// The year as jq prints it, tm_year plus 1900 in an int.
+    fn shown_year(&self) -> i64 {
+        shown(self.year)
+    }
+
     fn jv(&self, fsecs: f64) -> Value {
         Value::array(vec![
-            Value::number(self.year as f64),
+            Value::number(self.shown_year() as f64),
             Value::number(self.mon as f64),
             Value::number(self.mday as f64),
             Value::number(self.hour as f64),
@@ -493,11 +673,27 @@ fn read(value: &Value, zone: Option<&Zone>) -> Option<Tm> {
     }
 }
 
+/// A year as tm_year plus 1900 comes out of an int, wrapping past its
+/// largest.
+fn shown(year: i64) -> i64 {
+    i64::from(((year - 1900) as i32).wrapping_add(1900))
+}
+
+/// A double as x86-64 converts it to time_t: NaN and values out of range
+/// become the lowest.
+fn time_t(secs: f64) -> i64 {
+    if (-9.223_372_036_854_776e18..9.223_372_036_854_776e18).contains(&secs) {
+        secs as i64
+    } else {
+        i64::MIN
+    }
+}
+
 fn gmtime(input: &Value, zone: Option<&Zone>, name: &str) -> Answer {
     let Some(fsecs) = input.as_f64() else {
         return Err(fail(format!("{name}() requires numeric inputs")));
     };
-    match Tm::at(fsecs as i64, zone) {
+    match Tm::at(time_t(fsecs), zone) {
         Some(tm) => Ok(tm.jv(fsecs)),
         None => Err(fail(CONVERT)),
     }
@@ -517,7 +713,13 @@ fn mktime(input: &Value) -> Answer {
     }
 }
 
-fn strftime(input: &Value, format: &Value, local: Option<&Zone>, name: &str) -> Answer {
+fn strftime(
+    input: &Value,
+    format: &Value,
+    local: Option<&Zone>,
+    process: &Zone,
+    name: &str,
+) -> Answer {
     let array = match input {
         Value::Number(_) => gmtime(input, local, name)?,
         Value::Array(_) => input.clone(),
@@ -526,38 +728,75 @@ fn strftime(input: &Value, format: &Value, local: Option<&Zone>, name: &str) -> 
     let Value::String(format) = format else {
         return Err(fail(format!("{name}/1 requires a string format")));
     };
-    let Some(tm) = read(&array, local) else {
+    let Some(mut tm) = read(&array, local) else {
         return Err(fail(format!("{name}/1 requires parsed datetime inputs")));
     };
+    if local.is_none() {
+        tm.epoch = process.standard(tm.epoch);
+    }
     let format = until_nul(format);
-    let mut out = String::new();
-    render(format, &tm, &mut out, format.len() + 100);
+    let cap = format.len() + 100;
+    let mut out = Vec::new();
+    let fits = render(format.as_bytes(), &tm, &mut out, cap);
     let mut charge = Charge::open(out.capacity());
-    if (out.is_empty() && !format.is_empty()) || out.len() >= format.len() + 100 {
+    if !fits || (out.is_empty() && !format.is_empty()) {
         return Err(fail(format!("{name}/1: unknown system failure")));
     }
     charge.set(0);
-    Ok(Value::string(out))
+    Ok(Value::string(String::from_utf8_lossy(&out).into_owned()))
 }
 
 fn until_nul(text: &str) -> &str {
     text.split('\0').next().unwrap_or("")
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum Pad {
-    Zero,
-    Space,
-    None,
+/// The conversions an `E` modifier makes glibc's strftime print as they
+/// are written, and those an `O` does.
+const E_REFUSED: &[u8] = b"aAbBdDeFgGhHIjklmMSUVwW";
+const O_REFUSED: &[u8] = b"aAcDFxXY";
+
+/// A conversion's flags: the padding asked for (`_`, `-` or `0`), `^`,
+/// `#`, and the width.
+#[derive(Clone, Copy, Default)]
+struct Flags {
+    pad: Option<u8>,
+    upper: bool,
+    swap: bool,
+    width: Option<usize>,
 }
 
-fn number(out: &mut String, value: i64, width: usize, fill: Pad, flag: Option<Pad>) {
-    let pad = flag.unwrap_or(fill);
-    match pad {
-        Pad::Zero => out.push_str(&format!("{value:0width$}")),
-        Pad::Space => out.push_str(&format!("{value:width$}")),
-        Pad::None => out.push_str(&value.to_string()),
+/// Text right-aligned in the width, padded with zeros under `0` and with
+/// spaces otherwise.
+fn text(out: &mut Vec<u8>, text: &[u8], flags: Flags) {
+    let fill = if flags.pad == Some(b'0') { b'0' } else { b' ' };
+    let padding = flags.width.unwrap_or(0).saturating_sub(text.len());
+    out.extend(std::iter::repeat_n(fill, padding));
+    out.extend_from_slice(text);
+}
+
+/// A number at least `natural` characters wide with its sign: zeros after
+/// the sign or spaces before it, as the flags or the conversion (`zero`)
+/// say, and under `-` spaces up to an explicit width only.
+fn number(out: &mut Vec<u8>, value: i64, natural: usize, zero: bool, flags: Flags) {
+    let width = flags.width.unwrap_or(0);
+    let (fill, width) = match flags.pad {
+        Some(b'-') => (b' ', width),
+        Some(b'_') => (b' ', width.max(natural)),
+        Some(_) => (b'0', width.max(natural)),
+        None => (if zero { b'0' } else { b' ' }, width.max(natural)),
+    };
+    let digits = value.unsigned_abs().to_string();
+    let padding = width.saturating_sub(digits.len() + usize::from(value < 0));
+    if fill == b' ' {
+        out.extend(std::iter::repeat_n(b' ', padding));
     }
+    if value < 0 {
+        out.push(b'-');
+    }
+    if fill == b'0' {
+        out.extend(std::iter::repeat_n(b'0', padding));
+    }
+    out.extend_from_slice(digits.as_bytes());
 }
 
 fn weeks(year: i64) -> i64 {
@@ -582,144 +821,278 @@ fn iso_week(tm: &Tm) -> (i64, i64) {
     }
 }
 
-/// Write `format`'s expansion, stopping once it holds `cap` bytes, which is
-/// as long as strftime would be let to write.
-fn render(format: &str, tm: &Tm, out: &mut String, cap: usize) {
-    let mut chars = format.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '%' {
-            out.push(c);
+/// Write `format`'s expansion as glibc's strftime does, false once it
+/// would not fit in `cap` bytes. A directive glibc does not know, or a
+/// modifier on a conversion that refuses it, is written as it stands,
+/// padded to its width and uppercased under `^`.
+fn render(format: &[u8], tm: &Tm, out: &mut Vec<u8>, cap: usize) -> bool {
+    let mut at = 0;
+    while at < format.len() {
+        if out.len() >= cap {
+            return false;
+        }
+        let start = at;
+        at += 1;
+        if format[start] != b'%' {
+            out.push(format[start]);
             continue;
         }
-        let mut flag = None;
-        let mut alternative = false;
-        let mut conv = chars.next();
-        while let Some(m) = conv {
-            if chars.peek().is_none() {
-                break;
+        let mut flags = Flags::default();
+        while let Some(&flag) = format.get(at).filter(|f| b"_-0^#".contains(f)) {
+            match flag {
+                b'^' => flags.upper = true,
+                b'#' => flags.swap = true,
+                _ => flags.pad = Some(flag),
             }
-            match m {
-                '-' | '_' | '0' if flag.is_none() => {
-                    flag = Some(match m {
-                        '-' => Pad::None,
-                        '_' => Pad::Space,
-                        _ => Pad::Zero,
-                    });
-                }
-                'E' | 'O' if !alternative => alternative = true,
-                _ => break,
-            }
-            conv = chars.next();
+            at += 1;
         }
-        let Some(conv) = conv else {
-            out.push('%');
-            break;
+        while let Some(&digit) = format.get(at).filter(|d| d.is_ascii_digit()) {
+            let width = flags.width.unwrap_or(0).saturating_mul(10);
+            flags.width = Some(width.saturating_add(usize::from(digit - b'0')));
+            at += 1;
+        }
+        if flags.width.is_some_and(|width| width >= cap) {
+            return false;
+        }
+        let modifier = format.get(at).copied().filter(|m| matches!(m, b'E' | b'O'));
+        at += usize::from(modifier.is_some());
+        let conv = format.get(at).copied();
+        at += usize::from(conv.is_some());
+        let refused = match (modifier, conv) {
+            (_, None) => true,
+            (Some(b'E'), Some(c)) => E_REFUSED.contains(&c),
+            (Some(_), Some(c)) => O_REFUSED.contains(&c),
+            (None, Some(_)) => false,
         };
-        conversion(conv, flag, tm, out);
-        if out.len() >= cap {
-            break;
+        if refused || conversion(conv.unwrap_or(0), flags, tm, out).is_none() {
+            let mut written = format[start..at].to_vec();
+            if flags.upper {
+                written.make_ascii_uppercase();
+            }
+            let fill = Flags {
+                pad: flags.pad.filter(|&pad| pad == b'0'),
+                ..flags
+            };
+            text(out, &written, fill);
         }
     }
+    out.len() < cap
 }
 
-fn conversion(conv: char, flag: Option<Pad>, tm: &Tm, out: &mut String) {
+fn composite(format: &[u8], tm: &Tm) -> Vec<u8> {
+    let mut out = Vec::new();
+    render(format, tm, &mut out, usize::MAX);
+    out
+}
+
+/// Write one conversion, or None for one glibc does not know.
+fn conversion(conv: u8, flags: Flags, tm: &Tm, out: &mut Vec<u8>) -> Option<()> {
+    let year = tm.shown_year();
     let hour12 = if tm.hour % 12 == 0 { 12 } else { tm.hour % 12 };
     let (iso_year, iso) = iso_week(tm);
+    let iso_year = year + iso_year - tm.year;
     let weekday = tm.wday.rem_euclid(7) as usize;
     let month = tm.mon.rem_euclid(12) as usize;
-    match conv {
-        'a' => out.push_str(&WEEKDAYS[weekday][..3]),
-        'A' => out.push_str(WEEKDAYS[weekday]),
-        'b' | 'h' => out.push_str(&MONTHS[month][..3]),
-        'B' => out.push_str(MONTHS[month]),
-        'c' => render("%a %b %e %H:%M:%S %Y", tm, out, usize::MAX),
-        'C' => {
-            let century = tm.year / 100;
-            if tm.year < 0 && century == 0 {
-                out.push_str("-0");
-            } else {
-                number(out, century, 2, Pad::Zero, None);
-            }
-        }
-        'd' => number(out, tm.mday, 2, Pad::Zero, flag),
-        'D' | 'x' => render("%m/%d/%y", tm, out, usize::MAX),
-        'e' => number(out, tm.mday, 2, Pad::Space, flag),
-        'F' => render("%Y-%m-%d", tm, out, usize::MAX),
-        'g' => number(out, (iso_year % 100).abs(), 2, Pad::Zero, None),
-        'G' => number(out, iso_year, 4, Pad::Zero, None),
-        'H' => number(out, tm.hour, 2, Pad::Zero, flag),
-        'I' => number(out, hour12, 2, Pad::Zero, flag),
-        'j' => number(out, tm.yday + 1, 3, Pad::Zero, flag),
-        'k' => number(out, tm.hour, 2, Pad::Space, flag),
-        'l' => number(out, hour12, 2, Pad::Space, flag),
-        'm' => number(out, tm.mon + 1, 2, Pad::Zero, flag),
-        'M' => number(out, tm.min, 2, Pad::Zero, flag),
-        'n' => out.push('\n'),
-        'p' => out.push_str(if tm.hour >= 12 { "PM" } else { "AM" }),
-        'r' => render("%I:%M:%S %p", tm, out, usize::MAX),
-        'R' => render("%H:%M", tm, out, usize::MAX),
-        's' => out.push_str(&tm.epoch.to_string()),
-        'S' => number(out, tm.sec, 2, Pad::Zero, flag),
-        't' => out.push('\t'),
-        'T' | 'X' => render("%H:%M:%S", tm, out, usize::MAX),
-        'u' => out.push_str(&(if tm.wday == 0 { 7 } else { tm.wday }).to_string()),
-        'U' => number(out, (tm.yday + 7 - tm.wday) / 7, 2, Pad::Zero, flag),
-        'v' => render("%e-%b-%Y", tm, out, usize::MAX),
-        'V' => number(out, iso, 2, Pad::Zero, flag),
-        'w' => out.push_str(&tm.wday.to_string()),
-        'W' => number(
-            out,
-            (tm.yday + 7 - (tm.wday + 6) % 7) / 7,
-            2,
-            Pad::Zero,
-            flag,
-        ),
-        'y' => number(out, (tm.year % 100).abs(), 2, Pad::Zero, None),
-        'Y' => number(out, tm.year, 4, Pad::Zero, None),
-        'z' => {
+    let mut words: Vec<u8> = match conv {
+        b'a' => WEEKDAYS[weekday][..3].into(),
+        b'A' => WEEKDAYS[weekday].into(),
+        b'b' | b'h' => MONTHS[month][..3].into(),
+        b'B' => MONTHS[month].into(),
+        b'c' => composite(b"%a %b %e %H:%M:%S %Y", tm),
+        b'D' | b'x' => composite(b"%m/%d/%y", tm),
+        b'F' => composite(b"%Y-%m-%d", tm),
+        b'n' => b"\n".into(),
+        b't' => b"\t".into(),
+        b'%' => b"%".into(),
+        b'p' => (if tm.hour >= 12 { "PM" } else { "AM" }).into(),
+        b'P' => (if tm.hour >= 12 { "pm" } else { "am" }).into(),
+        b'r' => composite(b"%I:%M:%S %p", tm),
+        b'R' => composite(b"%H:%M", tm),
+        b'T' | b'X' => composite(b"%H:%M:%S", tm),
+        b's' => tm.epoch.to_string().into(),
+        b'Z' => tm.zone.as_bytes().into(),
+        b'z' => {
             let minutes = tm.east.abs() / 60;
-            let sign = if tm.east < 0 { '-' } else { '+' };
-            out.push(sign);
-            number(out, minutes / 60 * 100 + minutes % 60, 4, Pad::Zero, flag);
+            text(out, if tm.east < 0 { b"-" } else { b"+" }, flags);
+            number(out, minutes / 60 * 100 + minutes % 60, 4, true, flags);
+            return Some(());
         }
-        'Z' => out.push_str(&tm.zone),
-        '+' => render("%a %b %e %H:%M:%S %Z %Y", tm, out, usize::MAX),
-        other => out.push(other),
+        _ => {
+            let (value, natural, zero) = match conv {
+                b'C' => (year.div_euclid(100), 1, true),
+                b'd' => (tm.mday, 2, true),
+                b'e' => (tm.mday, 2, false),
+                b'g' => (iso_year.rem_euclid(100), 2, true),
+                b'G' => (iso_year, 1, true),
+                b'H' => (tm.hour, 2, true),
+                b'I' => (hour12, 2, true),
+                b'j' => (tm.yday + 1, 3, true),
+                b'k' => (tm.hour, 2, false),
+                b'l' => (hour12, 2, false),
+                b'm' => (tm.mon + 1, 2, true),
+                b'M' => (tm.min, 2, true),
+                b'S' => (tm.sec, 2, true),
+                b'u' => (if tm.wday == 0 { 7 } else { tm.wday }, 1, true),
+                b'U' => ((tm.yday + 7 - tm.wday) / 7, 2, true),
+                b'V' => (iso, 2, true),
+                b'w' => (tm.wday, 1, true),
+                b'W' => ((tm.yday + 7 - (tm.wday + 6) % 7) / 7, 2, true),
+                b'y' => (tm.year.rem_euclid(100), 2, true),
+                b'Y' => (year, 1, true),
+                _ => return None,
+            };
+            number(out, value, natural, zero, flags);
+            return Some(());
+        }
+    };
+    match conv {
+        b'p' | b'Z' if flags.swap => words.make_ascii_lowercase(),
+        b'a' | b'A' | b'b' | b'B' | b'h' if flags.upper || flags.swap => {
+            words.make_ascii_uppercase();
+        }
+        b'P' => {}
+        _ if flags.upper => words.make_ascii_uppercase(),
+        _ => {}
     }
+    text(out, &words, flags);
+    Some(())
 }
 
 fn is_space(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
 }
 
-/// What a strptime format has read so far.
-#[derive(Default)]
-struct Scan {
-    year: i32,
-    mon: i32,
-    mday: i32,
-    hour: i32,
-    min: i32,
-    sec: i32,
-    yday: Option<i32>,
-    week: Option<(Week, i32)>,
-    wday: Option<i32>,
-    year_read: bool,
-    mon_read: bool,
-    mday_read: bool,
-    century: Option<i32>,
-    short_year: bool,
-    year_specs: u32,
-    two_digit_years: u32,
-    offset: Option<i32>,
-    normalize: bool,
+/// The days before each month in a common year then in a leap year.
+const MONTH_STARTS: [i64; 26] = [
+    0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365, 0, 31, 60, 91, 121, 152, 182, 213,
+    244, 274, 305, 335, 366,
+];
+
+/// The days before month `mon` as glibc's strptime reads them: from the
+/// year's row of the month starts and on past its end, through the leap
+/// year's row, with the month before January taken as the day before
+/// that row starts.
+fn month_start(leap: bool, mon: i64) -> i64 {
+    match usize::try_from(mon + if leap { 13 } else { 0 }) {
+        Ok(at) => MONTH_STARTS.get(at).copied().unwrap_or(i64::MAX),
+        Err(_) => 0,
+    }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+/// The weekday glibc's strptime works out for a date, counting the leap
+/// days before it with division that truncates, which puts January and
+/// February of year 0 a day late.
+fn weekday(year: i64, mon: i64, mday: i64) -> i64 {
+    let leaps = |y: i64| y / 4 - y / 100 + y / 400;
+    let before = year - i64::from(mon < 2);
+    let days =
+        365 * (year - 1970) + leaps(before) - leaps(1969) + month_start(false, mon) + mday - 1;
+    (days + 4).rem_euclid(7)
+}
+
+#[derive(Clone, Copy)]
 enum Week {
     Sunday,
     Monday,
-    Iso,
+}
+
+/// What a strptime format has read: struct tm's fields, with 8 and 367 in
+/// the weekday and the day of the year until something sets them, as jq
+/// starts them, and what the input named.
+struct Scan {
+    year: i64,
+    mon: i64,
+    mday: i64,
+    hour: i64,
+    min: i64,
+    sec: i64,
+    wday: i64,
+    yday: i64,
+    have_wday: bool,
+    have_yday: bool,
+    have_mon: bool,
+    have_mday: bool,
+    dated: bool,
+    twelve: bool,
+    pm: Option<bool>,
+    century: Option<i64>,
+    short: Option<i64>,
+    week: Option<(Week, i64)>,
+}
+
+impl Default for Scan {
+    fn default() -> Self {
+        Scan {
+            year: 1900,
+            mon: 0,
+            mday: 0,
+            hour: 0,
+            min: 0,
+            sec: 0,
+            wday: 8,
+            yday: 367,
+            have_wday: false,
+            have_yday: false,
+            have_mon: false,
+            have_mday: false,
+            dated: false,
+            twelve: false,
+            pm: None,
+            century: None,
+            short: None,
+            week: None,
+        }
+    }
+}
+
+impl Scan {
+    /// The month and the day of the month the day of the year falls in,
+    /// for whichever the input did not name.
+    fn walk(&mut self) {
+        let leap = is_leap(self.year);
+        let mut mon = 0;
+        while self.yday >= month_start(leap, mon) {
+            mon += 1;
+        }
+        if !self.have_mon {
+            self.mon = mon - 1;
+        }
+        if !self.have_mday {
+            self.mday = self.yday - month_start(leap, mon - 1) + 1;
+        }
+    }
+
+    /// What glibc's strptime works out once the format is read: the hour
+    /// `%p` moves, the year `%C` names, then the weekday and the day of the
+    /// year a date gives, and the date a week number and a weekday give.
+    fn finish(&mut self) {
+        if self.twelve && self.pm == Some(true) {
+            self.hour += 12;
+        }
+        if let Some(century) = self.century {
+            self.year = century * 100 + self.short.unwrap_or(0);
+        }
+        if self.dated && !self.have_wday {
+            if !(self.have_mon && self.have_mday) && self.have_yday {
+                self.walk();
+            }
+            self.wday = weekday(self.year, self.mon, self.mday);
+        }
+        if self.dated && !self.have_yday {
+            self.yday = month_start(is_leap(self.year), self.mon) + self.mday - 1;
+        }
+        if let (Some((week, n)), true) = (self.week, self.have_wday) {
+            if !self.have_yday {
+                let first = weekday(self.year, 0, 1);
+                let day = match week {
+                    Week::Sunday => (7 - first) % 7 + self.wday,
+                    Week::Monday => (8 - first) % 7 + (self.wday + 6) % 7,
+                };
+                self.yday = (n - 1) * 7 + day;
+            }
+            self.walk();
+        }
+    }
 }
 
 struct Reader<'a> {
@@ -734,50 +1107,32 @@ impl Reader<'_> {
         &self.input[self.at..]
     }
 
-    fn ended(&self) -> bool {
-        self.rest().first().is_none_or(|b| is_space(*b))
-    }
-
     fn skip_space(&mut self) {
         while self.rest().first().is_some_and(|b| is_space(*b)) {
             self.at += 1;
         }
     }
 
-    /// Up to `width` characters of digits, with a sign counting toward the
-    /// width when `signed`.
-    fn digits(&mut self, width: usize, signed: bool) -> Option<i32> {
+    /// Past white space, one to `width` digits in `low..=high`.
+    fn number(&mut self, width: usize, low: i64, high: i64) -> Option<i64> {
+        self.skip_space();
         let rest = self.rest();
-        let mut len = 0;
-        let negative = signed && rest.first() == Some(&b'-');
-        if signed && matches!(rest.first(), Some(b'-' | b'+')) {
-            len = 1;
+        let len = rest
+            .iter()
+            .take(width)
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        if len == 0 {
+            return None;
         }
-        let start = len;
-        while len < width && rest.get(len).is_some_and(u8::is_ascii_digit) {
-            len += 1;
-        }
-        if len == start {
-            if start == 0 {
-                return None;
-            }
-            self.at += len;
-            return Some(0);
-        }
-        let mut value: i32 = 0;
-        for b in &rest[start..len] {
-            value = value * 10 + i32::from(b - b'0');
-        }
+        let value = rest[..len].iter().fold(0i64, |v, b| {
+            v.saturating_mul(10).saturating_add(i64::from(b - b'0'))
+        });
         self.at += len;
-        Some(if negative { -value } else { value })
+        (low..=high).contains(&value).then_some(value)
     }
 
-    fn ranged(&mut self, width: usize, low: i32, high: i32) -> Option<i32> {
-        self.digits(width, false)
-            .filter(|v| (low..=high).contains(v))
-    }
-
-    fn name(&mut self, names: &[&str]) -> Option<usize> {
+    fn name(&mut self, names: &[&str]) -> Option<i64> {
         for long in [true, false] {
             for (index, name) in names.iter().enumerate() {
                 let name = if long { name } else { &name[..3] };
@@ -786,7 +1141,7 @@ impl Reader<'_> {
                     && rest[..name.len()].eq_ignore_ascii_case(name.as_bytes())
                 {
                     self.at += name.len();
-                    return Some(index);
+                    return Some(index as i64);
                 }
             }
         }
@@ -794,12 +1149,11 @@ impl Reader<'_> {
     }
 
     fn literal(&mut self, byte: u8) -> Option<()> {
-        if self.rest().first() == Some(&byte) {
-            self.at += 1;
-            Some(())
-        } else {
-            None
+        if self.rest().first() != Some(&byte) {
+            return None;
         }
+        self.at += 1;
+        Some(())
     }
 
     fn run(&mut self, format: &[u8]) -> Option<()> {
@@ -807,23 +1161,31 @@ impl Reader<'_> {
         while at < format.len() {
             let c = format[at];
             at += 1;
-            if c != b'%' {
-                if is_space(c) {
-                    self.skip_space();
-                } else {
-                    self.literal(c)?;
-                }
+            if is_space(c) {
+                self.skip_space();
                 continue;
             }
-            let mut conv = *format.get(at)?;
-            at += 1;
-            if matches!(conv, b'E' | b'O') {
-                conv = *format.get(at)?;
+            if c != b'%' {
+                self.literal(c)?;
+                continue;
+            }
+            while format.get(at).is_some_and(|f| b"_-0^#".contains(f)) {
                 at += 1;
             }
-            while conv.is_ascii_digit() {
-                conv = *format.get(at)?;
+            while format.get(at).is_some_and(u8::is_ascii_digit) {
                 at += 1;
+            }
+            let modifier = format.get(at).copied().filter(|m| matches!(m, b'E' | b'O'));
+            at += usize::from(modifier.is_some());
+            let conv = *format.get(at)?;
+            at += 1;
+            let allowed = match modifier {
+                None => true,
+                Some(b'E') => b"cCxXY".contains(&conv),
+                Some(_) => b"bBdehHImMSUVwWy".contains(&conv),
+            };
+            if !allowed {
+                return None;
             }
             self.conversion(conv)?;
         }
@@ -833,262 +1195,155 @@ impl Reader<'_> {
     fn conversion(&mut self, conv: u8) -> Option<()> {
         match conv {
             b'%' => self.literal(b'%')?,
-            b'Y' => {
-                if !self.ended() {
-                    self.scan.year = self.digits(4, true)? - 1900;
-                    self.scan.short_year = false;
-                    self.scan.century = None;
-                    self.scan.year_specs += 1;
-                    self.scan.year_read = true;
-                }
+            b'n' | b't' => self.skip_space(),
+            b'a' | b'A' => {
+                self.scan.wday = self.name(&WEEKDAYS)?;
+                self.scan.have_wday = true;
             }
-            b'y' => {
-                if !self.ended() {
-                    let v = self.digits(2, true)?;
-                    let year = if v < 69 { v + 100 } else { v };
-                    match self.scan.century.take() {
-                        Some(century) => self.scan.year = year % 100 + (century - 19) * 100,
-                        None => {
-                            self.scan.year = year;
-                            self.scan.short_year = true;
-                        }
-                    }
-                    self.scan.year_specs += 1;
-                    self.scan.two_digit_years += 1;
-                    self.scan.year_read = true;
-                }
+            b'b' | b'B' | b'h' => {
+                self.scan.mon = self.name(&MONTHS)?;
+                self.scan.have_mon = true;
+                self.scan.dated = true;
             }
+            b'c' => self.run(b"%a %b %e %H:%M:%S %Y")?,
             b'C' => {
-                let century = self.digits(2, true)?;
-                let base = if self.scan.short_year {
-                    self.scan.year % 100
-                } else {
-                    0
-                };
-                self.scan.year = base + (century - 19) * 100;
-                self.scan.century = (!self.scan.short_year).then_some(century);
-                self.scan.short_year = false;
-                self.scan.year_read = true;
-            }
-            b'm' => {
-                self.scan.mon = self.ranged(2, 1, 12)? - 1;
-                self.scan.mon_read = true;
+                self.scan.century = Some(self.number(2, 0, 99)?);
+                self.scan.dated = true;
             }
             b'd' | b'e' => {
-                self.skip_space();
-                self.scan.mday = self.ranged(2, 0, 31)?;
-                self.scan.mday_read = true;
+                self.scan.mday = self.number(2, 1, 31)?;
+                self.scan.have_mday = true;
+                self.scan.dated = true;
             }
-            b'H' | b'k' => self.scan.hour = self.ranged(2, 0, 23)?,
-            b'I' | b'l' => self.scan.hour = self.ranged(2, 0, 12)?,
-            b'M' => {
-                if !self.ended() {
-                    self.scan.min = self.ranged(2, 0, 59)?;
-                }
+            b'D' | b'x' => self.run(b"%m/%d/%y")?,
+            b'F' => self.run(b"%Y-%m-%d")?,
+            b'g' => {
+                self.number(2, 0, 99)?;
             }
-            b'S' => {
-                if !self.ended() {
-                    self.scan.sec = self.ranged(2, 0, 60)?;
-                }
+            b'G' => {
+                self.number(usize::MAX, 0, i64::MAX)?;
             }
-            b'j' => self.scan.yday = Some(self.ranged(3, 1, 366)? - 1),
-            b'U' | b'W' => {
-                let week = if conv == b'U' {
-                    Week::Sunday
-                } else {
-                    Week::Monday
-                };
-                self.scan.week = Some((week, self.ranged(2, 0, 53)?));
+            b'H' | b'k' => {
+                self.scan.hour = self.number(2, 0, 23)?;
+                self.scan.twelve = false;
             }
-            b'V' => self.scan.week = Some((Week::Iso, self.ranged(2, 1, 53)?)),
-            b'w' => self.scan.wday = Some(self.ranged(1, 0, 6)?),
-            b'u' => self.scan.wday = Some(self.ranged(1, 1, 7)? % 7),
+            b'I' | b'l' => {
+                self.scan.hour = self.number(2, 1, 12)? % 12;
+                self.scan.twelve = true;
+            }
+            b'j' => {
+                self.scan.yday = self.number(3, 1, 366)? - 1;
+                self.scan.have_yday = true;
+            }
+            b'm' => {
+                self.scan.mon = self.number(2, 1, 12)? - 1;
+                self.scan.have_mon = true;
+                self.scan.dated = true;
+            }
+            b'M' => self.scan.min = self.number(2, 0, 59)?,
             b'p' => {
-                let rest = self.rest();
-                let hour = self.scan.hour;
-                if rest.len() >= 2 && rest[..2].eq_ignore_ascii_case(b"am") {
-                    if hour > 12 {
-                        return None;
-                    }
-                    if hour == 12 {
-                        self.scan.hour = 0;
-                    }
-                } else if rest.len() >= 2 && rest[..2].eq_ignore_ascii_case(b"pm") {
-                    if hour > 12 {
-                        return None;
-                    }
-                    if hour != 12 {
-                        self.scan.hour += 12;
-                    }
+                let half = self.rest().get(..2)?;
+                let pm = if half.eq_ignore_ascii_case(b"PM") {
+                    true
+                } else if half.eq_ignore_ascii_case(b"AM") {
+                    false
                 } else {
                     return None;
-                }
+                };
                 self.at += 2;
+                self.scan.pm = Some(pm);
             }
-            b'a' | b'A' => self.scan.wday = Some(self.name(&WEEKDAYS)? as i32),
-            b'b' | b'B' | b'h' => {
-                self.scan.mon = self.name(&MONTHS)? as i32;
-                self.scan.mon_read = true;
-            }
+            b'r' => self.run(b"%I:%M:%S %p")?,
+            b'R' => self.run(b"%H:%M")?,
             b's' => self.epoch()?,
+            b'S' => self.scan.sec = self.number(2, 0, 61)?,
+            b'T' | b'X' => self.run(b"%H:%M:%S")?,
+            b'u' => {
+                self.scan.wday = self.number(1, 1, 7)? % 7;
+                self.scan.have_wday = true;
+            }
+            b'U' => self.scan.week = Some((Week::Sunday, self.number(2, 0, 53)?)),
+            b'V' => {
+                self.number(2, 0, 53)?;
+            }
+            b'w' => {
+                self.scan.wday = self.number(1, 0, 6)?;
+                self.scan.have_wday = true;
+            }
+            b'W' => self.scan.week = Some((Week::Monday, self.number(2, 0, 53)?)),
+            b'y' => {
+                let short = self.number(2, 0, 99)?;
+                self.scan.year = short + if short < 69 { 2000 } else { 1900 };
+                self.scan.short = Some(short);
+                self.scan.dated = true;
+            }
+            b'Y' => {
+                self.scan.year = self.number(4, 0, 9999)?;
+                self.scan.short = None;
+                self.scan.dated = true;
+            }
             b'z' => self.offset()?,
             b'Z' => {
-                let rest = self.rest();
-                let len = rest.iter().take_while(|b| b.is_ascii_uppercase()).count();
-                let name = std::str::from_utf8(&rest[..len]).ok()?;
-                let local = self.zone.is_some_and(|z| {
-                    name == z.std.name.as_str()
-                        || z.dst
-                            .as_ref()
-                            .is_some_and(|d| name == d.offset.name.as_str())
-                });
-                if !(matches!(name, "UTC" | "GMT") || local) {
-                    return None;
-                }
-                self.scan.normalize |= name == "GMT";
+                self.skip_space();
+                let len = self.rest().iter().take_while(|b| !is_space(**b)).count();
                 self.at += len;
             }
-            b'n' | b't' => {
-                if !self.rest().first().is_some_and(|b| is_space(*b)) {
-                    return None;
-                }
-                self.skip_space();
-            }
-            b'c' => self.nested(b"%a %b %e %H:%M:%S %Y")?,
-            b'D' | b'x' => self.nested(b"%m/%d/%y")?,
-            b'F' => self.nested(b"%Y-%m-%d")?,
-            b'R' => self.nested(b"%H:%M")?,
-            b'r' => self.nested(b"%I:%M:%S %p")?,
-            b'T' | b'X' => self.nested(b"%H:%M:%S")?,
             _ => return None,
         }
         Some(())
     }
 
-    fn nested(&mut self, format: &[u8]) -> Option<()> {
-        let century = self.scan.century.take();
-        let year_read = self.scan.year_read;
-        let specs = self.scan.year_specs;
-        let two_digit = self.scan.two_digit_years;
-        self.run(format)?;
-        if self.scan.year_specs == specs {
-            self.scan.century = century;
-        }
-        if self.scan.two_digit_years != two_digit {
-            self.scan.short_year = false;
-        }
-        self.scan.year_read = year_read;
-        Some(())
-    }
-
+    /// `%s`: digits, the seconds since the epoch, read as local time into
+    /// every field.
     fn epoch(&mut self) -> Option<()> {
         let rest = self.rest();
-        let space = rest.iter().take_while(|b| is_space(**b)).count();
-        let rest = &rest[space..];
-        let mut len = usize::from(matches!(rest.first(), Some(b'-' | b'+')));
-        let start = len;
-        while rest.get(len).is_some_and(u8::is_ascii_digit) {
-            len += 1;
-        }
-        let mut t = 0;
-        if len > start {
-            t = std::str::from_utf8(&rest[..len]).ok()?.parse().ok()?;
-            self.at += space + len;
-        }
+        let len = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+        let t: i64 = std::str::from_utf8(&rest[..len]).ok()?.parse().ok()?;
         let tm = Tm::at(t, self.zone)?;
-        self.scan = Scan {
-            year: (tm.year - 1900) as i32,
-            mon: tm.mon as i32,
-            mday: tm.mday as i32,
-            hour: tm.hour as i32,
-            min: tm.min as i32,
-            sec: tm.sec as i32,
-            mon_read: true,
-            mday_read: true,
-            normalize: true,
-            ..Scan::default()
-        };
+        self.at += len;
+        let scan = &mut self.scan;
+        (scan.year, scan.mon, scan.mday) = (tm.year, tm.mon, tm.mday);
+        (scan.hour, scan.min, scan.sec) = (tm.hour, tm.min, tm.sec);
+        (scan.wday, scan.yday) = (tm.wday, tm.yday);
+        scan.have_mon = true;
+        scan.have_mday = true;
+        scan.dated = true;
         Some(())
     }
 
+    /// `%z`: `Z`, or a sign, two digits of hours and optionally two of
+    /// minutes, after a colon or not. glibc keeps the offset out of the
+    /// fields jq reads.
     fn offset(&mut self) -> Option<()> {
-        let sign = match self.rest().first()? {
-            b'+' => 1,
-            b'-' => -1,
-            _ => return None,
+        self.skip_space();
+        let rest = self.rest();
+        if rest.first() == Some(&b'Z') {
+            self.at += 1;
+            return Some(());
+        }
+        let digit = |i: usize| rest.get(i).is_some_and(u8::is_ascii_digit);
+        if !matches!(rest.first(), Some(b'+' | b'-')) || !(digit(1) && digit(2)) {
+            return None;
+        }
+        let len = match rest.get(3) {
+            Some(b':') if digit(4) && digit(5) => 6,
+            Some(b':') => return None,
+            _ if digit(3) && digit(4) => 5,
+            _ if digit(3) => return None,
+            _ => 3,
         };
-        self.at += 1;
-        let hours = self.digits(2, false)?;
-        let minutes = self.digits(2, false)?;
-        self.scan.offset = Some(sign * (hours * 3600 + minutes * 60));
+        if len > 3 && (rest[len - 2] - b'0') * 10 + (rest[len - 1] - b'0') > 59 {
+            return None;
+        }
+        self.at += len;
         Some(())
     }
-}
-
-/// set_tm_wday.
-fn weekday(year: i32, mon: i32, mday: i32) -> i32 {
-    let full = i64::from(year) + 1900;
-    let century = full / 100;
-    let mut y = full % 100;
-    if mon < 2 {
-        y -= 1;
-    }
-    let mut m = i64::from(mon) - 1;
-    if m < 1 {
-        m += 12;
-    }
-    let sum = i64::from(mday)
-        + (2.6 * m as f64 - 0.2).floor() as i64
-        + y
-        + (y as f64 / 4.0).floor() as i64
-        + (century as f64 / 4.0).floor() as i64
-        - 2 * century;
-    let mut wday = sum % 7;
-    if wday < 0 {
-        wday += 7;
-    }
-    wday as i32
-}
-
-/// The days of the year before month `mon` starts.
-fn month_start(year: i32, mon: i32) -> i64 {
-    const DAYS: [i64; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
-    let leap = mon > 1 && is_leap(i64::from(year) + 1900);
-    DAYS[(mon.unsigned_abs() % 12) as usize] + i64::from(leap)
-}
-
-/// set_tm_yday.
-fn yearday(year: i32, mon: i32, mday: i32) -> i32 {
-    month_start(year, mon) as i32 + mday - 1
 }
 
 fn mismatch(text: &str, format: &str) -> Fault {
     fail(format!(
         "date \"{text}\" does not match format \"{format}\""
     ))
-}
-
-/// The day of the year a week number and day of the week name, where
-/// `first` is the weekday of January 1st.
-fn week_day(week: Week, n: i64, wday: Option<i32>, first: i64) -> i64 {
-    let monday = (first + 6) % 7;
-    let from_monday = i64::from(wday.map_or(0, |d| (d + 6) % 7));
-    let (lead, offset) = match week {
-        Week::Sunday => ((7 - first) % 7, i64::from(wday.unwrap_or(0)) - first),
-        Week::Monday => ((7 - monday) % 7, from_monday - monday),
-        Week::Iso => {
-            let start = if monday <= 3 { -monday } else { 7 - monday };
-            return start + (n - 1) * 7 + from_monday;
-        }
-    };
-    if n > 0 {
-        let day = i64::from(wday.map_or(0, |d| if week == Week::Sunday { d } else { (d + 6) % 7 }));
-        lead + (n - 1) * 7 + day
-    } else if offset < lead {
-        offset
-    } else {
-        -1
-    }
 }
 
 fn strptime(input: &Value, format: &Value, zone: Option<&Zone>) -> Answer {
@@ -1102,67 +1357,24 @@ fn strptime(input: &Value, format: &Value, zone: Option<&Zone>) -> Answer {
         scan: Scan::default(),
         zone,
     };
-    let matched = reader.run(format.as_bytes()).is_some() && reader.ended();
-    if !matched {
+    let read = reader.run(format.as_bytes()).is_some();
+    let rest = text.get(reader.at..).unwrap_or("");
+    if !read || rest.bytes().next().is_some_and(|b| !is_space(b)) {
         return Err(mismatch(text, format));
     }
     let mut scan = reader.scan;
-    let first = days_from_civil(i64::from(scan.year) + 1900, 1, 1);
-    let dated = scan.mon_read && scan.mday_read;
-    let yday = match (scan.yday, scan.week) {
-        _ if dated => None,
-        (Some(yday), _) => Some(i64::from(yday)),
-        (None, Some((week, n))) if scan.year_read => {
-            let yday = week_day(week, i64::from(n), scan.wday, (first + 4).rem_euclid(7));
-            if yday < 0 {
-                return Err(mismatch(text, format));
-            }
-            Some(yday)
-        }
-        _ => None,
-    };
-    if let Some(yday) = yday {
-        if scan.mon_read {
-            scan.mday = (yday + 1 - month_start(scan.year, scan.mon)) as i32;
-        } else {
-            let (year, month, day) = civil(first + yday);
-            scan.year = (year - 1900) as i32;
-            scan.mon = (month - 1) as i32;
-            scan.mday = day as i32;
-        }
-    }
-    let mut fields = Fields {
-        year: scan.year,
-        mon: scan.mon,
-        mday: scan.mday,
-        hour: scan.hour,
-        min: scan.min,
-        sec: scan.sec,
-    };
-    if scan.offset.is_some() || scan.normalize {
-        let offset = i64::from(scan.offset.unwrap_or(0));
-        if let Some(tm) = Tm::at(fields.wall() - offset, None) {
-            fields = Fields {
-                year: (tm.year - 1900) as i32,
-                mon: tm.mon as i32,
-                mday: tm.mday as i32,
-                hour: tm.hour as i32,
-                min: tm.min as i32,
-                sec: tm.sec as i32,
-            };
-        }
-    }
-    let mut items = vec![
-        Value::number(f64::from(fields.year) + 1900.0),
-        Value::number(f64::from(fields.mon)),
-        Value::number(f64::from(fields.mday)),
-        Value::number(f64::from(fields.hour)),
-        Value::number(f64::from(fields.min)),
-        Value::number(f64::from(fields.sec)),
-        Value::number(f64::from(weekday(fields.year, fields.mon, fields.mday))),
-        Value::number(f64::from(yearday(fields.year, fields.mon, fields.mday))),
+    scan.finish();
+    let fields = [
+        shown(scan.year),
+        scan.mon,
+        scan.mday,
+        scan.hour,
+        scan.min,
+        scan.sec,
+        scan.wday,
+        scan.yday,
     ];
-    let rest = text.get(reader.at..).unwrap_or("");
+    let mut items: Vec<Value> = fields.iter().map(|&f| Value::number(f as f64)).collect();
     if !rest.is_empty() {
         items.push(Value::string(rest));
     }
@@ -1173,19 +1385,13 @@ fn strptime(input: &Value, format: &Value, zone: Option<&Zone>) -> Answer {
 pub(crate) fn call(f: Cfunc, args: &[Value], clock: &Clock) -> Answer {
     let input = &args[0];
     let a = args.get(1).unwrap_or(&Value::Null);
-    let zone = clock.zone.as_deref();
+    let zone = Some(&*clock.zone);
     match f {
         Cfunc::Mktime => mktime(input),
         Cfunc::Gmtime => gmtime(input, None, "gmtime"),
-        Cfunc::Localtime => match zone {
-            Some(_) => gmtime(input, zone, "localtime"),
-            None => Err(fail("localtime is not available")),
-        },
-        Cfunc::Strftime => strftime(input, a, None, "strftime"),
-        Cfunc::StrfLocaltime => match zone {
-            Some(_) => strftime(input, a, zone, "strflocaltime"),
-            None => Err(fail("strflocaltime is not available")),
-        },
+        Cfunc::Localtime => gmtime(input, zone, "localtime"),
+        Cfunc::Strftime => strftime(input, a, None, &clock.zone, "strftime"),
+        Cfunc::StrfLocaltime => strftime(input, a, zone, &clock.zone, "strflocaltime"),
         Cfunc::Strptime => strptime(input, a, zone),
         _ => unreachable!("not a time builtin"),
     }

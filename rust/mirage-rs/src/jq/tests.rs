@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::compile::{Refusal, compile};
+use super::compile::compile;
 use super::eval::{DEBUG, ERROR, HALT, OUTPUT, STDERR};
 use super::meter::{self, Meter};
 use super::value::{Value, parse_json};
@@ -1024,11 +1024,7 @@ fn builtins_lists_jqs_names_in_jqs_order() {
             format!("{name}({args})")
         };
         let compiled = compile(&call, &HashMap::new());
-        if matches!(name, "gamma" | "jn") {
-            assert!(matches!(compiled, Err(Refusal::Unsupported(_))), "{call}");
-        } else {
-            assert!(compiled.is_ok(), "{call}");
-        }
+        assert!(compiled.is_ok(), "{call}");
     }
 }
 
@@ -1075,7 +1071,7 @@ fn modulemeta_and_imports_validate_paths_with_the_same_diagnostics() {
             "{path}"
         );
         assert_eq!(
-            invalid_report(&format!("import {input} as x; missing")),
+            refusal(&format!("import {input} as x; missing")),
             format!("jq: error: {message}\n\njq: 1 compile error"),
             "{path}"
         );
@@ -1090,46 +1086,39 @@ fn the_grammar_builds_as_bison_builds_jqs() {
     assert_eq!(tables.conflicts, 0);
 }
 
-fn refusal(program: &str) -> Refusal {
+fn refusal(program: &str) -> String {
     match compile(program, &HashMap::new()) {
         Ok(_) => panic!("{program:.40} compiles"),
-        Err(refusal) => refusal,
-    }
-}
-
-fn invalid_report(program: &str) -> String {
-    match refusal(program) {
-        Refusal::Invalid(report) => report,
-        Refusal::Unsupported(why) => panic!("unexpected fallback: {why}"),
+        Err(report) => report,
     }
 }
 
 #[test]
 fn programs_compile_or_get_jqs_report() {
-    assert!(invalid_report("if").ends_with("jq: 1 compile error"));
-    assert!(invalid_report("$x").ends_with("jq: 1 compile error"));
+    assert!(refusal("if").ends_with("jq: 1 compile error"));
+    assert!(refusal("$x").ends_with("jq: 1 compile error"));
     assert_eq!(
-        invalid_report("import \"a\" as a; ."),
+        refusal("import \"a\" as a; ."),
         "jq: error: module not found: a\n\njq: 1 compile error"
     );
     assert_eq!(
-        invalid_report("include \"a\"; $x"),
+        refusal("include \"a\"; $x"),
         "jq: error: module not found: a\n\njq: 1 compile error"
     );
     assert_eq!(
-        invalid_report("import \"a\" as a; import \"../b\" as b; ."),
+        refusal("import \"a\" as a; import \"../b\" as b; ."),
         "jq: error: Relative paths to modules may not traverse to parent directories (../b)\n\njq: 1 compile error"
     );
     assert_eq!(
-        invalid_report("$$$$x + $$$$y"),
+        refusal("$$$$x + $$$$y"),
         "jq: error: x/-1 is not defined at <top-level>, line 1, column 1:\n    $$$$x + $$$$y\n    ^^^^^\njq: error: y/-1 is not defined at <top-level>, line 1, column 9:\n    $$$$x + $$$$y\n            ^^^^^\njq: 2 compile errors"
     );
     assert_eq!(
-        invalid_report("\"\\\u{e9}\""),
+        refusal("\"\\\u{e9}\""),
         "jq: error: Invalid escape at line 1, column 6 (while parsing '\"\\\u{fffd}\"') at <top-level>, line 1, column 2:\n    \"\\\u{e9}\"\n     ^^\njq: 1 compile error"
     );
     assert_eq!(
-        invalid_report("\"\\\u{20ac}x\""),
+        refusal("\"\\\u{20ac}x\""),
         "jq: error: Unfinished string at EOF at line 1, column 5 (while parsing '\"\\\u{fffd}') at <top-level>, line 1, column 2:\n    \"\\\u{20ac}x\"\n     ^^\njq: 1 compile error"
     );
     for program in [
@@ -1142,37 +1131,37 @@ fn programs_compile_or_get_jqs_report() {
     }
 }
 
-/// jq folds `[1,2] - [2]` while it parses; this parser leaves that to
-/// run time, so metadata that needs it goes to libjq, and metadata that
-/// is not constant gets jq's error.
+/// jq folds `[1,2] - [2]` and `"ab" * 2` while it parses; this parser
+/// leaves them to run time, so metadata folds them itself, under the
+/// default limits, and metadata that is not constant gets jq's error.
 #[test]
-fn module_metadata_jq_folds_is_left_to_libjq() {
-    assert!(compile("module {a: [1,2], b: {c: 3}}; .", &HashMap::new()).is_ok());
+fn module_metadata_folds_what_jq_folds() {
     for program in [
+        "module {a: [1,2], b: {c: 3}}; .",
         "module {a: ([1,2] - [2])}; .",
         r#"module {a: ("ab" * 2)}; ."#,
         "module {a: [([1] - [1])]}; .",
     ] {
+        assert_eq!(outputs(program, "7"), vec!["7"], "{program}");
+    }
+    for program in [
+        "module {a: .}; .",
+        r#"module {a: (1 - "a")}; ."#,
+        r#"module {a: ("x" * 1e9)}; ."#,
+    ] {
+        let report = refusal(program);
         assert!(
-            matches!(refusal(program), Refusal::Unsupported(_)),
-            "{program}"
+            report
+                .starts_with("jq: error: Module metadata must be constant at <top-level>, line 1"),
+            "{program}: {report}"
         );
     }
-    let Refusal::Invalid(report) = refusal("module {a: .}; .") else {
-        panic!("jq refuses it");
-    };
-    assert!(
-        report.starts_with("jq: error: Module metadata must be constant at <top-level>, line 1"),
-        "{report}"
-    );
 }
 
 #[test]
 fn a_program_deeper_than_bisons_stack_exhausts_its_memory() {
     let program = format!("{}1{}", "(".repeat(9995), ")".repeat(9995));
-    let Refusal::Invalid(report) = refusal(&program) else {
-        panic!("jq refuses it");
-    };
+    let report = refusal(&program);
     let want = format!(
         "jq: error: memory exhausted at <top-level>, line 1, column 9997:\n    {program}\n    {}^\njq: 1 compile error",
         " ".repeat(9996)
@@ -1200,7 +1189,20 @@ fn named_arguments_and_args_bind_as_constants() {
 }
 
 /// Cases whose output differs from jq 1.8.2's, each with the reason.
-const DIVERGENT: &[(&str, &str)] = &[];
+const DIVERGENT: &[(&str, &str)] = &[
+    (
+        "get_jq_origin",
+        "where the corpus's jq was installed; jq run by name answers `.`",
+    ),
+    (
+        "get_prog_origin",
+        "the corpus generator's working directory; the host names the run's",
+    ),
+    (
+        "$JQ_BUILD_CONFIGURATION",
+        "the corpus's jq's configure line; this engine had none",
+    ),
+];
 
 /// Whether an open's refusal is jq's report of a program it refuses,
 /// which ends in its count of compile errors.
@@ -1216,14 +1218,13 @@ fn compile_report(message: &str) -> bool {
 /// jq 1.8.2's tests/jq.test and the generator's probes, each case's
 /// outputs as a jq 1.8.2 binary printed them (scripts/gen_jq_corpus.py),
 /// at a budget that pauses the VM every few steps. A program jq refuses
-/// must be refused with jq's report, byte for byte; one jq runs may be
-/// left to libjq at compile; any other difference fails unless DIVERGENT
-/// names it.
+/// must be refused with jq's report, byte for byte, and one jq runs
+/// must run; any other difference fails unless DIVERGENT names it.
 #[test]
 fn jq_test_corpus() {
     let (pass, refused, reported, left) = run_corpus(include_str!("corpus.json"));
     assert!(
-        pass >= 570 && refused <= 3 && reported >= 213 && left == 0,
+        pass >= 570 && refused == 0 && reported >= 213 && left == 0,
         "pass {pass}, refused {refused}, reported {reported}, left {left}"
     );
 }
@@ -1453,7 +1454,11 @@ fn cancel_frees_a_deep_value_across_drains() {
 
 const TIME_CASES: &[(&str, &str, &str)] = &[
     (r"UTC", r"-1.5|gmtime", r"[1969,11,31,23,59,59.5,3,364]"),
-    (r"UTC", r"nan|gmtime", r"[1970,0,1,0,0,null,4,0]"),
+    (
+        r"UTC",
+        r"nan|gmtime",
+        r"!error converting number of seconds since epoch to datetime",
+    ),
     (r"UTC", r"1e12|gmtime", r"[33658,8,27,1,46,40,5,269]"),
     (
         r"UTC",
@@ -1514,27 +1519,27 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#"1425599507|strftime("%u %U %V %v %w %W %x %X %y %Y %z %Z %% %+")"#,
-        r#""4 09 10  5-Mar-2015 4 09 03/05/15 23:51:47 15 2015 +0000 UTC % Thu Mar  5 23:51:47 UTC 2015""#,
+        r#""4 09 10 %v 4 09 03/05/15 23:51:47 15 2015 +0000 GMT % %+""#,
     ),
     (
         r"UTC",
         r#"[1970,0,3,4,5,6]|strftime("%-e|%_e|%0e|%-k|%0k|%_k|%0l|%-l|%_l|%_I|%-I|%_S|%-S|%_U|%-V|%-j|%_j|%0j|%-m|%_M|%-s|%-D|%-p|%-P|%-z|%-Z")"#,
-        r#""3| 3|03|4|04| 4|04|4| 4| 4|4| 6|6| 0|1|3|  3|003|1| 5|187506|01/03/70|AM|P|+0|UTC""#,
+        r#""3| 3|03|4|04| 4|04|4| 4| 4|4| 6|6| 0|1|3|  3|003|1| 5|187506|01/03/70|AM|am|+0|GMT""#,
     ),
     (
         r"UTC",
         r#"[2005,0,1,1,2,3]|strftime("%-y|%_y|%-C|%0C|%-Y|%_Y|%0y|%0u|%-u")"#,
-        r#""05|05|20|20|2005|2005|05|6|6""#,
+        r#""5| 5|20|20|2005|2005|05|6|6""#,
     ),
     (
         r"UTC",
         r#"[1970,0,3,4,5,6]|strftime("%E|%O|%Ez|%EY|%Od|%EE|%E%E|%-|%_|%")"#,
-        r#""||+0000|1970|03|E|%E|||%""#,
+        r#""%E|%O|+0000|1970|03|%EE|%E|%-|%_|%""#,
     ),
     (
         r"UTC",
         r#"[1970,0,3,4,5,6]|strftime("%f%q%i%o|%3d|%10Y|%^a|%#a|%_10d|%010Y|é%Y|%é")"#,
-        r#""fqio|3d|10Y|^a|#a|10d|10Y|é1970|é""#,
+        r#""%f%q%i%o|003|0000001970|SAT|SAT|         3|0000001970|é1970|%é""#,
     ),
     (
         r"UTC",
@@ -1665,7 +1670,7 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""10:20"|strptime("%H:%M")"#,
-        r"[1900,0,0,10,20,0,6,-1]",
+        r"[1900,0,0,10,20,0,8,367]",
     ),
     (
         r"UTC",
@@ -1680,22 +1685,22 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""11:51:47 PM"|strptime("%r")"#,
-        r"[1900,0,0,23,51,47,6,-1]",
+        r"[1900,0,0,23,51,47,8,367]",
     ),
     (
         r"UTC",
         r#""12 AM"|strptime("%I %p")"#,
-        r"[1900,0,0,0,0,0,6,-1]",
+        r"[1900,0,0,0,0,0,8,367]",
     ),
     (
         r"UTC",
         r#""12 PM"|strptime("%I %p")"#,
-        r"[1900,0,0,12,0,0,6,-1]",
+        r"[1900,0,0,12,0,0,8,367]",
     ),
     (
         r"UTC",
         r#""22 PM"|strptime("%H %p")"#,
-        r#"!date "22 PM" does not match format "%H %p""#,
+        r"[1900,0,0,22,0,0,8,367]",
     ),
     (r"UTC", r#""68"|strptime("%y")"#, r"[2068,0,0,0,0,0,6,-1]"),
     (r"UTC", r#""69"|strptime("%y")"#, r"[1969,0,0,0,0,0,2,-1]"),
@@ -1712,7 +1717,7 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""2015 366"|strptime("%Y %j")"#,
-        r"[2016,0,1,0,0,0,5,0]",
+        r"[2015,24,31,0,0,0,5,365]",
     ),
     (
         r"UTC",
@@ -1727,22 +1732,22 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""-5"|strptime("%s")"#,
-        r"[1969,11,31,23,59,55,3,364]",
+        r#"!date "-5" does not match format "%s""#,
     ),
     (
         r"UTC",
         r#""2015-03-05T23:51:47+0100"|strptime("%Y-%m-%dT%H:%M:%S%z")"#,
-        r"[2015,2,5,22,51,47,4,63]",
+        r"[2015,2,5,23,51,47,4,63]",
     ),
     (
         r"UTC",
         r#""2015-03-05T23:51:47-0530"|strptime("%Y-%m-%dT%H:%M:%S%z")"#,
-        r"[2015,2,6,5,21,47,5,64]",
+        r"[2015,2,5,23,51,47,4,63]",
     ),
     (
         r"UTC",
         r#""2015-03-05T23:51:47+01:00"|strptime("%Y-%m-%dT%H:%M:%S%z")"#,
-        r#"!date "2015-03-05T23:51:47+01:00" does not match format "%Y-%m-%dT%H:%M:%S%z""#,
+        r"[2015,2,5,23,51,47,4,63]",
     ),
     (
         r"UTC",
@@ -1752,7 +1757,7 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""2015-03-05T23:51:47 PST"|strptime("%Y-%m-%dT%H:%M:%S %Z")"#,
-        r#"!date "2015-03-05T23:51:47 PST" does not match format "%Y-%m-%dT%H:%M:%S %Z""#,
+        r"[2015,2,5,23,51,47,4,63]",
     ),
     (
         r"UTC",
@@ -1772,7 +1777,7 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""  2015-03-05"|strptime("%Y-%m-%d")"#,
-        r#"!date "  2015-03-05" does not match format "%Y-%m-%d""#,
+        r"[2015,2,5,0,0,0,4,63]",
     ),
     (
         r"UTC",
@@ -1794,9 +1799,21 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
         r#""99999"|strptime("%Y")"#,
         r#"!date "99999" does not match format "%Y""#,
     ),
-    (r"UTC", r#""-123"|strptime("%Y")"#, r"[-123,0,0,0,0,0,6,-1]"),
-    (r"UTC", r#""+5"|strptime("%Y")"#, r"[5,0,0,0,0,0,5,-1]"),
-    (r"UTC", r#"""|strptime("%Y")"#, r"[1900,0,0,0,0,0,6,-1]"),
+    (
+        r"UTC",
+        r#""-123"|strptime("%Y")"#,
+        r#"!date "-123" does not match format "%Y""#,
+    ),
+    (
+        r"UTC",
+        r#""+5"|strptime("%Y")"#,
+        r#"!date "+5" does not match format "%Y""#,
+    ),
+    (
+        r"UTC",
+        r#"""|strptime("%Y")"#,
+        r#"!date "" does not match format "%Y""#,
+    ),
     (
         r"UTC",
         r#""Sept"|strptime("%b")"#,
@@ -1806,18 +1823,18 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""JANUARY"|strptime("%B")"#,
-        r"[1900,0,0,0,0,0,6,-1]",
+        r"[1900,0,0,0,0,0,0,-1]",
     ),
     (
         r"UTC",
         r#""a b"|strptime("ab")"#,
         r#"!date "a b" does not match format "ab""#,
     ),
-    (r"UTC", r#""ab"|strptime("a b")"#, r"[1900,0,0,0,0,0,6,-1]"),
+    (r"UTC", r#""ab"|strptime("a b")"#, r"[1900,0,0,0,0,0,8,367]"),
     (
         r"UTC",
         r#""2015-03-05"|strptime("%Y-%m-%d%n")"#,
-        r#"!date "2015-03-05" does not match format "%Y-%m-%d%n""#,
+        r"[2015,2,5,0,0,0,4,63]",
     ),
     (
         r"UTC",
@@ -1829,7 +1846,11 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
         r#""5"|strptime("%q")"#,
         r#"!date "5" does not match format "%q""#,
     ),
-    (r"UTC", r#""5"|strptime("%Ey")"#, r"[2005,0,0,0,0,0,5,-1]"),
+    (
+        r"UTC",
+        r#""5"|strptime("%Ey")"#,
+        r#"!date "5" does not match format "%Ey""#,
+    ),
     (
         r"UTC",
         r#""2015-02-30"|strptime("%Y-%m-%d")"#,
@@ -1848,17 +1869,17 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""1900-01-01"|strptime("%Y-%m-%d")"#,
-        r"[1900,0,1,0,0,0,0,0]",
+        r"[1900,0,1,0,0,0,1,0]",
     ),
     (
         r"UTC",
         r#""0000-01-01"|strptime("%Y-%m-%d")"#,
-        r"[0,0,1,0,0,0,6,0]",
+        r"[0,0,1,0,0,0,0,0]",
     ),
     (
         r"UTC",
         r#""Sun 2015-03-05"|strptime("%a %Y-%m-%d")"#,
-        r"[2015,2,5,0,0,0,4,63]",
+        r"[2015,2,5,0,0,0,0,63]",
     ),
     (
         r"UTC",
@@ -1873,7 +1894,7 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""2015 53 6"|strptime("%Y %U %w")"#,
-        r"[2016,0,9,0,0,0,6,8]",
+        r"[2015,25,8,0,0,0,6,373]",
     ),
     (
         r"UTC",
@@ -1883,32 +1904,32 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""2015 0 0"|strptime("%Y %U %w")"#,
-        r#"!date "2015 0 0" does not match format "%Y %U %w""#,
+        r"[2015,-1,-3,0,0,0,0,-4]",
     ),
     (
         r"UTC",
         r#""2023 0 6"|strptime("%Y %U %w")"#,
-        r#"!date "2023 0 6" does not match format "%Y %U %w""#,
+        r"[2023,-1,0,0,0,0,6,-1]",
     ),
     (
         r"UTC",
         r#""2015 10"|strptime("%Y %V")"#,
-        r"[2015,2,2,0,0,0,1,60]",
+        r"[2015,0,0,0,0,0,3,-1]",
     ),
     (
         r"UTC",
         r#""2015 1 4"|strptime("%Y %V %u")"#,
-        r"[2015,0,1,0,0,0,4,0]",
+        r"[2015,0,0,0,0,0,4,-1]",
     ),
     (
         r"UTC",
         r#""2015 1 1"|strptime("%Y %V %u")"#,
-        r#"!date "2015 1 1" does not match format "%Y %V %u""#,
+        r"[2015,0,0,0,0,0,1,-1]",
     ),
     (
         r"UTC",
         r#""2015 53 7"|strptime("%Y %V %u")"#,
-        r"[2016,0,3,0,0,0,0,2]",
+        r"[2015,0,0,0,0,0,0,-1]",
     ),
     (
         r"UTC",
@@ -1954,17 +1975,17 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""22 03/05/15"|strptime("%C %x")"#,
-        r"[2015,2,5,0,0,0,4,63]",
+        r"[2215,2,5,0,0,0,0,63]",
     ),
     (
         r"UTC",
         r#""03/05/15 22"|strptime("%x %C")"#,
-        r"[2200,2,5,0,0,0,3,63]",
+        r"[2215,2,5,0,0,0,0,63]",
     ),
     (
         r"UTC",
         r#""2015 22"|strptime("%Y %C")"#,
-        r"[2200,0,0,0,0,0,1,-1]",
+        r"[2200,0,0,0,0,0,2,-1]",
     ),
     (
         r"UTC",
@@ -1974,7 +1995,7 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"UTC",
         r#""2015-02-30 GMT"|strptime("%Y-%m-%d %Z")"#,
-        r"[2015,2,2,0,0,0,1,60]",
+        r"[2015,1,30,0,0,0,1,60]",
     ),
     (
         r"UTC",
@@ -2095,7 +2116,7 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
     (
         r"EST5EDT,M3.2.0,M11.1.0",
         r#""2015-03-05 18:51:47 PST"|strptime("%Y-%m-%d %H:%M:%S %Z")"#,
-        r#"!date "2015-03-05 18:51:47 PST" does not match format "%Y-%m-%d %H:%M:%S %Z""#,
+        r"[2015,2,5,18,51,47,4,63]",
     ),
     (
         r"EST5EDT,M3.2.0,M11.1.0",
@@ -2151,6 +2172,313 @@ const TIME_CASES: &[(&str, &str, &str)] = &[
         r"EST5EDT,J60,J300",
         r#"[range(1420070400;1451692800;86400*20)|strflocaltime("%F %H:%M %Z")]|join(",")"#,
         r#""2014-12-31 19:00 EST,2015-01-20 19:00 EST,2015-02-09 19:00 EST,2015-03-01 20:00 EDT,2015-03-21 20:00 EDT,2015-04-10 20:00 EDT,2015-04-30 20:00 EDT,2015-05-20 20:00 EDT,2015-06-09 20:00 EDT,2015-06-29 20:00 EDT,2015-07-19 20:00 EDT,2015-08-08 20:00 EDT,2015-08-28 20:00 EDT,2015-09-17 20:00 EDT,2015-10-07 20:00 EDT,2015-10-27 19:00 EST,2015-11-16 19:00 EST,2015-12-06 19:00 EST,2015-12-26 19:00 EST""#,
+    ),
+    (
+        r"UTC",
+        r#"[1970,0,3,4,5,6]|strftime("%10a|%010a|%-10a|%^10B|%#A|%#b|%#p|%^p|%P|%^P|%#Z|%^#Z")"#,
+        r#""       Sat|0000000Sat|       Sat|   JANUARY|SATURDAY|JAN|am|AM|am|am|gmt|gmt""#,
+    ),
+    (
+        r"UTC",
+        r#"[1970,0,3,4,5,6]|strftime("%-_d|%_-d|%0_d|%_0d|%-0d|%0-d|%^#a|%-^5a|%5^a")"#,
+        r#"" 3|3| 3|03|03|3|SAT|  SAT|  %5^a""#,
+    ),
+    (
+        r"UTC",
+        r#"[1970,0,3,4,5,6]|strftime("%3k|%03k|%-k|%0l|%5j|%_5j|%1d|%01Y|%5u|%_5u|%5G|%5s|%_15s|%015s")"#,
+        r#""  4|004|4|04|00003|    3|03|1970|00006|    6|01970|187506|         187506|000000000187506""#,
+    ),
+    (
+        r"UTC",
+        r#"[1970,0,3,4,5,6]|strftime("%10z|%_10z|%010z|%-10z|%3z|%-z|%_z")"#,
+        r#""         +0000000000|         +         0|000000000+0000000000|         +         0|  +0000|+0|+   0""#,
+    ),
+    (
+        r"America/St_Johns",
+        r#"1700000000|strflocaltime("%z|%-z|%_z|%_10z|%6z")"#,
+        r#""-0330|-330|- 330|         -       330|     -000330""#,
+    ),
+    (
+        r"UTC",
+        r#"[-5,0,3,4,5,6]|strftime("%Y|%10Y|%_10Y|%-10Y|%010Y|%C|%5C|%y|%G|%g|%F")"#,
+        r#""-5|-000000005|        -5|        -5|-000000005|-1|-0001|95|-5|95|-5-01-03""#,
+    ),
+    (
+        r"UTC",
+        r#"[-101,0,3,4,5,6], [5,0,3,4,5,6], [999,0,3,4,5,6]|strftime("%Y|%C|%y|%-y|%05y|%c|%D")"#,
+        r#""-101|-2|99|99|00099|Tue Jan  3 04:05:06 -101|01/03/99"
+"5|0|05|5|00005|Mon Jan  3 04:05:06 5|01/03/05"
+"999|9|99|99|00099|Thu Jan  3 04:05:06 999|01/03/99""#,
+    ),
+    (
+        r"UTC",
+        r#"[1970,0,3,4,5,6]|strftime("%10%|%5|%x%|%E5d|%5Ed|%^10v|%#10v|%05||x%05")"#,
+        r#""         %|  %5|01/03/70%|%E5d| %5Ed|     %^10V|     %#10v|0%05||x00%05""#,
+    ),
+    (
+        r"UTC",
+        r#"[1970,0,3,4,5,6]|strftime("%Ec|%EC|%Ex|%EX|%Ey|%EY|%Ez|%Ed|%EH|%Ej|%Ob|%Od|%Oe|%Os|%OY|%Oa|%Oc|%Ox|%E%")"#,
+        r#""Sat Jan  3 04:05:06 1970|19|01/03/70|04:05:06|70|1970|+0000|%Ed|%EH|%Ej|Jan|03| 3|187506|%OY|%Oa|%Oc|%Ox|%""#,
+    ),
+    (
+        r"UTC",
+        r#"[1970,0,3,4,5,6]|strftime("%15D|%015D|%-12F|%^15r|%5n|%05%|%10Z")"#,
+        r#""       01/03/70|000000001/03/70|  1970-01-03|    04:05:06 AM|    \n|0000%|       GMT""#,
+    ),
+    (
+        r"UTC",
+        r#"[1970,0,3,14,5,6]|strftime("%^c|%#c|%^#p|%#P|%10p|%010p|%r")"#,
+        r#""SAT JAN  3 14:05:06 1970|Sat Jan  3 14:05:06 1970|pm|pm|        PM|00000000PM|02:05:06 PM""#,
+    ),
+    (
+        r"UTC",
+        r#"[1970,0,1,0,0,0]|(strftime("%99Y")|length), (try strftime("%2147483647Y") catch .)"#,
+        r#"99
+"strftime/1: unknown system failure""#,
+    ),
+    (
+        r"UTC",
+        r#"[2147485547,0,1], [-2147483648,0,1]|strftime("%Y|%C|%y|%G|%g"), todate"#,
+        r#""-2147481749|-21474818|47|-2147481749|51"
+"-2147481749-01-01T00:00:00Z"
+"-2147481748|-21474818|52|-2147481748|52"
+"-2147481748-01-01T00:00:00Z""#,
+    ),
+    (
+        r"Europe/Paris",
+        r#"[1970,0,3,4,5,6]|strftime("%s|%z|%Z"), strflocaltime("%s|%z|%Z|%#Z|%10z")"#,
+        r#""183906|+0000|GMT"
+"183906|+0100|CET|cet|         +0000000100""#,
+    ),
+    (
+        r"America/New_York",
+        r#"[2015,6,1,12,0,0]|strftime("%s"), strflocaltime("%s")"#,
+        r#""1435770000"
+"1435766400""#,
+    ),
+    (
+        r"Australia/Lord_Howe",
+        r#"[2015,0,1,12,0,0]|strftime("%s %z"), strflocaltime("%s %z")"#,
+        r#""1420075800 +0000"
+"1420074000 +1100""#,
+    ),
+    (
+        r"Asia/Kolkata",
+        r#"[1943,6,1,12,0,0]|strftime("%s %z"), strflocaltime("%s %z %Z")"#,
+        r#""-836415000 +0000"
+"-836418600 +0630 +0630""#,
+    ),
+    (
+        r"UTC",
+        r"nan, infinite, -infinite, 1e19, 9.3e18, -67768040609740800 | try gmtime catch .",
+        r#""error converting number of seconds since epoch to datetime"
+"error converting number of seconds since epoch to datetime"
+"error converting number of seconds since epoch to datetime"
+"error converting number of seconds since epoch to datetime"
+"error converting number of seconds since epoch to datetime"
+[-2147481748,0,1,0,0,0,4,0]"#,
+    ),
+    (
+        r"UTC",
+        r#"[["10:20","%H:%M"],["2015","%Y"],["03","%m"],["5","%d"],["Thu","%a"],["64","%j"],["2015 Thu","%Y %a"],["03 05","%m %d"],["10","%U"],["2015 10","%Y %U"]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[1900,0,0,10,20,0,8,367]
+[2015,0,0,0,0,0,3,-1]
+[1900,2,0,0,0,0,3,58]
+[1900,0,5,0,0,0,5,4]
+[1900,0,0,0,0,0,4,367]
+[1900,0,0,0,0,0,8,63]
+[2015,0,0,0,0,0,4,-1]
+[1900,2,5,0,0,0,1,63]
+[1900,0,0,0,0,0,8,367]
+[2015,0,0,0,0,0,3,-1]"#,
+    ),
+    (
+        r"UTC",
+        r#"[["2015 64","%Y %j"],["2016 64","%Y %j"],["2016 366","%Y %j"],["2015 366","%Y %j"],["0001 366","%Y %j"],["2015 64 10","%Y %j %d"],["2015 01 64","%Y %m %j"],["2015 64 Thu","%Y %j %a"],["01 64","%m %j"],["64 05","%j %d"]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[2015,2,5,0,0,0,4,63]
+[2016,2,4,0,0,0,5,63]
+[2016,11,31,0,0,0,6,365]
+[2015,24,31,0,0,0,5,365]
+[1,24,31,0,0,0,2,365]
+[2015,2,10,0,0,0,2,63]
+[2015,0,5,0,0,0,1,63]
+[2015,0,0,0,0,0,4,63]
+[1900,0,5,0,0,0,5,63]
+[1900,2,5,0,0,0,1,63]"#,
+    ),
+    (
+        r"UTC",
+        r#"[["2015 10 4","%Y %U %w"],["2015 10 0","%Y %W %w"],["2015 0 0","%Y %U %w"],["2016 0 0","%Y %U %w"],["2015 52 6","%Y %U %w"],["2015 53 6","%Y %W %w"],["2016 53 6","%Y %U %w"],["10 4","%U %w"],["2015 10 4 70","%Y %U %w %j"],["2015 10 4 01","%Y %U %w %m"],["2015 10 4 03 01","%Y %U %w %m %d"],["2015 10 11 4","%Y %U %W %w"],["2015 53 6 Feb","%Y %U %w %b"]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[2015,2,12,0,0,0,4,70]
+[2015,2,15,0,0,0,0,73]
+[2015,-1,-3,0,0,0,0,-4]
+[2016,-1,-369,0,0,0,0,-5]
+[2015,25,1,0,0,0,6,366]
+[2015,25,8,0,0,0,6,373]
+[2016,12,7,0,0,0,6,372]
+[1900,2,15,0,0,0,4,73]
+[2015,2,11,0,0,0,4,69]
+[2015,0,12,0,0,0,4,70]
+[2015,2,1,0,0,0,4,70]
+[2015,2,19,0,0,0,4,77]
+[2015,1,8,0,0,0,6,373]"#,
+    ),
+    (
+        r"UTC",
+        r#"[["0000-01-01","%Y-%m-%d"],["0000-03-01","%Y-%m-%d"],["0000-12-31","%Y-%m-%d"],["0000","%Y"],["0001","%Y"],["0000 60","%Y %j"],["0000 1 1","%Y %U %w"],["0000 0 0","%Y %U %w"],["1900-01-01","%Y-%m-%d"],["9999-12-31","%Y-%m-%d"]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[0,0,1,0,0,0,0,0]
+[0,2,1,0,0,0,3,60]
+[0,11,31,0,0,0,0,365]
+[0,0,0,0,0,0,6,-1]
+[1,0,0,0,0,0,0,-1]
+[0,1,29,0,0,0,3,59]
+[0,0,2,0,0,0,1,1]
+[0,-1,-371,0,0,0,0,-7]
+[1900,0,1,0,0,0,1,0]
+[9999,11,31,0,0,0,5,364]"#,
+    ),
+    (
+        r"UTC",
+        r#"[["20","%C"],["5","%C"],["20 15","%C %y"],["15 20","%y %C"],["20 2015","%C %Y"],["2015 99","%Y %y"],["99 2015","%y %Y"],["2015 99 20","%Y %y %C"],["03/05/99 20","%D %C"],["68","%y"],["69","%y"],["0 5","%C %y"]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[2000,0,0,0,0,0,5,-1]
+[500,0,0,0,0,0,4,-1]
+[2015,0,0,0,0,0,3,-1]
+[2015,0,0,0,0,0,3,-1]
+[2000,0,0,0,0,0,5,-1]
+[1999,0,0,0,0,0,4,-1]
+[2015,0,0,0,0,0,3,-1]
+[2099,0,0,0,0,0,3,-1]
+[2099,2,5,0,0,0,4,63]
+[2068,0,0,0,0,0,6,-1]
+[1969,0,0,0,0,0,2,-1]
+[5,0,0,0,0,0,5,-1]"#,
+    ),
+    (
+        r"UTC",
+        r#"[["12 AM","%H %p"],["12 PM","%I %p"],["12","%I"],["PM 11","%p %I"],["PM 11","%p %H"],["5 AM 7 PM","%I %p %I %p"],["11 PM 5","%I %p %H"],["11 pm","%I %p"],["11 P","%I %p"],["13 PM","%I %p"],["11 PM","%I%p"]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[1900,0,0,12,0,0,8,367]
+[1900,0,0,12,0,0,8,367]
+[1900,0,0,0,0,0,8,367]
+[1900,0,0,23,0,0,8,367]
+[1900,0,0,11,0,0,8,367]
+[1900,0,0,19,0,0,8,367]
+[1900,0,0,5,0,0,8,367]
+[1900,0,0,23,0,0,8,367]
+"no match"
+"no match"
+"no match""#,
+    ),
+    (
+        r"UTC",
+        r#"[[" 2015","%Y"],["2015- 1- 1","%Y-%m-%d"],["-1","%Y"],["+1","%m"],["12345","%Y"],["201","%Y"],["2015-02-00","%Y-%m-%d"],["2015-02-31","%Y-%m-%d"],["61","%S"],["24","%H"],["0","%u"],["7","%u"],["123","%m%d"],["12","%m%d"],["2015","%10Y"],["05","%-d"]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[2015,0,0,0,0,0,3,-1]
+[2015,0,1,0,0,0,4,0]
+"no match"
+"no match"
+"no match"
+[201,0,0,0,0,0,3,-1]
+"no match"
+[2015,1,31,0,0,0,2,61]
+[1900,0,0,0,0,61,8,367]
+"no match"
+"no match"
+[1900,0,0,0,0,0,0,367]
+[1900,11,3,0,0,0,1,336]
+"no match"
+[2015,0,0,0,0,0,3,-1]
+[1900,0,5,0,0,0,5,4]"#,
+    ),
+    (
+        r"UTC",
+        r#"[["1425599507","%s"],[" 5","%s"],["+5","%s"],["1425599507 10","%s %j"],["10 1425599507","%j %s"],["Mon 1425599507","%a %s"],["1425599507 10","%s %d"],["1425599507 2016","%s %Y"],["20 1425599507","%C %s"],["5 PM 1425599507","%I %p %s"],["67768036191676799","%s"],["9223372036854775807","%s"]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[2015,2,5,23,51,47,4,63]
+"no match"
+"no match"
+[2015,2,5,23,51,47,4,9]
+[2015,2,5,23,51,47,4,63]
+[2015,2,5,23,51,47,4,63]
+[2015,2,10,23,51,47,2,68]
+[2016,2,5,23,51,47,6,64]
+[2000,2,5,23,51,47,0,64]
+[2015,2,5,35,51,47,4,63]
+[-2147481749,11,31,23,59,59,3,364]
+"no match""#,
+    ),
+    (
+        r"America/New_York",
+        r#""1425599507"|strptime("%s")"#,
+        r"[2015,2,5,18,51,47,4,63]",
+    ),
+    (
+        r"UTC",
+        r#"[["+0100","%z"],["-0530","%z"],["+01:00","%z"],["+01","%z"],["Z","%z"],[" +0100","%z"],["+1","%z"],["+013","%z"],["+01:3","%z"],["+0099","%z"],["+9959","%z"],["0100","%z"],["2015-03-05T23:51:47+0100","%Y-%m-%dT%H:%M:%S%z"]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[1900,0,0,0,0,0,8,367]
+[1900,0,0,0,0,0,8,367]
+[1900,0,0,0,0,0,8,367]
+[1900,0,0,0,0,0,8,367]
+[1900,0,0,0,0,0,8,367]
+[1900,0,0,0,0,0,8,367]
+"no match"
+"no match"
+"no match"
+"no match"
+[1900,0,0,0,0,0,8,367]
+"no match"
+[2015,2,5,23,51,47,4,63]"#,
+    ),
+    (
+        r"UTC",
+        r#"[["GMT","%Z"],["","%Z"],["x","%Zx"],["UTC+5","%Z"],["ab cd","%Z %Z"],["2023   CET","%Y%Z"],["2023 ABC7","%Y %Z%m"],["2023 AB\tC","%Y %Z"],["2015-03-05 18:51:47 PST","%Y-%m-%d %H:%M:%S %Z"],["2015-02-30 GMT","%Y-%m-%d %Z"]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[1900,0,0,0,0,0,8,367]
+[1900,0,0,0,0,0,8,367]
+"no match"
+[1900,0,0,0,0,0,8,367]
+[1900,0,0,0,0,0,8,367]
+[2023,0,0,0,0,0,6,-1]
+"no match"
+[2023,0,0,0,0,0,6,-1,"\tC"]
+[2015,2,5,18,51,47,4,63]
+[2015,1,30,0,0,0,1,60]"#,
+    ),
+    (
+        r"UTC",
+        r#"[["March 5","%B %d"],["Marc 5","%b %d"],["mar","%b"],["Thursday","%a"],["Thurs","%A"],[" Mar","%b"],["2015 Mar","%Y%b"],["2015Mar","%Y %b"],["2015Mar","%Y%n%b"],["2015 ","%Y%n"],["2015 ","%Y"],["5 x","%M"],["5x","%M"],["",""]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[1900,2,5,0,0,0,1,63]
+"no match"
+[1900,2,0,0,0,0,3,58]
+[1900,0,0,0,0,0,4,367]
+"no match"
+"no match"
+"no match"
+[2015,2,0,0,0,0,6,58]
+[2015,2,0,0,0,0,6,58]
+[2015,0,0,0,0,0,3,-1]
+[2015,0,0,0,0,0,3,-1," "]
+[1900,0,0,0,5,0,8,367," x"]
+"no match"
+[1900,0,0,0,0,0,8,367]"#,
+    ),
+    (
+        r"UTC",
+        r#"[["Thu Mar  5 23:51:47 2015","%Ec"],["20","%EC"],["2015","%EY"],["5","%Ey"],["03/05/15","%Ex"],["05","%Od"],["05","%Om"],["5","%Ow"],["5","%Ou"],["05","%Ed"],["2015","%OY"],["pm","%P"],["x","%q"],["x","%"],["12345678901","%G"],["123","%g"],["0","%V"],["54","%V"]][] as [$t, $f] | try ($t | strptime($f)) catch "no match""#,
+        r#"[2015,2,5,23,51,47,4,63]
+[2000,0,0,0,0,0,5,-1]
+[2015,0,0,0,0,0,3,-1]
+"no match"
+[2015,2,5,0,0,0,4,63]
+[1900,0,5,0,0,0,5,4]
+[1900,4,0,0,0,0,1,119]
+[1900,0,0,0,0,0,5,367]
+"no match"
+"no match"
+"no match"
+"no match"
+"no match"
+"no match"
+[1900,0,0,0,0,0,8,367]
+"no match"
+[1900,0,0,0,0,0,8,367]
+"no match""#,
     ),
 ];
 
@@ -3299,7 +3627,7 @@ fn deep_programs_compile_and_run_on_a_small_stack() {
                     " ".repeat(column - 1),
                     "^".repeat(*carets)
                 );
-                assert_eq!(invalid_report(&program), report, "{program:.40}");
+                assert_eq!(refusal(&program), report, "{program:.40}");
             }
         })
         .unwrap();
@@ -3334,151 +3662,234 @@ fn loadvn_and_interpolated_keys_run_as_jq_runs_them() {
     }
 }
 
+/// jq run by name: `get_jq_origin` is `.`, `get_prog_origin` the
+/// directory the host names, and the build configured with no arguments.
 #[test]
-fn platform_paths_and_build_configuration_keep_the_pre_execution_fallback() {
-    for program in [
-        "get_jq_origin",
-        "get_prog_origin",
-        "$JQ_BUILD_CONFIGURATION",
-    ] {
-        assert!(
-            matches!(refusal(program), Refusal::Unsupported(_)),
-            "{program}"
-        );
-    }
+fn origins_and_build_configuration_answer_as_jq_run_by_name() {
+    assert_eq!(
+        outputs(
+            "[get_jq_origin, get_prog_origin, $JQ_BUILD_CONFIGURATION]",
+            "null"
+        ),
+        vec![r#"[".",null,""]"#]
+    );
+    let config = serde_json::json!({"program": "get_prog_origin", "prog_origin": "/data/q"});
+    let mut stream = super::eval::open(config.to_string().as_bytes()).expect("compiles");
+    let mut wire = Vec::new();
+    stream.feed(b"null", &mut wire).unwrap();
+    stream.finish(&mut wire).unwrap();
+    settle(&mut *stream, &mut wire);
+    assert_eq!(frames(&wire), vec![Frame::Out(r#""/data/q""#.into())]);
     let globals = HashMap::from([("JQ_BUILD_CONFIGURATION".into(), Value::string("provided"))]);
     assert!(compile("$JQ_BUILD_CONFIGURATION", &globals).is_ok());
 }
 
+/// Local time in a zone of the tz database, a POSIX rule, a path into
+/// zoneinfo and names no file has, as jq 1.8.2 prints it on glibc with
+/// Debian's tzdata and tzdata-legacy: each zone's offsets and names through
+/// history and past its last change, the instant a skipped or doubled
+/// wall-clock time names, and `strptime`'s `%s`.
 #[test]
-fn unsupported_local_zones_refuse_before_effects_or_dynamic_arguments() {
-    for zone in [
-        None,
-        Some("Europe/Paris"),
-        Some("America/New_York"),
-        Some("GB-Eire"),
-        Some("Unknown/1868"),
-        Some("/usr/share/zoneinfo/Europe/Paris"),
-        Some(":/usr/share/zoneinfo/Europe/Paris"),
-        Some("posix/Europe/Paris"),
-        Some("right/Europe/Paris"),
-    ] {
-        for program in [
-            "localtime",
-            "strflocaltime(\"%Z %z\")",
-            "strptime(\"%s\")",
-            "debug | localtime",
-            "input | localtime",
-            "def alias: localtime; alias",
-            "debug | strflocaltime(\"%Z\")",
-            "input | strptime(.)",
-            "def alias: strflocaltime(.); alias",
-            "\"%Z\" as $format | strflocaltime($format)",
-            "def invoke(f): f; invoke(strptime(.))",
-        ] {
-            let config = serde_json::json!({"program": program, "zone": zone});
-            let error = super::eval::open(config.to_string().as_bytes())
-                .err()
-                .unwrap();
-            assert_eq!(
-                error.message, "jq_eval: no time zone for local time",
-                "{program}"
-            );
-        }
-        for program in [
-            ".",
-            "gmtime",
-            "mktime",
-            "strftime(\"%Z\")",
-            "def localtime: 42; localtime",
-            "def strptime($format): 42; strptime(\"%s\")",
-            "def strflocaltime($format): 42; strflocaltime(\"%Z\")",
-            "def unused: localtime; .",
-        ] {
-            let config = serde_json::json!({"program": program, "zone": zone});
-            assert!(
-                super::eval::open(config.to_string().as_bytes()).is_ok(),
-                "{program}"
-            );
+fn local_time_follows_the_tz_database() {
+    let table = r#"[([1700000000, 1690000000, 0, -2e9, 4e9][] | [localtime, strflocaltime("%Z %z %c")]), ([[2023,2,26,2,30,0,0,0], [2023,9,29,2,30,0,0,0], [2023,9,29,1,30,0,0,0], [1970,0,1,0,0,0,0,0]][] | strflocaltime("%Y-%m-%dT%H:%M:%S %Z %z")), ("1700000000" | strptime("%s"))]"#;
+    let zones: &[(&str, &str)] = &[
+        (
+            r#"Europe/Paris"#,
+            r#"[[[2023,10,14,23,13,20,2,317],"CET +0100 Tue Nov 14 23:13:20 2023"],[[2023,6,22,6,26,40,6,202],"CEST +0200 Sat Jul 22 06:26:40 2023"],[[1970,0,1,1,0,0,4,0],"CET +0100 Thu Jan  1 01:00:00 1970"],[[1906,7,16,20,36,1,4,227],"PMT +0009 Thu Aug 16 20:36:01 1906"],[[2096,9,2,9,6,40,2,275],"CEST +0200 Tue Oct  2 09:06:40 2096"],"2023-03-26T03:30:00 CEST +0200","2023-10-29T02:30:00 CET +0100","2023-10-29T01:30:00 CEST +0200","1970-01-01T00:00:00 CET +0100",[2023,10,14,23,13,20,2,317]]"#,
+        ),
+        (
+            r#"America/New_York"#,
+            r#"[[[2023,10,14,17,13,20,2,317],"EST -0500 Tue Nov 14 17:13:20 2023"],[[2023,6,22,0,26,40,6,202],"EDT -0400 Sat Jul 22 00:26:40 2023"],[[1969,11,31,19,0,0,3,364],"EST -0500 Wed Dec 31 19:00:00 1969"],[[1906,7,16,15,26,40,4,227],"EST -0500 Thu Aug 16 15:26:40 1906"],[[2096,9,2,3,6,40,2,275],"EDT -0400 Tue Oct  2 03:06:40 2096"],"2023-03-26T02:30:00 EDT -0400","2023-10-29T02:30:00 EDT -0400","2023-10-29T01:30:00 EDT -0400","1970-01-01T00:00:00 EST -0500",[2023,10,14,17,13,20,2,317]]"#,
+        ),
+        (
+            r#"Asia/Kolkata"#,
+            r#"[[[2023,10,15,3,43,20,3,318],"IST +0530 Wed Nov 15 03:43:20 2023"],[[2023,6,22,9,56,40,6,202],"IST +0530 Sat Jul 22 09:56:40 2023"],[[1970,0,1,5,30,0,4,0],"IST +0530 Thu Jan  1 05:30:00 1970"],[[1906,7,17,1,56,40,5,228],"IST +0530 Fri Aug 17 01:56:40 1906"],[[2096,9,2,12,36,40,2,275],"IST +0530 Tue Oct  2 12:36:40 2096"],"2023-03-26T02:30:00 IST +0530","2023-10-29T02:30:00 IST +0530","2023-10-29T01:30:00 IST +0530","1970-01-01T00:00:00 IST +0530",[2023,10,15,3,43,20,3,318]]"#,
+        ),
+        (
+            r#"Australia/Lord_Howe"#,
+            r#"[[[2023,10,15,9,13,20,3,318],"+11 +1100 Wed Nov 15 09:13:20 2023"],[[2023,6,22,14,56,40,6,202],"+1030 +1030 Sat Jul 22 14:56:40 2023"],[[1970,0,1,10,0,0,4,0],"AEST +1000 Thu Jan  1 10:00:00 1970"],[[1906,7,17,6,26,40,5,228],"AEST +1000 Fri Aug 17 06:26:40 1906"],[[2096,9,2,17,36,40,2,275],"+1030 +1030 Tue Oct  2 17:36:40 2096"],"2023-03-26T02:30:00 +11 +1100","2023-10-29T02:30:00 +11 +1100","2023-10-29T01:30:00 +11 +1100","1970-01-01T00:00:00 AEST +1000",[2023,10,15,9,13,20,3,318]]"#,
+        ),
+        (
+            r#":Europe/Paris"#,
+            r#"[[[2023,10,14,23,13,20,2,317],"CET +0100 Tue Nov 14 23:13:20 2023"],[[2023,6,22,6,26,40,6,202],"CEST +0200 Sat Jul 22 06:26:40 2023"],[[1970,0,1,1,0,0,4,0],"CET +0100 Thu Jan  1 01:00:00 1970"],[[1906,7,16,20,36,1,4,227],"PMT +0009 Thu Aug 16 20:36:01 1906"],[[2096,9,2,9,6,40,2,275],"CEST +0200 Tue Oct  2 09:06:40 2096"],"2023-03-26T03:30:00 CEST +0200","2023-10-29T02:30:00 CET +0100","2023-10-29T01:30:00 CEST +0200","1970-01-01T00:00:00 CET +0100",[2023,10,14,23,13,20,2,317]]"#,
+        ),
+        (
+            r#"/usr/share/zoneinfo/Asia/Tokyo"#,
+            r#"[[[2023,10,15,7,13,20,3,318],"JST +0900 Wed Nov 15 07:13:20 2023"],[[2023,6,22,13,26,40,6,202],"JST +0900 Sat Jul 22 13:26:40 2023"],[[1970,0,1,9,0,0,4,0],"JST +0900 Thu Jan  1 09:00:00 1970"],[[1906,7,17,5,26,40,5,228],"JST +0900 Fri Aug 17 05:26:40 1906"],[[2096,9,2,16,6,40,2,275],"JST +0900 Tue Oct  2 16:06:40 2096"],"2023-03-26T02:30:00 JST +0900","2023-10-29T02:30:00 JST +0900","2023-10-29T01:30:00 JST +0900","1970-01-01T00:00:00 JST +0900",[2023,10,15,7,13,20,3,318]]"#,
+        ),
+        (
+            r#"Unknown/1868"#,
+            r#"[[[2023,10,14,22,13,20,2,317],"Unknown +0000 Tue Nov 14 22:13:20 2023"],[[2023,6,22,4,26,40,6,202],"Unknown +0000 Sat Jul 22 04:26:40 2023"],[[1970,0,1,0,0,0,4,0],"Unknown +0000 Thu Jan  1 00:00:00 1970"],[[1906,7,16,20,26,40,4,227],"Unknown +0000 Thu Aug 16 20:26:40 1906"],[[2096,9,2,7,6,40,2,275],"Unknown +0000 Tue Oct  2 07:06:40 2096"],"2023-03-26T02:30:00 Unknown +0000","2023-10-29T02:30:00 Unknown +0000","2023-10-29T01:30:00 Unknown +0000","1970-01-01T00:00:00 Unknown +0000",[2023,10,14,22,13,20,2,317]]"#,
+        ),
+        (
+            r#"Ab"#,
+            r#"[[[2023,10,14,22,13,20,2,317]," +0000 Tue Nov 14 22:13:20 2023"],[[2023,6,22,4,26,40,6,202]," +0000 Sat Jul 22 04:26:40 2023"],[[1970,0,1,0,0,0,4,0]," +0000 Thu Jan  1 00:00:00 1970"],[[1906,7,16,20,26,40,4,227]," +0000 Thu Aug 16 20:26:40 1906"],[[2096,9,2,7,6,40,2,275]," +0000 Tue Oct  2 07:06:40 2096"],"2023-03-26T02:30:00  +0000","2023-10-29T02:30:00  +0000","2023-10-29T01:30:00  +0000","1970-01-01T00:00:00  +0000",[2023,10,14,22,13,20,2,317]]"#,
+        ),
+        (
+            r#"posix/Europe/Paris"#,
+            r#"[[[2023,10,14,22,13,20,2,317],"posix +0000 Tue Nov 14 22:13:20 2023"],[[2023,6,22,4,26,40,6,202],"posix +0000 Sat Jul 22 04:26:40 2023"],[[1970,0,1,0,0,0,4,0],"posix +0000 Thu Jan  1 00:00:00 1970"],[[1906,7,16,20,26,40,4,227],"posix +0000 Thu Aug 16 20:26:40 1906"],[[2096,9,2,7,6,40,2,275],"posix +0000 Tue Oct  2 07:06:40 2096"],"2023-03-26T02:30:00 posix +0000","2023-10-29T02:30:00 posix +0000","2023-10-29T01:30:00 posix +0000","1970-01-01T00:00:00 posix +0000",[2023,10,14,22,13,20,2,317]]"#,
+        ),
+        (
+            r#"europe/paris"#,
+            r#"[[[2023,10,14,22,13,20,2,317],"europe +0000 Tue Nov 14 22:13:20 2023"],[[2023,6,22,4,26,40,6,202],"europe +0000 Sat Jul 22 04:26:40 2023"],[[1970,0,1,0,0,0,4,0],"europe +0000 Thu Jan  1 00:00:00 1970"],[[1906,7,16,20,26,40,4,227],"europe +0000 Thu Aug 16 20:26:40 1906"],[[2096,9,2,7,6,40,2,275],"europe +0000 Tue Oct  2 07:06:40 2096"],"2023-03-26T02:30:00 europe +0000","2023-10-29T02:30:00 europe +0000","2023-10-29T01:30:00 europe +0000","1970-01-01T00:00:00 europe +0000",[2023,10,14,22,13,20,2,317]]"#,
+        ),
+        (
+            r#"EST5EDT"#,
+            r#"[[[2023,10,14,17,13,20,2,317],"EST -0500 Tue Nov 14 17:13:20 2023"],[[2023,6,22,0,26,40,6,202],"EDT -0400 Sat Jul 22 00:26:40 2023"],[[1969,11,31,19,0,0,3,364],"EST -0500 Wed Dec 31 19:00:00 1969"],[[1906,7,16,15,26,40,4,227],"EST -0500 Thu Aug 16 15:26:40 1906"],[[2096,9,2,3,6,40,2,275],"EDT -0400 Tue Oct  2 03:06:40 2096"],"2023-03-26T02:30:00 EDT -0400","2023-10-29T02:30:00 EDT -0400","2023-10-29T01:30:00 EDT -0400","1970-01-01T00:00:00 EST -0500",[2023,10,14,17,13,20,2,317]]"#,
+        ),
+        (
+            r#"US/Eastern"#,
+            r#"[[[2023,10,14,17,13,20,2,317],"EST -0500 Tue Nov 14 17:13:20 2023"],[[2023,6,22,0,26,40,6,202],"EDT -0400 Sat Jul 22 00:26:40 2023"],[[1969,11,31,19,0,0,3,364],"EST -0500 Wed Dec 31 19:00:00 1969"],[[1906,7,16,15,26,40,4,227],"EST -0500 Thu Aug 16 15:26:40 1906"],[[2096,9,2,3,6,40,2,275],"EDT -0400 Tue Oct  2 03:06:40 2096"],"2023-03-26T02:30:00 EDT -0400","2023-10-29T02:30:00 EDT -0400","2023-10-29T01:30:00 EDT -0400","1970-01-01T00:00:00 EST -0500",[2023,10,14,17,13,20,2,317]]"#,
+        ),
+        (
+            r#"UTC"#,
+            r#"[[[2023,10,14,22,13,20,2,317],"UTC +0000 Tue Nov 14 22:13:20 2023"],[[2023,6,22,4,26,40,6,202],"UTC +0000 Sat Jul 22 04:26:40 2023"],[[1970,0,1,0,0,0,4,0],"UTC +0000 Thu Jan  1 00:00:00 1970"],[[1906,7,16,20,26,40,4,227],"UTC +0000 Thu Aug 16 20:26:40 1906"],[[2096,9,2,7,6,40,2,275],"UTC +0000 Tue Oct  2 07:06:40 2096"],"2023-03-26T02:30:00 UTC +0000","2023-10-29T02:30:00 UTC +0000","2023-10-29T01:30:00 UTC +0000","1970-01-01T00:00:00 UTC +0000",[2023,10,14,22,13,20,2,317]]"#,
+        ),
+        (
+            r#""#,
+            r#"[[[2023,10,14,22,13,20,2,317],"UTC +0000 Tue Nov 14 22:13:20 2023"],[[2023,6,22,4,26,40,6,202],"UTC +0000 Sat Jul 22 04:26:40 2023"],[[1970,0,1,0,0,0,4,0],"UTC +0000 Thu Jan  1 00:00:00 1970"],[[1906,7,16,20,26,40,4,227],"UTC +0000 Thu Aug 16 20:26:40 1906"],[[2096,9,2,7,6,40,2,275],"UTC +0000 Tue Oct  2 07:06:40 2096"],"2023-03-26T02:30:00 UTC +0000","2023-10-29T02:30:00 UTC +0000","2023-10-29T01:30:00 UTC +0000","1970-01-01T00:00:00 UTC +0000",[2023,10,14,22,13,20,2,317]]"#,
+        ),
+    ];
+    let walls: &[(&str, &str, &str)] = &[
+        (
+            r#"America/New_York"#,
+            r#"[2023,10,5,1,30,0,0,0]"#,
+            r#""2023-11-05T01:30:00 EDT -0400""#,
+        ),
+        (
+            r#"America/New_York"#,
+            r#"[2023,2,12,2,30,0,0,0]"#,
+            r#""2023-03-12T03:30:00 EDT -0400""#,
+        ),
+        (
+            r#"Australia/Lord_Howe"#,
+            r#"[2023,3,2,1,45,0,0,0]"#,
+            r#""2023-04-02T01:45:00 +1030 +1030""#,
+        ),
+        (
+            r#"Australia/Lord_Howe"#,
+            r#"[2023,9,1,2,15,0,0,0]"#,
+            r#""2023-10-01T02:45:00 +11 +1100""#,
+        ),
+        (
+            r#"Europe/Dublin"#,
+            r#"[2023,9,29,1,30,0,0,0]"#,
+            r#""2023-10-29T01:30:00 GMT +0000""#,
+        ),
+        (
+            r#"America/Santiago"#,
+            r#"[2023,3,1,23,30,0,0,0]"#,
+            r#""2023-04-01T23:30:00 -03 -0300""#,
+        ),
+        (
+            r#"Pacific/Auckland"#,
+            r#"[2023,3,2,2,30,0,0,0]"#,
+            r#""2023-04-02T02:30:00 NZST +1200""#,
+        ),
+        (
+            r#"America/St_Johns"#,
+            r#"[2023,10,5,1,30,0,0,0]"#,
+            r#""2023-11-05T01:30:00 NDT -0230""#,
+        ),
+        (
+            r#"Europe/Moscow"#,
+            r#"[2014,9,26,1,30,0,0,0]"#,
+            r#""2014-10-26T01:30:00 MSK +0300""#,
+        ),
+        (
+            r#"EST5EDT,M3.2.0,M11.1.0"#,
+            r#"[2015,10,1,1,30,0,0,0]"#,
+            r#""2015-11-01T01:30:00 EDT -0400""#,
+        ),
+        (
+            r#"CET-1CEST,M3.5.0,M10.5.0/3"#,
+            r#"[2015,9,25,2,30,0,0,0]"#,
+            r#""2015-10-25T02:30:00 CET +0100""#,
+        ),
+    ];
+    let runs = zones
+        .iter()
+        .map(|(zone, want)| (*zone, table.to_string(), *want));
+    let runs = runs.chain(walls.iter().map(|(zone, wall, want)| {
+        let program = format!(r#"{wall} | strflocaltime("%Y-%m-%dT%H:%M:%S %Z %z")"#);
+        (*zone, program, *want)
+    }));
+    let mut wrong = Vec::new();
+    for (zone, program, want) in runs {
+        let got = host_run(&program, zone);
+        if got != vec![Frame::Out(want.into())] {
+            wrong.push(format!(
+                "{program} under {zone:?}\n  got  {got:?}\n  want {want}"
+            ));
         }
     }
-    for zone in ["UTC", "UTC0", "EST5EDT,M3.2.0,M11.1.0", "<+07>-7"] {
-        for program in ["localtime", "strflocaltime(\"%Z %z\")", "strptime(\"%s\")"] {
-            let config = serde_json::json!({"program": program, "zone": zone});
-            assert!(
-                super::eval::open(config.to_string().as_bytes()).is_ok(),
-                "{zone} {program}"
-            );
-        }
-    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 #[test]
-fn nonexact_libm_builtins_keep_the_pre_execution_fallback() {
-    for (name, arity) in [
-        ("erf", 0),
-        ("erfc", 0),
-        ("gamma", 0),
-        ("lgamma", 0),
-        ("lgamma_r", 0),
-        ("tgamma", 0),
-        ("j0", 0),
-        ("j1", 0),
-        ("jn", 2),
-        ("y0", 0),
-        ("y1", 0),
-        ("yn", 2),
-        ("remainder", 2),
-        ("drem", 2),
+fn math_builtins_answer_as_jq_does() {
+    let cases: &[(&str, &str)] = &[
+        (
+            "[0, 0.5, 1, -1.5] | map(erf)",
+            "[0,0.5204998778130465,0.8427007929497149,-0.9661051464753108]",
+        ),
+        (
+            "[0, 0.5, 1] | map(erfc)",
+            "[1,0.4795001221869535,0.15729920705028513]",
+        ),
+        (
+            "[1, 2, 3, 0.5, -0.5, 0] | map(lgamma) == map(gamma)",
+            "true",
+        ),
+        (
+            "[1, 2, 3, 0.5, -0.5, 0] | map(lgamma)",
+            "[0,0,0.6931471805599453,0.5723649429247001,1.2655121234846454,1.7976931348623157e+308]",
+        ),
+        (
+            "[5, 1, -0.5, 0, -1, 172] | map(tgamma)",
+            "[24,1,-3.544907701811032,1.7976931348623157e+308,null,1.7976931348623157e+308]",
+        ),
+        (
+            "[-0.5, -12, 1, 0.5] | map(lgamma_r)",
+            "[[1.2655121234846454,-1],[1.7976931348623157e+308,-1],[0,1],[0.5723649429247001,1]]",
+        ),
+        (
+            "[0, 1] | map([j0, j1, y1])",
+            "[[1,0,-1.7976931348623157e+308],[0.7651976865579666,0.4400505857449335,-0.7812128213002887]]",
+        ),
+        (
+            "[jn(0; 1), jn(1; 1), jn(-1; 1), jn(1.9; 1), yn(-1; 2), yn(0; 0), (0 | y0)]",
+            "[0.7651976865579666,0.4400505857449335,-0.4400505857449335,0.4400505857449335,0.10703243154093756,-1.7976931348623157e+308,-1.7976931348623157e+308]",
+        ),
+        (
+            "[remainder(5; 2), remainder(7; 2), drem(-7; 2), remainder(5; 0), remainder(1.7976931348623157e308; 1e308), remainder(5e-324; 5e-324), remainder(-4; 2)]",
+            "[1,-1,1,null,-2.0230686513768431e+307,0,-0]",
+        ),
+        (
+            "[[1, 2] | jn(.[]; 0.5, 1.5)] == [jn(1; 0.5), jn(2; 0.5), jn(1; 1.5), jn(2; 1.5)]",
+            "true",
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (program, want) in cases {
+        let got = outputs(program, "null");
+        if got.first().map(String::as_str) != Some(want) {
+            wrong.push(format!("{program}\n  got  {got:?}\n  want {want}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    for program in [
+        r#""a" | erf"#,
+        r#"jn("a"; 1)"#,
+        r#"jn(1; "a")"#,
+        r#"remainder(1; "a")"#,
     ] {
-        let program = if arity == 0 {
-            name.to_string()
-        } else {
-            format!("{name}(1;2)")
-        };
-        assert!(
-            matches!(refusal(&program), Refusal::Unsupported(_)),
+        assert_eq!(
+            run(program, "null", 1 << 16),
+            vec![Frame::Err(r#"string ("a") number required"#.into())],
             "{program}"
         );
     }
-    assert_eq!(
-        run("def erf: 42; erf", "null", 1),
-        vec![Frame::Out("42".into())]
-    );
-}
-
-#[test]
-fn remainder_aliases_keep_the_pre_execution_fallback_at_extremes() {
-    for name in ["remainder", "drem"] {
-        for args in ["1.7976931348623157e308;1e308", "5e-324;5e-324", "5;2"] {
-            let call = format!("{name}({args})");
-            for program in [
-                call.clone(),
-                format!("def alias: {call}; alias"),
-                format!("debug | {call}"),
-                format!("input | {call}"),
-                format!("try {call} catch ."),
-            ] {
-                assert!(
-                    matches!(refusal(&program), Refusal::Unsupported(_)),
-                    "{program}"
-                );
-            }
-        }
-        assert_eq!(
-            run(
-                &format!("def {name}($a; $b): $a + $b; {name}(2;3)"),
-                "null",
-                1
-            ),
-            vec![Frame::Out("5".into())],
-            "{name}"
-        );
-    }
-    assert_eq!(
-        outputs("[fmod(5;2), fmod(-5;2), 5 % 2, -5 % 2]", "null"),
-        vec!["[1,-1,1,-1]"]
-    );
 }
 
 #[test]

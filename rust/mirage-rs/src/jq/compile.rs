@@ -159,19 +159,11 @@ struct Compiler<'a> {
     marks: Vec<(usize, usize)>,
     envs: Vec<Env>,
     saved: Vec<Option<usize>>,
-    unsupported: Option<String>,
-    unavailable_config: bool,
-}
-
-#[derive(Debug)]
-pub(crate) enum Refusal {
-    Invalid(String),
-    Unsupported(String),
 }
 
 /// The variables jq's main binds before the command line's: `$ENV`,
-/// `$ARGS`, and `$JQ_BUILD_CONFIGURATION`, which names a configure line
-/// this engine never had.
+/// `$ARGS`, and `$JQ_BUILD_CONFIGURATION`, the configure arguments jq was
+/// built with, none for this engine, as for a jq configured without any.
 fn builtin_globals() -> [(&'static str, Value); 3] {
     let mut args = Object::default();
     args.insert("positional".into(), Value::array(Vec::new()));
@@ -191,27 +183,22 @@ fn builtin_globals() -> [(&'static str, Value); 3] {
 /// Compile `source` against jq's builtin library. `globals` are the
 /// `$name` bindings jq's command line makes (`--arg`, `--argjson`,
 /// `$ARGS`, `$ENV`); the ones jq's main binds by itself default. A
-/// program jq refuses is refused with jq's report. Work requiring the
-/// host evaluator is refused before execution.
-pub(crate) fn compile(source: &str, globals: &HashMap<String, Value>) -> Result<Program, Refusal> {
+/// program jq refuses is refused with jq's report.
+pub(crate) fn compile(source: &str, globals: &HashMap<String, Value>) -> Result<Program, String> {
     let (ast, imports) = match syntax::parse(source) {
         Parsed::Program(ast, imports) => (ast, imports),
-        Parsed::Invalid(messages) => return Err(Refusal::Invalid(syntax::report(&messages))),
-        Parsed::Unsupported(why) => return Err(Refusal::Unsupported(why.into())),
+        Parsed::Invalid(messages) => return Err(syntax::report(&messages)),
     };
     if let Some(import) = imports.iter().rev().find(|import| !import.optional) {
         let message = builtin::module_error(&import.path);
-        return Err(Refusal::Invalid(syntax::report(&[format!(
-            "jq: error: {message}\n"
-        )])));
+        return Err(syntax::report(&[format!("jq: error: {message}\n")]));
     }
-    let unavailable_config = !globals.contains_key("JQ_BUILD_CONFIGURATION");
     let mut globals = globals.clone();
     for (name, value) in builtin_globals() {
         globals.entry(name.to_string()).or_insert(value);
     }
-    let referenced = check::check(&ast, &globals, source)
-        .map_err(|errors| Refusal::Invalid(syntax::report(&errors)))?;
+    let referenced =
+        check::check(&ast, &globals, source).map_err(|errors| syntax::report(&errors))?;
     let mut compiler = Compiler {
         bcs: vec![Builder::default()],
         globals: &globals,
@@ -223,14 +210,9 @@ pub(crate) fn compile(source: &str, globals: &HashMap<String, Value>) -> Result<
         marks: Vec::new(),
         envs: Vec::new(),
         saved: Vec::new(),
-        unsupported: None,
-        unavailable_config,
     };
     compiler.seq(0, vec![Step::Code(Node::Ast(&ast), None)]);
     compiler.run();
-    if let Some(why) = compiler.unsupported.take() {
-        return Err(Refusal::Unsupported(why));
-    }
     compiler.emit(0, Op::Ret);
     Ok(compiler.finish())
 }
@@ -380,9 +362,6 @@ impl<'a> Compiler<'a> {
 
     fn run(&mut self) {
         while let Some((bc, step)) = self.tasks.pop() {
-            if self.unsupported.is_some() {
-                break;
-            }
             match step {
                 Step::Emit(op) => {
                     self.emit(bc, op);
@@ -703,14 +682,6 @@ impl<'a> Compiler<'a> {
             Ast::Call(name, args, _) => {
                 let args: Vec<Node> = args.iter().map(Node::Ast).collect();
                 return self.call(bc, name, &args, env);
-            }
-            Ast::Var(name, _)
-                if self.unavailable_config
-                    && name == "JQ_BUILD_CONFIGURATION"
-                    && find_var(env, name).is_none() =>
-            {
-                self.unsupported = Some("build configuration requires the host evaluator".into());
-                Vec::new()
             }
             Ast::Var(name, _) => match find_var(env, name) {
                 Some((owner, index)) => {
@@ -1111,31 +1082,6 @@ impl<'a> Compiler<'a> {
                 .collect();
             steps.push(Step::Emit(Op::Raise));
             return self.seq(bc, steps);
-        }
-        if matches!(
-            name,
-            "erf"
-                | "erfc"
-                | "gamma"
-                | "lgamma"
-                | "lgamma_r"
-                | "tgamma"
-                | "j0"
-                | "j1"
-                | "jn"
-                | "y0"
-                | "y1"
-                | "yn"
-                | "remainder"
-                | "drem"
-        ) {
-            self.unsupported = Some("this math builtin requires the host evaluator".into());
-            return;
-        }
-        if matches!((name, arity), ("get_jq_origin" | "get_prog_origin", 0)) {
-            self.unsupported =
-                Some("program and evaluator paths require the host evaluator".into());
-            return;
         }
         match (name, arity) {
             ("empty", 0) => {

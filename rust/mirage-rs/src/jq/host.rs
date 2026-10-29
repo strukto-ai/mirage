@@ -40,6 +40,9 @@ pub(crate) enum Request {
 /// last took it, with its length in bytes.
 pub(crate) struct Host {
     pub(crate) env: Value,
+    /// What `get_prog_origin` answers: the directory of the program's
+    /// file, else the working directory.
+    pub(crate) origin: Value,
     pub(crate) filename: Value,
     pub(crate) line: f64,
     pub(crate) reply: Option<Reply>,
@@ -56,6 +59,7 @@ impl Default for Host {
     fn default() -> Self {
         Self {
             env: Value::object(Object::default()),
+            origin: Value::Null,
             filename: Value::Null,
             line: 0.0,
             reply: None,
@@ -79,6 +83,7 @@ pub(crate) fn is_host(f: Cfunc) -> bool {
             | Cfunc::Debug
             | Cfunc::Stderr
             | Cfunc::Env
+            | Cfunc::GetProgOrigin
             | Cfunc::InputFilename
             | Cfunc::InputLineNumber
     )
@@ -214,6 +219,7 @@ impl Host {
                 Answer::Value(input)
             }
             Cfunc::Env => Answer::Value(self.env.clone()),
+            Cfunc::GetProgOrigin => Answer::Value(self.origin.clone()),
             Cfunc::InputFilename => Answer::Value(self.filename.clone()),
             Cfunc::InputLineNumber => Answer::Value(Value::number(self.line)),
             _ => unreachable!("not a host builtin"),
