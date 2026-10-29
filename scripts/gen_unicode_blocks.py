@@ -33,6 +33,9 @@ def blocks(text: str) -> list[tuple[str, int, int]]:
 
     A property name is read with case, spaces, hyphens and underscores
     ignored, and a block's starts with `In`.
+
+    Args:
+        text (str): Raw contents of Unicode's Blocks.txt data file.
     """
     out = []
     for line in text.splitlines():
