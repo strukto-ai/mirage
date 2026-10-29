@@ -216,9 +216,16 @@ fn collect_bodies<'a>(node: &'a Node, out: &mut [Option<&'a Node>]) {
 fn mark_calls(node: &mut Node, groups: usize) -> Result<(Vec<bool>, Vec<bool>), String> {
     let root = groups + 1;
     let mut calls_in: Vec<Vec<usize>> = vec![Vec::new(); groups + 2];
+    let mut live: Vec<Vec<usize>> = vec![Vec::new(); groups + 2];
+    collect_calls(node, root, &mut calls_in, &mut live);
     let mut called = vec![false; groups + 1];
-    let mut chain = vec![root];
-    collect_calls(node, &mut chain, false, &mut calls_in, &mut called);
+    let mut entered = live[root].clone();
+    while let Some(g) = entered.pop() {
+        if !called[g] {
+            called[g] = true;
+            entered.extend(live[g].iter().copied());
+        }
+    }
     let mut target = vec![false; groups + 1];
     for &g in &calls_in[root] {
         target[g] = true;
@@ -257,39 +264,41 @@ fn mark_calls(node: &mut Node, groups: usize) -> Result<(Vec<bool>, Vec<bool>), 
     Ok((called, recursive))
 }
 
-/// Records every call under the groups enclosing it, root included.
-fn collect_calls(
-    node: &Node,
-    chain: &mut Vec<usize>,
-    in_zero: bool,
-    calls_in: &mut [Vec<usize>],
-    called: &mut [bool],
-) {
-    let mut stack = vec![(Some(node), in_zero)];
-    while let Some((node, in_zero)) = stack.pop() {
+/// Records every call under the groups enclosing it, root included, and
+/// in `live` the calls no `{0}` inside that group hides: a group a live
+/// call enters runs its own live calls, wherever the group itself sits.
+fn collect_calls(node: &Node, root: usize, calls_in: &mut [Vec<usize>], live: &mut [Vec<usize>]) {
+    let mut chain = vec![(root, 0)];
+    let mut stack = vec![(Some(node), 0)];
+    while let Some((node, zeros)) = stack.pop() {
         let Some(node) = node else {
             chain.pop();
             continue;
         };
         match node {
             Node::Call(call) => {
-                for &enclosing in chain.iter() {
+                for &(enclosing, _) in &chain {
                     calls_in[enclosing].push(call.group);
                 }
-                if !in_zero {
-                    called[call.group] = true;
+                for &(enclosing, entered_at) in chain.iter().rev() {
+                    if entered_at != zeros {
+                        break;
+                    }
+                    live[enclosing].push(call.group);
                 }
             }
             Node::Group(index, body) => {
-                chain.push(*index);
-                stack.push((None, in_zero));
-                stack.push((Some(body), in_zero));
+                chain.push((*index, zeros));
+                stack.push((None, zeros));
+                stack.push((Some(body), zeros));
             }
-            Node::Repeat { body, max, .. } => stack.push((Some(body), in_zero || *max == Some(0))),
+            Node::Repeat { body, max, .. } => {
+                stack.push((Some(body), zeros + usize::from(*max == Some(0))))
+            }
             node => {
                 let mut children = Vec::new();
                 node.children(&mut children);
-                stack.extend(children.into_iter().map(|node| (Some(node), in_zero)));
+                stack.extend(children.into_iter().map(|node| (Some(node), zeros)));
             }
         }
     }
