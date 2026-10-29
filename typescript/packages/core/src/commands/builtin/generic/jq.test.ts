@@ -821,8 +821,8 @@ describe('jq_eval', () => {
   })
 
   it('runs a program jq_eval refuses in the worker', async () => {
-    const result = await ranOver([], '"a" | test("\\\\X")', { null_input: true })
-    expect(result).toEqual({ stdout: 'true\n', stderr: '', exitCode: 0 })
+    const result = await ranOver([], '5 | tgamma', { null_input: true })
+    expect(result).toEqual({ stdout: '24\n', stderr: '', exitCode: 0 })
   })
 
   it('runs dates, the clock and a rule zone in jq_eval', async () => {

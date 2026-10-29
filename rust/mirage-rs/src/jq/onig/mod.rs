@@ -1,5 +1,6 @@
 // Adapted from Oniguruma 6.9.10 (BSD-2-Clause), src/regexec.c. See licenses/third_party/oniguruma.txt.
 
+mod callout;
 mod class;
 mod compile;
 mod exec;
@@ -30,10 +31,7 @@ pub(crate) struct Options {
 
 /// A pattern in Oniguruma's ONIG_SYNTAX_PERL_NG over UTF-8, the dialect
 /// jq's regex builtins compile with, with every group capturing
-/// (ONIG_OPTION_CAPTURE_GROUP). Subexp calls, absent operators, callouts,
-/// text segments (`\X`, `\y`), conditions that are no group reference,
-/// backreferences with a level and Unicode blocks are refused with an
-/// error.
+/// (ONIG_OPTION_CAPTURE_GROUP).
 pub(crate) struct Regex {
     program: Program,
     groups: usize,
@@ -68,7 +66,9 @@ impl Regex {
         };
         let parsed = parse::parse(pattern, flags)?;
         let required = compile::required(&parsed.node).map(first_byte);
-        let program = compile::compile(parsed.node, parsed.groups)?;
+        let groups = parsed.groups;
+        let names = parsed.names.clone();
+        let program = compile::compile(parsed)?;
         let lead = program
             .insts
             .iter()
@@ -86,7 +86,7 @@ impl Regex {
         let backrefs = program
             .insts
             .iter()
-            .any(|inst| matches!(inst, Inst::Backref(..)));
+            .any(|inst| matches!(inst, Inst::Backref { .. }));
         let star = match lead {
             _ if backrefs => None,
             Some(Inst::Star {
@@ -99,8 +99,8 @@ impl Regex {
         };
         Ok(Regex {
             program,
-            groups: parsed.groups,
-            names: parsed.names,
+            groups,
+            names,
             options,
             first,
             anchor,
@@ -145,12 +145,13 @@ impl Search {
         }
     }
 
-    /// Starts over from `from`, keeping the buffers.
+    /// Starts over from `from` in the same subject, keeping the buffers.
     pub(crate) fn restart(&mut self, from: usize) {
         self.from = from;
         self.at = from;
         self.active = false;
         self.best = None;
+        self.machine.new_search();
     }
 
     /// Searches `hay` with `regex`, spending `budget`; out of it, the same
@@ -171,7 +172,7 @@ impl Search {
                 if !self.next_start(regex, hay) {
                     return Step::Done(Ok(self.best.take().map(|best| best.region)));
                 }
-                self.machine.reset(&regex.program, self.at);
+                self.machine.reset(&regex.program, self.at, hay.len());
                 self.active = true;
             }
             let found = self.machine.run(
@@ -192,6 +193,7 @@ impl Search {
                 Step::Done(Ok(None)) => {
                     self.active = false;
                     self.at += exec::unit_at(hay, self.at).map_or(1, |(_, len)| len);
+                    self.at = self.at.max(self.machine.skip());
                 }
             }
         }

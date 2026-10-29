@@ -287,6 +287,166 @@
         "stdout": "[\"I\",\"I\",\"ŉ\",\"ʼN\"]\n[false,false,true,true]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "jq_regex_subexpression_call",
+      "seq": 18610019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"abab\" | [match(\"(ab)\\\\g<1>\") | [.offset,.length,.string,[.captures[].string]]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[0,4,\"abab\",[\"ab\"]]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_absent_operator",
+      "seq": 18610020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"abcxabc\" | [match(\"(?~x)\";\"g\") | .string]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"abc\",\"\",\"abc\",\"\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_callouts",
+      "seq": 18610021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"abc\" | [test(\"(*FAIL)|abc\"),test(\"a(?{x})bc\")]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[true,true]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_grapheme_clusters",
+      "seq": 18610022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"é🇻🇳\" | [match(\"\\\\X\";\"g\") | [.offset,.length,.string]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[0,2,\"é\"],[2,2,\"🇻🇳\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_backreference_level",
+      "seq": 18610023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"aa\" | test(\"(a)\\\\k<1+0>\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_unicode_blocks",
+      "seq": 18610024,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[\"a\",\"α\"] | map(test(\"\\\\p{InBasicLatin}\")), map(test(\"\\\\p{In_Greek_and_Coptic}\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[true,false]\n[false,true]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_duplicate_name_recursive_backreference",
+      "seq": 18610025,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"aaa\" | [match(\"(?<x>a)(?<x>\\\\1)(?<r>\\\\k<x>\\\\g<r>?)\";\"g\") | [.offset,.length,.string,[.captures[].string]]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[0,3,\"aaa\",[\"a\",\"a\",\"a\"]]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_shared_recursive_call_graph",
+      "seq": 18610026,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc 'def pattern: reduce range(1;13) as $n (\"(?<g0>a\\\\g<r>?){0}\"; . + \"(?<g\\($n)>\\\\g<g\\($n-1)>\\\\g<g\\($n-1)>){0}\") + \"(?<r>\\\\g<g12>?)\"; \"\" | test(pattern)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_wrapped_recursive_call_cycle",
+      "seq": 18610027,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc 'def pattern: [range(0;32) | \"(?<w\\(.)>(?<g\\(.)>a\\\\g<g\\((. + 1) % 32)>?))\"] | join(\"\"); \"aaaa\" | test(pattern)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "false\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_repeated_recursive_call_cache",
+      "seq": 18610028,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"aaaa\" | test(\"(?<x>a\\\\g<r>?){0}(?<r>\" + (\"\\\\g<x>\" * 16384) + \")\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "false\n",
+        "stderr": ""
+      }
     }
   ]
 }

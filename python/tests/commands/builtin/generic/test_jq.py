@@ -774,8 +774,8 @@ async def test_a_program_that_never_ends_is_cancelled_on_this_thread(
 
 @pytest.mark.asyncio
 async def test_a_program_jq_eval_refuses_runs_in_libjqs_worker(monkeypatch):
-    out, io = await _run([], r'"a" | test("\\X")', null_input=True)
-    assert (out, io.exit_code) == (b"true\n", 0)
+    out, io = await _run([], "5 | tgamma", null_input=True)
+    assert (out, io.exit_code) == (b"24\n", 0)
 
 
 @pytest.mark.asyncio

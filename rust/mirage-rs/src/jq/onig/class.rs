@@ -6,6 +6,8 @@ use std::sync::OnceLock;
 use regex_syntax::ParserBuilder;
 use regex_syntax::hir::{Class, ClassUnicode, ClassUnicodeRange, HirKind};
 
+use crate::generated::unicode_blocks::BLOCKS;
+
 /// The characters a class, `\w` or a caseless literal matches.
 pub(super) type Set = ClassUnicode;
 
@@ -72,9 +74,12 @@ fn union(mut set: Set, other: &Set) -> Set {
     set
 }
 
-pub(super) fn negate(mut set: Set) -> Set {
-    set.negate();
-    set
+/// Every character outside `set`. regex-syntax's own negate joins U+D7FF
+/// and U+E000 across the surrogate gap, so a set holding both kept them.
+pub(super) fn negate(set: Set) -> Set {
+    let mut all = range('\0', char::MAX);
+    all.difference(&set);
+    all
 }
 
 /// The class holding `codes`, skipping any that is no character.
@@ -141,11 +146,12 @@ pub(super) fn ctype(ctype: Ctype, bracket: bool) -> &'static Set {
     })
 }
 
-/// What `\p{name}` matches: an error says whether the name is one
-/// Oniguruma knows (a block) that this engine does not support.
-pub(super) fn property(name: &str) -> Result<Set, bool> {
+/// What `\p{name}` matches, None for a name Oniguruma does not know:
+/// its ctypes, a general category, a script, a binary property, or a
+/// block as `In_Basic_Latin` names it, the name read loosely.
+pub(super) fn property(name: &str) -> Option<Set> {
     if !name.is_ascii() {
-        return Err(false);
+        return None;
     }
     let loose: String = name
         .chars()
@@ -153,20 +159,41 @@ pub(super) fn property(name: &str) -> Result<Set, bool> {
         .map(|c| c.to_ascii_lowercase())
         .collect();
     if loose.is_empty() || !loose.chars().all(|c| c.is_ascii_alphanumeric() || c == '&') {
-        return Err(false);
+        return None;
     }
     if let Some((_, ctype)) = CTYPES.iter().find(|(known, _)| *known == loose) {
-        return Ok(ctype_set(*ctype));
+        return Some(ctype_set(*ctype));
     }
-    let found = match loose.as_str() {
+    match loose.as_str() {
         "any" => Some(negate(Set::empty())),
         "assigned" => unicode(r"\P{Cn}"),
         "l&" => unicode(r"\p{LC}"),
+        "innoblock" => Some(negate(blocks())),
         _ => unicode(&format!(r"\p{{gc={loose}}}"))
             .or_else(|| unicode(&format!(r"\p{{sc={loose}}}")))
-            .or_else(|| unicode(&format!(r"\p{{{loose}}}"))),
-    };
-    found.ok_or(loose.starts_with("in"))
+            .or_else(|| unicode(&format!(r"\p{{{loose}}}")))
+            .or_else(|| block(&loose)),
+    }
+}
+
+/// The block `name` (loosened, `in` first) covers.
+fn block(name: &str) -> Option<Set> {
+    let (_, from, to) = BLOCKS.iter().find(|(known, _, _)| *known == name)?;
+    Some(codes_of_ranges([(*from, *to)]))
+}
+
+/// Every code point some block covers.
+fn blocks() -> Set {
+    codes_of_ranges(BLOCKS.iter().map(|(_, from, to)| (*from, *to)))
+}
+
+fn codes_of_ranges(ranges: impl IntoIterator<Item = (u32, u32)>) -> Set {
+    Set::new(ranges.into_iter().filter_map(|(from, to)| {
+        Some(ClassUnicodeRange::new(
+            char::from_u32(from)?,
+            char::from_u32(to)?,
+        ))
+    }))
 }
 
 fn ctype_set(ctype: Ctype) -> Set {
