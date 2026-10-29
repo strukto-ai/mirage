@@ -232,13 +232,14 @@ async function attachmentsOf(
     const n = ctx.minter.next('attachment')
     const id = postSnowflake(n)
     const filename = typeof entry.filename === 'string' ? entry.filename : 'file'
+    const url = `${BASE_TOKEN}/attachments/${id}/${encodeURIComponent(filename)}`
     await ctx.db.discordBlob.create({ data: { tenant: ctx.tenant, id, seq: n, body: part.bytes } })
     out.push({
       id,
       filename,
       size: part.bytes.length,
-      url: `${BASE_TOKEN}/attachments/${id}/${filename}`,
-      proxy_url: `${BASE_TOKEN}/attachments/${id}/${filename}`,
+      url,
+      proxy_url: url,
       content_type: 'application/octet-stream',
     })
   }

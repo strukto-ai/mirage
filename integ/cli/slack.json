@@ -320,6 +320,17 @@
         "stdout": "",
         "stderr": "slack upload-file: read /scratch/nope.wav: No such file or directory\n"
       }
+    },
+    {
+      "id": "sl_upload_file_keeps_binary_bytes",
+      "seq": 564026,
+      "targets": ["cli-slack"],
+      "command": "printf '\\000\\001\\377\\376\\200#\\n' > '/scratch/#blob.bin' && slack upload-file --channel C1 --file '/scratch/#blob.bin' >/dev/null && cmp '/scratch/#blob.bin' '/slack/channels/general__C1/2026-03-31/files/#blob__FU000003.bin' && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      }
     }
   ]
 }
