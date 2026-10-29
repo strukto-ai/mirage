@@ -92,52 +92,6 @@ export function spliceWindow(data: Uint8Array, offset: number, payload: Uint8Arr
   return out
 }
 
-const PARTIAL_CONTENT = 206
-
-/**
- * The window, whether or not the server honored the Range header.
- *
- * Sending a Range is a request, not an instruction: RFC 9110 lets a server
- * ignore it and answer 200 with the whole representation, and a CDN in front
- * of one may do that even when the origin would not. Trusting the header
- * alone therefore hands back the entire file for what the caller asked to be
- * a window, which over FUSE is a read that returns far more bytes than it was
- * given room for. Only a 206 is proof the bytes are already the window, so
- * anything else is sliced here.
- *
- * @param data the body the server returned
- * @param status the response status
- * @param offset first byte the caller asked for
- * @param size how many bytes, or null for the rest
- */
-export function windowIfUnranged(
-  data: Uint8Array,
-  status: number,
-  offset: number,
-  size: number | null,
-): Uint8Array {
-  if (status === PARTIAL_CONTENT) return data
-  return sliceWindow(data, offset, size)
-}
-
-/**
- * The same guarantee for a reader that takes the window as one value.
- *
- * A whole-file read passes no window and gets its bytes back untouched.
- *
- * @param data the body the server returned
- * @param status the response status
- * @param window the window the caller asked for, or undefined for all of it
- */
-export function windowOf(
-  data: Uint8Array,
-  status: number,
-  window: ByteWindow | undefined,
-): Uint8Array {
-  if (window === undefined) return data
-  return windowIfUnranged(data, status, window.offset, window.size)
-}
-
 // HTTP 416, and the spellings the stores put on it. S3 and its clones answer
 // `InvalidRange`, Azure/OneDrive `InvalidRange` too, and a bare WebDAV or
 // static host only sets the status line.

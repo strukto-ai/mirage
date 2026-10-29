@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { OverrideShape } from './clone.ts'
+
 export interface MountSummary {
   prefix: string
   vfs: string
@@ -47,4 +49,20 @@ export interface WorkspaceDetail {
   sessions: SessionSummary[]
   mounts: MountSummary[]
   internals: WorkspaceInternals | null
+}
+
+export interface CreateWorkspaceRequest {
+  config: Record<string, unknown>
+  id?: string
+}
+
+export interface CloneWorkspaceRequest {
+  id?: string
+  override?: OverrideShape
+}
+
+export interface LoadWorkspaceRequest {
+  key?: string
+  id?: string
+  override?: OverrideShape
 }

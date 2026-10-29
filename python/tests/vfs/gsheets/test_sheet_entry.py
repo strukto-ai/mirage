@@ -13,23 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from mirage.vfs.gsheets.sheet_entry import SheetEntry, make_filename
-
-
-def test_sheet_entry_creation():
-    entry = SheetEntry(
-        id="abc123",
-        name="My Spreadsheet",
-        modified_time="2026-04-01T12:00:00.000Z",
-        created_time="2026-03-01T12:00:00.000Z",
-        owner="user@gmail.com",
-        owned_by_me=True,
-        can_edit=True,
-        filename="My_Spreadsheet__abc123.gsheet.json",
-    )
-    assert entry.id == "abc123"
-    assert entry.owned_by_me is True
-    assert entry.can_edit is True
+from mirage.vfs.gsheets.sheet_entry import make_filename
 
 
 def test_make_filename_with_and_without_a_date():

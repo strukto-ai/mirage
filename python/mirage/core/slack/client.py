@@ -194,7 +194,7 @@ async def download_file(
     Takes the window rather than a prepared header so the answer can be
     checked against it: Slack serves files from a CDN, and a server is
     free to ignore Range and reply 200 with the whole file, which
-    ``window_if_unranged`` then trims.
+    ``api_request`` then trims.
 
     Args:
         accessor (SlackAccessor): Slack accessor.

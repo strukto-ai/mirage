@@ -28,7 +28,7 @@ import { Claim, type WorkspaceRegistry } from '../registry.ts'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
-import { buildOverrideMounts, cloneWorkspaceWithOverride, type OverrideShape } from '../clone.ts'
+import { buildOverrideMounts, cloneWorkspaceWithOverride } from '../clone.ts'
 import {
   configToWorkspaceArgs,
   loadProfilePolicy,
@@ -37,6 +37,11 @@ import {
   type WorkspaceConfigRaw,
 } from '@struktoai/mirage-node'
 import { makeBrief, makeDetail } from '../summary.ts'
+import type {
+  CloneWorkspaceRequest,
+  CreateWorkspaceRequest,
+  LoadWorkspaceRequest,
+} from '../schemas.ts'
 import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from '../multipart.ts'
 import { SharedStorageError, WritePolicyError } from '@struktoai/mirage-core/workspace/mount/errors'
 import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
@@ -52,22 +57,12 @@ const WRITE_RATE_LIMIT = {
   config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
 }
 
-interface CreateWorkspaceBody {
-  config: Record<string, unknown>
-  id?: string
-}
-
 interface WorkspaceIdParams {
   id: string
 }
 
 interface WorkspaceGetQuery {
   verbose?: string
-}
-
-interface CloneWorkspaceBody {
-  id?: string
-  override?: OverrideShape
 }
 
 const SnapshotBodySchema = z.object({ key: z.string() }).strict()
@@ -80,18 +75,12 @@ const LoadBodySchema = z
   })
   .strict()
 
-interface LoadWorkspaceBody {
-  key?: string
-  id?: string
-  override?: OverrideShape
-}
-
-function parseLoadRequest(raw: unknown): LoadWorkspaceBody {
+function parseLoadRequest(raw: unknown): LoadWorkspaceRequest {
   const parsed = LoadBodySchema.safeParse(raw ?? {})
   if (!parsed.success) {
     throw new MultipartError(400, `bad load request: ${parsed.error.message}`)
   }
-  return parsed.data as LoadWorkspaceBody
+  return parsed.data as LoadWorkspaceRequest
 }
 
 /**
@@ -101,7 +90,7 @@ function parseLoadRequest(raw: unknown): LoadWorkspaceBody {
  * @throws MultipartError 400 for a body without both parts, or with a
  *   `key`; 413 for an oversized request part.
  */
-async function readLoadBody(req: FastifyRequest): Promise<[LoadWorkspaceBody, Uint8Array]> {
+async function readLoadBody(req: FastifyRequest): Promise<[LoadWorkspaceRequest, Uint8Array]> {
   let name = ''
   const request: Uint8Array[] = []
   const tar: Uint8Array[] = []
@@ -236,7 +225,7 @@ function building(
 }
 
 /** Refuse an id that would name the state root, not a workspace. */
-function refuseId(reply: FastifyReply, id: string): FastifyReply {
+function refuseDotId(reply: FastifyReply, id: string): FastifyReply {
   return reply.status(400).send({ detail: `invalid workspace id: ${id}` })
 }
 
@@ -255,9 +244,9 @@ function configDigest(config: unknown): string {
 }
 
 export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRoutesDeps): void {
-  app.post<{ Body: CreateWorkspaceBody }>(
+  app.post<{ Body: CreateWorkspaceRequest }>(
     '/v1/workspaces',
-    async (req: FastifyRequest<{ Body: CreateWorkspaceBody }>, reply: FastifyReply) => {
+    async (req: FastifyRequest<{ Body: CreateWorkspaceRequest }>, reply: FastifyReply) => {
       const body = req.body
       const config: unknown = body.config
       if (config === null || typeof config !== 'object' || Array.isArray(config)) {
@@ -291,7 +280,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       // id run one at a time, so a second of the same config answers what
       // the first built, and one of another config is refused at once.
       const wid = body.id ?? cfg.workspaceId ?? newWorkspaceId()
-      if (DOT_IDS.has(wid)) return refuseId(reply, wid)
+      if (DOT_IDS.has(wid)) return refuseDotId(reply, wid)
       const digest = configDigest(config)
       return deps.registry.creating(wid, digest, async (admitted) => {
         if (!admitted) {
@@ -371,7 +360,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
 
   app.post('/v1/workspaces/load', WRITE_RATE_LIMIT, async (req, reply) => {
     const multipart = (req.headers['content-type'] ?? '').startsWith('multipart/')
-    let body: LoadWorkspaceBody
+    let body: LoadWorkspaceRequest
     let source: string | Uint8Array
     try {
       if (multipart) {
@@ -391,7 +380,8 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       return reply.status(e.statusCode).send({ detail: e.message })
     }
     const { key, id: workspaceId, override } = body
-    if (workspaceId !== undefined && DOT_IDS.has(workspaceId)) return refuseId(reply, workspaceId)
+    if (workspaceId !== undefined && DOT_IDS.has(workspaceId))
+      return refuseDotId(reply, workspaceId)
     if (
       workspaceId !== undefined &&
       (deps.registry.has(workspaceId) || deps.registry.removing(workspaceId))
@@ -516,13 +506,13 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     },
   )
 
-  app.post<{ Params: WorkspaceIdParams; Body: CloneWorkspaceBody }>(
+  app.post<{ Params: WorkspaceIdParams; Body: CloneWorkspaceRequest }>(
     '/v1/workspaces/:id/clone',
     async (req, reply) => {
       const source = deps.registry.visible(req.params.id, req.account)
       if (source === null) return reply.status(404).send({ detail: 'workspace not found' })
       const body = req.body
-      if (body.id !== undefined && DOT_IDS.has(body.id)) return refuseId(reply, body.id)
+      if (body.id !== undefined && DOT_IDS.has(body.id)) return refuseDotId(reply, body.id)
       if (
         body.id !== undefined &&
         (deps.registry.has(body.id) || deps.registry.removing(body.id))

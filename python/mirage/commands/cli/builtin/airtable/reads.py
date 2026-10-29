@@ -44,7 +44,7 @@ from mirage.core.airtable.normalize import (
 from mirage.io.types import IOResult
 
 
-async def _base_list(
+async def _base_list_body(
     accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
@@ -56,7 +56,7 @@ async def _base_list(
     return to_json_bytes(payload), IOResult()
 
 
-async def _base_get(
+async def _base_get_body(
     accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
@@ -71,7 +71,7 @@ async def _base_get(
     raise LookupError(f"{base_id}: no such base")
 
 
-async def _table_get(
+async def _table_get_body(
     accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
@@ -85,7 +85,7 @@ async def _table_get(
     return to_json_bytes(normalize_table(table, base_id)), IOResult()
 
 
-async def _record_list(
+async def _record_list_body(
     accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
@@ -114,7 +114,7 @@ async def _record_list(
     return records_jsonl(records), IOResult()
 
 
-async def _record_get(
+async def _record_get_body(
     accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
@@ -128,7 +128,7 @@ async def _record_get(
     return records_jsonl([record]), IOResult()
 
 
-async def _comment_list(
+async def _comment_list_body(
     accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
@@ -143,9 +143,9 @@ async def _comment_list(
     return to_json_bytes(payload), IOResult()
 
 
-base_list = functools.partial(run, _base_list)
-base_get = functools.partial(run, _base_get)
-table_get = functools.partial(run, _table_get)
-record_list = functools.partial(run, _record_list)
-record_get = functools.partial(run, _record_get)
-comment_list = functools.partial(run, _comment_list)
+base_list = functools.partial(run, _base_list_body)
+base_get = functools.partial(run, _base_get_body)
+table_get = functools.partial(run, _table_get_body)
+record_list = functools.partial(run, _record_list_body)
+record_get = functools.partial(run, _record_get_body)
+comment_list = functools.partial(run, _comment_list_body)

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.commands.cli.builtin.discord.delete import delete
+from mirage.commands.cli.builtin.discord.delete import delete_verb
 from mirage.commands.cli.builtin.discord.edit import edit
 from mirage.commands.cli.builtin.discord.members import members
 from mirage.commands.cli.builtin.discord.poll import poll
@@ -160,7 +160,7 @@ DISCORD = CLI(
         "send": CLIHandler(fn=send, write=True),
         "read": CLIHandler(fn=read),
         "edit": CLIHandler(fn=edit, write=True),
-        "delete": CLIHandler(fn=delete, write=True),
+        "delete": CLIHandler(fn=delete_verb, write=True),
         "react": CLIHandler(fn=react, write=True),
         "search": CLIHandler(fn=search),
         "thread-create": CLIHandler(fn=thread_create, write=True),

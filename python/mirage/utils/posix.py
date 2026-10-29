@@ -1,73 +1,5 @@
 import re
 
-# Character classes use the C locale in both runtimes.
-POSIX_CLASSES = {
-    "alpha": "A-Za-z",
-    "digit": "0-9",
-    "alnum": "0-9A-Za-z",
-    "upper": "A-Z",
-    "lower": "a-z",
-    "space": " \\t\\n\\r\\f\\v",
-    "blank": " \\t",
-    "punct": "!-/:-@\\[-`{-~",
-    "print": " -~",
-    "graph": "!-~",
-    "cntrl": "\\x00-\\x1f\\x7f",
-    "xdigit": "0-9A-Fa-f",
-}
-
-
-def translate_bracket(pattern: str, start: int, out: list[str]) -> int:
-    """Translate one bracket expression, expanding POSIX classes.
-
-    Args:
-        pattern (str): the whole ERE source.
-        start (int): index of the opening ``[``.
-        out (list[str]): accumulator receiving translated text.
-
-    Returns:
-        int: index just past the closing ``]``.
-    """
-    idx = start + 1
-    out.append("[")
-    if idx < len(pattern) and pattern[idx] == "^":
-        out.append("^")
-        idx += 1
-    # A `]` in the first position is a literal member in an ERE, but
-    # Python would read it as the end of the bracket expression.
-    if idx < len(pattern) and pattern[idx] == "]":
-        out.append("\\]")
-        idx += 1
-    while idx < len(pattern):
-        ch = pattern[idx]
-        if ch == "]":
-            out.append("]")
-            return idx + 1
-        if pattern.startswith("[:", idx):
-            close = pattern.find(":]", idx + 2)
-            if close == -1:
-                out.append("\\[")
-                idx += 1
-                continue
-            name = pattern[idx + 2 : close]
-            if name not in POSIX_CLASSES:
-                raise re.error("Invalid character class name")
-            out.append(POSIX_CLASSES[name])
-            idx = close + 2
-            continue
-        if ch == "\\" and idx + 1 < len(pattern):
-            out.append(pattern[idx : idx + 2])
-            idx += 2
-            continue
-        if ch == "[":
-            out.append("\\[")
-            idx += 1
-            continue
-        out.append(ch)
-        idx += 1
-    raise re.error("Unmatched [, [^, [:, [., or [=")
-
-
 # What each `.` and negated bracket checks first under a UTF-8 locale: a
 # byte that is no part of a character rides the text as its surrogate
 # escape, and glibc matches it with neither.
@@ -149,12 +81,3 @@ def compile_posix_regex(
     return re.compile(
         skip_raw_bytes(source) if utf8 else source, flags | re.ASCII
     )
-
-
-def folds_ascii_only(pattern: re.Pattern[str]) -> bool:
-    """Whether ``pattern`` ignores case for ASCII letters only, as POSIX grep does.
-
-    Args:
-        pattern (re.Pattern[str]): a compiled matcher.
-    """
-    return bool(pattern.flags & re.ASCII)

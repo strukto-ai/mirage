@@ -43,8 +43,8 @@ def scopes_for(config: LanceDBConfig) -> tuple[Scope, ...]:
     )
 
 
-def _detect(accessor: LanceDBAccessor) -> DetectFn:
+def _build_detect(accessor: LanceDBAccessor) -> DetectFn:
     return make_detect_scope(scopes_for(accessor.config))
 
 
-detect_for = per_accessor(_detect)
+detect_for = per_accessor(_build_detect)

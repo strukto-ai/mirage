@@ -16,7 +16,6 @@ import { foldAscii } from '../../../../utils/posix.ts'
 import { byteView, decodeText } from '../../../../shell/bytes.ts'
 
 import { getOpcodes } from '../../../builtin/diff_format.ts'
-import { DiffOpTag } from '../../../builtin/diff_types.ts'
 import { PosixRegex } from '../../../../rs/regex.ts'
 import { blobData, byteLines } from './patch.ts'
 import type { Repo } from './repo.ts'
@@ -97,7 +96,7 @@ async function greps(
   const before = byteLines(old)
   const after = byteLines(now)
   for (const [tag, i1, i2, j1, j2] of getOpcodes(before, after)) {
-    if (tag === DiffOpTag.EQUAL) continue
+    if (tag === 'equal') continue
     for (const line of [...before.slice(i1, i2), ...after.slice(j1, j2)]) {
       const text = byteView(line.endsWith('\n') ? line.slice(0, -1) : line, pattern.utf8)
       if ((await pattern.search(text, 0, signal)) !== null) return true

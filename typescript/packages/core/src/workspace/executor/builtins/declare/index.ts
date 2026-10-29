@@ -20,4 +20,3 @@ export {
 } from './declare.ts'
 export { handleExport } from './export.ts'
 export { handleLocal } from './local.ts'
-export { handleReadonly } from './readonly.ts'

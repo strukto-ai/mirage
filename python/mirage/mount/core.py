@@ -50,8 +50,6 @@ from mirage.runtime.handles.mode import READ, OpenMode
 from mirage.types import LIVE_KEY, FileStat, FileType, PathSpec
 from mirage.utils.dates import ns_to_iso
 from mirage.utils.stat_view import (
-    DIR_MODE,
-    DIR_SIZE,
     atime_ns,
     content_size,
     device_rdev,
@@ -325,19 +323,6 @@ class MountCore:
         if path == "/":
             return self._root
         return self._root + path
-
-    def dir_stat(self) -> MountAttrs:
-        return MountAttrs(
-            mode=DIR_MODE,
-            size=DIR_SIZE,
-            nlink=2,
-            uid=self._uid,
-            gid=self._gid,
-            rdev=0,
-            atime=self._now,
-            mtime=self._now,
-            ctime=self._now,
-        )
 
     def attrs(self, s: FileStat, size: int | None = None) -> MountAttrs:
         """The POSIX attrs for one stat row, the way a guest's stat reads

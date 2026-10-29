@@ -20,14 +20,12 @@ from mirage.workspace.executor.builtins.declare.declare import (
 )
 from mirage.workspace.executor.builtins.declare.export import handle_export
 from mirage.workspace.executor.builtins.declare.local import handle_local
-from mirage.workspace.executor.builtins.declare.readonly import handle_readonly
 
 __all__ = [
     "handle_declare_functions",
     "handle_declare_print",
     "handle_export",
     "handle_local",
-    "handle_readonly",
     "note_local_array",
     "store_staged_arrays",
 ]

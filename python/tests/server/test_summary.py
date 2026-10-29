@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.server.registry import WorkspaceRegistry
-from mirage.server.summary import _mount_description, make_detail
+from mirage.server.summary import _describe_vfs, make_detail
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -32,8 +32,8 @@ class _DescribedVFS(RAMVFS):
 
 
 def test_short_vfs_md_is_returned_whole():
-    assert _mount_description(_DescribedVFS("hello")) == "hello"
-    assert _mount_description(_DescribedVFS("")) == ""
+    assert _describe_vfs(_DescribedVFS("hello")) == "hello"
+    assert _describe_vfs(_DescribedVFS("")) == ""
 
 
 def test_budget_counts_code_points():
@@ -41,11 +41,11 @@ def test_budget_counts_code_points():
     # units, so the typescript twin ellipsized a text this side leaves
     # whole -- and its cut landed inside the 40th surrogate pair.
     text = "a" * 40 + ASTRAL * 45
-    assert _mount_description(_DescribedVFS(text)) == text
+    assert _describe_vfs(_DescribedVFS(text)) == text
 
 
 def test_ellipsizes_on_a_code_point_boundary():
-    result = _mount_description(_DescribedVFS(ASTRAL * 130))
+    result = _describe_vfs(_DescribedVFS(ASTRAL * 130))
     assert result == ASTRAL * 119 + "…"
     assert len(result) == 120
     assert "�" not in result
@@ -53,7 +53,7 @@ def test_ellipsizes_on_a_code_point_boundary():
 
 def test_trailing_whitespace_is_dropped_before_the_ellipsis():
     text = "x" * 118 + "  " + "y" * 10
-    assert _mount_description(_DescribedVFS(text)) == "x" * 118 + "…"
+    assert _describe_vfs(_DescribedVFS(text)) == "x" * 118 + "…"
 
 
 @pytest.mark.asyncio

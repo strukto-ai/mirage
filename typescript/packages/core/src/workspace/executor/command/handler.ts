@@ -23,7 +23,7 @@ import { CommandTimeoutError, GlobLimitError } from '../../../errors/types.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import { OutputStream, closeQuietly } from '../../../io/stream.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource, type CommandOutput } from '../../../io/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { STOP_WAIT_SECONDS } from '../../../shell/job_table/constants.ts'
 import type { PathSpec, Producer } from '../../../types.ts'
@@ -69,7 +69,7 @@ export interface RunHandlerOpts {
    * What the caller wraps an answer in before it is framed (a mount binds
    * its recorder and activity to the stream).
    */
-  scope?: (result: [ByteSource | null, IOResult]) => [ByteSource | null, IOResult]
+  scope?: (result: CommandOutput) => CommandOutput
   /** The caller's abort, which stops waiting for the body. */
   signal?: AbortSignal
   /**
@@ -175,9 +175,7 @@ function abandon(body: Promise<CommandFnResult>, err: unknown, name: string): vo
  * null declines, so its mount tries the next handler; a leaf's null is its
  * whole answer, an empty one. Mirrors Python's `answered`.
  */
-export async function answered(
-  body: Promise<CommandFnResult>,
-): Promise<[ByteSource | null, IOResult]> {
+export async function answered(body: Promise<CommandFnResult>): Promise<CommandOutput> {
   return (await body) ?? [null, new IOResult()]
 }
 

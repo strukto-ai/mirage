@@ -86,10 +86,6 @@ class AsyncLineIterator:
         self._buf = b""
         self._loaded = 0
         self._exhausted = False
-        self._view: bytes | None = None
-        self._view_key: tuple[tuple[bytes, ...], bool] = ((), False)
-        self._hits: list[int] = []
-        self._unskipped = 0
         self.holders = 0
         self._released = False
 
@@ -100,7 +96,6 @@ class AsyncLineIterator:
     def unread(self, data: bytes) -> None:
         """Return a lookahead suffix to a seekable descriptor."""
         self._buf = data + self._buf
-        self._view = None
 
     @property
     def loaded(self) -> int:
@@ -129,93 +124,6 @@ class AsyncLineIterator:
         """
         data, found = await self.read_until(eol)
         return data if found or data else None
-
-    def buffered_lines(
-        self,
-        eol: bytes = b"\n",
-        limit: int = 31,
-        needles: tuple[bytes, ...] | None = None,
-        ignore_case: bool = False,
-    ) -> list[bytes]:
-        """Peek at complete buffered records without pulling or consuming input.
-
-        Args:
-            eol (bytes): the one-byte record delimiter.
-            limit (int): maximum records to return.
-            needles (tuple[bytes, ...] | None): keep only the records that
-                hold one, as ``skip_nonmatching_lines`` reads them; None
-                keeps every record.
-            ignore_case (bool): search an ASCII-lowercased view.
-        """
-        if needles is None:
-            return self._buf.split(eol, limit)[:-1]
-        kept: list[bytes] = []
-        for record in self._buf.split(eol)[:-1]:
-            view = record.lower() if ignore_case else record
-            if any(needle in view for needle in needles):
-                kept.append(record)
-                if len(kept) == limit:
-                    break
-        return kept
-
-    def skip_empty_lines(
-        self, limit: int | None = None, eol: bytes = b"\n"
-    ) -> int:
-        """Consume buffered empty lines without pulling more input.
-
-        Args:
-            limit (int | None): maximum lines to consume, or all buffered.
-            eol (bytes): the one-byte line terminator.
-        """
-        end = len(self._buf) if limit is None else min(limit, len(self._buf))
-        count = 0
-        while count < end and self._buf[count] == eol[0]:
-            count += 1
-        self._buf = self._buf[count:]
-        return count
-
-    def skip_nonmatching_lines(
-        self,
-        needles: tuple[bytes, ...],
-        ignore_case: bool = False,
-        delimiter: bytes = b"\n",
-    ) -> tuple[int, int]:
-        """Skip complete buffered records before a possible literal match.
-
-        Leave the candidate and any unfinished record for ``read_until`` to
-        join across transport boundaries. Never pull more input. Each
-        needle's next hit is kept until the buffer is refilled, so the calls
-        between two pulls search it once, however the hits interleave.
-
-        Args:
-            needles (tuple[bytes, ...]): one or more nonempty literals
-                without the delimiter, lowercase under ``ignore_case``.
-            ignore_case (bool): search an ASCII-lowercased view.
-            delimiter (bytes): the one-byte record terminator.
-
-        Returns:
-            tuple[int, int]: skipped record and byte counts.
-        """
-        key = (needles, ignore_case)
-        if self._view is None or self._view_key != key:
-            self._view = self._buf.lower() if ignore_case else self._buf
-            self._view_key = key
-            self._hits = [-1] * len(needles)
-            self._unskipped = 0
-        # Dense matches skip nothing; stop trying until the next pull.
-        if self._unskipped >= 8:
-            return 0, 0
-        view = self._view
-        start = len(view) - len(self._buf)
-        for index, needle in enumerate(needles):
-            if self._hits[index] < start:
-                found = view.find(needle, start)
-                self._hits[index] = found if found >= 0 else len(view)
-        end = self._buf.rfind(delimiter, 0, min(self._hits) - start) + 1
-        self._unskipped = self._unskipped + 1 if end == 0 else 0
-        count = self._buf.count(delimiter, 0, end)
-        self._buf = self._buf[end:]
-        return count, end
 
     async def read_until(self, delim: bytes) -> tuple[bytes, bool]:
         """Read up to (not including) ``delim``, or to EOF.
@@ -250,7 +158,6 @@ class AsyncLineIterator:
                 self._buf = self._buf[split:]
                 try:
                     self._buf += await self._next_chunk()
-                    self._view = None
                 except StopAsyncIteration:
                     self._exhausted = True
         except BaseException as exc:
@@ -288,7 +195,6 @@ class AsyncLineIterator:
             try:
                 await self._budget.run()
                 self._buf = await self._next_chunk()
-                self._view = None
             except StopAsyncIteration:
                 self._exhausted = True
             except BaseException as exc:
@@ -304,7 +210,6 @@ class AsyncLineIterator:
         """
         if self._buf:
             data, self._buf = self._buf, b""
-            self._view = None
             return data
         if self._exhausted:
             return None
@@ -384,7 +289,6 @@ class AsyncLineIterator:
                 raise
             else:
                 self._buf += chunk
-                self._view = None
 
     async def read_chars(
         self, count: int, delim: bytes | None
@@ -426,7 +330,6 @@ class AsyncLineIterator:
                 if len(self._buf) < need and not self._exhausted:
                     try:
                         self._buf += await self._next_chunk()
-                        self._view = None
                     except StopAsyncIteration:
                         self._exhausted = True
                     continue

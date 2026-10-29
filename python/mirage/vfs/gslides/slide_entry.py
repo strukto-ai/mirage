@@ -12,24 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass
 from functools import partial
 
 from mirage.core.google.scope import app_filename
 
 SUFFIX = ".gslide.json"
-
-
-@dataclass
-class SlideEntry:
-    id: str
-    name: str
-    modified_time: str
-    created_time: str
-    owner: str | None
-    owned_by_me: bool
-    can_edit: bool
-    filename: str
 
 
 make_filename = partial(app_filename, suffix=SUFFIX)

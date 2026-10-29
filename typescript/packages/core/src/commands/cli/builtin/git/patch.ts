@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { getOpcodes, groupOpcodes } from '../../../builtin/diff_format.ts'
-import { DiffOpTag } from '../../../builtin/diff_types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { FUNCNAME_START, GIT_SPACE, GITLINK_MODE } from './constants.ts'
 import { quotePath } from './render.ts'
@@ -149,7 +148,7 @@ function hunks(
     }
     out.push(header + '\n')
     for (const [tag, i1, i2, j1, j2] of group) {
-      if (tag === DiffOpTag.EQUAL) {
+      if (tag === 'equal') {
         for (const line of old.slice(i1, i2)) out.push(hunkLine(' ', line))
         continue
       }
@@ -186,7 +185,7 @@ function functionGroups(
   const boundaries = old.flatMap((line, i) => (FUNCNAME_START.test(line) ? [i] : []))
   const ranges: [number, number][] = []
   for (const group of groups) {
-    const changes = group.filter((code) => code[0] !== DiffOpTag.EQUAL)
+    const changes = group.filter((code) => code[0] !== 'equal')
     const first = changes[0],
       last = changes.at(-1)
     if (!first || !last || !group[0] || !group.at(-1)) continue
@@ -200,7 +199,7 @@ function functionGroups(
   }
   return ranges.map(([start, end]) =>
     codes.flatMap(([tag, i1, i2, j1, j2]): Opcode[] => {
-      if (tag === DiffOpTag.EQUAL) {
+      if (tag === 'equal') {
         const lo = Math.max(start, i1),
           hi = Math.min(end, i2)
         return lo < hi ? [[tag, lo, hi, j1 + lo - i1, j1 + hi - i1]] : []

@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DiffOpTag } from './diff_types.ts'
-
-type Opcode = readonly [DiffOpTag, number, number, number, number]
+type Opcode = readonly ['equal' | 'delete' | 'insert' | 'replace', number, number, number, number]
 
 interface Match {
   a: number
@@ -126,10 +124,10 @@ export function getOpcodes(a: readonly string[], b: readonly string[]): Opcode[]
   let i = 0
   let j = 0
   for (const m of matches) {
-    if (i < m.a && j < m.b) opcodes.push([DiffOpTag.REPLACE, i, m.a, j, m.b] as const)
-    else if (i < m.a) opcodes.push([DiffOpTag.DELETE, i, m.a, j, m.b] as const)
-    else if (j < m.b) opcodes.push([DiffOpTag.INSERT, i, m.a, j, m.b] as const)
-    if (m.size > 0) opcodes.push([DiffOpTag.EQUAL, m.a, m.a + m.size, m.b, m.b + m.size] as const)
+    if (i < m.a && j < m.b) opcodes.push(['replace', i, m.a, j, m.b] as const)
+    else if (i < m.a) opcodes.push(['delete', i, m.a, j, m.b] as const)
+    else if (j < m.b) opcodes.push(['insert', i, m.a, j, m.b] as const)
+    if (m.size > 0) opcodes.push(['equal', m.a, m.a + m.size, m.b, m.b + m.size] as const)
     i = m.a + m.size
     j = m.b + m.size
   }
@@ -141,12 +139,12 @@ export function groupOpcodes(opcodes: readonly Opcode[], n: number): Opcode[][] 
   const codes = opcodes.map((op) => [...op] as [Opcode[0], number, number, number, number])
   const first = codes[0]
   const last = codes[codes.length - 1]
-  if (first?.[0] === DiffOpTag.EQUAL) {
+  if (first?.[0] === 'equal') {
     const [, i1, i2, j1, j2] = first
     first[1] = Math.max(i1, i2 - n)
     first[3] = Math.max(j1, j2 - n)
   }
-  if (last?.[0] === DiffOpTag.EQUAL) {
+  if (last?.[0] === 'equal') {
     const [, i1, i2, j1, j2] = last
     last[2] = Math.min(i2, i1 + n)
     last[4] = Math.min(j2, j1 + n)
@@ -155,15 +153,15 @@ export function groupOpcodes(opcodes: readonly Opcode[], n: number): Opcode[][] 
   let current: Opcode[] = []
   for (const op of codes) {
     const [tag, i1, i2, j1, j2] = op
-    if (tag === DiffOpTag.EQUAL && i2 - i1 > 2 * n) {
-      current.push([DiffOpTag.EQUAL, i1, Math.min(i2, i1 + n), j1, Math.min(j2, j1 + n)] as Opcode)
+    if (tag === 'equal' && i2 - i1 > 2 * n) {
+      current.push(['equal', i1, Math.min(i2, i1 + n), j1, Math.min(j2, j1 + n)] as Opcode)
       groups.push(current)
-      current = [[DiffOpTag.EQUAL, Math.max(i1, i2 - n), i2, Math.max(j1, j2 - n), j2] as Opcode]
+      current = [['equal', Math.max(i1, i2 - n), i2, Math.max(j1, j2 - n), j2] as Opcode]
       continue
     }
     current.push([tag, i1, i2, j1, j2] as Opcode)
   }
-  if (current.length > 0 && !(current.length === 1 && current[0]?.[0] === DiffOpTag.EQUAL)) {
+  if (current.length > 0 && !(current.length === 1 && current[0]?.[0] === 'equal')) {
     groups.push(current)
   }
   return groups

@@ -204,29 +204,3 @@ export class ExecutionTable {
     await Promise.all(runs.map((run) => run.completion))
   }
 }
-
-export interface JobBriefDict {
-  job_id: string
-  workspace_id: string
-  session_id: string
-  command: string
-  status: ExecutionStatus
-  cancel_requested: boolean
-  submitted_at: number
-  started_at: number | null
-  finished_at: number | null
-}
-
-export function toBriefDict(entry: ExecutionRecord): JobBriefDict {
-  return {
-    job_id: entry.id,
-    workspace_id: entry.workspaceId,
-    session_id: entry.sessionId,
-    command: entry.command,
-    status: entry.status,
-    cancel_requested: entry.cancelRequested,
-    submitted_at: entry.submittedAt,
-    started_at: entry.startedAt,
-    finished_at: entry.finishedAt,
-  }
-}

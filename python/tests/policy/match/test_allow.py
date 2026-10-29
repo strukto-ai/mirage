@@ -14,7 +14,6 @@
 
 from mirage.policy.match.allow import (
     head_allowed,
-    line_allowed,
     line_tokens,
 )
 from mirage.policy.types import AdmissionRules, CommandContext, CommandRule
@@ -48,16 +47,5 @@ def test_head_allowed_answers_the_roles_one_allow_list():
     assert head_allowed("rm", None)
 
 
-def test_line_allowed_reads_the_whole_line_and_skips_non_tools():
-    rules = AdmissionRules(allow=("ls", "git log", "git status"))
-    assert line_allowed(_ctx("ls", ("-la",), tokens=("ls", "-la")), rules)
-    assert line_allowed(_ctx("git", tokens=("git", "log", "-1")), rules)
-    # The head is allowed (some git line is) but this line is
-    # covered by no pattern.
-    assert not line_allowed(_ctx("git", tokens=("git", "push")), rules)
-    # A word that is not a tool is never refused by an allow list.
-    assert line_allowed(_ctx("cd", tokens=("cd", "/x"), tool=False), rules)
-    # A context built without the entry point's tokens reads the raw argv.
-    raw = _ctx("git", ("push",))
-    assert line_tokens(raw) == ("git", "push")
-    assert not line_allowed(raw, rules)
+def test_line_tokens_read_the_raw_argv_without_the_entry_point():
+    assert line_tokens(_ctx("git", ("push",))) == ("git", "push")

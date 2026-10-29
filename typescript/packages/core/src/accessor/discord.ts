@@ -16,7 +16,6 @@ import { Accessor } from './base.ts'
 import { ResponseCache } from './responses.ts'
 import { LISTING_TRUST_WINDOW } from '../cache/index/constants.ts'
 import { TimeRange } from '../core/time_range.ts'
-import type { BaseVFS } from '../vfs/base.ts'
 import { NodeDiscordTransport, type DiscordTransport } from '../core/discord/client.ts'
 import type { DiscordConfig } from '../core/discord/config.ts'
 
@@ -46,8 +45,4 @@ export class DiscordAccessor extends Accessor {
 export function discordAccessor(config: unknown): DiscordAccessor {
   const cfg = config as DiscordConfig
   return new DiscordAccessor(new NodeDiscordTransport(cfg.token, cfg.baseUrl, cfg.timeout))
-}
-
-export interface DiscordResourceLike extends BaseVFS {
-  readonly accessor: DiscordAccessor
 }

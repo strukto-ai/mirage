@@ -33,7 +33,7 @@ interface WsSessionParams {
   sessionId: string
 }
 
-interface CreateSessionBody {
+interface CreateSessionRequest {
   session_id?: string
   /**
    * Optional per-mount modes for this session: a mapping of prefix to
@@ -50,7 +50,7 @@ interface CreateSessionBody {
 }
 
 export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoutesDeps): void {
-  app.post<{ Params: WsIdParams; Body: CreateSessionBody }>(
+  app.post<{ Params: WsIdParams; Body: CreateSessionRequest }>(
     '/v1/workspaces/:wsId/sessions',
     async (req, reply) => {
       const { wsId } = req.params

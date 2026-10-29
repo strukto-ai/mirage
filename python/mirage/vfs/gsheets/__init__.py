@@ -16,12 +16,11 @@ from typing import TYPE_CHECKING
 
 from mirage.utils.loader import lazy_exports
 from mirage.vfs.gsheets.config import GSheetsConfig
-from mirage.vfs.gsheets.sheet_entry import SheetEntry
 
 if TYPE_CHECKING:
     from mirage.vfs.gsheets.gsheets import GSheetsVFS
 
-__all__ = ["GSheetsConfig", "SheetEntry", "GSheetsVFS"]
+__all__ = ["GSheetsConfig", "GSheetsVFS"]
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.vfs.gsheets.gsheets": ("GSheetsVFS",),

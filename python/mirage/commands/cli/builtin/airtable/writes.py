@@ -144,7 +144,7 @@ async def landed(
     return render(done), IOResult()
 
 
-async def _record_create(
+async def _record_create_body(
     accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
@@ -172,7 +172,7 @@ async def _record_create(
     return await landed(batches, records_jsonl)
 
 
-async def _record_update(
+async def _record_update_body(
     accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
@@ -210,7 +210,7 @@ async def _record_update(
     return await landed(batches, records_jsonl)
 
 
-async def _record_delete(
+async def _record_delete_body(
     accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
@@ -232,7 +232,7 @@ async def _record_delete(
     return await landed(batches, deletions_jsonl)
 
 
-async def _comment_add(
+async def _comment_add_body(
     accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
@@ -254,7 +254,7 @@ async def _comment_add(
     return to_json_bytes(normalize_comment(comment)), IOResult()
 
 
-record_create = functools.partial(run, _record_create)
-record_update = functools.partial(run, _record_update)
-record_delete = functools.partial(run, _record_delete)
-comment_add = functools.partial(run, _comment_add)
+record_create = functools.partial(run, _record_create_body)
+record_update = functools.partial(run, _record_update_body)
+record_delete = functools.partial(run, _record_delete_body)
+comment_add = functools.partial(run, _comment_add_body)

@@ -14,7 +14,6 @@
 
 import { Accessor } from './base.ts'
 import { TimeRange } from '../core/time_range.ts'
-import type { BaseVFS } from '../vfs/base.ts'
 import { NodeSlackTransport, type SlackTransport } from '../core/slack/client.ts'
 import type { SlackConfig } from '../core/slack/config.ts'
 
@@ -43,8 +42,4 @@ export function slackAccessor(config: unknown): SlackAccessor {
   return new SlackAccessor(
     new NodeSlackTransport(cfg.token, cfg.searchToken, cfg.baseUrl, cfg.timeout),
   )
-}
-
-export interface SlackResourceLike extends BaseVFS {
-  readonly accessor: SlackAccessor
 }
