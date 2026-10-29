@@ -16,6 +16,10 @@ from mirage.cache.index.view import IndexView
 from mirage.types import FileStat, FileType
 
 
+async def _unavailable(paths):
+    raise RuntimeError("unavailable")
+
+
 @pytest_asyncio.fixture(params=["ram", "fake-redis", "redis"])
 async def store_factory(request):
     backend = request.param
@@ -1278,11 +1282,8 @@ async def test_failed_observation_recovery_preserves_deletion_history(
 
     view = IndexView(store, cache, "/data", lambda _: True, on_gone=cleanup)
 
-    async def unavailable(paths):
-        raise RuntimeError("unavailable")
-
     with monkeypatch.context() as patcher:
-        patcher.setattr(store, "invalidate_missing", unavailable)
+        patcher.setattr(store, "invalidate_missing", _unavailable)
         with pytest.raises(RuntimeError):
             await view.invalidate_missing([parent + "/new"])
     if recover_by_observation:

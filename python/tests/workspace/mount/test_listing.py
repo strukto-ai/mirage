@@ -36,6 +36,10 @@ from mirage.workspace.mount.listing import (
 )
 
 
+async def _unavailable(paths):
+    raise RuntimeError("unavailable")
+
+
 class Folders(BaseVFS):
     """A store that knows its entries only by id, as Drive does."""
 
@@ -865,12 +869,9 @@ async def test_recovery_removes_bytes_of_a_file_the_peer_deleted(monkeypatch):
         del keys.files["old"]
         keys.files["new"] = b"new"
 
-        async def unavailable(paths):
-            raise RuntimeError("unavailable")
-
         with monkeypatch.context() as patcher:
             patcher.setattr(
-                ws.mount("/k").index_store, "invalidate_missing", unavailable
+                ws.mount("/k").index_store, "invalidate_missing", _unavailable
             )
             assert (await ws.vfs.stat("/k/new")).name == "new"
         assert await ws.vfs.readdir("/k") == ["/k/new"]

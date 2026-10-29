@@ -41,6 +41,10 @@ from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import override
 
 
+async def _unavailable(paths):
+    raise RuntimeError("unavailable")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("store_kind", ["ram", "redis"])
 @pytest.mark.parametrize("phase", ["backend", "store"])
@@ -898,11 +902,8 @@ async def test_failed_point_observation_does_not_serve_the_known_stale_listing(
         "/data", [("old", FileStat(name="old", type=FileType.FILE))]
     )
 
-    async def unavailable(paths):
-        raise RuntimeError("unavailable")
-
     with monkeypatch.context() as patcher:
-        patcher.setattr(index, "invalidate_missing", unavailable)
+        patcher.setattr(index, "invalidate_missing", _unavailable)
         with pytest.raises(RuntimeError, match="unavailable"):
             await view.invalidate_missing(["/data/new"])
     assert (await view.list_dir("/data")).status == LookupStatus.EXPIRED
@@ -922,11 +923,8 @@ async def test_failed_observation_recovery_cannot_touch_a_replacement_mount(
     owned = [True]
     view = IndexView(index, RAMFileCacheStore(), "/data", lambda _: owned[0])
 
-    async def unavailable(paths):
-        raise RuntimeError("unavailable")
-
     with monkeypatch.context() as patcher:
-        patcher.setattr(index, "invalidate_missing", unavailable)
+        patcher.setattr(index, "invalidate_missing", _unavailable)
         with pytest.raises(RuntimeError):
             await view.invalidate_missing(["/data/new"])
     owned[0] = False
@@ -954,11 +952,8 @@ async def test_listing_refill_recovers_a_failed_observation_scope(monkeypatch):
     await index.set_dir("/data/nested", [("keep", _row())])
     old = await view.refill_token()
 
-    async def unavailable(paths):
-        raise RuntimeError("unavailable")
-
     with monkeypatch.context() as patcher:
-        patcher.setattr(index, "invalidate_missing", unavailable)
+        patcher.setattr(index, "invalidate_missing", _unavailable)
         with pytest.raises(RuntimeError):
             await view.invalidate_missing(["/data/new"])
     assert await view.refill_dir("/data", [("old", _row())], old) is None
