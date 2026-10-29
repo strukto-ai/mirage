@@ -287,6 +287,102 @@
         "stdout": "[\"I\",\"I\",\"ŉ\",\"ʼN\"]\n[false,false,true,true]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "jq_regex_subexpression_call",
+      "seq": 18610019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"abab\" | [match(\"(ab)\\\\g<1>\") | [.offset,.length,.string,[.captures[].string]]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[0,4,\"abab\",[\"ab\"]]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_absent_operator",
+      "seq": 18610020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"abcxabc\" | [match(\"(?~x)\";\"g\") | .string]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"abc\",\"\",\"abc\",\"\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_callouts",
+      "seq": 18610021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"abc\" | [test(\"(*FAIL)|abc\"),test(\"a(?{x})bc\")]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[true,true]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_grapheme_clusters",
+      "seq": 18610022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"é🇻🇳\" | [match(\"\\\\X\";\"g\") | [.offset,.length,.string]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[0,2,\"é\"],[2,2,\"🇻🇳\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_backreference_level",
+      "seq": 18610023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"aa\" | test(\"(a)\\\\k<1+0>\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_regex_unicode_blocks",
+      "seq": 18610024,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '[\"a\",\"α\"] | map(test(\"\\\\p{InBasicLatin}\")), map(test(\"\\\\p{In_Greek_and_Coptic}\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[true,false]\n[false,true]\n",
+        "stderr": ""
+      }
     }
   ]
 }
