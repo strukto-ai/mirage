@@ -139,6 +139,7 @@ class Composition:
         self.actions: list[Any] = []
         self.originals: list[Any] = []
         self.rules: list[CommandRule] = []
+        self.rule_ids: dict[CommandRule, int] = {}
         self.names: dict[int, str] = {}
 
     def feed(self, value: dict[str, Any]) -> None:
@@ -154,11 +155,12 @@ class Composition:
         return data
 
     def rule_id(self, rule: CommandRule) -> int:
-        try:
-            return self.rules.index(rule)
-        except ValueError:
+        index = self.rule_ids.get(rule)
+        if index is None:
+            index = len(self.rules)
+            self.rule_ids[rule] = index
             self.rules.append(rule)
-            return len(self.rules) - 1
+        return index
 
     def descriptors(self, answered: Any, name: str) -> list[dict[str, Any]]:
         descriptors = []
@@ -234,6 +236,7 @@ class Composition:
                     and ctx is not None
                 )
                 self.rules.clear()
+                self.rule_ids.clear()
                 first_rules: tuple[CommandRule, ...]
                 next_rules: tuple[CommandRule, ...]
                 if same_ask:

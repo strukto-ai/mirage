@@ -153,7 +153,6 @@ struct Fold {
     answers: Vec<u32>,
     deny: Option<u32>,
     ask: Option<u32>,
-    rule_count: usize,
     action_count: usize,
     seen_actions: HashSet<u32>,
     routes: Vec<u32>,
@@ -592,12 +591,12 @@ impl Composition {
                 evaluation.advance()?
             }
             Pending::Ask { first, .. } => {
-                evaluation.fold.rule_count = evaluation
-                    .fold
-                    .rule_count
-                    .saturating_add(response.first_rules.len())
-                    .saturating_add(response.next_rules.len());
-                if evaluation.fold.rule_count > ENTRY_LIMIT {
+                if response
+                    .first_rules
+                    .len()
+                    .saturating_add(response.next_rules.len())
+                    > ENTRY_LIMIT
+                {
                     return Err(error("too many rule references"));
                 }
                 if response.same_ask {
@@ -935,13 +934,51 @@ mod tests {
         assert!(
             engine
                 .respond(
-                    &serde_json::to_vec(&json!({"evaluation":"a","effect":2,"first_rules":rules}))
+                    &serde_json::to_vec(&json!({"evaluation":"a","effect":2,"first_rules":rules,"next_rules":[],"same_ask":false}))
                         .unwrap(),
                     &[],
                     &mut Vec::new()
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn materialized_rule_batch_accepts_boundary_and_refuses_combined_overflow() {
+        for next_rules in [vec![], vec![ENTRY_LIMIT as u32]] {
+            let mut engine = stream(initial());
+            engine.request(&mut Vec::new()).unwrap();
+            engine
+                .respond(
+                    &response(
+                        1,
+                        json!([{"kind":"ask","action":0},{"kind":"ask","action":1}]),
+                    ),
+                    &[],
+                    &mut Vec::new(),
+                )
+                .unwrap();
+            engine.request(&mut Vec::new()).unwrap();
+            let reply = json!({
+                "evaluation":"a", "effect":2,
+                "first_rules":(0..ENTRY_LIMIT as u32).collect::<Vec<_>>(),
+                "next_rules":next_rules, "same_ask":false
+            });
+            let result = engine.respond(&serde_json::to_vec(&reply).unwrap(), &[], &mut Vec::new());
+            if next_rules.is_empty() {
+                result.unwrap();
+                let request: Value =
+                    serde_json::from_slice(&engine.request(&mut Vec::new()).unwrap()).unwrap();
+                assert_eq!(request["op"], "replace_ask_rules");
+                assert_eq!(request["rules"].as_array().unwrap().len(), ENTRY_LIMIT);
+            } else {
+                assert_eq!(
+                    result.unwrap_err().message,
+                    "policy composition: too many rule references"
+                );
+                assert!(engine.done());
+            }
+        }
     }
 
     #[test]

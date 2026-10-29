@@ -933,3 +933,16 @@ async def test_composition_reads_all_limits_for_fields_named_by_any_limit():
     ctx = ExecuteResultContext(line="true", commands=(), session_id="")
     _, limit = await Policies([First()]).post_execute(ctx)
     assert limit.max_bytes == 1
+
+
+@pytest.mark.asyncio
+async def test_composition_merges_many_asks_without_recounting_prior_rules():
+    rules = tuple(CommandRule(reason=f"rule {index}") for index in range(362))
+
+    class Questions(Policy):
+        def pre_command(self, ctx):
+            return tuple(Ask("review", rules=(rule,)) for rule in rules)
+
+    result = await Policies([Questions()]).pre_command(_ctx("true", []))
+    assert isinstance(result, Ask)
+    assert result.rules == rules

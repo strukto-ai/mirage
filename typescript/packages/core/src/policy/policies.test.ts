@@ -2135,3 +2135,13 @@ it('composition reads the original next ask rules after naming its copy', async 
   })
   expect(reads).toBe(2)
 })
+
+it('composition merges many asks without recounting prior rules', async () => {
+  const rules: CommandRule[] = Array.from({ length: 362 }, (_, index) => ({
+    reason: `rule ${String(index)}`,
+  }))
+  const questions: Ask[] = rules.map((rule) => ({ kind: 'ask', reason: 'review', rules: [rule] }))
+  const policies = new Policies([{ preCommand: () => questions }])
+  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+  expect(await policies.preCommand(ctx)).toMatchObject({ rules })
+})
