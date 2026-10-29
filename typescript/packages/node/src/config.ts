@@ -868,6 +868,8 @@ export function readProcessEnv(): Record<string, string> {
 
 /**
  * Interpolate `${VAR}` and check every key, leaving the spelling alone.
+ * `env` is where a name is read, the process's by default; null reads
+ * none and leaves every `${VAR}` as written.
  *
  * This is the shape that travels: the CLI prepares a config here and
  * POSTs it, and the daemon runs the same check on what arrives, so the
@@ -878,11 +880,10 @@ export function readProcessEnv(): Record<string, string> {
  */
 export function checkWorkspaceConfig(
   source: Record<string, unknown>,
-  env?: Record<string, string>,
+  env?: Record<string, string> | null,
 ): Record<string, unknown> {
   const raw = { ...source }
-  const useEnv = env ?? readProcessEnv()
-  const interpolated = interpolateEnv(raw, useEnv)
+  const interpolated = env === null ? raw : interpolateEnv(raw, env ?? readProcessEnv())
   const mounts = interpolated.mounts
   if (
     mounts === undefined ||
@@ -898,7 +899,7 @@ export function checkWorkspaceConfig(
 
 export function loadWorkspaceConfig(
   source: Record<string, unknown>,
-  env?: Record<string, string>,
+  env?: Record<string, string> | null,
 ): WorkspaceConfigRaw {
   return normalizeConfigKeys(checkWorkspaceConfig(source, env)) as unknown as WorkspaceConfigRaw
 }

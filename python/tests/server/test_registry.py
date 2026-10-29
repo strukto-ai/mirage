@@ -21,11 +21,12 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.policy.base import Policy
 from mirage.policy.types import Action, CommandContext, VfsContext
 from mirage.server.daemon_config import DaemonConfigError
-from mirage.server.env import ENV_MAX_WORKSPACES
+from mirage.server.env import ENV_HOME, ENV_MAX_WORKSPACES, ENV_POLICY_FILE
 from mirage.server.registry import (
     Claim,
     WorkspaceRegistry,
     resolve_max_workspaces,
+    resolve_policy_file,
 )
 from mirage.workspace.record.disk import DiskRecordClient
 
@@ -96,6 +97,25 @@ async def test_a_server_policy_reads_the_owners_account():
         assert seen.accounts == {"alice"}
     finally:
         await registry.close_all()
+
+
+def test_a_policy_file_reads_absolute_as_written_relative_next_to_config(
+    monkeypatch, tmp_path
+):
+    home = tmp_path / "home"
+    elsewhere = tmp_path / "elsewhere"
+    home.mkdir()
+    elsewhere.mkdir()
+    (elsewhere / "policy.yaml").write_text("pre_command: []\n")
+    (home / "near.yaml").write_text("post_command: []\n")
+    monkeypatch.setenv(ENV_HOME, str(home))
+    monkeypatch.delenv(ENV_POLICY_FILE, raising=False)
+    (home / "config.toml").write_text(
+        f'[daemon]\npolicy_file = "{elsewhere / "policy.yaml"}"\n'
+    )
+    assert list(resolve_policy_file()) == ["pre_command"]
+    (home / "config.toml").write_text('[daemon]\npolicy_file = "near.yaml"\n')
+    assert list(resolve_policy_file()) == ["post_command"]
 
 
 @pytest.mark.asyncio

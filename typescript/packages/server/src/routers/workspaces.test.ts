@@ -303,6 +303,27 @@ describe('workspaces router', () => {
     }
   })
 
+  it("keeps a posted config's ${VAR} as written, reading none of the server's env", async () => {
+    const app = buildApp()
+    try {
+      const made = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { config: { ...RAM, env: { GREETING: '${HOME}' } } },
+      })
+      expect(made.statusCode).toBe(201)
+      const id = made.json<{ id: string }>().id
+      const ran = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${id}/shell`,
+        payload: { command: 'echo "$GREETING"' },
+      })
+      expect(ran.json<{ stdout: string }>().stdout).toBe('${HOME}\n')
+    } finally {
+      await app.close()
+    }
+  })
+
   it("refuses a snapshot whose saved values the server's policies refuse", async () => {
     const noSecret: Policy = {
       preSession(ctx: SessionContext) {

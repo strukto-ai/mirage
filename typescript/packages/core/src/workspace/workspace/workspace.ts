@@ -2322,6 +2322,19 @@ export class Workspace {
         }
       }
     }
+    // A shared mount keeps the client it connected under this workspace's
+    // network, so a copy held to another rule cannot share it.
+    const shared = Object.keys(overrides)
+    if (
+      shared.length > 0 &&
+      options.network !== undefined &&
+      JSON.stringify(options.network) !== JSON.stringify(this.networkSetting)
+    ) {
+      throw new Error(
+        `copy: ${shared.join(', ')} keep this workspace's connections; ` +
+          'a copy under another network cannot share them',
+      )
+    }
     // A same-process copy reinstalls every CLI from its live install
     // (spec + validated config), the way remote mounts share their live
     // mounts: a directly installed spec and a redacted secret both
