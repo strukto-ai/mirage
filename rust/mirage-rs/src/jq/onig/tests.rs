@@ -332,7 +332,7 @@ fn extended_patterns_match_the_jq_oracle() {
         .spawn(|| {
             let cases: Vec<serde_json::Value> =
                 serde_json::from_str(include_str!("corpus.json")).unwrap();
-            assert_eq!(cases.len(), 414);
+            assert_eq!(cases.len(), 418);
             for case in cases {
                 let pattern = case["p"].as_str().unwrap();
                 let flags = case["f"].as_str().unwrap();
@@ -433,4 +433,17 @@ fn a_long_cycle_of_calls_compiles_on_a_small_stack() {
         .unwrap()
         .join()
         .unwrap();
+}
+
+#[test]
+fn repeated_call_targets_do_not_expand_the_recursion_check() {
+    let mut pattern = String::from("(?<g0>a){0}");
+    for group in 1..=40 {
+        let previous = group - 1;
+        pattern.push_str(&format!(
+            "(?<g{group}>\\g<g{previous}>\\g<g{previous}>){{0}}"
+        ));
+    }
+    pattern.push_str("(?<r>\\g<g40>\\g<r>?)");
+    assert!(Regex::new(&pattern, Options::default()).is_ok());
 }

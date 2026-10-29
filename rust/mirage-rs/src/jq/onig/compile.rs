@@ -255,6 +255,7 @@ fn mark_calls(node: &mut Node, groups: usize) -> Result<(Vec<bool>, Vec<bool>), 
         on_path[g] = true;
         let mut walk = Walk {
             bodies: &bodies,
+            reach: &reach,
             mins: &mut mins,
             target: g,
             on_path: &mut on_path,
@@ -381,6 +382,7 @@ impl Found {
 /// to the node at hand (MARK2), so no body is walked twice at once.
 struct Walk<'a, 'm> {
     bodies: &'a [Option<&'a Node>],
+    reach: &'a [Vec<u64>],
     mins: &'m mut [Min],
     target: usize,
     on_path: &'m mut [bool],
@@ -465,6 +467,9 @@ impl<'a> Walk<'a, '_> {
                             must: true,
                             infinite: false,
                         };
+                    }
+                    Node::Call(call) if !has(&self.reach[call.group], self.target) => {
+                        ret = Found::default();
                     }
                     Node::Call(call) => match self.bodies[call.group] {
                         Some(body) if !self.on_path[call.group] => {
@@ -618,6 +623,7 @@ fn min_len(node: &Node, bodies: &[Option<&Node>], mins: &mut [Min]) -> usize {
     let mut out: Vec<usize> = Vec::new();
     while let Some(task) = tasks.pop() {
         match task {
+            MinTask::Group(group) => group_min(group, bodies, mins, &mut tasks, &mut out),
             MinTask::Known(group) => {
                 mins[group] = Min::Known(out.last().copied().unwrap_or(0));
             }
@@ -650,16 +656,14 @@ fn min_len(node: &Node, bodies: &[Option<&Node>], mins: &mut [Min]) -> usize {
                     tasks.push(MinTask::Node(body))
                 }
                 Node::Call(call) if call.recursive => out.push(0),
-                Node::Call(call) => group_min(call.group, bodies, mins, &mut tasks, &mut out),
+                Node::Call(call) => tasks.push(MinTask::Group(call.group)),
                 Node::Backref {
                     groups,
                     inside: false,
                     ..
                 } => {
                     tasks.push(MinTask::Combine(node, groups.len()));
-                    for &group in groups {
-                        group_min(group, bodies, mins, &mut tasks, &mut out);
-                    }
+                    tasks.extend(groups.iter().copied().map(MinTask::Group));
                 }
                 Node::Cond {
                     cond,
@@ -682,6 +686,7 @@ fn min_len(node: &Node, bodies: &[Option<&Node>], mins: &mut [Min]) -> usize {
 
 enum MinTask<'a> {
     Node(&'a Node),
+    Group(usize),
     Combine(&'a Node, usize),
     Known(usize),
 }

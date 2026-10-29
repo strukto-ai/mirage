@@ -383,6 +383,22 @@
         "stdout": "[true,false]\n[false,true]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "jq_regex_duplicate_name_recursive_backreference",
+      "seq": 18610025,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -nc '\"aaa\" | [match(\"(?<x>a)(?<x>\\\\1)(?<r>\\\\k<x>\\\\g<r>?)\";\"g\") | [.offset,.length,.string,[.captures[].string]]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[0,3,\"aaa\",[\"a\",\"a\",\"a\"]]]\n",
+        "stderr": ""
+      }
     }
   ]
 }
