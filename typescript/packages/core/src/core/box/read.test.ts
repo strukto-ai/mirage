@@ -91,6 +91,9 @@ async function recordedStream(
     }
     return out
   })
+  expect(
+    records.every((r) => r.complete === (closeAfter === null || got.length < closeAfter)),
+  ).toBe(true)
   return [got, records.map((r) => [r.op, r.bytes, r.fingerprint])]
 }
 

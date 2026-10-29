@@ -23,10 +23,12 @@ import pytest
 import pytest_asyncio
 
 from mirage import Mount, MountMode, Workspace, WritePolicy
+from mirage.context.session_context import current_caller
 from mirage.errors.types import StaleWriteError
 from mirage.mount.core import MountCore
 from mirage.observe.context import mark_lost
 from mirage.runtime.handles.mode import open_mode
+from mirage.runtime.types import ScriptSource
 from mirage.types import PathSpec
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
 from mirage.vfs.ram import RAMVFS
@@ -1324,12 +1326,12 @@ async def test_a_conditional_line_sends_the_same_requests(line):
 @pytest.mark.parametrize(
     "line, lookups, keeps",
     [
-        ("mv /s3/f /s3/h", 1, 0),
-        ("eval 'echo x > /s3/g'", 1, 1),
+        ("mv /s3/f /s3/h", 0, 0),
+        ("eval 'echo x > /s3/g'", 0, 1),
     ],
     ids=["a move asks once", "a nested line keeps once"],
 )
-async def test_a_conditional_line_asks_the_store_once(
+async def test_a_conditional_line_uses_its_session_version(
     workspaces, monkeypatch, line, lookups, keeps
 ):
     ws = workspaces()
@@ -1367,6 +1369,190 @@ async def test_an_unconditional_sed_write_failure_reads_as_before(
     fake.before("put_object", _denied)
     code, _, err = await _run(ws, "sed -i s/o/O/ /s3/f /s3/g")
     assert (code, err.startswith("sed: can't read ")) == (1, True), err
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,key",
+    [
+        ("rm /s3/f", "f"),
+        ("rm -f /s3/f", "f"),
+        ("echo mine > /s3/f", "f"),
+        ("cp /s3/g /s3/f", "f"),
+        ("mv /s3/f /s3/new", "f"),
+        ("mv /s3/g /s3/f", "f"),
+        ("rm -r /s3/d", "d/a"),
+    ],
+)
+async def test_live_session_refuses_peer_mutation(workspaces, fake, line, key):
+    ws = workspaces()
+    ws.create_session("a")
+    ws.create_session("b")
+    read = await ws.shell(f"cat /s3/{key}", session_id="a")
+    assert await read.stdout_str() == SEED[key].decode()
+    wrote = await ws.shell(f"echo peer > /s3/{key}", session_id="b")
+    assert wrote.exit_code == 0
+    for _ in range(2):
+        refused = await ws.shell(line, session_id="a")
+        assert refused.exit_code != 0
+        assert STALE in await refused.stderr_str()
+        assert fake.buckets["b"][key] == b"peer\n"
+    refreshed = await ws.shell(f"cat /s3/{key}", session_id="a")
+    assert await refreshed.stdout_str() == "peer\n"
+    accepted = await ws.shell(line, session_id="a")
+    assert accepted.exit_code == 0, await accepted.stderr_str()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "read",
+    [
+        "cat /s3/f",
+        "head -n1 /s3/f",
+        "grep one /s3/f",
+        'x=$(cat /s3/f); echo "$x"',
+        "(cat /s3/f)",
+    ],
+)
+async def test_live_session_read_paths_and_eviction(workspaces, fake, read):
+    ws = workspaces()
+    ws.create_session("a")
+    ws.create_session("b")
+    await ws.shell("cat /s3/f", session_id="b")
+    got = await ws.shell(read, session_id="a")
+    assert await got.stdout_str() == "one\n"
+    await ws.shell("echo peer > /s3/f", session_id="b")
+    await ws.cache.clear()
+    refused = await ws.shell("rm -f /s3/f", session_id="a")
+    assert refused.exit_code == 1
+    assert fake.buckets["b"]["f"] == b"peer\n"
+    own = await ws.shell("echo latest > /s3/f", session_id="b")
+    assert own.exit_code == 0, await own.stderr_str()
+
+
+@pytest.mark.asyncio
+async def test_live_session_direct_files_and_recreation(workspaces, fake):
+    ws = workspaces()
+    a = await ws.session("a")
+    b = await ws.session("b")
+    assert await a.vfs.read("/s3/f") == b"one\n"
+    await b.vfs.write("/s3/f", b"peer\n")
+    with pytest.raises(StaleWriteError):
+        await a.vfs.unlink("/s3/f")
+    await ws.close_session("a")
+    fresh = await ws.session("a")
+    await fresh.vfs.unlink("/s3/f")
+    assert "f" not in fake.buckets["b"]
+
+
+@pytest.mark.asyncio
+async def test_live_session_symlink_read(workspaces, fake):
+    ws = workspaces()
+    ws.create_session("a")
+    ws.create_session("b")
+    assert (await ws.shell("ln -s /s3/f /ram/alias")).exit_code == 0
+    await ws.shell("cat /ram/alias", session_id="a")
+    await ws.shell("echo peer > /s3/f", session_id="b")
+    result = await ws.shell("rm /s3/f", session_id="a")
+    assert result.exit_code == 1
+    assert fake.buckets["b"]["f"] == b"peer\n"
+
+
+@pytest.mark.asyncio
+async def test_live_session_policy_read_does_not_advance_agent(
+    workspaces, fake
+):
+    ws = workspaces()
+    ws.create_session("a")
+    ws.create_session("b")
+    await ws.shell("cat /s3/f", session_id="a")
+    await ws.shell("echo peer > /s3/f", session_id="b")
+    await ws.set_session_profile(
+        "a",
+        {
+            "policy": {
+                "pre_command": [
+                    {
+                        "script": ScriptSource(
+                            "open('/s3/f').read()\nprint('null')\n"
+                        ),
+                        "runtime": "monty",
+                    }
+                ]
+            },
+        },
+    )
+    refused = await ws.shell("rm /s3/f", session_id="a")
+    assert refused.exit_code == 1
+    assert STALE in await refused.stderr_str()
+    assert fake.buckets["b"]["f"] == b"peer\n"
+
+
+@pytest.mark.asyncio
+async def test_live_session_warm_read_keeps_its_exact_version(
+    workspaces, fake, monkeypatch
+):
+    ws = workspaces()
+    ws.create_session("a")
+    ws.create_session("b")
+    await ws.shell("cat /s3/f", session_id="b")
+    sampled, release = asyncio.Event(), asyncio.Event()
+    original = ws.cache.get_versioned
+
+    async def paused(key):
+        held = await original(key)
+        caller = current_caller()
+        if (
+            key == "/s3/f"
+            and caller.session is not None
+            and caller.session.session_id == "a"
+        ):
+            sampled.set()
+            await release.wait()
+        return held
+
+    monkeypatch.setattr(ws.cache, "get_versioned", paused)
+    reading = asyncio.create_task(ws.shell("cat /s3/f", session_id="a"))
+    try:
+        await asyncio.wait_for(sampled.wait(), 5)
+        assert (
+            await ws.shell("echo peer > /s3/f", session_id="b")
+        ).exit_code == 0
+    finally:
+        release.set()
+    assert await (await reading).stdout_str() == "one\n"
+    assert (await ws.shell("rm /s3/f", session_id="a")).exit_code == 1
+    assert fake.buckets["b"]["f"] == b"peer\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, operation, completed",
+    [
+        ("rm -r /s3/d", "delete_objects", 0),
+        ("rm -r /s3/d", "delete_objects", 1),
+        ("mv /s3/d /s3/e", COPY, 0),
+        ("mv /s3/d /s3/e", COPY, 1),
+        ("rm /s3/d/b", "delete_object", 0),
+    ],
+)
+async def test_failed_mutation_keeps_untouched_session_versions(
+    fake, workspaces, line, operation, completed
+):
+    ws = workspaces()
+    await _run(ws, "cat /s3/d/b")
+    _theirs(fake, "d/b")
+    fake.page_size = 1
+    for _ in range(completed):
+        fake.before(operation, lambda: None)
+    fake.before(operation, _network_down)
+    code, _, err = await _run(ws, line)
+    assert code == 1 and "network down" in err, err
+    code, _, err = await _run(ws, "rm /s3/d/b")
+    assert code == 1 and STALE in err, err
+    assert fake.buckets["b"]["d/b"] == b"theirs\n"
+    await _run(ws, "cat /s3/d/b")
+    assert (await _run(ws, "rm /s3/d/b"))[0] == 0
 
 
 @pytest.mark.asyncio
@@ -1429,3 +1615,26 @@ async def test_missing_rewrite_refuses_a_competing_creation(
     assert [headers for op, headers in fake.ledger if op == PUT] == [
         {"IfNoneMatch": "*"}
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["md5sum", "sha256sum"])
+@pytest.mark.parametrize("warm", [False, True])
+async def test_live_session_checksum_keeps_observed_version(
+    workspaces, fake, command, warm
+):
+    ws = workspaces()
+    ws.create_session("a")
+    ws.create_session("b")
+    if warm:
+        await ws.shell("cat /s3/f", session_id="b")
+    fake.ledger.clear()
+    read = await ws.shell(f"{command} /s3/f", session_id="a")
+    assert read.exit_code == 0, await read.stderr_str()
+    if command == "md5sum" and not warm:
+        assert not any(op == "get_object" for op, _ in fake.ledger)
+    assert (await ws.shell("echo peer > /s3/f", session_id="b")).exit_code == 0
+    refused = await ws.shell("echo mine > /s3/f", session_id="a")
+    assert refused.exit_code == 1
+    assert STALE in await refused.stderr_str()
+    assert fake.buckets["b"]["f"] == b"peer\n"

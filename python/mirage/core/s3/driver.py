@@ -522,7 +522,7 @@ async def _move_file_if(
             matched=True,
         )
     except ConditionLostError as exc:
-        pinned = OwnRead.ABSENT if exc.gone else source
+        pinned: Measured = OwnRead.ABSENT if exc.gone else source
         raise _lost_on(src_key, pinned, landed=True) from exc
     return True
 

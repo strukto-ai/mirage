@@ -471,3 +471,16 @@ async def test_command_records_is_task_local_across_concurrent_commands():
     finally:
         scope.close()
     assert (first, second) == (["/a/x.txt"], ["/b/y.txt"])
+
+
+def test_stream_completion_is_pending_and_not_serialized():
+    scope = RecordingScope()
+    try:
+        record("read", "/f", "box", 0, start_op())
+        rec = record_stream("read", "/g", "box")
+        assert scope.records[0].complete
+        assert rec is not None and not rec.complete
+        rec.complete = True
+        assert "complete" not in rec.to_dict()
+    finally:
+        scope.close()

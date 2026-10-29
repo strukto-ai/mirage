@@ -229,6 +229,8 @@ async def read_stream(
             if rec is not None:
                 rec.bytes += len(chunk)
             yield chunk
+    if rec is not None:
+        rec.complete = True
     if rec is None or pinned:
         return
     if digest is not None and digest.hexdigest() != md5:

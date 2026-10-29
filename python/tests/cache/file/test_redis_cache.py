@@ -534,3 +534,18 @@ async def test_fingerprints_answers_each_key_in_order(cache):
     await cache.set("/a", b"x", fingerprint="v1")
     await cache.keep_fingerprints({"/c": "v3"})
     assert await cache.fingerprints(["/a", "/b", "/c"]) == ["v1", None, "v3"]
+
+
+@pytest.mark.asyncio
+async def test_versioned_read_pairs_bytes_with_their_token(cache):
+    await cache.set("/f", b"one", fingerprint="v1")
+    observed = await cache.get_versioned("/f")
+    await cache.set("/f", b"two", fingerprint="v2")
+    await cache.keep_fingerprints({"/f": "v1"})
+    assert observed == (b"one", "v1")
+    assert await cache.get_versioned("/f") == (b"two", "v2")
+    await cache.set("/empty", b"")
+    assert await cache.get_versioned("/empty") == (b"", None)
+    await cache.remove("/f")
+    await cache.keep_fingerprints({"/f": "v1"})
+    assert await cache.get_versioned("/f") is None

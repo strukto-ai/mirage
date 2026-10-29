@@ -194,6 +194,9 @@ def mark_lost(path: PathSpec, version: str | None = None) -> None:
         path (PathSpec): the path whose conditional write lost.
         version (str | None): the version it lost on, if any.
     """
+    context = current_caller().write_context
+    if context is not None and context.lose is not None:
+        context.lose(path, version)
     lost = active_lost()
     if lost is not None:
         lost.mark(path.virtual, version)
@@ -379,6 +382,13 @@ def finish_record(
 
 
 def _charge(op_rec: OpRecord) -> None:
+    context = current_caller().write_context
+    if (
+        op_rec.op != "read"
+        and context is not None
+        and context.observe is not None
+    ):
+        context.observe(op_rec)
     held = current_caller().command_sink
     if held is not None:
         command, mine = held
@@ -441,7 +451,9 @@ def record_stream(
     partial consumption (e.g., head stopping early). The caller may
     also assign ``rec.fingerprint`` / ``rec.revision`` after the initial
     GET response is available; passing them here is a shortcut for the
-    common case where the values are known up front.
+    common case where the values are known up front. Set ``rec.complete``
+    after normal exhaustion, including an empty stream, never after failure
+    or early close.
 
     Returns ``None`` if no recording context is active.
 
@@ -472,6 +484,7 @@ def record_stream(
         mount_id=rec.mount_id,
         execution_id=current_execution_id(),
     )
+    op_rec.complete = False
     rec.sink.append(op_rec)
     _charge(op_rec)
     return op_rec

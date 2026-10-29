@@ -41,4 +41,6 @@ export async function* readStream(
     if (rec !== null) rec.bytes += value.byteLength
     yield value
   }
+
+  if (rec !== null) rec.complete = true
 }

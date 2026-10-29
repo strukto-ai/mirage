@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { generic } from '../../commands/builtin/generic_bind/factory.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Command, command, type CommandFn } from '../../commands/config.ts'
 import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
@@ -26,6 +26,7 @@ import {
   runWithRecording,
 } from '../../observe/context.ts'
 import { readVersioned } from '../../cache/context.ts'
+import { ANY_WRITE } from '../../cache/types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
@@ -969,3 +970,37 @@ it('parallel collected reads keep their own versions', async () => {
     await ws.close()
   }
 })
+
+it.each([false, true])(
+  'preserves a settled plain pwrite replacement, native hook %s',
+  async (hasNative) => {
+    const vfs = new RAMVFS()
+    const path = PathSpec.fromStrPath('/ram/f', 'f')
+    const enc = new TextEncoder()
+    await vfs.write(path, enc.encode('before'))
+    const supports = vfs.supports.bind(vfs)
+    vi.spyOn(vfs, 'supports').mockImplementation((name) => name !== 'pwrite' && supports(name))
+    const bodies: AsyncIterator<Uint8Array>[] = []
+    const native = hasNative
+      ? vi.spyOn(vfs, '_replace').mockImplementation(async (request) => {
+          expect(request.condition).toEqual(ANY_WRITE)
+          if (request.body instanceof Uint8Array) throw new Error('expected a streamed rewrite')
+          const body = request.body[Symbol.asyncIterator]()
+          bodies.push(body)
+          expect((await body.next()).done).toBe(false)
+          return undefined
+        })
+      : null
+    const ordinary = vi.spyOn(vfs, 'write')
+    const mount = makeMount(MountMode.WRITE, vfs)
+    await mount.call('pwrite', '/ram/f', [enc.encode('X'), 1])
+    if (native !== null) {
+      expect(native).toHaveBeenCalledOnce()
+      expect(ordinary).not.toHaveBeenCalled()
+      expect((await bodies[0]?.next())?.done).toBe(true)
+    } else {
+      expect(ordinary).toHaveBeenCalledOnce()
+      expect(await vfs.read(path)).toEqual(enc.encode('bXfore'))
+    }
+  },
+)

@@ -12,6 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SessionState } from '../workspace/session/session.ts'
+import { Dispatcher } from '../workspace/dispatcher/dispatcher.ts'
+import { Workspace } from '../workspace/workspace/workspace.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { record, runWithRecording, startOp } from '../observe/context.ts'
+import { OpRecord } from '../observe/record.ts'
 import { CacheManager } from './manager.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { describe, expect, it, vi } from 'vitest'
@@ -33,7 +39,7 @@ import {
 import { MountMode, PathSpec, WritePolicy } from '../types.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
 import { runInCommandScope } from './index/scope.ts'
-import { currentCaller, runWithCaller } from '../context/session_context.ts'
+import { callsAs, currentCaller, runWithCaller, withCaller } from '../context/session_context.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
 import { materialize } from '../io/types.ts'
 import { BaseVFS } from '../vfs/base.ts'
@@ -406,4 +412,379 @@ describe('listedThisCommand on the fallback storage', () => {
       })
     },
   )
+})
+
+it("overlapping browser sessions cannot borrow or replace each other's versions", async () => {
+  const manager = new CacheManager(
+    null,
+    null,
+    '/s3/',
+    true,
+    () => true,
+    600,
+    undefined,
+    undefined,
+    () => [],
+    true,
+  )
+  const a = new SessionState({ sessionId: 'a' })
+  const b = new SessionState({ sessionId: 'b' })
+  a.versions.keep(manager.versionScope, '/f', 'v1')
+  b.versions.keep(manager.versionScope, '/f', 'v2')
+  const path = PathSpec.fromStrPath('/s3/f', '/f')
+  const rec = new OpRecord({
+    op: 'read',
+    path: '/s3/f',
+    source: 's3',
+    bytes: 1,
+    timestamp: 0,
+    durationMs: 0,
+    fingerprint: 'v3',
+  })
+  await runWithCaller({ ...currentCaller(), session: a }, () =>
+    runWithCaller({ ...currentCaller(), session: b }, async () => {
+      await expect(manager.readVersion(path)).rejects.toMatchObject({ code: 'ENOTSUP' })
+      expect(() => {
+        manager.observe(rec)
+      }).toThrow()
+      expect(() => {
+        manager.lose(path, 'v3')
+      }).toThrow()
+      await expect(manager.keepVersion(path, 'v3')).rejects.toMatchObject({ code: 'ENOTSUP' })
+    }),
+  )
+  await expect(
+    runWithCaller({ ...currentCaller(), session: a }, () =>
+      runWithCaller({ ...currentCaller(), session: null }, () =>
+        runWithWriteContext(
+          '/s3/',
+          {
+            vfs: 's3',
+            conditions: ['put'],
+            readVersion: (p) => manager.readVersion(p),
+            readVersions: (paths) => manager.readVersions(paths),
+            drop: () => Promise.resolve(),
+            keep: (p, version) => manager.keepVersion(p, version),
+          },
+          () => {
+            throw new Error('overlap must be refused before the backend runs')
+          },
+        ),
+      ),
+    ),
+  ).rejects.toMatchObject({ code: 'ENOTSUP' })
+  expect(a.versions.read(manager.versionScope, '/f')).toBe('v1')
+  expect(b.versions.read(manager.versionScope, '/f')).toBe('v2')
+  await runWithCaller({ ...currentCaller(), session: a }, () =>
+    runWithCaller({ ...currentCaller(), session: a.fork() }, async () => {
+      expect(await manager.readVersion(path)).toBe('v1')
+    }),
+  )
+})
+
+it.each([false, true])(
+  'rejects a new browser session before it can disrupt an in-flight conditional write (callback: %s)',
+  async (callback) => {
+    const manager = new CacheManager(
+      null,
+      null,
+      '/s3/',
+      true,
+      () => true,
+      600,
+      undefined,
+      undefined,
+      () => [],
+      true,
+    )
+    const a = new SessionState({ sessionId: 'a' })
+    const b = new SessionState({ sessionId: 'b' })
+    const base = currentCaller()
+    const path = PathSpec.fromStrPath('/s3/f', '/f')
+    a.versions.keep(manager.versionScope, '/f', 'v1')
+    const [held, release] = gate()
+    const [started, markStarted] = gate()
+    let sent = false
+    const upload = runWithCaller({ ...base, session: a }, () =>
+      runWithWriteContext(
+        '/s3/',
+        {
+          vfs: 's3',
+          conditions: ['put'],
+          readVersion: (p) => manager.readVersion(p),
+          readVersions: (paths) => manager.readVersions(paths),
+          drop: () => Promise.resolve(),
+          keep: (p, version) => manager.keepVersion(p, version),
+          observe: (rec) => {
+            manager.observe(rec)
+          },
+        },
+        () =>
+          runWithRecording(async () => {
+            expect(await writeCondition(path, 'put')).toEqual({ kind: 'match', version: 'v1' })
+            const timer = startOp()
+            markStarted()
+            await held
+            sent = true
+            record('write', path.virtual, 's3', 1, timer, { fingerprint: 'v2' })
+          }),
+      ),
+    )
+    await started
+    let entered = false
+    try {
+      const overlapping = async (): Promise<void> => {
+        entered = true
+        release()
+        await upload
+      }
+      const caller = { ...base, session: b }
+      await expect(
+        (async () => {
+          if (callback) await callsAs(caller, overlapping)()
+          else await runWithCaller(caller, overlapping)
+        })(),
+      ).rejects.toMatchObject({ code: 'ENOTSUP' })
+    } finally {
+      release()
+      await upload
+    }
+    expect(entered).toBe(false)
+    expect(sent).toBe(true)
+    expect(a.versions.read(manager.versionScope, '/f')).toBe('v2')
+    expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
+  },
+)
+
+it.each([
+  ['return', false],
+  ['return', true],
+  ['next', false],
+  ['next', true],
+] as const)(
+  'closes a paused peer stream after %s during conditional work (failed: %s)',
+  async (action, failed) => {
+    const manager = new CacheManager(
+      null,
+      null,
+      '/s3/',
+      true,
+      () => true,
+      600,
+      undefined,
+      undefined,
+      () => [],
+      true,
+    )
+    const a = new SessionState({ sessionId: 'a' })
+    const b = new SessionState({ sessionId: 'b' })
+    const base = currentCaller()
+    const context = {
+      vfs: 's3',
+      conditions: ['put'] as const,
+      readVersion: (p: PathSpec) => manager.readVersion(p),
+      readVersions: (paths: readonly PathSpec[]) => manager.readVersions(paths),
+      drop: () => Promise.resolve(),
+      keep: (p: PathSpec, version: string) => manager.keepVersion(p, version),
+      observe: (rec: OpRecord) => {
+        manager.observe(rec)
+      },
+    }
+    const [closed, markClosed] = gate()
+    let closeCount = 0
+    let cancelled = 0
+    const body = new ReadableStream<number>({
+      start(controller) {
+        controller.enqueue(1)
+      },
+      cancel() {
+        cancelled++
+      },
+    })
+    async function* source(): AsyncGenerator<number> {
+      const reader = body.getReader()
+      try {
+        const chunk = await reader.read()
+        if (!chunk.done) yield chunk.value
+      } finally {
+        await reader.cancel()
+        reader.releaseLock()
+        expect(currentCaller().session).toBe(b)
+        closeCount++
+        markClosed()
+      }
+    }
+    const stream = withCaller(source(), { ...base, session: b, write: { prefix: '/s3/', context } })
+    expect(await stream.next()).toEqual({ done: false, value: 1 })
+    const upload = runWithCaller({ ...base, session: a }, () =>
+      runWithWriteContext('/s3/', context, () =>
+        runWithRecording(async () => {
+          if (action === 'next')
+            await expect(stream.next()).rejects.toMatchObject({ code: 'ENOTSUP' })
+          else await stream.return(undefined)
+          expect(closeCount).toBe(0)
+          expect(currentCaller().session).toBe(a)
+          if (failed) throw new Error('upload failed')
+          record('write', '/s3/f', 's3', 1, startOp(), { fingerprint: 'v2' })
+        }),
+      ),
+    )
+    if (failed) await expect(upload).rejects.toThrow('upload failed')
+    else await upload
+    await closed
+    await stream.return(undefined)
+    expect(closeCount).toBe(1)
+    expect(cancelled).toBe(1)
+    expect(body.locked).toBe(false)
+    expect(a.versions.read(manager.versionScope, '/f')).toBe(failed ? null : 'v2')
+    expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
+  },
+)
+
+class ConditionalReadRAM extends RAMVFS {
+  override readonly cachesReads = true
+
+  override get conditionSupport(): ConditionSupport {
+    return { put: ['absent', 'match'], copy: ['match'], delete: ['match'] }
+  }
+
+  override read(path: PathSpec): Promise<Uint8Array> {
+    const data = new Uint8Array(path.virtual.endsWith('/f') ? [1] : [2])
+    record('read', path.virtual, 'ram', data.byteLength, startOp(), {
+      fingerprint: path.virtual.endsWith('/f') ? 'v1' : 'v2',
+    })
+    return Promise.resolve(data)
+  }
+}
+
+async function conditionalReads(
+  cached = true,
+  write: WritePolicy = WritePolicy.CONDITIONAL,
+): Promise<{
+  ws: Workspace
+  manager: CacheManager
+  dispatcher: Dispatcher
+}> {
+  const ws = new Workspace({ '/data': new ConditionalReadRAM() }, { mode: MountMode.WRITE, write })
+  await ws.namespace.ensureLoaded()
+  const mount = ws.namespace.mountFor('/data/f')
+  await mount.ensureReady()
+  const manager = mount.cacheManager
+  if (manager === null) throw new Error('expected a cache manager')
+  if (cached) {
+    await ws.cache.set('/data/f', new Uint8Array([1]), { fingerprint: 'v1', ttl: 600 })
+    await ws.cache.set('/data/g', new Uint8Array([2]), { fingerprint: 'v2', ttl: 600 })
+  }
+  return { ws, manager, dispatcher: new Dispatcher(ws.namespace, ws.cache) }
+}
+
+it.each([false, true])(
+  'overlapping warm dispatcher reads keep their owners, reverse=%s',
+  async (reverse) => {
+    const { ws, manager, dispatcher } = await conditionalReads()
+    const a = new SessionState({ sessionId: 'a' })
+    const b = new SessionState({ sessionId: 'b' })
+    const caller = currentCaller()
+    const holds = [gate(), gate()] as const
+    const ready = ws.namespace.ensureLoaded.bind(ws.namespace)
+    let entered = 0
+    vi.spyOn(ws.namespace, 'ensureLoaded').mockImplementation(async () => {
+      const pending = holds[entered++]
+      if (pending !== undefined) await pending[0]
+      await ready()
+    })
+    const first = runWithCaller({ ...caller, session: a }, () =>
+      dispatcher.dispatch('read', PathSpec.fromStrPath('/data/f')),
+    )
+    const other = runWithCaller({ ...caller, session: b }, () =>
+      dispatcher.dispatch('read', PathSpec.fromStrPath('/data/g'), [], {}, undefined, {
+        ...caller,
+        session: b,
+      }),
+    )
+    try {
+      if (reverse) {
+        holds[1][1]()
+        expect((await other)[0]).toEqual(new Uint8Array([2]))
+        holds[0][1]()
+        expect((await first)[0]).toEqual(new Uint8Array([1]))
+      } else {
+        holds[0][1]()
+        expect((await first)[0]).toEqual(new Uint8Array([1]))
+        holds[1][1]()
+        expect((await other)[0]).toEqual(new Uint8Array([2]))
+      }
+      expect(a.versions.read(manager.versionScope, '/f')).toBe('v1')
+      expect(a.versions.read(manager.versionScope, '/g')).toBeNull()
+      expect(b.versions.read(manager.versionScope, '/g')).toBe('v2')
+      expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
+    } finally {
+      holds[0][1]()
+      holds[1][1]()
+      await Promise.allSettled([first, other])
+      await ws.close()
+    }
+  },
+)
+
+it('an explicit dispatcher owner wins over an already live browser peer', async () => {
+  const { ws, manager, dispatcher } = await conditionalReads()
+  const a = new SessionState({ sessionId: 'a' })
+  const b = new SessionState({ sessionId: 'b' })
+  const caller = currentCaller()
+  try {
+    const [result] = await runWithCaller({ ...caller, session: b }, () =>
+      dispatcher.dispatch('read', PathSpec.fromStrPath('/data/f'), [], {}, undefined, {
+        ...caller,
+        session: a,
+      }),
+    )
+    expect(result).toEqual(new Uint8Array([1]))
+    expect(a.versions.read(manager.versionScope, '/f')).toBe('v1')
+    expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each([WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL])(
+  'an ambiguous unbound browser read respects the mount write policy (%s)',
+  async (write) => {
+    const { ws, manager, dispatcher } = await conditionalReads(true, write)
+    const a = new SessionState({ sessionId: 'a' })
+    const b = new SessionState({ sessionId: 'b' })
+    const caller = currentCaller()
+    try {
+      const read = runWithCaller({ ...caller, session: a }, () =>
+        runWithCaller({ ...caller, session: b }, () =>
+          dispatcher.dispatch('read', PathSpec.fromStrPath('/data/f')),
+        ),
+      )
+      if (write === WritePolicy.CONDITIONAL)
+        await expect(read).rejects.toMatchObject({ code: 'ENOTSUP' })
+      else expect((await read)[0]).toEqual(new Uint8Array([1]))
+      expect(a.versions.read(manager.versionScope, '/f')).toBeNull()
+      expect(b.versions.read(manager.versionScope, '/f')).toBeNull()
+    } finally {
+      await ws.close()
+    }
+  },
+)
+
+it.each([
+  [false, '/data/f'],
+  [false, '/data/./f'],
+  [true, '/data/./f'],
+] as const)('a known browser read keeps its owner, cached=%s path=%s', async (cached, path) => {
+  const { ws, manager, dispatcher } = await conditionalReads(cached)
+  const a = new SessionState({ sessionId: 'a' })
+  try {
+    const [result] = await runWithCaller({ ...currentCaller(), session: a }, () =>
+      dispatcher.dispatch('read', PathSpec.fromStrPath(path, undefined, '/')),
+    )
+    expect(result).toEqual(new Uint8Array([1]))
+    expect(a.versions.read(manager.versionScope, '/f')).toBe('v1')
+  } finally {
+    await ws.close()
+  }
 })

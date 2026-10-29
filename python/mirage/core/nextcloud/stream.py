@@ -35,3 +35,5 @@ async def read_stream(
                 yield chunk_bytes
     except NotFound as exc:
         raise enoent(path) from exc
+    if rec is not None:
+        rec.complete = True

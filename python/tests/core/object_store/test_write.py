@@ -15,9 +15,16 @@
 import asyncio
 import errno
 from dataclasses import replace
+from unittest.mock import AsyncMock
 
 import pytest
 
+from mirage.cache.types import WriteContext
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.core.object_store.driver import ObjectMeta
 from mirage.core.object_store.write import (
     make_create,
@@ -440,3 +447,29 @@ def test_mkdir_records_nothing(accessor):
         make_mkdir(make_driver(store))(accessor, spec("/a/b"), True)
     )
     assert records == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("versioned", [False, True])
+async def test_nonempty_truncate_uses_its_tokenless_read(accessor, versioned):
+    store = FakeStore({"f.bin": b"peer"})
+    driver = make_driver(store)
+    if versioned:
+        driver = replace(
+            driver, get_versioned=AsyncMock(return_value=(b"peer", None))
+        )
+    context = WriteContext(
+        vfs="fake",
+        conditions=frozenset({"put"}),
+        read_version=AsyncMock(return_value="old"),
+        read_versions=AsyncMock(return_value=["old"]),
+        drop=AsyncMock(),
+        keep=AsyncMock(),
+    )
+    token = bind_caller(current_caller().changed({"write_context": context}))
+    try:
+        await make_truncate(driver)(accessor, spec("/f.bin"), 2)
+    finally:
+        reset_caller(token)
+    assert store.objects["f.bin"] == b"pe"
+    assert store.puts == [("f.bin", b"pe")]

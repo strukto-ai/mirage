@@ -17,7 +17,19 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.cache.types import ABSENT_WRITE, ReplaceRequest
+from mirage.cache.context import publish_read
+from mirage.cache.types import (
+    ABSENT_WRITE,
+    ANY_WRITE,
+    MatchWrite,
+    ReplaceRequest,
+    WriteContext,
+)
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.core.generic.rewrite import (
     append_by_rewrite,
     append_by_streamed_rewrite,
@@ -263,3 +275,55 @@ async def test_refuse_taken(kind, parents, refused):
 @pytest.mark.asyncio
 async def test_refuse_taken_leaves_a_missing_name_to_the_create():
     await refuse_taken(AsyncMock(side_effect=FileNotFoundError()), PATH, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kind", ["append", "streamed_append", "pwrite", "truncate"]
+)
+@pytest.mark.parametrize("version", [None, "v2"])
+async def test_a_completed_own_read_replaces_the_saved_condition(
+    kind, version
+):
+    data = b"old"
+    context = WriteContext(
+        vfs="test",
+        conditions=frozenset({"put"}),
+        read_version=AsyncMock(return_value="v1"),
+        read_versions=AsyncMock(return_value=["v1"]),
+        drop=AsyncMock(),
+        keep=AsyncMock(),
+    )
+    write = AsyncMock()
+    stat = AsyncMock(return_value=_file())
+
+    async def read(path):
+        publish_read(path.virtual, data, version)
+        return data
+
+    async def streamed_read(path, remember):
+        remember(version)
+        yield data
+
+    async def spooled_read(path, spool):
+        await spool.append(data)
+        return version
+
+    token = bind_caller(current_caller().changed({"write_context": context}))
+    try:
+        if kind == "append":
+            await append_by_rewrite(read, write, stat, PATH, b"new")
+        elif kind == "streamed_append":
+            await append_by_streamed_rewrite(
+                streamed_read, write, stat, PATH, b"new"
+            )
+        elif kind == "pwrite":
+            await pwrite_by_streamed_rewrite(
+                spooled_read, write, stat, PATH, b"new", 1
+            )
+        else:
+            await truncate_by_rewrite(read, write, PATH, 2, False)
+    finally:
+        reset_caller(token)
+    condition = write.await_args.args[0].condition
+    assert condition == (ANY_WRITE if version is None else MatchWrite(version))

@@ -26,6 +26,7 @@ DEFAULT_PROFILE = "default"
 # way `script_name` was.
 INHERITED_FIELDS: tuple[str, ...] = (
     "session_id",
+    "versions",
     "cwd",
     "logical_cwd",
     "vars",

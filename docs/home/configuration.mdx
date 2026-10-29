@@ -113,7 +113,11 @@ count only their own writes.
 | Value | Behavior |
 | --- | --- |
 | `unconditional` | Replacements use last-write-wins. The default. |
-| `conditional` | Send the version the mount last saw, such as `If-Match` on the S3 family, so a write based on a stale read is refused. |
+| `conditional` | Send the version the live session last observed, such as `If-Match` on the S3 family, so a write based on a stale read is refused. |
+
+Conditional writes and deletes reject changes based on a stale read when the
+backend supports it. Read the file again before retrying. Protection lasts only
+for the live session and does not survive a workspace restart.
 
 The shared rewrite helpers and object-store truncate require a file observed
 missing to remain absent at commit, under either policy. These paths cover

@@ -57,7 +57,9 @@ async def truncate(
     own: str | OwnRead | None = OwnRead.ABSENT
     if item is not None and live is not None:
         data = await download_file(accessor.token_manager, item["id"])
-        own = hashlib.sha1(data).hexdigest() if live.content else None
+        own = (
+            hashlib.sha1(data).hexdigest() if live.content else OwnRead.UNKNOWN
+        )
     if length <= len(data):
         new = data[:length]
     else:

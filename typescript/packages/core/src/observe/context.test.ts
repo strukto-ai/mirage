@@ -362,3 +362,15 @@ describe('commandRecords', () => {
     expect(mine.map((r) => r.path)).toEqual(['/late'])
   })
 })
+
+it('stream completion starts pending and stays out of serialized observations', async () => {
+  const [, records] = await runWithRecording(async () => {
+    record('read', '/f', 'box', 0, startOp())
+    const rec = recordStream('read', '/g', 'box')
+    expect(rec?.complete).toBe(false)
+    if (rec !== null) rec.complete = true
+  })
+  expect(records[0]?.complete).toBe(true)
+  expect(records[1]?.complete).toBe(true)
+  expect(records[1]?.toDict()).not.toHaveProperty('complete')
+})

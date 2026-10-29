@@ -16,6 +16,8 @@ import type { PathSpec } from '../../types.ts'
 
 export interface FileCache {
   get(key: string): Promise<Uint8Array | null>
+  /** Read bytes and their token atomically; null when no bytes remain. */
+  getVersioned(key: string): Promise<[Uint8Array, string | null] | null>
   set(
     key: string,
     data: Uint8Array,

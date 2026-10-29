@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { closeQuietly } from '../../io/stream.ts'
+import { closeQuietly, ensureStream } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
@@ -73,6 +73,7 @@ import {
   runWithMountContext,
   runWithRecording,
   startOp,
+  finishRecord,
 } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
 import type { LostPaths, OpRecord } from '../../observe/record.ts'
@@ -137,6 +138,7 @@ import {
   type CallerDispatchFn,
   callerSignal,
   currentCaller,
+  liveCallers,
   effectivePathMode,
   explaining,
   getCurrentSession,
@@ -530,6 +532,8 @@ function followOrLoop(
  * Python's `_Call`.
  */
 interface Call {
+  readonly caller: Caller | undefined
+  readRecords: OpRecord[]
   readonly name: string
   /** The op's path: walked, then followed. */
   path: PathSpec
@@ -829,7 +833,24 @@ export class Dispatcher {
     }
   }
 
+  /** The observation owner known before this call can suspend. */
+  private readCaller(): Caller | undefined {
+    const caller = this.caller ?? currentCaller()
+    if (
+      this.caller === null &&
+      !asyncContextIsolatesTasks &&
+      liveCallers().some(
+        (held) =>
+          (held.session !== null || held.write?.context != null) &&
+          (held.session?.versions ?? null) !== (caller.session?.versions ?? null),
+      )
+    )
+      return undefined
+    return caller
+  }
+
   private dispatchAdmitted: DispatchFn = async (name, path, args, kwargs, report) => {
+    const caller = this.readCaller()
     // The caller's own mark on the op, lifted before any gate fires so
     // each one is told whose op it judges.
     const [issuer, stripped] = takeIssuer(kwargs)
@@ -868,14 +889,21 @@ export class Dispatcher {
     if (name === 'stat' && fresh !== undefined) kwargs = own
     if (name === 'read_many') {
       const { paths } = (kwargs ?? {}) as { paths?: PathSpec[] }
-      await this.readMany([path, ...(paths ?? [])], issuer)
+      await this.readMany([path, ...(paths ?? [])], issuer, caller)
       return [null, new IOResult()]
     }
     const { scopes, ...searched } = (kwargs ?? {}) as { scopes?: PathSpec[] }
     if (name === 'search' && scopes !== undefined) {
       kwargs = searched
       if (scopes.length > 0) {
-        const hits = await this.searchTogether([path, ...scopes], args, searched, report, issuer)
+        const hits = await this.searchTogether(
+          [path, ...scopes],
+          args,
+          searched,
+          report,
+          issuer,
+          caller,
+        )
         return [hits, new IOResult()]
       }
     }
@@ -909,6 +937,7 @@ export class Dispatcher {
       gate,
       report,
       issuer,
+      caller,
       name === 'stat' && fresh === true,
     )
     call.stream = name === 'read' && stream === true
@@ -1068,6 +1097,12 @@ export class Dispatcher {
     const mark = declared(vfs.constructor, name) ?? CALLS.get(name) ?? null
     if (mark === null) throw enotsup(vfs.name, name, call.path)
     await mount.ensureReady()
+    if (
+      mount.write === WritePolicy.CONDITIONAL &&
+      (DISPATCH_READ_OPS.has(name) || READ_SHORTCUT_OPS.has(name)) &&
+      call.caller === undefined
+    )
+      throw enotsup('workspace', 'conditional read (overlapping sessions)', call.path)
     const cached = await this.serveCached(call, mount, vfs, boundary, mark)
     if (cached !== null) {
       return [cached, new IOResult()]
@@ -1081,9 +1116,17 @@ export class Dispatcher {
         : []
     let ran: Awaited<ReturnType<typeof this.callBackend>>
     try {
-      ran = call.fresh
-        ? await this.freshCall(call, mount, vfs, scope, mode)
-        : await this.callBackend(call, mount, vfs, scope, mode)
+      const [answer, records] = await commandRecords(
+        async (mine) =>
+          [
+            await (call.fresh
+              ? this.freshCall(call, mount, vfs, scope, mode)
+              : this.callBackend(call, mount, vfs, scope, mode)),
+            mine,
+          ] as const,
+      )
+      ran = answer
+      if (call.readRecords.length === 0) call.readRecords = records
     } catch (err) {
       if (settles) {
         await this.evictFailedWrite(
@@ -1118,10 +1161,56 @@ export class Dispatcher {
     // The transfer already happened, so a limit changes what the caller
     // receives, not what the backend moved; the report above already
     // carries the moved count.
-    return [
-      await boundary.complete(mark, call.path, call.write, result, call.issuer),
-      new IOResult(),
-    ]
+    result = await boundary.complete(mark, call.path, call.write, result, call.issuer)
+    if (DISPATCH_READ_OPS.has(name) || READ_SHORTCUT_OPS.has(name)) {
+      if (
+        DISPATCH_READ_OPS.has(name) &&
+        call.stream &&
+        mount.write === WritePolicy.CONDITIONAL &&
+        result instanceof Uint8Array
+      )
+        result = ensureStream(result)
+      if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
+        if (DISPATCH_READ_OPS.has(name) && !(result instanceof PipeStream)) {
+          const observed = this.observeStream(call, mount, result as AsyncIterable<Uint8Array>)
+          await observed.next()
+          result = observed
+        }
+      } else this.observeReads(call, mount, result instanceof Uint8Array && result.byteLength > 0)
+    }
+    return [result, new IOResult()]
+  }
+
+  /** Publish only this admitted read's records for its captured caller. */
+  private observeReads(call: Call, mount: MountEntry, delivered: boolean): void {
+    const [offset, size] = readWindow(call.kwargs)
+    for (const rec of call.readRecords)
+      if (
+        rec.op === 'read' &&
+        rec.path === call.path.virtual &&
+        ((offset === 0 && size === null && rec.complete) || (delivered && rec.fingerprint !== null))
+      )
+        mount.cacheManager?.observe(rec, call.caller)
+  }
+
+  /** Publish delivered chunks and normal empty completion, retaining stream cleanup. */
+  private async *observeStream(
+    call: Call,
+    mount: MountEntry,
+    source: AsyncIterable<Uint8Array>,
+  ): AsyncGenerator<Uint8Array> {
+    let delivered = false
+    try {
+      yield new Uint8Array()
+      for await (const chunk of source) {
+        delivered ||= chunk.byteLength > 0
+        this.observeReads(call, mount, delivered)
+        yield chunk
+      }
+      this.observeReads(call, mount, delivered)
+    } finally {
+      await closeQuietly(source)
+    }
   }
 
   /**
@@ -1266,12 +1355,22 @@ export class Dispatcher {
     kwargs: Record<string, unknown>,
     report: OpReport | undefined,
     issuer: symbol | undefined,
+    caller: Caller | undefined,
   ): Promise<[string, string][] | null> {
     await this.prepare()
     const gate = this.caller?.ruleGate ?? null
     const calls: Call[] = []
     for (const typed of scopes) {
-      const call = await this.walk('search', typed, args, { ...kwargs }, gate, report, issuer)
+      const call = await this.walk(
+        'search',
+        typed,
+        args,
+        { ...kwargs },
+        gate,
+        report,
+        issuer,
+        caller,
+      )
       this.follow(call)
       calls.push(call)
     }
@@ -1333,7 +1432,11 @@ export class Dispatcher {
    * logged and dropped: the read that follows meets it itself. Mirrors
    * Python's Dispatcher._read_many.
    */
-  private async readMany(typed: readonly PathSpec[], issuer: symbol | undefined): Promise<void> {
+  private async readMany(
+    typed: readonly PathSpec[],
+    issuer: symbol | undefined,
+    caller: Caller | undefined,
+  ): Promise<void> {
     if (this.explaining() !== null || (await this.policies.wantsFor('preVfs', this.sessionId()))) {
       return
     }
@@ -1343,7 +1446,7 @@ export class Dispatcher {
     for (const path of typed) {
       let call: Call
       try {
-        call = await this.walk('read', path, [], {}, null, undefined, issuer)
+        call = await this.walk('read', path, [], {}, null, undefined, issuer, caller)
         this.follow(call)
       } catch (err) {
         console.debug(`read-ahead passes over ${path.virtual}: ${String(err)}`)
@@ -1418,8 +1521,10 @@ export class Dispatcher {
         }
       }
     }
-    if (activeRecords() === undefined) await runWithRecording(warm, null, this.namespace.clock)
-    else await warm()
+    await runWithCaller({ ...currentCaller(), versionReads: false }, async () => {
+      if (activeRecords() === undefined) await runWithRecording(warm, null, this.namespace.clock)
+      else await warm()
+    })
   }
 
   /**
@@ -1472,6 +1577,7 @@ export class Dispatcher {
     ruleGate: EntryGate | null,
     report: OpReport | undefined,
     issuer: symbol | undefined,
+    caller: Caller | undefined,
     fresh = false,
   ): Promise<Call> {
     const vis = sessionVisibility(this.access)
@@ -1572,6 +1678,8 @@ export class Dispatcher {
       warm: false,
       fresh: false,
       walked: null,
+      caller,
+      readRecords: [],
     }
   }
 
@@ -1655,7 +1763,16 @@ export class Dispatcher {
    */
   private async walkOperands(call: Call): Promise<void> {
     for (const [at, typed] of operands(call.name, call.args, call.kwargs)) {
-      const other = await this.walk(call.name, typed, [], {}, call.ruleGate, undefined, call.issuer)
+      const other = await this.walk(
+        call.name,
+        typed,
+        [],
+        {},
+        call.ruleGate,
+        undefined,
+        call.issuer,
+        call.caller,
+      )
       this.follow(other)
       const landed = other.path
       if (typeof at === 'number') {
@@ -1930,6 +2047,7 @@ export class Dispatcher {
     const [source, records] = await commandRecords((mine) =>
       Promise.resolve([mount.readStream(scope, this.access), mine] as const),
     )
+    call.readRecords = records
     const pipe = mount.livePipe(scope.virtual, this.access)
     if (pipe !== null) {
       const live = new PipeStream(await primed(source, call.report, false), call.path, pipe)
@@ -1993,9 +2111,10 @@ export class Dispatcher {
     vfs: BaseVFS,
     boundary: Boundary,
     mark: VfsCall,
-  ): Promise<Uint8Array | null> {
+  ): Promise<ByteSource | null> {
     if (call.direct || !vfs.cachesReads || !DISPATCH_READ_OPS.has(call.name)) return null
-    const cached = await this.cache.get(call.path.virtual)
+    const held = await this.cache.getVersioned(call.path.virtual)
+    const cached = held?.[0] ?? null
     if (
       cached === null ||
       retracted(call.path.virtual) ||
@@ -2014,7 +2133,27 @@ export class Dispatcher {
     // recorded against the backend and counted as traffic that never
     // happened.
     memoryAnswered(call.report, window.byteLength)
-    return (await boundary.complete(mark, call.path, call.write, window, call.issuer)) as Uint8Array
+    const result = (await boundary.complete(
+      mark,
+      call.path,
+      call.write,
+      window,
+      call.issuer,
+    )) as Uint8Array
+    if (mount.write === WritePolicy.CONDITIONAL) {
+      call.readRecords = [
+        finishRecord('read', call.path.virtual, 'ram', window.byteLength, startOp(), {
+          fingerprint: held?.[1] ?? null,
+        }),
+      ]
+      if (call.stream) {
+        const observed = this.observeStream(call, mount, ensureStream(result))
+        await observed.next()
+        return observed
+      }
+      this.observeReads(call, mount, result.byteLength > 0)
+    }
+    return result
   }
 
   /**

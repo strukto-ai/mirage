@@ -44,4 +44,6 @@ export async function* readStream(
     if (isMissing(err)) throw enoent(path)
     throw asRefusal(path, err, REFUSED_STATUSES)
   }
+
+  if (rec !== null) rec.complete = true
 }

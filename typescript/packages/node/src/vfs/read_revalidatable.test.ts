@@ -222,7 +222,10 @@ vi.mock('@struktoai/mirage-core/observe/context', async (importOriginal) => {
       const rec = H.unrecorded
         ? capture(op, path, source, 0, options)
         : actual.recordStream(op, path, source, options)
-      if (H.unrecorded && rec !== null) H.captured.push(rec)
+      if (H.unrecorded && rec !== null) {
+        rec.complete = false
+        H.captured.push(rec)
+      }
       const forced = H.stampOverride
       if (op === 'read' && forced !== null && rec !== null) {
         Object.defineProperty(rec, 'fingerprint', { get: () => forced, set: () => undefined })
@@ -1556,6 +1559,7 @@ describe('the read-token contract', () => {
       // The real recordStream returns null with no recorder bound, so no
       // stream read can stamp a token outside a capture at all. This row can
       // only show the stamp does not depend on the recorder check itself.
+      expect(H.captured[0]?.complete).toBe(true)
       expect(H.captured[0]?.fingerprint).not.toBeNull()
       expect(stat.fingerprint).not.toBeNull()
       expect(H.captured[0]?.fingerprint).toBe(stat.fingerprint)

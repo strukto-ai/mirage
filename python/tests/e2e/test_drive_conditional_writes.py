@@ -12,14 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 
 import pytest
 import pytest_asyncio
 
+import mirage.core.box.read as box_read
 from mirage import Mount, MountMode, Workspace, WritePolicy
 from mirage.errors.types import StaleWriteError
+from mirage.policy import Deny, Policy
+from mirage.policy.types import VfsResultContext
 from mirage.types import ReadPolicy, ReadSpec
 from mirage.vfs.registry import build_vfs
 from tests.fixtures.box_api import FakeBox
@@ -548,6 +552,29 @@ async def test_a_box_resize_holds_the_bytes_it_downloaded(drive, workspace):
 
 @pytest.mark.asyncio
 @BOX
+@pytest.mark.parametrize("operation", ["append", "resize"])
+async def test_a_box_rewrite_uses_its_completed_tokenless_read(
+    drive, workspace, operation
+):
+    ws = workspace()
+    a = await ws.session("a")
+    await a.vfs.read("/box/f")
+    drive.put("f", b"peer\n")
+    drive.box.unhashed.add(drive.box.id_of("f"))
+    await ws.cache.clear()
+    line = (
+        "echo extra >> /box/f"
+        if operation == "append"
+        else "truncate -s 2 /box/f"
+    )
+    result = await a.shell(line)
+    assert result.exit_code == 0, await result.stderr_str()
+    want = b"peer\nextra\n" if operation == "append" else b"pe"
+    assert drive.fake.read("f") == want
+
+
+@pytest.mark.asyncio
+@BOX
 async def test_a_box_resize_of_a_file_with_no_sha1_goes_out_plain(
     drive, workspace
 ):
@@ -728,3 +755,278 @@ async def test_an_append_keeps_a_file_created_after_the_listing(
     code, _, err = await _run(ws, f"echo x >> {drive.root}/n")
     assert (code, err) == (0, "")
     assert drive.fake.read("n") == b"v1\nx\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("peer", [b"peer\n", b""])
+async def test_failed_stream_rereads_keep_the_refused_session_version(
+    drive, workspace, peer
+):
+    ws = workspace()
+    a, b = await ws.session("a"), await ws.session("b")
+    path = f"{drive.root}/f"
+    await a.vfs.read(path)
+    await b.vfs.write(path, peer)
+    with pytest.raises(StaleWriteError):
+        await a.vfs.write(path, b"mine\n")
+    for _ in range(2):
+        await ws.cache.clear()
+        drive.fake.hooks[drive.download] = _fail
+        with pytest.raises(Exception, match="500|injected server error"):
+            stream = await a.vfs.read(path, stream=True)
+            async for chunk in stream:
+                pytest.fail(f"failed download returned bytes: {chunk!r}")
+        with pytest.raises(StaleWriteError):
+            await a.vfs.write(path, b"mine\n")
+        assert drive.fake.read("f") == peer
+    stream = await a.vfs.read(path, stream=True)
+    assert b"".join([chunk async for chunk in stream]) == peer
+    await a.vfs.write(path, b"mine\n")
+    assert drive.fake.read("f") == b"mine\n"
+
+
+@pytest.mark.asyncio
+@BOX
+@pytest.mark.parametrize(
+    "streamed,buffered", [(False, False), (True, False), (True, True)]
+)
+async def test_completed_empty_box_reread_without_sha1_releases_old_version(
+    drive, workspace, streamed, buffered
+):
+    ws = workspace(read=ReadSpec(policy=ReadPolicy.FRESH))
+    a = await ws.session("a")
+    path = "/box/f"
+    await a.vfs.read(path)
+    drive.put("f", b"")
+    drive.box.unhashed.add(drive.box.id_of("f"))
+    with pytest.raises(StaleWriteError):
+        await a.vfs.write(path, b"mine\n")
+    if buffered:
+        policy = _DenyResult()
+        policy.enabled = False
+        ws.policies.add(policy)
+    if streamed:
+        content = b"".join(
+            [chunk async for chunk in await a.vfs.read(path, stream=True)]
+        )
+    else:
+        content = await a.vfs.read(path)
+    assert content == b""
+    await a.vfs.write(path, b"mine\n")
+    assert drive.fake.read("f") == b"mine\n"
+
+
+@pytest.mark.asyncio
+@BOX
+async def test_a_pending_parallel_read_cannot_hide_a_completed_observation(
+    drive, workspace, monkeypatch
+):
+    ws = workspace(read=ReadSpec(policy=ReadPolicy.FRESH))
+    a, b = await ws.session("a"), await ws.session("b")
+    real = box_read.download_file_stream
+    ready = [asyncio.Event(), asyncio.Event()]
+    release = [asyncio.Event(), asyncio.Event()]
+    started = 0
+
+    async def delayed(*args, **kwargs):
+        nonlocal started
+        index = started
+        started += 1
+        ready[index].set()
+        await release[index].wait()
+        async for chunk in real(*args, **kwargs):
+            yield chunk
+
+    monkeypatch.setattr(box_read, "download_file_stream", delayed)
+    first = asyncio.create_task(a.vfs.read("/box/f", stream=True))
+    await ready[0].wait()
+    second = asyncio.create_task(a.vfs.read("/box/f", stream=True))
+    await ready[1].wait()
+    try:
+        release[0].set()
+        assert b"".join([chunk async for chunk in await first]) == SEED["f"]
+        await b.vfs.write("/box/f", b"peer\n")
+        with pytest.raises(StaleWriteError):
+            await a.vfs.write("/box/f", b"mine\n")
+        assert drive.fake.read("f") == b"peer\n"
+    finally:
+        for event in release:
+            event.set()
+        for task in (first, second):
+            stream = await task
+            async for _ in stream:
+                pass
+
+
+class _DenyResult(Policy):
+    def __init__(self, operation="read"):
+        self.enabled = True
+        self.operation = operation
+
+    async def post_vfs(self, ctx: VfsResultContext):
+        return (
+            Deny("read blocked")
+            if self.enabled and ctx.call.name == self.operation
+            else None
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_a_denied_reread_cannot_advance_the_session_version(
+    drive, workspace, streamed
+):
+    ws = workspace(read=ReadSpec(policy=ReadPolicy.FRESH))
+    a, b = await ws.session("a"), await ws.session("b")
+    path = f"{drive.root}/f"
+    await a.vfs.read(path)
+    await b.vfs.write(path, b"peer\n")
+    await ws.cache.clear()
+    policy = _DenyResult()
+    ws.policies.add(policy)
+    with pytest.raises(PermissionError):
+        await a.vfs.read(path, stream=streamed)
+    with pytest.raises(StaleWriteError):
+        await a.vfs.write(path, b"mine\n")
+    assert drive.fake.read("f") == b"peer\n"
+    policy.enabled = False
+    assert await a.vfs.read(path) == b"peer\n"
+    await a.vfs.write(path, b"mine\n")
+
+
+@pytest.mark.asyncio
+async def test_a_completed_write_keeps_its_version_when_its_result_is_denied(
+    drive, workspace
+):
+    ws = workspace()
+    a = await ws.session("a")
+    path = f"{drive.root}/f"
+    await a.vfs.read(path)
+    policy = _DenyResult("write")
+    ws.policies.add(policy)
+    with pytest.raises(PermissionError):
+        await a.vfs.write(path, b"first\n")
+    assert drive.fake.read("f") == b"first\n"
+    policy.enabled = False
+    await a.vfs.write(path, b"second\n")
+    assert drive.fake.read("f") == b"second\n"
+
+
+@pytest.mark.asyncio
+@BOX
+@pytest.mark.parametrize("finish", ["unpulled", "closed", "drained"])
+@pytest.mark.parametrize("warm", [False, True])
+async def test_a_partial_box_stream_keeps_its_previous_basis(
+    drive, workspace, monkeypatch, finish, warm
+):
+    ws = workspace()
+    a, b = await ws.session("a"), await ws.session("b")
+    path, peer = "/box/f", b"prefix\nunread peer tail\n"
+    await a.vfs.read(path)
+    await b.vfs.write(path, peer)
+    if not warm:
+        await ws.cache.clear()
+    real = box_read.download_file_stream
+
+    async def split(*args, **kwargs):
+        async for chunk in real(*args, **kwargs):
+            yield chunk[:7]
+            yield chunk[7:]
+
+    monkeypatch.setattr(box_read, "download_file_stream", split)
+    before = drive.fake.count(drive.download)
+    source = await a.vfs.read(path, stream=True)
+    assert drive.fake.count(drive.download) - before == (0 if warm else 1)
+    try:
+        if finish == "drained" or (warm and finish == "closed"):
+            if finish == "drained":
+                assert b"".join([chunk async for chunk in source]) == peer
+            else:
+                assert await anext(source) == peer
+                await source.aclose()
+            await a.vfs.write(path, b"mine\n")
+            assert drive.fake.read("f") == b"mine\n"
+        else:
+            if finish == "closed":
+                assert await anext(source) == b"prefix\n"
+            await source.aclose()
+            with pytest.raises(StaleWriteError):
+                await a.vfs.write(path, b"mine\n")
+            assert drive.fake.read("f") == peer
+    finally:
+        await source.aclose()
+
+
+@pytest.mark.asyncio
+@BOX
+@pytest.mark.parametrize("known", [False, True])
+@pytest.mark.parametrize(
+    "warm,offset,size",
+    [
+        (False, 0, 7),
+        (False, 7, None),
+        (False, 0, 0),
+        (True, 0, 7),
+        (True, 7, None),
+        (True, 0, 0),
+        (True, 999, None),
+    ],
+)
+async def test_a_box_range_needs_delivered_bytes_and_a_token_to_change_basis(
+    drive, workspace, warm, known, offset, size
+):
+    ws = workspace()
+    a, b = await ws.session("a"), await ws.session("b")
+    path, peer = "/box/f", b"prefix\nunread peer tail\n"
+    await a.vfs.read(path)
+    if not known:
+        drive.box.unhashed.add(drive.box.id_of("f"))
+    await b.vfs.write(path, peer)
+    if not warm:
+        await ws.cache.clear()
+    before = drive.fake.count(drive.download)
+    got = await a.vfs.read(path, offset=offset, size=size)
+    assert got == peer[offset : None if size is None else offset + size]
+    assert drive.fake.count(drive.download) - before == (
+        0 if warm or size == 0 else 1
+    )
+    if warm and known and got:
+        await a.vfs.write(path, b"mine\n")
+        await b.vfs.read(path)
+        await b.vfs.write(path, b"new peer\n")
+        with pytest.raises(StaleWriteError):
+            await a.vfs.write(path, b"again\n")
+        assert drive.fake.read("f") == b"new peer\n"
+    else:
+        with pytest.raises(StaleWriteError):
+            await a.vfs.write(path, b"mine\n")
+        assert drive.fake.read("f") == peer
+        assert await a.vfs.read(path) == peer
+        await a.vfs.write(path, b"mine\n")
+        assert drive.fake.read("f") == b"mine\n"
+
+
+@pytest.mark.asyncio
+@DROPBOX
+@pytest.mark.parametrize("warm", [False, True])
+async def test_a_dropbox_stream_observes_its_token_only_after_delivery(
+    drive, workspace, warm
+):
+    ws = workspace()
+    a, b = await ws.session("a"), await ws.session("b")
+    path, peer = "/dbx/f", b"peer\n"
+    await a.vfs.read(path)
+    await b.vfs.write(path, peer)
+    if not warm:
+        await ws.cache.clear()
+    source = await a.vfs.read(path, stream=True)
+    try:
+        with pytest.raises(StaleWriteError):
+            await a.vfs.write(path, b"not seen\n")
+        assert drive.fake.read("f") == peer
+        assert await anext(source) == peer
+        await source.aclose()
+        await a.vfs.write(path, b"mine\n")
+        assert drive.fake.read("f") == b"mine\n"
+    finally:
+        await source.aclose()

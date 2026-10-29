@@ -83,10 +83,14 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
   }
 
   async get(key: string): Promise<Uint8Array | null> {
+    return (await this.getVersioned(key))?.[0] ?? null
+  }
+
+  async getVersioned(key: string): Promise<[Uint8Array, string | null] | null> {
     // The data, and whether an expiry left a version to evict around.
     const [data, kept] = await this.lock.withLock(
       key,
-      (): Promise<[Uint8Array | null, boolean]> => {
+      (): Promise<[[Uint8Array, string | null] | null, boolean]> => {
         const entry = this.entries.get(key)
         if (!entry?.hasBytes) return Promise.resolve([null, false])
         if (entry.isExpired(this.seconds())) {
@@ -104,7 +108,8 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
         }
         this.entries.delete(key)
         this.entries.set(key, entry)
-        return Promise.resolve([this.store.files.get(key) ?? null, false])
+        const bytes = this.store.files.get(key)
+        return Promise.resolve([bytes === undefined ? null : [bytes, entry.fingerprint], false])
       },
     )
     if (kept) await this.evict()

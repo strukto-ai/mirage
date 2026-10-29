@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { OpRecord } from '../observe/record.ts'
 import type { FileStat, PathSpec } from '../types.ts'
 import type { ByteSource } from '../io/types.ts'
 
@@ -76,14 +77,18 @@ export interface WriteContext {
   readonly vfs: string
   /** The ops the backend can condition: put, copy, delete. */
   readonly conditions: readonly WriteKind[]
-  /** The version the mount last saw for a path, null when it saw none. */
+  /** The live session's observed version, or the mount's version without a session. */
   readVersion(path: PathSpec): Promise<string | null>
-  /** `readVersion` for many paths at once, in one store round trip. */
+  /** `readVersion` for many paths at once. */
   readVersions(paths: readonly PathSpec[]): Promise<(string | null)[]>
   /** Drops the mount's cached copy, so the read a refusal asks for fetches. */
   drop(path: PathSpec): Promise<void>
   /** Keeps a version for a path without bytes, the one a refused write lost on. */
   keep(path: PathSpec, version: string): Promise<void>
+  /** Record this caller's read or mutation result. */
+  observe?(record: OpRecord): void
+  /** Retain a refusal token, or clear it for a file confirmed gone. */
+  lose?(path: PathSpec, version: string | null): void
 }
 
 export type WriteKind = 'put' | 'copy' | 'delete'
@@ -94,10 +99,11 @@ export type WriteKind = 'put' | 'copy' | 'delete'
  */
 export type KnownVersions = (keys: readonly string[]) => Promise<Map<string, string>>
 
-/** An op's own read that found no file, as against one it never made. */
+/** An op's own read that found no file or no usable version. */
 export enum OwnRead {
   ABSENT = 0,
+  UNKNOWN = 1,
 }
 
 /** The version a key was measured on, or ABSENT for a key found gone. */
-export type Measured = string | OwnRead
+export type Measured = string | OwnRead.ABSENT

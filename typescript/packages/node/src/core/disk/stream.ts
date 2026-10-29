@@ -53,7 +53,10 @@ export async function* readStream(
         if (rec !== null) rec.bytes += bytesRead
         yield buffer.subarray(0, bytesRead)
       }
-      if (bytesRead === 0 || (regular && bytesRead < size)) return
+      if (bytesRead === 0 || (regular && bytesRead < size)) {
+        if (rec !== null) rec.complete = true
+        return
+      }
     }
   } finally {
     await handle.close()

@@ -66,6 +66,8 @@ export async function* readStream(accessor: SSHAccessor, p: PathSpec): AsyncIter
     if (isNoSuchFile(err)) throw enoent(p)
     throw err
   }
+
+  if (rec !== null) rec.complete = true
 }
 
 /**

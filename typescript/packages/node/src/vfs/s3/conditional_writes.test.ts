@@ -14,11 +14,13 @@
 
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
+import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { markLost } from '@struktoai/mirage-core/observe/context'
 import { MountMode, PathSpec, WritePolicy } from '@struktoai/mirage-core/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { openMode } from '@struktoai/mirage-core/runtime/handles/index'
 import { MinIOVFS } from '../minio/minio.ts'
@@ -112,6 +114,152 @@ describe('conditional writes on an S3 mount', () => {
     built.push(ws)
     return ws
   }
+  it.each(
+    ['md5sum', 'sha256sum'].flatMap((command) =>
+      [false, true].map((warm) => [command, warm] as const),
+    ),
+  )('live session checksum keeps its observed version: %s warm=%s', async (command, warm) => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    if (warm) await ws.shell('cat /s3/f', { sessionId: 'b' })
+    mock.ledger.length = 0
+    const read = await ws.shell(`${command} /s3/f`, { sessionId: 'a' })
+    expect(read.exitCode, DEC.decode(read.stderr)).toBe(0)
+    if (command === 'md5sum' && !warm)
+      expect(mock.ledger.some(([op]) => op === 'GetObject')).toBe(false)
+    expect((await ws.shell('echo peer > /s3/f', { sessionId: 'b' })).exitCode).toBe(0)
+    const refused = await ws.shell('echo mine > /s3/f', { sessionId: 'a' })
+    expect(refused.exitCode).toBe(1)
+    expect(DEC.decode(refused.stderr)).toContain(STALE)
+    expect(object('f')).toBe('peer\n')
+  })
+
+  it('live session warm reads keep the exact sampled version', async () => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    await ws.shell('cat /s3/f', { sessionId: 'b' })
+    let sampled!: () => void
+    let release!: () => void
+    const ready = new Promise<void>((resolve) => {
+      sampled = resolve
+    })
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const original = ws.cache.getVersioned.bind(ws.cache)
+    vi.spyOn(ws.cache, 'getVersioned').mockImplementation(async (key) => {
+      const held = await original(key)
+      if (key === '/s3/f' && currentCaller().session?.sessionId === 'a') {
+        sampled()
+        await gate
+      }
+      return held
+    })
+    const reading = ws.shell('cat /s3/f', { sessionId: 'a' })
+    try {
+      await ready
+      expect((await ws.shell('echo peer > /s3/f', { sessionId: 'b' })).exitCode).toBe(0)
+    } finally {
+      release()
+    }
+    expect(DEC.decode((await reading).stdout)).toBe('one\n')
+    expect((await ws.shell('rm /s3/f', { sessionId: 'a' })).exitCode).toBe(1)
+    expect(DEC.decode(mock.store.get('b', 'f'))).toBe('peer\n')
+  })
+
+  it('live session policy reads do not advance the agent', async () => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    await ws.shell('cat /s3/f', { sessionId: 'a' })
+    await ws.shell('echo peer > /s3/f', { sessionId: 'b' })
+    await ws.setSessionProfile('a', {
+      policy: {
+        preCommand: [
+          {
+            script: new ScriptSource("open('/s3/f').read()\nprint('null')\n", 'python'),
+            runtime: 'monty',
+          },
+        ],
+      },
+    })
+    const refused = await ws.shell('rm /s3/f', { sessionId: 'a' })
+    expect(refused.exitCode).toBe(1)
+    expect(DEC.decode(refused.stderr)).toContain(STALE)
+    expect(DEC.decode(mock.store.get('b', 'f'))).toBe('peer\n')
+  })
+
+  it.each([
+    ['rm /s3/f', 'f'],
+    ['rm -f /s3/f', 'f'],
+    ['echo mine > /s3/f', 'f'],
+    ['cp /s3/g /s3/f', 'f'],
+    ['mv /s3/f /s3/new', 'f'],
+    ['mv /s3/g /s3/f', 'f'],
+    ['rm -r /s3/d', 'd/a'],
+  ])('live session refuses peer mutation: %s', async (line, key) => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    const read = await ws.shell(`cat /s3/${key}`, { sessionId: 'a' })
+    expect(DEC.decode(read.stdout)).toBe(SEED[key])
+    expect((await ws.shell(`echo peer > /s3/${key}`, { sessionId: 'b' })).exitCode).toBe(0)
+    for (let i = 0; i < 2; i++) {
+      const refused = await ws.shell(line, { sessionId: 'a' })
+      expect(refused.exitCode).not.toBe(0)
+      expect(DEC.decode(refused.stderr)).toContain(STALE)
+      expect(DEC.decode(mock.store.get('b', key))).toBe('peer\n')
+    }
+    expect(DEC.decode((await ws.shell(`cat /s3/${key}`, { sessionId: 'a' })).stdout)).toBe('peer\n')
+    const accepted = await ws.shell(line, { sessionId: 'a' })
+    expect(accepted.exitCode, DEC.decode(accepted.stderr)).toBe(0)
+  })
+
+  it.each([
+    'cat /s3/f',
+    'head -n1 /s3/f',
+    'grep one /s3/f',
+    'x=$(cat /s3/f); echo "$x"',
+    '(cat /s3/f)',
+  ])('live session read paths survive eviction: %s', async (read) => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    await ws.shell('cat /s3/f', { sessionId: 'b' })
+    expect(DEC.decode((await ws.shell(read, { sessionId: 'a' })).stdout)).toBe('one\n')
+    await ws.shell('echo peer > /s3/f', { sessionId: 'b' })
+    await ws.cache.clear()
+    expect((await ws.shell('rm -f /s3/f', { sessionId: 'a' })).exitCode).toBe(1)
+    expect(DEC.decode(mock.store.get('b', 'f'))).toBe('peer\n')
+    expect((await ws.shell('echo latest > /s3/f', { sessionId: 'b' })).exitCode).toBe(0)
+  })
+
+  it('live session direct files and recreation', async () => {
+    const ws = workspace()
+    const a = await ws.session('a')
+    const b = await ws.session('b')
+    expect(DEC.decode(await a.vfs.read('/s3/f'))).toBe('one\n')
+    await b.vfs.write('/s3/f', ENC.encode('peer\n'))
+    await expect(a.vfs.unlink('/s3/f')).rejects.toMatchObject({ code: 'STALE_WRITE' })
+    await ws.closeSession('a')
+    const fresh = await ws.session('a')
+    await fresh.vfs.unlink('/s3/f')
+    expect(mock.store.get('b', 'f')).toBeUndefined()
+  })
+
+  it('live session symlink read', async () => {
+    const ws = workspace()
+    ws.createSession('a')
+    ws.createSession('b')
+    expect((await ws.shell('ln -s /s3/f /ram/alias')).exitCode).toBe(0)
+    await ws.shell('cat /ram/alias', { sessionId: 'a' })
+    await ws.shell('echo peer > /s3/f', { sessionId: 'b' })
+    expect((await ws.shell('rm /s3/f', { sessionId: 'a' })).exitCode).toBe(1)
+    expect(DEC.decode(mock.store.get('b', 'f'))).toBe('peer\n')
+  })
+
   const mutations = (): [string, Record<string, string>][] =>
     mock.ledger.filter(([op]) => MUTATIONS.has(op))
   const sent = (op: string): Record<string, string>[] =>
@@ -989,6 +1137,33 @@ describe('conditional writes on an S3 mount', () => {
     expect(mutations()).toEqual([])
   })
 
+  it.each([
+    ['rm -r /s3/d', 'DeleteObjects', 0],
+    ['rm -r /s3/d', 'DeleteObjects', 1],
+    ['mv /s3/d /s3/e', 'CopyObject', 0],
+    ['mv /s3/d /s3/e', 'CopyObject', 1],
+    ['rm /s3/d/b', 'DeleteObject', 0],
+  ] as const)(
+    '%s preserves untouched versions when %s fails after %i requests',
+    async (line, operation, completed) => {
+      const ws = workspace()
+      await run(ws, 'cat /s3/d/b')
+      theirs('d/b')
+      mock.pageSize = 1
+      for (let i = 0; i < completed; i++) mock.before(operation, () => undefined)
+      mock.before(operation, () => {
+        throw new Error('network down')
+      })
+      let [code, , err] = await run(ws, line)
+      expect(code === 1 && err.includes('network down'), err).toBe(true)
+      ;[code, , err] = await run(ws, 'rm /s3/d/b')
+      expect(code === 1 && err.includes(STALE), err).toBe(true)
+      expect(object('d/b')).toBe('theirs\n')
+      await run(ws, 'cat /s3/d/b')
+      expect((await run(ws, 'rm /s3/d/b'))[0]).toBe(0)
+    },
+  )
+
   it('deletes a conditional rm -r page by page', async () => {
     // As the unconditional rm -r: memory stays one page, not the whole prefix.
     for (const name of ['c', 'd', 'e']) mock.store.set('b', `d/${name}`, ENC.encode(name))
@@ -1096,8 +1271,8 @@ describe('conditional writes on an S3 mount', () => {
   })
 
   it.each([
-    ['a move asks once', 'mv /s3/f /s3/h', 1, 0],
-    ['a nested line keeps once', "eval 'echo x > /s3/g'", 1, 1],
+    ['a move uses its session', 'mv /s3/f /s3/h', 0, 0],
+    ['a nested line keeps once', "eval 'echo x > /s3/g'", 0, 1],
   ] as const)('asks the store once: %s', async (_name, line, lookups, keeps) => {
     const ws = workspace()
     await run(ws, 'cat /s3/f /s3/g')

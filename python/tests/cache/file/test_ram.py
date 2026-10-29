@@ -500,3 +500,18 @@ async def test_a_version_replaces_bytes_the_clock_expired():
     await cache.keep_fingerprints({"/a": "v2"})
     assert (await cache.fingerprints(["/a"]))[0] == "v2"
     assert await cache.get("/a") is None
+
+
+@pytest.mark.asyncio
+async def test_versioned_read_pairs_bytes_with_their_token():
+    cache = RAMFileCacheStore()
+    await cache.set("/f", b"one", fingerprint="v1")
+    read = await cache.get_versioned("/f")
+    await cache.set("/f", b"two", fingerprint="v2")
+    assert read == (b"one", "v1")
+    assert await cache.get_versioned("/f") == (b"two", "v2")
+    await cache.set("/f", b"")
+    assert await cache.get_versioned("/f") == (b"", None)
+    await cache.remove("/f")
+    await cache.keep_fingerprints({"/f": "v3"})
+    assert await cache.get_versioned("/f") is None

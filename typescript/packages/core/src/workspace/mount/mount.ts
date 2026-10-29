@@ -1108,7 +1108,7 @@ export class MountEntry {
         'put',
         request.condition,
       )
-      if (request.condition.kind === 'any')
+      if (request.condition.kind === 'any' && !this.vfs.supports('_replace'))
         return await this.writeAt(index, request.path, request.body)
       return await this.vfs._replace(
         request,
@@ -1723,6 +1723,12 @@ export class MountEntry {
           readVersions: (paths) => manager.readVersions(paths),
           drop: (path) => manager.invalidate(path, FileChangeKind.UPDATE),
           keep: (path, version) => manager.keepVersion(path, version),
+          observe: (record) => {
+            manager.observe(record)
+          },
+          lose: (path, version) => {
+            manager.lose(path, version)
+          },
         },
       }
     }

@@ -63,8 +63,10 @@ async def append_by_rewrite(
         if found.type == FileType.DIRECTORY:
             raise eisdir(path.virtual)
         return None
+    own: str | OwnRead | None
     try:
         existing, own = await read_versioned(path, lambda: read(path))
+        own = own if own is not None else OwnRead.UNKNOWN
     except FileNotFoundError:
         return await write(
             ReplaceRequest(
@@ -119,11 +121,11 @@ async def append_by_streamed_rewrite(
                 raise eisdir(path)
             return None
         async with ByteSpool() as spool:
-            own: str | OwnRead | None = None
+            own: str | OwnRead = OwnRead.UNKNOWN
 
             def remember(version: str | None) -> None:
                 nonlocal own
-                own = version
+                own = version if version is not None else OwnRead.UNKNOWN
 
             try:
                 await spool.fill(read(path, remember))
@@ -192,7 +194,8 @@ async def pwrite_by_streamed_rewrite(
         async with ByteSpool() as spool:
             own: str | OwnRead | None
             try:
-                own = await read(path, spool)
+                version = await read(path, spool)
+                own = version if version is not None else OwnRead.UNKNOWN
             except FileNotFoundError:
                 if spool.size:
                     raise
@@ -266,6 +269,7 @@ async def truncate_by_rewrite(
     own: str | OwnRead | None
     try:
         data, own = await read_versioned(path, lambda: read(path))
+        own = own if own is not None else OwnRead.UNKNOWN
     except FileNotFoundError:
         data, own = b"", OwnRead.ABSENT
     await write(

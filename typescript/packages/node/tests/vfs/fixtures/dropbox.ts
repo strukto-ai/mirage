@@ -290,6 +290,7 @@ export class InlineDropbox {
     const arg = JSON.parse(req.headers.get('Dropbox-API-Arg') ?? '{}') as { path?: string }
     const path = norm(arg.path ?? '')
     this.log.push('download')
+    this.hook('download')
     if (this.restricted.has(path)) return InlineDropbox.refused()
     if (this.dirs.has(path)) return InlineDropbox.notFile()
     const data = this.files.get(path)

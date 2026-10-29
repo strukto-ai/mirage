@@ -27,4 +27,6 @@ export async function* readStream(
     if (rec !== null) rec.bytes += chunk.byteLength
     yield chunk
   }
+
+  if (rec !== null) rec.complete = true
 }

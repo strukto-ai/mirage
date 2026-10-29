@@ -98,6 +98,8 @@ jobs:
             # remain in the same whole-host filters on both hosts.
             # Fill invalidation and its tests live under cache/file on both
             # hosts and remain covered by these whole-host filters.
+            # Live session version history under cache/versions uses these
+            # filters too, with peer-session cases in unix/write/conditional.
             core:
               - 'integ/**'
               - 'data/**'

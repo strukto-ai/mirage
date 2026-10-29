@@ -33,4 +33,6 @@ export async function* readStream(
   const rec = recordStream('read', path.virtual, VFSName.REDIS)
   if (rec !== null) rec.bytes = data.byteLength
   yield data
+
+  if (rec !== null) rec.complete = true
 }

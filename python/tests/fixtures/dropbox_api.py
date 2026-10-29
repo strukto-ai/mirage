@@ -320,6 +320,7 @@ class FakeDropbox:
     async def download(self, req: web.Request) -> web.Response:
         path = _norm(json.loads(req.headers["Dropbox-API-Arg"])["path"])
         self.log.append(("download", path))
+        self._hook("download")
         if path in self.restricted:
             return self._refused()
         if path in self.dirs:

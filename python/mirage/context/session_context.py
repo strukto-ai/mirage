@@ -188,6 +188,7 @@ class Caller:
     program: SessionState | None = None
     call: tuple[DecisionOwner, HandOff, str] | None = None
     policy_read: bool = False
+    version_reads: bool = True
     stop: asyncio.Event | None = None
     write_held: bool = False
     line_writer: StatusWriter | None = None

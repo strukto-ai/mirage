@@ -171,6 +171,7 @@ export async function* readStream(
     if (rec !== null) rec.bytes += chunk.byteLength
     yield chunk
   }
+  if (rec !== null) rec.complete = true
   if (rec === null || pinned !== null) return
   if (digest !== null && digest.digest() !== md5) return
   rec.revision = revision

@@ -359,6 +359,54 @@
         "stderr": "/data/l1.txt: changed since it was read; read it again before writing\n"
       },
       "note": "A read through a listing row another client has since outdated holds the version of the bytes it returned (on Box their sha1, on Dropbox the download's content_hash), so a write after a further change is refused rather than sent plain."
+    },
+    {
+      "id": "write_conditional_live_session_delete",
+      "seq": 310094,
+      "targets": [
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "command": "echo one > /data/session.txt; echo source > /data2/source.txt",
+          "session": "a"
+        },
+        {
+          "command": "cat /data/session.txt",
+          "session": "a"
+        },
+        {
+          "command": "echo peer > /data/session.txt",
+          "session": "b"
+        },
+        {
+          "command": "rm -f /data/session.txt; echo $?",
+          "session": "a"
+        },
+        {
+          "command": "rm -f /data/session.txt; echo $?",
+          "session": "a"
+        },
+        {
+          "command": "cat /data/session.txt",
+          "session": "a"
+        },
+        {
+          "command": "rm -f /data/session.txt; echo $?",
+          "session": "a"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "one\n1\n1\npeer\n0\n",
+        "stderr": "rm: cannot remove '/data/session.txt': changed since it was read; read it again before writing\nrm: cannot remove '/data/session.txt': changed since it was read; read it again before writing\n"
+      },
+      "note": "Named sessions share one workspace and byte cache. A peer write cannot replace the reader's conditional basis; a reread permits retry."
     }
   ]
 }

@@ -843,7 +843,12 @@ async def run_scenario(
             else:
                 await mutate(spec["path"], spec["content"].encode())
             continue
-        result = await read_ws.shell(step["command"])
+        session = step.get("session")
+        if session is not None and not any(
+            item.session_id == session for item in read_ws.list_sessions()
+        ):
+            read_ws.create_session(session)
+        result = await read_ws.shell(step["command"], session_id=session)
         raw_out = await result.materialize_stdout()
         raw_err = await result.materialize_stderr()
         outs.append(raw_out.decode(errors="replace"))

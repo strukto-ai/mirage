@@ -586,6 +586,8 @@ async def stream_item(
         if exc.status == 404:
             raise enoent(virtual)
         raise
+    if rec is not None:
+        rec.complete = True
 
 
 async def iter_tree(

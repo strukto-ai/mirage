@@ -61,7 +61,8 @@ async def settle_after(
     merged some children) has already changed the backend, so its
     record is owed either way. ``settle`` gets the op's result, or None
     when the op failed. After a failed op a settle error is logged, not
-    raised, so the caller still learns why the op failed.
+    raised, so the caller still learns why the op failed. Failure records
+    invalidate shared caches but preserve session versions for untouched files.
 
     Args:
         op (Awaitable[T]): The backend change.
@@ -71,10 +72,13 @@ async def settle_after(
     try:
         result = await op
     except BaseException:
+        token = bind_caller(current_caller().changed({"version_reads": False}))
         try:
             await settle(None)
         except Exception as exc:
             logger.debug("settling after a failed op: %s", exc)
+        finally:
+            reset_caller(token)
         raise
     await settle(result)
     return result
@@ -240,6 +244,8 @@ async def _settle(
     own: str | OwnRead | None,
     cached: str | None,
 ) -> WriteCondition:
+    if own is OwnRead.UNKNOWN:
+        return _condition(context, path, kind, None)
     if own is OwnRead.ABSENT:
         if cached:
             raise await stale(path, gone=True)
@@ -356,7 +362,7 @@ async def stale(
     path: PathSpec,
     landed: bool = False,
     gone: bool = False,
-    version: str | OwnRead | None = None,
+    version: str | Literal[OwnRead.ABSENT] | None = None,
 ) -> StaleWriteError:
     """The refusal for a lost condition, after dropping the cached copy.
 
@@ -369,7 +375,7 @@ async def stale(
         landed (bool): a move's copy landed before its source's delete
             lost.
         gone (bool): the file no longer exists.
-        version (str | OwnRead | None): the version the write sent, when
+        version (str | Literal[OwnRead.ABSENT] | None): the version the write sent, when
             the line no longer names it (a move retracts both paths);
             ABSENT when the op found the file gone, which keeps none.
     """

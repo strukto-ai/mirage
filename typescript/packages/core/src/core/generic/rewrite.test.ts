@@ -17,7 +17,8 @@ import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { materialize } from '../../io/types.ts'
 import type { ByteSpool } from '../../io/spool.ts'
-import type { ReplaceRequest } from '../../cache/types.ts'
+import { ANY_WRITE, type ReplaceRequest, type WriteContext } from '../../cache/types.ts'
+import { publishRead, runWithWriteContext } from '../../cache/context.ts'
 import {
   appendByRewrite,
   appendByStreamedRewrite,
@@ -112,5 +113,54 @@ describe('truncateByRewrite', () => {
     })
     expect(read).not.toHaveBeenCalled()
     expect(write).not.toHaveBeenCalled()
+  })
+})
+
+describe('a completed operation-owned read', () => {
+  it.each([
+    ['append', null],
+    ['streamed_append', null],
+    ['pwrite', null],
+    ['truncate', null],
+    ['append', 'v2'],
+    ['streamed_append', 'v2'],
+    ['pwrite', 'v2'],
+    ['truncate', 'v2'],
+  ] as const)('replaces the saved condition for %s with %s', async (kind, version) => {
+    const data = new TextEncoder().encode('old')
+    const context: WriteContext = {
+      vfs: 'test',
+      conditions: ['put'],
+      readVersion: () => Promise.resolve('v1'),
+      readVersions: () => Promise.resolve(['v1']),
+      drop: () => Promise.resolve(),
+      keep: () => Promise.resolve(),
+    }
+    const write = vi.fn((_request: ReplaceRequest) => Promise.resolve())
+    const stat = () => Promise.resolve(new FileStat({ name: 'f', type: FileType.FILE }))
+    const read = (path: PathSpec) => {
+      publishRead(path.virtual, data, version)
+      return Promise.resolve(data)
+    }
+    async function* streamedRead(_path: PathSpec, remember: (token: string | null) => void) {
+      remember(version)
+      yield await Promise.resolve(data)
+    }
+    const spooledRead = async (_path: PathSpec, spool: ByteSpool) => {
+      await spool.append(data)
+      return version
+    }
+    const incoming = new TextEncoder().encode('new')
+    await runWithWriteContext('/m/', context, async () => {
+      if (kind === 'append') await appendByRewrite(read, write, stat, PATH, incoming)
+      else if (kind === 'streamed_append')
+        await appendByStreamedRewrite(streamedRead, write, stat, PATH, incoming)
+      else if (kind === 'pwrite')
+        await pwriteByStreamedRewrite(spooledRead, write, stat, PATH, incoming, 1)
+      else await truncateByRewrite(read, write, PATH, 2, false)
+    })
+    expect(write.mock.calls[0]?.[0].condition).toEqual(
+      version === null ? ANY_WRITE : { kind: 'match', version },
+    )
   })
 })

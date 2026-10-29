@@ -371,6 +371,7 @@ class MountRegistry:
             m.vfs.caches_reads,
             lambda path: not m.retiring and self.try_mount_for(path) is m,
             read_ttl=m.read.ttl,
+            conditional=m.write is WritePolicy.CONDITIONAL,
             on_gone=cleanup,
             may_serve_listing=listing_gate,
             excluded_prefixes=lambda: tuple(

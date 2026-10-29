@@ -110,6 +110,7 @@ export function lostPaths(records: readonly OpRecord[] | undefined): LostPaths |
 
 /** Mark `key` lost on the running line, if one is recording. */
 export function markLost(path: PathSpec, version: string | null = null): void {
+  currentCaller().write?.context?.lose?.(path, version)
   lostPaths(currentCaller().recording?.records)?.mark(path.virtual, version)
 }
 
@@ -288,6 +289,7 @@ export function finishRecord(
 }
 
 function charge(rec: OpRecord): void {
+  if (rec.op !== 'read') currentCaller().write?.context?.observe?.(rec)
   const held = currentCaller().commandSink
   if (held !== null) {
     held[1].push(rec)
@@ -317,6 +319,7 @@ export function record(
 
 /**
  * Append a streaming record whose bytes are filled in as it drains.
+ * Set `complete` after normal exhaustion, never after failure or early close.
  *
  * `path`: the full virtual path.
  */
@@ -340,6 +343,7 @@ export function recordStream(
     mountId: currentCaller().recording?.mountId ?? null,
     executionId: currentExecutionId(),
   })
+  rec.complete = false
   state.records.push(rec)
   charge(rec)
   return rec

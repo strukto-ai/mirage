@@ -91,7 +91,7 @@ export type ScenarioStep =
         | { path: string; delete: true }
         | { command: string }
     }
-  | { command: string }
+  | { command: string; session?: string }
 
 export interface ExplainedNode {
   readonly children: readonly ExplainedNode[]

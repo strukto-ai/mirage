@@ -61,13 +61,18 @@ export async function* readStream(
     const body = resp.Body as
       | (AsyncIterable<Uint8Array> & { [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array> })
       | undefined
-    if (body === undefined) return
+    if (body === undefined) {
+      if (rec !== null) rec.complete = true
+      return
+    }
     if (typeof body[Symbol.asyncIterator] === 'function') {
       for await (const piece of rechunk(body, DEFAULT_CHUNK_SIZE)) {
         if (rec !== null) rec.bytes += piece.byteLength
         yield piece
       }
     }
+
+    if (rec !== null) rec.complete = true
   } catch (err) {
     if (isNotFound(err)) {
       throw enoent(path)

@@ -45,3 +45,5 @@ async def read_stream(
         if error is None:
             raise
         raise error from exc
+    if rec is not None:
+        rec.complete = True

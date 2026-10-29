@@ -988,6 +988,149 @@
       "note": "A backend without enabled native create-only refuses the missing append before creating bytes. An intentional write can still create the file, and appending to that existing file retains matching or unconditional behavior.",
       "read": "bounded",
       "ttl": 600
+    },
+    {
+      "id": "write_conditional_live_session_overwrite",
+      "seq": 310106,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "command": "echo one > /data/session.txt; echo source > /data2/source.txt",
+          "session": "a"
+        },
+        {
+          "command": "cat /data/session.txt",
+          "session": "a"
+        },
+        {
+          "command": "echo peer > /data/session.txt",
+          "session": "b"
+        },
+        {
+          "command": "echo mine > /data/session.txt; echo $?",
+          "session": "a"
+        },
+        {
+          "command": "echo mine > /data/session.txt; echo $?",
+          "session": "a"
+        },
+        {
+          "command": "cat /data/session.txt",
+          "session": "a"
+        },
+        {
+          "command": "echo mine > /data/session.txt; echo $?",
+          "session": "a"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "one\n1\n1\npeer\n0\n",
+        "stderr": "/data/session.txt: changed since it was read; read it again before writing\n/data/session.txt: changed since it was read; read it again before writing\n"
+      },
+      "note": "Named sessions share one workspace and byte cache. A peer write cannot replace the reader's conditional basis; a reread permits retry."
+    },
+    {
+      "id": "write_conditional_live_session_copy",
+      "seq": 310093,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "command": "echo one > /data/session.txt; echo source > /data2/source.txt",
+          "session": "a"
+        },
+        {
+          "command": "cat /data/session.txt",
+          "session": "a"
+        },
+        {
+          "command": "echo peer > /data/session.txt",
+          "session": "b"
+        },
+        {
+          "command": "cp /data2/source.txt /data/session.txt; echo $?",
+          "session": "a"
+        },
+        {
+          "command": "cp /data2/source.txt /data/session.txt; echo $?",
+          "session": "a"
+        },
+        {
+          "command": "cat /data/session.txt",
+          "session": "a"
+        },
+        {
+          "command": "cp /data2/source.txt /data/session.txt; echo $?",
+          "session": "a"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "one\n1\n1\npeer\n0\n",
+        "stderr": "cp: cannot create regular file '/data/session.txt': changed since it was read; read it again before writing\ncp: cannot create regular file '/data/session.txt': changed since it was read; read it again before writing\n"
+      },
+      "note": "Named sessions share one workspace and byte cache. A peer write cannot replace the reader's conditional basis; a reread permits retry."
+    },
+    {
+      "id": "write_conditional_live_session_checksum",
+      "seq": 310107,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "box",
+        "dropbox",
+        "dropbox-root"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/checksum.txt",
+            "content": "one\n"
+          }
+        },
+        {
+          "command": "md5sum /data/checksum.txt > /dev/null",
+          "session": "a"
+        },
+        {
+          "command": "echo peer > /data/checksum.txt",
+          "session": "b"
+        },
+        {
+          "command": "echo mine > /data/checksum.txt; echo $?",
+          "session": "a"
+        },
+        {
+          "command": "cat /data/checksum.txt",
+          "session": "b"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "1\npeer\n",
+        "stderr": "/data/checksum.txt: changed since it was read; read it again before writing\n"
+      }
     }
   ]
 }

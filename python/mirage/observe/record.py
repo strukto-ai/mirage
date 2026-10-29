@@ -116,6 +116,7 @@ class OpRecord:
     revision: str | None = field(default=None)
     mount_id: str | None = field(default=None, repr=False, compare=False)
     execution_id: str | None = None
+    complete: bool = field(default=True, init=False, repr=False, compare=False)
 
     @property
     def is_cache(self) -> bool:

@@ -489,7 +489,16 @@ export async function runScenario(
       else await mutate(spec.path, ENC.encode(spec.content))
       continue
     }
-    const result = await ws.shell(step.command)
+    if (
+      step.session !== undefined &&
+      !ws.listSessions().some((s) => s.sessionId === step.session)
+    ) {
+      ws.createSession(step.session, {})
+    }
+    const result = await ws.shell(
+      step.command,
+      step.session === undefined ? {} : { sessionId: step.session },
+    )
     outputs.push(DEC.decode(result.stdout))
     errors.push(DEC.decode(result.stderr))
     notes.push(...undecodable({ stdout: result.stdout, stderr: result.stderr }))

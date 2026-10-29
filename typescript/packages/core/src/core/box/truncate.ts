@@ -47,7 +47,7 @@ export async function truncate(
   let own: string | OwnRead | null = OwnRead.ABSENT
   if (item !== null && live !== null) {
     data = await downloadFile(accessor.tokenManager, item.id)
-    own = live.content !== null ? await sha1Hex(data) : null
+    own = live.content !== null ? await sha1Hex(data) : OwnRead.UNKNOWN
   }
   let next: Uint8Array
   if (length <= data.length) {

@@ -107,4 +107,6 @@ export async function* readStream(
   } catch (err) {
     throw refusal(path, err) ?? err
   }
+
+  if (rec !== null) rec.complete = true
 }

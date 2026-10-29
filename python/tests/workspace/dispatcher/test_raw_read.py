@@ -236,14 +236,14 @@ async def test_a_renderer_registered_mid_read_is_never_served_warm():
     # finds is still the command's raw bytes, not this rendering.
     ws = Workspace({"/data/": _CachingRAM()}, mode=MountMode.WRITE)
     await _seed(ws, "/data/books.tally")
-    original = ws.cache.get
+    original = ws.cache.get_versioned
 
     async def get_then_register(path, *args, **kwargs):
         data = await original(path, *args, **kwargs)
         render(ws.mount("/data/").vfs, ".tally", _read_tally)
         return data
 
-    ws.cache.get = get_then_register
+    ws.cache.get_versioned = get_then_register
     assert await ws.vfs.read("/data/books.tally") == b"RENDERED"
 
 

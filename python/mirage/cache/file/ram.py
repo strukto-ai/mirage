@@ -63,13 +63,18 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
         return int(self._clock.now())
 
     async def get(self, key: str) -> bytes | None:
+        held = await self.get_versioned(key)
+        return held[0] if held is not None else None
+
+    async def get_versioned(self, key: str) -> tuple[bytes, str | None] | None:
         async with self._lock_for(key):
             entry = self._entries.get(key)
             if entry is None or not entry.has_bytes:
                 return None
             if not entry.is_expired(self._seconds()):
                 self._entries.move_to_end(key)
-                return self._store.files.get(key)
+                data = self._store.files.get(key)
+                return (data, entry.fingerprint) if data is not None else None
             self._drop_entry(key)
             # A kept version outlives its bytes, as redis's meta key does.
             kept = (

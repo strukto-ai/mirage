@@ -309,6 +309,7 @@ export class MountRegistry {
       },
       (folder, version) => this.mayServeListing(m, folder, version),
       () => this.descendantMounts(m.prefix).map((entry) => entry.prefix.replace(/\/$/, '')),
+      m.write === WritePolicy.CONDITIONAL,
     )
   }
 

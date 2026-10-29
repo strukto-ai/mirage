@@ -360,7 +360,14 @@ describe('a trailing redirect binds to the command it follows', () => {
     const { ws } = makeIntegrationWS({ 'b.txt': '1\n2\n3\n' })
     try {
       const [exit, out, err] = await runResult(ws, line)
-      expect([out, err, exit]).toEqual([stdout, stderr, code])
+      // Redirecting cat's input leaves the producer unread. It may finish
+      // before the pipe closes, or receive SIGPIPE, as GNU bash does.
+      const allowed =
+        line.includes('| cat < /data/b.txt') && stdout.includes('ps=0 0 0')
+          ? [stdout, stdout.replace('ps=0 0 0', 'ps=141 0 0')]
+          : [stdout]
+      expect(allowed).toContain(out)
+      expect([err, exit]).toEqual([stderr, code])
     } finally {
       await ws.close()
     }

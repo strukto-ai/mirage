@@ -40,3 +40,5 @@ async def read_stream(
     if rec is not None:
         rec.bytes = len(data)
     yield data
+    if rec is not None:
+        rec.complete = True

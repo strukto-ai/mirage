@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import {
   CONTENT_CHANGING_OPS,
   RETRACT_FINGERPRINT_OPS,
@@ -152,6 +153,11 @@ export async function installDriftState(
     if (mount === null) continue
     if (e.revision !== undefined && e.revision !== null) {
       mount.revisions.set(e.path, e.revision)
+      if (e.fingerprint !== undefined && e.fingerprint !== null)
+        mount.cacheManager?.versionScope.pins.set(
+          '/' + mountKey(e.path, mount.prefix),
+          e.fingerprint,
+        )
       continue
     }
     if (e.fingerprint !== undefined && e.fingerprint !== null) {

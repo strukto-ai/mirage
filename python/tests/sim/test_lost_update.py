@@ -23,7 +23,7 @@ from mirage import WritePolicy
 from tests.sim.model import Verdict, no_lost_update
 from tests.sim.rand import stream
 from tests.sim.seam import Exponential
-from tests.sim.trace import StepRef, Trace
+from tests.sim.trace import ABSENT, StepRef, Trace
 from tests.sim.world import Actor, Sim, simulate
 
 KEYS = ("f", "g", "new")
@@ -88,21 +88,16 @@ async def _i2(sim: Sim) -> int:
     return (await b.write("f")).exit_code
 
 
-def test_detects_432_i2_a_session_writes_with_another_sessions_etag():
-    """#432 I2 on main: B's write is conditioned on A's ETag.
-
-    A and B read the same version, but the shared file cache holds A's
-    new one by the time B writes, so B's stale write commits over A's.
-    The #432 fix flips this to B refused.
-    """
+def test_guards_1922_sessions_keep_their_own_etags():
+    """A peer's write cannot advance the stale session's condition."""
     exit_code, trace = simulate(_i2, files=SEEDED)
     ((a_sent,), (b_sent,)) = (
         _puts(trace, StepRef("a", 1)),
         _puts(trace, StepRef("b", 1)),
     )
-    assert exit_code == 0
-    assert b_sent["IfMatch"] != a_sent["IfMatch"]
-    assert _lost(trace) == ["b.1"]
+    assert exit_code == 1
+    assert b_sent["IfMatch"] == a_sent["IfMatch"]
+    assert _lost(trace) == []
 
 
 async def _i4(sim: Sim) -> int:
@@ -149,13 +144,15 @@ def test_detects_432_i5_a_refusal_loses_the_basis():
     assert _lost(trace) == ["a.2"]
 
 
-async def _rmw_agent(actor: Actor, seed: int) -> None:
+async def _rmw_agent(
+    actor: Actor, seed: int, existing_only: bool = False
+) -> None:
     rng = stream(seed, "actor", actor.name)
     for _ in range(rng.randint(1, 6)):
         await asyncio.sleep(rng.expovariate(50))
-        key = rng.choice(KEYS)
+        key = rng.choice(tuple(SEEDED) if existing_only else KEYS)
         roll = rng.random()
-        if roll < 0.45:
+        if existing_only or roll < 0.45:
             if (await actor.read(key)).exit_code == 0:
                 await asyncio.sleep(rng.expovariate(100))
                 await actor.write(key)
@@ -173,29 +170,46 @@ async def _rmw_agent(actor: Actor, seed: int) -> None:
             await actor.sh("ls /s3 > /dev/null")
 
 
-async def _rmw(sim: Sim) -> None:
+async def _rmw(sim: Sim, existing_only: bool = False) -> None:
     world = stream(sim.seed, "world")
     workspaces = [sim.workspace() for _ in range(world.randint(1, 2))]
     actors = [
         await world.choice(workspaces).actor(f"s{i}", f"s{i}")
         for i in range(world.randint(2, 4))
     ]
-    await asyncio.gather(*(_rmw_agent(a, sim.seed) for a in actors))
+    await asyncio.gather(
+        *(_rmw_agent(a, sim.seed, existing_only) for a in actors)
+    )
 
 
-def _rmw_trace(seed: int) -> Trace:
+def _rmw_trace(seed: int, existing_only: bool = False) -> Trace:
     _, trace = simulate(
-        _rmw, seed=seed, files=SEEDED, latency=Exponential(seed)
+        lambda sim: _rmw(sim, existing_only),
+        seed=seed,
+        files=SEEDED,
+        latency=Exponential(seed),
     )
     return trace
 
 
-def test_detects_432_random_read_modify_write_loses_updates():
-    """#432 on main: concurrent read-modify-write on ``write:
-    conditional`` loses an update on at least a fifth of seeds. The #432
-    fix flips this to no seed losing one."""
-    losing = [seed for seed in range(100) if _judged(_rmw_trace(seed)).lost]
-    assert len(losing) >= 20, losing
+def test_guards_1922_random_read_modify_write_of_existing_files():
+    """Stale reads cannot overwrite peer writes across 100 schedules."""
+    for seed in range(100):
+        trace = _rmw_trace(seed, existing_only=True)
+        assert _judged(trace).lost == [], trace.render()
+
+
+def test_mixed_workload_retains_only_absence_and_unconditioned_losses():
+    """#432 create races and gone-file retries remain outside #1922."""
+    losing = []
+    for seed in range(100):
+        trace = _rmw_trace(seed)
+        for lost in _judged(trace).lost:
+            assert lost.basis is ABSENT or _puts(trace, lost.step) == [{}], (
+                trace.render()
+            )
+            losing.append(seed)
+    assert losing
 
 
 def _digest(seeds: range) -> str:
