@@ -1129,13 +1129,15 @@ describe('outputs as a run makes them', () => {
 
   it('stops a run at an output --raw-output0 cannot print, and runs the next', async () => {
     // Pinned to jq 1.8.2: printf '1 2' | jq --raw-output0 'if . == 1 then
-    // "x", "a\u0000b", "y" else "c" end' prints x, refuses the NUL string,
-    // leaves y unprinted, and runs the second document, whose run settles
-    // the exit status.
+    // "x", "a\u0000b", (1 | debug), "y" else "c" end' prints x, refuses the
+    // NUL string, leaves the debug line and y unwritten, and runs the second
+    // document, whose run settles the exit status.
     expect(
-      await ranOver(['/d/one-two.json'], 'if . == 1 then "x", "a\\u0000b", "y" else "c" end', {
-        raw_output0: true,
-      }),
+      await ranOver(
+        ['/d/one-two.json'],
+        'if . == 1 then "x", "a\\u0000b", (1 | debug), "y" else "c" end',
+        { raw_output0: true },
+      ),
     ).toEqual({
       stdout: 'x\0c\0',
       stderr:

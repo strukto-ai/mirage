@@ -901,12 +901,12 @@ async def test_messages_and_outputs_go_out_in_the_order_the_run_wrote_them():
 @pytest.mark.asyncio
 async def test_a_raw_output0_refusal_stops_its_run_and_the_next_runs():
     # Pinned to jq 1.8.2: printf '1 2' | jq --raw-output0 'if . == 1 then
-    # "x", "a\u0000b", "y" else "c" end' prints x, refuses the NUL string,
-    # leaves y unprinted, and runs the second document, whose run settles
-    # the exit status.
+    # "x", "a\u0000b", (1 | debug), "y" else "c" end' prints x, refuses the
+    # NUL string, leaves the debug line and y unwritten, and runs the second
+    # document, whose run settles the exit status.
     out, io = await _run(
         [],
-        'if . == 1 then "x", "a\\u0000b", "y" else "c" end',
+        'if . == 1 then "x", "a\\u0000b", (1 | debug), "y" else "c" end',
         stdin=b"1 2",
         raw_output0=True,
     )
