@@ -152,13 +152,14 @@ fn configured_allocations(input: &str, config: serde_json::Value) -> (usize, Vec
 }
 
 #[test]
-fn caught_conversion_errors_keep_the_string_and_array_buffer_peak() {
+fn limit_errors_refuse_before_building_the_result() {
     let _serial = SERIAL.lock().unwrap();
     let input = format!("\"{}\"", "x".repeat(NAME_BYTES));
     for steps in [7, u64::MAX] {
         for (operation, limit, memory) in [
             ("$x + $x", "bytes", 260000),
             ("$x | explode", "items", 1000000),
+            ("$x | split(\"\")", "items", 1000000),
         ] {
             let mut config = serde_json::json!({
                 "program": ". as $x | input | $x | empty",
@@ -171,12 +172,8 @@ fn caught_conversion_errors_keep_the_string_and_array_buffer_peak() {
             config["program"] =
                 format!(". as $x | input | try ({operation}) catch empty | empty").into();
             let (extra, wire) = configured_allocations(&input, config);
-            assert!(
-                extra + NAME_BYTES > memory,
-                "{operation}: {extra} extra bytes"
-            );
-            assert_eq!(wire.first(), Some(&2), "{operation}: {extra} extra bytes");
-            assert!(String::from_utf8_lossy(&wire[5..]).contains("memory limit"));
+            assert_eq!(extra, 0, "{operation}: {extra} extra bytes");
+            assert!(wire.is_empty(), "{operation}: {wire:?}");
         }
     }
 }

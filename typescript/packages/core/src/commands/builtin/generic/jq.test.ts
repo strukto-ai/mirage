@@ -49,6 +49,7 @@ const FILES: Record<string, string> = {
   '/d/bad.json': '{"a":1}\n{"a":2}\n[',
   '/d/mid.json': '1\n[1 2]\n3\n4\n',
   '/d/one.json': '1',
+  '/d/one-two.json': '1 2',
   '/d/two.json': ' 2\n',
   '/d/-': '42\n',
 }
@@ -1083,5 +1084,42 @@ describe('deferred evaluator refusal boundaries', () => {
     } finally {
       patched.mockRestore()
     }
+  })
+})
+
+describe('outputs as a run makes them', () => {
+  it('writes an output before its run ends, and closing the output ends the run', async () => {
+    const ctx = {
+      stdin: null,
+      flags: { null_input: true },
+      cwd: PathSpec.fromStrPath('/'),
+    } as Context
+    const result = await jqGeneric([], ['0, until(false; .)'], ctx, read)
+    if (result === null) throw new Error('jq returned no result')
+    const [out] = result
+    if (out === null || out instanceof Uint8Array) throw new Error('jq returned no stream')
+    const chunks = out[Symbol.asyncIterator]()
+    const first = await chunks.next()
+    expect(first.done).toBe(false)
+    expect(DEC.decode(first.value as Uint8Array)).toBe('0\n')
+    await chunks.return?.()
+  })
+
+  it('stops a run at an output --raw-output0 cannot print, and runs the next', async () => {
+    // Pinned to jq 1.8.2: printf '1 2' | jq --raw-output0 'if . == 1 then
+    // "x", "a\u0000b", "y" else "c" end' prints x, refuses the NUL string,
+    // leaves y unprinted, and runs the second document, whose run settles
+    // the exit status.
+    expect(
+      await ranOver(['/d/one-two.json'], 'if . == 1 then "x", "a\\u0000b", "y" else "c" end', {
+        raw_output0: true,
+      }),
+    ).toEqual({
+      stdout: 'x\0c\0',
+      stderr:
+        'jq: error (at /d/one-two.json:0): Cannot dump a string containing NUL with' +
+        ' --raw-output0 option\n',
+      exitCode: 0,
+    })
   })
 })

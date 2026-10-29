@@ -8,12 +8,14 @@ import os
 import re
 import time
 from collections.abc import (
+    AsyncGenerator,
     AsyncIterator,
     Awaitable,
     Callable,
     Mapping,
     Sequence,
 )
+from contextlib import aclosing
 from typing import Any
 
 from mirage.commands.builtin.generic.program import (
@@ -39,7 +41,6 @@ from mirage.core.jq import (
     jq_check,
     jq_run_texts,
     load_failure,
-    printable,
     read_texts,
     references_args,
     stream_reads,
@@ -609,6 +610,16 @@ async def input_reply(
     return {"kind": "value", **position}, item.encode()
 
 
+@dataclasses.dataclass
+class Ending:
+    """How a run whose outputs went out as it made them ended: the error
+    or halt that stopped it, if one did, and whether jq_eval left its
+    document to libjq, which it says only before any output."""
+
+    stop: JqError | JqHalt | None = None
+    declined: bool = False
+
+
 class Engine:
     """A program compiled once by mirage-rs's jq_eval and run on the
     loop's own thread, a bounded number of VM steps per drain, so a
@@ -672,19 +683,24 @@ class Engine:
         doc: str,
         reader: InputReader,
         report: Callable[[str], None],
-    ) -> JqRun[str] | None:
-        """Run the program on one document, or None for a document jq_eval
-        cannot read, which the caller runs elsewhere.
+        ending: Ending,
+    ) -> AsyncGenerator[str, None]:
+        """Run the program on one document, yielding each output as a
+        drain decodes it, and leave on `ending` how the run stopped, or
+        that jq_eval cannot read the document, which the caller then runs
+        elsewhere.
 
         Each `input` the program calls takes the reader's next document
         then and there, as jq's input callback does, so the run consumes
-        exactly what it asks for and the main loop reads on after it.
+        exactly what it asks for and the main loop reads on after it. A
+        run its caller stops reading is cancelled, so the next can begin.
 
         Args:
             doc (str): the document's JSON text.
             reader (InputReader): the invocation's reader.
             report (Callable[[str], None]): takes each line `debug` and
                 `stderr` write, in order.
+            ending (Ending): set once the run ends.
         """
         stream = self._stream
         stream.begin(reader_position(reader))
@@ -696,6 +712,12 @@ class Engine:
             stop = read_frames(stream.finish(), outputs, messages) or stop
             safe = not outputs and not messages and stop is None
             while True:
+                for tag, text in messages:
+                    report(await self._message(tag, text))
+                messages.clear()
+                for value in outputs:
+                    yield value
+                outputs.clear()
                 if stream.busy():
                     await self._budget.run()
                     wire = stream.drain()
@@ -717,19 +739,24 @@ class Engine:
                 if wire:
                     safe = False
                 stop = read_frames(wire, outputs, messages) or stop
-                for tag, text in messages:
-                    report(await self._message(tag, text))
-                messages.clear()
         except StreamRefusal as exc:
             if not safe or exc.output:
                 raise
             logger.debug("jq_eval leaves the document to libjq: %s", exc)
-            if stream.cancel():
-                while stream.busy():
-                    await self._budget.run()
-                    stream.drain()
-            return None
-        return JqRun(outputs, stop)
+            await self._cancel()
+            ending.declined = True
+            return
+        except GeneratorExit:
+            await self._cancel()
+            raise
+        ending.stop = stop
+
+    async def _cancel(self) -> None:
+        # Stop the run in flight and retire it, so the next can begin.
+        if self._stream.cancel():
+            while self._stream.busy():
+                await self._budget.run()
+                self._stream.drain()
 
     async def _message(self, tag: int, text: str) -> str:
         # `debug` prints its line through jq's dumper, `stderr` its text.
@@ -807,17 +834,16 @@ class MainLoop:
         self._env = env
         self._io = io
         self._statuses: list[int] = []
+        self._halted = False
         self._budget = YieldBudget()
 
     async def outputs(self) -> AsyncIterator[bytes]:
-        """The invocation's stdout, run by run."""
+        """The invocation's stdout, each output as its run makes it."""
         try:
             if self._opts.null_input:
-                run, position = await self._run("null")
-                for value in run.outputs:
-                    await self._budget.run()
-                    yield await format_one(value, self._opts)
-                self._settle(run, position)
+                async with aclosing(self._run("null")) as chunks:
+                    async for chunk in chunks:
+                        yield chunk
                 return
             while not self._reader.failures():
                 item = await self._reader.next_input()
@@ -828,11 +854,10 @@ class MainLoop:
                     if self._opts.seq:
                         continue
                     return
-                run, position = await self._run(item)
-                for value in run.outputs:
-                    await self._budget.run()
-                    yield await format_one(value, self._opts)
-                if self._settle(run, position):
+                async with aclosing(self._run(item)) as chunks:
+                    async for chunk in chunks:
+                        yield chunk
+                if self._halted:
                     return
         finally:
             self._io.exit_code = (
@@ -848,29 +873,62 @@ class MainLoop:
                 await self._worker.close()
             await self._reader.close()
 
-    async def _run(self, doc: str) -> tuple[JqRun[str], str]:
-        """Run the program on one document, and say where the reader
-        stands after it, for its error report. The run is what jq's main
-        loop gets to print (see printable).
+    async def _run(self, doc: str) -> AsyncGenerator[bytes, None]:
+        """Run the program on one document, printing each output as the
+        run makes it, then fold the run into the invocation, its error
+        reported where the reader stands after it. An output
+        --raw-output0 cannot print stops the run with that error, as it
+        does jq's.
 
         Args:
             doc (str): the run's own document, null under -n.
+        """
+        ending = Ending()
+        last: str | None = None
+        async with aclosing(self._values(doc, ending)) as values:
+            async for value in values:
+                await self._budget.run()
+                try:
+                    chunk = await format_one(value, self._opts)
+                except StreamRefusal as exc:
+                    if not self._opts.nul_output:
+                        raise
+                    ending.stop = JqError(exc.message, True)
+                    break
+                last = value
+                yield chunk
+        run = JqRun([] if last is None else [last], ending.stop)
+        self._halted = self._settle(run, self._reader.position())
+
+    async def _values(
+        self, doc: str, ending: Ending
+    ) -> AsyncGenerator[str, None]:
+        """The run's outputs: from jq_eval as it makes them, or from libjq
+        for a program or a document jq_eval leaves to it.
+
+        Args:
+            doc (str): the run's own document, null under -n.
+            ending (Ending): set once the run ends.
         """
         if not self._opened:
             self._opened = True
             self._engine = Engine.open(
                 self._expr, self._opts, self._args, self._env
             )
-        run = (
-            None
-            if self._engine is None
-            else await self._engine.run(
-                doc, self._reader, self._reports.append
-            )
-        )
-        if run is None:
-            run = await self._evaluate_reading(doc)
-        return await printable(run, self._opts), self._reader.position()
+        if self._engine is not None:
+            async with aclosing(
+                self._engine.run(
+                    doc, self._reader, self._reports.append, ending
+                )
+            ) as values:
+                async for value in values:
+                    yield value
+            if not ending.declined:
+                return
+        run = await self._evaluate_reading(doc)
+        ending.stop = run.stop
+        for value in run.outputs:
+            yield value
 
     async def _evaluate_reading(self, doc: str) -> JqRun[str]:
         """Run the program on one document in libjq, reading first what

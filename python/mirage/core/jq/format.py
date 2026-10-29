@@ -13,10 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.jq.codec import run_codec
-from mirage.core.jq.types import JqError, JqHalt, JqOptions, JqRun
+from mirage.core.jq.types import JqError, JqHalt, JqOptions
 from mirage.errors.fs import fs_strerror
-from mirage.io.yield_budget import YieldBudget
-from mirage.rs.errors import StreamRefusal
 from mirage.types import JsonValue
 
 
@@ -49,27 +47,6 @@ async def format_one(text: str, opts: JqOptions) -> bytes:
     return b"".join(
         [part async for part in run_codec("jq_format", config, text.encode())]
     )
-
-
-async def printable(run: JqRun[str], opts: JqOptions) -> JqRun[str]:
-    """Apply the shared formatter's raw-NUL refusal before printing a run.
-
-    Args:
-        run (JqRun[str]): compact outputs and the evaluator stop.
-        opts (JqOptions): resolved output options.
-    """
-    if not opts.nul_output or opts.ascii_output:
-        return run
-    config = _config(opts, separator=False, check_only=True)
-    budget = YieldBudget()
-    for at, text in enumerate(run.outputs):
-        await budget.run()
-        try:
-            async for _ in run_codec("jq_format", config, text.encode()):
-                pass
-        except StreamRefusal as exc:
-            return JqRun(run.outputs[:at], JqError(exc.message, True))
-    return run
 
 
 def error_report(position: str, error: JqError) -> str:

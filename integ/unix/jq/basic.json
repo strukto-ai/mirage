@@ -693,6 +693,44 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "jq_timeout_ends_a_long_contains",
+      "seq": 701222,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 0.5 jq -n '[range(1e5)] as $a | $a | contains($a | reverse)'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=124\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "jq_timeout_ends_a_long_array_indices",
+      "seq": 701223,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "timeout 0.5 jq -n '[range(1e5) | 0] | indices([range(1e4) | 0]) | length'; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=124\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

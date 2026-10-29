@@ -13,10 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runCodec } from './codec.ts'
-import { type JqError, type JqHalt, type JqOptions, type JqRun } from './types.ts'
+import { type JqError, type JqHalt, type JqOptions } from './types.ts'
 import { fsStrerror, isEisdir } from '../../errors/fs.ts'
-import { YieldBudget } from '../../io/yield_budget.ts'
-import { StreamRefusal } from '../../rs/errors.ts'
 import type { JsonValue } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
 
@@ -57,37 +55,6 @@ export async function formatOne(
   ))
     parts.push(part)
   return concat(parts)
-}
-
-/** Apply the shared formatter's raw-NUL refusal before printing a run. */
-export async function printable(
-  run: JqRun<string>,
-  opts: JqOptions,
-  signal?: AbortSignal,
-): Promise<JqRun<string>> {
-  if (!opts.nulOutput || opts.asciiOutput) return run
-  const budget = new YieldBudget(signal)
-  for (const [at, text] of run.outputs.entries()) {
-    const pending = budget.run()
-    if (pending !== undefined) await pending
-    try {
-      for await (const _ of runCodec(
-        'jq_format',
-        config(opts, false, true),
-        ENC.encode(text),
-        signal,
-      )) {
-        void _
-      }
-    } catch (error) {
-      if (!(error instanceof StreamRefusal)) throw error
-      return {
-        outputs: run.outputs.slice(0, at),
-        stop: { kind: 'error', text: error.message, string: true },
-      }
-    }
-  }
-  return run
 }
 
 /**

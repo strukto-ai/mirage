@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::builtin::{self, Cfunc, Fault, Sorting, Subtracting};
+use super::builtin::{self, Cfunc, Containing, Fault, Indexing, Sorting, Splitting, Subtracting};
 use super::host::{self, Answer, Host, Messaging, Reply};
 use super::meter::{Charge, Meter};
 use super::parse::Decoding;
@@ -220,6 +220,9 @@ pub(crate) enum Pending {
     Read(Box<Parsing>),
     Message(Box<Messaging>),
     Subtract(Box<Subtracting>),
+    Split(Box<Splitting>),
+    Index(Box<Indexing>),
+    Contain(Box<Containing>),
 }
 
 impl Pending {
@@ -232,6 +235,9 @@ impl Pending {
             Self::Read(task) => task.retire(),
             Self::Message(task) => task.retire(),
             Self::Subtract(task) => task.retire(),
+            Self::Split(task) => task.retire(),
+            Self::Index(task) => task.retire(),
+            Self::Contain(task) => task.retire(),
         }
     }
 
@@ -268,6 +274,14 @@ impl Pending {
                 _ => return None,
             },
             Cfunc::Minus => Ok(Pending::Subtract(Box::new(Subtracting::begin(args)?))),
+            Cfunc::Split | Cfunc::Divide | Cfunc::Explode => {
+                Ok(Pending::Split(Box::new(Splitting::begin(f, args)?)))
+            }
+            Cfunc::StrIndices => Ok(Pending::Index(Box::new(Indexing::text(args)?))),
+            Cfunc::Contains => Ok(Pending::Contain(Box::new(Containing::begin(
+                input,
+                args.get(1)?,
+            )?))),
             _ => return None,
         })
     }
@@ -290,6 +304,9 @@ impl Pending {
                 .run(budget)
                 .map(|result| result.map_err(builtin::fail)),
             Pending::Subtract(subtracting) => subtracting.run(budget),
+            Pending::Split(splitting) => splitting.run(budget, limits.items),
+            Pending::Index(indexing) => indexing.run(budget, limits.items),
+            Pending::Contain(containing) => containing.run(budget),
             Pending::Message(messaging) => messaging.run(budget, limits),
             Pending::Read(_) => unreachable!("a document reader is retired outside the VM"),
         }
@@ -848,17 +865,31 @@ impl Vm {
                         t.dump_trunc()
                     ))));
                 }
-                match builtin::get(&t, &k) {
+                let found = match self.pending.take() {
+                    Some(task) => self.resume(task, budget),
+                    None => match Indexing::list(&t, &k) {
+                        Some(task) => self.resume(Pending::Index(Box::new(task)), budget),
+                        None => Some(builtin::get(&t, &k).map_err(Fault::Error)),
+                    },
+                };
+                let Some(found) = found else {
+                    self.push(k);
+                    self.push(t);
+                    self.pc = pc;
+                    return Flow::Pause;
+                };
+                match found {
                     Ok(v) => {
                         self.path_append(k, v.clone());
                         self.push(v);
                     }
-                    Err(message) => {
+                    Err(Fault::Error(message)) => {
                         if matches!(op, Op::Index) {
                             return Flow::Raise(Raise::Error(message));
                         }
                         return Flow::Backtrack;
                     }
+                    Err(Fault::Halt(..)) => unreachable!("indexing never halts"),
                 }
             }
             Op::Each | Op::EachOpt => {

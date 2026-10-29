@@ -23,7 +23,7 @@ export {
   referencesArgs,
   streamReads,
 } from './eval.ts'
-export { errorReport, formatOne, haltReport, loadFailure, printable } from './format.ts'
+export { errorReport, formatOne, haltReport, loadFailure } from './format.ts'
 export { JqParser, decodeUtf8, stringText } from './parse.ts'
 export { InputReader, readTexts, valueText } from './stream.ts'
 export {
