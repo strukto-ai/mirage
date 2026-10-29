@@ -22,6 +22,8 @@ from mirage.io.async_line_iterator import (
     share,
 )
 from mirage.io.cooperative import chunks
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.types import DeviceInput, materialize
 
 
@@ -303,3 +305,29 @@ async def test_line_buffer_reads_a_shared_input_in_place():
     shared = SharedInput(b"a\nb\n")
     assert line_buffer(shared) is shared.lines
     assert await line_buffer(b"a\nb\n").readline() == b"a"
+
+
+@pytest.mark.asyncio
+async def test_a_line_past_the_memory_budget_is_refused():
+    async def first(parts: list[bytes]) -> bytes | None:
+        return await AsyncLineIterator(_chunks(parts)).readline()
+
+    assert await run_with_memory(
+        MemoryBudget(8, lambda: 0), first([b"abcd", b"ef\n"])
+    ) == (b"abcdef")
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(
+            MemoryBudget(8, lambda: 0), first([b"abcd", b"efgh", b"ij\n"])
+        )
+
+
+@pytest.mark.asyncio
+async def test_what_a_reader_loads_must_fit_in_the_memory_budget():
+    async def load(parts: list[bytes]) -> None:
+        await AsyncLineIterator(_chunks(parts)).load_rest()
+
+    await run_with_memory(MemoryBudget(8, lambda: 0), load([b"abcd", b"efgh"]))
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(
+            MemoryBudget(8, lambda: 0), load([b"abcd", b"efgh", b"i"])
+        )

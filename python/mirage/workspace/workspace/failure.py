@@ -18,12 +18,14 @@ from mirage.commands.errors import UsageError
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
+from mirage.io.errors import MemoryExhausted
 from mirage.policy import (
     Deny,
     Pending,
     refusal_of,
     render_deny,
 )
+from mirage.policy.builtin.output_cap import LINE_NAME
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import TIMEOUT_STATUS
 from mirage.workspace.workspace.utils import command_name
@@ -70,6 +72,10 @@ def failure_result(exc: BaseException, command: str) -> IOResult:
     if isinstance(exc, UsageError):
         return IOResult(
             exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
+        )
+    if isinstance(exc, MemoryExhausted):
+        return IOResult(
+            exit_code=1, stderr=encode_text(f"{LINE_NAME}: {exc}\n")
         )
     if isinstance(exc, OSError):
         name = command_name(command) or command

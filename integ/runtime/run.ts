@@ -180,6 +180,7 @@ interface World {
   builtin_clis?: string[]
   session_id?: string
   command_limits?: unknown
+  max_memory?: string | number | null
   register_runtimes?: Record<string, string>
   runtimes?: (string | Record<string, unknown>)[]
   route_policy?: { script: string; runtime: string }
@@ -914,6 +915,7 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
     commandLimits: parseCommandLimits(world.command_limits),
   }
   if (world.session_id !== undefined) options.sessionId = world.session_id
+  if (world.max_memory !== undefined) options.maxMemory = world.max_memory
   if (world.runtimes !== undefined) options.runtimes = world.runtimes.map(buildEntry)
   if (world.route_policy !== undefined) {
     options.routePolicy = {

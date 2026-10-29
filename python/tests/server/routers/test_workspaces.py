@@ -257,6 +257,35 @@ async def test_create_with_explicit_id():
 
 
 @pytest.mark.asyncio
+async def test_a_server_at_max_workspaces_answers_503():
+    app = build_app(idle_grace_seconds=10.0, max_workspaces=2)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        made = []
+        for wid in ("a", "b"):
+            r = await client.post(
+                "/v1/workspaces", json={**_minimal_config(), "id": wid}
+            )
+            assert r.status_code == 201, r.text
+            made.append(wid)
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+        assert r.status_code == 503
+        assert r.json()["detail"] == "server is at max_workspaces (2)"
+        r = await client.post(f"/v1/workspaces/{made[0]}/clone", json={})
+        assert r.status_code == 503
+        r = await client.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "a"}
+        )
+        assert r.status_code == 200
+        r = await client.delete(f"/v1/workspaces/{made[0]}")
+        assert r.status_code == 200
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+        assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
 async def test_create_answers_a_held_config_id_without_building(monkeypatch):
     closed: list[Workspace] = []
     real_close = Workspace.close

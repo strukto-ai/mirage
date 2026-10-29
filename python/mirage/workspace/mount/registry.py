@@ -38,6 +38,7 @@ from mirage.context import (
 from mirage.errors.fs import no_mount
 from mirage.errors.types import NoMountError
 from mirage.io.config import IOConfig
+from mirage.io.memory import MemoryBudget
 from mirage.observe.observer import Observer
 from mirage.policy import Decisions, MountRootPolicy, Policies
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
@@ -59,6 +60,7 @@ from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.utils.path import norm_dir, owner_prefix
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dev import DevVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.view.types import SessionAccess
 from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.lookup.constants import changes_files
@@ -172,6 +174,9 @@ class MountRegistry:
         # an entry behind another capturer never binds a command.
         self.runtime_entries: list[Runtime[Any]] = []
         self.command_limits: dict[str, Limit] = {}
+        # The workspace's max_memory, over the bytes its RAM mounts hold;
+        # None for no cap.
+        self.memory: MemoryBudget | None = None
         # Why a command that SOME runtime class captures has no live
         # binding: default-world entries that failed to build (missing
         # extra) record their construction error per captured command,
@@ -1059,6 +1064,14 @@ class MountRegistry:
 
     def mounts(self) -> list[MountEntry]:
         return list(self._mounts)
+
+    def held_in_memory(self) -> int:
+        """The bytes the workspace's RAM mounts hold, each store counted
+        once, as a remount's retiring entry shares its store."""
+        stores = {
+            id(m.vfs): m.vfs for m in self._mounts if isinstance(m.vfs, RAMVFS)
+        }
+        return sum(store.held for store in stores.values())
 
     def visible_mounts(
         self, session_id: str | None = None

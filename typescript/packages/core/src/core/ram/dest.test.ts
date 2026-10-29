@@ -16,7 +16,9 @@ import { describe, expect, it } from 'vitest'
 import { RAMAccessor } from '../../accessor/ram.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { RAMStore } from '../../vfs/ram/store.ts'
+import { RAMFiles, RAMStore } from '../../vfs/ram/store.ts'
+import { MemoryBudget, runWithMemory } from '../../io/memory.ts'
+import { write } from './write.ts'
 import { copy } from './copy.ts'
 import { lookupError } from './dest.ts'
 import { read } from './read.ts'
@@ -83,5 +85,62 @@ describe('every lookup names a plain-file parent', () => {
     if (op === undefined) throw new Error(name)
     expect(await codeOf(() => op(mkAccessor(), mkPath('/a.txt/x')))).toBe('ENOTDIR')
     expect(await codeOf(() => op(mkAccessor(), mkPath('/nope/x')))).toBe('ENOENT')
+  })
+})
+
+describe('the workspace memory budget', () => {
+  async function* pieces(...parts: string[]): AsyncIterable<Uint8Array> {
+    await Promise.resolve()
+    for (const part of parts) yield new TextEncoder().encode(part)
+  }
+
+  it('refuses a write past what the workspace has left', async () => {
+    const store = new RAMStore()
+    const accessor = new RAMAccessor(store)
+    const enc = new TextEncoder()
+    await runWithMemory(new MemoryBudget(8, () => 4), async () => {
+      await write(accessor, mkPath('/a'), enc.encode('1234'))
+      await expect(write(accessor, mkPath('/b'), enc.encode('12345'))).rejects.toMatchObject({
+        code: 'EDQUOT',
+      })
+      await expect(write(accessor, mkPath('/c'), pieces('123', '45'))).rejects.toMatchObject({
+        code: 'EDQUOT',
+      })
+      await write(accessor, mkPath('/a'), enc.encode('5678'))
+    })
+    expect(new TextDecoder().decode(store.files.get('/a'))).toBe('5678')
+  })
+
+  it('keeps writes in flight together within what the workspace has left', async () => {
+    const store = new RAMStore()
+    const accessor = new RAMAccessor(store)
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    async function* heldBack(): AsyncIterable<Uint8Array> {
+      yield new TextEncoder().encode('12345')
+      await released
+    }
+    const files = store.files as RAMFiles
+    const results = await runWithMemory(new MemoryBudget(8, () => files.held), async () => {
+      const both = ['/a', '/b'].map((name) => write(accessor, mkPath(name), heldBack()))
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      release()
+      return Promise.allSettled(both)
+    })
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1)
+    expect(files.held).toBeLessThanOrEqual(8)
+  })
+
+  it('counts what RAM files hold', () => {
+    const files = new RAMFiles()
+    files.set('/a', new Uint8Array(4))
+    files.set('/b', new Uint8Array(2))
+    files.set('/a', new Uint8Array(1))
+    files.delete('/b')
+    expect(files.held).toBe(1)
+    files.clear()
+    expect(files.held).toBe(0)
   })
 })

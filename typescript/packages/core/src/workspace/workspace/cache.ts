@@ -60,7 +60,7 @@ export function registerFileCacheStore(type: CacheType, factory: FileCacheFactor
  */
 export function buildFileCache(
   cache: CacheConfig | undefined,
-  cacheLimit: string | number = '512MB',
+  cacheLimit: string | number = '32MB',
   clock?: Clock,
   workspaceId?: string,
 ): FileCacheStore {

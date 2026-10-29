@@ -45,7 +45,11 @@ from mirage.server.paths import (
     pid_file_path,
     state_root_path,
 )
-from mirage.server.registry import OWNERS_PREFIX, WorkspaceRegistry
+from mirage.server.registry import (
+    OWNERS_PREFIX,
+    WorkspaceRegistry,
+    resolve_max_workspaces,
+)
 from mirage.server.routers import (
     asks,
     documents,
@@ -173,6 +177,7 @@ def build_app(
     state_root: str | Path | None = None,
     pid_file: str | Path | None = None,
     ssh_config: SSHConfig | None = None,
+    max_workspaces: int | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -215,6 +220,10 @@ def build_app(
             app's lifespan. ``None`` (default) resolves it from the
             ``MIRAGE_SSH_*`` env vars and the ``ssh_*`` config keys; it
             stays shut unless a port is set.
+        max_workspaces (int | None): the most workspaces the app holds
+            at once; past it a create, clone or load answers 503.
+            ``None`` (default) reads ``$MIRAGE_MAX_WORKSPACES`` or the
+            ``max_workspaces`` config key, else sets no cap.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -243,6 +252,7 @@ def build_app(
         exit_event=app.state.exit_event,
         accounts_required=auth.mode == AuthMode.JWT,
         owners=DiskRecordClient(str(app.state.state_root), OWNERS_PREFIX),
+        max_workspaces=resolve_max_workspaces(max_workspaces),
     )
     app.state.jobs = app.state.registry.jobs
     app.state.pid_file = (

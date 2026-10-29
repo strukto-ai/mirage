@@ -5,7 +5,8 @@
 # workspace create`) and executed with `mirage shell`. This is the
 # yaml -> daemon -> CLI construction path: entry captures, config
 # blocks, the route program, workspace, mount and profile
-# command_limits, and the per-line --runtime argument.
+# command_limits, the workspace max_memory, and the per-line --runtime
+# argument.
 #
 # Cases whose steps need the SDK surface (add_runtime, rename, s3_put,
 # read_op, profile, wait_job, facade — the last calls ws.vfs directly) or a runner-local
@@ -199,6 +200,7 @@ write_world_yaml() {
              + (if .config then {config: .config} else {} end)
              + (if .limits then {command_limits: .limits} else {} end)))}
       + (if .command_limits then {command_limits: .command_limits} else {} end)
+      + (if has("max_memory") then {max_memory: .max_memory} else {} end)
       + (if .profiles then {profiles: .profiles} else {} end)
       + (if .profile then {profile: .profile} else {} end)
       + (if .runtimes then {runtimes: .runtimes} else {} end)

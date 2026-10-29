@@ -67,6 +67,14 @@ class RAMVFS(BaseVFS):
         self._store = RAMStore(files=RAMFiles(self.usage), usage=self.usage)
         self.accessor = RAMAccessor(self._store)
 
+    @property
+    def held(self) -> int:
+        """The bytes the store's files hold, which count against the
+        ``max_memory`` of each workspace the store is mounted in; 0 for a
+        table that keeps none, as ``/dev``'s devices and pipes."""
+        files = self.accessor.store.files
+        return files.held if isinstance(files, RAMFiles) else 0
+
     async def readdir(self, path: PathSpec) -> list[FileStat]:
         return await _readdir(self.accessor, path)
 

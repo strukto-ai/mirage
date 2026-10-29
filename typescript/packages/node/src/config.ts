@@ -181,6 +181,7 @@ const TOP_LEVEL_KEYS = [
   'mounts',
   'io',
   'command_limits',
+  'max_memory',
   'clis',
   'runtimes',
   'route_policy',
@@ -409,6 +410,9 @@ function validateReadBlock(prefix: string, block: Record<string, unknown>): void
 function validateConfigKeys(raw: Record<string, unknown>): void {
   rejectUnknownKeys(raw, TOP_LEVEL_KEYS, 'config')
   parseCommandLimits(raw.command_limits)
+  if (raw.max_memory !== undefined && raw.max_memory !== null) {
+    parseLimit(raw.max_memory as string | number, 'max_memory')
+  }
   // At the sync entry point, as Python's WorkspaceConfig validator is, so the CLI
   // refuses a bad value before it POSTs the document to the daemon.
   if (raw.read !== undefined && raw.read !== null) resolveReadSpec(raw.read, undefined)
@@ -762,6 +766,8 @@ interface CLIBlock {
 export interface WorkspaceConfigRaw {
   io?: Partial<IOConfig>
   commandLimits?: unknown
+  /** What the RAM mounts store and a command builds may hold; null for no cap. */
+  maxMemory?: string | number | null
   mounts: Record<string, MountBlock>
   clis?: Record<string, CLIBlock> | null
   runtimes?: (string | Record<string, unknown>)[] | null
@@ -1099,6 +1105,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
     options: {
       mode: wsMode,
       commandLimits: parseCommandLimits(cfg.commandLimits),
+      ...(cfg.maxMemory !== undefined ? { maxMemory: cfg.maxMemory } : {}),
       io: new IOConfig(cfg.io),
       read: defaultRead,
       write: defaultWrite,

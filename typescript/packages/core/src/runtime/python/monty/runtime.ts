@@ -46,7 +46,9 @@ import { MontyExecution } from './execution.ts'
  *
  * `externalLookup` is the host functions the code may call by name, empty
  * unless the one who built the runtime hands it some, as a policy does for
- * its own programs.
+ * its own programs. `shared` runs it on the process's shared worker pool; a
+ * policy's own runtime keeps a pool of its own, since its programs judge the
+ * reads runs on the shared pool make and must not wait behind them.
  */
 export class MontyRuntime extends PythonRuntime<MontyExecution> {
   readonly name = 'monty'
@@ -62,6 +64,7 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
   override readonly runsModules = false
   declare config: MontyConfig
   externalLookup: Readonly<Record<string, (...args: never[]) => unknown>> = {}
+  shared = true
   private readonly maxMemory: number | null
 
   constructor(options: RuntimeOptions<MontyConfig> = {}) {
@@ -70,7 +73,7 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
   }
 
   protected override openEngine(): Promise<MontyExecution> {
-    return Promise.resolve(new MontyExecution(this.maxMemory))
+    return Promise.resolve(new MontyExecution(this.maxMemory, this.shared))
   }
 
   protected override closeEngine(engine: MontyExecution): Promise<void> {

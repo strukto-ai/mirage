@@ -139,6 +139,8 @@ import { linkView } from '../../commands/builtin/utils/links.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { NOT_FOUND_STATUS } from '../../shell/constants.ts'
+import { checkMemory } from '../../io/memory.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 
 type CmdKey = string
 
@@ -253,16 +255,22 @@ async function* asStream(
  * still sends the version it read. Its records are its own, so a read
  * running beside it never lends it a version, and reach the block around it
  * too, so the write a rewrite makes still sees the read that proves the copy
- * it extends. Mirrors Python's `_collected`.
+ * it extends. Bytes answered whole must fit in what the workspace's
+ * `max_memory` has left unless they are what a RAM store holds (`counted`),
+ * already counted. Mirrors Python's `_collected`.
  */
 async function collected(
   answer: Promise<ByteSource> | AsyncIterable<Uint8Array>,
   path: PathSpec,
   whole: boolean,
   clock: Clock,
+  counted = false,
 ): Promise<Uint8Array> {
   const found = await answer
-  if (found instanceof Uint8Array) return found
+  if (found instanceof Uint8Array) {
+    if (!counted) checkMemory(found.byteLength)
+    return found
+  }
   if (!whole) return materialize(found)
   const [data, records] = await recorded(() => materialize(found), clock)
   publishRead(path.virtual, data, latestFingerprint(records, path.virtual))
@@ -302,11 +310,14 @@ async function recorded<T>(
  * read is answered here rather than sent anywhere, and a window starting at
  * or past EOF answers empty, the POSIX answer, where an HTTP store refuses
  * with 416: normalizing here keeps the op's contract one thing whichever
- * path answers it. Mirrors Python's `_read_window`.
+ * path answers it. `counted` says `read` answers bytes a RAM store holds,
+ * already counted against the workspace's `max_memory`. Mirrors Python's
+ * `_read_window`.
  */
 async function readWindow(
   read: ReadFn,
   ranges: boolean,
+  counted: boolean,
   path: PathSpec,
   kwargs: OpKwargs,
   handed: Handed | undefined,
@@ -318,13 +329,13 @@ async function readWindow(
   const whole = offset === 0 && size === null
   if (ranges && !whole) {
     try {
-      return await collected(read(path, handed, offset, size), path, false, clock)
+      return await collected(read(path, handed, offset, size), path, false, clock, counted)
     } catch (err) {
       if (!isUnsatisfiableRange(err)) throw err
       return new Uint8Array(0)
     }
   }
-  const data = await collected(read(path, handed), path, true, clock)
+  const data = await collected(read(path, handed), path, true, clock, counted)
   return whole ? data : sliceWindow(data, offset, size)
 }
 
@@ -881,14 +892,22 @@ export class MountEntry {
           : (vfs as unknown as Record<string, ReadFn | undefined>)[renderer]
       if (render !== undefined) {
         levels.push((scope, _args, kw) =>
-          readWindow(render.bind(vfs), true, scope, kw, handedOf(kw), this.indexStore.clock),
+          readWindow(render.bind(vfs), true, false, scope, kw, handedOf(kw), this.indexStore.clock),
         )
       }
       if (vfs.supports('read')) {
         const read: ReadFn = (path, given, offset, size) =>
           vfs.read(path, given, offset, size, callerSignal())
         levels.push((scope, _args, kw) =>
-          readWindow(read, vfs.readsRanges, scope, kw, handedOf(kw), this.indexStore.clock),
+          readWindow(
+            read,
+            vfs.readsRanges,
+            vfs instanceof RAMVFS,
+            scope,
+            kw,
+            handedOf(kw),
+            this.indexStore.clock,
+          ),
         )
       }
       return levels
@@ -1122,7 +1141,13 @@ export class MountEntry {
 
   /** The VFS's read of a whole file, handed what is at its path. */
   private readAt(index: IndexCacheStore, path: PathSpec): Promise<Uint8Array> {
-    return collected(this.answer(this.vfs, index, path), path, true, index.clock)
+    return collected(
+      this.answer(this.vfs, index, path),
+      path,
+      true,
+      index.clock,
+      this.vfs instanceof RAMVFS,
+    )
   }
 
   /**

@@ -57,7 +57,10 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
 
     `external_lookup` is the host functions the code may call by name,
     empty unless the one who built the runtime hands it some, as a
-    policy does for its own programs.
+    policy does for its own programs. `shared` runs it on the process's
+    shared worker pool; a policy's own runtime keeps a pool of its own,
+    since its programs judge the reads runs on the shared pool make and
+    must not wait behind them.
     """
 
     name = "monty"
@@ -91,9 +94,10 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
         super().__init__(captures, config)
         self._max_memory = memory_limit(self.config.max_memory)
         self.external_lookup: Mapping[str, Callable[..., Any]] = {}
+        self.shared = True
 
     async def open_engine(self) -> MontyExecution:
-        return MontyExecution(self._max_memory)
+        return MontyExecution(self._max_memory, shared=self.shared)
 
     async def close_engine(self, engine: MontyExecution) -> None:
         await engine.close()

@@ -51,20 +51,23 @@ class _FileStore(Protocol):
 
 
 class RAMFiles(MutableMapping[str, bytes]):
-    """A RAM store's file table, keeping ``usage.used`` equal to the bytes
-    it holds when a capacity caps the store.
+    """A RAM store's file table, keeping ``held`` equal to the bytes it
+    holds, and ``usage.used`` too when a capacity caps the store.
 
     Counting here, rather than at each op, means no change to the table
-    can miss the count. It does not refuse anything: an op checks growth
-    with ``check_capacity`` before it stores, under ``RAMStore.lock``, as
-    one step. Mirrors the TS ``RAMFiles``.
+    can miss the count; the workspace's ``max_memory`` sums ``held``. It
+    does not refuse anything: an op checks growth with ``check_capacity``
+    before it stores, under ``RAMStore.lock``, as one step. Mirrors the
+    TS ``RAMFiles``.
     """
 
     def __init__(self, usage: StorageUsage | None = None) -> None:
         self._data: dict[str, bytes] = {}
         self.usage = usage
+        self.held = 0
 
     def _count(self, delta: int) -> None:
+        self.held += delta
         if self.usage is not None:
             self.usage.land(0, delta)
 
@@ -88,9 +91,11 @@ class RAMFiles(MutableMapping[str, bytes]):
     def clear(self) -> None:
         if self.usage is None:
             self._data.clear()
+            self.held = 0
             return
         with self.usage.lock:
             self._data.clear()
+            self.held = 0
             self.usage.used = 0
 
 

@@ -21,6 +21,7 @@ from mirage.core.ram.constants import STREAM_PUBLISH_SECONDS
 from mirage.core.ram.dest import (
     check_capacity,
     check_dest_parents,
+    check_room,
     check_write_target,
 )
 from mirage.io.cooperative import chunks
@@ -115,9 +116,10 @@ async def write(
     later: asyncio.TimerHandle | None = None
     usage = store.usage
     held = 0
+    queued = 0
 
     def publish() -> None:
-        nonlocal position, last, later, held
+        nonlocal position, last, later, held, queued
         if later is not None:
             later.cancel()
             later = None
@@ -125,22 +127,24 @@ async def write(
         if not pending:
             return
         try:
-            data = b"".join(pending)
+            arrived = sum(map(len, pending))
             with store.lock:
                 current = store.files.get(p, b"")
-                if append:
-                    store.files[p] = current + data
+                start = len(current) if append else position
+                check_room(path_spec, max(start + arrived - len(current), 0))
+                if start >= len(current):
+                    gap = b"\0" * (start - len(current))
+                    store.files[p] = b"".join([current, gap, *pending])
                 else:
-                    current = current.ljust(position, b"\0")
-                    store.files[p] = (
-                        current[:position]
-                        + data
-                        + current[position + len(data) :]
+                    data = b"".join(pending)
+                    store.files[p] = b"".join(
+                        [current[:start], data, current[start + arrived :]]
                     )
-                    position += len(data)
+                position = start + arrived
             store.modified[p] = now_iso()
         finally:
             pending.clear()
+            queued = 0
             if usage is not None:
                 usage.land(held, 0)
             held = 0
@@ -160,11 +164,13 @@ async def write(
             async for chunk in source:
                 if failure is not None:
                     raise failure
+                check_room(path_spec, queued + len(chunk))
                 if usage is not None:
                     # The whole chunk: bytes another writer put in its way count.
                     usage.hold(path_spec, len(chunk))
                     held += len(chunk)
                 pending.append(chunk)
+                queued += len(chunk)
                 size += len(chunk)
                 wait = STREAM_PUBLISH_SECONDS - (loop.time() - last)
                 if wait <= 0:

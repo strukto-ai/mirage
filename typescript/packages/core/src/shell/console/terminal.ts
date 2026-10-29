@@ -14,6 +14,7 @@
 
 import { concat } from '../../utils/bytes.ts'
 import { CHUNK_SIZE } from '../../io/cooperative.ts'
+import { checkMemory } from '../../io/memory.ts'
 import { JobConsole } from './job_console.ts'
 import { Channel, type OwnedStream } from './types.ts'
 
@@ -25,11 +26,13 @@ import { Channel, type OwnedStream } from './types.ts'
  * through `jobs`, the line's own `JobOutput`. A job that writes while no
  * line runs waits here for the next one, as bash's job prints to the
  * terminal whenever it likes. With a reader attached (a caller streaming
- * the line), every chunk goes straight on to it. A session has one (`tty`),
+ * the line), every chunk goes straight on to it; what it keeps must fit in
+ * what the workspace's `max_memory` has left. A session has one (`tty`),
  * shared by every fork of it.
  */
 export class Terminal extends JobConsole {
   chunks: [Channel, Uint8Array, boolean][] = []
+  held = 0
   reader: JobConsole | null = null
   readonly jobs: JobOutput = new JobOutput(new JobSide(this))
   ended = 0
@@ -68,7 +71,9 @@ export class Terminal extends JobConsole {
       await reader.emit(channel, data)
       return
     }
+    checkMemory(this.held + data.byteLength)
     this.chunks.push([channel, data, job])
+    this.held += data.byteLength
     if (reader !== null) {
       this.reader = null
       await this.pass(reader)
@@ -106,6 +111,7 @@ export class Terminal extends JobConsole {
     try {
       let chunk = this.chunks.shift()
       while (chunk !== undefined) {
+        this.held -= chunk[1].byteLength
         this.remember(chunk[0], chunk[1])
         await reader.emit(chunk[0], chunk[1])
         if (this.ended !== ended) return
@@ -125,7 +131,9 @@ export class Terminal extends JobConsole {
    */
   handOver(to: Terminal): void {
     to.chunks = [...this.chunks, ...to.chunks]
+    to.held += this.held
     this.chunks = []
+    this.held = 0
     this.prefix = new Uint8Array(CHUNK_SIZE)
     this.prefixSize = 0
     this.reader = to.jobs
@@ -135,6 +143,7 @@ export class Terminal extends JobConsole {
   drain(): [Uint8Array, Uint8Array] {
     const chunks = this.chunks
     this.chunks = []
+    this.held = 0
     const out = concat(chunks.filter(([c]) => c === Channel.STDOUT).map(([, data]) => data))
     const err = concat(chunks.filter(([c]) => c === Channel.STDERR).map(([, data]) => data))
     return [out, err]
@@ -146,6 +155,7 @@ export class Terminal extends JobConsole {
     if (out.byteLength > 0) returned.push([Channel.STDOUT, out, false])
     if (err.byteLength > 0) returned.push([Channel.STDERR, err, false])
     this.chunks = [...returned, ...this.chunks]
+    this.held += out.byteLength + err.byteLength
   }
 
   /** End a line: its stdout and stderr, jobs' output among them. */
@@ -157,6 +167,7 @@ export class Terminal extends JobConsole {
   /** End an abandoned line: what it wrote goes, its jobs' stays. */
   dropLine(): void {
     this.chunks = this.chunks.filter(([, , job]) => job)
+    this.held = this.chunks.reduce((size, [, data]) => size + data.byteLength, 0)
     this.end()
   }
 

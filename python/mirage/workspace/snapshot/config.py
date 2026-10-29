@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 from mirage.cache.index.config import IndexConfig, IndexType, RedisIndexConfig
 from mirage.commands.cli.types import CLI
 from mirage.io.config import IOConfig
+from mirage.io.memory import MAX_MEMORY
 from mirage.policy.profile import SessionProfile
 from mirage.types import Limit, WritePolicy
 from mirage.vfs.secrets import REDACTED_SECRET, has_redacted_secret
@@ -43,6 +44,8 @@ class MountArgs:
     # The profile table every session ran under, and its default.
     profiles: dict[str, SessionProfile] = field(default_factory=dict)
     profile: str | None = None
+    # The workspace's max_memory in bytes, None for no cap.
+    max_memory: int | None = MAX_MEMORY
 
 
 def index_config_dump(

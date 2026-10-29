@@ -22,18 +22,23 @@ export interface RAMAttrs {
 }
 
 /**
- * A RAM store's file table, keeping `usage.used` equal to the bytes it holds
- * when a capacity caps the store. Counting here, rather than at each op, means
- * no change to the table can miss the count. It refuses nothing: an op checks
+ * A RAM store's file table, keeping `held` equal to the bytes it holds, and
+ * `usage.used` too when a capacity caps the store. Counting here, rather than
+ * at each op, means no change to the table can miss the count; the
+ * workspace's `max_memory` sums `held`. It refuses nothing: an op checks
  * growth with `checkCapacity` before it stores, in the same synchronous step.
  * Mirrors Python's `RAMFiles`.
  */
 export class RAMFiles extends Map<string, Uint8Array> {
+  /** The bytes the table holds, which the workspace's `max_memory` sums. */
+  held = 0
+
   constructor(readonly usage: StorageUsage | null = null) {
     super()
   }
 
   private count(delta: number): void {
+    this.held += delta
     const usage = this.usage
     if (usage !== null && usage.used !== null) usage.used += delta
   }
@@ -50,6 +55,7 @@ export class RAMFiles extends Map<string, Uint8Array> {
 
   override clear(): void {
     super.clear()
+    this.held = 0
     if (this.usage !== null) this.usage.used = 0
   }
 }

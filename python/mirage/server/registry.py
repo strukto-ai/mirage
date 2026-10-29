@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -21,7 +22,10 @@ from enum import StrEnum
 from typing import Any, Iterable
 
 from mirage import Workspace, WorkspaceRunner
+from mirage.server.daemon_config import DaemonConfigError, read_daemon_table
+from mirage.server.env import ENV_MAX_WORKSPACES
 from mirage.server.jobs import ExecutionTable
+from mirage.server.paths import mirage_home
 from mirage.utils.ids import new_workspace_id
 from mirage.workspace.record.disk import DiskRecordClient
 
@@ -64,6 +68,36 @@ class WorkspaceEntry:
         self.accepting_jobs = True
 
 
+def resolve_max_workspaces(max_workspaces: int | None = None) -> int | None:
+    """The most workspaces the server holds at once: ``max_workspaces``
+    when given, else ``$MIRAGE_MAX_WORKSPACES``, else the
+    ``max_workspaces`` key in config.toml's ``[daemon]`` table, else no
+    cap. Mirrors TypeScript's ``resolveMaxWorkspaces``.
+
+    Args:
+        max_workspaces (int | None): the cap the caller set.
+
+    Raises:
+        DaemonConfigError: the cap is not a positive whole number.
+    """
+    value: Any = max_workspaces
+    if value is None:
+        value = os.environ.get(ENV_MAX_WORKSPACES) or read_daemon_table(
+            mirage_home()
+        ).get("max_workspaces")
+        if value is None or value == "":
+            return None
+    try:
+        cap = int(value) if not isinstance(value, (bool, float)) else 0
+    except ValueError:
+        cap = 0
+    if cap < 1:
+        raise DaemonConfigError(
+            f"max_workspaces must be a positive whole number, got {value!r}"
+        )
+    return cap
+
+
 class WorkspaceRegistry:
     """In-memory map of workspace_id -> WorkspaceRunner.
 
@@ -82,6 +116,7 @@ class WorkspaceRegistry:
         exit_event: asyncio.Event | None = None,
         accounts_required: bool = False,
         owners: DiskRecordClient | None = None,
+        max_workspaces: int | None = None,
     ) -> None:
         """Construct an empty registry.
 
@@ -98,8 +133,11 @@ class WorkspaceRegistry:
                 owning account is kept across restarts, so a stored
                 workspace is only ever reopened by its owner. None keeps
                 ownership in memory.
+            max_workspaces (int | None): the most workspaces held at
+                once, those being built among them; None for no cap.
         """
         self._entries: dict[str, WorkspaceEntry] = {}
+        self.max_workspaces = max_workspaces
         self.jobs = ExecutionTable()
         self.accounts_required = accounts_required
         self._owners = owners
@@ -151,6 +189,17 @@ class WorkspaceRegistry:
         finally:
             del self._creates[workspace_id]
             done.set_result(None)
+
+    def has_room(self) -> bool:
+        """Whether a workspace being built fits under ``max_workspaces``,
+        counting those registered and every build in flight, its own
+        among them, so builds racing each other cannot pass it. A build
+        that registered and still answers its request counts once."""
+        return (
+            self.max_workspaces is None
+            or len(self._entries.keys() | self._creates.keys())
+            <= self.max_workspaces
+        )
 
     def removing(self, workspace_id: str) -> bool:
         """Whether ``workspace_id`` is being deleted or closed.

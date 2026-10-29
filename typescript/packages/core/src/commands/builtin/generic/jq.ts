@@ -49,6 +49,8 @@ import {
 } from '../../../core/jq/index.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { closeStream, openStream, type OpenStream } from '../../../rs/stream.ts'
+import { MemoryExhausted } from '../../../io/errors.ts'
+import { memoryRoom } from '../../../io/memory.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec, type JsonValue } from '../../../types.ts'
@@ -109,6 +111,11 @@ const ERROR_SYSTEM = 2
 // refusal to compile such a program ends in; any other refusal names what
 // jq_eval cannot run yet.
 const COMPILE_REPORT = /(?:^|\n)jq: [0-9]+ compile errors?$/
+
+// The error jq_eval ends a run with once it holds more than its memory, `{}`
+// the bytes. Mirrors Python's MEMORY_REPORT.
+const MEMORY_REPORT = 'jq memory limit of {} bytes exceeded'
+
 const USAGE_HINT =
   'Use jq --help for help with command-line options,\n' +
   'or see the jq manpage, or online docs at https://jqlang.org'
@@ -505,9 +512,12 @@ export class Engine {
   // layout or raw options (main.c's dumpopts less pretty).
   private readonly debugOpts: JqOptions
 
+  // What the workspace's max_memory had left when the program compiled, the
+  // bytes the run may hold; null for jq_eval's own.
   private constructor(
     private readonly stream: OpenStream,
     opts: JqOptions,
+    private readonly memory: number | null,
     private readonly signal?: AbortSignal,
   ) {
     this.budget = new YieldBudget(signal)
@@ -536,6 +546,7 @@ export class Engine {
     signal?: AbortSignal,
   ): Promise<Engine | null> {
     let stream: OpenStream
+    const limit = memoryRoom()
     try {
       stream = await openStream('jq_eval', {
         program: expr,
@@ -543,6 +554,7 @@ export class Engine {
         args,
         env,
         zone: localZone() ?? null,
+        ...(limit === null ? {} : { memory: limit }),
       })
     } catch (error) {
       if (!(error instanceof StreamRefusal)) throw error
@@ -550,7 +562,7 @@ export class Engine {
       console.debug(`jq: jq_eval leaves the program to jq-wasm: ${error.message}`)
       return null
     }
-    return new Engine(stream, opts, signal)
+    return new Engine(stream, opts, limit, signal)
   }
 
   /**
@@ -620,6 +632,13 @@ export class Engine {
       return
     } finally {
       if (abandoned) await this.cancel()
+    }
+    if (
+      this.memory !== null &&
+      stop?.kind === 'error' &&
+      stop.text === MEMORY_REPORT.replace('{}', String(this.memory))
+    ) {
+      throw new MemoryExhausted()
     }
     ending.stop = stop
   }

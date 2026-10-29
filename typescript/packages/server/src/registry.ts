@@ -15,7 +15,10 @@
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import type { DiskRecordClient, Workspace } from '@struktoai/mirage-node'
+import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
+import { ENV_MAX_WORKSPACES } from './env.ts'
 import { ExecutionTable } from './jobs.ts'
+import { mirageHome } from './paths.ts'
 
 // Under the daemon's state root: one record per workspace id naming the
 // account that owns it.
@@ -63,6 +66,36 @@ export interface WorkspaceRegistryOptions {
    * ownership in memory.
    */
   owners?: DiskRecordClient
+  /** The most workspaces held at once, those being built among them; null for no cap. */
+  maxWorkspaces?: number | null
+}
+
+/**
+ * The most workspaces the server holds at once: `maxWorkspaces` when given,
+ * else `$MIRAGE_MAX_WORKSPACES`, else the `max_workspaces` key in
+ * config.toml's `[daemon]` table, else no cap. Mirrors Python's
+ * `resolve_max_workspaces`.
+ */
+export function resolveMaxWorkspaces(
+  maxWorkspaces?: number | null,
+  env: Record<string, string | undefined> = process.env,
+): number | null {
+  let value: string | number | undefined = maxWorkspaces ?? undefined
+  if (value === undefined) {
+    const fromEnv = env[ENV_MAX_WORKSPACES]
+    value =
+      fromEnv !== undefined && fromEnv !== ''
+        ? fromEnv
+        : readDaemonTable(mirageHome(env)).max_workspaces
+    if (value === undefined || value === '') return null
+  }
+  const cap = typeof value === 'number' ? value : /^\d+$/.test(value) ? Number(value) : 0
+  if (!Number.isSafeInteger(cap) || cap < 1) {
+    throw new DaemonConfigError(
+      `max_workspaces must be a positive whole number, got ${JSON.stringify(value)}`,
+    )
+  }
+  return cap
 }
 
 export class WorkspaceRegistry {
@@ -75,8 +108,10 @@ export class WorkspaceRegistry {
   private idleTimer: NodeJS.Timeout | null = null
   accountsRequired: boolean
   private readonly owners: DiskRecordClient | null
+  readonly maxWorkspaces: number | null
 
   constructor(options: WorkspaceRegistryOptions = {}) {
+    this.maxWorkspaces = options.maxWorkspaces ?? null
     this.idleGraceSeconds = options.idleGraceSeconds ?? 30
     this.onIdleExit = options.onIdleExit ?? null
     this.accountsRequired = options.accountsRequired ?? false
@@ -85,6 +120,18 @@ export class WorkspaceRegistry {
 
   has(id: string): boolean {
     return this.entries.has(id)
+  }
+
+  /**
+   * Whether a workspace being built fits under `maxWorkspaces`, counting
+   * those registered and every build in flight, its own among them, so
+   * builds racing each other cannot pass it. A build that registered and
+   * still answers its request counts once. Mirrors Python's `has_room`.
+   */
+  hasRoom(): boolean {
+    if (this.maxWorkspaces === null) return true
+    const ids = new Set([...this.entries.keys(), ...this.creates.keys()])
+    return ids.size <= this.maxWorkspaces
   }
 
   /**
@@ -108,12 +155,16 @@ export class WorkspaceRegistry {
       if (pending.digest !== configDigest) return run(false)
       await Promise.allSettled([pending.done])
     }
-    const done = run(true)
+    let finish: () => void = () => undefined
+    const done = new Promise<void>((resolve) => {
+      finish = resolve
+    })
     this.creates.set(id, { digest: configDigest, done })
     try {
-      return await done
+      return await run(true)
     } finally {
       this.creates.delete(id)
+      finish()
     }
   }
 
