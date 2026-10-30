@@ -23,6 +23,7 @@ mod look;
 mod network;
 pub mod nfs;
 mod nl;
+mod number;
 mod numfmt;
 mod od;
 mod paste;
@@ -40,6 +41,7 @@ mod rg_format;
 mod rg_grapheme;
 mod rg_input;
 mod rg_matcher;
+mod scan;
 mod sed;
 mod seq;
 pub mod shell;
@@ -249,7 +251,13 @@ pub(crate) fn latin1<'de, D: serde::Deserializer<'de>>(
         .ok_or_else(|| serde::de::Error::custom("a byte string holds a character past U+00FF"))
 }
 
-fn latin1_bytes(text: &str) -> Option<Vec<u8>> {
+/// Bytes as a string of one character per byte, the form `latin1` reads
+/// back and a refusal carries its stderr in.
+pub(crate) fn byte_text(raw: &[u8]) -> String {
+    raw.iter().map(|&b| char::from(b)).collect()
+}
+
+pub(crate) fn latin1_bytes(text: &str) -> Option<Vec<u8>> {
     text.chars()
         .map(|c| u8::try_from(u32::from(c)).ok())
         .collect()
@@ -307,17 +315,37 @@ pub(crate) fn quoted(text: &[u8]) -> String {
 }
 
 /// A refusal: the message is the command's own stderr wording, or what the
-/// host reports it as (`sort -c` sends the disordered record's number).
+/// host reports it as (`sort -c` sends the disordered record's number),
+/// and the status the command exits with. A refusal of a command's
+/// options or operands holds its stderr one character per byte, so both
+/// hosts write back the same bytes whether `open` fails with it or a
+/// `Refused` stream reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamError {
     pub message: String,
+    pub status: i32,
 }
 
 impl StreamError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            status: 1,
         }
+    }
+
+    /// The refusal of a command's options or operands: the bytes it writes
+    /// to stderr, without the final newline, and its exit status.
+    pub fn refusal(stderr: &[u8], status: i32) -> Self {
+        Self {
+            message: byte_text(stderr),
+            status,
+        }
+    }
+
+    /// The bytes the refusal writes to stderr.
+    pub(crate) fn stderr(&self) -> Vec<u8> {
+        latin1_bytes(&self.message).unwrap_or_else(|| self.message.as_bytes().to_vec())
     }
 }
 
@@ -369,6 +397,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "rev" => rev::open(config),
         "rg" => rg::open(config),
         "rg_format" => rg_format::open(config),
+        "scan" => scan::open(config),
         "sed" => sed::open(config),
         "seq" => seq::open(config),
         "sort" => sort::open(config),

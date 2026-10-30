@@ -14,8 +14,7 @@ use serde::Deserialize;
 use serde_json::Value as Json;
 
 use crate::request::{Io, Opening, Refused, Reply, Request, bytes, read_failure};
-use crate::split::unit;
-use crate::{Stream, StreamError, parse_config, quoted};
+use crate::{Stream, StreamError, number, parse_config, quoted};
 
 use self::format::{Format, Kind, Layout};
 
@@ -50,54 +49,28 @@ enum Radix {
 /// base 0 (decimal for `-w`), then for `-j`, `-N` and `-S` one size
 /// letter, alone, with `B` (powers of 1000) or with `iB` (of 1024).
 fn count(raw: &[u8], label: &str, suffixes: bool) -> Result<u64, String> {
-    let text = latin1(raw);
-    let invalid = || format!("od: invalid {label} argument '{text}'");
-    let mut at = raw
-        .iter()
-        .take_while(|b| b" \t\n\x0b\x0c\r".contains(b))
-        .count();
-    match raw.get(at) {
-        Some(b'+') => at += 1,
-        Some(b'-') => return Err(invalid()),
-        _ => {}
+    let text = crate::byte_text(raw);
+    let parts = number::parts(raw, suffixes);
+    if parts.negative() || parts.digits.is_empty() {
+        return Err(format!("od: invalid {label} argument '{text}'"));
     }
-    let rest = &raw[at..];
-    let (base, start) = match rest {
-        [b'0', b'x' | b'X', next, ..] if suffixes && next.is_ascii_hexdigit() => (16, 2),
-        [b'0', ..] if suffixes => (8, 0),
-        _ => (10, 0),
-    };
-    let digits = rest[start..]
-        .iter()
-        .take_while(|&&b| char::from(b).is_digit(base))
-        .count();
-    if digits == 0 {
-        return Err(invalid());
-    }
-    let value = rest[start..start + digits].iter().try_fold(0u128, |n, &b| {
-        let digit = char::from(b).to_digit(base).unwrap_or(0);
-        n.checked_mul(u128::from(base))?
-            .checked_add(u128::from(digit))
-    });
-    let suffix = &rest[start + digits..];
-    let multiplier = match suffix {
+    let multiplier = match parts.rest {
         [] => 1,
-        _ if suffixes => unit(suffix).ok_or_else(|| suffixed(label, raw))?,
+        suffix if suffixes => number::unit(suffix).ok_or_else(|| suffixed(label, raw))?,
         _ => return Err(suffixed(label, raw)),
     };
-    value
+    parts
+        .value()
         .and_then(|value| value.checked_mul(multiplier))
         .and_then(|value| u64::try_from(value).ok())
         .ok_or_else(|| format!("od: {label} argument '{text}' too large"))
 }
 
 fn suffixed(label: &str, raw: &[u8]) -> String {
-    format!("od: invalid suffix in {label} argument '{}'", latin1(raw))
-}
-
-/// Bytes as the text `bytes` turns back into them.
-fn latin1(raw: &[u8]) -> String {
-    raw.iter().map(|&b| char::from(b)).collect()
+    format!(
+        "od: invalid suffix in {label} argument '{}'",
+        crate::byte_text(raw)
+    )
 }
 
 /// A traditional offset or label: `[+]` then octal digits, or `0x` and
@@ -509,7 +482,10 @@ impl Settings {
             }
             // GNU 9.7 aborts on a width of 0 or below; mirage refuses it.
             "w" | "width" => {
-                self.wide = format!("od: {label} argument '{}' too large", latin1(&raw));
+                self.wide = format!(
+                    "od: {label} argument '{}' too large",
+                    crate::byte_text(&raw)
+                );
                 self.width = Some(match bare {
                     true => 32,
                     false => match count(&raw, &label, false)? {
@@ -518,7 +494,9 @@ impl Settings {
                     },
                 });
             }
-            "format" => format::parse(&raw, &mut self.formats).map_err(|line| latin1(&line))?,
+            "format" => {
+                format::parse(&raw, &mut self.formats).map_err(|line| crate::byte_text(&line))?
+            }
             "output_duplicates" => self.duplicates = true,
             "endian" => self.big = endian(&raw)?,
             "traditional" => self.traditional = true,
@@ -534,7 +512,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(config)?;
     Ok(match plan(config) {
         Ok(od) => Box::new(od),
-        Err(stderr) => Box::new(Refused::new(stderr)),
+        Err(stderr) => Box::new(Refused::new(StreamError::refusal(&stderr, 1))),
     })
 }
 

@@ -1,14 +1,13 @@
 use serde::Deserialize;
 
+use crate::number::{EOVERFLOW, ERANGE};
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
 use crate::regex::{STEPS, Step};
-use crate::{Stream, StreamError, parse_config, quoted};
+use crate::{Stream, StreamError, number, parse_config, quoted};
 
 const INTMAX: i128 = i64::MAX as i128;
 const INTMAX_MIN: i128 = i64::MIN as i128;
-const ERANGE: &str = "Numerical result out of range";
-const EOVERFLOW: &str = "Value too large for defined data type";
 const HINT: &str = "Try 'nl --help' for more information.";
 /// The most a call writes past the line it starts.
 const OUTPUT: usize = 64 * 1024;
@@ -170,21 +169,8 @@ fn compile(pattern: &[u8], utf8: bool) -> Result<Posix, &'static str> {
 /// most one sign, decimal digits and nothing after them; None for anything
 /// else. A value past i128 saturates, which every bound compares alike.
 fn scan(raw: &[u8]) -> Option<i128> {
-    let start = raw
-        .iter()
-        .position(|b| !b" \t\n\x0b\x0c\r".contains(b))
-        .unwrap_or(raw.len());
-    let (negative, digits) = match &raw[start..] {
-        [b'-', rest @ ..] => (true, rest),
-        [b'+', rest @ ..] => (false, rest),
-        rest => (false, rest),
-    };
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    let magnitude = digits.iter().fold(0i128, |n, d| {
-        n.saturating_mul(10).saturating_add(i128::from(d - b'0'))
-    });
+    let (negative, magnitude) = number::decimal(raw)?;
+    let magnitude = i128::try_from(magnitude).unwrap_or(i128::MAX);
     Some(if negative { -magnitude } else { magnitude })
 }
 

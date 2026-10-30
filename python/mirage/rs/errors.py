@@ -24,15 +24,19 @@ class StreamRefusal(Exception):
             stderr wording, or what the caller reports it as (``sort -c``
             gets the disordered record's number).
         output (bytes): What the command wrote before it failed.
+        status (int): The status the command exits with.
     """
 
-    def __init__(self, message: str, output: bytes) -> None:
+    def __init__(self, message: str, output: bytes, status: int = 1) -> None:
         super().__init__(message)
         self.message = message
         self.output = output
+        self.status = status
 
-    def __reduce__(self) -> tuple[type["StreamRefusal"], tuple[str, bytes]]:
-        return type(self), (self.message, self.output)
+    def __reduce__(
+        self,
+    ) -> tuple[type["StreamRefusal"], tuple[str, bytes, int]]:
+        return type(self), (self.message, self.output, self.status)
 
 
 class SearchLimit(Exception):

@@ -45,7 +45,7 @@ class OpenStream:
         try:
             self._stream = Stream(kind, json.dumps(config).encode())
         except StreamError as exc:
-            raise StreamRefusal(str(exc.args[0]), b"") from exc
+            raise StreamRefusal(*exc.args) from exc
 
     def feed(self, chunk: bytes) -> bytes:
         """Push one chunk.
@@ -56,14 +56,14 @@ class OpenStream:
         try:
             return self._stream.feed(chunk)
         except StreamError as exc:
-            raise StreamRefusal(str(exc.args[0]), bytes(exc.args[1])) from exc
+            raise StreamRefusal(*exc.args) from exc
 
     def finish(self) -> bytes:
         """End the input and return what the stream held back."""
         try:
             return self._stream.finish()
         except StreamError as exc:
-            raise StreamRefusal(str(exc.args[0]), bytes(exc.args[1])) from exc
+            raise StreamRefusal(*exc.args) from exc
 
     def busy(self) -> bool:
         """Whether ``drain`` has work or output left."""
@@ -79,7 +79,7 @@ class OpenStream:
         try:
             return self._stream.drain()
         except StreamError as exc:
-            raise StreamRefusal(str(exc.args[0]), bytes(exc.args[1])) from exc
+            raise StreamRefusal(*exc.args) from exc
 
     def wants(self) -> int | None:
         """The input a multi-input stream needs next, None for none."""
@@ -95,7 +95,7 @@ class OpenStream:
         try:
             return self._stream.feed_input(index, chunk)
         except StreamError as exc:
-            raise StreamRefusal(str(exc.args[0]), bytes(exc.args[1])) from exc
+            raise StreamRefusal(*exc.args) from exc
 
     def end_input(self, index: int) -> bytes:
         """End input *index* of a multi-input stream.
@@ -106,7 +106,7 @@ class OpenStream:
         try:
             return self._stream.end_input(index)
         except StreamError as exc:
-            raise StreamRefusal(str(exc.args[0]), bytes(exc.args[1])) from exc
+            raise StreamRefusal(*exc.args) from exc
 
     def begin(self, config: Mapping[str, JsonValue]) -> None:
         """Start the next input of a stream that reads one after another.
@@ -117,7 +117,7 @@ class OpenStream:
         try:
             self._stream.begin(json.dumps(config).encode())
         except StreamError as exc:
-            raise StreamRefusal(str(exc.args[0]), b"") from exc
+            raise StreamRefusal(*exc.args) from exc
 
     def done(self) -> bool:
         """Whether the stream wants no more of the current input."""
@@ -154,7 +154,7 @@ class OpenStream:
         try:
             return self._stream.respond(json.dumps(reply).encode(), data)
         except StreamError as exc:
-            raise StreamRefusal(str(exc.args[0]), bytes(exc.args[1])) from exc
+            raise StreamRefusal(*exc.args) from exc
 
 
 class Served(NamedTuple):

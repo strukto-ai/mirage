@@ -14,18 +14,13 @@ use serde::Deserialize;
 use serde_json::Value as Json;
 
 use crate::request::{Io, Opening, Refused, Reply, Request, WriteMode, bytes, read_failure};
-use crate::{Stream, StreamError, parse_config, quoted};
+use crate::{Stream, StreamError, number, parse_config, quoted};
 
 use self::pieces::{Input, MAX_SUFFIX, Piece, STEPS, write_failure};
 
 const ALPHA: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
 const DECIMAL: &[u8] = b"0123456789";
 const HEX: &[u8] = b"0123456789abcdef";
-
-/// The size letters split and od take after a byte count (coreutils 9.7):
-/// every power letter in upper case, `k` and `m` in lower case, and `b`.
-const SIZE_LETTERS: &[u8] = b"bkKmMEGPQRTYZ";
-const POWERS: &[u8] = b"KMGTPEZYRQ";
 
 const HINT: &[u8] = b"\nTry 'split --help' for more information.";
 
@@ -141,20 +136,11 @@ struct Plan {
     additional: Vec<u8>,
 }
 
-/// A count as split and od read one: C blanks, at most one `+`, and
-/// decimal digits; a value past u128 saturates.
+/// A count as split reads one: C blanks, at most one `+`, and decimal
+/// digits; a value past u128 saturates.
 fn count(raw: &[u8]) -> Option<u128> {
-    let start = raw
-        .iter()
-        .position(|b| !b" \t\n\x0b\x0c\r".contains(b))
-        .unwrap_or(raw.len());
-    let digits = raw[start..].strip_prefix(b"+").unwrap_or(&raw[start..]);
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    Some(digits.iter().fold(0u128, |n, d| {
-        n.saturating_mul(10).saturating_add(u128::from(d - b'0'))
-    }))
+    let parts = number::parts(raw, false);
+    (parts.whole() && !parts.negative()).then(|| parts.saturating())
 }
 
 fn saturate(value: u128) -> u64 {
@@ -173,34 +159,13 @@ fn positive(value: &[u8], what: &str) -> Result<u64, Vec<u8>> {
         .ok_or_else(|| refusal(what, value))
 }
 
-/// The multiplier a byte count's suffix stands for.
-pub(crate) fn unit(suffix: &[u8]) -> Option<u128> {
-    let (&letter, tail) = suffix.split_first()?;
-    if !SIZE_LETTERS.contains(&letter) {
-        return None;
-    }
-    if letter == b'b' {
-        return tail.is_empty().then_some(512);
-    }
-    let power = POWERS
-        .iter()
-        .position(|&p| p == letter.to_ascii_uppercase())?
-        + 1;
-    let base: u128 = match tail {
-        b"" | b"iB" => 1024,
-        b"B" => 1000,
-        _ => return None,
-    };
-    Some(base.pow(power as u32))
-}
-
 fn byte_count(value: &[u8]) -> Result<u64, Vec<u8>> {
     let (digits, multiplier) = (1..=3.min(value.len()))
         .rev()
         .find_map(|len| {
             Some((
                 &value[..value.len() - len],
-                unit(&value[value.len() - len..])?,
+                number::unit(&value[value.len() - len..])?,
             ))
         })
         .unwrap_or((value, 1));
@@ -413,7 +378,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(config)?;
     let plan = match plan(config) {
         Ok(plan) => plan,
-        Err(refused) => return Ok(Box::new(Refused::new(refused))),
+        Err(refused) => return Ok(Box::new(Refused::new(StreamError::refusal(&refused, 1)))),
     };
     let mut io = Io::default();
     let input = Input::new(&mut io, plan.input.clone(), Opening::Operand(1));

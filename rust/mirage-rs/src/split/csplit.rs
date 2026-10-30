@@ -14,7 +14,7 @@ use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
 use crate::regex::{STEPS as REGEX_STEPS, Step};
 use crate::request::{Io, Opening, Refused, Reply, Request, WriteMode, bytes, read_failure};
-use crate::{Stream, StreamError, parse_config, quoted};
+use crate::{Stream, StreamError, number, parse_config, quoted};
 
 use super::pieces::{Input, MAX_SUFFIX, Piece, STEPS, write_failure};
 
@@ -168,27 +168,6 @@ struct Pattern {
     repeat: u64,
 }
 
-/// A number as GNU's decimal scans read it: C blanks, a sign, digits, and
-/// nothing after, a value past u128 saturating; None for anything else.
-fn decimal(raw: &[u8]) -> Option<(bool, u128)> {
-    let start = raw
-        .iter()
-        .position(|b| !b" \t\n\x0b\x0c\r".contains(b))
-        .unwrap_or(raw.len());
-    let (negative, digits) = match &raw[start..] {
-        [b'-', rest @ ..] => (true, rest),
-        [b'+', rest @ ..] => (false, rest),
-        rest => (false, rest),
-    };
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    let value = digits.iter().fold(0u128, |n, d| {
-        n.saturating_mul(10).saturating_add(u128::from(d - b'0'))
-    });
-    Some((negative, value))
-}
-
 fn says(text: &[u8], what: &str) -> Vec<u8> {
     format!("csplit: '{}': {what}", quoted(text)).into_bytes()
 }
@@ -211,7 +190,7 @@ fn patterns(
             let Some(inner) = inner.strip_suffix(b"}") else {
                 return Err(says(text, "'}' is required in repeat count"));
             };
-            previous.repeat = match decimal(inner) {
+            previous.repeat = match number::decimal(inner) {
                 _ if inner == b"*" => u64::MAX,
                 Some((false, count)) if count <= u128::from(u64::MAX) => count as u64,
                 _ => {
@@ -246,7 +225,7 @@ fn patterns(
                 let offset = if tail.is_empty() {
                     0
                 } else {
-                    match decimal(tail) {
+                    match number::decimal(tail) {
                         Some((negative, value)) => {
                             let value = i64::try_from(value)
                                 .map_err(|_| says(text, "integer expected after delimiter"))?;
@@ -262,7 +241,7 @@ fn patterns(
                 }
             }
             _ => {
-                let value = decimal(text).filter(|&(negative, _)| !negative);
+                let value = number::decimal(text).filter(|&(negative, _)| !negative);
                 let Some(value) = value.and_then(|(_, value)| u64::try_from(value).ok()) else {
                     return Err(says(text, "invalid pattern"));
                 };
@@ -522,7 +501,11 @@ struct Csplit {
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(config)?;
     // getopt reads -n, a decimal from 0 to INT_MAX, before any operand.
-    let digits = match config.digits.as_deref().map(|raw| (raw, decimal(raw))) {
+    let digits = match config
+        .digits
+        .as_deref()
+        .map(|raw| (raw, number::decimal(raw)))
+    {
         None => 2,
         Some((_, Some((negative, n)))) if (!negative || n == 0) && n <= i32::MAX as u128 => {
             n as usize
@@ -530,11 +513,17 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         Some((raw, scanned)) => {
             let reason = scanned.map_or("", |_| ": Value too large for defined data type");
             let refused = format!("csplit: invalid number: '{}'{reason}", quoted(raw));
-            return Ok(Box::new(Refused::new(refused.into_bytes())));
+            return Ok(Box::new(Refused::new(StreamError::refusal(
+                refused.as_bytes(),
+                1,
+            ))));
         }
     };
     if config.operands.len() < 2 {
-        return Ok(Box::new(Refused::new(missing(config.operands.first()))));
+        return Ok(Box::new(Refused::new(StreamError::refusal(
+            &missing(config.operands.first()),
+            1,
+        ))));
     }
     let format = match &config.suffix_format {
         Some(raw) => Format::parse(raw),
@@ -547,10 +536,13 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     };
     let format = match format {
         Ok(format) if format.width.max(format.precision.unwrap_or(0)) > MAX_SUFFIX => {
-            return Ok(Box::new(Refused::new(b"csplit: memory exhausted".to_vec())));
+            return Ok(Box::new(Refused::new(StreamError::refusal(
+                b"csplit: memory exhausted",
+                1,
+            ))));
         }
         Ok(format) => format,
-        Err(refused) => return Ok(Box::new(Refused::new(refused))),
+        Err(refused) => return Ok(Box::new(Refused::new(StreamError::refusal(&refused, 1)))),
     };
     let mut operands = config.operands.into_iter();
     let file = operands.next().unwrap_or_default();
