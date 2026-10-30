@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::utf8::{Decoder, INVALID};
+use crate::utf8::{Decoder, INVALID, ascii_run};
 use crate::width::{advance_column, is_space};
 use crate::{Stream, StreamError, parse_config};
 
@@ -20,6 +20,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         (config.lines || config.bytes) && !(config.words || config.chars || config.max_line_length);
     Ok(Box::new(Wc {
         byte_counts_only,
+        length: config.max_line_length
+            || !(config.lines || config.words || config.bytes || config.chars),
         decoder: Decoder::new(),
         counts: Counts::default(),
     }))
@@ -43,7 +45,7 @@ struct Counts {
 }
 
 impl Counts {
-    fn char(&mut self, cp: u32) {
+    fn char(&mut self, cp: u32, length: bool) {
         if cp == INVALID {
             self.in_word = true;
             return;
@@ -59,6 +61,11 @@ impl Counts {
         }
         if cp == 0x0A {
             self.lines += 1;
+        }
+        if !length {
+            return;
+        }
+        if cp == 0x0A {
             self.max_line_length = self.max_line_length.max(self.column);
             self.column = 0;
             return;
@@ -74,6 +81,7 @@ impl Counts {
 /// `lines words bytes chars max_line_length`.
 struct Wc {
     byte_counts_only: bool,
+    length: bool,
     decoder: Decoder,
     counts: Counts,
 }
@@ -86,13 +94,39 @@ impl Stream for Wc {
             return Ok(());
         }
         let counts = &mut self.counts;
-        self.decoder.decode(input, |cp| counts.char(cp));
+        let mut at = 0;
+        while at < input.len() {
+            if !self.decoder.pending() {
+                let len = ascii_run(&input[at..]);
+                if len > 0 {
+                    let ascii = &input[at..at + len];
+                    if self.length {
+                        for &byte in ascii {
+                            counts.char(u32::from(byte), true);
+                        }
+                    } else {
+                        counts.chars += len as u64;
+                        counts.lines += memchr::memchr_iter(b'\n', ascii).count() as u64;
+                        for &byte in ascii {
+                            let space = byte == b' ' || (b'\t'..=b'\r').contains(&byte);
+                            counts.words += u64::from(counts.in_word && space);
+                            counts.in_word = !space;
+                        }
+                    }
+                    at += len;
+                    continue;
+                }
+            }
+            self.decoder
+                .decode(&input[at..at + 1], |cp| counts.char(cp, self.length));
+            at += 1;
+        }
         Ok(())
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         let counts = &mut self.counts;
-        self.decoder.finish(|cp| counts.char(cp));
+        self.decoder.finish(|cp| counts.char(cp, self.length));
         if counts.in_word {
             counts.words += 1;
             counts.in_word = false;

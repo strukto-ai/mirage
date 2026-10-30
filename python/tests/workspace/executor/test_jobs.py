@@ -157,7 +157,11 @@ async def test_job_output_reaches_the_lines_once_and_wait_prints_none():
         await ws.shell("wait"),
         await ws.shell("true"),
     ]
-    assert "".join([await line.stdout_str() for line in lines]) == "a\nb\n"
+    # Independent jobs may finish in either order; neither output may repeat.
+    assert "".join([await line.stdout_str() for line in lines]) in (
+        "a\nb\n",
+        "b\na\n",
+    )
 
 
 @pytest.mark.asyncio

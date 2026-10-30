@@ -1,6 +1,6 @@
 /// What an input gives when asked for its next record.
-pub(crate) enum Take {
-    Record(Vec<u8>),
+pub(crate) enum Take<T = Vec<u8>> {
+    Record(T),
     End,
     Wait,
 }
@@ -13,6 +13,7 @@ pub(crate) struct Records {
     pos: usize,
     searched: usize,
     ended: bool,
+    ready: Option<(usize, bool)>,
 }
 
 impl Records {
@@ -20,6 +21,9 @@ impl Records {
         if self.pos * 2 > self.buf.len() {
             self.buf.drain(..self.pos);
             self.searched -= self.pos;
+            if let Some((end, _)) = &mut self.ready {
+                *end -= self.pos;
+            }
             self.pos = 0;
         }
         self.buf.extend_from_slice(data);
@@ -34,19 +38,47 @@ impl Records {
     }
 
     pub(crate) fn next(&mut self, terminator: u8) -> Take {
-        let from = self.searched.max(self.pos);
-        let end = match memchr::memchr(terminator, &self.buf[from..]) {
-            Some(at) => from + at,
-            None if self.ended && self.pos < self.buf.len() => self.buf.len(),
-            None if self.ended => return Take::End,
-            None => {
-                self.searched = self.buf.len();
-                return Take::Wait;
-            }
-        };
-        let record = self.buf[self.pos..end].to_vec();
-        self.pos = (end + 1).min(self.buf.len());
-        self.searched = self.pos;
-        Take::Record(record)
+        match self.next_span(terminator) {
+            Take::Record(record) => Take::Record(record.to_vec()),
+            Take::End => Take::End,
+            Take::Wait => Take::Wait,
+        }
+    }
+
+    pub(crate) fn peek_span(&mut self, terminator: u8) -> Take<(&[u8], bool)> {
+        if self.ready.is_none() {
+            let from = self.searched.max(self.pos);
+            let (end, terminated) = match memchr::memchr(terminator, &self.buf[from..]) {
+                Some(at) => (from + at, true),
+                None if self.ended && self.pos < self.buf.len() => (self.buf.len(), false),
+                None if self.ended => return Take::End,
+                None => {
+                    self.searched = self.buf.len();
+                    return Take::Wait;
+                }
+            };
+            self.ready = Some((end, terminated));
+        }
+        let (end, terminated) = self.ready.unwrap();
+        Take::Record((&self.buf[self.pos..end], terminated))
+    }
+
+    pub(crate) fn advance(&mut self) {
+        if let Some((end, terminated)) = self.ready.take() {
+            self.pos = end + usize::from(terminated);
+            self.searched = self.pos;
+        }
+    }
+
+    pub(crate) fn next_span(&mut self, terminator: u8) -> Take<&[u8]> {
+        match self.peek_span(terminator) {
+            Take::Wait => return Take::Wait,
+            Take::End => return Take::End,
+            Take::Record(_) => {}
+        }
+        let start = self.pos;
+        let (end, _) = self.ready.unwrap();
+        self.advance();
+        Take::Record(&self.buf[start..end])
     }
 }

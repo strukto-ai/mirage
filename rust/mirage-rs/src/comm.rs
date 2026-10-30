@@ -62,27 +62,6 @@ impl Comm {
         if self.config.shared { 0 } else { side }
     }
 
-    /// Whether file `side`'s new record ends the run with its disorder.
-    fn disordered(&mut self, side: usize, before: Option<Vec<u8>>) -> bool {
-        let check = self.config.check_order;
-        let (Some(line), Some(before)) = (&self.lines[side], before) else {
-            return false;
-        };
-        if check == Some(false)
-            || !(check == Some(true) || self.unpairable)
-            || self.warned[side]
-            || *line >= before
-        {
-            return false;
-        }
-        self.warned[side] = true;
-        self.stderr.extend_from_slice(
-            format!("comm: file {} is not in sorted order\n", side + 1).as_bytes(),
-        );
-        self.status = 1;
-        check == Some(true)
-    }
-
     fn close(&mut self, out: &mut Vec<u8>) {
         self.done = true;
         if self.config.stdin_twice {
@@ -111,15 +90,33 @@ impl Comm {
         while !self.done {
             if let Some(&side) = self.pulls.front() {
                 let source = self.source(side);
-                let line = match self.inputs[source].next(self.terminator) {
+                let next = match self.inputs[source].next_span(self.terminator) {
                     Take::Wait => return,
                     Take::End => None,
                     Take::Record(line) => Some(line),
                 };
                 self.pulls.pop_front();
-                let before = std::mem::replace(&mut self.lines[side], line);
-                if self.disordered(side, before) {
-                    self.done = true;
+                let check = self.config.check_order;
+                if check != Some(false)
+                    && (check == Some(true) || self.unpairable)
+                    && !self.warned[side]
+                    && next
+                        .zip(self.lines[side].as_deref())
+                        .is_some_and(|(line, before)| line < before)
+                {
+                    self.warned[side] = true;
+                    self.stderr.extend_from_slice(
+                        format!("comm: file {} is not in sorted order\n", side + 1).as_bytes(),
+                    );
+                    self.status = 1;
+                    self.done = check == Some(true);
+                }
+                if let Some(next) = next {
+                    let line = self.lines[side].get_or_insert_with(Vec::new);
+                    line.clear();
+                    line.extend_from_slice(next);
+                } else {
+                    self.lines[side] = None;
                 }
                 continue;
             }
