@@ -478,11 +478,26 @@ async def test_large_ram_command_honors_caller_cancel(command, monkeypatch):
         progress.append((consumed, available))
         cancel.set()
 
+    class ScannedBytes(bytes):
+        def count(self, sub, start=0, end=None):
+            nonlocal timer, consumed
+            result = super().count(sub, start, end)
+            end_at = len(self) if end is None else min(len(self), end)
+            consumed += end_at - start
+            if timer is None:
+                timer = loop.call_soon(stop)
+            return result
+
     async def read(path, offset=0, size=None):
         nonlocal timer, consumed, available
         source = await original_read(path, offset, size)
         assert isinstance(source, bytes)
         available += len(source)
+        if command.startswith("head "):
+            # One whole blob: only the inner line scan can yield the
+            # abort after it finishes counting its first bounded slice.
+            yield ScannedBytes(source)
+            return
         yield source[:CHUNK_SIZE]
         consumed += CHUNK_SIZE
         if timer is None:
@@ -495,7 +510,6 @@ async def test_large_ram_command_honors_caller_cancel(command, monkeypatch):
         ws = Workspace({"/": ram})
         try:
             patch.setattr(loop, "time", clock)
-            # Requesting the next chunk proves the first was consumed.
             # Keep the remaining RAM input ready, and let elapsed budget
             # time offer the abort callback a real loop turn.
             with pytest.raises(MirageAbortError):

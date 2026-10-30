@@ -404,23 +404,40 @@ describe('large in-memory commands', () => {
     let available = 0
     let progress: [number, number] | undefined
     const originalRead = ram.read.bind(ram)
+    function stop(): void {
+      fired = true
+      progress = [consumed, available]
+      abort.abort()
+    }
+    class ScannedBytes extends Uint8Array {
+      override indexOf(searchElement: number, fromIndex = 0): number {
+        const result = super.indexOf(searchElement, fromIndex)
+        if (result === -1) {
+          consumed += this.byteLength
+          timer ??= setImmediate(stop)
+        }
+        return result
+      }
+    }
     async function* read(...args: Parameters<RAMVFS['read']>): AsyncGenerator<Uint8Array> {
       const source = await originalRead(...args)
       if (!(source instanceof Uint8Array)) throw new Error('RAM input must be bytes')
       available += source.byteLength
+      if (command.startsWith('head ')) {
+        // Keep one whole blob so the inner line scan must yield the abort
+        // after it finishes counting its first bounded slice.
+        yield new ScannedBytes(source)
+        return
+      }
       yield source.subarray(0, CHUNK_SIZE)
       consumed += CHUNK_SIZE
-      timer ??= setImmediate(() => {
-        fired = true
-        progress = [consumed, available]
-        abort.abort()
-      })
+      timer ??= setImmediate(stop)
       yield source.subarray(CHUNK_SIZE)
       consumed += source.byteLength - CHUNK_SIZE
     }
     const reading = vi.spyOn(ram, 'read').mockImplementation(read)
-    // Requesting the next chunk proves the first was consumed. Keep the
-    // remaining RAM input ready, and let elapsed budget time offer a loop turn.
+    // Keep the remaining RAM input ready, and let elapsed budget time
+    // offer the abort callback a real loop turn.
     const clock = vi.spyOn(performance, 'now').mockImplementation(() => {
       if (timer !== undefined) now += 20
       return now
