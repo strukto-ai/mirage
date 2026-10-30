@@ -2292,10 +2292,10 @@ describe('ask end to end', () => {
     expect(ws.decisions.pending()).toEqual([])
     // The grant is session state: on the record, and not another
     // session's.
-    const record = ws.sessionManager.get(ws.sessionManager.defaultId).toDict() as {
-      decisions: { outcome: string; scope: string }[]
-    }
-    expect(record.decisions[0]?.scope).toBe('session')
+    const record = ws.sessionManager.get(ws.sessionManager.defaultId).toDict()
+    expect(record.approval_state).toMatchObject({
+      records: [{ outcome: 'allow', scope: 'session' }],
+    })
     ws.createSession('other')
     await ws.shell('touch /scratch/w', { sessionId: 'other' })
     const other = await line(ws, 'rm /scratch/w', 'other')
@@ -2312,7 +2312,7 @@ describe('ask end to end', () => {
     expect(err).toBe(`wc: Permission denied\nrequires approval: looks risky (ask ${request.id})\n`)
     // The synthesized rule names the program, so a session grant covers
     // every wc line.
-    expect(request.rule).toEqual({ reason: 'looks risky', commands: ['wc'] })
+    expect(request.rule).toEqual({ reason: 'looks risky', commands: ['wc'], paths: [] })
     await ws.decisions.answer(request.id, Outcome.ALLOW, Scope.SESSION)
     expect(await line(ws, 'wc -c /scratch/z')).toEqual([0, '0 /scratch/z\n', ''])
     expect(await line(ws, 'wc -l /scratch/z')).toEqual([0, '0 /scratch/z\n', ''])

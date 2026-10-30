@@ -108,15 +108,7 @@ async function answered(
  */
 export type AskHandler = (record: Decision, signal?: AbortSignal) => Promise<Decision | null>
 
-/**
- * The id a record is named by: a digest of what was asked, so a retry
- * of the same line quotes the same id and a host answers it once.
- *
- * The id names the record; it does not decide what a retry matches.
- * That comparison is made against the recorded fields themselves
- * (`covers`), so a line the digest cannot tell apart from another still
- * cannot borrow its answer.
- */
+/** A stable display digest. Approval authority uses fresh opaque tickets. */
 export async function decisionId(
   sessionId: string,
   cwd: string,
@@ -966,6 +958,14 @@ export class Decisions extends DecisionOwner {
         },
         bound.incarnation,
       )
+    } catch (error) {
+      if (
+        !(error instanceof ApprovalUnavailable) ||
+        !['session_replaced', 'session_closed', 'stale_incarnation'].includes(error.status)
+      )
+        throw error
+      logger.debug?.(`retired approval cleanup: ${error.status}`)
+      this.project(sessionId)
     } finally {
       this.readers.delete(handed)
     }
@@ -981,6 +981,14 @@ export class Decisions extends DecisionOwner {
         { op, owner: this.owner, holder: this.id(handed) },
         bound.incarnation,
       )
+    } catch (error) {
+      if (
+        !(error instanceof ApprovalUnavailable) ||
+        !['session_replaced', 'session_closed', 'stale_incarnation'].includes(error.status)
+      )
+        throw error
+      logger.debug?.(`retired approval cleanup: ${error.status}`)
+      this.project(sessionId)
     } finally {
       this.readers.delete(handed)
     }

@@ -804,3 +804,65 @@ it('a final flush after session deletion does not recreate it', async () => {
   await manager.flush('gone')
   expect((await store.get('gone'))?.closed).toEqual(expect.any(String))
 })
+
+it('retires the old default root before a snapshot rekeys the session', async () => {
+  const store = new RAMNamespaceStore()
+  const manager = new SessionManager('old', store)
+  const old = await manager.activate('old')
+  await manager.restoreDefault('new')
+  expect(manager.defaultId).toBe('new')
+  expect(manager.has('old')).toBe(false)
+  const closed = await store.get('old')
+  expect(closed?.closed).toEqual(expect.any(String))
+  expect(manager.approvalStateOf('old')).toEqual(closed?.approval_state)
+  await expect(
+    manager.approvalEvent('old', { op: 'revoke', owner: 'owner', holder: 'holder' }, old),
+  ).resolves.toEqual({ kind: 'applied' })
+  await expect(manager.activate('old')).rejects.toThrow('session_closed')
+  await manager.replaceFromSnapshot([manager.get('new')])
+  expect(await manager.activate('new')).not.toBe(old)
+})
+
+it('keeps the old default until its retirement is confirmed and retries the same fence', async () => {
+  const store = new RAMNamespaceStore()
+  const manager = new SessionManager('old', store)
+  const epoch = await manager.activate('old')
+  const casSet = store.casSet.bind(store)
+  let rejectAcknowledgement = true
+  const spy = vi.spyOn(store, 'casSet').mockImplementation(async (...args) => {
+    const placed = await casSet(...args)
+    if (placed && args[1].closed != null && rejectAcknowledgement) {
+      throw new Error('acknowledgement lost')
+    }
+    return placed
+  })
+  try {
+    await expect(manager.restoreDefault('new')).rejects.toThrow('storage_unconfirmed')
+    expect(manager.defaultId).toBe('old')
+    expect(manager.has('new')).toBe(false)
+    const fenced = await store.get('old')
+    await expect(
+      manager.approvalEvent('old', { op: 'revoke', owner: 'owner', holder: 'holder' }, epoch),
+    ).rejects.toThrow('session_transition_pending')
+    rejectAcknowledgement = false
+    await manager.restoreDefault('new')
+    expect(manager.defaultId).toBe('new')
+    expect((await store.get('old'))?.incarnation).toBe(fenced?.incarnation)
+    expect((await store.get('old'))?.closed).toBe(fenced?.closed)
+  } finally {
+    spy.mockRestore()
+  }
+})
+
+it('restores an imported session into a missing destination with a fresh root', async () => {
+  const source = new SessionManager('restored')
+  const importedEpoch = await source.activate('restored')
+  const imported = source.get('restored').fork()
+  const store = new RAMNamespaceStore()
+  const target = new SessionManager('default', store)
+  await target.replaceFromSnapshot([imported])
+  const current = await store.get('restored')
+  expect(current?.incarnation).toEqual(expect.any(String))
+  expect(current?.incarnation).not.toBe(importedEpoch)
+  expect(current?.generation).toBe(1)
+})

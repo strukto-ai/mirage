@@ -181,6 +181,146 @@ function record(over: Partial<Decision> = {}): Decision {
 }
 
 describe('decisions', () => {
+  it('registers a lifetime when admission reads a standing session grant', async () => {
+    const ledger = new Decisions()
+    const pending = await ledger.resolve(ctx(), ASK)
+    if (pending?.kind !== 'pending') throw new Error('Expected an approval ticket')
+    await ledger.answer(pending.id, Outcome.ALLOW, Scope.SESSION)
+    const line = fresh()
+    expect(await ledger.sessionGrants(ctx(), at(line))).toEqual([
+      { reason: 'sign-off', commands: ['git push'], paths: [] },
+    ])
+    await ledger.revoke('s', line)
+    await expect(ledger.validate('s', line)).rejects.toThrow('stale_holder')
+  })
+
+  it('lets an admitted call finish after restore and preserves a later refusal', async () => {
+    const manager = new SessionManager('s')
+    const ledger = new Decisions(manager)
+    expect(
+      await ledger.withinCall('s', async () => {
+        await manager.replaceFromSnapshot([manager.get('s').fork()])
+        return 'read completed'
+      }),
+    ).toBe('read completed')
+    await expect(
+      ledger.withinCall('s', async () => {
+        await manager.replaceFromSnapshot([manager.get('s').fork()])
+        throw new Error('tool refused after restore')
+      }),
+    ).rejects.toThrow('tool refused after restore')
+  })
+
+  it('checks a current deny before applying an inline answer', async () => {
+    const ledger = new Decisions(null, async (question) => ({
+      ...question,
+      outcome: Outcome.ALLOW,
+    }))
+    const line = fresh()
+    const denied = { kind: 'deny' as const, reason: 'current policy refuses' }
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(line), async () => denied)).toEqual(
+      denied,
+    )
+    expect(ledger.list().every((entry) => entry.outcome !== Outcome.ALLOW)).toBe(true)
+    await ledger.revoke('s', line)
+  })
+
+  it('asks the replacement question instead of applying an outdated inline reply', async () => {
+    const replacement: Ask = {
+      kind: 'ask',
+      reason: 'new sign-off',
+      rule: { ...RULE, reason: 'new sign-off' },
+    }
+    const questions: Decision[] = []
+    const ledger = new Decisions(null, async (question) => {
+      questions.push(question)
+      return { ...question, outcome: Outcome.ALLOW }
+    })
+    const line = fresh()
+    expect(
+      await ledger.resolve(ctx(), ASK, undefined, at(line), async () => replacement),
+    ).toBeNull()
+    expect(questions.map((question) => question.reason)).toEqual(['sign-off', 'new sign-off'])
+    expect(new Set(questions.map((question) => question.id)).size).toBe(2)
+    await ledger.revoke('s', line)
+  })
+
+  it('invalidates an inline reply when the registered policy chain changes', async () => {
+    let revision = 0
+    const ledger = new Decisions(
+      null,
+      async (question) => {
+        revision += 1
+        return { ...question, outcome: Outcome.ALLOW }
+      },
+      () => revision,
+    )
+    const line = fresh()
+    const result = await ledger.resolve(ctx(), ASK, undefined, at(line), async () => ASK)
+    expect(result?.kind).toBe('deny')
+    expect(ledger.list().every((entry) => entry.outcome !== Outcome.ALLOW)).toBe(true)
+    await ledger.revoke('s', line)
+  })
+
+  it('invalidates a grant when the policy chain changes during storage confirmation', async () => {
+    let revision = 0
+    class ChangedStore extends RAMNamespaceStore {
+      override async casSet(
+        key: string,
+        fields: RecordFields,
+        expectedGeneration: number,
+      ): Promise<boolean> {
+        const placed = await super.casSet(key, fields, expectedGeneration)
+        const state = ledgerSchema.safeParse(fields.approval_state)
+        if (
+          placed &&
+          state.success &&
+          state.data.records.some(
+            (entry) =>
+              typeof entry === 'object' &&
+              entry !== null &&
+              !Array.isArray(entry) &&
+              entry.outcome === Outcome.ALLOW,
+          )
+        )
+          revision += 1
+        return placed
+      }
+    }
+    const manager = new SessionManager('s', new ChangedStore())
+    const ledger = new Decisions(
+      manager,
+      async (question) => ({ ...question, outcome: Outcome.ALLOW }),
+      () => revision,
+    )
+    const line = fresh()
+    const result = await ledger.resolve(ctx(), ASK, undefined, at(line))
+    expect(revision).toBeGreaterThan(0)
+    expect(result).toMatchObject({
+      kind: 'deny',
+      reason: expect.stringContaining('policy_changed'),
+    })
+    expect(ledger.list().every((entry) => entry.outcome !== Outcome.ALLOW)).toBe(true)
+    await ledger.revoke('s', line)
+  })
+
+  it('treats public claim projections as data rather than authority', async () => {
+    const ledger = new Decisions()
+    const line = fresh()
+    line.claimed.push({
+      occurrence: at(line).occurrence,
+      decision: record({ outcome: Outcome.ALLOW }),
+    })
+    const question = await ledger.resolve(ctx(), ASK, undefined, at(line))
+    expect(question?.kind).toBe('pending')
+    if (question?.kind !== 'pending') throw new Error('Expected a pending approval')
+    await ledger.answer(question.id, Outcome.ALLOW)
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(line))).toBeNull()
+    line.claimed.splice(0)
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(line))).toBeNull()
+    await ledger.revoke('s', line)
+  })
+
   it('names a record stably for the same line and session', async () => {
     const same = await decisionId('s', '/repo', ['git', 'push'])
     expect(same).toBe(await decisionId('s', '/repo', ['git', 'push']))
