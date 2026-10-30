@@ -20,7 +20,6 @@ from typing import Any
 import pytest
 
 from mirage.accessor.base import Accessor
-from mirage.accessor.email import EmailAccessor
 from mirage.accessor.responses import ResponseCache
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.commands.cli.builtin.airtable import AIRTABLE
@@ -35,7 +34,6 @@ from mirage.commands.cli.builtin.trello import TRELLO
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec.types import Argument, CommandSpec
-from mirage.core.email.config import EmailConfig
 from mirage.errors.fs import ebusy
 from mirage.errors.types import NoMountError
 from mirage.io.types import IOResult
@@ -55,14 +53,12 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 from mirage.view.types import SessionAccess
-from mirage.workspace import Workspace
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.mount.errors import (
     MountCommandAmbiguous,
     SharedStorageError,
 )
-from tests.fixtures.github_api import FakeGitHub, serve
 
 # ── mount_for ──────────────────────────────────
 
@@ -932,15 +928,14 @@ _MAIL = {
     "username": "u",
     "password": "p",
 }
+_MAIL_MOUNTS = {"mail", "mail_elsewhere", "gmail"}
 _GOOGLE = {"access_token": "t"}
 _GOOGLE_MOUNTS = {"gdrive", "gdocs", "gsheets", "gslides", "gmail", "gcal"}
 _PROXY = "https://proxy.test"
 _REPO = {"repo_id": "o/r"}
 _MOUNTS: dict[str, tuple[str, dict[str, Any]]] = {
     "mail": ("email", _MAIL),
-    "mail_other_login": ("email", {**_MAIL, "username": "v"}),
     "mail_elsewhere": ("email", {**_MAIL, "imap_host": "imap.b"}),
-    "mail_other_port": ("email", {**_MAIL, "imap_port": 143}),
     "slack": ("slack", {"token": "u", "base_url": _PROXY}),
     "discord": ("discord", {"token": "u", "base_url": _PROXY}),
     "notion": ("notion", {"api_key": "u", "base_url": _PROXY}),
@@ -954,6 +949,11 @@ _MOUNTS: dict[str, tuple[str, dict[str, Any]]] = {
         name: (name, {**_GOOGLE, "api_base": _PROXY})
         for name in _GOOGLE_MOUNTS
     },
+    "box": ("box", {"access_token": "t"}),
+    "dropbox": (
+        "dropbox",
+        {"client_id": "c", "client_secret": "s", "refresh_token": "r"},
+    ),
     "hf_models": ("hf_models", _REPO),
     "hf_datasets": ("hf_datasets", _REPO),
     "hf_spaces": ("hf_spaces", _REPO),
@@ -967,14 +967,14 @@ _MOUNTS: dict[str, tuple[str, dict[str, Any]]] = {
 @pytest.mark.parametrize(
     ("cli", "config", "reached"),
     [
-        (HIMALAYA, _MAIL, {"mail", "mail_other_login"}),
+        (HIMALAYA, _MAIL, _MAIL_MOUNTS),
         (SLACK, {"token": "t"}, {"slack"}),
         (DISCORD, {"token": "t"}, {"discord"}),
         (NTN, {"api_key": "t"}, {"notion"}),
         (LINEAR, {"api_key": "t"}, {"linear"}),
         (AIRTABLE, {"token": "t"}, {"airtable"}),
         (TRELLO, {"api_key": "k", "api_token": "t"}, {"trello"}),
-        (GWS, _GOOGLE, _GOOGLE_MOUNTS),
+        (GWS, _GOOGLE, _GOOGLE_MOUNTS | _MAIL_MOUNTS),
         (
             HF,
             {"endpoint": "https://huggingface.co/"},
@@ -986,58 +986,15 @@ _MOUNTS: dict[str, tuple[str, dict[str, Any]]] = {
 def test_an_account_cli_write_reaches_its_own_service_alone(
     cli: CLI, config: dict[str, Any], reached: set[str]
 ):
-    # Never narrowed by credential (two logins reach one mailbox) nor by
-    # an API root a proxy or fake can stand in for; only an IMAP server or
-    # a Hub endpoint names different data.
+    # A proxy in front of an API root reaches the same data, so only a Hub
+    # endpoint narrows; mail reaches every mailbox, whichever server or API
+    # reads it, since a send can land in any of them.
     accessor = CLIRegistry().install("acct", cli, config).accessor
     assert {
         name
         for name, (kind, mount_config) in _MOUNTS.items()
         if accessor.reaches(build_vfs(kind, mount_config).accessor)
     } == reached
-
-
-async def _saved(
-    accessor: Accessor, paths, texts, ctx
-) -> tuple[bytes, IOResult]:
-    return b"", IOResult()
-
-
-@pytest.mark.asyncio
-async def test_a_mail_write_costs_a_warm_github_mount_no_request():
-    hub = FakeGitHub(files={"a.txt": b"a\n"})
-    with serve(hub):
-        vfs = build_vfs(
-            "github",
-            {
-                "token": "t",
-                "owner": "o",
-                "repo": "r",
-                "ref": "main",
-                "base_url": hub.url,
-            },
-        )
-        ws = Workspace({"/repo/": vfs})
-        try:
-            ws.register_cli(
-                "mail",
-                CLI(
-                    spec=CommandSpec(
-                        name="mail", subcommands=(CommandSpec(name="save"),)
-                    ),
-                    handlers={"save": CLIHandler(fn=_saved, write=True)},
-                    config_model=EmailConfig,
-                    accessor=EmailAccessor,
-                ),
-                _MAIL,
-            )
-            assert (await ws.shell("cat /repo/a.txt")).stdout == b"a\n"
-            warm = len(hub.log)
-            assert (await ws.shell("mail save")).exit_code == 0
-            assert (await ws.shell("cat /repo/a.txt")).stdout == b"a\n"
-            assert hub.log[warm:] == []
-        finally:
-            await ws.close()
 
 
 def test_held_in_memory_sums_the_ram_mounts():

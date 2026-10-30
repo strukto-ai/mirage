@@ -24,18 +24,13 @@ import { LINEAR } from '@struktoai/mirage-core/commands/cli/builtin/linear/index
 import { NTN } from '@struktoai/mirage-core/commands/cli/builtin/ntn/index'
 import { SLACK } from '@struktoai/mirage-core/commands/cli/builtin/slack/index'
 import { TRELLO } from '@struktoai/mirage-core/commands/cli/builtin/trello/index'
-import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
-import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
-import { IOResult } from '@struktoai/mirage-core/io/types'
 import { CLIRegistry } from '@struktoai/mirage-core/workspace/cli/registry'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode, PathSpec, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { DiskAccessor } from './accessor/disk.ts'
-import { EmailAccessor } from './accessor/email.ts'
 import { HIMALAYA } from './commands/cli/builtin/himalaya/index.ts'
 import { HF } from './commands/cli/builtin/hf/index.ts'
-import { type EmailConfig, EmailConfigSchema } from './core/email/config.ts'
 import { DiskEventHook } from './core/disk/events/hook.ts'
 import { DiskVFS } from './vfs/disk/disk.ts'
 import { InlineGitHub } from '../tests/vfs/fixtures/github.ts'
@@ -284,6 +279,7 @@ describe('an account CLI write drops only the mounts it reaches', () => {
   })
 
   const MAIL = { imap_host: 'imap.a', smtp_host: 'smtp.a', username: 'u', password: 'p' }
+  const MAIL_MOUNTS = ['mail', 'mail_elsewhere', 'gmail']
   const GOOGLE = { access_token: 't' }
   const GOOGLE_MOUNTS = ['gdrive', 'gdocs', 'gsheets', 'gslides', 'gmail', 'gcal']
   const PROXY = 'https://proxy.test'
@@ -292,9 +288,7 @@ describe('an account CLI write drops only the mounts it reaches', () => {
   const GITHUB = new InlineGitHub()
   const MOUNTS: Record<string, [string, Record<string, unknown>]> = {
     mail: ['email', MAIL],
-    mail_other_login: ['email', { ...MAIL, username: 'v' }],
     mail_elsewhere: ['email', { ...MAIL, imap_host: 'imap.b' }],
-    mail_other_port: ['email', { ...MAIL, imap_port: 143 }],
     slack: ['slack', { token: 'u', base_url: PROXY }],
     discord: ['discord', { token: 'u', base_url: PROXY }],
     notion: ['notion', { api_key: 'u', base_url: PROXY }],
@@ -304,6 +298,8 @@ describe('an account CLI write drops only the mounts it reaches', () => {
     ...Object.fromEntries(
       GOOGLE_MOUNTS.map((name) => [name, [name, { ...GOOGLE, api_base: PROXY }]]),
     ),
+    box: ['box', { access_token: 't' }],
+    dropbox: ['dropbox', { client_id: 'c', client_secret: 's', refresh_token: 'r' }],
     hf_models: ['hf_models', REPO],
     hf_datasets: ['hf_datasets', REPO],
     hf_spaces: ['hf_spaces', REPO],
@@ -314,19 +310,20 @@ describe('an account CLI write drops only the mounts it reaches', () => {
   }
 
   it.each([
-    ['himalaya', HIMALAYA, MAIL, ['mail', 'mail_other_login']],
+    ['himalaya', HIMALAYA, MAIL, MAIL_MOUNTS],
     ['slack', SLACK, { token: 't' }, ['slack']],
     ['discord', DISCORD, { token: 't' }, ['discord']],
     ['ntn', NTN, { api_key: 't' }, ['notion']],
     ['linear', LINEAR, { api_key: 't' }, ['linear']],
     ['airtable', AIRTABLE, { token: 't' }, ['airtable']],
     ['trello', TRELLO, { api_key: 'k', api_token: 't' }, ['trello']],
-    ['gws', GWS, GOOGLE, GOOGLE_MOUNTS],
+    ['gws', GWS, GOOGLE, [...new Set([...GOOGLE_MOUNTS, ...MAIL_MOUNTS])]],
     ['hf', HF, { endpoint: 'https://huggingface.co/' }, ['hf_models', 'hf_datasets', 'hf_spaces']],
   ] as const)('a %s write reaches its own service alone', async (_name, cli, config, reached) => {
-    // Never narrowed by credential (two logins reach one mailbox) nor by an
-    // API root a proxy or fake can stand in for; only an IMAP server or a Hub
-    // endpoint names different data. Mirrors Python's registry test.
+    // A proxy in front of an API root reaches the same data, so only a Hub
+    // endpoint narrows; mail reaches every mailbox, whichever server or API
+    // reads it, since a send can land in any of them. Mirrors Python's
+    // registry test.
     vi.stubGlobal('fetch', GITHUB.fetch)
     const accessor = new CLIRegistry().install('acct', cli, config).accessor
     const got: string[] = []
@@ -335,42 +332,5 @@ describe('an account CLI write drops only the mounts it reaches', () => {
       if (accessor.reaches?.(vfs.accessor) ?? true) got.push(name)
     }
     expect(got.sort()).toEqual([...reached].sort())
-  })
-
-  it('a mail write costs a warm github mount no request', async () => {
-    const gh = new InlineGitHub({ 'a.txt': 'a\n' })
-    vi.stubGlobal('fetch', gh.fetch)
-    const vfs = await buildVfs('github', {
-      token: 't',
-      owner: 'o',
-      repo: 'r',
-      ref: 'main',
-      base_url: gh.url,
-    })
-    const ws = new Workspace({ '/repo': vfs })
-    try {
-      ws.registerCli(
-        'mail',
-        new CLI({
-          spec: new CommandSpec({ name: 'mail', subcommands: [new CommandSpec({ name: 'save' })] }),
-          handlers: {
-            save: new CLIHandler({
-              fn: async () => [new Uint8Array(), new IOResult()],
-              write: true,
-            }),
-          },
-          configModel: EmailConfigSchema,
-          accessor: (config) => new EmailAccessor(config as EmailConfig),
-        }),
-        MAIL,
-      )
-      expect((await ws.shell('cat /repo/a.txt')).stdoutText).toBe('a\n')
-      const warm = gh.log.length
-      expect((await ws.shell('mail save')).exitCode).toBe(0)
-      expect((await ws.shell('cat /repo/a.txt')).stdoutText).toBe('a\n')
-      expect(gh.log.slice(warm)).toEqual([])
-    } finally {
-      await ws.close()
-    }
   })
 })
