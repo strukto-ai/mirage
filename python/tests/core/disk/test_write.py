@@ -271,6 +271,11 @@ async def _refuse_slowly(data):
     await _refuse(data)
 
 
+async def _brief():
+    yield b"first\n"
+    await asyncio.sleep(1.5 * STREAM_FLUSH_SECONDS)
+
+
 @pytest.mark.asyncio
 async def test_a_failed_timed_write_stops_a_writer_waiting_on_input(
     tmp_path, monkeypatch
@@ -320,16 +325,12 @@ async def test_input_ending_during_a_failed_timed_write_reports_the_error(
         f.write = _refuse_slowly
         return f
 
-    async def brief():
-        yield b"first\n"
-        await asyncio.sleep(1.5 * STREAM_FLUSH_SECONDS)
-
     monkeypatch.setattr(disk_write.aiofiles, "open", slow_and_full)
     with pytest.raises(OSError) as caught:
         await write(
             DiskAccessor(tmp_path),
             PathSpec.from_str_path("/file", vfs_path="file"),
-            brief(),
+            _brief(),
         )
     assert caught.value.errno == errno.ENOSPC
     assert asyncio.current_task().cancelling() == 0
