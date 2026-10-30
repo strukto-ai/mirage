@@ -334,3 +334,72 @@ fn session_grant_projections_require_and_register_a_live_caller() {
     let (blocked, _) = commit(&input);
     assert_eq!(blocked, json!({"kind":"blocked","status":"stale_holder"}));
 }
+
+#[test]
+fn exhausted_retention_refuses_without_discarding_terminal_tickets() {
+    let mut input = resolving();
+    input["ledger"]["retired"] = json!(vec!["retired"; ENTRY_LIMIT + 1]);
+    let original = input["ledger"]["retired"].clone();
+    let mut engine = open(b"{}").unwrap();
+    engine
+        .feed(&serde_json::to_vec(&input).unwrap(), &mut Vec::new())
+        .unwrap();
+    assert!(
+        engine
+            .finish(&mut Vec::new())
+            .unwrap_err()
+            .to_string()
+            .contains("entry limit")
+    );
+    assert!(engine.done());
+    assert!(engine.request(&mut Vec::new()).is_none());
+    assert_eq!(input["ledger"]["retired"], original);
+}
+
+#[test]
+fn oversized_retained_transition_cannot_publish_an_effect() {
+    let mut input = resolving();
+    input["event"]["question"]["id"] = json!("q".repeat(PACKET_BYTES / 4));
+    let mut engine = open(b"{}").unwrap();
+    engine
+        .feed(&serde_json::to_vec(&input).unwrap(), &mut Vec::new())
+        .unwrap();
+    assert!(
+        engine
+            .finish(&mut Vec::new())
+            .unwrap_err()
+            .to_string()
+            .contains("byte limit")
+    );
+    assert!(engine.done());
+    assert!(engine.request(&mut Vec::new()).is_none());
+    assert!(engine.finish(&mut Vec::new()).is_err());
+}
+
+#[test]
+fn pending_reservations_require_live_holders_and_pending_records() {
+    let mut input = resolving();
+    input["event"]["claimant"] = json!({"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[],"start":0,"end":0}});
+    let (_, ledger) = commit(&input);
+    for mutation in ["holder", "decision", "outcome", "duplicate"] {
+        input["ledger"] = ledger.clone();
+        match mutation {
+            "holder" => input["ledger"]["holders"][0]["active"] = json!(false),
+            "decision" => input["ledger"]["pending_claims"][0]["decision"] = json!("missing"),
+            "outcome" => input["ledger"]["records"][0]["outcome"] = json!("allow"),
+            _ => {
+                let reservation = input["ledger"]["pending_claims"][0].clone();
+                input["ledger"]["pending_claims"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(reservation);
+            }
+        }
+        let mut engine = open(b"{}").unwrap();
+        engine
+            .feed(&serde_json::to_vec(&input).unwrap(), &mut Vec::new())
+            .unwrap();
+        assert!(engine.finish(&mut Vec::new()).is_err(), "{mutation}");
+        assert!(engine.request(&mut Vec::new()).is_none());
+    }
+}
