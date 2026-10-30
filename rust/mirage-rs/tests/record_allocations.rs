@@ -109,7 +109,10 @@ fn short_records_bound_allocation_volume_and_live_input() {
         ("uniq", br#"{"count":true,"repeated":false,"unique":false,"counts":[],"ignore_case":true,"all_repeated":null,"group":null,"zero_terminated":false}"#),
     ] { hot_loop_allocations(kind, config, b"alpha,theta,words\n"); }
     for bytes in [4 * 1024 * 1024, 64 * 1024 * 1024] {
-        scatter_memory(bytes);
+        // Long records answered word for word, as a seeded source does, and
+        // short ones answered with the platform source's surplus words.
+        scatter_memory(bytes, 4096, false);
+        scatter_memory(bytes, 16, true);
     }
     shuffle_plan_memory();
     let row = [b"theta,\x80,".as_slice(), &vec![b'x'; 1015], b"\n"].concat();
@@ -331,10 +334,12 @@ fn hot_loop_allocations(kind: &str, config: &[u8], row: &[u8]) {
     );
 }
 
-fn scatter_memory(bytes: usize) {
+fn scatter_memory(bytes: usize, record: usize, surplus: bool) {
     let config = format!(r#"{{"mode":"scatter","separator":10,"size":{bytes}}}"#);
     let mut stream = mirage_rs::open("shuf", config.as_bytes()).unwrap();
-    let chunk = [b"x".repeat(4095), b"\n".to_vec()].concat().repeat(4);
+    let chunk = [b"x".repeat(record - 1), b"\n".to_vec()]
+        .concat()
+        .repeat(16 * 1024 / record);
     let mut out = Vec::new();
     let mut payload = Vec::new();
     let mut bucket = 0u64;
@@ -355,7 +360,11 @@ fn scatter_memory(bytes: usize) {
         let request: serde_json::Value = serde_json::from_slice(&request).unwrap();
         let data = match request["op"].as_str().unwrap() {
             "read" => chunk.clone(),
-            "words" => (0..request["count"].as_u64().unwrap())
+            "words" => (0..if surplus {
+                (2 * request["count"].as_u64().unwrap()).max(1024)
+            } else {
+                request["count"].as_u64().unwrap()
+            })
                 .flat_map(|_| {
                     let next = ((bucket as u32) << 27).to_le_bytes();
                     bucket = (bucket + 1) % 16;

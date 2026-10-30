@@ -967,25 +967,23 @@ impl Main {
     /// of the stream, or its parse error, and where the reader stands
     /// after it.
     fn answer(&mut self, read: Read, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let mut reply =
-            serde_json::json!({ "filename": self.reader.name, "line": self.reader.line });
+        let reply = |kind: &str| {
+            serde_json::json!({ "kind": kind, "filename": self.reader.name, "line": self.reader.line })
+                .to_string()
+        };
         match read {
             Read::Value(value) => {
                 self.eval
                     .answer(self.reader.place(), value, &mut self.wire)?;
             }
             Read::Error(message) => {
-                reply["kind"] = "error".into();
-                self.eval.respond(
-                    reply.to_string().as_bytes(),
-                    message.as_bytes(),
-                    &mut self.wire,
-                )?;
+                let reply = reply("error");
+                self.eval
+                    .respond(reply.as_bytes(), message.as_bytes(), &mut self.wire)?;
             }
             Read::End => {
-                reply["kind"] = "end".into();
-                self.eval
-                    .respond(reply.to_string().as_bytes(), b"", &mut self.wire)?;
+                let reply = reply("end");
+                self.eval.respond(reply.as_bytes(), b"", &mut self.wire)?;
             }
             Read::Wait(_) | Read::Working => unreachable!("an answer the reader has"),
         }

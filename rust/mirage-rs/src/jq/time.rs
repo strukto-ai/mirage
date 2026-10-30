@@ -63,11 +63,15 @@ pub(crate) struct Clock {
 
 impl Default for Clock {
     /// UTC, parsed once and shared: every run starts on it before the
-    /// host's zone replaces it.
+    /// host's zone replaces it. It is parsed unmetered, so the shared zone
+    /// keeps no run's meter.
     fn default() -> Self {
         static UTC: OnceLock<Arc<Zone>> = OnceLock::new();
         Self {
-            zone: Arc::clone(UTC.get_or_init(|| Arc::new(Zone::parse("UTC")))),
+            zone: Arc::clone(UTC.get_or_init(|| {
+                let _unmetered = super::meter::suspend();
+                Arc::new(Zone::parse("UTC"))
+            })),
         }
     }
 }
