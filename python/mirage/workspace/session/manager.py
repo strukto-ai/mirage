@@ -714,13 +714,13 @@ class SessionManager(SessionOwner):
         for sid, session in entries.items():
             lock = self._locks.setdefault(sid, asyncio.Lock())
             async with lock:
-                if sid not in self._resets:
-                    current = await self._store.get(sid)
-                    self._resets[sid] = plan_reset(
-                        session.to_dict(), current, close=False
-                    )
-                elif self._resets[sid].event["closed"] is not None:
-                    raise ApprovalUnavailable("session_transition_pending")
+                requested = copy.deepcopy(session.to_dict())
+                if sid in self._resets:
+                    if self._resets[sid].event["closed"] is not None:
+                        raise ApprovalUnavailable("session_transition_pending")
+                    await self._commit_reset(self._sessions.get(sid, session))
+                current = await self._store.get(sid)
+                self._resets[sid] = plan_reset(requested, current, close=False)
                 await self._commit_reset(session)
                 self._sessions[sid] = session
 

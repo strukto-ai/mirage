@@ -28,6 +28,7 @@ from mirage.workspace.session.approval import (
 )
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.session import SessionState
+from mirage.workspace.session.shell_dirs import set_cwd
 from mirage.workspace.session.state import seed_var
 
 
@@ -340,6 +341,52 @@ class LostClosureStore(RAMNamespaceStore):
         if self.lose_replies:
             raise OSError("committed but acknowledgement lost")
         return placed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reuse_live_session", [False, True])
+async def test_a_new_snapshot_does_not_reuse_an_uncertain_prior_reset(
+    reuse_live_session,
+):
+    store = LostClosureStore()
+    manager = SessionManager("s", store)
+    await manager.activate("s")
+    first = SessionState(
+        session_id="s", cwd="/snapshot-a", functions={"from_a": "echo a"}
+    )
+    seed_var(first, "SNAPSHOT", "A")
+    store.lose_replies = True
+    with pytest.raises(ApprovalUnavailable, match="storage_unconfirmed"):
+        await manager.replace_from_snapshot([first])
+    unconfirmed = await store.get("s")
+    second = (
+        manager.get("s")
+        if reuse_live_session
+        else SessionState(session_id="s")
+    )
+    set_cwd(second, "/snapshot-b")
+    second.functions = {"from_b": "echo b"}
+    requested_rules = AdmissionRules(
+        deny=(CommandRule(reason="snapshot B", commands=("touch",)),)
+    )
+    second.commands = requested_rules
+    seed_var(second, "SNAPSHOT", "B")
+    store.lose_replies = False
+    await manager.replace_from_snapshot([second])
+    live = manager.get("s")
+    stored = await store.get("s")
+    assert live.env["SNAPSHOT"] == stored["env"]["SNAPSHOT"] == "B"
+    assert live.cwd == stored["cwd"] == "/snapshot-b"
+    assert live.functions == stored["functions"] == {"from_b": "echo b"}
+    assert live.commands == requested_rules
+    assert SessionState.from_dict(stored).commands == requested_rules
+    assert live.incarnation == stored["incarnation"]
+    assert stored["incarnation"] != unconfirmed["incarnation"]
+    assert stored["approval_state"]["records"] == []
+    hydrated = SessionManager("s", store)
+    await hydrated.ensure_loaded()
+    assert hydrated.get("s").env["SNAPSHOT"] == "B"
+    assert hydrated.get("s").cwd == "/snapshot-b"
 
 
 @pytest.mark.asyncio
