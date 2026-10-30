@@ -238,11 +238,12 @@ async def test_trailing_redirect_binds_to_the_command_it_follows(
     try:
         await ws.shell("printf '1\\n2\\n3\\n' > /data/b.txt")
         io = await ws.shell(line)
-        # An unread producer may finish before the pipe closes or receive
-        # SIGPIPE, as GNU bash does under different process scheduling.
+        # A producer whose reader takes its input elsewhere may finish
+        # before the pipe closes or receive SIGPIPE, as GNU bash does under
+        # different process scheduling, whether or not the reader opened it.
         allowed = {stdout}
-        if "| cat < /data/b.txt" in line and "ps=0 0 0" in stdout:
-            allowed.add(stdout.replace("ps=0 0 0", "ps=141 0 0"))
+        if "| cat <" in line and "ps=0 " in stdout:
+            allowed.add(stdout.replace("ps=0 ", "ps=141 ", 1))
         assert await io.stdout_str() in allowed
         assert (await io.stderr_str(), io.exit_code) == (stderr, code)
     finally:
