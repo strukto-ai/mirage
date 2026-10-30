@@ -445,3 +445,50 @@ async def test_a_follow_stream_keeps_its_egress_past_the_op(port):
     finally:
         await ws.close()
     assert [(c.mount, c.port) for c in watch.asked] == [("/remote", port)]
+
+
+class _Cleanup:
+    """A follow's stream whose close tells the server it is done, as a
+    change stream drops its cursor."""
+
+    def __init__(self, port: int) -> None:
+        self.port = port
+
+    def __aiter__(self) -> "_Cleanup":
+        return self
+
+    async def __anext__(self) -> bytes:
+        raise StopAsyncIteration
+
+    async def aclose(self) -> None:
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        writer.write(b"GET / HTTP/1.1\r\nHost: remote\r\n\r\n")
+        await reader.read()
+        writer.close()
+
+
+class _Unsubscribing(RAMVFS):
+    def __init__(self, port: int) -> None:
+        super().__init__()
+        self.port = port
+
+    async def follow(
+        self, path: PathSpec, n: int, interval: float
+    ) -> AsyncIterator[bytes]:
+        return _Cleanup(self.port)
+
+
+@pytest.mark.asyncio
+async def test_a_follow_close_runs_as_the_stream_owner(port):
+    watch = _Watch()
+    ws = Workspace({"/remote": (_Unsubscribing(port), MountMode.WRITE)})
+    ws.policies.add(watch)
+    try:
+        await ws.shell("echo x > /remote/f")
+        stream, _ = await ws.dispatch(
+            "follow", PathSpec.from_str_path("/remote/f"), n=1, interval=1.0
+        )
+        await stream.aclose()
+    finally:
+        await ws.close()
+    assert [(c.mount, c.port) for c in watch.asked] == [("/remote", port)]

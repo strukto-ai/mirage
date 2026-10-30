@@ -483,6 +483,38 @@ describe('a workspace network rule', () => {
     expect(watch.asked.map((ctx) => [ctx.mount, ctx.port])).toEqual([['/remote', port]])
   })
 
+  // A RAM mount whose follow hands out a separate iterator whose close tells
+  // the server it is done, as a change stream drops its cursor.
+  class Unsubscribing extends RAMVFS {
+    override follow(): Promise<AsyncIterable<Uint8Array> | null> {
+      const at = port
+      return Promise.resolve({
+        [Symbol.asyncIterator]: () => ({
+          next: (): Promise<IteratorResult<Uint8Array>> =>
+            Promise.resolve({ value: undefined, done: true }),
+          return: async (): Promise<IteratorResult<Uint8Array>> => {
+            await ask(at)
+            return { value: undefined, done: true }
+          },
+        }),
+      })
+    }
+  }
+
+  it('closes a follow stream as its owner', async () => {
+    const watch = new Watch()
+    const ws = new Workspace({ '/remote': [new Unsubscribing(), MountMode.WRITE] as const })
+    ws.policies.add(watch)
+    try {
+      await ws.shell('echo x > /remote/f')
+      const stream = (await ws.dispatch('follow', '/remote/f', [1, 1])) as AsyncIterable<Uint8Array>
+      await stream[Symbol.asyncIterator]().return?.()
+    } finally {
+      await ws.close()
+    }
+    expect(watch.asked.map((ctx) => [ctx.mount, ctx.port])).toEqual([['/remote', port]])
+  })
+
   it('holds each session to its profile network besides the workspace one', async () => {
     const held = { allowed_domains: [`127.0.0.1:${String(port)}`] }
     const ws = new Workspace(

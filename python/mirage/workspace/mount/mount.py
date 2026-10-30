@@ -91,7 +91,7 @@ from mirage.context import (
     session_visibility,
     strongest_mode_under,
 )
-from mirage.context.session_context import with_caller
+from mirage.context.session_context import awaits_as, with_caller
 from mirage.core.dev.device import active_pipe, pipe_below
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.generic.rewrite import (
@@ -218,16 +218,20 @@ def _wrap_stream(result: Any, mount_id: str, activity: Activity) -> Any:
         mount_id (str): identity of the serving mount.
     """
     if hasattr(result, "__aiter__"):
+        caller = current_caller()
+        # The close, a cleanup request it may send among it, runs as the
+        # stream's own caller, whoever closes it and however late.
         return activity.hold(
             with_egress(
                 OutputStream(
                     with_host_io(
                         with_caller(
-                            with_mount_context(result, mount_id),
-                            current_caller(),
+                            with_mount_context(result, mount_id), caller
                         )
                     ),
-                    functools.partial(close_quietly, result),
+                    functools.partial(
+                        awaits_as(caller, close_quietly), result
+                    ),
                 )
             )
         )

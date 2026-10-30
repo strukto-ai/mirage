@@ -20,6 +20,7 @@ import { activePipe, pipeBelow } from '../../core/dev/device.ts'
 import type { DevicePipe } from '../../core/dev/pipe.ts'
 import { norm } from '../../utils/path.ts'
 import {
+  awaitsAs,
   type Caller,
   currentCaller,
   effectiveMountMode,
@@ -2429,13 +2430,19 @@ export function wrapStream(
     // The backend's own iterator, which the close reaches first: a pull
     // waiting inside it ends only once it is told.
     const iterator = (result as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+    const caller = currentCaller()
     const kept = withCaller(
       withMountContext({ [Symbol.asyncIterator]: () => iterator }, mountId),
-      currentCaller(),
+      caller,
     )
+    // The close, a cleanup request it may send among it, runs as the
+    // stream's own caller, whoever closes it and however late.
     return activity.hold(
       withEgress(
-        new OutputStream(kept[Symbol.asyncIterator](), () => closeQuietly(iterator)),
+        new OutputStream(
+          kept[Symbol.asyncIterator](),
+          awaitsAs(caller, () => closeQuietly(iterator)),
+        ),
         owner,
       ),
     )
