@@ -21,8 +21,9 @@ import pytest
 from mirage.core.jq.parse import (
     JqParser,
     decode_utf8,
+    read_texts,
     string_text,
-    utf8_missing,
+    value_text,
 )
 from mirage.core.jq.types import NO_VALUE, JqParseError
 
@@ -90,23 +91,6 @@ def test_string_text_is_json_jq_reads_back():
     assert string_text('a"\\\n\x7fé') == '"a\\"\\\\\\n\x7fé"'
 
 
-@pytest.mark.parametrize(
-    "piece,missing",
-    [
-        (b"a", 0),
-        (b"ab", 0),
-        (b"a\xe2", 2),
-        (b"a\xe2\x82", 1),
-        (b"a\xe2\x82\xac", 0),
-        (b"a\xf0\x9f", 2),
-        (b"a\x80", 0),
-        (b"a\xff", 0),
-    ],
-)
-def test_utf8_missing(piece, missing):
-    assert utf8_missing(piece) == missing
-
-
 @pytest.mark.asyncio
 async def test_large_unfinished_input_can_be_cancelled_and_discarded():
     parser = JqParser()
@@ -119,3 +103,27 @@ async def test_large_unfinished_input_can_be_cancelled_and_discarded():
             await pending
     finally:
         await parser.close()
+
+
+@pytest.mark.asyncio
+async def test_read_texts_reads_a_slurpfile_as_jq_does():
+    assert await read_texts(b'{"a":1.0}\n{"a":2}\n') == (
+        ['{"a":1.0}', '{"a":2}'],
+        None,
+    )
+    assert await read_texts(b"1 [") == (
+        ["1"],
+        JqParseError("Unfinished JSON term at EOF at line 1, column 3"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_value_text_takes_one_value_as_jv_parse_does():
+    assert (await value_text(b'{"b":1,"1":2.50}')) == '{"b":1,"1":2.50}'
+    assert (await value_text(b"nan")) == "nan"
+    assert (await value_text(b" 12 \n")) == "12"
+    assert (await value_text(b"\xef\xbb\xbf1.0")) == "1.0"
+    assert (await value_text(b"1 2")) is NO_VALUE
+    assert (await value_text(b"")) is NO_VALUE
+    assert (await value_text(b"nope")) is NO_VALUE
+    assert (await value_text(b"[1,")) is NO_VALUE

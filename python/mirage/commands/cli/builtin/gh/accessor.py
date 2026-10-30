@@ -25,7 +25,6 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from mirage.accessor.github import GitHubAccount
-from mirage.commands.builtin.generic.jq import Ending, Engine, local_zone
 from mirage.commands.builtin.utils.http import DEFAULT_PORTS
 from mirage.commands.cli.builtin.gh.constants import (
     CONNECT_HINT,
@@ -39,9 +38,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.core.github.constants import API_BASE
 from mirage.core.github.repo import RepoRef, parse_repo, repo_host
-from mirage.core.jq import JqHalt, JqRun
-from mirage.core.jq.stream import InputReader
-from mirage.core.jq.types import JqOptions
+from mirage.core.jq import Ending, Engine, JqHalt, JqRun, local_zone
 from mirage.core.render.json import compact_json_text
 from mirage.errors.fs import fs_strerror
 from mirage.io.stream import materialize
@@ -522,16 +519,13 @@ async def jq_lines(
     """
     env = json.dumps(dict(ctx.env or {}))
     zone = local_zone(ctx.env)
-    engine = Engine.open(program, JqOptions(), None, env, zone, None)
-    reader = InputReader([], JqOptions())
+    engine = Engine.open(program, env, zone)
     lines: list[str] = []
     try:
         for value in values:
             ending = Ending()
             async with aclosing(
-                engine.run(
-                    json.dumps(value), reader, lambda _line: None, ending
-                )
+                engine.run(json.dumps(value), ending)
             ) as texts:
                 outputs = [
                     json.loads(text, parse_int=float) async for text in texts
@@ -543,7 +537,6 @@ async def jq_lines(
                 raise StreamRefusal(failure, "".join(lines).encode())
     finally:
         await engine.close()
-        await reader.close()
     return "".join(lines)
 
 

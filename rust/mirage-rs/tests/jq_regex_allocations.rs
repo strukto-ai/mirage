@@ -42,7 +42,7 @@ static ALLOCATOR: CountAlloc = CountAlloc;
 fn runtime_compile_allocations(pattern: &str) -> (usize, usize) {
     let config = serde_json::json!({
         "program": "test($pattern)",
-        "named": { "pattern": serde_json::to_string(pattern).unwrap() },
+        "named": [["pattern", serde_json::to_string(pattern).unwrap()]],
     });
     let mut stream = mirage_rs::open("jq_eval", config.to_string().as_bytes()).unwrap();
     let mut out = Vec::new();

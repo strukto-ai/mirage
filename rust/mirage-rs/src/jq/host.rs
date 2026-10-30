@@ -384,7 +384,7 @@ mod tests {
         assert_eq!(got.frames, [r#"["/home/a","/home/a",["A","HOME"]]"#]);
         let mut stream = open(serde_json::json!({
             "program": "[$ENV, env.HOME, (1 as $ENV | $ENV)]",
-            "named": { "ENV": "\"x\"" },
+            "named": [["ENV", "\"x\""]],
             "env": r#"{"HOME":"/home/a"}"#,
         }));
         let got = run(&mut *stream, "{}", "null", &[]);

@@ -18,8 +18,7 @@
 import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { GITHUB_API_BASE } from '../../../../core/github/client.ts'
 import { parseRepo, repoHost, type RepoRef } from '../../../../core/github/repo.ts'
-import { InputReader, jqOptions, type JqRun } from '../../../../core/jq/index.ts'
-import { Engine, localZone, type Ending } from '../../../builtin/generic/jq.ts'
+import { Engine, localZone, type Ending, type JqRun } from '../../../../core/jq/index.ts'
 import { UsageError } from '../../../errors.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
@@ -410,14 +409,13 @@ export async function jqLines(
 ): Promise<string> {
   const env = JSON.stringify(ctx.env ?? {})
   const zone = localZone(ctx.env)
-  const engine = await Engine.open(program, jqOptions(), null, env, zone, null, ctx.signal)
-  const reader = new InputReader([], jqOptions())
+  const engine = await Engine.open(program, env, zone, ctx.signal)
   const lines: string[] = []
   try {
     for (const value of values) {
       const ending: Ending = { stop: null }
       const outputs: unknown[] = []
-      for await (const text of engine.run(JSON.stringify(value), reader, () => undefined, ending)) {
+      for await (const text of engine.run(JSON.stringify(value), ending)) {
         outputs.push(JSON.parse(text))
       }
       const run: JqRun = { outputs, stop: ending.stop }
@@ -429,7 +427,6 @@ export async function jqLines(
     }
   } finally {
     await engine.close()
-    await reader.close()
   }
   return lines.join('')
 }

@@ -17,9 +17,8 @@ import json
 import time
 from pathlib import Path
 
-from mirage.commands.builtin.generic.jq import FRAME_OUTPUT, read_frames
-from mirage.core.jq import InputSource, JqError, read_texts
-from mirage.io.stream import yield_bytes
+from mirage.core.jq import JqError, read_texts
+from mirage.core.jq.eval import read_frames
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import open_stream
 from mirage.types import JsonValue, MountMode
@@ -69,9 +68,9 @@ def jq_texts(text: str, expr: str) -> list[JsonValue]:
         raise ValueError(exc.message) from exc
     position: dict[str, JsonValue] = {"filename": None, "line": 0}
     stream.begin(position)
-    frames: list[tuple[int, bytes]] = []
-    stop = read_frames(stream.feed(text.encode()), frames)
-    stop = read_frames(stream.finish(), frames) or stop
+    outputs: list[bytes] = []
+    stop = read_frames(stream.feed(text.encode()), outputs)
+    stop = read_frames(stream.finish(), outputs) or stop
     while True:
         if stream.busy():
             wire = stream.drain()
@@ -84,10 +83,10 @@ def jq_texts(text: str, expr: str) -> list[JsonValue]:
             wire = stream.respond(reply, b"")
         else:
             break
-        stop = read_frames(wire, frames) or stop
+        stop = read_frames(wire, outputs) or stop
     if isinstance(stop, JqError):
         raise ValueError(stop.text)
-    return [json.loads(out) for tag, out in frames if tag == FRAME_OUTPUT]
+    return [json.loads(out) for out in outputs]
 
 
 def eval_one(obj: JsonValue, expr: str) -> JsonValue:
@@ -114,8 +113,7 @@ def documents(backend, path):
         path (str): the file.
     """
     store = backend.accessor.store
-    source = InputSource(path, yield_bytes(store.files[_norm(path)]))
-    texts, failure = asyncio.run(read_texts(source))
+    texts, failure = asyncio.run(read_texts(store.files[_norm(path)]))
     assert failure is None, failure
     return [json.loads(text) for text in texts]
 

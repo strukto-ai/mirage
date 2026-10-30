@@ -17,7 +17,6 @@ export const DEFAULT_INDENT = 2
 // What jq names standard input when it reports where it stands, and what
 // it reports before it has read any input at all.
 export const STDIN_NAME = '<stdin>'
-export const UNKNOWN_POSITION = '<unknown>'
 
 /**
  * jq's `jv_invalid()` where a value could stand: nothing yet, which is not
@@ -33,16 +32,6 @@ export type NoValue = typeof NO_VALUE
  */
 export class JqParseError {
   constructor(readonly message: string) {}
-}
-
-/**
- * One input of the stream jq reads: a file operand or stdin. `name` is the
- * input as jq reports it, the operand as the command line spelled it or
- * `<stdin>`.
- */
-export interface InputSource {
-  readonly name: string
-  readonly chunks: AsyncIterable<Uint8Array>
 }
 
 /**
@@ -84,18 +73,6 @@ export interface JqRun<T = unknown> {
   /** The error or the halt that ended it, or null when it ran to its end. */
   readonly stop: JqError | JqHalt | null
 }
-
-/** Which of the builtins that read the input stream a program calls. */
-export interface StreamReads {
-  /** `input`, which takes the next unread document. */
-  readonly input: boolean
-  /** `inputs`, which yields every unread document. */
-  readonly inputs: boolean
-}
-
-// The record separator an application/json-seq stream puts before every
-// value (RFC 7464).
-export const RS = '\u001e'
 
 /**
  * One jq invocation's resolved options.

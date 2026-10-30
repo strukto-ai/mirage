@@ -8,7 +8,7 @@ use super::format::{self, Formatter};
 use super::host::{Host, Message, Reply, Request};
 use super::meter::{self, Charge, Meter};
 use super::time::{Clock, Zone};
-use super::value::{Dumping, Object, Parsing, Value, parse_json};
+use super::value::{Dumping, Key, Object, Parsing, Value, parse_json};
 use super::vm::{Halt, Limits, Next, Program, Raise, Vm};
 
 pub(super) const STEPS: u64 = 1 << 16;
@@ -33,10 +33,15 @@ const PRINT_SLICE: u64 = (format::LIMIT / 64) as u64;
 #[serde(deny_unknown_fields)]
 struct Config {
     program: String,
+    /// The `--arg`, `--argjson`, `--rawfile` and `--slurpfile` bindings as
+    /// name and JSON text, in the order they were bound; each binds `$name`
+    /// when the name is one.
     #[serde(default)]
-    named: HashMap<String, String>,
+    named: Vec<(String, String)>,
+    /// The JSON text of each `$ARGS.positional` value; given, `$ARGS` is
+    /// bound, its `named` sharing the bindings' values.
     #[serde(default)]
-    args: Option<String>,
+    positional: Option<Vec<String>>,
     #[serde(default)]
     env: Option<String>,
     #[serde(default = "steps")]
@@ -55,7 +60,7 @@ struct Config {
     /// which `get_prog_origin` answers.
     #[serde(default)]
     prog_origin: Option<String>,
-    /// The options jq prints its outputs by (jq_format's): each output
+    /// The options jq prints its outputs by: each output
     /// then goes out printed, in a print frame, instead of as its dump.
     #[serde(default)]
     print: Option<format::Config>,
@@ -192,7 +197,7 @@ impl Printing {
 /// compact dump fed to the formatter a piece a slice, and what it printed
 /// since it last went out, after a byte that says whether the output was
 /// null or false, which `-e` reads.
-struct Formatting {
+pub(super) struct Formatting {
     formatter: Formatter,
     text: String,
     fed: usize,
@@ -202,7 +207,7 @@ struct Formatting {
 }
 
 impl Formatting {
-    fn begin(options: &format::Config, text: String) -> Self {
+    pub(super) fn begin(options: &format::Config, text: String) -> Self {
         let printed = vec![u8::from(text == "null" || text == "false")];
         Self {
             formatter: Formatter::new(options.clone()),
@@ -216,7 +221,7 @@ impl Formatting {
 
     /// Print on while the budget lasts: None until the output is printed,
     /// then the formatter's refusal of it, if it refused it.
-    fn run(&mut self, budget: &mut u64) -> Option<Result<(), StreamError>> {
+    pub(super) fn run(&mut self, budget: &mut u64) -> Option<Result<(), StreamError>> {
         while self.refused.is_none() && (!self.finished || self.formatter.busy()) {
             if *budget == 0 {
                 return None;
@@ -244,6 +249,12 @@ impl Formatting {
     /// Send what it printed so far in a print frame.
     fn flush(&mut self, out: &mut Vec<u8>) {
         frame(PRINT, &self.printed, out);
+        self.printed.truncate(1);
+    }
+
+    /// Hand on what it printed so far.
+    pub(super) fn take(&mut self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.printed[1..]);
         self.printed.truncate(1);
     }
 
@@ -277,7 +288,7 @@ impl Formatting {
 /// prints (the compact dump of `["DEBUG:", value]`), and what `stderr`
 /// writes (the bytes). An output is dumped on the same step budget, so
 /// a large one takes several drains and its frame goes out whole once
-/// it is written. Given jq_format's options as `print`, the stream prints
+/// it is written. Given jq's printer options as `print`, the stream prints
 /// each output itself, on that budget too, and writes print frames
 /// instead: a byte set when the output was null or false, then the bytes
 /// printed since the last, at least one frame an output and its last
@@ -290,7 +301,7 @@ impl Formatting {
 /// for `{"op": "input"}`, and `respond` takes the next document, the end
 /// of the stream, or the reader's parse error, as jq's input callback
 /// answers it, and the reader's position after it.
-struct Eval {
+pub(super) struct Eval {
     program: Arc<Program>,
     limits: Limits,
     meter: Arc<Meter>,
@@ -315,18 +326,35 @@ struct Eval {
 /// refused with jq's report, whose last line is its `jq: N compile
 /// error(s)` count; any other refusal names what jq_eval cannot run yet.
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
+    Ok(Box::new(compile(config)?))
+}
+
+/// The configured program compiled, as `open` refuses it.
+pub(super) fn compile(config: &[u8]) -> Result<Eval, StreamError> {
     let config: Config = serde_json::from_slice(config)
         .map_err(|e| StreamError::new(format!("bad jq_eval config: {e}")))?;
     let meter = Arc::new(Meter::limited(config.memory));
     let _metered = meter::install(&meter);
     let mut globals = HashMap::new();
+    let mut named = config.positional.is_some().then(Object::default);
     for (name, text) in &config.named {
+        let value = json(text)?;
+        if let Some(named) = &mut named {
+            named.insert(Key::from(name.as_str()), value.clone());
+        }
         if is_ident(name) {
-            globals.insert(name.clone(), json(text)?);
+            globals.insert(name.clone(), value);
         }
     }
-    if let Some(args) = &config.args {
-        globals.insert("ARGS".to_string(), json(args)?);
+    if let (Some(positional), Some(named)) = (&config.positional, named) {
+        let positional = positional
+            .iter()
+            .map(|text| json(text))
+            .collect::<Result<_, _>>()?;
+        let mut args = Object::default();
+        args.insert(Key::from("positional"), Value::array(positional));
+        args.insert(Key::from("named"), Value::object(named));
+        globals.insert("ARGS".to_string(), Value::object(args));
     }
     let env = match &config.env {
         Some(text) => json(text)?,
@@ -339,7 +367,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         zone: Arc::new(Zone::parse(config.zone.as_deref().unwrap_or("UTC"))),
     };
     let compile_limited = meter.exceeded();
-    Ok(Box::new(Eval {
+    Ok(Eval {
         program,
         limits: Limits {
             blocks: config.blocks,
@@ -363,7 +391,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         print: config.print,
         formatting: None,
         state: State::Feeding,
-    }))
+    })
 }
 
 fn place(host: &mut Host, position: Position) {
@@ -399,12 +427,22 @@ fn frame(tag: u8, payload: &[u8], out: &mut Vec<u8>) {
     out.extend_from_slice(payload);
 }
 
-fn memory_error_frame(limits: Limits, out: &mut Vec<u8>) {
-    let text = format!("jq memory limit of {} bytes exceeded", limits.memory);
+/// The error a run ends with once it holds more than `memory` bytes.
+pub(super) fn memory_report(memory: usize) -> String {
+    format!("jq memory limit of {memory} bytes exceeded")
+}
+
+/// An error frame: its flag byte (bit 0 for a string, bit 1 when the
+/// program raised it with `error` itself), then its text.
+fn error_frame(flags: u8, text: &str, out: &mut Vec<u8>) {
     out.push(ERROR);
     out.extend_from_slice(&((text.len() + 1) as u32).to_le_bytes());
-    out.push(1);
+    out.push(flags);
     out.extend_from_slice(text.as_bytes());
+}
+
+fn memory_error_frame(limits: Limits, out: &mut Vec<u8>) {
+    error_frame(1, &memory_report(limits.memory), out);
 }
 
 impl Stream for Eval {
@@ -546,11 +584,7 @@ impl Stream for Eval {
                         };
                         let mut formatting = self.formatting.take().expect("the printed output");
                         if let Err(refusal) = printed {
-                            let text = refusal.message;
-                            out.push(ERROR);
-                            out.extend_from_slice(&((text.len() + 1) as u32).to_le_bytes());
-                            out.push(1);
-                            out.extend_from_slice(text.as_bytes());
+                            error_frame(1, &refusal.message, out);
                             break;
                         }
                         formatting.flush(out);
@@ -577,10 +611,7 @@ impl Stream for Eval {
                                 }
                             },
                             PrintKind::Error(string, own) => {
-                                out.push(ERROR);
-                                out.extend_from_slice(&((text.len() + 1) as u32).to_le_bytes());
-                                out.push(u8::from(string) | u8::from(own) << 1);
-                                out.extend_from_slice(text.as_bytes());
+                                error_frame(u8::from(string) | u8::from(own) << 1, &text, out);
                                 break;
                             }
                             PrintKind::HaltMessage(string, code) => {
@@ -782,6 +813,29 @@ impl Drop for Eval {
 }
 
 impl Eval {
+    /// Take a whole document's text, as `feed` takes it, without copying
+    /// it: what the reader read of the document is the run's input.
+    pub(super) fn feed_owned(&mut self, mut text: Vec<u8>) -> Result<(), StreamError> {
+        if !self.pending.is_empty() {
+            return self.feed(&text, &mut Vec::new());
+        }
+        if !matches!(self.state, State::Feeding) {
+            return Err(StreamError::new("jq_eval: begin the next document first"));
+        }
+        let _metered = meter::install(&self.meter);
+        text.shrink_to_fit();
+        if self.input_limited
+            || self.meter.live().saturating_add(text.capacity()) > self.limits.memory
+        {
+            self.input_limited = true;
+            return Ok(());
+        }
+        self.pending = text;
+        self.pending_charge.set(self.pending.capacity());
+        self.input_limited |= self.meter.exceeded();
+        Ok(())
+    }
+
     fn compiled(&self) -> Arc<Program> {
         Arc::clone(&self.program)
     }

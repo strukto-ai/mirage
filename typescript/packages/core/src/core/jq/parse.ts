@@ -28,31 +28,6 @@ export async function decodeUtf8(data: Uint8Array, signal?: AbortSignal): Promis
   return DEC.decode(concat(parts))
 }
 
-/** Bytes needed to finish a jq reader piece's final UTF-8 character. */
-export function utf8Missing(piece: Uint8Array): number {
-  let at = piece.length - 1
-  if (at <= 0) return 0
-  let seen = 1
-  for (;;) {
-    const byte = piece[at] ?? 0
-    if (byte < 0x80 || byte >= 0xc0 || at === 0) break
-    at -= 1
-    seen += 1
-  }
-  const first = piece[at] ?? 0
-  const length =
-    first < 0x80
-      ? 1
-      : first >= 0xc2 && first < 0xe0
-        ? 2
-        : first >= 0xe0 && first < 0xf0
-          ? 3
-          : first >= 0xf0 && first <= 0xf4
-            ? 4
-            : 0
-  return Math.max(0, length - seen)
-}
-
 /** Quote a host string for the evaluator. */
 export function stringText(value: string): string {
   return JSON.stringify(value)
@@ -127,5 +102,42 @@ export class JqParser {
       } else return NO_VALUE
       if (output.length > 0) this.wire = concat([this.wire, output])
     }
+  }
+}
+
+/**
+ * The JSON text of the one value a text holds, as jq's jv_parse reads an
+ * --argjson or a --jsonargs value, or NO_VALUE when it holds none, several,
+ * or bad JSON.
+ */
+export async function valueText(text: Uint8Array): Promise<string | NoValue> {
+  const parser = new JqParser()
+  try {
+    parser.feed(text, false)
+    const value = await parser.next()
+    if (value === NO_VALUE || value instanceof JqParseError) return NO_VALUE
+    return (await parser.next()) === NO_VALUE ? value.trim() : NO_VALUE
+  } finally {
+    await parser.close()
+  }
+}
+
+/**
+ * The JSON text of every value a file holds, and the parse error that ended
+ * it early, as jq reads a --slurpfile.
+ */
+export async function readTexts(text: Uint8Array): Promise<[string[], JqParseError | null]> {
+  const parser = new JqParser()
+  const texts: string[] = []
+  try {
+    parser.feed(text, false)
+    for (;;) {
+      const value = await parser.next()
+      if (value instanceof JqParseError) return [texts, value]
+      if (value === NO_VALUE) return [texts, null]
+      texts.push(value)
+    }
+  } finally {
+    await parser.close()
   }
 }

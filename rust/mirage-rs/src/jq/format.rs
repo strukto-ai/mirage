@@ -44,7 +44,8 @@ impl Default for Config {
     }
 }
 
-pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
+#[cfg(test)]
+fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     Ok(Box::new(Formatter::new(crate::parse_config(config)?)))
 }
 

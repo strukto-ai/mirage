@@ -99,7 +99,7 @@ fn outputs(program: &str, input: &str) -> Vec<String> {
         .collect()
 }
 
-/// Run `program` over `input`, printing its outputs by jq_format's
+/// Run `program` over `input`, printing its outputs by jq's printer
 /// `options`, with `steps` VM steps per drain; and how many drains it took.
 fn printed(
     program: &str,
@@ -1331,8 +1331,8 @@ fn a_program_deeper_than_bisons_stack_exhausts_its_memory() {
 fn named_arguments_and_args_bind_as_constants() {
     let config = serde_json::json!({
         "program": "[$x, $ARGS.named.x]",
-        "named": { "x": "\"v\"" },
-        "args": r#"{"positional":[],"named":{"x":"v"}}"#,
+        "named": [["x", "\"v\""]],
+        "positional": [],
     });
     let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
     let mut wire = Vec::new();

@@ -13,6 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from mirage.errors.fs import fs_strerror
+
+
 class JqCompileError(ValueError):
     """jq's refusal of a program, which jq reports on stderr and exits 3
     for.
@@ -22,4 +25,18 @@ class JqCompileError(ValueError):
     """
 
 
-__all__ = ["JqCompileError"]
+def load_failure(name: str, exc: BaseException) -> str:
+    """Why jq could not load a whole file (jv_load_file): an -f program,
+    a --rawfile or a --slurpfile. It opens the file itself, so a
+    directory gets words of its own instead of a failed read.
+
+    Args:
+        name (str): the file as typed.
+        exc (BaseException): why it could not be read.
+    """
+    if isinstance(exc, IsADirectoryError):
+        return f"Could not open {name}: It's a directory"
+    return f"Could not open {name}: {fs_strerror(exc)}"
+
+
+__all__ = ["JqCompileError", "load_failure"]

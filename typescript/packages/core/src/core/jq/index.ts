@@ -12,25 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { JqCompileError } from './errors.ts'
-export { argsText, referencesArgs, streamReads } from './eval.ts'
-export { errorReport, formatOne, haltReport, loadFailure, printConfig } from './format.ts'
-export { JqParser, decodeUtf8, stringText } from './parse.ts'
-export { InputReader, readTexts, valueText } from './stream.ts'
-export {
-  DEFAULT_INDENT,
-  JqParseError,
-  NO_VALUE,
-  STDIN_NAME,
-  UNKNOWN_POSITION,
-  jqOptions,
-} from './types.ts'
-export type {
-  InputSource,
-  JqError,
-  JqHalt,
-  JqOptions,
-  JqRun,
-  NoValue,
-  StreamReads,
-} from './types.ts'
+export { JqCompileError, loadFailure } from './errors.ts'
+export { Engine, localZone } from './eval.ts'
+export type { Ending } from './eval.ts'
+export { JqParser, decodeUtf8, readTexts, stringText, valueText } from './parse.ts'
+export { DEFAULT_INDENT, JqParseError, NO_VALUE, STDIN_NAME, jqOptions } from './types.ts'
+export type { JqError, JqHalt, JqOptions, JqRun, NoValue } from './types.ts'
