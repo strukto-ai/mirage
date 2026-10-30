@@ -25,7 +25,20 @@ vi.mock('../../shell/job_table/constants.ts', async (importOriginal) => ({
 }))
 
 class Held extends JobConsole {
-  override emit(): Promise<void> {
+  readonly reached: Promise<void>
+  readonly channels: Channel[] = []
+  private reach = (): void => undefined
+
+  constructor() {
+    super()
+    this.reached = new Promise<void>((resolve) => {
+      this.reach = resolve
+    })
+  }
+
+  override emit(channel: Channel): Promise<void> {
+    this.channels.push(channel)
+    this.reach()
     return new Promise(() => undefined)
   }
 }
@@ -34,19 +47,36 @@ const DEC = new TextDecoder()
 
 describe('a job past its limit', () => {
   it('ends while a reader holds its output', async () => {
+    // Cold preflight must not spend the launcher's budget before it creates
+    // a job; advance the unchanged deadline only after output is held.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       { mode: MountMode.WRITE, commandLimits: { '@line': new Limit({ timeoutSeconds: 0.2 }) } },
     )
     try {
-      Object.assign(ws.sessionManager.get(ws.defaultSessionId).tty, { jobs: new Held() })
-      await ws.shell('seq 1 1000000000 &')
-      const job = await ws.jobTable.wait(1, ws.defaultSessionId)
+      const reader = new Held()
+      Object.assign(ws.sessionManager.get(ws.defaultSessionId).tty, { jobs: reader })
+      expect((await ws.shell('seq 1 1000000000 &')).exitCode).toBe(0)
+      await reader.reached
+      expect(reader.channels).toEqual([Channel.STDOUT])
+      const waiting = ws.jobTable.wait(1, ws.defaultSessionId)
+      let ended = false
+      void waiting.then(() => {
+        ended = true
+      })
+      await vi.advanceTimersByTimeAsync(199)
+      expect(ended).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      const job = await waiting
       expect(job.exitCode).toBe(124)
       expect(DEC.decode(await job.console.snapshot(Channel.STDERR))).toBe(
         'line: timed out after 0.2s\n',
       )
+      expect(reader.channels).toEqual([Channel.STDOUT, Channel.STDERR])
+      expect(ws.processes.live()).toHaveLength(0)
     } finally {
+      vi.useRealTimers()
       await ws.close()
     }
   }, 10_000)

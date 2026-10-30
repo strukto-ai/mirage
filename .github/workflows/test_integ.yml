@@ -2173,6 +2173,7 @@ jobs:
       INTEG_RUNTIME_STRICT: "1"
       # The shared sandbox cases, run through the e2b runtime only.
       INTEG_RUNTIMES: e2b
+      PYTHONFAULTHANDLER: "1"
     steps:
       - uses: actions/checkout@v7
 
@@ -2248,13 +2249,18 @@ jobs:
               sandbox = await AsyncSandbox.create(timeout=1800)
               # sshfs, so mount_type can serve the workspace into the
               # sandbox; /boxdata is a mount of its own, for `both`.
-              await sandbox.commands.run(
+              setup = await sandbox.commands.run(
                   "sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive "
                   "apt-get install -y -qq sshfs >/dev/null && sudo mkdir -p /boxdata && "
                   "sudo mount -t tmpfs tmpfs /boxdata && "
                   "echo box | sudo tee /boxdata/own.txt >/dev/null",
+                  background=True,
                   timeout=300,
               )
+              try:
+                  await setup.wait()
+              finally:
+                  await setup.disconnect()
               with open(os.environ["GITHUB_ENV"], "a") as env:
                   env.write(f"MIRAGE_INTEG_E2B_SANDBOX={sandbox.sandbox_id}\n")
                   env.write("MIRAGE_INTEG_BOX_MOUNTS=1\n")
