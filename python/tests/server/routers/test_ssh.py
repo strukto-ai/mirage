@@ -133,6 +133,20 @@ async def test_a_line_runs_over_the_https_route(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_page_on_another_origin_cannot_open_the_route(tmp_path):
+    async with _serving(tmp_path) as address:
+        async with AsyncClient(base_url=f"http://{address}") as client:
+            r = await client.post("/v1/workspaces", json={**RAM, "id": "w"})
+            assert r.status_code == 201, r.text
+        with pytest.raises(InvalidStatus) as refused:
+            await connect(
+                f"ws://{address}/v1/workspaces/w/ssh",
+                additional_headers={"Origin": "https://evil.example"},
+            )
+        assert refused.value.response.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_the_login_must_name_the_routes_workspace(tmp_path):
     async with _serving(tmp_path) as address:
         async with AsyncClient(base_url=f"http://{address}") as client:
