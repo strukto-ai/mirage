@@ -98,16 +98,17 @@ export function networkLayer(setting: unknown): Record<string, JsonValue> | null
 /**
  * Whether two settings hold the same rule: their allowed and denied lists
  * name the same entries as written, in any order, `false` being an empty
- * allowed list. An entry is compared as written, since one spelling can be
- * an address and another a host name.
+ * allowed list and an empty denied list none at all, since it refuses
+ * nothing. An entry is compared as written, since one spelling can be an
+ * address and another a host name.
  */
 export function sameNetwork(a: NetworkSetting, b: NetworkSetting): boolean {
   const [left, right] = [a, b].map((setting) => {
     const layer = networkLayer(setting)
-    if (layer === null) return null
     const sorted = (entries: JsonValue | undefined): string[] | null =>
       entries === undefined ? null : [...new Set(entries as string[])].sort(compareCodePoints)
-    return JSON.stringify([sorted(layer.allow), sorted(layer.deny)])
+    const denied = sorted(layer?.deny)
+    return JSON.stringify([sorted(layer?.allow), denied?.length === 0 ? null : denied])
   })
   return left === right
 }

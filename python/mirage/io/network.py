@@ -77,9 +77,14 @@ class NetworkRule:
         # The audit hook asks from any thread, and a test runs with the
         # GIL released: one test goes through the stream at a time.
         self._lock = threading.Lock()
-        # The name each address a lookup this rule let answered was asked
-        # for, which a connect, naming only its address, is judged by.
-        self._resolved: OrderedDict[str, str] = OrderedDict()
+        # Each address a lookup this rule let answered, with the port the
+        # lookup was for (None when it named none) and the name it was
+        # asked for, which a connect, naming only its address, is judged
+        # by. Keyed by the port too, so two names sharing an address keep
+        # their own ports.
+        self._resolved: OrderedDict[tuple[str, int | None], str] = (
+            OrderedDict()
+        )
 
     def lets(self, host: str, address: str, port: int | None = None) -> bool:
         """Whether a connection to ``address``, resolved for ``host``, opens.
@@ -96,8 +101,9 @@ class NetworkRule:
     def resolved(
         self, host: str, address: str, port: int | None = None
     ) -> bool:
-        """Whether a lookup of ``host`` may answer ``address``; the name
-        it was asked for judges this rule's connects to it.
+        """Whether a lookup of ``host`` may answer ``address``; one that
+        may lets this rule's connects to it at the port it was for, and
+        the name it was asked for judges the rest.
 
         Args:
             host (str): the name looked up.
@@ -108,22 +114,26 @@ class NetworkRule:
         if not self.lets(host, address, port):
             return False
         with self._lock:
-            self._resolved.pop(address, None)
-            self._resolved[address] = host
+            self._resolved.pop((address, port), None)
+            self._resolved[(address, port)] = host
             while len(self._resolved) > _RESOLVED_SIZE:
                 self._resolved.popitem(last=False)
         return True
 
     def connects(self, address: str, port: int | None = None) -> bool:
-        """Whether a connection to ``address`` opens, judged by the name a
-        lookup this rule let answered it for, else by its address alone.
+        """Whether a connection to ``address`` opens: one a lookup this
+        rule let answered for this port, else one judged by the name a
+        lookup that named no port answered it for, else by its address
+        alone.
 
         Args:
             address (str): the address it connects to.
             port (int | None): the port it connects to.
         """
         with self._lock:
-            host = self._resolved.get(address, "")
+            if (address, port) in self._resolved:
+                return True
+            host = self._resolved.get((address, None), "")
         return self.lets(host, address, port)
 
 

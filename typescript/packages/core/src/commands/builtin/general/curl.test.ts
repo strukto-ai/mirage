@@ -763,6 +763,29 @@ describe('curl -b and -c', () => {
     ])
   })
 
+  it('-c writes the jar when the reader lets the body go', async () => {
+    serve([{ body: 'body\n', headers: [['Set-Cookie', 'z=1']] }])
+    const cmd = GENERAL_CURL[0]
+    if (cmd === undefined) throw new Error('curl not registered')
+    const files: Record<string, string> = {}
+    const dispatch: DispatchFn = (_op, path, args) => {
+      files[path.virtual] = DEC.decode(args?.[0] as Uint8Array)
+      return Promise.resolve([null, new IOResult()])
+    }
+    const result = await cmd.fn(null as never, [], ['http://127.0.0.1:8080/jar/x'], {
+      stdin: null,
+      flags: { cookie_jar: '/data/jar' },
+      cwd: PathSpec.fromStrPath('/'),
+      vfs: new Files(dispatch, null, null, { ledger: false }),
+    })
+    if (result === null) throw new Error('no result')
+    const body = (result[0] as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+    const first = await body.next()
+    await body.return?.()
+    expect(DEC.decode(first.value as Uint8Array)).toBe('body\n')
+    expect(files['/data/jar']).toBe(`${JAR}127.0.0.1\tFALSE\t/jar/\tFALSE\t0\tz\t1\n`)
+  })
+
   it('-c - writes the jar to stdout after the body and -w', async () => {
     serve([{ body: 'body\n', headers: [['Set-Cookie', 'z=1']] }])
     const r = await run({ cookie_jar: '-', write_out: 'W\n' })

@@ -83,9 +83,10 @@ import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 
-// These producers write no named file while their output is consumed, so
-// their output streams into a redirect's file; any other command's output is
-// replayed once it ends.
+// These producers write no named file while their output is consumed (curl
+// writes its cookie jar once its body has ended), so their output streams
+// into a redirect's file; any other command's output is replayed once it
+// ends.
 const STREAM_OUTPUT_BUILTINS = new Set([
   'cat',
   'head',
@@ -116,6 +117,8 @@ const STREAM_OUTPUT_BUILTINS = new Set([
   'stat',
   'readlink',
   'realpath',
+  'curl',
+  'wget',
 ])
 
 /**

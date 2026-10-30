@@ -154,6 +154,15 @@ async def test_a_name_is_judged_by_the_host_it_was_asked_for(port):
     assert await _curl(port, other, "localhost") == 7
 
 
+def test_names_sharing_an_address_keep_their_own_ports():
+    rule = NetworkRule([{"allow": ["a.test:443", "b.test:8443"]}])
+    assert rule.resolved("a.test", "10.1.1.1", 443)
+    assert rule.resolved("b.test", "10.1.1.1", 8443)
+    assert rule.connects("10.1.1.1", 443)
+    assert rule.connects("10.1.1.1", 8443)
+    assert not rule.connects("10.1.1.1", 22)
+
+
 @pytest.mark.asyncio
 async def test_a_name_lends_its_address_to_no_other_name(port, monkeypatch):
     resolve = network._resolve
@@ -262,6 +271,64 @@ async def test_post_network_sees_a_refused_connection_fail(port):
     finally:
         await ws.close()
     assert [(e.status, e.failed) for e in watch.ended] == [(0, True)]
+
+
+class _Shut(Policy):
+    async def post_network(self, ctx: NetworkResultContext) -> Deny:
+        return Deny("no more requests")
+
+
+async def _held(port: int, line: str, *policies: Policy) -> int:
+    ws = Workspace({"/data": RAMVFS()})
+    for policy in policies:
+        ws.policies.add(policy)
+    try:
+        return (await ws.shell(line.format(port=port))).exit_code
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_post_network_reaches_each_policy_that_let_a_request_through(
+    port,
+):
+    counted, refusing = _Watch(), _Watch(refused=("127.0.0.1",))
+    line = "curl -sS http://127.0.0.1:{port}/"
+    assert await _held(port, line, counted, refusing) == 7
+    assert [(e.status, e.failed) for e in counted.ended] == [(0, True)]
+    assert (counted.open, refusing.open, refusing.ended) == (0, 0, [])
+
+
+@pytest.mark.asyncio
+async def test_a_post_network_deny_stops_no_other_policy(port):
+    counted = _Watch()
+    line = "curl -sS http://127.0.0.1:{port}/"
+    assert await _held(port, line, _Shut(), counted) == 7
+    assert [(e.status, e.failed) for e in counted.ended] == [(200, False)]
+    assert counted.open == 0
+
+
+@pytest_asyncio.fixture
+async def silent():
+    async def hold(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        await reader.read()
+        writer.close()
+
+    server = await asyncio.start_server(hold, "127.0.0.1", 0)
+    yield server.sockets[0].getsockname()[1]
+    server.close()
+    await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_request_still_ends(silent):
+    counted = _Watch()
+    line = "timeout 0.3 curl -sS http://127.0.0.1:{port}/"
+    assert await _held(silent, line, counted) == 124
+    assert [(e.status, e.failed) for e in counted.ended] == [(0, True)]
+    assert counted.open == 0
 
 
 @pytest.mark.asyncio

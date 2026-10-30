@@ -29,6 +29,7 @@ export class Workspace extends CoreWorkspace {
 
   constructor(...args: ConstructorParameters<typeof CoreWorkspace>) {
     super(...args)
+    this.registry.setNetworkWatch(watchNetwork)
     if (this.registry.network !== null) watchNetwork()
   }
 }

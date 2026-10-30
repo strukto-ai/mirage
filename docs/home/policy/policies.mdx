@@ -403,10 +403,13 @@ Deny at `post_session` gives the same answer and puts the old value back.
 request, before any connection opens. `post_network` runs once the
 transfer ends: `status` is the final response's (0 when none came), `size`
 the body bytes read, and `failed` whether the transfer broke off or never
-began. The redirects a request follows are part of it; the workspace's
-[`network`](/home/configuration#network) judges every connection they
-open. Together the two can hold a workspace to a number of requests at
-once:
+began. It runs once for each policy whose `pre_network` let the request
+through, however the request ended: refused by a later policy, cut short
+by a reader or a `timeout`, or finished. A Deny from one does not keep
+the others from running. The redirects a request follows are part of it;
+the workspace's [`network`](/home/configuration#network) judges every
+connection they open. Together the two can hold a workspace to a number
+of requests at once:
 
 <CodeGroup>
 

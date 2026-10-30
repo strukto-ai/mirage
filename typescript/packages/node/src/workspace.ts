@@ -67,6 +67,7 @@ export class Workspace extends CoreWorkspace {
       }
     }
     super(mounts, options)
+    this.registry.setNetworkWatch(watchNetwork)
     if (this.registry.network !== null) watchNetwork()
     if (mountTargets.length > 0) {
       // Kick off mounts eagerly; await inside fuseReady() / execute() / close()

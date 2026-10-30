@@ -18,9 +18,10 @@
 // earlier version threw on !resp.ok here, which made both tools fail on any
 // 4xx and leaked 'fetch failed' onto stderr for a refused connection.
 
-import { callerSignal, currentCaller } from '../../../context/session_context.ts'
+import { callerSignal, currentCaller, runLanding } from '../../../context/session_context.ts'
 import { primeStream } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
+import type { Policy } from '../../../policy/base.ts'
 import { PolicyDenied } from '../../../policy/errors.ts'
 import {
   linePolicies,
@@ -159,39 +160,39 @@ function failure(
 }
 
 // postNetwork once the transfer ends, however it ends: a refusal of one that
-// worked fails it as a broken transfer does.
+// worked fails it as a broken transfer does, and one of a transfer that
+// already broke leaves that failure standing.
 async function ended(
-  judges: Policies | null,
+  judge: Policies,
   asked: NetworkContext,
+  passed: readonly Policy[] | null,
   status: number,
   size: number,
   failed: boolean,
 ): Promise<void> {
   try {
-    await postNetworkGate(judges, { ...asked, status, size, failed })
+    await postNetworkGate(judge, { ...asked, status, size, failed }, passed)
   } catch (err) {
     if (!(err instanceof PolicyDenied)) throw err
     if (!failed) throw new HttpConnectError(asked.host, asked.port)
+    console.debug('postNetwork refused a failed request:', err.message)
   }
 }
 
 // The body as it arrives, under the same deadline and with the same failures
-// as the request; the deadline ends with it, and letting it go cancels the
-// rest of the transfer.
+// as the request; the deadline ends with it, letting it go cancels the rest of
+// the transfer, and the transfer ends then, however it stopped.
 async function* streamed(
   resp: Response,
   url: string,
   caller: AbortSignal | undefined,
   started: number,
   timer: ReturnType<typeof setTimeout> | null,
-  judges: Policies | null,
-  asked: NetworkContext,
+  end: (status: number, size: number, failed: boolean) => Promise<void>,
 ): AsyncGenerator<Uint8Array> {
   const reader = resp.body?.getReader()
   let size = 0
-  // Whether the transfer reached its end or broke off; neither when the
-  // reader let it go first.
-  let over = false
+  let whole = false
   try {
     if (reader !== undefined) {
       for (;;) {
@@ -199,8 +200,6 @@ async function* streamed(
         try {
           step = await reader.read()
         } catch (err) {
-          over = true
-          await ended(judges, asked, resp.status, size, true)
           throw failure(err, caller, url, started)
         }
         if (step.done) break
@@ -208,21 +207,20 @@ async function* streamed(
         yield step.value
       }
     }
-    over = true
+    whole = true
   } finally {
     if (timer !== null) clearTimeout(timer)
     await reader?.cancel().catch((err: unknown) => {
       console.debug('body cancel failed:', err)
     })
-    if (!over) await ended(judges, asked, resp.status, size, true)
+    await end(resp.status, size, !whole)
   }
-  await ended(judges, asked, resp.status, size, false)
 }
 
 async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpResponse> {
   // The policies of the line sending it judge the request before any
-  // connection opens; a refusal reads as a port that would not open.
-  const judges = linePolicies()
+  // connection opens; a refusal reads as a port that would not open. Each
+  // that let it through hears how it ends, once.
   const first = endpoint(url)
   const sender = currentCaller()
   const asked: NetworkContext = {
@@ -233,9 +231,27 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
     command: sender.command ?? '',
     sessionId: sender.session?.sessionId ?? '',
   }
+  const passed: [Policies, readonly Policy[] | null][] = []
+  let over = false
+  const end = async (status: number, size: number, failed: boolean): Promise<void> => {
+    if (over) return
+    over = true
+    let refused: HttpConnectError | null = null
+    for (const [judge, held] of passed) {
+      try {
+        // An abort that ended the transfer stops no policy hearing so.
+        await runLanding(() => ended(judge, asked, held, status, size, failed))
+      } catch (err) {
+        if (!(err instanceof HttpConnectError)) throw err
+        refused ??= err
+      }
+    }
+    if (refused !== null) throw refused
+  }
   try {
-    await preNetworkGate(judges, asked)
+    for (const judge of linePolicies()) passed.push([judge, await preNetworkGate(judge, asked)])
   } catch (err) {
+    await end(0, 0, true)
     if (err instanceof PolicyDenied) throw new HttpConnectError(first.host, first.port)
     throw err
   }
@@ -314,8 +330,6 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
             .map(([, value]) => value),
         )
       } catch (err) {
-        // A transport failure carries no status.
-        await ended(judges, asked, 0, 0, true)
         throw failure(err, caller, current, started)
       }
       const location = resp.headers.get('location')
@@ -324,9 +338,7 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
           ? nextHop(location, current)
           : null
       if (next === null && options.stream === true) {
-        const body = await primeStream(
-          streamed(resp, current, caller, started, timer, judges, asked),
-        )
+        const body = await primeStream(streamed(resp, current, caller, started, timer, end))
         handed = true
         return { ...hopOf(resp, current, method, body), history }
       }
@@ -337,12 +349,12 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
         // the request the python twin wraps.
         buf = await resp.arrayBuffer()
       } catch (err) {
-        await ended(judges, asked, resp.status, 0, true)
+        await end(resp.status, 0, true)
         throw failure(err, caller, current, started)
       }
       const hop = hopOf(resp, current, method, new Uint8Array(buf))
       if (next === null) {
-        await ended(judges, asked, resp.status, buf.byteLength, false)
+        await end(resp.status, buf.byteLength, false)
         return { ...hop, history }
       }
       if (history.length >= MAX_REDIRECTS) {
@@ -366,7 +378,13 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
       current = next.url
     }
   } finally {
-    if (!handed && timer !== null) clearTimeout(timer)
+    // Every exit the body was not handed over by, an abort or a redirect
+    // past the last among them, ends the transfer as failed; one the body
+    // owns ends there.
+    if (!handed) {
+      if (timer !== null) clearTimeout(timer)
+      await end(0, 0, true)
+    }
   }
 }
 

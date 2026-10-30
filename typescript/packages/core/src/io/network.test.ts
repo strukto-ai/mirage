@@ -36,6 +36,8 @@ describe('sameNetwork', () => {
     [{ allowed_domains: ['a.com'] }, { allowed_domains: ['b.com'] }, false],
     [{ allowed_domains: ['10.0.0.5'] }, { allowed_domains: ['10.0.0.5.'] }, false],
     [{ denied_domains: ['a.com'] }, { allowed_domains: ['a.com'] }, false],
+    [true, { denied_domains: [] }, true],
+    [{ allowed_domains: ['a.com'] }, { allowed_domains: ['a.com'], denied_domains: [] }, true],
     [
       { allowed_domains: ['*'], denied_domains: ['b.com', 'a.com'] },
       { denied_domains: ['a.com', 'b.com'], allowed_domains: ['*'] },

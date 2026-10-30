@@ -611,25 +611,35 @@ async def run_with_policies(policies: "Policies", call: Awaitable[_T]) -> _T:
         _judges.reset(token)
 
 
-def line_policies() -> "Policies | None":
-    """The policies of the running line, None outside one. Mirrors TS's
-    ``linePolicies``."""
-    return _judges.get()
+def line_policies() -> tuple["Policies", ...]:
+    """The policies that judge a request the running line sends, none
+    outside a line. A task keeps its own binding, so it is one; TS's
+    ``linePolicies`` answers every live line's in a browser, which
+    cannot tell them apart."""
+    policies = _judges.get()
+    return () if policies is None else (policies,)
 
 
 async def pre_network_gate(
     policies: "Policies | None", ctx: NetworkContext
-) -> None:
+) -> tuple[Policy, ...] | None:
     """Fire pre_network where a command sends a request; a Deny, or an
     Ask, refuses it with EACCES, the URL as the name refused.
 
     Requests are sent by a running command, whose line was admitted
     without the question, so an Ask refuses like a deny. None policies
-    gate nothing, nor does a dry run's policy deciding.
+    gate nothing, nor does a dry run's policy deciding. Only the policies
+    that let the request through hear how it ends, so a refusal, or a
+    cancel while they decide, ends it for those already passed.
 
     Args:
         policies (Policies | None): the workspace's policies.
         ctx (NetworkContext): the request about to be sent.
+
+    Returns:
+        tuple[Policy, ...] | None: the policies that let it through, for
+        ``post_network_gate``; None when none was asked, so every policy
+        hears.
 
     Raises:
         PolicyDenied: a policy refused the request.
@@ -640,23 +650,51 @@ async def pre_network_gate(
         or caller.explaining is DryRun.DECIDING
         or not await policies.wants_for("pre_network", ctx.session_id)
     ):
-        return
+        return None
     ctx = replace(ctx, caller=policy_caller(caller.session, policies.account))
-    answer = await _apart(policies.pre_network(ctx))
+    passed: list[Policy] = []
+    ended = NetworkResultContext(
+        **{field.name: getattr(ctx, field.name) for field in fields(ctx)},
+        failed=True,
+    )
+    try:
+        answer = await _apart(policies.pre_network(ctx, passed))
+    except BaseException:
+        await _end_failed(policies, ended, tuple(passed))
+        raise
     if answer is not None:
+        await _end_failed(policies, ended, tuple(passed))
         refused = answer if isinstance(answer, Deny) else Deny(answer.reason)
         raise policy_denied(refused, ctx.url, caller=caller)
+    return tuple(passed)
+
+
+async def _end_failed(
+    policies: "Policies", ctx: NetworkResultContext, passed: tuple[Policy, ...]
+) -> None:
+    try:
+        await post_network_gate(policies, ctx, passed)
+    except PolicyDenied as exc:
+        logger.debug("post_network refused a failed request: %s", exc)
 
 
 async def post_network_gate(
-    policies: "Policies | None", ctx: NetworkResultContext
+    policies: "Policies | None",
+    ctx: NetworkResultContext,
+    passed: tuple[Policy, ...] | None = None,
 ) -> None:
     """Fire post_network once a request's transfer ends; a Deny, or an
     Ask, fails it with EACCES, what it delivered already delivered.
 
+    Every policy among ``passed`` hears it, a Deny not stopping the
+    rest, so each one that counted the request at pre_network counts it
+    done.
+
     Args:
         policies (Policies | None): the workspace's policies.
         ctx (NetworkResultContext): the request and how it ended.
+        passed (tuple[Policy, ...] | None): what ``pre_network_gate``
+            returned; None for every policy.
 
     Raises:
         PolicyDenied: a policy refused the finished request.
@@ -669,7 +707,7 @@ async def post_network_gate(
     ):
         return
     ctx = replace(ctx, caller=policy_caller(caller.session, policies.account))
-    answer = await _apart(policies.post_network(ctx))
+    answer = await _apart(policies.post_network(ctx, passed))
     if answer is not None:
         refused = answer if isinstance(answer, Deny) else Deny(answer.reason)
         raise policy_denied(refused, ctx.url, caller=caller)
@@ -997,6 +1035,9 @@ class Policies:
         placed: bool = False,
         rules_only: bool = False,
         projection: str = "fire",
+        *,
+        among: tuple[Policy, ...] | None = None,
+        passed: list[Policy] | None = None,
     ) -> CompositionResult:
         snapshot = tuple(self._policies)
         placement = self._placement
@@ -1020,14 +1061,18 @@ class Policies:
                     policy, PermissionsPolicy
                 ):
                     role = "permissions"
+                asked = getattr(type(policy), method) is not getattr(
+                    Policy, method
+                )
+                if not asked and passed is not None:
+                    passed.append(policy)
+                if among is not None and all(p is not policy for p in among):
+                    asked = False
                 descriptors.append(
                     {
                         "slot": slot,
                         "role": role,
-                        "hooks": [method]
-                        if getattr(type(policy), method)
-                        is not getattr(Policy, method)
-                        else [],
+                        "hooks": [method] if asked else [],
                     }
                 )
                 composition.names[slot] = type(policy).__name__
@@ -1087,6 +1132,8 @@ class Policies:
                         )
                     finally:
                         reset_explaining(token)
+                    if answered is None and passed is not None:
+                        passed.append(policy)
                     pending = (
                         answered
                         if isinstance(answered, tuple)
@@ -1243,27 +1290,36 @@ class Policies:
         action, _, _ = await self._fire("post_vfs", ctx)
         return action
 
-    async def pre_network(self, ctx: NetworkContext) -> Deny | Ask | None:
+    async def pre_network(
+        self, ctx: NetworkContext, passed: list[Policy]
+    ) -> Deny | Ask | None:
         """Fire pre_network across the policies; first Deny wins, else
         the first Ask.
 
         Args:
             ctx (NetworkContext): the request about to be sent.
+            passed (list[Policy]): filled, as they answer, with the
+                policies that let the request through, and those with
+                no pre_network.
         """
-        action, _, _ = await self._fire("pre_network", ctx)
-        return action
+        result = await self._evaluate("pre_network", ctx, False, passed=passed)
+        return result.action
 
     async def post_network(
-        self, ctx: NetworkResultContext
+        self,
+        ctx: NetworkResultContext,
+        among: tuple[Policy, ...] | None = None,
     ) -> Deny | Ask | None:
-        """Fire post_network across the policies; first Deny wins, else
-        the first Ask.
+        """Fire post_network across the policies, every one asked past a
+        Deny; the first Deny wins, else the first Ask.
 
         Args:
             ctx (NetworkResultContext): the request and how it ended.
+            among (tuple[Policy, ...] | None): the policies that let the
+                request through, None for every one.
         """
-        action, _, _ = await self._fire("post_network", ctx)
-        return action
+        result = await self._evaluate("post_network", ctx, True, among=among)
+        return result.action
 
     async def post_execute(
         self, ctx: ExecuteResultContext

@@ -190,6 +190,53 @@ describe('a workspace network rule', () => {
     expect(watch.ended.map((ctx) => [ctx.status, ctx.failed])).toEqual([[0, true]])
   })
 
+  // Refuses every request once it has ended.
+  class Shut implements Policy {
+    postNetwork(): Deny {
+      return { kind: 'deny', reason: 'no more requests' }
+    }
+  }
+
+  async function held(line: string, ...policies: Policy[]): Promise<number> {
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    for (const policy of policies) ws.policies.add(policy)
+    try {
+      return (await ws.shell(line)).exitCode
+    } finally {
+      await ws.close()
+    }
+  }
+
+  it('shows postNetwork to each policy that let a request through', async () => {
+    const counted = new Watch()
+    const refusing = new Watch(['127.0.0.1'])
+    expect(await held(`curl -sS http://127.0.0.1:${String(port)}/`, counted, refusing)).toBe(7)
+    expect(counted.ended.map((ctx) => [ctx.status, ctx.failed])).toEqual([[0, true]])
+    expect([counted.open, refusing.open, refusing.ended]).toEqual([0, 0, []])
+  })
+
+  it('lets no postNetwork deny stop another policy', async () => {
+    const counted = new Watch()
+    expect(await held(`curl -sS http://127.0.0.1:${String(port)}/`, new Shut(), counted)).toBe(7)
+    expect(counted.ended.map((ctx) => [ctx.status, ctx.failed])).toEqual([[200, false]])
+    expect(counted.open).toBe(0)
+  })
+
+  it('ends a request a timeout cuts short', async () => {
+    const silent = createServer(() => undefined)
+    await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', resolve))
+    const counted = new Watch()
+    try {
+      const at = (silent.address() as AddressInfo).port
+      expect(await held(`timeout 0.3 curl -sS http://127.0.0.1:${String(at)}/`, counted)).toBe(124)
+    } finally {
+      silent.closeAllConnections()
+      await new Promise((resolve) => silent.close(resolve))
+    }
+    expect(counted.ended.map((ctx) => [ctx.status, ctx.failed])).toEqual([[0, true]])
+    expect(counted.open).toBe(0)
+  })
+
   it('holds each session to its profile network besides the workspace one', async () => {
     const held = { allowed_domains: [`127.0.0.1:${String(port)}`] }
     const ws = new Workspace(

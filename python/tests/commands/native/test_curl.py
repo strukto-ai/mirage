@@ -750,6 +750,35 @@ def test_a_redirect_cookie_crosses_only_with_the_jar_on(
     assert _cookies_sent(httpx_mock) == [None, after]
 
 
+def test_c_writes_the_jar_when_the_reader_lets_the_body_go(httpx_mock):
+    httpx_mock.add_response(
+        url=JAR_URL, text="body\n", headers=[("Set-Cookie", "z=1")]
+    )
+    held: dict[str, str] = {}
+
+    async def dispatch(op, scope, **kwargs):
+        held[scope.virtual] = (await materialize(kwargs["data"])).decode()
+        return None, IOResult()
+
+    spec = PathSpec(virtual="/", directory="/", vfs_path="", resolved=False)
+    ctx = Context(
+        vfs=Files(dispatch, ledger=False),
+        cwd=spec,
+        flags={"cookie_jar": "/data/jar"},
+    )
+
+    async def run() -> bytes:
+        body, _ = await curl(NOOPAccessor(), [], [JAR_URL], ctx)
+        first = await anext(aiter(body))
+        await body.aclose()
+        return first
+
+    assert asyncio.run(run()) == b"body\n"
+    assert (
+        held["/data/jar"] == f"{JAR}127.0.0.1\tFALSE\t/jar/\tFALSE\t0\tz\t1\n"
+    )
+
+
 def test_c_dash_writes_the_jar_to_stdout_after_the_body_and_w(httpx_mock):
     httpx_mock.add_response(
         url=JAR_URL, text="body\n", headers=[("Set-Cookie", "z=1")]

@@ -163,6 +163,9 @@ export class MountRegistry {
   // The rule each profile's `network` narrows it to, by the layer it adds,
   // with the rule it narrowed.
   private readonly narrowed = new Map<string, [NetworkRule | null, NetworkRule]>()
+  // What starts judging the process's connections, which the host sets: a
+  // profile can narrow a workspace that limits nothing itself.
+  private watch: (() => void) | null = null
   // Command admission policies. Policies itself is a bare mechanism;
   // the registry seeds the POSIX mount-root rule (mount-root semantics
   // are mount semantics) and the document's deny rules, then user
@@ -249,8 +252,14 @@ export class MountRegistry {
       const base = this.network
       held = [base, new NetworkRule([...(base?.layers ?? []), layer], base?.metadata ?? false)]
       this.narrowed.set(key, held)
+      this.watch?.()
     }
     return held[1]
+  }
+
+  /** Set what starts judging the process's connections, once a rule needs it. */
+  setNetworkWatch(watch: () => void): void {
+    this.watch = watch
   }
 
   /** The rules `networkOf` built, whose connections close with the workspace. */

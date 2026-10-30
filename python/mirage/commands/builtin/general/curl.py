@@ -629,6 +629,18 @@ async def curl(
     # short: the status, the message and -w report both once it ends.
     received = [0]
     cut: list[HttpConnectError] = []
+    jar_kept = [False]
+
+    async def keep_jar() -> bytes:
+        # Written once, when the transfer ends or when its reader lets it
+        # go first, as curl writes the jar at cleanup either way.
+        if cookie_target is None or jar_kept[0]:
+            return b""
+        jar_kept[0] = True
+        return await _save_cookies(ctx, cookie_target, jar)
+
+    async def let_go() -> None:
+        await keep_jar()
 
     async def finish(
         stdout: ByteSource | None,
@@ -643,7 +655,7 @@ async def curl(
 
         # The body streams out first; what curl prints after it waits for
         # its end, which is when the size and any failure are known.
-        return async_chain([stdout, rest()]), io
+        return async_chain([stdout, OutputStream(rest(), let_go)]), io
 
     async def settle(io: IOResult, response: HttpResponse | None) -> bytes:
         if cut:
@@ -683,12 +695,7 @@ async def curl(
         }
         out, err = render_write_out(template, values)
         io.stderr = prompt + (await materialize(io.stderr)) + err
-        saved = (
-            b""
-            if cookie_target is None
-            else await _save_cookies(ctx, cookie_target, jar)
-        )
-        return out + saved
+        return out + await keep_jar()
 
     body_len: int | None = None
     body_type: str | None = None

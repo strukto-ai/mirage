@@ -513,6 +513,14 @@ async function curl(
   // the status, the message and -w report both once it ends.
   let received = 0
   let cut: HttpConnectError | null = null
+  // Written once, when the transfer ends or when its reader lets it go
+  // first, as curl writes the jar at cleanup either way.
+  let jarKept = false
+  const keepJar = async (): Promise<Uint8Array> => {
+    if (cookieJar === null || jarKept) return new Uint8Array()
+    jarKept = true
+    return await saveCookies(ctx, cookieJar, jar)
+  }
   const settle = async (io: IOResult, response?: HttpResponse): Promise<Uint8Array> => {
     if (cut !== null) {
       let line: string
@@ -539,8 +547,7 @@ async function curl(
       time_total: ((performance.now() - started) / 1000).toFixed(6),
     })
     io.stderr = concat([prompt, await materialize(io.stderr), err])
-    const saved = cookieJar === null ? new Uint8Array() : await saveCookies(ctx, cookieJar, jar)
-    return concat([out, saved])
+    return concat([out, await keepJar()])
   }
   const finish = async (
     stdout: ByteSource | null,
@@ -555,7 +562,10 @@ async function curl(
     async function* rest(): AsyncGenerator<Uint8Array> {
       yield await settle(io, response)
     }
-    return [asyncChain([stdout, rest()]), io]
+    const letGo = async (): Promise<void> => {
+      await keepJar()
+    }
+    return [asyncChain([stdout, new OutputStream(rest(), letGo)]), io]
   }
   let method: string
   let bodyLen: number | null = null
