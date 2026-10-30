@@ -805,8 +805,8 @@ describe('the node table answers every verb that names a link', () => {
   })
 })
 
-describe('the fenced remnant cascade rides the mount revisions', () => {
-  it('a fenced backend op reads the pinned revision', async () => {
+describe('the fenced remnant cascade rides the mount frame', () => {
+  it('a fenced backend op reads the pinned revision and names its mount', async () => {
     // fencedCall reruns backend ops outside `dispatch`, and Python's
     // twin routes them through `Mount.call`, which binds the
     // mount prefix AND the revision pins. A fenced readdir/stat that
@@ -820,8 +820,10 @@ describe('the fenced remnant cascade rides the mount revisions', () => {
       await ws.shell('mkdir /ram/d && echo x > /ram/d/h.txt')
       const original = ram.readdir.bind(ram)
       let seen: string | null | undefined
+      const mounts = new Set<string | null>()
       ram.readdir = (path) => {
         seen = revisionFor('/ram/d/h.txt')
+        mounts.add(currentCaller().vfsMount)
         return original(path)
       }
       const internals = ws as unknown as {
@@ -834,10 +836,38 @@ describe('the fenced remnant cascade rides the mount revisions', () => {
       })
       await runWithSession(sess, () => ws.dispatch('rmdir', '/ram/d'))
       expect(seen).toBe('r1')
+      expect([...mounts]).toEqual(['/ram/'])
     } finally {
       await ws.close()
     }
   }, 30_000)
+
+  it('a stream an op hands back pulls under the mount frame', async () => {
+    // The backend's body runs on each pull, after dispatch returns, so the
+    // stream keeps the frame the op ran in: the mount's pins and write context.
+    const seen: [string | null | undefined, string | undefined][] = []
+    class Lazy extends RAMVFS {
+      override follow(): Promise<AsyncIterable<Uint8Array> | null> {
+        return Promise.resolve(
+          (async function* () {
+            await Promise.resolve()
+            seen.push([revisionFor('/ram/f'), currentCaller().write?.prefix])
+            yield new Uint8Array([10])
+          })(),
+        )
+      }
+    }
+    const ws = new Workspace({ '/ram': new Lazy() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('echo x > /ram/f')
+      ws.namespace.mountFor('/ram/f').revisions.set('/ram/f', 'r1')
+      const stream = (await ws.dispatch('follow', '/ram/f', [1, 1])) as AsyncIterable<Uint8Array>
+      for await (const chunk of stream) expect(chunk).toEqual(new Uint8Array([10]))
+      expect(seen).toEqual([['r1', '/ram/']])
+    } finally {
+      await ws.close()
+    }
+  })
 })
 
 describe('the turf mode gates the node table', () => {
